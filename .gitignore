@@ -1,7 +1,7 @@
 # Rust
 /target/
 **/target/
-Cargo.lock
+# Cargo.lock is committed per ADR-0005 (MCI ships binaries, not a library).
 
 # Swift / Xcode (macOS adapter, agent, recall UI)
 .build/

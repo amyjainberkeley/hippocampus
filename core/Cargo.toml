@@ -1,0 +1,21 @@
+[package]
+name         = "mci-core"
+version      = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description  = "MCI portable core: capture pipeline, dedupe, OCR orchestration, brain, crypto, sync. See docs/decisions/0002-stack-split-rust-core-native-adapters.md."
+
+[lints]
+workspace = true
+
+[dependencies]
+# Runtime locked to tokio per ADR-0006.
+tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time"] }
+async-trait  = "0.1"
+thiserror    = "1"
+tracing      = { version = "0.1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "test-util"] }
