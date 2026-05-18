@@ -1,0 +1,36 @@
+# Rust
+/target/
+**/target/
+Cargo.lock
+
+# Swift / Xcode (macOS adapter, agent, recall UI)
+.build/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+xcuserdata/
+
+# Node (browser extensions)
+node_modules/
+dist/
+
+# Secrets & local state — NEVER commit
+.env
+.env.*
+*.p8
+*.pem
+*.key
+*.keychain
+secrets/
+mci.sqlite
+mci.sqlite-*
+*.mci-store
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
