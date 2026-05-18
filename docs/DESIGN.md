@@ -1,7 +1,7 @@
 # MCI — Memory Context Interface
 
-**Design Document v0.1**
-Status: Draft · Owner: @amyjainberkeley · Last updated: 2026-05-18
+**Design Document v0.2**
+Status: Draft · Owner: @amyjainberkeley · Last updated: 2026-05-18 (Phase 0 ADRs landed — §8 retrieval shape, §12 schema, §13 embedder updated per ADRs 0009/0010/0011)
 
 ---
 
@@ -165,21 +165,28 @@ OCR is the heaviest step in the pipeline. Hard rules:
 
 ## 8. The Brain — Memory Layer
 
-The brain is what the user (and agents) actually interact with. Pipeline shape:
+The brain is what the user (and agents) actually interact with. Pipeline shape (per ADR-0010, the **retrieval and index unit is the event**, not the flat chunk):
 
 ```
 state-transition event
   → keyframe + OCR/extracted text + context join (app, window, URL, page text, timestamp)
   → text cleanup
-  → chunk (~200–500 tokens, semantic/paragraph boundaries)
+  → episode segmenter (time-gap + content-shift; cheap, no LLM)
+  → key expansion: idle-batch on-device LLM writes `events.summary` + `events.entities`
+  → embed event text WITH prepended context header `[app|title|url|ts] <text>`
+        (sub-chunk only over-long events on semantic/paragraph boundaries)
   → batch-embed   (deferred to idle/charging)
   → upsert into one SQLite file (FTS5 + sqlite-vec)
-  → retrieve = hybrid lexical (FTS5) + semantic (vector KNN) + recency/app boosting
+  → retrieve = hybrid lexical (FTS5) + semantic (vector KNN), fused by min-max Convex Combination:
+        score = w_sem·sem̂ + w_lex·lex̂ + w_rec·0.99^Δt_hours + w_src·src
+        (starting weights 0.5 / 0.3 / 0.15 / 0.05; tuned on the ADR-0010 eval)
+  → query router: anchor-then-window for "right before X"; on-device-LLM time-range
+                  extraction for "last Tuesday"; plain hybrid otherwise.
 ```
 
-- **Embedding model:** quantized **all-MiniLM-L6-v2** (384-d) via **Core ML** (ANE) on macOS / **ONNX Runtime + DirectML** on Windows. ~6–90 MB depending on quantization, thousands of chunks/sec on modern hardware, negligible energy when batched. `NLEmbedding` only as a no-dependency floor. Larger model (bge-small) only if retrieval eval demands it.
-- **Vector store:** **sqlite-vec** — pure C, zero deps, single file, co-located with relational + FTS5 data in **one SQLite file**. Trivial to client-side-encrypt and sync as a unit. ~tens of ms over 1M vectors. (LanceDB is the scale-up option if we ever exceed many millions of vectors; not v1.)
-- **Hybrid retrieval:** FTS5 (lexical, catches exact strings/errors/URLs) + vector KNN (semantic) fused with recency and app/source boosting. Hybrid dramatically out-recalls either alone on noisy screen text.
+- **Embedding model:** quantized **`snowflake-arctic-embed-s`** (33M params, **384-d**, Apache-2.0, int8) via **Core ML** (ANE) on macOS / **ONNX Runtime + DirectML** on Windows. +23.9% relative MTEB-R vs `all-MiniLM-L6-v2` (51.98 vs 41.95 nDCG@10) at the same dimension, same size class, same runtime path. **Query and document prefixes are required by the model card** and applied in the embedder wrapper. `NLEmbedding` / a potion-retrieval-32M-class static embedder is kept only as a no-dependency floor. (ADR-0011.)
+- **Vector store:** **sqlite-vec** — pure C, zero deps, single file, co-located with relational + FTS5 data in **one SQLite file**. The only vector store preserving the single-encrypted-file / zero-knowledge invariant (ADR-0008). Brute-force ~124 ms per 1M binary-quantized vectors; scaling ladder past ~10⁶ vectors = binary quantization + recency/app pre-filter.
+- **Hybrid retrieval:** FTS5 (lexical) + vector KNN (semantic) fused by **min-max Convex Combination** (Bruch et al., ACM TOIS 2023 — outperforms Reciprocal Rank Fusion in- and out-of-domain). Recall (not precision) is the dominant success metric on lifelog corpora.
 - **Recall interface:**
   - **Local UI** — timeline scrubber + natural-language search; each result = keyframe thumbnail, extracted text, app/URL, timestamp, neighboring events.
   - **Local API** (loopback, authenticated) — so an LLM/agent can query the brain ("answer from my memory"), with results structured for RAG.
@@ -235,16 +242,18 @@ Adding Windows later = implement one adapter + wire platform encode/OCR. No brai
 
 ## 12. Data Model (initial sketch)
 
-One encrypted SQLite database:
+One encrypted SQLite database (schema reflects ADR-0010's event/episode retrieval unit + ADR-0009's pinned 384-d vectors):
 
-- `events` — `id, ts, device_id, app_bundle, window_title, source_type, url, keyframe_blob_ref, dwell_ms, dhash`
+- `events` — `id, ts, device_id, app_bundle, window_title, source_type, url, keyframe_blob_ref, dwell_ms, dhash, episode_id, summary, entities`
+  - `summary` and `entities` are key-expansion fields (ADR-0010); both populated by an idle-time on-device LLM. `episode_id` is nullable; backfilled by the episode segmenter.
+- `episodes` — `id, ts_start, ts_end, app_bundle, summary, entities` — a contiguous app/task run, segmented from the event stream by time-gap + content-shift (dHash distance + embedding-cosine drop over a sliding window). No LLM in the segmenter.
 - `event_text` — `event_id, text, lang, extraction_method (ext|ocr|ax)` + **FTS5** virtual table over `text`
-- `event_vectors` — **sqlite-vec** table: `event_id, chunk_id, embedding(384)`
-- `chunks` — `id, event_id, ord, text, token_count`
+- `event_vectors` — **sqlite-vec** table: `event_id, chunk_id, embedding(384)` — dimension pinned at 384 (ADR-0009); vectors stored L2-normalized so cosine == dot product and any future MRL-capable swap is a truncation, not a re-train.
+- `chunks` — `id, event_id, ord, text, token_count` — only populated for over-long events that exceed the embedder's effective context; each chunk carries the parent event's context header.
 - `blobs` — content-addressed keyframe/segment store (on disk; row holds hash, path, bytes, codec)
-- `sync_log` — append-only encrypted deltas: `seq, device_id, op, ciphertext, nonce`
-- `redactions` / `denylist` / `deletions` — user-control + tombstone records
-- `meta` — schema version, key wrapping metadata, retention policy
+- `sync_log` — append-only encrypted deltas: `seq, device_id, op, ciphertext, nonce`. The delta log is **hash-chained** end-to-end to defend against rollback / truncation / key-substitution (ADR-0012).
+- `redactions` / `denylist` / `deletions` — user-control + tombstone records. Deletion = **crypto-shredding** of per-segment keys + tombstones in the delta log (ADR-0012).
+- `meta` — `schema_version` (monotonic integer; ADR-0009 migration discipline), key-wrapping metadata, retention policy.
 
 Retention/compaction policy (open, §15): age-out raw keyframes while keeping text+embeddings; tiered (recent = keyframe+text+vec; old = text+vec only; very old = summary only).
 
@@ -261,7 +270,7 @@ Retention/compaction policy (open, §15): age-out raw keyframes while keeping te
 | Windows context | UI Automation |
 | Page content | Optional per-browser extension (native messaging); OCR fallback |
 | Dedupe | dHash (64-bit), SSIM for borderline |
-| Embeddings | quantized all-MiniLM-L6-v2 — Core ML (mac) / ONNX Runtime+DirectML (win) |
+| Embeddings | quantized `snowflake-arctic-embed-s` (33M, 384-d, Apache-2.0) — Core ML/ANE (mac) / ONNX Runtime+DirectML (win); query+doc prefixes required (ADR-0011) |
 | Store / index | one SQLite file: FTS5 + sqlite-vec, SQLCipher-encrypted |
 | Crypto | OS keystore-backed device key; client-side E2E for cloud |
 | Sync | zero-knowledge encrypted delta log to object storage |
