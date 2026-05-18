@@ -201,18 +201,20 @@ MCI captures the most sensitive possible data stream. Trust is the product; this
 - The cloud sync server **must never** be able to read user content (zero-knowledge).
 - A device-local attacker should not get plaintext memory at rest.
 - The user must have hard, obvious controls to **not capture** certain things.
+- **Plaintext in an MCI same-user-accessible process while running** (per ADR-0012). MCI is an all-day daemon; any other process running as the same user is, by default, able to read its memory and IPC channels via standard OS APIs. This is exactly how Microsoft Recall's 2025/26 redesign failed (`AIXHost.exe` unprotected-process leak, TotalRecall Reloaded, CSO Online 2026-04-16). The at-rest model alone is insufficient — see §10 process-hardening.
 
 ### 9.2 Encryption
-- **At rest (device):** the SQLite store + blob store encrypted with a device-held key (SQLCipher / OS keystore-backed key — Keychain on macOS, DPAPI/Credential Manager on Windows). Memory store is never plaintext on disk.
-- **Cloud (local + encrypted cloud model):** **client-side encryption before upload.** A user master key (derived from a passphrase + per-device keys; recovery-code backed) encrypts every delta. The server stores opaque ciphertext blobs + a delta log for sync ordering, and **cannot decrypt anything**. End-to-end across the user's own devices.
-- Sync is **delta-based** (append-only encrypted change log), so cross-device convergence never requires server-side plaintext.
+- **At rest (device, ADR-0008):** the SQLite store + blob store encrypted with a device-held key (rusqlite + bundled SQLCipher; sqlite-vec as runtime extension). DB master key wrapped by a **Secure-Enclave-gated, biometric-access-controlled, non-exportable, `ThisDeviceOnly`** Keychain item on macOS (TPM + DPAPI-NG analog on Windows). Memory store is never plaintext on disk.
+- **Cloud (transport, ADR-0012):** **client-side encryption before upload** under a per-device Secure-Enclave-backed keypair + a shared user master key bootstrapped via **device-to-device authenticated enrollment** (existing device cross-signs new device's key; PAKE-style exchange over the sync transport; server never vouches). For single-device users, an opt-in **HSM-rate-limited recovery vault that self-destructs after N=10 failed attempts** (Apple ADP / WhatsApp Encrypted Backups envelope) provides catastrophic-loss recovery.
+- **Hash-chained delta log (ADR-0012).** The sync log is append-only and **hash-chained end-to-end** to defend against rollback, truncation, and key-substitution (Backendal et al., CRYPTO 2024 + ACM CCS 2024 companion). Clients verify the chain on every sync round.
+- **Searchable Symmetric Encryption is an explicit non-goal** (ADR-0012). Search runs on-device against a decrypted-in-memory index; SSE would add the known leakage-abuse exposure for zero functional gain.
 
 ### 9.3 Sensitive-content controls (not optional)
-- **App & URL denylist:** never capture from configured apps (password managers, banking, health, private messaging) — capture is suppressed at the source, frame never enters the pipeline.
+- **App & URL denylist:** never capture from configured apps (password managers, banking, health, private messaging) — capture is suppressed at the source, frame never enters the pipeline. **This is the load-bearing primitive** (per ADR-0012); the OCR-time redaction below is defense-in-depth.
 - **Incognito / private windows:** detected and excluded.
 - **One-click pause** + auto-pause rules (on screen-lock, on denylisted foreground, on call/meeting if configured).
-- **On-device redaction pass** (opportunistic): detect and mask secrets/PII patterns (passwords, tokens, card numbers) in OCR text before it is indexed.
-- **Full user control:** browse, search, **delete** any memory or time range; "forget last hour"; export; full wipe. Deletion propagates to the encrypted cloud deltas.
+- **On-device redaction pass** (opportunistic, **defense-in-depth — never the guarantee**): detect and mask secrets/PII patterns (passwords, tokens, card numbers) in OCR text before it is indexed. The verified state of the art (Basak et al., arXiv:2307.00714) is best-tool recall ≈ 52–88%; the 12%–48% miss rate is why source-level capture suppression above carries the privacy load.
+- **Full user control:** browse, search, **delete** any memory or time range; "forget last hour"; export; full wipe. **Deletion = crypto-shredding of per-segment keys + tombstones in the delta log** (ADR-0012) — the only durable delete primitive. Server-side delete is not trusted.
 - **No telemetry of content.** Crash/usage telemetry (if any) is opt-in and content-free.
 
 ---
@@ -222,6 +224,7 @@ MCI captures the most sensitive possible data stream. Trust is the product; this
 - **Process model:** a single signed menu-bar / system-tray agent (`LSUIElement` on macOS / tray app on Windows), auto-started per-user (LaunchAgent / Task Scheduler-or-Run-key), crash-relaunched. **Not** a foreground app, **not** a root daemon — per-user TCC/permissions are tied to a GUI app bundle and need a UI for onboarding/consent/pause. A rich recall/settings UI may run as a *separate* process the agent launches on demand.
 - **Memory ceiling discipline:** bounded ring buffer for in-flight frames (fixed N surfaces, never an unbounded array); backpressure = **drop frames** if OCR/encode falls behind (a dropped near-duplicate is harmless — dedupe already assumed it); batched, throttled disk flush (SQLite WAL + periodic checkpoint; blobs to content-addressed store, not in the DB); release capture surfaces immediately; OCR/embed at low QoS, deferred on battery, throttled on thermal/low-power state.
 - **Realistic footprint (well-built native pipeline, Apple Silicon / modern x86):** static-screen steady state ≈ <1–2% of one core, ~100–250 MB resident (flat, buffer+cache bound); per-event bursts = brief sub-second one-core spikes, smoothed by batching; energy "modest, noticeable only under sustained heavy editing." This is the entire reason the capture/encode/OCR layer is native and the runtime is not Electron.
+- **Process-hardening discipline (ADR-0012).** The agent shell, the recall UI, and the macOS Swift capture helper each ship with **hardened runtime enabled and library validation on**; **notarization is pinned** and a non-matching helper is refused at launch; the recall UI requires a **fresh Touch ID / passcode unlock** before the wrapping key is unwrapped (independent of system unlock state) with a configurable idle timeout (default 5 minutes); every place plaintext lives is a **zero-on-drop buffer** (`secrecy::SecretVec` or platform-locked memory); **bulk-decrypt-to-working-set is forbidden** — the brain decrypts only what is currently in the active recall window (top-k results plus immediate temporal neighbors). These mitigations close the same-user-process gap added to §9.1.
 
 ---
 
