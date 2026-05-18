@@ -20,5 +20,6 @@
 
 pub mod capture;
 pub mod error;
+pub mod store;
 
 pub use error::CoreError;
