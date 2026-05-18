@@ -24,9 +24,9 @@ P1=$(tmux list-panes -t "$SESSION":build -F '#{pane_id}' | head -1)
 # START HERE block points it at docs/STATE.md — full context, no re-brief.
 tmux send-keys -t "$P1" "claude" C-m
 
-# Pane 2 (top-right): live PR + commit watch.
+# Pane 2 (top-right): live PR + commit watch. (macOS has no `watch` — use a loop.)
 P2=$(tmux split-window -h -t "$P1" -c "$REPO" -P -F '#{pane_id}')
-tmux send-keys -t "$P2" "watch -n 30 'gh pr list -R amyjainberkeley/hippocampus 2>/dev/null; echo; git log --oneline -8'" C-m
+tmux send-keys -t "$P2" "while :; do clear; gh pr list -R amyjainberkeley/hippocampus 2>/dev/null; echo; git log --oneline -8; sleep 30; done" C-m
 
 # Pane 3 (bottom-right): scratch shell, prints where we are on open.
 P3=$(tmux split-window -v -t "$P2" -c "$REPO" -P -F '#{pane_id}')
