@@ -40,6 +40,7 @@ public struct SuppressionCascade: Sendable {
     private let axSecureSubrole: any AXSecureSubroleProbe
     private let denylist: any DenylistProbe
     private let blackedRegion: any BlackedRegionProbe
+    private let denylistDrift: any DenylistDriftProbe
     private let knownSafeAppBundles: Set<String>
 
     /// Construct a cascade orchestrator.
@@ -48,17 +49,27 @@ public struct SuppressionCascade: Sendable {
     /// — bundle IDs whose AX coverage has been positively characterized
     /// by Phase-1 integration tests. Initially empty (no app is
     /// "known-safe" until earned). Additions are CSO-gated.
+    ///
+    /// `denylistDrift` is the ADR-0013 §5 source-filter↔live-policy
+    /// drift detector. It defaults to `NoDenylistDrift()` (a strict
+    /// no-op) so constructions that have not yet wired live-`SCStream`
+    /// filter-generation tracking keep their exact prior cascade
+    /// behavior; the live adapter supplies a real implementation on a
+    /// real machine (Track B). The §5 *decision* is locked + tested
+    /// here regardless (Track A).
     public init(
         secureEventInput: any SecureEventInputProbe,
         axSecureSubrole: any AXSecureSubroleProbe,
         denylist: any DenylistProbe,
         blackedRegion: any BlackedRegionProbe,
+        denylistDrift: any DenylistDriftProbe = NoDenylistDrift(),
         knownSafeAppBundles: Set<String> = []
     ) {
         self.secureEventInput = secureEventInput
         self.axSecureSubrole = axSecureSubrole
         self.denylist = denylist
         self.blackedRegion = blackedRegion
+        self.denylistDrift = denylistDrift
         self.knownSafeAppBundles = knownSafeAppBundles
     }
 
@@ -106,14 +117,32 @@ public struct SuppressionCascade: Sendable {
             return .suppress(reason: .axSecureSubrole)
         }
 
-        // §5 — post-capture denylist (no-op duplicate of §1 in this
-        // skeleton; in production the §1 check uses the SCContentFilter
-        // configuration while §5 uses the live WorkflowContext at OCR
-        // time. They diverge under denylist updates not yet propagated
-        // to the SCStream — and that's the gap §5 closes).
-        // Phase-1 cycle 2+ wires the divergence detection; here §5
-        // shares the same denylist probe, so it cannot find anything
-        // §1 missed.
+        // §5 — post-capture denylist drift backstop.
+        //
+        // §1 enforces the denylist at the earliest layer: the
+        // `SCContentFilter` installed on the live `SCStream`, built
+        // from a SNAPSHOT of the policy at stream-construction time.
+        // When the user edits the denylist the running stream's filter
+        // is NOT rebuilt instantly — a drift window opens in which a
+        // newly-denied source's pixels still flow because the
+        // source-level exclusion predates the policy change.
+        //
+        // §5 closes that window: if the installed filter's policy
+        // generation lags the CURRENT policy generation AND the live
+        // context matches the CURRENT policy, suppress here with
+        // `.denylistPostCapture` — a reason distinct from §1's
+        // `.denylistSource`, so the privacy tombstone records that the
+        // post-capture backstop fired (the ADR-0013 §5 §1↔§5
+        // divergence observability surface for the CRS Telemetry-Gap
+        // analyst). Under the default `NoDenylistDrift` sentinel this
+        // is a strict no-op (generation parity), so §1–§4/§7 behavior
+        // is unchanged.
+        if denylistDrift.installedFilterGeneration()
+            != denylistDrift.currentPolicyGeneration(),
+            denylistDrift.currentPolicyDenies(context)
+        {
+            return .suppress(reason: .denylistPostCapture)
+        }
 
         // §7 — fail-safe default: unknown ⇒ redact.
         // The cascade treats a positive classification ("AX returned a
