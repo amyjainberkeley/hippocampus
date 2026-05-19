@@ -26,6 +26,8 @@
 
 pub mod migrations;
 pub mod schema;
+pub mod tombstone;
 
 pub use migrations::MIGRATIONS;
 pub use schema::{all_ddl, SCHEMA_VERSION};
+pub use tombstone::{EventRow, TOMBSTONE_SOURCE_TYPE};
