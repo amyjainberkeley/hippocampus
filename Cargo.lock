@@ -258,6 +258,7 @@ dependencies = [
  "async-trait",
  "getrandom 0.3.4",
  "rusqlite",
+ "rustix",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

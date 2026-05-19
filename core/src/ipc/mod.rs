@@ -46,11 +46,13 @@
 //! byte-explicit and round-trip-tested.
 
 pub mod connection;
+pub mod fdpass;
 pub mod reader;
 pub mod wire;
 pub mod writer;
 
 pub use connection::{ConnectionError, HelperConnection, Routed};
+pub use fdpass::{recv_with_fds, send_with_fds, socket_pair, FdPassError, RecvOutcome, MAX_SCM_FDS};
 pub use reader::{FrameReader, ReadError, READER_BUFFER_CAP};
 pub use wire::{
     decode, encode, DecodeError, Frame, MessageType, FRAME_MAGIC, FRAME_VERSION,
