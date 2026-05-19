@@ -31,6 +31,16 @@ tracing      = { version = "0.1", default-features = false, features = ["std"] }
 rusqlite = { version = "0.39.0", features = ["bundled-sqlcipher-vendored-openssl"] }
 zeroize = { version = "1.8.2", features = ["derive"] }
 getrandom = "0.3.4"
+# AF_UNIX socketpair(2) + SCM_RIGHTS fd-passing for the macOS helper IPC
+# seam (ADR-0007 / ADR-0014). rustix gives a SAFE wrapper over
+# socketpair / sendmsg / recvmsg+ancillary, so `core/` keeps
+# `#![forbid(unsafe_code)]` — no hand-written fd-passing unsafe in a
+# privacy daemon. PROTECTED-SET dep: ADR-0008 supply-chain gate
+# (CRS Security-Signal audit recorded in RESEARCH_DIGEST) + CSO.
+# default-features off drops `use-libc-auxv` (Linux-init only); macOS
+# uses rustix's libc backend regardless. `std` for std::os::fd OwnedFd
+# + std::io::IoSlice interop.
+rustix = { version = "1.1.4", default-features = false, features = ["net", "std"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -102,6 +102,120 @@ pub enum Platform<'frame> {
 }
 
 // ---------------------------------------------------------------------------
+// SurfaceLease — opaque, OWNED, RAII-released
+// ---------------------------------------------------------------------------
+
+/// Opaque, **owned** carrier for an OS frame-pool retain that must
+/// cross a channel — and, on macOS, a *process* boundary — without the
+/// borrowed `'frame` lifetime of [`SurfaceHandle`].
+///
+/// # Why this exists (ADR-0006 + ADR-0007 + ADR-0014)
+///
+/// [`SurfaceHandle`]`<'frame>` mechanically enforces the pool-release
+/// deadline *inside the OS callback scope* — but the seam is async +
+/// push (ADR-0006): the adapter sends a [`StateTransition`] over a
+/// bounded channel, and on macOS the producer is a **separate signed
+/// helper process** (ADR-0007) that passed the surface fd to the core
+/// out-of-band via `SCM_RIGHTS`. A borrowed `'frame` cannot survive
+/// either hop. `SurfaceLease` is the owned-but-still-opaque type the
+/// `core/` skeleton's `StateTransitionSender` always *intended* (see
+/// the historical note this replaces): it carries the retain and
+/// **returns the surface to its OS pool exactly once, on `Drop`**, so
+/// the §5.1 / ADR-0007 timing contract is preserved by RAII rather
+/// than by a lifetime.
+///
+/// OS-agnostic by construction (ADR-0003): the actual pool-return is a
+/// boxed `FnOnce` the *adapter* supplies; `core/` never inspects or
+/// constructs the OS payload. The per-frame ack discipline of ADR-0007
+/// still bounds *when* the core drops this lease; `Drop` guarantees
+/// the release *happens* on every path (deliver / suppress / drop /
+/// error / panic-unwind), which is the ADR-0013 Amendment 1 §3(d)
+/// "no `IOSurface` pool-stall on any path" invariant expressed in the
+/// type system.
+pub struct SurfaceLease {
+    width_px: u32,
+    height_px: u32,
+    /// OS-agnostic pool-return hook, run once. `None` after an explicit
+    /// [`release`](Self::release) or for a [`mock`](Self::mock) lease.
+    /// `core/` MUST NOT interpret what this closure does (ADR-0003).
+    releaser: Option<Box<dyn FnOnce() + Send>>,
+}
+
+impl SurfaceLease {
+    /// Construct an owned lease. The adapter passes a `releaser` that
+    /// returns the underlying OS surface to its pool (e.g. drops the
+    /// macOS `IOSurface` retain / closes the `SCM_RIGHTS` fd). It is
+    /// invoked exactly once — on explicit [`release`](Self::release)
+    /// or otherwise on `Drop`.
+    #[must_use]
+    pub fn new(width_px: u32, height_px: u32, releaser: Box<dyn FnOnce() + Send>) -> Self {
+        Self {
+            width_px,
+            height_px,
+            releaser: Some(releaser),
+        }
+    }
+
+    /// A lease backed by nothing — for `mci-core` unit tests and
+    /// adapter tests that don't spin up the OS pipeline. Dropping it
+    /// is a no-op (no pool to stall).
+    #[must_use]
+    pub fn mock(width_px: u32, height_px: u32) -> Self {
+        Self {
+            width_px,
+            height_px,
+            releaser: None,
+        }
+    }
+
+    /// Logical width of the surface in pixels (before any scaling).
+    #[must_use]
+    pub const fn width_px(&self) -> u32 {
+        self.width_px
+    }
+
+    /// Logical height of the surface in pixels (before any scaling).
+    #[must_use]
+    pub const fn height_px(&self) -> u32 {
+        self.height_px
+    }
+
+    /// Return the surface to its OS pool *now*, synchronously, instead
+    /// of waiting for `Drop`. Idempotent: a subsequent `Drop` is a
+    /// no-op. Prefer this on the hot path so the pool is freed as
+    /// early as possible (the ADR-0006 / ADR-0007 timing contract).
+    pub fn release(mut self) {
+        if let Some(r) = self.releaser.take() {
+            r();
+        }
+        // `self` drops here; releaser is already None ⇒ Drop no-ops.
+    }
+}
+
+impl Drop for SurfaceLease {
+    fn drop(&mut self) {
+        // Exactly-once: `release()` already took it ⇒ None ⇒ no-op.
+        // This is the load-bearing guarantee — every exit path
+        // (deliver / suppress / backpressure-drop / error / unwind)
+        // returns the surface to the pool, so the pool cannot stall.
+        if let Some(r) = self.releaser.take() {
+            r();
+        }
+    }
+}
+
+impl std::fmt::Debug for SurfaceLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never expose the releaser. Opaque on purpose (ADR-0003).
+        f.debug_struct("SurfaceLease")
+            .field("width_px", &self.width_px)
+            .field("height_px", &self.height_px)
+            .field("released", &self.releaser.is_none())
+            .finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // DirtyRect / FrameStatus / WorkflowContext / PermissionsStatus / StateTransition
 // ---------------------------------------------------------------------------
 
@@ -142,13 +256,21 @@ pub enum FrameStatus {
 
 /// One state-transition event from the capture spine.
 ///
-/// `'frame` ties the surface borrow to the callback scope. The receiver MUST
-/// finish using `surface` before this struct is dropped.
+/// The frame is carried as an **owned** [`SurfaceLease`], not a
+/// borrowed [`SurfaceHandle`]`<'frame>`: this struct is sent over the
+/// async-push channel (ADR-0006) and, on macOS, materializes from a
+/// separate helper process (ADR-0007), neither of which a `'frame`
+/// borrow can survive. The lease returns the surface to its OS pool on
+/// `Drop`, so the §5.1 / ADR-0007 release-timing contract is preserved
+/// by RAII (ADR-0014). The receiver should still drop the
+/// `StateTransition` (or call [`SurfaceLease::release`]) promptly —
+/// "owned" relaxes the *compiler-enforced* deadline, not the
+/// performance contract.
 #[derive(Debug)]
-pub struct StateTransition<'frame> {
-    /// Borrowed handle to the frame pixels. See [`SurfaceHandle`] for the
+pub struct StateTransition {
+    /// Owned lease on the frame pixels. See [`SurfaceLease`] for the
     /// release-timing contract.
-    pub surface: SurfaceHandle<'frame>,
+    pub surface: SurfaceLease,
     /// Pixels that changed since the prior delivered frame. Adapter-side
     /// allocation is fine; this `Vec` is short-lived and small.
     pub dirty_rects: Vec<DirtyRect>,
@@ -237,13 +359,13 @@ pub enum CaptureError {
 /// Convenience alias for the channel the adapter pushes [`StateTransition`]s
 /// over.
 ///
-/// Note the `'static` bound on the `StateTransition`'s lifetime parameter:
-/// adapters do **not** literally send a borrowed `'frame` surface across the
-/// channel. The skeleton omits the actual frame payload; the Phase-1 adapter
-/// PR refines this signature to use an owned-but-still-opaque
-/// `SurfaceLease` type that carries the OS pool retain across the channel
-/// while the per-frame ack discipline of ADR-0007 enforces the deadline.
-pub type StateTransitionSender = mpsc::Sender<StateTransition<'static>>;
+/// [`StateTransition`] now carries an **owned** [`SurfaceLease`] (ADR-0014):
+/// there is no lifetime parameter to bound, because a borrowed `'frame`
+/// surface cannot cross the async-push channel (ADR-0006) nor the macOS
+/// helper-process `SCM_RIGHTS` boundary (ADR-0007). The lease's `Drop`
+/// returns the surface to its OS pool; the ADR-0007 per-frame ack still
+/// bounds *when* the core releases it.
+pub type StateTransitionSender = mpsc::Sender<StateTransition>;
 
 /// The cross-platform capture seam.
 ///
@@ -323,7 +445,7 @@ mod tests {
     #[tokio::test]
     async fn mock_source_start_stop_round_trip() {
         let mut src = MockSource { running: false };
-        let (tx, _rx) = mpsc::channel::<StateTransition<'static>>(DEFAULT_CHANNEL_BOUND);
+        let (tx, _rx) = mpsc::channel::<StateTransition>(DEFAULT_CHANNEL_BOUND);
         src.start(tx).await.expect("start");
         assert!(src.running);
         src.stop().await.expect("stop");
@@ -344,6 +466,107 @@ mod tests {
         // a clear signal that the seam shape changed (ADR-0006 amendment
         // required before merging).
         fn _accepts_dyn(_b: Box<dyn CaptureSource>) {}
+    }
+
+    #[test]
+    fn surface_lease_releases_exactly_once_on_drop() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = Arc::clone(&calls);
+        {
+            let lease = SurfaceLease::new(1920, 1080, Box::new(move || {
+                c.fetch_add(1, Ordering::SeqCst);
+            }));
+            assert_eq!(lease.width_px(), 1920);
+            assert_eq!(lease.height_px(), 1080);
+            assert_eq!(calls.load(Ordering::SeqCst), 0, "not released until drop");
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "Drop returns the surface to the pool exactly once"
+        );
+    }
+
+    #[test]
+    fn surface_lease_explicit_release_then_drop_is_once() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = Arc::clone(&calls);
+        let lease = SurfaceLease::new(640, 480, Box::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+        }));
+        lease.release(); // consumes; releaser runs here
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "explicit release + implicit drop must total exactly one pool-return"
+        );
+    }
+
+    #[test]
+    fn surface_lease_mock_drop_is_noop() {
+        // A mock lease has no pool to stall; dropping it must not panic
+        // and obviously runs no releaser.
+        let lease = SurfaceLease::mock(100, 200);
+        assert_eq!(lease.width_px(), 100);
+        assert_eq!(lease.height_px(), 200);
+        drop(lease);
+    }
+
+    #[test]
+    fn surface_lease_is_send() {
+        // The lease MUST be Send — it crosses the async-push channel
+        // (ADR-0006) and is moved between tokio tasks. If someone makes
+        // the releaser non-Send this stops compiling.
+        fn assert_send<T: Send>() {}
+        assert_send::<SurfaceLease>();
+        assert_send::<StateTransition>();
+    }
+
+    #[tokio::test]
+    async fn state_transition_carries_owned_lease_over_channel() {
+        // The whole point of the refactor: a StateTransition with an
+        // owned SurfaceLease survives the bounded channel with no
+        // lifetime parameter, and the lease releases when the receiver
+        // drops it.
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let released = Arc::new(AtomicUsize::new(0));
+        let r = Arc::clone(&released);
+        let (tx, mut rx) = mpsc::channel::<StateTransition>(DEFAULT_CHANNEL_BOUND);
+        tx.send(StateTransition {
+            surface: SurfaceLease::new(800, 600, Box::new(move || {
+                r.fetch_add(1, Ordering::SeqCst);
+            })),
+            dirty_rects: vec![DirtyRect {
+                x: 0,
+                y: 0,
+                width: 800,
+                height: 600,
+            }],
+            ts: Instant::now(),
+            status: FrameStatus::Complete,
+        })
+        .await
+        .expect("send");
+        let evt = rx.recv().await.expect("recv");
+        assert_eq!(evt.surface.width_px(), 800);
+        assert_eq!(released.load(Ordering::SeqCst), 0, "still held by receiver");
+        drop(evt);
+        assert_eq!(
+            released.load(Ordering::SeqCst),
+            1,
+            "receiver drop returns the surface to the pool"
+        );
     }
 
     #[test]
