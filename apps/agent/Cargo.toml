@@ -1,0 +1,21 @@
+[package]
+name                   = "mci-agent"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI macOS menu-bar / system-tray agent shell. Supervises the capture helper, owns the per-device id, runs the IPC select! loop. See docs/decisions/0007-macos-capture-separate-signed-helper-process.md."
+
+[lints]
+workspace = true
+
+[dependencies]
+mci-core    = { path = "../../core" }
+tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "process", "signal", "fs"] }
+tracing     = { version = "0.1", default-features = false, features = ["std"] }
+thiserror   = "1"
+
+[dev-dependencies]
+tempfile    = "3"
+tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "process", "signal", "fs", "test-util"] }

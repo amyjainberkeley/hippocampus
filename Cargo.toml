@@ -12,7 +12,7 @@
 
 [workspace]
 resolver = "2"
-members = ["core"]
+members = ["apps/agent", "core"]
 
 [workspace.package]
 edition      = "2021"
