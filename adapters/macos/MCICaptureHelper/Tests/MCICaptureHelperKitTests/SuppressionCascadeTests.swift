@@ -211,3 +211,109 @@ final class CascadeOrderingTests: XCTestCase {
         XCTAssertEqual(c.decide(context: ctx), .suppress(reason: .secureEventInput))
     }
 }
+
+// MARK: - ADR-0013 cascade §5 — post-capture denylist drift backstop
+
+/// Mock `DenylistDriftProbe`. `installedGen != currentGen` models a
+/// denylist edit not yet propagated to the live `SCContentFilter`;
+/// `deniesCurrent` models the live context matching the *current*
+/// (post-edit) policy that the stale source filter does not enforce.
+private struct MockDenylistDrift: DenylistDriftProbe {
+    let installedGen: UInt64
+    let currentGen: UInt64
+    let deniesCurrent: Bool
+    func installedFilterGeneration() -> UInt64 { installedGen }
+    func currentPolicyGeneration() -> UInt64 { currentGen }
+    func currentPolicyDenies(_: WorkflowContext) -> Bool { deniesCurrent }
+}
+
+/// Builder that injects a `DenylistDriftProbe`. §1 denylist is empty
+/// and the app is known-safe + AX non-secure by default, so absent §5
+/// the cascade would `.allow` — isolating §5's effect.
+private func driftCascade(
+    installedGen: UInt64,
+    currentGen: UInt64,
+    deniesCurrent: Bool,
+    secureEventInput: Bool = false,
+    ax: Bool? = false,
+    denyApps: Set<String> = [],
+    knownSafe: Set<String> = ["com.example.app"]
+) -> SuppressionCascade {
+    SuppressionCascade(
+        secureEventInput: MockSecureEventInput(enabled: secureEventInput),
+        axSecureSubrole: MockAX(result: ax),
+        denylist: MockDenylist(apps: denyApps, urls: [], titles: []),
+        blackedRegion: MockBlackedRegion(present: false),
+        denylistDrift: MockDenylistDrift(
+            installedGen: installedGen,
+            currentGen: currentGen,
+            deniesCurrent: deniesCurrent
+        ),
+        knownSafeAppBundles: knownSafe
+    )
+}
+
+final class CascadeDenylistDriftTests: XCTestCase {
+    private let ctx = WorkflowContext(appBundleId: "com.example.app")
+
+    /// Generation parity ⇒ no drift ⇒ §5 is a strict no-op even when
+    /// the current policy *would* deny. The cascade reaches its normal
+    /// terminal decision (`.allow` here: known-safe + AX non-secure).
+    func testNoDriftIsNoOpEvenIfCurrentPolicyWouldDeny() {
+        let c = driftCascade(installedGen: 7, currentGen: 7, deniesCurrent: true)
+        XCTAssertEqual(c.decide(context: ctx), .allow)
+    }
+
+    /// Drift + current policy denies the live context ⇒ §5 suppresses
+    /// with `.denylistPostCapture` (NOT `.denylistSource` — the
+    /// post-capture backstop fired, not the source filter). This is
+    /// the gap §5 closes.
+    func testDriftPlusCurrentPolicyDenySuppressesPostCapture() {
+        let c = driftCascade(installedGen: 1, currentGen: 2, deniesCurrent: true)
+        XCTAssertEqual(
+            c.decide(context: ctx),
+            .suppress(reason: .denylistPostCapture)
+        )
+    }
+
+    /// Drift present but the current policy does NOT deny the live
+    /// context ⇒ §5 does not fire. Drift alone is not suppression;
+    /// only a current-policy match in the drift window is.
+    func testDriftWithoutCurrentPolicyDenyDoesNotFire() {
+        let c = driftCascade(installedGen: 1, currentGen: 9, deniesCurrent: false)
+        XCTAssertEqual(c.decide(context: ctx), .allow)
+    }
+
+    /// First-match-wins: §1 source-level denylist fires before §5 even
+    /// when drift + current-policy-deny would also fire. Reason must
+    /// be `.denylistSource`.
+    func testSourceDenylistFiresBeforeDriftBackstop() {
+        let c = driftCascade(
+            installedGen: 1,
+            currentGen: 2,
+            deniesCurrent: true,
+            denyApps: ["com.example.app"]
+        )
+        XCTAssertEqual(c.decide(context: ctx), .suppress(reason: .denylistSource))
+    }
+
+    /// Cascade order: §3 secure-event-input fires before the §5 drift
+    /// backstop. Reason must be `.secureEventInput`.
+    func testSecureEventInputFiresBeforeDriftBackstop() {
+        let c = driftCascade(
+            installedGen: 1,
+            currentGen: 2,
+            deniesCurrent: true,
+            secureEventInput: true
+        )
+        XCTAssertEqual(c.decide(context: ctx), .suppress(reason: .secureEventInput))
+    }
+
+    /// Regression guard: the default `NoDenylistDrift` sentinel (used
+    /// by every pre-existing construction) reports generation parity,
+    /// so §5 can never fire — prior cascade behavior is preserved.
+    func testDefaultSentinelNeverFiresSection5() {
+        let c = cascade(knownSafe: ["com.example.app"])
+        XCTAssertEqual(c.decide(context: ctx), .allow)
+    }
+}
