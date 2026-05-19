@@ -109,6 +109,11 @@ let helperVersion = "0.0.2-phase1-cycle2-iter5"
 
 let args = parseArgs(CommandLine.arguments)
 
+// ADR-0013 Amendment 1 §4 — live capture is DEFAULT-OFF / dev-only.
+// `captureEnabled` is true ONLY if the non-default `--capture` flag was
+// explicitly passed. The default path never constructs an `SCStream`.
+let captureOptions = CaptureLaunchOptions.parse(CommandLine.arguments)
+
 // Output file handle.
 let outputHandle: FileHandle
 if let path = args.outputPath {
@@ -174,6 +179,39 @@ if args.oneShot {
     } catch {
         FileHandle.standardError.write("mci-capture-helper: tick error: \(error)\n".data(using: .utf8)!)
         exit(4)
+    }
+}
+
+// ADR-0013 Amendment 1 §4 — dev-only live-capture path. OFF unless
+// `--capture` was explicitly passed. Even when ON this PR-1 path has
+// NO IOSurface retain and NO encoder, so it structurally cannot store
+// a frame; it exists so a human can drive the live SCStream wiring in
+// a dev session. `// UNVERIFIED — needs live macOS`.
+if captureOptions.captureEnabled {
+    FileHandle.standardError.write("""
+    mci-capture-helper: --capture is a DEV-ONLY, UNVERIFIED path \
+    (ADR-0013 Amendment 1 §4). Live SCStream capture is NOT enabled in \
+    default builds and stores no frame in this build (no retain, no \
+    encoder). Starting live session…\n
+    """.data(using: .utf8) ?? Data())
+
+    let captureSession = SCStreamCaptureSession(
+        pipeline: SCStreamPipeline(
+            cascade: cascade,
+            encoder: DeferredVideoToolboxEncoder(), // no-op — no stored frame
+            sink: FileHandleFrameSink(handle: outputHandle)
+        ),
+        denylist: Denylist(entries: denylistEntries)
+    )
+    Task.detached {
+        do {
+            try await captureSession.start()
+        } catch {
+            FileHandle.standardError.write(
+                "mci-capture-helper: live capture start failed (expected off a real screen): \(error)\n"
+                    .data(using: .utf8) ?? Data()
+            )
+        }
     }
 }
 
