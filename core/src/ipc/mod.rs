@@ -45,10 +45,12 @@
 //! deliberately small and audit-friendly. Encoders and decoders are
 //! byte-explicit and round-trip-tested.
 
+pub mod connection;
 pub mod reader;
 pub mod wire;
 pub mod writer;
 
+pub use connection::{ConnectionError, HelperConnection, Routed};
 pub use reader::{FrameReader, ReadError, READER_BUFFER_CAP};
 pub use wire::{
     decode, encode, DecodeError, Frame, MessageType, FRAME_MAGIC, FRAME_VERSION,
