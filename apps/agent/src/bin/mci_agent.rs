@@ -24,13 +24,17 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
+use mci_agent::health_summary::summarize_file;
 use mci_agent::runner::drain_to_log;
-use mci_agent::wall_clock::SystemWallClock;
+use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
 
-const VERSION: &str = "0.0.2-phase1-cycle2-iter11";
+const VERSION: &str = "0.0.3-phase1-cycle2-iter12";
+
+const DEFAULT_HEALTH_SUMMARY_WINDOW_SECONDS: u64 = 3_600; // 1 hour
 
 struct Args {
     device_id_path: PathBuf,
@@ -42,6 +46,7 @@ enum Mode {
     Help,
     Version,
     DrainStdin,
+    HealthSummary { window_seconds: u64 },
 }
 
 fn default_device_id_path() -> PathBuf {
@@ -53,32 +58,38 @@ fn default_log_path() -> PathBuf {
     HealthLogConfig::default_for_user().path
 }
 
-fn parse_args(argv: Vec<String>) -> Args {
-    let mut a = Args {
-        device_id_path: default_device_id_path(),
-        log_path: default_log_path(),
-        mode: Mode::Help,
-    };
+fn parse_args(argv: &[String]) -> Args {
+    // Two-pass: first scan resolves the mode flag, second scan binds
+    // mode-specific options. Keeps `--window-seconds 600
+    // --health-summary` order-independent.
+    let mut device_id_path = default_device_id_path();
+    let mut log_path = default_log_path();
+    let mut mode_kind = ModeKind::Help;
+    let mut window_seconds = DEFAULT_HEALTH_SUMMARY_WINDOW_SECONDS;
+
     let mut i = 1;
     while i < argv.len() {
         match argv[i].as_str() {
             "--device-id-path" if i + 1 < argv.len() => {
-                a.device_id_path = PathBuf::from(&argv[i + 1]);
+                device_id_path = PathBuf::from(&argv[i + 1]);
                 i += 1;
             }
             "--log-path" if i + 1 < argv.len() => {
-                a.log_path = PathBuf::from(&argv[i + 1]);
+                log_path = PathBuf::from(&argv[i + 1]);
                 i += 1;
             }
-            "--drain-stdin" => {
-                a.mode = Mode::DrainStdin;
+            "--drain-stdin" => mode_kind = ModeKind::DrainStdin,
+            "--health-summary" => mode_kind = ModeKind::HealthSummary,
+            "--window-seconds" if i + 1 < argv.len() => {
+                if let Ok(n) = argv[i + 1].parse::<u64>() {
+                    if n > 0 {
+                        window_seconds = n;
+                    }
+                }
+                i += 1;
             }
-            "-h" | "--help" => {
-                a.mode = Mode::Help;
-            }
-            "--version" => {
-                a.mode = Mode::Version;
-            }
+            "-h" | "--help" => mode_kind = ModeKind::Help,
+            "--version" => mode_kind = ModeKind::Version,
             _ => {
                 // Unknown args silent for now (parity with the Swift
                 // helper's parser); cycle 3 tightens this.
@@ -86,7 +97,26 @@ fn parse_args(argv: Vec<String>) -> Args {
         }
         i += 1;
     }
-    a
+
+    let mode = match mode_kind {
+        ModeKind::Help => Mode::Help,
+        ModeKind::Version => Mode::Version,
+        ModeKind::DrainStdin => Mode::DrainStdin,
+        ModeKind::HealthSummary => Mode::HealthSummary { window_seconds },
+    };
+    Args {
+        device_id_path,
+        log_path,
+        mode,
+    }
+}
+
+#[derive(Copy, Clone)]
+enum ModeKind {
+    Help,
+    Version,
+    DrainStdin,
+    HealthSummary,
 }
 
 fn print_usage() {
@@ -97,18 +127,21 @@ fn print_usage() {
         \n\
         Modes:\n\
         \x20 --drain-stdin              read wire frames from stdin and write JSONL\n\
+        \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 --version                  print version and exit\n\
         \x20 -h, --help                 print this and exit\n\
         \n\
         Options:\n\
         \x20 --device-id-path PATH      default ~/.mci/device-id\n\
-        \x20 --log-path PATH            default ~/Library/Logs/MCI/helper-health.jsonl\n"
+        \x20 --log-path PATH            default ~/Library/Logs/MCI/helper-health.jsonl\n\
+        \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n"
     );
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    let args = parse_args(std::env::args().collect());
+    let raw_argv: Vec<String> = std::env::args().collect();
+    let args = parse_args(&raw_argv);
 
     match args.mode {
         Mode::Version => {
@@ -153,6 +186,29 @@ async fn main() -> ExitCode {
                 Err(e) => {
                     eprintln!("mci-agent: drain error: {e}");
                     ExitCode::from(3)
+                }
+            }
+        }
+        Mode::HealthSummary { window_seconds } => {
+            // Compute the cutoff RFC-3339 string once. The summary
+            // comparator does a lexicographic compare against each
+            // record's wall_ts; both are produced by the same
+            // `format_unix_ms` so the compare is chronological.
+            let now_unix_ms: u128 = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(std::time::Duration::ZERO)
+                .as_millis();
+            let window_ms = u128::from(window_seconds).saturating_mul(1000);
+            let cutoff_ts = format_unix_ms(now_unix_ms.saturating_sub(window_ms));
+
+            match summarize_file(&args.log_path, cutoff_ts).await {
+                Ok(summary) => {
+                    println!("{}", summary.to_human_line());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mci-agent: health-summary error: {e}");
+                    ExitCode::from(4)
                 }
             }
         }
