@@ -11,7 +11,7 @@
 # Wire format mirrors `adapters/macos/.../IPC/Wire.swift` /
 # `core/src/ipc/wire.rs` (binary, little-endian):
 #
-#   magic(1=0x4D) + version(1=0x01) + msg_type(2) + seq(8) + len(4) + payload(len)
+#   magic(1=0x4D) + version(1=0x02) + msg_type(2) + seq(8) + len(4) + payload(len)
 #
 # msg_type discriminants (MUST match Wire.swift `MessageType`):
 #   0x0001 captureStart   0x0002 captureStop
@@ -40,7 +40,7 @@ import struct
 from collections import Counter
 
 MAGIC = 0x4D
-VERSION = 0x01
+VERSION = 0x02  # wire bumped 0x01->0x02 (PR #24: HelperHealth frames_redacted_by_failsafe)
 HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
 
 MSG = {
@@ -79,7 +79,7 @@ def main(path):
         if magic != MAGIC or ver != VERSION:
             corrupt.append(
                 f"@{off}: bad header magic=0x{magic:02X} ver=0x{ver:02X} "
-                f"(expected 0x4D/0x01) — stopping decode here"
+                f"(expected 0x4D/0x02) — stopping decode here"
             )
             break
         if n - off - HEADER < plen:
