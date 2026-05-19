@@ -13,11 +13,22 @@
 //! - [`KeyWrap`] — the portable trait the store-open path depends on.
 //!   The macOS adapter implements it over the Secure-Enclave item;
 //!   a future Windows adapter implements it over DPAPI-NG/TPM.
-//! - [`InMemoryKeyWrap`] — a **test-only** wrap. It holds the wrapped
+//! - `InMemoryKeyWrap` — a **test-only** wrap. It holds the wrapped
 //!   bytes in process memory and provides **no at-rest
 //!   confidentiality whatsoever**. It exists so the encrypted-store
 //!   round-trip can be proven headlessly on a non-macOS CI runner.
-//!   Shipping it in a release build is a CSO-blocking defect.
+//!   Shipping it in a release build is a CSO-blocking defect, so it
+//!   is **physically uncompilable in a shipped build**:
+//!     - the type, its `KeyWrap` impl, and its tests are behind
+//!       `#[cfg(any(test, feature = "insecure-test-keywrap"))]`;
+//!     - `insecure-test-keywrap` is **not** in any default feature
+//!       set and is **not** enabled by `apps/agent` (the shipped
+//!       binary), so a release build of the agent never even names
+//!       the type;
+//!     - a **compile-time tripwire** (`compile_error!` below) fails
+//!       the build outright if the feature is ever enabled in an
+//!       optimized, non-`cfg(test)` build — defence in depth so a
+//!       future `Cargo.toml` edit cannot smuggle it into a release.
 //!
 //! The trait is deliberately tiny: `wrap` + `unwrap`. Key custody
 //! policy (biometric gate, SE residency, rotation) lives entirely in
@@ -100,6 +111,23 @@ pub trait KeyWrap {
     fn unwrap_key(&self, wrapped: &WrappedKey) -> Result<DbKey, KeyWrapError>;
 }
 
+// ── Release tripwire (CSO, AGENT_PROTOCOL §5 / ADR-0008) ────────────
+// The insecure in-memory wrap is gated to `cfg(test)` OR the explicit
+// opt-in `insecure-test-keywrap` feature (for downstream integration
+// test crates that cannot see this crate's `cfg(test)`). It must NEVER
+// reach a shipped binary. `cargo test` sets `cfg(test)`; a normal
+// `cargo build`/`--release` of the agent enables neither and so never
+// compiles the type at all. As defence in depth, if the feature is
+// somehow enabled in an optimized build OUTSIDE `cfg(test)`
+// (`debug_assertions` off ⇒ release profile), refuse to compile —
+// a future Cargo.toml edit cannot silently smuggle it into a release.
+#[cfg(all(feature = "insecure-test-keywrap", not(test), not(debug_assertions)))]
+compile_error!(
+    "InMemoryKeyWrap is TEST-ONLY and provides no at-rest confidentiality. \
+     The `insecure-test-keywrap` feature must never be enabled in a release \
+     build. This is a CSO-blocking misconfiguration (ADR-0008, AGENT_PROTOCOL §5)."
+);
+
 /// **TEST-ONLY** in-memory wrap. Stores the key bytes verbatim.
 ///
 /// Provides NO confidentiality. Its only purpose is to let the
@@ -107,9 +135,15 @@ pub trait KeyWrap {
 /// runner where the Secure-Enclave adapter is unavailable. A release
 /// build that constructs this is a CSO-blocking defect; the agent
 /// shell wires the macOS adapter's `KeyWrap`, never this.
+///
+/// Compiled only under `#[cfg(any(test, feature =
+/// "insecure-test-keywrap"))]` — absent entirely from the shipped
+/// agent binary (see the release tripwire above).
+#[cfg(any(test, feature = "insecure-test-keywrap"))]
 #[derive(Debug, Default)]
 pub struct InMemoryKeyWrap;
 
+#[cfg(any(test, feature = "insecure-test-keywrap"))]
 impl KeyWrap for InMemoryKeyWrap {
     fn wrap(&self, key: &DbKey) -> Result<WrappedKey, KeyWrapError> {
         Ok(WrappedKey::from_vec(key.expose_bytes().to_vec()))

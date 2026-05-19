@@ -60,9 +60,15 @@ impl DbKey {
         Self { bytes }
     }
 
-    /// Borrow the raw bytes. Restricted to the crate so only the
-    /// store-open path + the key-wrap impls can reach them; callers
+    /// Borrow the raw bytes. Restricted to the crate so callers
     /// outside `core` cannot exfiltrate the key buffer.
+    ///
+    /// Gated to `cfg(test)` / `insecure-test-keywrap`: the production
+    /// store-open path uses [`Self::expose_sqlcipher_pragma_value`],
+    /// never the raw buffer. The only remaining callers are the
+    /// `db_key` unit tests and the test-only `InMemoryKeyWrap` — both
+    /// compiled out of a shipped build, so this accessor is too.
+    #[cfg(any(test, feature = "insecure-test-keywrap"))]
     #[must_use]
     pub(crate) fn expose_bytes(&self) -> &[u8; DB_KEY_LEN] {
         &self.bytes
