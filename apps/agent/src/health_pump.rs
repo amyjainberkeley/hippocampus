@@ -58,6 +58,7 @@ pub fn pump_one(
         uptime_ms,
         frames_delivered,
         frames_suppressed,
+        frames_redacted_by_failsafe,
         frames_dropped_backpressure,
         frames_dropped_late_ack,
     } = &frame.message
@@ -73,6 +74,7 @@ pub fn pump_one(
         uptime_ms: *uptime_ms,
         frames_delivered: *frames_delivered,
         frames_suppressed: *frames_suppressed,
+        frames_redacted_by_failsafe: *frames_redacted_by_failsafe,
         frames_dropped_backpressure: *frames_dropped_backpressure,
         frames_dropped_late_ack: *frames_dropped_late_ack,
     })
@@ -96,6 +98,7 @@ mod tests {
                 uptime_ms: 5_000,
                 frames_delivered: 100,
                 frames_suppressed: 12,
+                frames_redacted_by_failsafe: 9,
                 frames_dropped_backpressure: 1,
                 frames_dropped_late_ack: 0,
             },
@@ -114,6 +117,7 @@ mod tests {
         assert_eq!(rec.uptime_ms, 5_000);
         assert_eq!(rec.frames_delivered, 100);
         assert_eq!(rec.frames_suppressed, 12);
+        assert_eq!(rec.frames_redacted_by_failsafe, 9);
         assert_eq!(rec.frames_dropped_backpressure, 1);
         assert_eq!(rec.frames_dropped_late_ack, 0);
     }

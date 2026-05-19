@@ -128,7 +128,9 @@ final class FrameSequenceTests: XCTestCase {
 
 final class HelperMainLoopTests: XCTestCase {
     /// tickHealth emits exactly one HelperHealth frame whose payload
-    /// length matches the wire spec (16 header + 40 payload = 56 bytes).
+    /// length matches the wire spec. wire 0x02: 16 header + 6 × u64
+    /// (48) = 64 bytes (was 56 at 0x01, before the
+    /// frames_redacted_by_failsafe counter was added).
     func testTickHealthEmitsOneFrameWithCorrectLength() async throws {
         let sink = RecordingFrameSink()
         let loop = HelperMainLoop(
@@ -138,11 +140,11 @@ final class HelperMainLoopTests: XCTestCase {
         try await loop.tickHealth()
         let frames = await sink.recorded()
         XCTAssertEqual(frames.count, 1)
-        // Header(16) + 5 × u64 = 56 bytes.
-        XCTAssertEqual(frames[0].count, 56)
+        // Header(16) + 6 × u64(48) = 64 bytes.
+        XCTAssertEqual(frames[0].count, 64)
         // Wire magic + version.
         XCTAssertEqual(frames[0][0], 0x4D)
-        XCTAssertEqual(frames[0][1], 0x01)
+        XCTAssertEqual(frames[0][1], frameVersion)
         // msg_type 0x0030 = HelperHealth.
         XCTAssertEqual(frames[0][2], 0x30)
         XCTAssertEqual(frames[0][3], 0x00)
@@ -173,6 +175,7 @@ final class HelperMainLoopTests: XCTestCase {
         let snap = await loop.counters.snapshot()
         XCTAssertEqual(snap.framesDelivered, 1)
         XCTAssertEqual(snap.framesSuppressed, 0)
+        XCTAssertEqual(snap.framesRedactedByFailsafe, 0)
     }
 
     /// Suppress path emits exactly one PrivacyTombstone frame whose
@@ -202,10 +205,50 @@ final class HelperMainLoopTests: XCTestCase {
         // Last byte = reason discriminant. FailsafeUnknown = 7.
         XCTAssertEqual(frames[0].last, RedactionReason.failsafeUnknown.rawValue)
 
-        // Delivered + suppressed both incremented.
+        // Delivered + suppressed both incremented — and because the
+        // reason was .failsafeUnknown, the §7 sentinel too (a strict
+        // subset of framesSuppressed).
         let snap = await loop.counters.snapshot()
         XCTAssertEqual(snap.framesDelivered, 1)
         XCTAssertEqual(snap.framesSuppressed, 1)
+        XCTAssertEqual(snap.framesRedactedByFailsafe, 1)
+    }
+
+    /// A NON-fail-safe suppression (denylist §1) increments
+    /// framesSuppressed but NOT the §7 fail-safe sentinel — proving
+    /// the sentinel is reason-specific, not "any suppression."
+    func testNonFailsafeSuppressionDoesNotIncrementSentinel() async throws {
+        struct NoSEI: SecureEventInputProbe {
+            func isSecureEventInputEnabled() -> Bool { false }
+        }
+        struct AXSilent: AXSecureSubroleProbe {
+            func focusedHasSecureSubrole() -> Bool? { nil }
+        }
+        struct DenyApp: DenylistProbe {
+            func appIsDenied(bundleId: String) -> Bool { bundleId == "com.denied.app" }
+            func urlIsDenied(_: String) -> Bool { false }
+            func windowTitleIsDenied(_: String) -> Bool { false }
+        }
+        struct NoBlack: BlackedRegionProbe {
+            func hasBlackedRegion() -> Bool { false }
+        }
+        let loop = HelperMainLoop(
+            cascade: SuppressionCascade(
+                secureEventInput: NoSEI(),
+                axSecureSubrole: AXSilent(),
+                denylist: DenyApp(),
+                blackedRegion: NoBlack()
+            ),
+            sink: RecordingFrameSink()
+        )
+        let decision = try await loop.processSyntheticTransition(
+            nowUs: 1,
+            context: WorkflowContext(appBundleId: "com.denied.app")
+        )
+        XCTAssertEqual(decision, .suppress(reason: .denylistSource))
+        let snap = await loop.counters.snapshot()
+        XCTAssertEqual(snap.framesSuppressed, 1)
+        XCTAssertEqual(snap.framesRedactedByFailsafe, 0)
     }
 
     /// Sequence numbers monotonically increase across emitted frames.
