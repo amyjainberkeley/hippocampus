@@ -25,17 +25,19 @@
 //       ahead of, or around, the cascade.
 //   (b) fail-closed preserved — this file widens no `.allow` path and
 //       relaxes no probe; it only *feeds* the existing cascade.
-//   (c) no stored/emitted suppressed event — PR-1 adds NO encoder
-//       (the pipeline still holds `DeferredVideoToolboxEncoder`, a
-//       no-op) and NO IOSurface retain. The pixel buffer is read
-//       SYNCHRONOUSLY in-callback into a 9×8 luminance grid, folded to
-//       a dHash, then the surface is dropped. Only `Sendable` value
-//       types cross into the async pipeline. There is, by
-//       construction, nothing to store.
-//   (d) no IOSurface pool-stall — because nothing is retained past the
-//       callback, the OS frame pool can never stall on this path. The
-//       `SurfaceLease` here is backed by a no-op releaser (there is no
-//       retain to release); PR-2 introduces the real retain→lease.
+//   (c) no stored/emitted suppressed event — there is still NO encoder
+//       (the pipeline holds `DeferredVideoToolboxEncoder`, a no-op).
+//       PR-2 adds the IOSurface retain (so PR-3's encoder can outlive
+//       the callback) but encodes/stores NOTHING: the retained buffer
+//       is freed by the lease on every path, used by no one. Only
+//       `Sendable` value types cross into the async pipeline.
+//   (d) no IOSurface pool-stall — PR-2 introduces the real retain via
+//       `CVPixelBufferRetainedSurface`, released through
+//       `PixelSurfaceReleaser` by the pipeline's single top-level
+//       exactly-once `defer` on EVERY exit (filter-drop / suppress /
+//       allow / throwing sink / throwing encoder). The hold is bounded
+//       (cascade + no-op encoder ⇒ sub-millisecond) and well inside
+//       the `minimumFrameInterval × (queueDepth−1)` pool budget.
 //
 // ADR-0013 Amendment 1 §4: this session only ever starts behind the
 // non-default `--capture` dev flag (`CaptureLaunchOptions`). The
@@ -163,11 +165,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// The live frame callback. `// UNVERIFIED — needs live macOS; do
     /// not claim working`.
     ///
-    /// Contract enforced here (Amendment 1 §3(c)/(d)): everything the
-    /// borrowed `sampleBuffer` is needed for is read SYNCHRONOUSLY into
-    /// `InCallbackSample` (a `Sendable` value), the surface is then
-    /// dropped, and only that value crosses into the async pipeline.
-    /// No retain, no encoder ⇒ structurally cannot store a frame.
+    /// Contract enforced here (Amendment 1 §3(c)/(d)): the metadata +
+    /// dHash are read SYNCHRONOUSLY into `InCallbackSample` (a
+    /// `Sendable` value). PR-2 ALSO retains the pixel buffer
+    /// (`CVPixelBufferRetainedSurface`) so PR-3's encoder can outlive
+    /// the callback — but nothing encodes/stores it here (no-op
+    /// encoder), and the retain is released by the pipeline's
+    /// exactly-once `defer` on every exit ⇒ no pool-stall, no stored
+    /// frame.
     public func stream(
         _: SCStream,
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
@@ -200,10 +205,24 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         )
         let nowUs = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
 
-        // No retained surface ⇒ no-op releaser. The pipeline's
-        // top-level `defer { lease.release() }` still runs exactly
-        // once on every path; here it simply has nothing to free.
-        let lease = SurfaceLease(releaser: BorrowedNoRetainReleaser())
+        // PR-2: retain the pixel buffer (⇒ its IOSurface) so a future
+        // encoder (PR-3) can read it after the callback returns. The
+        // retain is wrapped in a `SurfaceLease`, which the pipeline
+        // releases exactly once on EVERY exit path via its single
+        // top-level `defer`. If the buffer can't be obtained we fall
+        // back to the no-retain releaser (still correct — nothing to
+        // free). Either way the §4 pool budget is respected because
+        // the hold is bounded by the cascade + no-op encoder.
+        let releaser: any SurfaceReleasing
+        if let pb = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            // UNVERIFIED — needs live macOS; do not claim working.
+            releaser = PixelSurfaceReleaser(
+                surface: CVPixelBufferRetainedSurface(retaining: pb)
+            )
+        } else {
+            releaser = BorrowedNoRetainReleaser()
+        }
+        let lease = SurfaceLease(releaser: releaser)
 
         // Only `Sendable` values are captured — NOT the sample buffer.
         let pipeline = self.pipeline
@@ -237,8 +256,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     /// Read frame-status, dirty-rects and a 9×8 luminance grid out of
     /// the borrowed buffer SYNCHRONOUSLY, fold the grid to a dHash, and
-    /// return a `Sendable` snapshot. The buffer is NOT retained past
-    /// this function.
+    /// return a `Sendable` snapshot. THIS function never retains the
+    /// buffer (the bounded PR-2 retain is taken separately in the
+    /// callback and released by the pipeline lease).
     ///
     /// `// UNVERIFIED — needs live macOS; do not claim working`: every
     /// `CoreMedia` / `CoreVideo` / `ScreenCaptureKit` call below needs a
