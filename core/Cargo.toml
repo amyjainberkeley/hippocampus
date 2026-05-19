@@ -11,11 +11,12 @@ description  = "MCI portable core: capture pipeline, dedupe, OCR orchestration, 
 workspace = true
 
 [dependencies]
-# Runtime locked to tokio per ADR-0006.
-tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time"] }
+# Runtime locked to tokio per ADR-0006. `io-util` enables AsyncReadExt /
+# AsyncWriteExt / tokio::io::duplex — required by core::ipc::reader.
+tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "io-util"] }
 async-trait  = "0.1"
 thiserror    = "1"
 tracing      = { version = "0.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "test-util"] }
+tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "test-util", "io-util"] }
