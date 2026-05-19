@@ -1,6 +1,6 @@
 # ADR-0013 — Native-grade sensitive-surface suppression (launch-blocker)
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 4 — F-STRAT-001a derived work)
+- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 4 — F-STRAT-001a derived work). **Amended 2026-05-19 — Amendment 1 (enabler-PR gating boundary); see end of file.**
 - Owners: **CSO** (binding contract) + **Director-Recording** (Phase-1 implementation)
 - Reviewers: CEO; Director-Sync-Core (CaptureSource adapter PR consumes this contract); Director-Context (workflow-context metadata side); CRS (research-spike memo author, `docs/research/2026-05-18-macos-secure-surface-detection.md`)
 - Phase: 0 (contract); implementation lands in Phase 1 (macOS capture spine)
@@ -142,3 +142,49 @@ The detection cascade above is Director-Recording's Phase-1 implementation scope
 - Apple — `kAXSecureTextFieldSubrole`, `IsSecureEventInputEnabled()`, `NSWindow.sharingType`, `SCContentFilter`, FairPlay-protected playback (see CRS memo for exact references).
 - Microsoft Recall — TotalRecall Reloaded, CSO Online 2026-04-16 (the failure shape this ADR prevents).
 - `docs/COMPETITORS.md` (CRS, screenpipe entry, 2026-05-18) — the competitive context.
+
+## Amendment 1 (2026-05-19) — Enabler-PR gating boundary
+
+- Status: Accepted (2026-05-19; ratified by human CEO in the Phase-1 live-capture human-in-the-loop session). Protected-set authoring (AGENT_PROTOCOL §5). Amends the operational reading of §5 and §7; the substantive cascade contract (§1–§4, §6) is unchanged.
+- Decision record: `docs/AGENT_QUESTIONS.md` § "2026-05-19 — CSO/CEO — ADR-0013 §7 enabler-PR gating boundary".
+
+### Context
+
+The Phase-1 live-capture work (live `SCShareableContent`/`SCStream`/`SCStreamConfiguration`, the `SCStreamOutput` callback, IOSurface retain → surface-lease release, VideoToolbox HEVC encode) can only be done and verified on a live screen on a real Mac, in a human-in-the-loop session. It lands as a **sequence** of small protected-set PRs, not one PR.
+
+A literal reading of §7 ("A Phase-1 helper PR without these tests does not pass CSO review") conflicts with the operational reality recorded in `docs/STATE.md`: the §7 secure-surface integration-test corpus (1Password, `sudo`, FairPlay/HDCP, `NSWindowSharingType=.none`, System Settings password sheet, secure text fields) is **HUMAN-ONLY and must be run on a real machine** — it cannot be a precondition for the very PRs that make it runnable. This amendment removes the contradiction without weakening the launch-blocker.
+
+### Decision
+
+1. **What the §7 corpus gates (unchanged in force, sharpened in scope).** The §7 integration-test corpus + the committed audit artifact (`docs/audit/2026-XX-XX-suppression-corpus.json`, §7) gate **all three of**: (a) the **Phase 1 → 2** transition; (b) **enabling capture in any shipped or default build** (capture default-ON); (c) declaring any **footprint/G2 measurement** as a satisfied gate. Until the corpus is green on a real machine and the artifact is committed, none of (a)/(b)/(c) may be claimed. This is non-negotiable and remains a CSO veto-gate.
+
+2. **What the §7 corpus does NOT gate.** The §7 corpus is **not** a per-PR blocker on the *enabler PRs* — the live-`SCStream` wiring sequence (live session + `SCStreamOutput`; IOSurface retain → surface-lease; VideoToolbox encode behind `.allow`). Those PRs may merge before the corpus exists, **provided every condition in §3 below holds**. This is the only operational change Amendment 1 makes to §5/§7.
+
+3. **The conditions an enabler PR must satisfy to merge (CSO structural review — all four, every PR).** Each enabler PR carries a CSO sign-off block asserting, by reading the diff:
+   - **(a) Cascade-before-encode (§5).** The ADR-0013 `SuppressionCascade` runs on every frame *before* any encode call site. The single encode call site is reachable only on the cascade's `.allow` branch. No new path reaches encode/store/IPC ahead of, or around, the cascade.
+   - **(b) Fail-closed preserved (§3/§7).** The "unknown ⇒ redact" default is intact; no enabler PR widens an `.allow` path or relaxes a probe to "pass through on uncertainty."
+   - **(c) No stored / emitted suppressed event (§2 redaction-before-store guarantee).** No path materializes pixels, text, or metadata for a `.suppress` decision — not for encode, not for telemetry, not "just to compute X."
+   - **(d) No IOSurface pool-stall (§4 footprint failure mode).** The surface retain/release discipline cannot stall the OS frame pool on any path (drop / suppress / allow / error / throw). Exactly-once release on every exit.
+   A PR that fails any of (a)–(d) is rejected at CSO review exactly as a no-cascade PR is under §5.
+
+4. **Capture stays default-OFF / dev-only until the corpus is green.** Every enabler PR keeps the live-capture path **disabled in any default or shipped build** — gated behind an explicit, non-default dev affordance (e.g. an opt-in `--capture` flag and/or a non-default build configuration). No default code path may start a live `SCStream` that reaches an encode/store until §2's gate (1)(b) is satisfied. **Flipping capture default-ON is a CSO-protected change** and requires the committed §7 corpus artifact + a fresh CSO sign-off.
+
+5. **§5 is not weakened.** §5's rule — "a Phase-1 PR that lands `SCStream` without the full cascade wired end-to-end is rejected" — remains fully in force. It is *already* satisfied structurally: the cascade is wired in `SCStreamPipeline` (landed PR #15) and every enabler PR feeds that existing gate rather than bypassing it. Amendment 1 clarifies that the §7 *corpus* (as distinct from the *cascade*) is a capture-on / Phase 1→2 gate, not a per-enabler-PR blocker, conditioned on §3 + §4 above.
+
+### Consequences
+
+- The live-capture sequence can proceed in small, individually reviewable protected-set PRs without a literal-§7 deadlock, while the launch-blocker is *strengthened*: capture cannot reach a shipped/default build, and no footprint or Phase-1→2 claim can be made, until the real-machine §7 corpus is green and its artifact is committed.
+- CSO review load is explicit and bounded per enabler PR: assert (a)–(d) from the diff. No "follow-up" path is created.
+- The recall-UI tombstone surface (§4) and the fail-safe default (§3) are untouched.
+
+### CSO sign-off
+
+Amendment 1 is protected-set authoring (AGENT_PROTOCOL §5). It narrows the *operational* reading of §5/§7 only; the substantive cascade (§1–§4, §6), the redaction-before-store guarantee, the fail-safe default, and the tombstone surface are unchanged and remain CSO-protected. The four structural conditions in §3 and the default-OFF condition in §4 are themselves a binding CSO veto-gate on every enabler PR. Flipping capture default-ON, or claiming the Phase 1→2 / footprint gate, without the committed §7 corpus artifact is rejected without a fresh CSO sign-off. The CSO veto is final unless the human CEO overrides.
+
+— CSO, 2026-05-19
+
+### Director-Recording sign-off
+
+Director-Recording owns the enabler-PR sequence and acknowledges: every enabler PR carries the §3 (a)–(d) assertions and the §4 default-OFF gate in its PR body; the live-capture path ships disabled until the human runs the §7 corpus green on a real machine and the artifact is committed; flipping capture default-ON is CSO-gated, not Director-Recording-unilateral.
+
+— Director-Recording, 2026-05-19
