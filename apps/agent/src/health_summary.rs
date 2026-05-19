@@ -7,9 +7,12 @@
 //! window and gets a one-line picture of helper behavior.
 //!
 //! Per the CRS production-telemetry & gap memo (iter 10, 2026-05-19),
-//! this is the analyst-flagged recommendation #3 — alongside the still-
-//! owed wire-bump for `frames_redacted_by_failsafe` (cycle-3 CSO ADR
-//! work) and the cycle-3 `tracing` event taps.
+//! this is the analyst-flagged recommendation #3. The sibling
+//! recommendation #1 — the `frames_redacted_by_failsafe` wire-bump
+//! (CSO-gated, wire `0x01 → 0x02`) — is now **landed**: the summary
+//! surfaces it as the `failsafe=Δ<delta>/<latest>` segment, the
+//! privacy-regression sentinel a fail-safe spike trips. The cycle-3
+//! `tracing` event taps remain separately owed.
 //!
 //! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
 //!
@@ -87,6 +90,13 @@ pub struct HealthSummary {
     pub frames_suppressed_delta: u64,
     /// Absolute `frames_suppressed` from the latest in-window sample.
     pub frames_suppressed_latest: u64,
+    /// Sum of per-step positive deltas for `frames_redacted_by_failsafe`
+    /// — the ADR-0013 §7 fail-safe subset. A non-trivial delta here
+    /// (especially relative to `frames_suppressed_delta`) is the CRS
+    /// Telemetry-Gap privacy-regression sentinel.
+    pub frames_redacted_by_failsafe_delta: u64,
+    /// Absolute `frames_redacted_by_failsafe` from the latest sample.
+    pub frames_redacted_by_failsafe_latest: u64,
     /// Sum of per-step positive deltas for `frames_dropped_backpressure`.
     pub frames_dropped_backpressure_delta: u64,
     /// Absolute `frames_dropped_backpressure` from the latest sample.
@@ -123,6 +133,7 @@ impl HealthSummary {
              device_id={device} \
              deliv=Δ{deliv_d}/{deliv_l} \
              suppr=Δ{suppr_d}/{suppr_l} \
+             failsafe=Δ{failsafe_d}/{failsafe_l} \
              backp=Δ{backp_d}/{backp_l} \
              late_ack=Δ{lateack_d}/{lateack_l} \
              earliest={earliest} \
@@ -135,6 +146,8 @@ impl HealthSummary {
             deliv_l = self.frames_delivered_latest,
             suppr_d = self.frames_suppressed_delta,
             suppr_l = self.frames_suppressed_latest,
+            failsafe_d = self.frames_redacted_by_failsafe_delta,
+            failsafe_l = self.frames_redacted_by_failsafe_latest,
             backp_d = self.frames_dropped_backpressure_delta,
             backp_l = self.frames_dropped_backpressure_latest,
             lateack_d = self.frames_dropped_late_ack_delta,
@@ -165,6 +178,14 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
     let uptime_ms = extract_u64_field(s, "\"uptime_ms\":")?;
     let frames_delivered = extract_u64_field(s, "\"frames_delivered\":")?;
     let frames_suppressed = extract_u64_field(s, "\"frames_suppressed\":")?;
+    // Back-compat: pre-wire-`0x02` JSONL lines (dev-only artifacts;
+    // capture was default-OFF) have no `frames_redacted_by_failsafe`
+    // key. Treat absent as 0 so `--health-summary` over a log that
+    // straddles the bump stays readable rather than counting the old
+    // lines as malformed. Lines that DO carry the key are parsed
+    // strictly.
+    let frames_redacted_by_failsafe =
+        extract_u64_field_or_zero(s, "\"frames_redacted_by_failsafe\":")?;
     let frames_dropped_backpressure = extract_u64_field(s, "\"frames_dropped_backpressure\":")?;
     let frames_dropped_late_ack = extract_u64_field(s, "\"frames_dropped_late_ack\":")?;
     Ok(HealthLogRecord {
@@ -173,6 +194,7 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
         uptime_ms,
         frames_delivered,
         frames_suppressed,
+        frames_redacted_by_failsafe,
         frames_dropped_backpressure,
         frames_dropped_late_ack,
     })
@@ -195,6 +217,18 @@ fn extract_string_field(s: &str, key_with_open_quote: &str) -> Result<String, Pa
         .find('"')
         .ok_or_else(|| ParseError::Field(format!("unterminated string {key_with_open_quote}")))?;
     Ok(rest[..end].to_string())
+}
+
+/// Like [`extract_u64_field`] but a *missing* key resolves to `0`
+/// instead of [`ParseError::Field`]. Used only for fields added by a
+/// later wire/log-schema bump so a log file that straddles the bump
+/// stays readable. A key that is *present but malformed* still errors
+/// (we do not silently zero a torn value).
+fn extract_u64_field_or_zero(s: &str, key_with_colon: &str) -> Result<u64, ParseError> {
+    if s.find(key_with_colon).is_none() {
+        return Ok(0);
+    }
+    extract_u64_field(s, key_with_colon)
 }
 
 fn extract_u64_field(s: &str, key_with_colon: &str) -> Result<u64, ParseError> {
@@ -263,6 +297,11 @@ where
                 summary.frames_suppressed_delta = summary
                     .frames_suppressed_delta
                     .saturating_add(rec.frames_suppressed.saturating_sub(p.frames_suppressed));
+                summary.frames_redacted_by_failsafe_delta =
+                    summary.frames_redacted_by_failsafe_delta.saturating_add(
+                        rec.frames_redacted_by_failsafe
+                            .saturating_sub(p.frames_redacted_by_failsafe),
+                    );
                 summary.frames_dropped_backpressure_delta =
                     summary.frames_dropped_backpressure_delta.saturating_add(
                         rec.frames_dropped_backpressure
@@ -284,6 +323,9 @@ where
                 summary.frames_suppressed_delta = summary
                     .frames_suppressed_delta
                     .saturating_add(rec.frames_suppressed);
+                summary.frames_redacted_by_failsafe_delta = summary
+                    .frames_redacted_by_failsafe_delta
+                    .saturating_add(rec.frames_redacted_by_failsafe);
                 summary.frames_dropped_backpressure_delta = summary
                     .frames_dropped_backpressure_delta
                     .saturating_add(rec.frames_dropped_backpressure);
@@ -299,6 +341,7 @@ where
 
         summary.frames_delivered_latest = rec.frames_delivered;
         summary.frames_suppressed_latest = rec.frames_suppressed;
+        summary.frames_redacted_by_failsafe_latest = rec.frames_redacted_by_failsafe;
         summary.frames_dropped_backpressure_latest = rec.frames_dropped_backpressure;
         summary.frames_dropped_late_ack_latest = rec.frames_dropped_late_ack;
         prev = Some(rec);
@@ -346,8 +389,28 @@ mod tests {
             uptime_ms,
             frames_delivered: delivered,
             frames_suppressed: suppressed,
+            // The 6-arg helper keeps the fail-safe subcount at 0; the
+            // dedicated `rec_fs` builder below exercises non-zero
+            // values so existing delta/restart assertions stay
+            // unchanged.
+            frames_redacted_by_failsafe: 0,
             frames_dropped_backpressure: backpressure,
             frames_dropped_late_ack: late_ack,
+        }
+    }
+
+    /// `rec` with an explicit `frames_redacted_by_failsafe`. Only the
+    /// fail-safe-sentinel tests need this; the rest stay on `rec`.
+    fn rec_fs(
+        wall_ts: &str,
+        uptime_ms: u64,
+        delivered: u64,
+        suppressed: u64,
+        redacted_by_failsafe: u64,
+    ) -> HealthLogRecord {
+        HealthLogRecord {
+            frames_redacted_by_failsafe: redacted_by_failsafe,
+            ..rec(wall_ts, uptime_ms, delivered, suppressed, 0, 0)
         }
     }
 
@@ -495,6 +558,8 @@ mod tests {
             frames_delivered_latest: 25,
             frames_suppressed_delta: 5,
             frames_suppressed_latest: 5,
+            frames_redacted_by_failsafe_delta: 2,
+            frames_redacted_by_failsafe_latest: 2,
             frames_dropped_backpressure_delta: 0,
             frames_dropped_backpressure_latest: 0,
             frames_dropped_late_ack_delta: 0,
@@ -519,6 +584,7 @@ mod tests {
         // And it does contain the expected delta + cumulative shape.
         assert!(line.contains("deliv=Δ25/25"));
         assert!(line.contains("suppr=Δ5/5"));
+        assert!(line.contains("failsafe=Δ2/2"));
         assert!(line.contains("samples=3"));
         assert!(line.contains("device_id=0123456789abcdef0123456789abcdef"));
         assert!(line.contains("window_start=2026-05-19T03:00:00.000Z"));
@@ -561,5 +627,69 @@ mod tests {
             s.device_id.as_deref(),
             Some("0123456789abcdef0123456789abcdef")
         );
+    }
+
+    #[test]
+    fn failsafe_sentinel_delta_and_latest_are_summed() {
+        // Fail-safe subcount rises 0 → 4 → 9. Delta = 9, latest = 9.
+        // `frames_suppressed` rises faster (it is the superset).
+        let lines = [
+            rec_fs("2026-05-19T04:00:00.000Z", 1_000, 0, 0, 0).to_json_line(),
+            rec_fs("2026-05-19T04:00:30.000Z", 31_000, 50, 10, 4).to_json_line(),
+            rec_fs("2026-05-19T04:01:00.000Z", 61_000, 90, 20, 9).to_json_line(),
+        ];
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let s = summarize_lines("2026-05-19T03:00:00.000Z".to_string(), refs);
+        assert_eq!(s.samples, 3);
+        assert_eq!(s.frames_redacted_by_failsafe_delta, 9);
+        assert_eq!(s.frames_redacted_by_failsafe_latest, 9);
+        // Sentinel is a strict subset signal — never exceeds suppressed.
+        assert!(s.frames_redacted_by_failsafe_delta <= s.frames_suppressed_delta);
+        assert!(s.to_human_line().contains("failsafe=Δ9/9"));
+    }
+
+    #[test]
+    fn restart_resets_failsafe_sentinel_like_other_counters() {
+        let lines = [
+            rec_fs("2026-05-19T04:00:00.000Z", 60_000, 100, 30, 12).to_json_line(),
+            // Restart (uptime backward): full new values are fresh delta.
+            rec_fs("2026-05-19T04:00:30.000Z", 1_000, 7, 3, 2).to_json_line(),
+            rec_fs("2026-05-19T04:01:00.000Z", 31_000, 15, 6, 5).to_json_line(),
+        ];
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let s = summarize_lines("2026-05-19T03:00:00.000Z".to_string(), refs);
+        assert_eq!(s.restarts_detected, 1);
+        // sample1 = baseline ⇒ 0; sample2 = restart ⇒ full +2;
+        // sample3 = normal step ⇒ 5-2 = 3. Total 0+2+3 = 5.
+        assert_eq!(s.frames_redacted_by_failsafe_delta, 5);
+        assert_eq!(s.frames_redacted_by_failsafe_latest, 5);
+    }
+
+    #[test]
+    fn pre_bump_line_without_failsafe_key_parses_as_zero() {
+        // A pre-wire-0x02 JSONL line: every field EXCEPT
+        // `frames_redacted_by_failsafe`. Must parse (back-compat),
+        // resolving the absent sentinel to 0 — not be flagged
+        // malformed.
+        let old = r#"{"wall_ts":"2026-05-19T04:00:00.000Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1000,"frames_delivered":5,"frames_suppressed":1,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0}"#;
+        let parsed = parse_jsonl_line(old).expect("pre-bump line stays readable");
+        assert_eq!(parsed.frames_redacted_by_failsafe, 0);
+        assert_eq!(parsed.frames_suppressed, 1);
+
+        // And it flows through the aggregator as a normal sample
+        // (counted, not malformed).
+        let s = summarize_lines("2026-05-19T00:00:00.000Z".to_string(), [old]);
+        assert_eq!(s.samples, 1);
+        assert_eq!(s.malformed_lines_skipped, 0);
+        assert_eq!(s.frames_redacted_by_failsafe_latest, 0);
+    }
+
+    #[test]
+    fn present_but_malformed_failsafe_value_still_errors() {
+        // Back-compat zeroes only an ABSENT key. A present-but-torn
+        // value is still a parse error (we do not silently zero it).
+        let torn = r#"{"wall_ts":"2026-05-19T04:00:00.000Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1000,"frames_delivered":5,"frames_suppressed":1,"frames_redacted_by_failsafe":xx,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0}"#;
+        let err = parse_jsonl_line(torn).unwrap_err();
+        assert!(matches!(err, ParseError::Field(_)));
     }
 }

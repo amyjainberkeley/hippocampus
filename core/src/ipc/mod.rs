@@ -28,7 +28,7 @@
 //! ```text
 //! +-----------+--------+------------------+
 //! | magic     | u8     | 0x4D = 'M'       |
-//! | version   | u8     | currently 0x01   |
+//! | version   | u8     | currently 0x02   |
 //! | msg_type  | u16 LE | discriminant     |
 //! | seq       | u64 LE | monotonic seq id |
 //! | len       | u32 LE | payload bytes    |
@@ -141,8 +141,22 @@ pub enum Message {
         uptime_ms: u64,
         /// Frames the OS delivered since start.
         frames_delivered: u64,
-        /// Frames suppressed by the ADR-0013 cascade.
+        /// Frames suppressed by the ADR-0013 cascade — the **total**
+        /// across every cascade reason (denylist, blacked-region,
+        /// secure-event-input, AX-secure, post-capture, fail-safe).
         frames_suppressed: u64,
+        /// Frames suppressed specifically via the ADR-0013 **§7
+        /// fail-safe** path (`RedactionReason::FailsafeUnknown`) — a
+        /// **subset** of `frames_suppressed`, not subtracted from it.
+        ///
+        /// Split out as its own counter because it is a *privacy-
+        /// regression sentinel* for the CRS Telemetry-Gap analyst: a
+        /// spike means the cascade is failing to positively classify
+        /// (AX broke / Electron AX silence / denylist-filter drift)
+        /// and is bulk-redacting via fail-safe. That is privacy-*safe*
+        /// (it fails closed) but signals an upstream classification
+        /// regression that `frames_suppressed` alone would mask.
+        frames_redacted_by_failsafe: u64,
         /// Frames dropped on backpressure (queue full).
         frames_dropped_backpressure: u64,
         /// Frames dropped on late ack (core held the surface past the
@@ -364,6 +378,7 @@ mod tests {
                 uptime_ms: 0,
                 frames_delivered: 0,
                 frames_suppressed: 0,
+                frames_redacted_by_failsafe: 0,
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
             },

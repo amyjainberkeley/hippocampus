@@ -42,6 +42,7 @@ public actor HelperHealthCounters {
     private var startedAt: Date
     private var framesDelivered: UInt64 = 0
     private var framesSuppressed: UInt64 = 0
+    private var framesRedactedByFailsafe: UInt64 = 0
     private var framesDroppedBackpressure: UInt64 = 0
     private var framesDroppedLateAck: UInt64 = 0
 
@@ -51,6 +52,11 @@ public actor HelperHealthCounters {
 
     public func recordDelivered() { framesDelivered &+= 1 }
     public func recordSuppressed() { framesSuppressed &+= 1 }
+    /// The §7 fail-safe subcount. Incremented IN ADDITION TO
+    /// `recordSuppressed()` when (and only when) the cascade
+    /// suppressed via `.failsafeUnknown` — it is a subset of
+    /// `framesSuppressed`, never an alternative to it.
+    public func recordRedactedByFailsafe() { framesRedactedByFailsafe &+= 1 }
     public func recordBackpressureDrop() { framesDroppedBackpressure &+= 1 }
     public func recordLateAckDrop() { framesDroppedLateAck &+= 1 }
 
@@ -61,6 +67,7 @@ public actor HelperHealthCounters {
             uptimeMs: uptimeMs,
             framesDelivered: framesDelivered,
             framesSuppressed: framesSuppressed,
+            framesRedactedByFailsafe: framesRedactedByFailsafe,
             framesDroppedBackpressure: framesDroppedBackpressure,
             framesDroppedLateAck: framesDroppedLateAck
         )
@@ -73,6 +80,7 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
     public let uptimeMs: UInt64
     public let framesDelivered: UInt64
     public let framesSuppressed: UInt64
+    public let framesRedactedByFailsafe: UInt64
     public let framesDroppedBackpressure: UInt64
     public let framesDroppedLateAck: UInt64
 
@@ -80,12 +88,14 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
         uptimeMs: UInt64,
         framesDelivered: UInt64,
         framesSuppressed: UInt64,
+        framesRedactedByFailsafe: UInt64,
         framesDroppedBackpressure: UInt64,
         framesDroppedLateAck: UInt64
     ) {
         self.uptimeMs = uptimeMs
         self.framesDelivered = framesDelivered
         self.framesSuppressed = framesSuppressed
+        self.framesRedactedByFailsafe = framesRedactedByFailsafe
         self.framesDroppedBackpressure = framesDroppedBackpressure
         self.framesDroppedLateAck = framesDroppedLateAck
     }
@@ -167,6 +177,12 @@ public struct HelperMainLoop: Sendable {
             break
         case .suppress(let reason):
             await counters.recordSuppressed()
+            if reason == .failsafeUnknown {
+                // §7 fail-safe subcount — a strict subset of
+                // framesSuppressed; the CRS Telemetry-Gap privacy-
+                // regression sentinel.
+                await counters.recordRedactedByFailsafe()
+            }
             try await emitTombstone(
                 tsUs: nowUs,
                 appBundle: context.appBundleId ?? "",
@@ -185,6 +201,7 @@ public struct HelperMainLoop: Sendable {
             uptimeMs: snap.uptimeMs,
             framesDelivered: snap.framesDelivered,
             framesSuppressed: snap.framesSuppressed,
+            framesRedactedByFailsafe: snap.framesRedactedByFailsafe,
             framesDroppedBackpressure: snap.framesDroppedBackpressure,
             framesDroppedLateAck: snap.framesDroppedLateAck
         )

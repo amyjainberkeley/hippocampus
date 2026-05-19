@@ -22,7 +22,7 @@ final class WireFixturesTests: XCTestCase {
         let frame = encodeCaptureStop(seq: 0)
         var expected = Data()
         expected.append(0x4D)                              // magic
-        expected.append(0x01)                              // version
+        expected.append(frameVersion)                      // version (0x02)
         expected.append(contentsOf: [0x02, 0x00])          // msg_type 0x0002 LE
         expected.append(contentsOf: [UInt8](repeating: 0, count: 8))  // seq 0
         expected.append(contentsOf: [0x00, 0x00, 0x00, 0x00])         // len 0
@@ -46,7 +46,7 @@ final class WireFixturesTests: XCTestCase {
 
         // Spot-check header bytes.
         XCTAssertEqual(frame[0], 0x4D)
-        XCTAssertEqual(frame[1], 0x01)
+        XCTAssertEqual(frame[1], frameVersion)
         XCTAssertEqual(frame[2], 0x11)
         XCTAssertEqual(frame[3], 0x00)
 
@@ -100,15 +100,30 @@ final class WireFixturesTests: XCTestCase {
             uptimeMs: 1000,
             framesDelivered: 100,
             framesSuppressed: 5,
+            framesRedactedByFailsafe: 3,
             framesDroppedBackpressure: 2,
             framesDroppedLateAck: 0
         )
-        // Header(16) + 5 × u64(8) = 56 bytes.
-        XCTAssertEqual(frame.count, minFrameHeaderBytes + 40)
+        // wire 0x02: Header(16) + 6 × u64(8) = 64 bytes (was 5 × u64
+        // = 56 at 0x01; frames_redacted_by_failsafe added the 6th).
+        XCTAssertEqual(frame.count, minFrameHeaderBytes + 48)
         XCTAssertEqual(frame[0], 0x4D)
-        XCTAssertEqual(frame[1], 0x01)
+        XCTAssertEqual(frame[1], frameVersion)
         XCTAssertEqual(frame[2], 0x30)  // msg_type 0x0030
         XCTAssertEqual(frame[3], 0x00)
+
+        // The 4th u64 of the payload is frames_redacted_by_failsafe
+        // (= 3 here). Offset = header(16) + 3×u64(24) = 40.
+        let fsOffset = minFrameHeaderBytes + 24
+        XCTAssertEqual(frame[fsOffset], 3)
+        for i in 1..<8 { XCTAssertEqual(frame[fsOffset + i], 0) }
+    }
+
+    /// Cross-side version lock — mirrors the Rust
+    /// `wire::tests::frame_version_is_0x02` trip-wire. If the two
+    /// sides ever disagree the IPC contract is silently broken.
+    func testFrameVersionIs0x02() {
+        XCTAssertEqual(frameVersion, 0x02)
     }
 
     /// MessageType discriminants match the Rust spec.

@@ -268,6 +268,7 @@ mod tests {
             uptime_ms: 1000,
             frames_delivered: 10,
             frames_suppressed: 1,
+            frames_redacted_by_failsafe: 0,
             frames_dropped_backpressure: 0,
             frames_dropped_late_ack: 0,
         };

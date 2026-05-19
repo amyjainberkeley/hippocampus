@@ -16,7 +16,16 @@ use super::{DirtyRect, Message, RedactionReason};
 pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 
 /// Current wire-format version. Bumped on any breaking layout change.
-pub const FRAME_VERSION: u8 = 0x01;
+///
+/// `0x01 → 0x02` (2026-05-19): `HelperHealth` gained the
+/// `frames_redacted_by_failsafe` counter (a §7 fail-safe privacy-
+/// regression sentinel for the CRS Telemetry-Gap analyst). The decoder
+/// rejects any other version: helper and core ship **version-locked**
+/// in the same signed bundle and capture is default-OFF, so there are
+/// no persisted or in-flight `0x01` frames to remain compatible with —
+/// a hard version break is the correct, auditable choice over a
+/// silently mis-parsed payload.
+pub const FRAME_VERSION: u8 = 0x02;
 
 /// Header size in bytes: magic(1) + version(1) + `msg_type(2)` + seq(8) + len(4).
 pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
@@ -241,12 +250,14 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             uptime_ms,
             frames_delivered,
             frames_suppressed,
+            frames_redacted_by_failsafe,
             frames_dropped_backpressure,
             frames_dropped_late_ack,
         } => {
             out.extend_from_slice(&uptime_ms.to_le_bytes());
             out.extend_from_slice(&frames_delivered.to_le_bytes());
             out.extend_from_slice(&frames_suppressed.to_le_bytes());
+            out.extend_from_slice(&frames_redacted_by_failsafe.to_le_bytes());
             out.extend_from_slice(&frames_dropped_backpressure.to_le_bytes());
             out.extend_from_slice(&frames_dropped_late_ack.to_le_bytes());
         }
@@ -377,12 +388,14 @@ fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usi
             let uptime_ms = p.u64_le()?;
             let frames_delivered = p.u64_le()?;
             let frames_suppressed = p.u64_le()?;
+            let frames_redacted_by_failsafe = p.u64_le()?;
             let frames_dropped_backpressure = p.u64_le()?;
             let frames_dropped_late_ack = p.u64_le()?;
             Message::HelperHealth {
                 uptime_ms,
                 frames_delivered,
                 frames_suppressed,
+                frames_redacted_by_failsafe,
                 frames_dropped_backpressure,
                 frames_dropped_late_ack,
             }
@@ -542,9 +555,31 @@ mod tests {
             uptime_ms: u64::MAX / 2,
             frames_delivered: 1_000_000,
             frames_suppressed: 42,
+            frames_redacted_by_failsafe: 13,
             frames_dropped_backpressure: 7,
             frames_dropped_late_ack: 0,
         });
+    }
+
+    #[test]
+    fn frame_version_is_0x02() {
+        // Trip-wire: the wire bump for `frames_redacted_by_failsafe`
+        // moved the version 0x01 → 0x02. The Swift `Wire.swift` mirror
+        // and the byte fixtures in `WireTests.swift` MUST match this.
+        assert_eq!(FRAME_VERSION, 0x02);
+        let buf = encode(0, &Message::CaptureStop);
+        assert_eq!(buf[1], 0x02, "version byte in the framed header");
+    }
+
+    #[test]
+    fn decode_rejects_old_0x01_frame() {
+        // Helper + core ship version-locked; an 0x01 frame is a stale
+        // peer, not a compatible one. The decoder rejects it loudly
+        // rather than mis-parsing a `HelperHealth` whose layout moved.
+        let mut buf = encode(0, &Message::CaptureStop);
+        buf[1] = 0x01;
+        let err = decode(&buf).unwrap_err();
+        assert!(matches!(err, DecodeError::UnsupportedVersion { got: 0x01 }));
     }
 
     #[test]

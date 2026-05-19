@@ -64,8 +64,14 @@ pub struct HealthLogRecord {
     pub uptime_ms: u64,
     /// Cumulative counters since helper start.
     pub frames_delivered: u64,
-    /// Cumulative counters since helper start.
+    /// Cumulative counters since helper start. **Total** cascade
+    /// suppressions across every ADR-0013 reason.
     pub frames_suppressed: u64,
+    /// Cumulative count of suppressions via the ADR-0013 §7 fail-safe
+    /// path specifically — a **subset** of `frames_suppressed`. The
+    /// CRS Telemetry-Gap privacy-regression sentinel (a fail-safe
+    /// spike = the cascade lost positive-classification ability).
+    pub frames_redacted_by_failsafe: u64,
     /// Cumulative counters since helper start.
     pub frames_dropped_backpressure: u64,
     /// Cumulative counters since helper start.
@@ -85,12 +91,13 @@ impl HealthLogRecord {
         // standard JSON way for the wall_ts (it shouldn't contain
         // quotes; future change might).
         format!(
-            r#"{{"wall_ts":"{}","device_id":"{}","uptime_ms":{},"frames_delivered":{},"frames_suppressed":{},"frames_dropped_backpressure":{},"frames_dropped_late_ack":{}}}"#,
+            r#"{{"wall_ts":"{}","device_id":"{}","uptime_ms":{},"frames_delivered":{},"frames_suppressed":{},"frames_redacted_by_failsafe":{},"frames_dropped_backpressure":{},"frames_dropped_late_ack":{}}}"#,
             escape_json_string(&self.wall_ts),
             escape_json_string(&self.device_id),
             self.uptime_ms,
             self.frames_delivered,
             self.frames_suppressed,
+            self.frames_redacted_by_failsafe,
             self.frames_dropped_backpressure,
             self.frames_dropped_late_ack,
         )
@@ -218,6 +225,7 @@ mod tests {
             uptime_ms: 1234,
             frames_delivered: 10,
             frames_suppressed: 2,
+            frames_redacted_by_failsafe: 1,
             frames_dropped_backpressure: 0,
             frames_dropped_late_ack: 0,
         }
@@ -229,7 +237,7 @@ mod tests {
         let line = r.to_json_line();
         assert_eq!(
             line,
-            r#"{"wall_ts":"2026-05-19T04:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1234,"frames_delivered":10,"frames_suppressed":2,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0}"#
+            r#"{"wall_ts":"2026-05-19T04:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1234,"frames_delivered":10,"frames_suppressed":2,"frames_redacted_by_failsafe":1,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0}"#
         );
     }
 

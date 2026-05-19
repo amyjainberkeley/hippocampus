@@ -11,15 +11,19 @@
 //
 // Wire format (binary, little-endian) — identical to the Rust spec:
 //
-//   magic(1=0x4D) + version(1=0x01) + msg_type(2) + seq(8) + len(4) + payload(len)
+//   magic(1=0x4D) + version(1=0x02) + msg_type(2) + seq(8) + len(4) + payload(len)
+//
+// version 0x01 → 0x02 (2026-05-19): HelperHealth gained the
+// frames_redacted_by_failsafe counter. Helper + core ship version-
+// locked; the Rust decoder rejects any other version.
 
 import Foundation
 
 /// Wire-format magic byte.
 public let frameMagic: UInt8 = 0x4D
 
-/// Wire-format version byte.
-public let frameVersion: UInt8 = 0x01
+/// Wire-format version byte. MUST match `core::ipc::wire::FRAME_VERSION`.
+public let frameVersion: UInt8 = 0x02
 
 /// Minimum frame header size in bytes.
 public let minFrameHeaderBytes = 1 + 1 + 2 + 8 + 4
@@ -83,6 +87,7 @@ public func encodeHelperHealth(
     uptimeMs: UInt64,
     framesDelivered: UInt64,
     framesSuppressed: UInt64,
+    framesRedactedByFailsafe: UInt64,
     framesDroppedBackpressure: UInt64,
     framesDroppedLateAck: UInt64
 ) -> Data {
@@ -90,6 +95,9 @@ public func encodeHelperHealth(
     payload.appendUInt64LE(uptimeMs)
     payload.appendUInt64LE(framesDelivered)
     payload.appendUInt64LE(framesSuppressed)
+    // §7 fail-safe subcount — wire 0x02. Order matches
+    // core::ipc::wire decode: directly after frames_suppressed.
+    payload.appendUInt64LE(framesRedactedByFailsafe)
     payload.appendUInt64LE(framesDroppedBackpressure)
     payload.appendUInt64LE(framesDroppedLateAck)
     return assembleFrame(msgType: .helperHealth, seq: seq, payload: payload)

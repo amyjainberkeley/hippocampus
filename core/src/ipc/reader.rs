@@ -306,8 +306,11 @@ mod tests {
     /// honors it by never allocating past the cap.
     #[tokio::test]
     async fn oversized_payload_header_rejected_immediately() {
-        // Hand-build a header that declares 2 MiB.
-        let mut buf = vec![0x4D, 0x01]; // magic + version
+        // Hand-build a header that declares 2 MiB. Use the live
+        // FRAME_VERSION constant: the decoder checks version BEFORE
+        // payload size, so a stale hardcoded version byte would make
+        // this assert the wrong rejection reason after a wire bump.
+        let mut buf = vec![0x4D, crate::ipc::wire::FRAME_VERSION]; // magic + version
         buf.extend_from_slice(&0x0002_u16.to_le_bytes()); // CaptureStop
         buf.extend_from_slice(&0_u64.to_le_bytes()); // seq
         buf.extend_from_slice(&(2_u32 * 1024 * 1024).to_le_bytes()); // len
