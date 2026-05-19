@@ -19,7 +19,9 @@
 #![deny(missing_docs)]
 
 pub mod device_id;
+pub mod health_log;
 pub mod supervisor;
 
 pub use device_id::{load_or_generate, DeviceId, DeviceIdError, DeviceIdSource};
+pub use health_log::{HealthLog, HealthLogConfig, HealthLogError, HealthLogRecord};
 pub use supervisor::{HelperSpawnConfig, SupervisorError};
