@@ -125,13 +125,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     /// Start the live capture stream.
     ///
-    /// `// UNVERIFIED — needs live macOS; do not claim working`:
+    /// Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
     /// `SCShareableContent.current` (inside `makeDisplayFilter`),
     /// `SCStream` construction, `startCapture()` all require a real
     /// screen + Screen-Recording TCC grant. Only reachable via the
     /// non-default `--capture` dev flag (Amendment 1 §4).
     public func start() async throws {
-        // UNVERIFIED — needs live macOS; do not claim working.
+        // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         let filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
         let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
         let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
@@ -189,8 +189,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     // MARK: - SCStreamOutput
 
-    /// The live frame callback. `// UNVERIFIED — needs live macOS; do
-    /// not claim working`.
+    /// The live frame callback. Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
     ///
     /// Contract enforced here (Amendment 1 §3(c)/(d)): the metadata +
     /// dHash are read SYNCHRONOUSLY into `InCallbackSample` (a
@@ -205,7 +204,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of outputType: SCStreamOutputType
     ) {
-        // UNVERIFIED — needs live macOS; do not claim working.
+        // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         guard outputType == .screen else { return }
 
         // SCSTREAM-LIVE-001 observability: one-shot stderr breadcrumb
@@ -303,7 +302,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// buffer (the bounded PR-2 retain is taken separately in the
     /// callback and released by the pipeline lease).
     ///
-    /// `// UNVERIFIED — needs live macOS; do not claim working`: every
+    /// Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md). Every
     /// `CoreMedia` / `CoreVideo` / `ScreenCaptureKit` call below needs a
     /// real frame. The PURE part (`computeDHash9x8`, the `Sendable`
     /// assembly) is factored into `CapturedSampleExtractor` and IS unit
@@ -311,7 +310,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// frame is dropped — the safe direction (no capture beats a
     /// half-read capture).
     static func extractSynchronously(from sampleBuffer: CMSampleBuffer) -> InCallbackSample? {
-        // UNVERIFIED — needs live macOS; do not claim working.
+        // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         let attachments = CMSampleBufferGetSampleAttachmentsArray(
             sampleBuffer, createIfNecessary: false
         ) as? [[SCStreamFrameInfo: Any]]
@@ -355,12 +354,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     }
 
     /// Nearest-neighbour 9×8 luminance downscale of a borrowed
-    /// `CVPixelBuffer`. `// UNVERIFIED — needs live macOS; do not claim
-    /// working`. Assumes 32-BGRA (the `SCStreamConfiguration` default).
+    /// `CVPixelBuffer`. Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
+    /// Assumes 32-BGRA (the `SCStreamConfiguration` default).
     /// Locked read-only; unlocked before returning; the buffer is never
     /// retained.
     private static func grayscale9x8(from pixelBuffer: CVPixelBuffer) -> [UInt8]? {
-        // UNVERIFIED — needs live macOS; do not claim working.
+        // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         let w = CVPixelBufferGetWidth(pixelBuffer)
         let h = CVPixelBufferGetHeight(pixelBuffer)
         guard w > 0, h > 0 else { return nil }
