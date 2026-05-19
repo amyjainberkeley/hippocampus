@@ -151,16 +151,28 @@ if let toml = try? String(contentsOfFile: args.denylistPath, encoding: .utf8) {
     denylistEntries = []
 }
 
-// Build cascade with concrete probes. Production:
-struct NoBlackedRegionYet: BlackedRegionProbe {
-    func hasBlackedRegion() -> Bool { false }
-}
+// Build cascade with concrete probes.
+//
+// ADR-0013 §2: `BlackedRegionProbe` is now the real
+// `PixelGridBlackedRegionProbe` (production), replacing the prior
+// `NoBlackedRegionYet` stub. The SAME instance is shared between
+// the cascade (which reads `hasBlackedRegion()`) and the live
+// `SCStreamCaptureSession` below (which pre-feeds the verdict via
+// `update(grayscale:)` from the synchronously-extracted 9×8
+// luminance grid the callback already computes for the dHash). One
+// owner, one mutable byte, lock-guarded.
+//
+// Step-2 §7 corpus PARTIAL PASS (PR #34, 2026-05-19) recorded the
+// §2 stub as a known gap; the human re-runs Step-2 after this PR
+// merges to verify `reason=2` fires on full-screen FairPlay +
+// `NSWindowSharingType=.none` windows.
+let blackedRegionProbe = PixelGridBlackedRegionProbe()
 
 let cascade = SuppressionCascade(
     secureEventInput: CarbonSecureEventInputProbe(),
     axSecureSubrole: AXSubroleProbe(),
     denylist: Denylist(entries: denylistEntries),
-    blackedRegion: NoBlackedRegionYet(),
+    blackedRegion: blackedRegionProbe,
     knownSafeAppBundles: []
 )
 
@@ -220,7 +232,11 @@ if captureOptions.captureEnabled {
             encoder: DeferredVideoToolboxEncoder(),
             sink: FileHandleFrameSink(handle: outputHandle)
         ),
-        denylist: Denylist(entries: denylistEntries)
+        denylist: Denylist(entries: denylistEntries),
+        // Shared §2 probe instance: the session calls `update(...)`
+        // in the SCStreamOutput callback; the cascade (constructed
+        // above with this same probe) reads `hasBlackedRegion()`.
+        blackedRegionProbe: blackedRegionProbe
     )
 } else {
     captureSession = nil

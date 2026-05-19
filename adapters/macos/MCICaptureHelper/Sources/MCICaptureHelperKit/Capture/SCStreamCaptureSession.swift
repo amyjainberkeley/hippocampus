@@ -71,19 +71,28 @@ public struct InCallbackSample: Sendable, Equatable {
     public let dirtyRects: [DirtyRect]
     public let dhash: DHash
     public let appBundleId: String?
+    /// The 9×8 row-major luminance grid the callback already extracts
+    /// from the borrowed `CVPixelBuffer` to feed `computeDHash9x8`.
+    /// Surfaced here so the ADR-0013 §2 `PixelGridBlackedRegionProbe`
+    /// can pre-feed itself before the cascade runs on the frame
+    /// (`hasBlackedRegion()`). 72 bytes, value-typed — no surface
+    /// borrow, no additional pixel read.
+    public let grayscale: [UInt8]
 
     public init(
         userIdle: Bool,
         frameStatusComplete: Bool,
         dirtyRects: [DirtyRect],
         dhash: DHash,
-        appBundleId: String?
+        appBundleId: String?,
+        grayscale: [UInt8]
     ) {
         self.userIdle = userIdle
         self.frameStatusComplete = frameStatusComplete
         self.dirtyRects = dirtyRects
         self.dhash = dhash
         self.appBundleId = appBundleId
+        self.grayscale = grayscale
     }
 }
 
@@ -95,6 +104,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private let denylist: Denylist
     private let policy: StreamPolicy
     private let sampleQueue: DispatchQueue
+    /// ADR-0013 §2 probe, pre-fed in the callback before the cascade
+    /// runs on the same frame. `nil` is permitted (legacy
+    /// construction / headless tests that never need §2 to fire);
+    /// when `nil` the cascade's `BlackedRegionProbe` is whatever the
+    /// caller installed in `SuppressionCascade`, and `hasBlackedRegion`
+    /// is fed by some other means (or stays false → §7 fail-safe).
+    private let blackedRegionProbe: PixelGridBlackedRegionProbe?
 
     private let lock = NSLock()
     private var priorDHash: DHash?
@@ -114,11 +130,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     public init(
         pipeline: SCStreamPipeline,
         denylist: Denylist,
-        policy: StreamPolicy = .default
+        policy: StreamPolicy = .default,
+        blackedRegionProbe: PixelGridBlackedRegionProbe? = nil
     ) {
         self.pipeline = pipeline
         self.denylist = denylist
         self.policy = policy
+        self.blackedRegionProbe = blackedRegionProbe
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
     }
@@ -132,6 +150,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// non-default `--capture` dev flag (Amendment 1 §4).
     public func start() async throws {
         // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
+        // Force the §2 probe back to its fail-safe initial state so a
+        // stale flag from a prior session cannot bleed into this one.
+        blackedRegionProbe?.reset()
         let filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
         let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
         let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
@@ -147,6 +168,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // UNVERIFIED — needs live macOS; do not claim working.
         let s = takeStream()
         try await s?.stopCapture()
+        // No frames will arrive after `stopCapture()`; clear the §2
+        // verdict so a subsequent `start()` begins from fail-safe.
+        blackedRegionProbe?.reset()
     }
 
     // Locked critical sections live in non-async helpers: `NSLock` is
@@ -223,6 +247,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         }
 
         guard let sample = Self.extractSynchronously(from: sampleBuffer) else { return }
+
+        // ADR-0013 §2 pre-feed: stamp the latest blacked-region
+        // verdict from the synchronously-extracted 9×8 luminance grid
+        // BEFORE the cascade runs on this frame. O(72), well under
+        // the 100 µs/frame hot-path budget. The cascade reads back
+        // via `BlackedRegionProbe.hasBlackedRegion()` inside
+        // `SCStreamPipeline.process(...)`.
+        blackedRegionProbe?.update(grayscale: sample.grayscale)
 
         // Roll the prior-dHash window — pure bookkeeping, not the
         // surface. The callback is synchronous so the lock is fine
@@ -344,12 +376,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
         // PR-1 carries no Context join; bundle id is unknown here and
         // the cascade fail-safe handles that (the safe direction).
+        // The 9×8 grid is carried through so the ADR-0013 §2 probe
+        // can update its verdict in the callback before the cascade
+        // runs (single read, no second pixel scan).
         return InCallbackSample(
             userIdle: false,
             frameStatusComplete: frameStatusComplete,
             dirtyRects: dirtyRects,
             dhash: dhash,
-            appBundleId: nil
+            appBundleId: nil,
+            grayscale: grid
         )
     }
 
