@@ -21,11 +21,13 @@
 pub mod device_id;
 pub mod health_log;
 pub mod health_pump;
+pub mod runner;
 pub mod supervisor;
 pub mod wall_clock;
 
 pub use device_id::{load_or_generate, DeviceId, DeviceIdError, DeviceIdSource};
 pub use health_log::{HealthLog, HealthLogConfig, HealthLogError, HealthLogRecord};
 pub use health_pump::{pump_one, PumpError};
+pub use runner::{drain_to_log, RunError, RunStats};
 pub use supervisor::{HelperSpawnConfig, SupervisorError};
 pub use wall_clock::{format_unix_ms, SystemWallClock, WallClock};

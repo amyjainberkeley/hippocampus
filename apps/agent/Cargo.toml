@@ -7,12 +7,16 @@ publish.workspace      = true
 license.workspace      = true
 description            = "MCI macOS menu-bar / system-tray agent shell. Supervises the capture helper, owns the per-device id, runs the IPC select! loop. See docs/decisions/0007-macos-capture-separate-signed-helper-process.md."
 
+[[bin]]
+name = "mci-agent"
+path = "src/bin/mci_agent.rs"
+
 [lints]
 workspace = true
 
 [dependencies]
 mci-core    = { path = "../../core" }
-tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "process", "signal", "fs"] }
+tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "io-std", "process", "signal", "fs"] }
 tracing     = { version = "0.1", default-features = false, features = ["std"] }
 thiserror   = "1"
 # Deliberately NO `tracing-subscriber`: the typed HealthLogRecord
