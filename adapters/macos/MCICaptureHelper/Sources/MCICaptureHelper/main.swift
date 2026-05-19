@@ -216,11 +216,27 @@ if args.probeDebug {
             case .none: return "nil"
             }
         }()
+        // STEP-2-FINDING-001 §4 backstop signals — render one short
+        // token per signal so the next Step-2 re-run can attribute
+        // `reason=4` (or its absence) at signal granularity.
+        //   descendant=pos|neg|err
+        //   value-hidden=pos|neg|err
+        //   id-regex=pos|neg|err
+        func renderOutcome(_ o: AXBackstopOutcome) -> String {
+            switch o {
+            case .positive: return "pos"
+            case .negative: return "neg"
+            case .errored: return "err"
+            }
+        }
         let line =
             "mci-capture-helper: probe(ax-subrole) "
             + "focus=\(observation.focusResult) "
             + "role=\(role) subrole=\(subrole) "
             + "id=\(identifier) title=\(title) "
+            + "descendant=\(renderOutcome(observation.descendantSecure)) "
+            + "value-hidden=\(renderOutcome(observation.valueAttributeHidden)) "
+            + "id-regex=\(renderOutcome(observation.identifierRegexMatch)) "
             + "result=\(result)\n"
         FileHandle.standardError.write(line.data(using: .utf8) ?? Data())
     }
