@@ -241,26 +241,41 @@ public struct SCStreamPipeline: Sendable {
 
     /// The OS-free decision + dispatch core. The live SCStream adapter
     /// calls this after extracting `frame` + `context` from the
-    /// `CMSampleBuffer`. `lease` is released exactly once here on
-    /// every path — including the early filter-reject path — so a
-    /// dropped frame never stalls the IOSurface pool (§4).
+    /// `CMSampleBuffer`.
+    ///
+    /// The surface `lease` is released **exactly once on every exit
+    /// path** — via a single top-level `defer`. That covers the early
+    /// filter-reject path, the suppress path, the allow path, AND the
+    /// error paths where `sink.write` or `encoder.encodeAllowedFrame`
+    /// throws. A dropped, suppressed, or failed frame can therefore
+    /// never stall the IOSurface pool (§4); a throwing encoder no
+    /// longer leaks the surface lease (PRE-LAND CYCLE item 3). The
+    /// error still propagates — `defer` runs, then the throw unwinds.
+    /// `SurfaceLease.release()` is itself exactly-once-guarded, so the
+    /// single `defer` cannot double-release.
     public func process(
         frame: CandidateFrame,
         context: WorkflowContext,
         nowUs: UInt64,
         lease: SurfaceLease
     ) async throws -> Outcome {
+        // Exactly-once release on EVERY path, including a throwing
+        // `sink.write` / `encoder.encodeAllowedFrame`. Must be the
+        // first statement so no early return / thrown error can
+        // bypass it.
+        defer { lease.release() }
+
         await counters.recordDelivered()
 
         // Stage 1: cheap filter chain. Only `.forward` /
         // `.forwardTieBreak` are genuine new content; every `drop*`
-        // never reaches the cascade or the encoder — release the
-        // surface immediately so a dropped frame can't stall the pool.
+        // never reaches the cascade or the encoder — the top-level
+        // `defer` releases the surface so a dropped frame can't stall
+        // the pool.
         switch filter.decide(frame: frame) {
         case .forward, .forwardTieBreak:
             break
         case .dropIdle, .dropStatus, .dropNoDirtyRects, .dropNearDuplicate:
-            lease.release()
             return .filteredOut
         }
 
@@ -278,17 +293,20 @@ public struct SCStreamPipeline: Sendable {
                     reason: reason
                 )
             )
+            // If this throws, `defer` still releases the surface and
+            // the error propagates — no leak on the suppress path.
             try await sink.write(bytes)
-            // Suppressed frame: surface released, encoder NEVER called.
-            lease.release()
+            // Suppressed frame: encoder NEVER called; surface released
+            // by the top-level `defer`.
             return .suppressed(reason: reason)
 
         case .allow:
             // ONLY reachable after `.allow`. This is the single encode
-            // call site in the helper.
+            // call site in the helper. If the encoder throws, the
+            // top-level `defer` releases the surface and the error
+            // propagates — the allow-path lease leak this item fixes.
             let seq = await sequence.allocate()
             try await encoder.encodeAllowedFrame(seq: seq, context: context)
-            lease.release()
             return .encoded(seq: seq)
         }
     }

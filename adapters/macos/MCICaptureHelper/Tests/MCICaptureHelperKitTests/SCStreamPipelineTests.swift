@@ -57,6 +57,25 @@ private final class SpyReleaser: SurfaceReleasing, @unchecked Sendable {
     }
 }
 
+private struct EncodeBoom: Error, Equatable {}
+private struct SinkBoom: Error, Equatable {}
+
+/// A `FrameEncoder` that always throws — proves the allow path
+/// releases the surface lease even when the encoder fails.
+private struct ThrowingEncoder: FrameEncoder {
+    func encodeAllowedFrame(seq _: UInt64, context _: WorkflowContext) async throws {
+        throw EncodeBoom()
+    }
+}
+
+/// A `FrameSink` that always throws — proves the suppress path
+/// releases the surface lease even when the tombstone write fails.
+private struct ThrowingSink: FrameSink {
+    func write(_: Data) async throws {
+        throw SinkBoom()
+    }
+}
+
 private func forwardingFrame() -> CandidateFrame {
     // userIdle=false, status complete, dirty rects present, no prior
     // dHash → SmartCaptureFilter returns `.forward`.
@@ -237,6 +256,76 @@ final class SCStreamPipelineTests: XCTestCase {
         let lease = SurfaceLease(releaser: releaser)
         lease.release()
         XCTAssertEqual(releaser.releaseCount, 1)
+        XCTAssertTrue(lease.isReleased)
+    }
+
+    // ── PRE-LAND CYCLE item 3: a throwing encoder must NOT leak the
+    //    surface lease, and the error must still propagate. ───────────
+    func test_throwing_encoder_releases_lease_and_propagates_error() async throws {
+        let sink = RecordingSink()
+        // AX positively non-secure + app known-safe ⇒ the `.allow`
+        // path ⇒ the encode call site is reached, then it throws.
+        let pipe = makePipeline(
+            denied: [],
+            ax: AXNonSecure(),
+            knownSafe: ["com.good.app"],
+            encoder: ThrowingEncoder(),
+            sink: sink
+        )
+        let releaser = SpyReleaser()
+        let lease = SurfaceLease(releaser: releaser)
+
+        do {
+            _ = try await pipe.process(
+                frame: forwardingFrame(),
+                context: WorkflowContext(appBundleId: "com.good.app"),
+                nowUs: 9,
+                lease: lease
+            )
+            XCTFail("encoder threw — process(...) must propagate the error")
+        } catch let error as EncodeBoom {
+            XCTAssertEqual(error, EncodeBoom(), "the encoder's error must propagate unchanged")
+        }
+
+        XCTAssertEqual(
+            releaser.releaseCount, 1,
+            "a throwing encoder must still release the surface exactly once (no §4 pool stall)"
+        )
+        XCTAssertTrue(lease.isReleased)
+    }
+
+    // Same invariant on the suppress path: a throwing tombstone sink
+    // must not leak the lease either, and the error still propagates.
+    func test_throwing_sink_on_suppress_releases_lease_and_propagates_error() async throws {
+        let encoder = SpyEncoder()
+        let pipe = makePipeline(
+            denied: ["com.secret.app"], // denylisted ⇒ cascade suppresses
+            ax: AXNonSecure(),
+            knownSafe: [],
+            encoder: encoder,
+            sink: ThrowingSink()
+        )
+        let releaser = SpyReleaser()
+        let lease = SurfaceLease(releaser: releaser)
+
+        do {
+            _ = try await pipe.process(
+                frame: forwardingFrame(),
+                context: WorkflowContext(appBundleId: "com.secret.app"),
+                nowUs: 3,
+                lease: lease
+            )
+            XCTFail("sink threw — process(...) must propagate the error")
+        } catch let error as SinkBoom {
+            XCTAssertEqual(error, SinkBoom())
+        }
+
+        let enc = await encoder.callCount()
+        XCTAssertEqual(enc, 0, "encoder never runs on a suppressed frame")
+        XCTAssertEqual(
+            releaser.releaseCount, 1,
+            "a throwing tombstone sink must still release the surface exactly once"
+        )
         XCTAssertTrue(lease.isReleased)
     }
 }
