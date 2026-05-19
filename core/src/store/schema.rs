@@ -18,12 +18,15 @@
 //! `AGENT_PROTOCOL` §5 protected-set scope applies (ADRs 0008 + 0012).
 
 /// Monotonic schema version. Bumped on any DDL change (with a paired
-/// migration script under `core/src/store/migrations/`). The store-init code
+/// migration entry under `core/src/store/migrations/`). The store-init code
 /// refuses to open a database whose `meta.schema_version` is higher than
 /// this value.
 ///
-/// Phase 0 ships version 1.
-pub const SCHEMA_VERSION: u32 = 1;
+/// History:
+/// - **v1** (Phase 0) — initial schema in this file.
+/// - **v2** (Phase 1) — adds `events.redaction_reason TEXT` per ADR-0013 §4.
+///   See `core::store::migrations::V0002`.
+pub const SCHEMA_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // events / episodes — the retrieval unit per ADR-0010
@@ -274,8 +277,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schema_version_is_one_in_phase_zero() {
-        assert_eq!(SCHEMA_VERSION, 1, "Phase 0 ships schema version 1");
+    fn schema_version_matches_phase1_target() {
+        // Phase 0 baseline was v1. Phase 1 cycle 2 bumps to v2 via the
+        // V0002 migration (ADR-0013 §4 `events.redaction_reason`). The
+        // `last_migration_targets_current_schema_version` test in
+        // `super::migrations` enforces this stays in sync.
+        assert_eq!(SCHEMA_VERSION, 2, "Phase 1 target schema version");
     }
 
     #[test]

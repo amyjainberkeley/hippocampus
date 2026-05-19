@@ -24,6 +24,8 @@
 //! `event_vectors` dimension or the `sync_log` hash-chain fields —
 //! requires a fresh CSO review.
 
+pub mod migrations;
 pub mod schema;
 
+pub use migrations::MIGRATIONS;
 pub use schema::{all_ddl, SCHEMA_VERSION};
