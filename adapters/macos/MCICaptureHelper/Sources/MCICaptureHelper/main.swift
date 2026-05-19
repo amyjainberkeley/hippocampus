@@ -198,7 +198,11 @@ if captureOptions.captureEnabled {
     let captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
-            encoder: DeferredVideoToolboxEncoder(), // no-op — no stored frame
+            // No-op encoder — NO stored frame. PR-3 landed the real
+            // `VideoToolboxHEVCEncoder` SHAPE, but wiring it here is a
+            // CSO-gated default flip behind the green §7 corpus
+            // (ADR-0013 Amendment 1 §4) — deliberately NOT autonomous.
+            encoder: DeferredVideoToolboxEncoder(),
             sink: FileHandleFrameSink(handle: outputHandle)
         ),
         denylist: Denylist(entries: denylistEntries)
