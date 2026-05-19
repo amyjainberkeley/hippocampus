@@ -34,6 +34,16 @@ struct Args {
     /// `--once` — emit one HelperHealth frame and exit. Used in CI
     /// smoke tests.
     var oneShot: Bool
+
+    /// `--probe-debug` — dev-only. STEP-2-FINDING-001 instrumentation.
+    /// When set, every call to `AXSubroleProbe.focusedHasSecureSubrole()`
+    /// writes ONE stderr line: focused element's role + subrole +
+    /// identifier + title + the `Bool?` returned. Default OFF; the
+    /// steady-state (no-flag) cost of the flag is zero — the probe
+    /// only reads role / identifier / title when a sink is wired.
+    /// No wire-schema change. Pairs with `--capture` (which is what
+    /// actually drives the cascade per-frame).
+    var probeDebug: Bool
 }
 
 func defaultDenylistPath() -> String {
@@ -48,7 +58,8 @@ func parseArgs(_ argv: [String]) -> Args {
         outputPath: nil,
         denylistPath: defaultDenylistPath(),
         heartbeatSeconds: 30,
-        oneShot: false
+        oneShot: false,
+        probeDebug: false
     )
     var i = 1
     while i < argv.count {
@@ -67,6 +78,10 @@ func parseArgs(_ argv: [String]) -> Args {
             }
         case "--once":
             args.oneShot = true
+        case "--probe-debug":
+            // Dev-only STEP-2-FINDING-001 instrumentation. Logs every
+            // AXSubroleProbe call to stderr. No wire-schema change.
+            args.probeDebug = true
         case "--version":
             print("mci-capture-helper \(helperVersion)")
             exit(0)
@@ -96,6 +111,11 @@ func printUsage() {
                                 ~/Library/Application Support/MCI/denylist.toml
       --heartbeat-seconds <n>   Emit HelperHealth every n seconds. Default 30.
       --once                    Emit one frame and exit (CI smoke).
+      --probe-debug             DEV-ONLY. Log every AXSubroleProbe call to
+                                stderr (role/subrole/identifier/title/Bool?).
+                                For STEP-2-FINDING-001 diagnosis only. No
+                                wire-schema change. Steady-state cost when
+                                OFF is zero. Pair with --capture.
       --version                 Print version and exit.
       -h, --help                Print this and exit.
     """)
@@ -168,9 +188,49 @@ if let toml = try? String(contentsOfFile: args.denylistPath, encoding: .utf8) {
 // `NSWindowSharingType=.none` windows.
 let blackedRegionProbe = PixelGridBlackedRegionProbe()
 
+// STEP-2-FINDING-001 diagnostic — `--probe-debug` only.
+// `axProbeDebugSink == nil` is the steady-state production path: the
+// probe makes the same two AX calls the prior implementation made; no
+// extra work. When the sink is wired (dev-only), each probe call also
+// reads role / identifier / title and emits ONE stderr line. Never
+// writes to the wire / disk / encoded frame path.
+let axProbeDebugSink: AXSubroleProbe.DebugSink?
+if args.probeDebug {
+    if !captureOptions.captureEnabled {
+        FileHandle.standardError.write(
+            ("mci-capture-helper: --probe-debug is on but --capture is "
+                + "off; the cascade is never called from a live SCStream "
+                + "callback in this build, so no probe lines will appear. "
+                + "Pair --probe-debug with --capture on a real Mac.\n")
+                .data(using: .utf8) ?? Data())
+    }
+    axProbeDebugSink = { observation in
+        let role = observation.role ?? "nil"
+        let subrole = observation.subrole ?? "nil"
+        let identifier = observation.identifier ?? "nil"
+        let title = observation.title ?? "nil"
+        let result: String = {
+            switch observation.classification {
+            case .some(true): return "true"
+            case .some(false): return "false"
+            case .none: return "nil"
+            }
+        }()
+        let line =
+            "mci-capture-helper: probe(ax-subrole) "
+            + "focus=\(observation.focusResult) "
+            + "role=\(role) subrole=\(subrole) "
+            + "id=\(identifier) title=\(title) "
+            + "result=\(result)\n"
+        FileHandle.standardError.write(line.data(using: .utf8) ?? Data())
+    }
+} else {
+    axProbeDebugSink = nil
+}
+
 let cascade = SuppressionCascade(
     secureEventInput: CarbonSecureEventInputProbe(),
-    axSecureSubrole: AXSubroleProbe(),
+    axSecureSubrole: AXSubroleProbe(debugLog: axProbeDebugSink),
     denylist: Denylist(entries: denylistEntries),
     blackedRegion: blackedRegionProbe,
     knownSafeAppBundles: []
