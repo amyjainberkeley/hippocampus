@@ -34,3 +34,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Claude Code session artifacts — never commit
+.claude/scheduled_tasks.lock
+.claude/sessions/
+.claude/.skill-cache/

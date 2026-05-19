@@ -1,0 +1,31 @@
+[package]
+name                   = "mci-agent"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI macOS menu-bar / system-tray agent shell. Supervises the capture helper, owns the per-device id, runs the IPC select! loop. See docs/decisions/0007-macos-capture-separate-signed-helper-process.md."
+
+[[bin]]
+name = "mci-agent"
+path = "src/bin/mci_agent.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+mci-core    = { path = "../../core" }
+tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "io-std", "process", "signal", "fs"] }
+tracing     = { version = "0.1", default-features = false, features = ["std"] }
+thiserror   = "1"
+# Deliberately NO `tracing-subscriber`: the typed HealthLogRecord
+# serializer in `health_log.rs` keeps the JSON shape fixed at the
+# struct level (CSO sign-off). A `tracing::info!` macro-based path
+# accepts arbitrary `key=value` pairs, which is exactly the
+# user-content-could-leak surface ADR-0012 §6 forbids. Direct
+# tokio::fs write is also smaller dep-graph-wise.
+
+[dev-dependencies]
+tempfile    = "3"
+tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "process", "signal", "fs", "test-util"] }

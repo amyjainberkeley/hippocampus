@@ -1,11 +1,16 @@
-//! Encrypted `SQLite` store skeleton.
+//! Encrypted `SQLite` store.
 //!
-//! Phase 0 skeleton only. Just the schema DDL and the schema-version
-//! constant; **no `rusqlite` / `SQLCipher` dependency yet**. The Phase-1
-//! store-init code (in a follow-up PR) will execute these constants against
-//! a real `rusqlite::Connection` opened with `SQLCipher`'s bundled feature,
-//! `sqlite-vec` loaded as a runtime extension from the bundled binary path,
-//! the master DB key unwrapped from the Keychain item described in ADR-0008.
+//! [`schema`] holds the DDL constants + the schema-version constant.
+//! [`open`] (Phase 1, PRIORITY-REDIRECT P1) wires them against a real
+//! `rusqlite::Connection` opened with bundled `SQLCipher`
+//! (`bundled-sqlcipher-vendored-openssl`): `PRAGMA key` from a
+//! [`crate::crypto::DbKey`] (never argv/env), wrong-key probe, WAL +
+//! `foreign_keys`, the all-DDL init transaction, and the
+//! arbitrary-path guard for the sqlite-vec extension. The sqlite-vec
+//! dlopen itself ships with the bundled binary (see
+//! [`open::SchemaPolicy`]); the master-key Keychain/Secure-Enclave
+//! wrap is OS-specific and lives in `adapters/macos/` behind
+//! [`crate::crypto::KeyWrap`] (cross-platform-seam invariant).
 //!
 //! Binding ADRs:
 //! - `docs/decisions/0008-encrypted-store-sqlcipher-sqlite-vec-keychain.md`
@@ -24,6 +29,15 @@
 //! `event_vectors` dimension or the `sync_log` hash-chain fields —
 //! requires a fresh CSO review.
 
+pub mod migrations;
+pub mod open;
 pub mod schema;
+pub mod tombstone;
 
+pub use migrations::MIGRATIONS;
+pub use open::{
+    init_schema, open, validate_vec_extension_path, verify_schema_version, Db, SchemaPolicy,
+    StoreError,
+};
 pub use schema::{all_ddl, SCHEMA_VERSION};
+pub use tombstone::{EventRow, TOMBSTONE_SOURCE_TYPE};

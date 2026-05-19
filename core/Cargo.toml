@@ -10,12 +10,28 @@ description  = "MCI portable core: capture pipeline, dedupe, OCR orchestration, 
 [lints]
 workspace = true
 
+[features]
+# No `default` set — and `insecure-test-keywrap` is deliberately NOT
+# in one. It is TEST-ONLY: it un-gates `crypto::InMemoryKeyWrap`, an
+# in-memory key wrap with NO at-rest confidentiality. `cargo test -p
+# mci-core` already enables it via `cfg(test)`; this explicit feature
+# exists only for downstream integration-test crates that cannot see
+# this crate's `cfg(test)`. It must NEVER appear in a release build or
+# be enabled by `apps/agent` — a `compile_error!` tripwire in
+# `crypto::key_wrap` enforces this. CSO-gated (ADR-0008, §5).
+insecure-test-keywrap = []
+
 [dependencies]
-# Runtime locked to tokio per ADR-0006.
-tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time"] }
+# Runtime locked to tokio per ADR-0006. `io-util` enables AsyncReadExt /
+# AsyncWriteExt / tokio::io::duplex — required by core::ipc::reader.
+tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "io-util"] }
 async-trait  = "0.1"
 thiserror    = "1"
 tracing      = { version = "0.1", default-features = false, features = ["std"] }
+rusqlite = { version = "0.39.0", features = ["bundled-sqlcipher-vendored-openssl"] }
+zeroize = { version = "1.8.2", features = ["derive"] }
+getrandom = "0.3.4"
 
 [dev-dependencies]
-tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "test-util"] }
+tempfile = "3.27.0"
+tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "test-util", "io-util"] }
