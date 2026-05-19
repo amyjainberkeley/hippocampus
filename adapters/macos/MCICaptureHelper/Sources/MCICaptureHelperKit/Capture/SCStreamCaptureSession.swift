@@ -100,6 +100,17 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private var priorDHash: DHash?
     private var stream: SCStream?
 
+    /// Set to `true` by the first invocation of
+    /// `stream(_:didOutputSampleBuffer:of:)` that actually carries a
+    /// screen sample. Guarded by `lock`; the callback is on the
+    /// `sampleQueue`, the read on `start()` etc. is on whichever queue
+    /// the caller is on. Used ONLY to emit a single one-bit stderr
+    /// breadcrumb proving the callback wired up at least once — the
+    /// content-free observability surface for SCSTREAM-LIVE-001
+    /// re-verify (Step-1 audit, 2026-05-19). NOT a stored frame, NOT
+    /// on the wire.
+    private var firstSampleLogged: Bool = false
+
     public init(
         pipeline: SCStreamPipeline,
         denylist: Denylist,
@@ -160,6 +171,22 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         return prior
     }
 
+    /// Atomically claim the right to emit the one-shot "first sample
+    /// received" stderr breadcrumb. Returns `true` exactly once across
+    /// the session's lifetime (the first caller wins); every subsequent
+    /// call returns `false` so steady-state cost is a single locked
+    /// read of a `Bool`. The SCStreamOutput callback fires on
+    /// `sampleQueue`; this method is safe to call from any thread.
+    ///
+    /// `internal` (not `private`) only so the headless lifetime tests
+    /// can prove the one-shot contract directly. Not public API.
+    internal func claimFirstSampleLogSlot() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if firstSampleLogged { return false }
+        firstSampleLogged = true
+        return true
+    }
+
     // MARK: - SCStreamOutput
 
     /// The live frame callback. `// UNVERIFIED — needs live macOS; do
@@ -180,6 +207,22 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     ) {
         // UNVERIFIED — needs live macOS; do not claim working.
         guard outputType == .screen else { return }
+
+        // SCSTREAM-LIVE-001 observability: one-shot stderr breadcrumb
+        // proving the callback wired up at least once. Content-free,
+        // not a stored frame, not on the wire. The lifetime fix in
+        // main.swift is what made this callback reachable; this line
+        // gives the human Step-1 re-verify an unambiguous "callback
+        // alive" signal without a wire schema bump. Cleared once
+        // emitted so steady-state cost is a single locked-read of a
+        // `Bool` per frame.
+        if claimFirstSampleLogSlot() {
+            FileHandle.standardError.write(
+                "mci-capture-helper: SCStream callback alive: first sample received.\n"
+                    .data(using: .utf8) ?? Data()
+            )
+        }
+
         guard let sample = Self.extractSynchronously(from: sampleBuffer) else { return }
 
         // Roll the prior-dHash window — pure bookkeeping, not the

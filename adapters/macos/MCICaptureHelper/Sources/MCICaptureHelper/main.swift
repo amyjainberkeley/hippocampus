@@ -187,15 +187,30 @@ if args.oneShot {
 // NO IOSurface retain and NO encoder, so it structurally cannot store
 // a frame; it exists so a human can drive the live SCStream wiring in
 // a dev session. `// UNVERIFIED — needs live macOS`.
+//
+// SCSTREAM-LIVE-001 fix (2026-05-19): the session MUST be retained
+// for the lifetime of the helper process. `SCStream` per Apple
+// convention holds its `SCStreamDelegate` and registered `SCStreamOutput`
+// references WEAKLY ("maintain a strong reference"). The prior code
+// constructed `captureSession` as a local inside the `if` block and
+// kicked `start()` via `Task.detached`; once the detached closure
+// finished, the only strong reference dropped and the session
+// deallocated — `SCStream`'s weak delegate/output refs went nil and
+// the OS callback had nowhere to land. Observable shape: `startCapture`
+// returned without throwing, zero sample buffers ever delivered, zero
+// `didStopWithError` (the delegate was also nil), helper heartbeats
+// alive — exactly the Step-1 audit finding.
+//
+// The fix: bind `captureSession` at process top level (this file's
+// top-level scope IS the executable's main entry — the binding lives
+// until process exit), call `start()` synchronously inline, and let
+// the heartbeat loop run while the session stays retained. Catches
+// the regression class structurally — `if let` would re-introduce
+// scoped lifetime — so the binding stays at top level even though it
+// is optional.
+let captureSession: SCStreamCaptureSession?
 if captureOptions.captureEnabled {
-    FileHandle.standardError.write("""
-    mci-capture-helper: --capture is a DEV-ONLY, UNVERIFIED path \
-    (ADR-0013 Amendment 1 §4). Live SCStream capture is NOT enabled in \
-    default builds and stores no frame in this build (no retain, no \
-    encoder). Starting live session…\n
-    """.data(using: .utf8) ?? Data())
-
-    let captureSession = SCStreamCaptureSession(
+    captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
             // No-op encoder — NO stored frame. PR-3 landed the real
@@ -207,15 +222,30 @@ if captureOptions.captureEnabled {
         ),
         denylist: Denylist(entries: denylistEntries)
     )
-    Task.detached {
-        do {
-            try await captureSession.start()
-        } catch {
-            FileHandle.standardError.write(
-                "mci-capture-helper: live capture start failed (expected off a real screen): \(error)\n"
-                    .data(using: .utf8) ?? Data()
-            )
-        }
+} else {
+    captureSession = nil
+}
+
+if let captureSession {
+    FileHandle.standardError.write("""
+    mci-capture-helper: --capture is a DEV-ONLY, UNVERIFIED path \
+    (ADR-0013 Amendment 1 §4). Live SCStream capture is NOT enabled in \
+    default builds and stores no frame in this build (no retain, no \
+    encoder). Starting live session…\n
+    """.data(using: .utf8) ?? Data())
+
+    // Synchronous `start()` inline — no `Task.detached`. The session
+    // is retained by the top-level `captureSession` binding for the
+    // process lifetime, so SCStream's weak delegate/output refs to
+    // `self` stay live. A throw is logged and swallowed; the
+    // heartbeat loop still runs so the helper stays observable.
+    do {
+        try await captureSession.start()
+    } catch {
+        FileHandle.standardError.write(
+            "mci-capture-helper: live capture start failed (expected off a real screen): \(error)\n"
+                .data(using: .utf8) ?? Data()
+        )
     }
 }
 
@@ -230,3 +260,10 @@ do {
     FileHandle.standardError.write("mci-capture-helper: loop error: \(error)\n".data(using: .utf8)!)
     exit(5)
 }
+
+// Defensive: ensure the optimizer cannot lift `captureSession` out
+// of scope before `loop.run()` returns. The `if let` above already
+// holds it (the top-level binding has whole-file lifetime in a Swift
+// executable's main file), but read it here so the intent is explicit
+// in the source: this binding is load-bearing for SCSTREAM-LIVE-001.
+_ = captureSession
