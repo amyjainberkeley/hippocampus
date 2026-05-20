@@ -307,6 +307,18 @@ let policy = StreamPolicy.default
 
 let captureSession: SCStreamCaptureSession?
 if captureOptions.captureEnabled {
+    // STEP-2-FINDING-005 fix — pass `loop.counters` to the pipeline so
+    // pipeline writes (`recordDelivered` / `recordSuppressed` /
+    // `recordRedactedByFailsafe` / `recordCascadeForced` /
+    // `recordCascadeFromFilter`) land on the SAME actor that
+    // `loop.tickHealth()` snapshots. Prior to this PR the pipeline
+    // defaulted its own `HelperHealthCounters = HelperHealthCounters()`
+    // — a parallel actor that the wire encoder never read — so
+    // `HelperHealth` wire frames carried all-zero counters even after
+    // 228 demonstrable cascade evaluations on the Step-2 v6 live run.
+    // ONE actor instance, written by the pipeline, read by the
+    // heartbeat. No new wire field; no `.allow` widening; strictly
+    // more observability.
     captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
@@ -315,6 +327,7 @@ if captureOptions.captureEnabled {
             // CSO-gated default flip behind the green §7 corpus
             // (ADR-0013 Amendment 1 §4) — deliberately NOT autonomous.
             encoder: DeferredVideoToolboxEncoder(),
+            counters: loop.counters,
             sink: FileHandleFrameSink(handle: outputHandle),
             floorIntervalMs: policy.cascadeFloorIntervalMs
         ),

@@ -411,6 +411,19 @@ public struct SCStreamPipeline: Sendable {
         switch decision {
         case .suppress(let reason):
             await counters.recordSuppressed()
+            if reason == .failsafeUnknown {
+                // §7 fail-safe subcount — STRICT SUBSET of
+                // framesSuppressed, never an alternative to it. Mirrors
+                // `HelperMainLoop.processSyntheticTransition`'s record
+                // path so the wire's `frames_redacted_by_failsafe`
+                // counter (wire 0x02+) is sourced consistently whether
+                // the cascade ran from the live pipeline OR from the
+                // synthetic-transition test seam. STEP-2-FINDING-005:
+                // before this line the live capture path NEVER
+                // incremented this counter — wire field stayed 0 even
+                // on a stream dominated by `reason=7` tombstones.
+                await counters.recordRedactedByFailsafe()
+            }
             let seq = await sequence.allocate()
             let bytes = encodePrivacyTombstone(
                 seq: seq,
