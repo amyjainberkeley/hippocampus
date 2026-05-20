@@ -56,6 +56,10 @@ use thiserror::Error;
 #[cfg(any(test, feature = "stubs"))]
 pub mod stubs;
 
+pub mod event_chunker;
+
+pub use event_chunker::EventChunker;
+
 // ---------------------------------------------------------------------------
 // Newtype ids — keep `events` / `chunks` PKs out of arithmetic with raw u64
 // ---------------------------------------------------------------------------
@@ -131,13 +135,44 @@ pub struct Chunk {
 ///
 /// Per ADR-0010 §4 sub-chunking only happens when an event exceeds the
 /// embedder's effective context (e.g. > ~1500 tokens for arctic-embed-s).
-/// Production impls split on semantic / paragraph boundaries and apply
-/// each parent event's context header to every sub-chunk. For events under
-/// the threshold a chunker returns one element (the event text itself);
-/// callers MUST NOT rely on the chunker to apply the context header.
+/// Production impls split on semantic / paragraph boundaries. For events
+/// under the threshold a chunker returns one element (the event text
+/// itself).
+///
+/// # Caller-prepends-header invariant (LOAD-BEARING per ADR-0010 §1.3 +
+/// ADR-0016 §1.2)
+///
+/// The `Chunker` trait deliberately takes only `event_text: &str` — **no
+/// per-event context**. The context header
+/// `[app=… | title=… | url=… | ts=…]\n<text>` (the LongMemEval-validated
+/// "key expansion" prefix that ADR-0010 §1.3 mandates as part of the
+/// embedded string) is **the caller's responsibility**:
+///
+/// - the [`BrainStore`] writer / OCR-event ingestor prepends the header
+///   to `event_text` **before** calling [`Chunker::chunk`], so the
+///   chunker's output already carries the header on the (only) chunk
+///   for short events;
+/// - for long events, the same `event_text` (header + body) is what the
+///   chunker subdivides — the header naturally appears on the first
+///   sub-chunk. Sub-chunks past the first inherit the parent's header
+///   by upstream re-prepend at embedder-call time (the chunker itself
+///   does not, and cannot, re-emit it).
+///
+/// Embedding any chunk **without** the header is a §4 invariant
+/// regression (recall quality drops materially per `LongMemEval` +9.4%
+/// recall@5 ablation). The trait surface keeps the invariant a
+/// structural convention here in Phase 3; a follow-up PR (out of
+/// P3.4 scope, recommended in the P3.4 PR body) is expected to lift
+/// the header onto a typed `EventContext { app, title, url, ts }`
+/// argument so the discipline becomes type-checked.
 pub trait Chunker: Send + Sync {
     /// Split `event_text` into one-or-more sub-chunks. Returning an empty
-    /// `Vec` is allowed for empty input.
+    /// `Vec` is allowed for empty / whitespace-only input.
+    ///
+    /// **The caller MUST prepend the ADR-0010 §1.3 context header to
+    /// `event_text` before calling.** The chunker performs the
+    /// chunking math only; see the trait doc above for the
+    /// caller-prepends invariant.
     fn chunk(&self, event_text: &str) -> Result<Vec<String>, ChunkerError>;
 }
 
