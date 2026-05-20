@@ -296,6 +296,15 @@ if args.oneShot {
 // the regression class structurally — `if let` would re-introduce
 // scoped lifetime — so the binding stays at top level even though it
 // is optional.
+// STEP-2-FINDING-004 fix — `cascadeFloorIntervalMs` lives on
+// `StreamPolicy` so the cascade-floor heartbeat is reviewable in one
+// place and so the live SCStream's frame-delivery interval and the
+// pipeline's cascade-evaluation floor are wired together explicitly.
+// The default policy carries `cascadeFloorIntervalMs = 1000` (1 Hz);
+// the pipeline reads it via the `floorIntervalMs:` init parameter
+// below.
+let policy = StreamPolicy.default
+
 let captureSession: SCStreamCaptureSession?
 if captureOptions.captureEnabled {
     captureSession = SCStreamCaptureSession(
@@ -306,9 +315,11 @@ if captureOptions.captureEnabled {
             // CSO-gated default flip behind the green §7 corpus
             // (ADR-0013 Amendment 1 §4) — deliberately NOT autonomous.
             encoder: DeferredVideoToolboxEncoder(),
-            sink: FileHandleFrameSink(handle: outputHandle)
+            sink: FileHandleFrameSink(handle: outputHandle),
+            floorIntervalMs: policy.cascadeFloorIntervalMs
         ),
         denylist: Denylist(entries: denylistEntries),
+        policy: policy,
         // Shared §2 probe instance: the session calls `update(...)`
         // in the SCStreamOutput callback; the cascade (constructed
         // above with this same probe) reads `hasBlackedRegion()`.

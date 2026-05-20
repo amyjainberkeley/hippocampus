@@ -159,7 +159,7 @@ final class SCStreamPipelineTests: XCTestCase {
             lease: lease
         )
 
-        XCTAssertEqual(outcome, .suppressed(reason: .denylistSource))
+        XCTAssertEqual(outcome, .suppressed(reason: .denylistSource, forcedByFloor: false))
         let enc = await encoder.callCount()
         XCTAssertEqual(enc, 0, "encoder MUST NOT run on a suppressed frame")
         let writes = await sink.count()
@@ -187,7 +187,7 @@ final class SCStreamPipelineTests: XCTestCase {
             nowUs: 1,
             lease: lease
         )
-        XCTAssertEqual(outcome, .suppressed(reason: .failsafeUnknown))
+        XCTAssertEqual(outcome, .suppressed(reason: .failsafeUnknown, forcedByFloor: false))
         let enc = await encoder.callCount()
         XCTAssertEqual(enc, 0)
         XCTAssertTrue(lease.isReleased)

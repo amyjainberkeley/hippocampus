@@ -45,6 +45,25 @@ public actor HelperHealthCounters {
     private var framesRedactedByFailsafe: UInt64 = 0
     private var framesDroppedBackpressure: UInt64 = 0
     private var framesDroppedLateAck: UInt64 = 0
+    /// Cascade evaluations that ran because the `SmartCaptureFilter`
+    /// returned `.forward` / `.forwardTieBreak` (the natural path).
+    /// In-process observable only; NOT on the wire — STEP-2-FINDING-004
+    /// fix keeps the wire schema unchanged (a u64 add to `HelperHealth`
+    /// is a `0x02 → 0x03` bump per the PR #24 precedent + the
+    /// `decode_rejects_old_0x01_frame` trip-wire in `core/src/ipc/`,
+    /// and the spec footnote defers the wire bump to a separate CSO-
+    /// gated PR).
+    private var cascadeFromFilter: UInt64 = 0
+    /// Cascade evaluations forced by the cascade floor — the filter
+    /// returned a `.drop*` decision but the wall-clock since the last
+    /// cascade run reached `cascadeFloorIntervalMs`, so the pipeline
+    /// ran the cascade anyway. The whole point of the STEP-2-FINDING-004
+    /// fix: under a static secure surface (FairPlay, sudo password
+    /// entry, secure-field focus) the filter eats every frame; this
+    /// counter is how the wire observer notices that the floor is
+    /// doing what the filter cannot. In-process only — see the comment
+    /// on `cascadeFromFilter` above.
+    private var cascadeForced: UInt64 = 0
 
     public init(startedAt: Date = Date()) {
         self.startedAt = startedAt
@@ -59,8 +78,25 @@ public actor HelperHealthCounters {
     public func recordRedactedByFailsafe() { framesRedactedByFailsafe &+= 1 }
     public func recordBackpressureDrop() { framesDroppedBackpressure &+= 1 }
     public func recordLateAckDrop() { framesDroppedLateAck &+= 1 }
+    /// Record one filter-passed cascade evaluation. Called by
+    /// `SCStreamPipeline.process(...)` when the filter returned
+    /// `.forward` / `.forwardTieBreak` and the cascade was therefore
+    /// consulted.
+    public func recordCascadeFromFilter() { cascadeFromFilter &+= 1 }
+    /// Record one floor-forced cascade evaluation. Called by
+    /// `SCStreamPipeline.process(...)` when the filter returned a
+    /// `.drop*` decision but the cascade-floor interval had elapsed,
+    /// so the cascade was consulted anyway. Strictly disjoint from
+    /// `cascadeFromFilter` — a single `process()` call increments
+    /// exactly one of the two counters whenever the cascade runs.
+    public func recordCascadeForced() { cascadeForced &+= 1 }
 
     /// Snapshot in the shape `Wire.encodeHelperHealth` consumes.
+    ///
+    /// `cascadeFromFilter` + `cascadeForced` are exposed here as the
+    /// in-process observability surface for the STEP-2-FINDING-004
+    /// floor — they are NOT on the wire (no schema bump in this PR;
+    /// see `cascadeFromFilter`'s field docs).
     public func snapshot(now: Date = Date()) -> HelperHealthSnapshot {
         let uptimeMs = UInt64(max(0, now.timeIntervalSince(startedAt) * 1000))
         return HelperHealthSnapshot(
@@ -69,7 +105,9 @@ public actor HelperHealthCounters {
             framesSuppressed: framesSuppressed,
             framesRedactedByFailsafe: framesRedactedByFailsafe,
             framesDroppedBackpressure: framesDroppedBackpressure,
-            framesDroppedLateAck: framesDroppedLateAck
+            framesDroppedLateAck: framesDroppedLateAck,
+            cascadeFromFilter: cascadeFromFilter,
+            cascadeForced: cascadeForced
         )
     }
 }
@@ -83,6 +121,12 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
     public let framesRedactedByFailsafe: UInt64
     public let framesDroppedBackpressure: UInt64
     public let framesDroppedLateAck: UInt64
+    /// Filter-passed cascade evaluations. In-process only — NOT on the
+    /// wire in this PR; see `HelperHealthCounters.cascadeFromFilter`.
+    public let cascadeFromFilter: UInt64
+    /// Floor-forced cascade evaluations. In-process only — NOT on the
+    /// wire in this PR; see `HelperHealthCounters.cascadeForced`.
+    public let cascadeForced: UInt64
 
     public init(
         uptimeMs: UInt64,
@@ -90,7 +134,9 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
         framesSuppressed: UInt64,
         framesRedactedByFailsafe: UInt64,
         framesDroppedBackpressure: UInt64,
-        framesDroppedLateAck: UInt64
+        framesDroppedLateAck: UInt64,
+        cascadeFromFilter: UInt64 = 0,
+        cascadeForced: UInt64 = 0
     ) {
         self.uptimeMs = uptimeMs
         self.framesDelivered = framesDelivered
@@ -98,6 +144,8 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
         self.framesRedactedByFailsafe = framesRedactedByFailsafe
         self.framesDroppedBackpressure = framesDroppedBackpressure
         self.framesDroppedLateAck = framesDroppedLateAck
+        self.cascadeFromFilter = cascadeFromFilter
+        self.cascadeForced = cascadeForced
     }
 }
 

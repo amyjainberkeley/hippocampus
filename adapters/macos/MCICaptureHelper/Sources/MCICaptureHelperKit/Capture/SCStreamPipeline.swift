@@ -193,6 +193,73 @@ public struct DeferredVideoToolboxEncoder: FrameEncoder {
     }
 }
 
+/// Mutable wall-clock state for the cascade floor.
+///
+/// `SCStreamPipeline` is a `Sendable` struct (all `let` fields) and
+/// callers may legally share an instance across captures — so the
+/// last-cascade-run wall-clock must live behind an actor. The SCStream
+/// callback delivers serially on its `sampleQueue`, but the pipeline
+/// is `Sendable` by contract; an actor is the most defensive choice
+/// here.
+///
+/// STEP-2-FINDING-004 fix. See `StreamPolicy.cascadeFloorIntervalMs`
+/// for the design rationale.
+public actor CascadeFloorState {
+    /// Wall-clock microseconds (`Date.timeIntervalSince1970 * 1e6`) of
+    /// the most recent cascade evaluation — filter-passed OR floor-
+    /// forced, allowed OR suppressed. Updated on EVERY cascade call.
+    /// Initial value `0` means "no cascade has ever run on this
+    /// pipeline" — the very first inbound frame on a filter-`.drop*`
+    /// path always satisfies the floor and runs the cascade (the safe
+    /// direction: any unknown surface gets a cascade verdict, not a
+    /// silent filter drop).
+    private var lastCascadeRunUs: UInt64 = 0
+
+    public init() {}
+
+    /// Decide whether a floor-forced cascade run is due.
+    ///
+    /// Returns `true` iff `floorIntervalMs > 0` AND
+    /// `nowUs - lastCascadeRunUs >= floorIntervalMs * 1000`. The
+    /// subtraction is unsigned, but `lastCascadeRunUs == 0` (initial
+    /// state) and `nowUs > 0` (any real wall-clock) make the first
+    /// inbound frame on a `.drop*` path return `true`, which is the
+    /// safe direction (run the cascade on an unknown surface).
+    public func shouldRunFloorCascade(nowUs: UInt64, floorIntervalMs: UInt64) -> Bool {
+        guard floorIntervalMs > 0 else { return false }
+        let floorUs = floorIntervalMs &* 1000
+        // Pinned-monotonic guard: if `nowUs` is somehow earlier than the
+        // recorded `lastCascadeRunUs` (clock skew, NTP step, test driver
+        // feeding non-monotonic timestamps), refuse to fire. The safe
+        // direction is "do not force a cascade we cannot time".
+        guard nowUs >= lastCascadeRunUs else { return false }
+        return (nowUs &- lastCascadeRunUs) >= floorUs
+    }
+
+    /// Stamp the most recent cascade evaluation. MUST be called by
+    /// `SCStreamPipeline.process(...)` immediately after the cascade
+    /// returns, on EVERY path the cascade ran on — filter-passed AND
+    /// floor-forced, `.allow` AND `.suppress`. Failing to stamp on the
+    /// `.suppress` path would let the floor re-fire on the very next
+    /// frame, busting the configured interval.
+    public func markCascadeRan(nowUs: UInt64) {
+        // Pinned-monotonic: never roll the timestamp backward. A non-
+        // monotonic `nowUs` is silently absorbed (last-value-wins
+        // toward the future).
+        if nowUs > lastCascadeRunUs {
+            lastCascadeRunUs = nowUs
+        }
+    }
+
+    /// In-process read of the last-cascade timestamp. Used by tests
+    /// to prove the (f) invariant ("`lastCascadeRunUs` updates on
+    /// EVERY cascade call, forced or not, including `.suppress`
+    /// outcomes"). Not on the wire.
+    public func currentLastCascadeRunUs() -> UInt64 {
+        lastCascadeRunUs
+    }
+}
+
 /// The capture pipeline: the SCStream callback path with the cascade
 /// wired unconditionally in front of the encode call site.
 ///
@@ -209,6 +276,13 @@ public struct SCStreamPipeline: Sendable {
     private let counters: HelperHealthCounters
     private let sequence: FrameSequence
     private let sink: any FrameSink
+    /// Cascade-floor heartbeat interval, in milliseconds. `0` disables
+    /// the floor (legacy: cascade runs only when the filter forwards).
+    /// `>= 1` runs the cascade at LEAST every `floorIntervalMs` even
+    /// when the filter would drop the frame. See
+    /// `StreamPolicy.cascadeFloorIntervalMs`.
+    private let floorIntervalMs: UInt64
+    private let floorState: CascadeFloorState
 
     public init(
         filter: SmartCaptureFilter = SmartCaptureFilter(),
@@ -216,7 +290,9 @@ public struct SCStreamPipeline: Sendable {
         encoder: any FrameEncoder,
         counters: HelperHealthCounters = HelperHealthCounters(),
         sequence: FrameSequence = FrameSequence(),
-        sink: any FrameSink
+        sink: any FrameSink,
+        floorIntervalMs: UInt64 = StreamPolicy.default.cascadeFloorIntervalMs,
+        floorState: CascadeFloorState = CascadeFloorState()
     ) {
         self.filter = filter
         self.cascade = cascade
@@ -224,19 +300,34 @@ public struct SCStreamPipeline: Sendable {
         self.counters = counters
         self.sequence = sequence
         self.sink = sink
+        self.floorIntervalMs = floorIntervalMs
+        self.floorState = floorState
     }
+
+    /// Test/observer read of the in-process cascade-forced state.
+    /// Provided as an API surface so the headless tests can prove
+    /// invariant (f) — `lastCascadeRunUs` updates on EVERY cascade
+    /// call. Not on the wire; not load-bearing for production.
+    public var cascadeFloor: CascadeFloorState { floorState }
 
     /// What `process(...)` did with one candidate — returned so the
     /// OS-free test can assert the ordering invariant.
     public enum Outcome: Sendable, Equatable {
-        /// Filter chain rejected the frame as not-new-content. No
-        /// cascade, no encode, surface released.
+        /// Filter chain rejected the frame as not-new-content AND the
+        /// cascade floor was not due, so the cascade was not consulted.
+        /// No cascade, no encode, surface released.
         case filteredOut
         /// Cascade suppressed. Tombstone emitted, NO encode, surface
-        /// released.
-        case suppressed(reason: RedactionReason)
+        /// released. `forcedByFloor` is `true` iff the cascade ran
+        /// because the floor heartbeat was due (the filter would have
+        /// dropped the frame). STEP-2-FINDING-004 instrumentation —
+        /// `false` preserves the pre-floor outcome shape; tests assert
+        /// both paths.
+        case suppressed(reason: RedactionReason, forcedByFloor: Bool)
         /// Cascade allowed. Encoder invoked, then surface released.
-        case encoded(seq: UInt64)
+        /// `forcedByFloor` is `true` iff the cascade ran because the
+        /// floor heartbeat was due.
+        case encoded(seq: UInt64, forcedByFloor: Bool)
     }
 
     /// The OS-free decision + dispatch core. The live SCStream adapter
@@ -267,20 +358,56 @@ public struct SCStreamPipeline: Sendable {
 
         await counters.recordDelivered()
 
-        // Stage 1: cheap filter chain. Only `.forward` /
-        // `.forwardTieBreak` are genuine new content; every `drop*`
-        // never reaches the cascade or the encoder — the top-level
-        // `defer` releases the surface so a dropped frame can't stall
-        // the pool.
+        // Stage 1: cheap filter chain. STEP-2-FINDING-004 — on a
+        // `.drop*` decision we now consult the cascade-floor heartbeat
+        // before returning `.filteredOut`. A static-screen secure
+        // surface (FairPlay full-screen playback, sudo password prompt,
+        // a focused `NSSecureTextField` with no surrounding motion)
+        // produces a stream of `.dropNearDuplicate` / `.dropIdle` /
+        // `.dropNoDirtyRects`; without a floor the cascade never sees
+        // those frames and the specific cascade-layer verdict
+        // (`reason=2/3/4`) cannot emit. The floor guarantees the
+        // cascade runs at least once per `floorIntervalMs` so the wire
+        // observer sees the verdict at signal granularity.
+        //
+        // Privacy invariant: this floor only WIDENS observability. The
+        // floor-forced run is the EXACT same `cascade.decide(...)` the
+        // filter-passed path runs — same probes, same first-match-wins
+        // order, same fail-safe arm. It can only ADD `.suppress`
+        // decisions; it can never widen `.allow`. Fail-closed preserved
+        // (Amendment 1 §3(b)).
+        let forcedByFloor: Bool
         switch filter.decide(frame: frame) {
         case .forward, .forwardTieBreak:
-            break
+            forcedByFloor = false
         case .dropIdle, .dropStatus, .dropNoDirtyRects, .dropNearDuplicate:
-            return .filteredOut
+            // Filter would drop this frame. Consult the floor: if the
+            // heartbeat is due, run the cascade anyway as a "floor
+            // probe". Otherwise return `.filteredOut` exactly as the
+            // pre-floor behavior — preserving every existing dedup
+            // outcome at frequencies above the floor.
+            if await floorState.shouldRunFloorCascade(
+                nowUs: nowUs,
+                floorIntervalMs: floorIntervalMs
+            ) {
+                forcedByFloor = true
+            } else {
+                return .filteredOut
+            }
         }
 
         // Stage 2: ADR-0013 cascade — UNCONDITIONALLY before encode.
         let decision = cascade.decide(context: context)
+        // Stamp the wall-clock on EVERY cascade evaluation, regardless
+        // of `.allow` / `.suppress` and regardless of filter-passed /
+        // floor-forced. Failing to stamp on `.suppress` would let the
+        // floor re-fire on the very next frame (invariant (f) test).
+        await floorState.markCascadeRan(nowUs: nowUs)
+        if forcedByFloor {
+            await counters.recordCascadeForced()
+        } else {
+            await counters.recordCascadeFromFilter()
+        }
         switch decision {
         case .suppress(let reason):
             await counters.recordSuppressed()
@@ -298,7 +425,7 @@ public struct SCStreamPipeline: Sendable {
             try await sink.write(bytes)
             // Suppressed frame: encoder NEVER called; surface released
             // by the top-level `defer`.
-            return .suppressed(reason: reason)
+            return .suppressed(reason: reason, forcedByFloor: forcedByFloor)
 
         case .allow:
             // ONLY reachable after `.allow`. This is the single encode
@@ -307,7 +434,7 @@ public struct SCStreamPipeline: Sendable {
             // propagates — the allow-path lease leak this item fixes.
             let seq = await sequence.allocate()
             try await encoder.encodeAllowedFrame(seq: seq, context: context)
-            return .encoded(seq: seq)
+            return .encoded(seq: seq, forcedByFloor: forcedByFloor)
         }
     }
 }

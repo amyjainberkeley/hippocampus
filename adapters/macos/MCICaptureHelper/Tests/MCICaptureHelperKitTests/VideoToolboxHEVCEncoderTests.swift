@@ -106,7 +106,7 @@ final class VideoToolboxHEVCEncoderTests: XCTestCase {
             context: WorkflowContext(appBundleId: "com.secret.app"),
             nowUs: 1, lease: SurfaceLease(releaser: BorrowedNoRetainReleaser())
         )
-        XCTAssertEqual(outcome, .suppressed(reason: .denylistSource))
+        XCTAssertEqual(outcome, .suppressed(reason: .denylistSource, forcedByFloor: false))
         XCTAssertEqual(enc.allowedFrameCount(), 0, "HEVC encoder MUST NOT run on a suppressed frame")
     }
 

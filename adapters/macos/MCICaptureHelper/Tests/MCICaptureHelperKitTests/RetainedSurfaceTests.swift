@@ -148,7 +148,7 @@ final class RetainedSurfaceTests: XCTestCase {
             context: WorkflowContext(appBundleId: "com.secret.app"),
             nowUs: 1, lease: lease
         )
-        XCTAssertEqual(outcome, .suppressed(reason: .denylistSource))
+        XCTAssertEqual(outcome, .suppressed(reason: .denylistSource, forcedByFloor: false))
         XCTAssertEqual(spy.relinquishCount, 1, "suppressed frame relinquishes the retain once")
     }
 
