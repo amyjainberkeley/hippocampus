@@ -186,6 +186,13 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
     // strictly.
     let frames_redacted_by_failsafe =
         extract_u64_field_or_zero(s, "\"frames_redacted_by_failsafe\":")?;
+    // Back-compat: wire-`0x03` (STEP-2-FINDING-004) added the
+    // `cascade_forced_count` field. Older JSONL lines (pre-bump
+    // dev-only artifacts; capture was default-OFF) have no
+    // `cascade_forced_count` key — treat absent as 0, same policy
+    // as `frames_redacted_by_failsafe`. Lines that DO carry the key
+    // are parsed strictly.
+    let cascade_forced_count = extract_u64_field_or_zero(s, "\"cascade_forced_count\":")?;
     let frames_dropped_backpressure = extract_u64_field(s, "\"frames_dropped_backpressure\":")?;
     let frames_dropped_late_ack = extract_u64_field(s, "\"frames_dropped_late_ack\":")?;
     Ok(HealthLogRecord {
@@ -195,6 +202,7 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
         frames_delivered,
         frames_suppressed,
         frames_redacted_by_failsafe,
+        cascade_forced_count,
         frames_dropped_backpressure,
         frames_dropped_late_ack,
     })
@@ -389,11 +397,12 @@ mod tests {
             uptime_ms,
             frames_delivered: delivered,
             frames_suppressed: suppressed,
-            // The 6-arg helper keeps the fail-safe subcount at 0; the
-            // dedicated `rec_fs` builder below exercises non-zero
-            // values so existing delta/restart assertions stay
-            // unchanged.
+            // The 6-arg helper keeps the fail-safe subcount + cascade-
+            // forced counter at 0; the dedicated `rec_fs` builder
+            // below exercises non-zero values so existing delta /
+            // restart assertions stay unchanged.
             frames_redacted_by_failsafe: 0,
+            cascade_forced_count: 0,
             frames_dropped_backpressure: backpressure,
             frames_dropped_late_ack: late_ack,
         }

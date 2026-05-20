@@ -59,6 +59,7 @@ pub fn pump_one(
         frames_delivered,
         frames_suppressed,
         frames_redacted_by_failsafe,
+        cascade_forced_count,
         frames_dropped_backpressure,
         frames_dropped_late_ack,
     } = &frame.message
@@ -75,6 +76,7 @@ pub fn pump_one(
         frames_delivered: *frames_delivered,
         frames_suppressed: *frames_suppressed,
         frames_redacted_by_failsafe: *frames_redacted_by_failsafe,
+        cascade_forced_count: *cascade_forced_count,
         frames_dropped_backpressure: *frames_dropped_backpressure,
         frames_dropped_late_ack: *frames_dropped_late_ack,
     })
@@ -99,6 +101,7 @@ mod tests {
                 frames_delivered: 100,
                 frames_suppressed: 12,
                 frames_redacted_by_failsafe: 9,
+                cascade_forced_count: 4,
                 frames_dropped_backpressure: 1,
                 frames_dropped_late_ack: 0,
             },

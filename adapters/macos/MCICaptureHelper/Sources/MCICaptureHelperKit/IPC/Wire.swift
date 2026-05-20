@@ -11,11 +11,16 @@
 //
 // Wire format (binary, little-endian) — identical to the Rust spec:
 //
-//   magic(1=0x4D) + version(1=0x02) + msg_type(2) + seq(8) + len(4) + payload(len)
+//   magic(1=0x4D) + version(1=0x03) + msg_type(2) + seq(8) + len(4) + payload(len)
 //
 // version 0x01 → 0x02 (2026-05-19): HelperHealth gained the
-// frames_redacted_by_failsafe counter. Helper + core ship version-
-// locked; the Rust decoder rejects any other version.
+// frames_redacted_by_failsafe counter.
+// version 0x02 → 0x03 (2026-05-20): HelperHealth gained the
+// cascade_forced_count counter (STEP-2-FINDING-004 — floor-forced
+// cascade evaluations are now observable on the wire, strictly
+// disjoint from filter-passed evaluations).
+// Helper + core ship version-locked; the Rust decoder rejects any
+// other version.
 
 import Foundation
 
@@ -23,7 +28,7 @@ import Foundation
 public let frameMagic: UInt8 = 0x4D
 
 /// Wire-format version byte. MUST match `core::ipc::wire::FRAME_VERSION`.
-public let frameVersion: UInt8 = 0x02
+public let frameVersion: UInt8 = 0x03
 
 /// Minimum frame header size in bytes.
 public let minFrameHeaderBytes = 1 + 1 + 2 + 8 + 4
@@ -88,6 +93,7 @@ public func encodeHelperHealth(
     framesDelivered: UInt64,
     framesSuppressed: UInt64,
     framesRedactedByFailsafe: UInt64,
+    cascadeForcedCount: UInt64,
     framesDroppedBackpressure: UInt64,
     framesDroppedLateAck: UInt64
 ) -> Data {
@@ -95,9 +101,14 @@ public func encodeHelperHealth(
     payload.appendUInt64LE(uptimeMs)
     payload.appendUInt64LE(framesDelivered)
     payload.appendUInt64LE(framesSuppressed)
-    // §7 fail-safe subcount — wire 0x02. Order matches
+    // §7 fail-safe subcount — introduced wire 0x02. Order matches
     // core::ipc::wire decode: directly after frames_suppressed.
     payload.appendUInt64LE(framesRedactedByFailsafe)
+    // STEP-2-FINDING-004 floor-forced cascade counter — wire 0x03.
+    // Disjoint from filter-passed cascade calls; observability-only.
+    // Order matches core::ipc::wire decode: directly after
+    // frames_redacted_by_failsafe and before the drop-side counters.
+    payload.appendUInt64LE(cascadeForcedCount)
     payload.appendUInt64LE(framesDroppedBackpressure)
     payload.appendUInt64LE(framesDroppedLateAck)
     return assembleFrame(msgType: .helperHealth, seq: seq, payload: payload)

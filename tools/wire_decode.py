@@ -12,7 +12,7 @@
 # Wire format mirrors `adapters/macos/.../IPC/Wire.swift` /
 # `core/src/ipc/wire.rs` (binary, little-endian):
 #
-#   magic(1=0x4D) + version(1=0x02) + msg_type(2) + seq(8) + len(4) + payload(len)
+#   magic(1=0x4D) + version(1=0x03) + msg_type(2) + seq(8) + len(4) + payload(len)
 #
 # msg_type discriminants (MUST match Wire.swift `MessageType`):
 #   0x0001 captureStart   0x0002 captureStop
@@ -47,8 +47,13 @@ import sys
 from collections import Counter
 
 MAGIC = 0x4D
-VERSION = 0x02  # wire bumped 0x01->0x02 (PR #24: HelperHealth frames_redacted_by_failsafe)
+VERSION = 0x03  # wire bumped 0x02->0x03 (STEP-2-FINDING-004: HelperHealth cascade_forced_count)
 HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
+# HelperHealth v0x03 payload = 7 × u64 LE = 56 bytes:
+#   uptime_ms · frames_delivered · frames_suppressed ·
+#   frames_redacted_by_failsafe · cascade_forced_count ·
+#   frames_dropped_backpressure · frames_dropped_late_ack
+HELPER_HEALTH_PAYLOAD = 7 * 8
 
 MSG = {
     0x0001: "captureStart",
@@ -122,6 +127,36 @@ def main(path, verbose):
     by_type = Counter(MSG.get(m, f"unknown(0x{m:04X})") for m, _, _ in frames)
     tombstones = [(s, p) for (m, s, p) in frames if m == 0x0011]
     state_events = [(s, p) for (m, s, p) in frames if m == 0x0010]
+    health_frames = [(s, p) for (m, s, p) in frames if m == 0x0030]
+
+    # HelperHealth v0x03 payload: 7 u64s. Parse what we can — a
+    # malformed payload-length-mismatch is reported, not silently
+    # papered over.
+    health_parsed = []  # list of dicts in chronological seq order
+    health_malformed = []
+    for s, p in health_frames:
+        if len(p) != HELPER_HEALTH_PAYLOAD:
+            health_malformed.append((s, len(p)))
+            continue
+        (
+            uptime_ms,
+            frames_delivered,
+            frames_suppressed,
+            frames_redacted_by_failsafe,
+            cascade_forced_count,
+            frames_dropped_backpressure,
+            frames_dropped_late_ack,
+        ) = struct.unpack_from("<QQQQQQQ", p, 0)
+        health_parsed.append({
+            "seq": s,
+            "uptime_ms": uptime_ms,
+            "frames_delivered": frames_delivered,
+            "frames_suppressed": frames_suppressed,
+            "frames_redacted_by_failsafe": frames_redacted_by_failsafe,
+            "cascade_forced_count": cascade_forced_count,
+            "frames_dropped_backpressure": frames_dropped_backpressure,
+            "frames_dropped_late_ack": frames_dropped_late_ack,
+        })
 
     reason_hist = Counter()
     bad_reason_seqs = []
@@ -166,6 +201,31 @@ def main(path, verbose):
     print(f"  reason histogram: {dict(reason_hist)}")
     print("--- StateTransitionEvent (0x0010) ---")
     print(f"  count           : {len(state_events)}  (MUST be 0 — any > 0 = pixels/event reached IPC)")
+
+    # ---- HelperHealth (wire 0x03) ----
+    print("--- HelperHealth (0x0030) ---")
+    print(f"  count           : {len(health_frames)}")
+    if health_malformed:
+        print(f"  MALFORMED       : {len(health_malformed)} frame(s) — payload len mismatch (expected {HELPER_HEALTH_PAYLOAD} bytes)")
+        for s, ln in health_malformed[:10]:
+            print(f"    seq={s} len={ln}")
+    if health_parsed:
+        # Per-message: print the last one's snapshot — usually the most
+        # interesting at end-of-run.
+        last = health_parsed[-1]
+        print(f"  last snapshot   : seq={last['seq']}  uptime_ms={last['uptime_ms']}")
+        print(f"                    frames_delivered={last['frames_delivered']}")
+        print(f"                    frames_suppressed={last['frames_suppressed']}")
+        print(f"                    frames_redacted_by_failsafe={last['frames_redacted_by_failsafe']}")
+        print(f"                    cascade_forced_count={last['cascade_forced_count']}")
+        print(f"                    frames_dropped_backpressure={last['frames_dropped_backpressure']}")
+        print(f"                    frames_dropped_late_ack={last['frames_dropped_late_ack']}")
+        # End-of-stream running totals: each counter is monotonic, so
+        # the final HelperHealth carries the run totals. We print them
+        # explicitly alongside the per-message snapshot for the
+        # Telemetry-Gap analyst's static-secure-surface signal.
+        print(f"  running totals  : frames_redacted_by_failsafe={last['frames_redacted_by_failsafe']}  "
+              f"cascade_forced_count={last['cascade_forced_count']}")
 
     if verbose:
         # Per-frame dump for temporal correlation against a paper log

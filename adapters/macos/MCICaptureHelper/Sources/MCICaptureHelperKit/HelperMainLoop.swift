@@ -47,12 +47,11 @@ public actor HelperHealthCounters {
     private var framesDroppedLateAck: UInt64 = 0
     /// Cascade evaluations that ran because the `SmartCaptureFilter`
     /// returned `.forward` / `.forwardTieBreak` (the natural path).
-    /// In-process observable only; NOT on the wire — STEP-2-FINDING-004
-    /// fix keeps the wire schema unchanged (a u64 add to `HelperHealth`
-    /// is a `0x02 → 0x03` bump per the PR #24 precedent + the
-    /// `decode_rejects_old_0x01_frame` trip-wire in `core/src/ipc/`,
-    /// and the spec footnote defers the wire bump to a separate CSO-
-    /// gated PR).
+    /// In-process observability for the floor-vs-filter ratio; NOT
+    /// surfaced on the wire (only its disjoint counterpart
+    /// `cascadeForced` was promoted to the wire by the 0x02 → 0x03
+    /// bump — the floor counter is the privacy-relevant signal for
+    /// the Telemetry-Gap analyst on static secure surfaces).
     private var cascadeFromFilter: UInt64 = 0
     /// Cascade evaluations forced by the cascade floor — the filter
     /// returned a `.drop*` decision but the wall-clock since the last
@@ -61,8 +60,8 @@ public actor HelperHealthCounters {
     /// fix: under a static secure surface (FairPlay, sudo password
     /// entry, secure-field focus) the filter eats every frame; this
     /// counter is how the wire observer notices that the floor is
-    /// doing what the filter cannot. In-process only — see the comment
-    /// on `cascadeFromFilter` above.
+    /// doing what the filter cannot. Surfaced on the wire as
+    /// `HelperHealth.cascade_forced_count` after the 0x02 → 0x03 bump.
     private var cascadeForced: UInt64 = 0
 
     public init(startedAt: Date = Date()) {
@@ -93,10 +92,9 @@ public actor HelperHealthCounters {
 
     /// Snapshot in the shape `Wire.encodeHelperHealth` consumes.
     ///
-    /// `cascadeFromFilter` + `cascadeForced` are exposed here as the
-    /// in-process observability surface for the STEP-2-FINDING-004
-    /// floor — they are NOT on the wire (no schema bump in this PR;
-    /// see `cascadeFromFilter`'s field docs).
+    /// `cascadeForced` is surfaced on the wire by the 0x02 → 0x03 bump
+    /// (STEP-2-FINDING-004). `cascadeFromFilter` stays in-process only
+    /// — see its field docs.
     public func snapshot(now: Date = Date()) -> HelperHealthSnapshot {
         let uptimeMs = UInt64(max(0, now.timeIntervalSince(startedAt) * 1000))
         return HelperHealthSnapshot(
@@ -121,11 +119,12 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
     public let framesRedactedByFailsafe: UInt64
     public let framesDroppedBackpressure: UInt64
     public let framesDroppedLateAck: UInt64
-    /// Filter-passed cascade evaluations. In-process only — NOT on the
-    /// wire in this PR; see `HelperHealthCounters.cascadeFromFilter`.
+    /// Filter-passed cascade evaluations. In-process only — see
+    /// `HelperHealthCounters.cascadeFromFilter`.
     public let cascadeFromFilter: UInt64
-    /// Floor-forced cascade evaluations. In-process only — NOT on the
-    /// wire in this PR; see `HelperHealthCounters.cascadeForced`.
+    /// Floor-forced cascade evaluations. Surfaced on the wire as
+    /// `HelperHealth.cascade_forced_count` after the 0x02 → 0x03 bump
+    /// (STEP-2-FINDING-004). See `HelperHealthCounters.cascadeForced`.
     public let cascadeForced: UInt64
 
     public init(
@@ -250,6 +249,12 @@ public struct HelperMainLoop: Sendable {
             framesDelivered: snap.framesDelivered,
             framesSuppressed: snap.framesSuppressed,
             framesRedactedByFailsafe: snap.framesRedactedByFailsafe,
+            // STEP-2-FINDING-004 floor-forced cascade counter — wire
+            // 0x03. Sourced from the in-process counter incremented
+            // by `SCStreamPipeline.process(...)` when the cascade ran
+            // because the floor heartbeat elapsed (not because the
+            // filter passed). Strictly disjoint from `cascadeFromFilter`.
+            cascadeForcedCount: snap.cascadeForced,
             framesDroppedBackpressure: snap.framesDroppedBackpressure,
             framesDroppedLateAck: snap.framesDroppedLateAck
         )

@@ -72,6 +72,14 @@ pub struct HealthLogRecord {
     /// CRS Telemetry-Gap privacy-regression sentinel (a fail-safe
     /// spike = the cascade lost positive-classification ability).
     pub frames_redacted_by_failsafe: u64,
+    /// Cumulative count of cascade evaluations that ran because the
+    /// cascade-floor heartbeat elapsed (filter returned `.drop*` but
+    /// the floor interval forced the cascade anyway). Promoted to
+    /// the wire by the 0x02 → 0x03 bump (STEP-2-FINDING-004) and
+    /// mirrored here for the Telemetry-Gap analyst's static-secure-
+    /// surface signal — content-free counter, no user text or
+    /// identifiers; safe to persist under the §9.3 / NG3 invariant.
+    pub cascade_forced_count: u64,
     /// Cumulative counters since helper start.
     pub frames_dropped_backpressure: u64,
     /// Cumulative counters since helper start.
@@ -91,13 +99,14 @@ impl HealthLogRecord {
         // standard JSON way for the wall_ts (it shouldn't contain
         // quotes; future change might).
         format!(
-            r#"{{"wall_ts":"{}","device_id":"{}","uptime_ms":{},"frames_delivered":{},"frames_suppressed":{},"frames_redacted_by_failsafe":{},"frames_dropped_backpressure":{},"frames_dropped_late_ack":{}}}"#,
+            r#"{{"wall_ts":"{}","device_id":"{}","uptime_ms":{},"frames_delivered":{},"frames_suppressed":{},"frames_redacted_by_failsafe":{},"cascade_forced_count":{},"frames_dropped_backpressure":{},"frames_dropped_late_ack":{}}}"#,
             escape_json_string(&self.wall_ts),
             escape_json_string(&self.device_id),
             self.uptime_ms,
             self.frames_delivered,
             self.frames_suppressed,
             self.frames_redacted_by_failsafe,
+            self.cascade_forced_count,
             self.frames_dropped_backpressure,
             self.frames_dropped_late_ack,
         )
@@ -226,6 +235,7 @@ mod tests {
             frames_delivered: 10,
             frames_suppressed: 2,
             frames_redacted_by_failsafe: 1,
+            cascade_forced_count: 3,
             frames_dropped_backpressure: 0,
             frames_dropped_late_ack: 0,
         }
@@ -237,7 +247,7 @@ mod tests {
         let line = r.to_json_line();
         assert_eq!(
             line,
-            r#"{"wall_ts":"2026-05-19T04:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1234,"frames_delivered":10,"frames_suppressed":2,"frames_redacted_by_failsafe":1,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0}"#
+            r#"{"wall_ts":"2026-05-19T04:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1234,"frames_delivered":10,"frames_suppressed":2,"frames_redacted_by_failsafe":1,"cascade_forced_count":3,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0}"#
         );
     }
 

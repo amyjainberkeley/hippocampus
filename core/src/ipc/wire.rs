@@ -19,13 +19,24 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 ///
 /// `0x01 → 0x02` (2026-05-19): `HelperHealth` gained the
 /// `frames_redacted_by_failsafe` counter (a §7 fail-safe privacy-
-/// regression sentinel for the CRS Telemetry-Gap analyst). The decoder
-/// rejects any other version: helper and core ship **version-locked**
-/// in the same signed bundle and capture is default-OFF, so there are
-/// no persisted or in-flight `0x01` frames to remain compatible with —
-/// a hard version break is the correct, auditable choice over a
-/// silently mis-parsed payload.
-pub const FRAME_VERSION: u8 = 0x02;
+/// regression sentinel for the CRS Telemetry-Gap analyst).
+///
+/// `0x02 → 0x03` (2026-05-20): `HelperHealth` gained the
+/// `cascade_forced_count` counter — monotonically-increasing total of
+/// cascade evaluations that ran because the cascade-floor heartbeat
+/// elapsed (filter returned `.drop*` but the wall-clock since the last
+/// cascade run reached `cascadeFloorIntervalMs`), strictly disjoint
+/// from the existing filter-passed cascade calls. STEP-2-FINDING-004's
+/// in-process counter (`HelperHealthCounters.cascadeForced`) is now
+/// surfaced on the wire so the Telemetry-Gap analyst can observe
+/// floor-forced evaluations on static secure surfaces.
+///
+/// The decoder rejects any other version: helper and core ship
+/// **version-locked** in the same signed bundle and capture is
+/// default-OFF, so there are no persisted or in-flight `0x01` / `0x02`
+/// frames to remain compatible with — a hard version break is the
+/// correct, auditable choice over a silently mis-parsed payload.
+pub const FRAME_VERSION: u8 = 0x03;
 
 /// Header size in bytes: magic(1) + version(1) + `msg_type(2)` + seq(8) + len(4).
 pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
@@ -251,6 +262,7 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             frames_delivered,
             frames_suppressed,
             frames_redacted_by_failsafe,
+            cascade_forced_count,
             frames_dropped_backpressure,
             frames_dropped_late_ack,
         } => {
@@ -258,6 +270,11 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             out.extend_from_slice(&frames_delivered.to_le_bytes());
             out.extend_from_slice(&frames_suppressed.to_le_bytes());
             out.extend_from_slice(&frames_redacted_by_failsafe.to_le_bytes());
+            // wire 0x03: cascade_forced_count immediately follows
+            // frames_redacted_by_failsafe (the PR #24 precedent: a new
+            // u64 inserts in the natural "what does the cascade see"
+            // cluster, before the drop-side counters).
+            out.extend_from_slice(&cascade_forced_count.to_le_bytes());
             out.extend_from_slice(&frames_dropped_backpressure.to_le_bytes());
             out.extend_from_slice(&frames_dropped_late_ack.to_le_bytes());
         }
@@ -389,6 +406,7 @@ fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usi
             let frames_delivered = p.u64_le()?;
             let frames_suppressed = p.u64_le()?;
             let frames_redacted_by_failsafe = p.u64_le()?;
+            let cascade_forced_count = p.u64_le()?;
             let frames_dropped_backpressure = p.u64_le()?;
             let frames_dropped_late_ack = p.u64_le()?;
             Message::HelperHealth {
@@ -396,6 +414,7 @@ fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usi
                 frames_delivered,
                 frames_suppressed,
                 frames_redacted_by_failsafe,
+                cascade_forced_count,
                 frames_dropped_backpressure,
                 frames_dropped_late_ack,
             }
@@ -556,30 +575,160 @@ mod tests {
             frames_delivered: 1_000_000,
             frames_suppressed: 42,
             frames_redacted_by_failsafe: 13,
+            cascade_forced_count: 5,
             frames_dropped_backpressure: 7,
             frames_dropped_late_ack: 0,
         });
     }
 
     #[test]
-    fn frame_version_is_0x02() {
-        // Trip-wire: the wire bump for `frames_redacted_by_failsafe`
-        // moved the version 0x01 → 0x02. The Swift `Wire.swift` mirror
-        // and the byte fixtures in `WireTests.swift` MUST match this.
-        assert_eq!(FRAME_VERSION, 0x02);
-        let buf = encode(0, &Message::CaptureStop);
-        assert_eq!(buf[1], 0x02, "version byte in the framed header");
+    fn helper_health_cross_side_fixture() {
+        // Byte-exact mirror of the Swift
+        // `WireFixturesTests.testHelperHealthCrossSideFixture` and the
+        // layout parsed by `tools/wire_decode.py`. If any of those
+        // three drift, the IPC contract is broken silently. This
+        // fixture is the observable trip-wire.
+        let buf = encode(
+            42,
+            &Message::HelperHealth {
+                uptime_ms: 1,
+                frames_delivered: 2,
+                frames_suppressed: 3,
+                frames_redacted_by_failsafe: 4,
+                cascade_forced_count: 5,
+                frames_dropped_backpressure: 6,
+                frames_dropped_late_ack: 7,
+            },
+        );
+        let expected: [u8; 72] = [
+            0x4D, 0x03, 0x30, 0x00,
+            0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x38, 0x00, 0x00, 0x00,
+            // u64 LE × 7
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        assert_eq!(buf, expected.to_vec(), "HelperHealth v0x03 cross-side fixture");
+
+        // And the round-trip decoder reads exactly back what the
+        // encoder produced — proves the v0x03 layout is self-consistent.
+        let (frame, used) = decode(&buf).expect("decode v0x03 fixture");
+        assert_eq!(used, buf.len());
+        assert_eq!(frame.seq, 42);
+        assert_eq!(
+            frame.message,
+            Message::HelperHealth {
+                uptime_ms: 1,
+                frames_delivered: 2,
+                frames_suppressed: 3,
+                frames_redacted_by_failsafe: 4,
+                cascade_forced_count: 5,
+                frames_dropped_backpressure: 6,
+                frames_dropped_late_ack: 7,
+            }
+        );
     }
 
     #[test]
-    fn decode_rejects_old_0x01_frame() {
-        // Helper + core ship version-locked; an 0x01 frame is a stale
+    fn helper_health_v0x03_payload_is_seven_u64s() {
+        // Trip-wire: the wire 0x03 bump added one u64
+        // (`cascade_forced_count`). The frame is now header(16) + 7 ×
+        // u64(56) = 72 bytes. The Swift mirror's `testHelperHealthFixture`
+        // asserts the same length. Drift here = silent IPC break.
+        let buf = encode(
+            1,
+            &Message::HelperHealth {
+                uptime_ms: 1000,
+                frames_delivered: 100,
+                frames_suppressed: 5,
+                frames_redacted_by_failsafe: 3,
+                cascade_forced_count: 11,
+                frames_dropped_backpressure: 2,
+                frames_dropped_late_ack: 0,
+            },
+        );
+        assert_eq!(buf.len(), MIN_FRAME_HEADER_BYTES + 7 * 8);
+        // cascade_forced_count is the 5th u64 of the payload.
+        // Offset = header(16) + 4 × u64(32) = 48.
+        let off = MIN_FRAME_HEADER_BYTES + 4 * 8;
+        let cfc = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap());
+        assert_eq!(cfc, 11);
+    }
+
+    #[test]
+    fn frame_version_is_0x03() {
+        // Trip-wire: the wire bump for `cascade_forced_count` moved
+        // the version 0x02 → 0x03 (STEP-2-FINDING-004). The Swift
+        // `Wire.swift` mirror and the byte fixtures in `WireTests.swift`
+        // MUST match this.
+        assert_eq!(FRAME_VERSION, 0x03);
+        let buf = encode(0, &Message::CaptureStop);
+        assert_eq!(buf[1], 0x03, "version byte in the framed header");
+    }
+
+    #[test]
+    fn decode_rejects_old_0x02_frame() {
+        // Helper + core ship version-locked; an 0x02 frame is a stale
         // peer, not a compatible one. The decoder rejects it loudly
-        // rather than mis-parsing a `HelperHealth` whose layout moved.
+        // rather than mis-parsing a `HelperHealth` whose layout moved
+        // (0x02 had 6 u64s; 0x03 has 7 — reading 0x02's payload at
+        // 0x03's layout would either truncate or silently mis-cluster
+        // the disjoint cascade-forced counter).
+        let mut buf = encode(0, &Message::CaptureStop);
+        buf[1] = 0x02;
+        let err = decode(&buf).unwrap_err();
+        assert!(matches!(err, DecodeError::UnsupportedVersion { got: 0x02 }));
+    }
+
+    #[test]
+    fn decode_rejects_old_0x01_frame_at_v0x03_layout() {
+        // Cross-version regression guard. The decoder MUST refuse to
+        // read a 0x01 (or any non-FRAME_VERSION) frame at the v0x03
+        // payload layout. Without this, a stale signed helper from a
+        // prior bundle could pump 0x01 bytes into a 0x03 core and the
+        // strict payload-length consumption tripwire downstream would
+        // not catch it (the version check fails first, which is the
+        // whole point — fail loud at the trust boundary).
         let mut buf = encode(0, &Message::CaptureStop);
         buf[1] = 0x01;
         let err = decode(&buf).unwrap_err();
         assert!(matches!(err, DecodeError::UnsupportedVersion { got: 0x01 }));
+    }
+
+    #[test]
+    fn decode_rejects_old_v0x02_helper_health_payload() {
+        // A v0x02 HelperHealth payload was 6 × u64 = 48 bytes; the
+        // v0x03 decoder expects 7 × u64 = 56 bytes. Hand-craft a
+        // header that claims v0x03 but carries a v0x02-shaped payload
+        // — strict payload-length consumption (PayloadLengthMismatch)
+        // is what guards against silent cross-version reads after the
+        // version byte alone would not (e.g. a misconfigured proxy).
+        // This is the "payload-strict-consumption tripwire" called out
+        // in the PR body.
+        let mut payload = Vec::with_capacity(48);
+        for v in 0u64..6 {
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut buf = vec![FRAME_MAGIC, FRAME_VERSION];
+        buf.extend_from_slice(&(MessageType::HelperHealth as u16).to_le_bytes());
+        buf.extend_from_slice(&0_u64.to_le_bytes());
+        #[allow(clippy::cast_possible_truncation)]
+        let payload_len = payload.len() as u32;
+        buf.extend_from_slice(&payload_len.to_le_bytes());
+        buf.extend_from_slice(&payload);
+
+        let err = decode(&buf).unwrap_err();
+        // The decoder runs out of payload bytes trying to read the
+        // 7th u64 — surfaces as a Truncated parser error.
+        assert!(
+            matches!(err, DecodeError::Truncated { .. }),
+            "expected Truncated on a 48-byte v0x02-shaped payload at v0x03, got {err:?}"
+        );
     }
 
     #[test]

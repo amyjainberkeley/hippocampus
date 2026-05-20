@@ -22,7 +22,7 @@ final class WireFixturesTests: XCTestCase {
         let frame = encodeCaptureStop(seq: 0)
         var expected = Data()
         expected.append(0x4D)                              // magic
-        expected.append(frameVersion)                      // version (0x02)
+        expected.append(frameVersion)                      // version (0x03)
         expected.append(contentsOf: [0x02, 0x00])          // msg_type 0x0002 LE
         expected.append(contentsOf: [UInt8](repeating: 0, count: 8))  // seq 0
         expected.append(contentsOf: [0x00, 0x00, 0x00, 0x00])         // len 0
@@ -38,7 +38,7 @@ final class WireFixturesTests: XCTestCase {
         )
         let frame = encodePrivacyTombstone(seq: 7, tombstone: t)
 
-        // Header: magic 4D + ver 01 + msg_type 0011 + seq 7 + len = ?
+        // Header: magic 4D + ver 03 + msg_type 0011 + seq 7 + len = ?
         // Payload: ts_us(8=0) + app_bundle_len(2=16) + "com.apple.Safari"(16) + reason(1=4)
         // = 8 + 2 + 16 + 1 = 27 bytes
         let expectedPayloadLen = 27
@@ -101,12 +101,14 @@ final class WireFixturesTests: XCTestCase {
             framesDelivered: 100,
             framesSuppressed: 5,
             framesRedactedByFailsafe: 3,
+            cascadeForcedCount: 11,
             framesDroppedBackpressure: 2,
             framesDroppedLateAck: 0
         )
-        // wire 0x02: Header(16) + 6 × u64(8) = 64 bytes (was 5 × u64
-        // = 56 at 0x01; frames_redacted_by_failsafe added the 6th).
-        XCTAssertEqual(frame.count, minFrameHeaderBytes + 48)
+        // wire 0x03: Header(16) + 7 × u64(8) = 72 bytes (was 64 at
+        // 0x02 = 6 × u64; cascade_forced_count added the 7th —
+        // STEP-2-FINDING-004 floor-forced cascade observability).
+        XCTAssertEqual(frame.count, minFrameHeaderBytes + 56)
         XCTAssertEqual(frame[0], 0x4D)
         XCTAssertEqual(frame[1], frameVersion)
         XCTAssertEqual(frame[2], 0x30)  // msg_type 0x0030
@@ -117,13 +119,56 @@ final class WireFixturesTests: XCTestCase {
         let fsOffset = minFrameHeaderBytes + 24
         XCTAssertEqual(frame[fsOffset], 3)
         for i in 1..<8 { XCTAssertEqual(frame[fsOffset + i], 0) }
+
+        // The 5th u64 of the payload is cascade_forced_count (= 11
+        // here). Offset = header(16) + 4×u64(32) = 48.
+        let cfcOffset = minFrameHeaderBytes + 32
+        XCTAssertEqual(frame[cfcOffset], 11)
+        for i in 1..<8 { XCTAssertEqual(frame[cfcOffset + i], 0) }
     }
 
     /// Cross-side version lock — mirrors the Rust
-    /// `wire::tests::frame_version_is_0x02` trip-wire. If the two
+    /// `wire::tests::frame_version_is_0x03` trip-wire. If the two
     /// sides ever disagree the IPC contract is silently broken.
-    func testFrameVersionIs0x02() {
-        XCTAssertEqual(frameVersion, 0x02)
+    func testFrameVersionIs0x03() {
+        XCTAssertEqual(frameVersion, 0x03)
+    }
+
+    /// Byte-exact cross-side fixture — pin the full HelperHealth v0x03
+    /// frame. The Rust-side `wire::tests::helper_health_cross_side_fixture`
+    /// asserts the SAME 72-byte vector for the SAME input tuple, and
+    /// `tools/wire_decode.py` parses the same layout. If any of those
+    /// three drifts, the IPC contract is broken — this is the
+    /// observable trip-wire.
+    func testHelperHealthCrossSideFixture() {
+        let frame = encodeHelperHealth(
+            seq: 42,
+            uptimeMs: 1,
+            framesDelivered: 2,
+            framesSuppressed: 3,
+            framesRedactedByFailsafe: 4,
+            cascadeForcedCount: 5,
+            framesDroppedBackpressure: 6,
+            framesDroppedLateAck: 7
+        )
+        // Header(16): magic(4D) ver(03) msg_type(30 00 LE = 0x0030)
+        //             seq(2A 00 ... LE = 42) len(38 00 00 00 = 56)
+        // Payload(56): 7 u64 LE = 1, 2, 3, 4, 5, 6, 7 (little-endian)
+        let expected: [UInt8] = [
+            0x4D, 0x03, 0x30, 0x00,
+            0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x38, 0x00, 0x00, 0x00,
+            // u64 LE × 7
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]
+        XCTAssertEqual(frame.count, 72)
+        XCTAssertEqual(Array(frame), expected, "HelperHealth v0x03 byte-exact cross-side fixture")
     }
 
     /// MessageType discriminants match the Rust spec.

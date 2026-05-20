@@ -128,9 +128,9 @@ final class FrameSequenceTests: XCTestCase {
 
 final class HelperMainLoopTests: XCTestCase {
     /// tickHealth emits exactly one HelperHealth frame whose payload
-    /// length matches the wire spec. wire 0x02: 16 header + 6 × u64
-    /// (48) = 64 bytes (was 56 at 0x01, before the
-    /// frames_redacted_by_failsafe counter was added).
+    /// length matches the wire spec. wire 0x03: 16 header + 7 × u64
+    /// (56) = 72 bytes (was 64 at 0x02, before the
+    /// cascade_forced_count counter was added per STEP-2-FINDING-004).
     func testTickHealthEmitsOneFrameWithCorrectLength() async throws {
         let sink = RecordingFrameSink()
         let loop = HelperMainLoop(
@@ -140,8 +140,8 @@ final class HelperMainLoopTests: XCTestCase {
         try await loop.tickHealth()
         let frames = await sink.recorded()
         XCTAssertEqual(frames.count, 1)
-        // Header(16) + 6 × u64(48) = 64 bytes.
-        XCTAssertEqual(frames[0].count, 64)
+        // Header(16) + 7 × u64(56) = 72 bytes.
+        XCTAssertEqual(frames[0].count, 72)
         // Wire magic + version.
         XCTAssertEqual(frames[0][0], 0x4D)
         XCTAssertEqual(frames[0][1], frameVersion)

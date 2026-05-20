@@ -269,6 +269,7 @@ mod tests {
             frames_delivered: 10,
             frames_suppressed: 1,
             frames_redacted_by_failsafe: 0,
+            cascade_forced_count: 0,
             frames_dropped_backpressure: 0,
             frames_dropped_late_ack: 0,
         };

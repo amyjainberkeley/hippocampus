@@ -28,7 +28,7 @@
 //! ```text
 //! +-----------+--------+------------------+
 //! | magic     | u8     | 0x4D = 'M'       |
-//! | version   | u8     | currently 0x02   |
+//! | version   | u8     | currently 0x03   |
 //! | msg_type  | u16 LE | discriminant     |
 //! | seq       | u64 LE | monotonic seq id |
 //! | len       | u32 LE | payload bytes    |
@@ -159,6 +159,23 @@ pub enum Message {
         /// (it fails closed) but signals an upstream classification
         /// regression that `frames_suppressed` alone would mask.
         frames_redacted_by_failsafe: u64,
+        /// Cascade evaluations that ran because the cascade-floor
+        /// heartbeat elapsed — the filter returned a `.drop*` decision
+        /// but the wall-clock since the last cascade run reached
+        /// `cascadeFloorIntervalMs`, so the helper pipeline forced the
+        /// cascade anyway. Surfaced on the wire by the `0x02 → 0x03`
+        /// bump (STEP-2-FINDING-004): under a static secure surface
+        /// (FairPlay, sudo password entry, secure-field focus) the
+        /// SmartCaptureFilter eats every frame; this counter is how
+        /// the Telemetry-Gap analyst observes that the floor is doing
+        /// what the filter cannot. **Strictly disjoint** from the
+        /// existing filter-passed cascade calls (a single `process()`
+        /// call increments exactly one of them whenever the cascade
+        /// runs). NOT a subset of `frames_suppressed` — the floor-
+        /// forced cascade can still emit a tombstone (`.suppress`),
+        /// so the two streams can overlap, but it is observability-
+        /// only and does not affect any fail-closed semantics.
+        cascade_forced_count: u64,
         /// Frames dropped on backpressure (queue full).
         frames_dropped_backpressure: u64,
         /// Frames dropped on late ack (core held the surface past the
@@ -381,6 +398,7 @@ mod tests {
                 frames_delivered: 0,
                 frames_suppressed: 0,
                 frames_redacted_by_failsafe: 0,
+                cascade_forced_count: 0,
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
             },
