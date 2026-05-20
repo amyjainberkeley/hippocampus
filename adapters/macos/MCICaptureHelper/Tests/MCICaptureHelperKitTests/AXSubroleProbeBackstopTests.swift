@@ -451,3 +451,186 @@ final class AXSubroleProbePasswordRegexTests: XCTestCase {
         XCTAssertEqual(AXSubroleProbe.tokenize(""), [])
     }
 }
+
+// MARK: - STEP-2-FINDING-003 regex tightening
+
+/// Pins STEP-2-FINDING-003: URL-parameter shapes that co-tokenize with
+/// the positive set (`secure`, `unlock`, etc.) must be rejected by the
+/// stopword arm of `passwordIdentifierMatches(...)`. Natural identifier
+/// shapes (`MyPasswordField`, `Passcode`) must still match.
+///
+/// Pure / side-effect-free — no AX, no live calls.
+final class AXSubroleProbePasswordRegexFinding003Tests: XCTestCase {
+
+    // ───────── URL-parameter false-positives (must now be negative) ─────────
+
+    /// "IsSecure=true&UUID=8868DC69" — the exact tokenization shape
+    /// observed in real-Mac evidence (PR #38 post-merge live test).
+    /// Tokens: ["Is","Secure","true","UUID","8868DC69"] → contains the
+    /// stopwords `is` and `uuid` ⇒ must not match.
+    func testIsSecureUUIDUrlShapeDoesNotMatch() {
+        XCTAssertFalse(
+            AXSubroleProbe.passwordIdentifierMatches(
+                "IsSecure=true&UUID=8868DC69"))
+    }
+
+    /// "SafariWindow?IsSecure=true&UUID=8868DC69" — the literal Safari
+    /// window identifier observed in the live false-positive run. Six
+    /// of six reason=4 tombstones came from this shape; the regex
+    /// backstop must now reject it.
+    func testSafariWindowFullIdentifierDoesNotMatch() {
+        XCTAssertFalse(
+            AXSubroleProbe.passwordIdentifierMatches(
+                "SafariWindow?IsSecure=true&UUID=8868DC69"))
+    }
+
+    /// "isPasswordValid" — boolean predicate variable. Contains the
+    /// stopword `is`; tokens: ["is","Password","Valid"] ⇒ must not
+    /// match even though "Password" is in the positive set.
+    func testIsPasswordValidPredicateDoesNotMatch() {
+        XCTAssertFalse(
+            AXSubroleProbe.passwordIdentifierMatches("isPasswordValid"))
+    }
+
+    /// "hasPassword" — getter-style. Tokens: ["has","Password"];
+    /// stopword `has` ⇒ must not match.
+    func testHasPasswordGetterDoesNotMatch() {
+        XCTAssertFalse(
+            AXSubroleProbe.passwordIdentifierMatches("hasPassword"))
+    }
+
+    /// "wasUnlocked" — past-tense predicate. Tokens: ["was","Unlocked"].
+    /// `unlocked` is not in the positive set (only `unlock` is), so
+    /// this would already return false on the positive guard. The
+    /// `was` stopword pins refactor-safety: if someone widens the
+    /// positive set to include past-tense forms, this must stay
+    /// negative.
+    func testWasUnlockedPredicateDoesNotMatch() {
+        XCTAssertFalse(
+            AXSubroleProbe.passwordIdentifierMatches("wasUnlocked"))
+    }
+
+    /// "isSecureField" — directly mirrors the IsSecure URL token but
+    /// in CamelCase predicate form. Tokens: ["is","Secure","Field"];
+    /// positive `secure` + negative `is` ⇒ must not match.
+    func testIsSecureFieldPredicateDoesNotMatch() {
+        XCTAssertFalse(
+            AXSubroleProbe.passwordIdentifierMatches("isSecureField"))
+    }
+
+    /// "PasswordId" — identifier suffix shape. Tokens:
+    /// ["Password","Id"] ⇒ positive `password` + negative `id` ⇒ does
+    /// not match. Accepted cost: identifiers literally suffixed
+    /// with `Id` are rejected — privacy still preserved by the §7
+    /// fail-safe catchall.
+    func testPasswordIdSuffixDoesNotMatch() {
+        XCTAssertFalse(
+            AXSubroleProbe.passwordIdentifierMatches("PasswordId"))
+    }
+
+    // ───────── natural identifiers still match (regression guard) ─────────
+
+    /// "MyPasswordField" — the canonical positive from the
+    /// STEP-2-FINDING-001 brief. Tokens: ["My","Password","Field"] ⇒
+    /// no stopword overlap ⇒ must still match.
+    func testMyPasswordFieldStillMatchesAfterTightening() {
+        XCTAssertTrue(
+            AXSubroleProbe.passwordIdentifierMatches("MyPasswordField"))
+    }
+
+    /// "Passcode" — single positive token. Tokens: ["Passcode"] ⇒ no
+    /// stopword overlap ⇒ must still match.
+    func testPasscodeStillMatchesAfterTightening() {
+        XCTAssertTrue(
+            AXSubroleProbe.passwordIdentifierMatches("Passcode"))
+    }
+
+    /// "secret-pin" — two positive tokens hyphen-separated. Tokens:
+    /// ["secret","pin"] ⇒ no stopword overlap ⇒ must still match.
+    func testSecretPinStillMatchesAfterTightening() {
+        XCTAssertTrue(
+            AXSubroleProbe.passwordIdentifierMatches("secret-pin"))
+    }
+
+    /// "Unlock Screen" — title shape. Tokens: ["Unlock","Screen"] ⇒
+    /// positive `unlock`, no stopword overlap ⇒ must still match.
+    func testUnlockScreenStillMatchesAfterTightening() {
+        XCTAssertTrue(
+            AXSubroleProbe.passwordIdentifierMatches("Unlock Screen"))
+    }
+
+    /// "PasswordEntry" — CamelCase natural identifier. Tokens:
+    /// ["Password","Entry"] ⇒ no stopword overlap ⇒ matches.
+    func testPasswordEntryStillMatchesAfterTightening() {
+        XCTAssertTrue(
+            AXSubroleProbe.passwordIdentifierMatches("PasswordEntry"))
+    }
+}
+
+// MARK: - STEP-2-FINDING-003 container-traversal tightening
+
+/// Pins STEP-2-FINDING-003 fix #1: `AXWindow` removed from
+/// `containerRoles` so the regex backstop does NOT descend into the
+/// children of a focused entire-app window (the Safari false-positive
+/// case). Non-window containers (dialog / sheet / group / popover /
+/// drawer / split-group / scroll-area) still drive descendant walks.
+///
+/// The data is what we verify here — the live `identifierRegexSignal`
+/// branches on `containerRoles.contains(role)`, so this set IS the
+/// contract.
+final class AXSubroleProbeContainerRolesFinding003Tests: XCTestCase {
+
+    /// AXWindow MUST NOT be in containerRoles. Removing it is the
+    /// fix; a regression here re-opens the Safari URL-param
+    /// false-positive surface.
+    func testAXWindowExcludedFromContainerRoles() {
+        XCTAssertFalse(AXSubroleProbe.containerRoles.contains("AXWindow"))
+    }
+
+    /// AXGroup MUST stay in containerRoles. Removing it would break
+    /// the original STEP-2-FINDING-001 fix (dialog/group AX focus
+    /// surfacing the container, not the descendant secure field).
+    func testAXGroupStaysInContainerRoles() {
+        XCTAssertTrue(AXSubroleProbe.containerRoles.contains("AXGroup"))
+    }
+
+    /// AXSheet — system-modal password sheets (System Settings unlock
+    /// padlock) come through as AXSheet. Stays.
+    func testAXSheetStaysInContainerRoles() {
+        XCTAssertTrue(AXSubroleProbe.containerRoles.contains("AXSheet"))
+    }
+
+    /// AXDialog — 1Password master-password and similar app dialogs.
+    /// Stays.
+    func testAXDialogStaysInContainerRoles() {
+        XCTAssertTrue(AXSubroleProbe.containerRoles.contains("AXDialog"))
+    }
+
+    /// AXPopover — login popovers from menubar agents. Stays.
+    func testAXPopoverStaysInContainerRoles() {
+        XCTAssertTrue(AXSubroleProbe.containerRoles.contains("AXPopover"))
+    }
+
+    /// AXDrawer / AXScrollArea / AXSplitGroup — preserved structural
+    /// containers from the STEP-2-FINDING-001 fix; pin them so a
+    /// future tightening doesn't accidentally drop one.
+    func testStructuralContainersStayInContainerRoles() {
+        XCTAssertTrue(AXSubroleProbe.containerRoles.contains("AXDrawer"))
+        XCTAssertTrue(AXSubroleProbe.containerRoles.contains("AXScrollArea"))
+        XCTAssertTrue(AXSubroleProbe.containerRoles.contains("AXSplitGroup"))
+    }
+
+    /// Full expected set — pins exactly which roles drive descendant
+    /// traversal post-STEP-2-FINDING-003. Any future widening
+    /// (re-adding AXWindow, etc.) must update this assertion AND get
+    /// CSO sign-off because it changes the §4 surface.
+    func testContainerRolesIsExactlyTheTightenedSet() {
+        XCTAssertEqual(
+            AXSubroleProbe.containerRoles,
+            [
+                "AXGroup", "AXSheet", "AXScrollArea",
+                "AXSplitGroup", "AXDialog", "AXDrawer", "AXPopover",
+            ]
+        )
+    }
+}

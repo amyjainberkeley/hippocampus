@@ -68,20 +68,46 @@
 //      (`identifierRegexBackstop`) — case-insensitive token-set match
 //      against `kAXIdentifierAttribute`, `kAXTitleAttribute`, and
 //      `kAXPlaceholderValueAttribute` of the focused element OR (if
-//      the focused element is a container like dialog / window /
-//      sheet / group) any descendant up to depth 3. Tokenization
-//      splits on non-alphanumerics AND CamelCase humps; a match
-//      requires (a) any token in the positive set
+//      the focused element is a non-window container like dialog /
+//      sheet / group / popover) any descendant up to depth 3.
+//      Tokenization splits on non-alphanumerics AND CamelCase humps;
+//      a match requires (a) any token in the positive set
 //      {password, passcode, passphrase, pin, secret, unlock, secure}
 //      AND (b) no token in the negative-context set
 //      {recovery, link, info, hint, help, label, learn, more,
-//       forgot, reset, button, tutorial, docs, what, why, how}.
+//       forgot, reset, button, tutorial, docs, what, why, how,
+//       is, has, was, uuid, id}.
 //      This is the operational interpretation of the brief's
 //      "\b(password|…)\b" — bare `\b` cannot satisfy both
 //      "MyPasswordField → positive" (CamelCase, no `\b` between
 //      `y` and `P`) and "password-recovery-link → negative"
 //      (literal `\b` matches at the hyphens) — token-set matching
 //      satisfies both at the price of a small stoplist.
+//
+//      STEP-2-FINDING-003 tightening (this revision):
+//        - `containerRoles` no longer includes `AXWindow`. A focused
+//          `AXWindow` whose identifier carries URL parameters (e.g.
+//          Safari window id `SafariWindow?IsSecure=true&UUID=...`)
+//          tokenized to `[…, Is, Secure, true, UUID, …]` and matched
+//          the positive token `secure`. Removing `AXWindow` from the
+//          container-traversal arm prevents children of an entire
+//          app window from being walked by the regex backstop. The
+//          backstop still runs on the focused element ITSELF when
+//          it's an `AXWindow`; it just doesn't descend into it. True
+//          positives (nested secure fields inside dialogs / sheets /
+//          groups / popovers) are unaffected.
+//        - Stopwords `is`, `has`, `was`, `uuid`, `id` added to the
+//          negative-context set. These are common URL-query /
+//          identifier-parameter prefixes (`IsSecure=true`,
+//          `hasPassword`, `UUID=…`) that accidentally co-tokenize
+//          with positive tokens. Adding them makes the focused-
+//          element arm reject URL-parameter shapes while keeping
+//          natural identifier shapes (`MyPasswordField`,
+//          `PasswordEntry`) positive.
+//      Both fixes are STRICTLY-LESS-REDACTION: they move frames from
+//      `reason=4` to `reason=7` (the fail-safe catchall). The cascade
+//      cannot move any frame from suppressed to allowed because §7
+//      still fires after §4. Privacy invariant preserved.
 //
 // Evaluation order is cheap-first (signal 2 → signal 3 → signal 1).
 // A signal's individual AX-error path ⇒ `.errored` outcome (do NOT
@@ -508,17 +534,31 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
     /// Negative-context token set — tokens that, when co-occurring with
     /// a positive token, indicate the string is about passwords
     /// (recovery flow, hint, link, …) rather than IS a password field.
-    /// Lowercased.
+    /// Also includes URL-query / identifier-parameter prefixes
+    /// (`is`, `has`, `was`, `uuid`, `id`) added under
+    /// STEP-2-FINDING-003 to reject URL-shaped identifiers like
+    /// `SafariWindow?IsSecure=true&UUID=…` whose tokens accidentally
+    /// match `secure`. Lowercased.
     static let negativeContextTokens: Set<String> = [
         "recovery", "link", "info", "hint", "help", "label", "learn", "more",
         "forgot", "reset", "button", "tutorial", "docs", "what", "why", "how",
+        "is", "has", "was", "uuid", "id",
     ]
 
     /// Container roles whose descendants the regex backstop walks (to
     /// catch nested fields when AX focus is the dialog / sheet / group
     /// itself — the STEP-2-FINDING-001 root cause).
+    ///
+    /// `AXWindow` is DELIBERATELY excluded (STEP-2-FINDING-003). A
+    /// focused AXWindow is too broad — children include the entire
+    /// app surface, and Safari window identifiers carrying URL
+    /// parameters (`IsSecure=true`) caused false positives. The
+    /// backstop still runs on the focused element itself when it's an
+    /// AXWindow; it just doesn't descend. True positives (secure
+    /// fields nested in dialogs / sheets / groups / popovers) are
+    /// unaffected.
     static let containerRoles: Set<String> = [
-        "AXWindow", "AXGroup", "AXSheet", "AXScrollArea",
+        "AXGroup", "AXSheet", "AXScrollArea",
         "AXSplitGroup", "AXDialog", "AXDrawer", "AXPopover",
     ]
 
