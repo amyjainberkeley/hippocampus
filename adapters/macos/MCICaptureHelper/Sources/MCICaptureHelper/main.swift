@@ -305,6 +305,41 @@ if args.oneShot {
 // below.
 let policy = StreamPolicy.default
 
+// ADR-0015 §6 P2.5 — context join. Construct the shared
+// `WorkflowContextSnapshot` actor (one per process); wire
+// `NSWorkspaceContextProvider` (1 Hz poll of `NSWorkspace.frontmost
+// Application.bundleIdentifier` + AX-backed focused-window-title via
+// the injected `AXWindowTitleProvider`); compose the per-browser URL
+// providers (Safari + Chromium-family + Firefox + Arc) behind the
+// `CompositeURLProvider` walk. The SCStream callback reads the
+// snapshot synchronously per-frame and invokes the URL provider
+// against the snapshot's frontmost bundle id (each per-browser
+// provider has its own 1 s cache TTL → ~1 AppleScript invocation/s
+// in the steady-state hot path).
+//
+// Lifetime: the provider's `start()` is called BEFORE the SCStream
+// kicks off, `stop()` is not currently triggered (the helper exits
+// on SIGINT/SIGPIPE and the timer is best-effort cancelled in
+// `deinit`). Idempotent on both ends. When `--capture` is off the
+// context providers are still constructed but the snapshot has no
+// reader — the polling cost is one NSWorkspace + one AX call per
+// second, far inside §4 budget by inspection.
+//
+// ADR-0015 §4 invariant 1 ("context-as-content") + invariant 2
+// ("cascade-before-storage"): the snapshot is the only path through
+// which `appBundleId` / `windowTitle` / `url` reach the cascade.
+// Nothing on this construction path writes those fields to disk,
+// IPC, or any sink ahead of a `.allow` cascade decision (the
+// `.suppress` path emits a `PrivacyTombstone` carrying ONLY
+// `appBundleId` + reason — see `SCStreamPipeline.swift:411-441`).
+let contextSnapshot = WorkflowContextSnapshot()
+let urlProvider: URLProvider = CompositeURLProvider()
+let nsWorkspaceContextProvider = NSWorkspaceContextProvider(
+    snapshotStore: contextSnapshot,
+    source: NSWorkspaceFrontmostAppSource(),
+    windowTitleProvider: AXWindowTitleProvider()
+)
+
 let captureSession: SCStreamCaptureSession?
 if captureOptions.captureEnabled {
     // STEP-2-FINDING-005 fix — pass `loop.counters` to the pipeline so
@@ -336,7 +371,13 @@ if captureOptions.captureEnabled {
         // Shared §2 probe instance: the session calls `update(...)`
         // in the SCStreamOutput callback; the cascade (constructed
         // above with this same probe) reads `hasBlackedRegion()`.
-        blackedRegionProbe: blackedRegionProbe
+        blackedRegionProbe: blackedRegionProbe,
+        // ADR-0015 §6 P2.5 — shared snapshot + composite URL provider.
+        // The SCStream callback reads `contextSnapshot.currentSync()`
+        // synchronously per frame and dispatches the URL read against
+        // the snapshot's frontmost bundle id.
+        contextSnapshot: contextSnapshot,
+        urlProvider: urlProvider
     )
 } else {
     captureSession = nil
@@ -349,6 +390,11 @@ if let captureSession {
     default builds and stores no frame in this build (no retain, no \
     encoder). Starting live session…\n
     """.data(using: .utf8) ?? Data())
+
+    // ADR-0015 §6 P2.5 — start the 1 Hz context poller BEFORE
+    // SCStream so the snapshot has a chance to leave the all-nil
+    // initial state on the first cascade evaluation. Idempotent.
+    nsWorkspaceContextProvider.start()
 
     // Synchronous `start()` inline — no `Task.detached`. The session
     // is retained by the top-level `captureSession` binding for the
@@ -383,3 +429,13 @@ do {
 // executable's main file), but read it here so the intent is explicit
 // in the source: this binding is load-bearing for SCSTREAM-LIVE-001.
 _ = captureSession
+// ADR-0015 §6 P2.5 — same load-bearing-binding discipline applies to
+// the context provider + snapshot + URL composite. The session's
+// callback reads the snapshot synchronously every frame, so the
+// snapshot actor MUST stay alive for the SCStream's lifetime; the
+// poller MUST stay alive to refresh it. Top-level bindings give us
+// process-lifetime retention by construction (SCSTREAM-LIVE-001
+// lesson, applied to Phase-2 state).
+_ = contextSnapshot
+_ = urlProvider
+_ = nsWorkspaceContextProvider

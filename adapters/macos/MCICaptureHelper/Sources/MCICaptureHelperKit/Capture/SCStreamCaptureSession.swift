@@ -111,6 +111,22 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// caller installed in `SuppressionCascade`, and `hasBlackedRegion`
     /// is fed by some other means (or stays false → §7 fail-safe).
     private let blackedRegionProbe: PixelGridBlackedRegionProbe?
+    /// ADR-0015 §6 P2.5 — context join. The shared
+    /// `WorkflowContextSnapshot` actor the background pollers
+    /// (NSWorkspace / AX / per-browser AppleScript) write to. The
+    /// SCStream callback reads it synchronously via `currentSync()`
+    /// before the cascade runs. `nil` preserves the pre-P2.5
+    /// behaviour byte-for-byte (all-nil `WorkflowContext` reaches the
+    /// cascade — fail-closed under §7).
+    private let contextSnapshot: WorkflowContextSnapshot?
+    /// ADR-0015 §6 P2.5 — per-callback URL extraction. Invoked
+    /// against the frontmost bundle id read from the snapshot. Each
+    /// underlying per-browser provider has its own ≤1 s TTL cache
+    /// (P2.3/P2.4) so the hot-path cost is a cache hit in the common
+    /// case; misses cap at 250 ms via the provider's AppleScript
+    /// timeout. `nil` preserves pre-P2.5 behaviour (no URL ever
+    /// reaches the cascade).
+    private let urlProvider: URLProvider?
 
     private let lock = NSLock()
     private var priorDHash: DHash?
@@ -131,12 +147,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         pipeline: SCStreamPipeline,
         denylist: Denylist,
         policy: StreamPolicy = .default,
-        blackedRegionProbe: PixelGridBlackedRegionProbe? = nil
+        blackedRegionProbe: PixelGridBlackedRegionProbe? = nil,
+        contextSnapshot: WorkflowContextSnapshot? = nil,
+        urlProvider: URLProvider? = nil
     ) {
         self.pipeline = pipeline
         self.denylist = denylist
         self.policy = policy
         self.blackedRegionProbe = blackedRegionProbe
+        self.contextSnapshot = contextSnapshot
+        self.urlProvider = urlProvider
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
     }
@@ -211,6 +231,71 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         return true
     }
 
+    // MARK: - ADR-0015 §6 P2.5 — pure context-build helper
+
+    /// Pure, OS-free assembly of the `WorkflowContext` the cascade
+    /// consumes. Factored out of the SCStream callback so the
+    /// decision matrix (snapshot present / absent / partial; URL
+    /// provider present / absent; bundleId empty vs populated) is
+    /// unit-testable headlessly. Mirrors the
+    /// `CapturedSampleExtractor.computeDHash9x8` / `makeCandidateFrame`
+    /// pattern: the OS-touching read is in the live `// UNVERIFIED`
+    /// callback; the pure assembly is tested here.
+    ///
+    /// Behaviour:
+    ///   - `snapshot == nil` ⇒ pre-P2.5 fallback (use the bundleId the
+    ///     in-callback extractor surfaced, which is currently nil
+    ///     by design — see `extractSynchronously`). The cascade
+    ///     treats an all-nil context as "unknown app" → fail-closed
+    ///     under §7. This branch exists only so legacy / headless
+    ///     test constructions can keep building the session without
+    ///     wiring a snapshot.
+    ///   - `snapshot != nil` ⇒ read `currentSync()` (non-blocking,
+    ///     `OSAllocatedUnfairLock`-protected). For a populated
+    ///     non-empty bundleId, invoke the URL provider once
+    ///     synchronously; the per-browser provider's ≤1 s TTL cache
+    ///     (ADR-0015 §3) caps actual AppleScript invocations at ~1/s
+    ///     in the steady state.
+    ///   - `pageText` is always `nil`; populated by Phase 3 (Vision
+    ///     OCR) per DESIGN.md §15 + ADR-0015 §1.4.
+    ///
+    /// Privacy invariants honoured by construction (ADR-0015 §4):
+    ///   - context-as-content — the assembled struct is the cascade's
+    ///     *input*; this helper writes nothing to disk / IPC / any
+    ///     sink. The caller (`SCStreamPipeline.process(...)`) routes
+    ///     it through the cascade BEFORE any storage decision.
+    ///   - no auto-grant Apple Events — the URL provider call is a
+    ///     pass-through; the per-browser provider's `nil` on denial
+    ///     surfaces here as `url == nil`, exactly as if AppleScript
+    ///     had never been attempted.
+    internal static func buildWorkflowContext(
+        snapshot: WorkflowContextSnapshot?,
+        urlProvider: URLProvider?,
+        fallbackAppBundleId: String?
+    ) -> WorkflowContext {
+        guard let snapshotActor = snapshot else {
+            return WorkflowContext(
+                appBundleId: fallbackAppBundleId,
+                windowTitle: nil,
+                url: nil,
+                pageText: nil
+            )
+        }
+        let snap = snapshotActor.currentSync()
+        let resolvedUrl: String?
+        if let id = snap.appBundleId, !id.isEmpty {
+            resolvedUrl = urlProvider?.activeTabURL(forFrontmost: id)
+        } else {
+            resolvedUrl = nil
+        }
+        return WorkflowContext(
+            appBundleId: snap.appBundleId,
+            windowTitle: snap.windowTitle,
+            url: resolvedUrl,
+            pageText: nil
+        )
+    }
+
     // MARK: - SCStreamOutput
 
     /// The live frame callback. Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
@@ -268,14 +353,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             dhash: sample.dhash,
             priorDhash: prior
         )
-        // PR-1 has no Context join (Phase 2). The cascade still runs on
-        // whatever bundle id the buffer carried; absent that it is the
-        // fail-safe `.suppress` path — which is the safe direction.
-        let context = CapturedSampleExtractor.makeWorkflowContext(
-            appBundleId: sample.appBundleId,
-            windowTitle: nil,
-            url: nil,
-            pageText: nil
+        // ADR-0015 §6 P2.5 — context join. Delegates to the pure
+        // `buildWorkflowContext(...)` helper below so the wiring is
+        // exercisable from a headless test (`SCStreamCaptureSession`'s
+        // SCStream callback itself is `// UNVERIFIED — needs live
+        // macOS`; the *decision* about how the snapshot + URL provider
+        // assemble into a `WorkflowContext` is pure and IS tested).
+        let context = Self.buildWorkflowContext(
+            snapshot: contextSnapshot,
+            urlProvider: urlProvider,
+            fallbackAppBundleId: sample.appBundleId
         )
         let nowUs = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
 
@@ -374,8 +461,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         guard let grid = grayscale9x8(from: pixelBuffer) else { return nil }
         let dhash = CapturedSampleExtractor.computeDHash9x8(grayscale: grid)
 
-        // PR-1 carries no Context join; bundle id is unknown here and
-        // the cascade fail-safe handles that (the safe direction).
+        // appBundleId on the InCallbackSample is intentionally nil; the
+        // populated WorkflowContext is built at the cascade-feed site
+        // in `stream(_:didOutputSampleBuffer:of:)` above (ADR-0015 §6
+        // P2.5) from the in-process `WorkflowContextSnapshot` actor.
+        // The synchronous extractor runs BEFORE the snapshot is read,
+        // so wiring a bundleId here would either duplicate the
+        // snapshot read or contradict it — neither is useful.
+        //
         // The 9×8 grid is carried through so the ADR-0013 §2 probe
         // can update its verdict in the callback before the cascade
         // runs (single read, no second pixel scan).
