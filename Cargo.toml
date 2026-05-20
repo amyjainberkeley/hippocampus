@@ -12,7 +12,18 @@
 
 [workspace]
 resolver = "2"
-members = ["apps/agent", "core", "core/brain"]
+members = [
+    "apps/agent",
+    "core",
+    "core/brain",
+    # macOS-only Rust adapter: Core ML / ANE backend for the
+    # snowflake-arctic-embed-s embedder. Deps + lib body are gated by
+    # `cfg(target_os = "macos")` inside the crate so `cargo build
+    # --workspace` on non-macOS contributors compiles it as an empty
+    # library (no dep download, no link). See
+    # `adapters/macos/mci-embed-coreml/Cargo.toml`.
+    "adapters/macos/mci-embed-coreml",
+]
 
 [workspace.package]
 edition      = "2021"

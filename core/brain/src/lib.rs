@@ -53,6 +53,8 @@ use std::fmt;
 
 use thiserror::Error;
 
+pub mod arctic_embed_s;
+
 #[cfg(any(test, feature = "stubs"))]
 pub mod stubs;
 
