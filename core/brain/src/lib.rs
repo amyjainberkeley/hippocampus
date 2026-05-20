@@ -62,6 +62,10 @@ pub mod event_chunker;
 
 pub use event_chunker::EventChunker;
 
+mod sqlcipher_brain_store;
+
+pub use sqlcipher_brain_store::SqlCipherBrainStore;
+
 // ---------------------------------------------------------------------------
 // Newtype ids — keep `events` / `chunks` PKs out of arithmetic with raw u64
 // ---------------------------------------------------------------------------
@@ -95,37 +99,91 @@ impl fmt::Display for EventId {
 }
 
 // ---------------------------------------------------------------------------
-// Chunk — the unit the store actually holds
+// Event — the retrieval and index unit (ADR-0010 / ADR-0016 §1.4)
 // ---------------------------------------------------------------------------
 
-/// One stored piece of text + (optional) embedding, with a back-pointer to
-/// its source event.
+/// One captured state-transition moment — the **retrieval and index unit**
+/// per ADR-0010 / ADR-0016 §1.4.
 ///
-/// Per ADR-0010 the *retrieval* unit is the event. The brain still stores a
-/// `Chunk` per row in the vector table because sub-chunking kicks in for
-/// over-long events. For most events `text` is the event text (with the
-/// embedded-time context header already prepended); for over-long events
-/// `text` is a paragraph-boundary sub-chunk inheriting the parent's context
-/// header (ADR-0010 §4).
+/// Phase 3 production stores Events directly: `text` is OCR'd page content
+/// (with the embedding-time context header `[app=… | title=… | url=… |
+/// ts=…]\n` prepended per ADR-0010 §3 by the upstream chunker) and the FTS5
+/// virtual table indexes `text + summary + window_title + url`. Sub-chunking
+/// into [`Chunk`] only kicks in when one Event's text exceeds the embedder's
+/// effective context (ADR-0016 §1.2); chunks reference the parent Event via
+/// `event_id` in the `chunks` table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Event {
+    /// Store-assigned id. Zero until [`BrainStore::put_event`] returns.
+    pub id: EventId,
+    /// Capture-time timestamp in **microseconds since UNIX epoch**
+    /// (ADR-0016 §1.4 `events.ts_us`).
+    pub ts_us: u64,
+    /// `appBundleId` of the frontmost app when the event was captured
+    /// (`None` pre-P2.5 wiring; populated post-ADR-0015).
+    pub app_bundle_id: Option<String>,
+    /// Focused window title (`None` until ADR-0015 P2.2 lands AX wiring).
+    pub window_title: Option<String>,
+    /// Active browser tab URL (`None` for non-browser apps or pre-ADR-0015
+    /// wiring).
+    pub url: Option<String>,
+    /// The text the embedder sees and FTS5 indexes. Already includes the
+    /// `[app=… | title=… | url=… | ts=…]\n` context header per ADR-0010 §3
+    /// when the upstream pipeline applied one.
+    pub text: String,
+    /// Idle-batch-generated extractive summary (ADR-0016 §1.3).
+    /// `None` until the idle-batch worker fills it (P3.8).
+    pub summary: Option<String>,
+    /// Idle-batch-generated entity list (JSON array string). `None` until
+    /// the idle-batch worker fills it (P3.8).
+    pub entities: Option<String>,
+    /// Backfilled by the episode segmenter (ADR-0010 §1). `None` for events
+    /// not yet assigned to an episode.
+    pub episode_id: Option<u64>,
+    /// Always `0` for events in the store: `.suppress`-decided frames never
+    /// reach `put_event` (ADR-0016 §4.3). The column exists so a future
+    /// allowlist policy can carry a richer reason code without a schema
+    /// bump; the invariant "no row with `cascade_reason != 0`" is asserted
+    /// at insert time.
+    pub cascade_reason: i64,
+    /// Content-addressed blob path for the keyframe (`None` for text-only
+    /// events). The blob is encrypted separately per ADR-0008 §1.5.
+    pub keyframe_blob: Option<String>,
+    /// L2-normalized 384-d embedding (ADR-0009 / ADR-0011). `None` when
+    /// the event has not yet been embedded — insert is allowed without an
+    /// embedding so capture-time inserts don't block on the embedder; the
+    /// event falls back to lexical-only until the idle-batch worker fills
+    /// it. When `Some`, the production impl writes to `event_vectors` in
+    /// the same transaction as `events`.
+    pub embedding: Option<Vec<f32>>,
+}
+
+// ---------------------------------------------------------------------------
+// Chunk — sub-units for over-long events
+// ---------------------------------------------------------------------------
+
+/// Sub-unit of an over-long [`Event`]. Stored in the `chunks` table (ADR-0016
+/// §1.4); kicks in only when one event's text exceeds the embedder's
+/// effective context window. For shorter events the `Event` row itself is
+/// the retrieval unit and no Chunk is materialized.
+///
+/// The trait surface in [`BrainStore`] is **event-centric** per ADR-0016
+/// §2 — sub-chunk readers/writers land at P3.4 / P3.8. This struct is
+/// reserved for that surface.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
-    /// Store-assigned id. Zero until [`BrainStore::put_chunk`] returns.
+    /// Store-assigned id. Zero until the chunk is inserted.
     pub id: ChunkId,
-    /// The text the embedder sees and FTS5 indexes. Already includes the
-    /// `[app=... | title=... | url=... | ts=...]\n` context header per
-    /// ADR-0010 §3 when the upstream pipeline applied one.
+    /// The text the embedder sees and FTS5 indexes. Inherits the parent
+    /// event's context header per ADR-0010 §4.
     pub text: String,
-    /// The event this chunk belongs to. Multiple chunks share an
-    /// `EventId` only when the event was over-long and sub-chunked.
+    /// The event this chunk belongs to.
     pub source_event_id: EventId,
-    /// Capture-time timestamp in **microseconds since UNIX epoch**, copied
-    /// from `events.ts` at insert time. Used by the recency term in the
-    /// fusion (ADR-0010 §5) without a join.
+    /// Capture-time timestamp in **microseconds since UNIX epoch**,
+    /// copied from the parent `events.ts_us` at insert time.
     pub created_at_us: u64,
     /// L2-normalized embedding, dimension fixed at 384 (ADR-0009). `None`
-    /// when the chunk has not yet been embedded (insert is allowed without
-    /// an embedding so capture-time inserts don't block on the idle-batch
-    /// embedder; the chunk falls back to lexical-only until embedded).
+    /// when not yet embedded.
     pub embedding: Option<Vec<f32>>,
 }
 
@@ -227,33 +285,50 @@ pub trait Embedder: Send + Sync {
 /// lets the retriever issue both reads in parallel and unifies the score
 /// space exactly once, in OS-free Rust above the trait.
 pub trait BrainStore: Send + Sync {
-    /// Insert (or upsert) a chunk and return the assigned id. Production
-    /// impl writes the FTS5 + sqlite-vec rows in the same transaction so a
-    /// half-indexed chunk can never be observed.
-    fn put_chunk(&self, chunk: &Chunk) -> Result<ChunkId, StoreError>;
+    /// Insert an event and return the assigned id. Production impl writes
+    /// the `events` row + (when `event.embedding.is_some()`) the
+    /// `event_vectors` row in the same transaction so a half-indexed event
+    /// can never be observed. The `events_fts` virtual table syncs via
+    /// trigger inside the same transaction (ADR-0016 §1.4).
+    ///
+    /// Per ADR-0016 §4.3 only `.allow`-decided events ever reach this
+    /// surface — `.suppress` paths dead-end in the cascade before the
+    /// brain ingestor sees them. The trait does not enforce that
+    /// structurally (it's an IPC-seam-level invariant); production impls
+    /// reject `event.cascade_reason != 0` as a defence-in-depth tripwire.
+    fn put_event(&self, event: &Event) -> Result<EventId, StoreError>;
 
-    /// Fetch a single chunk by id. `Ok(None)` for unknown ids. (Unknown is
-    /// not an error — the retriever's hit set may reference a chunk a
-    /// concurrent delete removed; the recall UI elides those.)
-    fn get_chunk(&self, id: ChunkId) -> Result<Option<Chunk>, StoreError>;
+    /// Fetch a single event by id. `Ok(None)` for unknown ids — a
+    /// concurrent delete or a hit-set reference past a tombstone is not
+    /// an error; the recall UI elides absent rows.
+    fn get_event(&self, id: EventId) -> Result<Option<Event>, StoreError>;
 
-    /// FTS5 lexical search. Returns at most `limit` hits, ordered by
-    /// descending BM25 / FTS5 rank. The `f32` is the raw lexical score;
-    /// the [`Retriever`] min-max-normalizes it across the candidate pool
+    /// FTS5 lexical search over `events_fts` (`text` + `summary` +
+    /// `window_title` + `url`, `porter unicode61 remove_diacritics 2`
+    /// tokenizer per ADR-0016 §1.4). Returns at most `limit` hits,
+    /// ordered by descending BM25 / FTS5 rank. The `f32` is the raw
+    /// lexical score (production impl uses `bm25(events_fts)`); the
+    /// [`Retriever`] min-max-normalizes it across the candidate pool
     /// before fusion (ADR-0010 §5 `lex_hat`).
-    fn fts5_search(&self, query: &str, limit: usize) -> Result<Vec<(ChunkId, f32)>, StoreError>;
+    fn fts5_search(&self, query: &str, limit: usize) -> Result<Vec<(EventId, f32)>, StoreError>;
 
-    /// Semantic KNN over the sqlite-vec table. Returns at most `limit`
-    /// hits, ordered by descending cosine similarity. Per ADR-0009 stored
+    /// Semantic KNN over `event_vectors`. Returns at most `limit` hits,
+    /// ordered by descending cosine similarity. Per ADR-0009 stored
     /// vectors are L2-normalized so cosine == dot product. The `f32` is
     /// the raw cosine score in `[-1.0, 1.0]`; the [`Retriever`]
     /// min-max-normalizes it across the candidate pool before fusion
     /// (ADR-0010 §5 `sem_hat`).
+    ///
+    /// Production impls MUST reject `query_embedding` whose length does
+    /// not match the schema-pinned dimension (384 per ADR-0009) with
+    /// [`StoreError::InvalidInput`]. The hard wall is the schema pin —
+    /// silently truncating / padding a mis-dim query was the
+    /// "almost-right-rank" failure mode the pin was authored against.
     fn vec_search(
         &self,
         query_embedding: &[f32],
         limit: usize,
-    ) -> Result<Vec<(ChunkId, f32)>, StoreError>;
+    ) -> Result<Vec<(EventId, f32)>, StoreError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +337,7 @@ pub trait BrainStore: Send + Sync {
 
 /// Inclusive time range, in microseconds since UNIX epoch.
 ///
-/// Matches the unit of [`Chunk::created_at_us`] so the retriever can apply
+/// Matches the unit of [`Event::ts_us`] so the retriever can apply
 /// the filter without a wall-clock conversion. The lifelog query router
 /// (ADR-0010 §6 "LLM time-range extraction") fills these from natural
 /// language; for plain hybrid recall the field is `None`.
@@ -291,13 +366,12 @@ pub struct RetrievalQuery {
     /// Maximum hits to return. The retriever may scan a larger candidate
     /// pool internally before fusion.
     pub limit: usize,
-    /// Restrict to chunks whose `created_at_us` falls inside this range.
+    /// Restrict to events whose `ts_us` falls inside this range.
     /// `None` ⇒ no time filter.
     pub time_filter: Option<TimeRange>,
-    /// Restrict to chunks whose source event's `app_bundle` matches this
-    /// bundle id (e.g. `"com.apple.Safari"`). Production impl joins
-    /// `events` to apply the filter; the scaffold's stub store keeps the
-    /// `app_bundle` in a side-table for the same effect. `None` ⇒ no
+    /// Restrict to events whose `app_bundle_id` matches this bundle id
+    /// (e.g. `"com.apple.Safari"`). Production impl applies the filter
+    /// as a SQL `WHERE` pre-filter on the candidate pool. `None` ⇒ no
     /// app filter.
     pub app_filter: Option<String>,
 }
@@ -310,8 +384,8 @@ pub struct RetrievalQuery {
 /// across the candidate pool (ADR-0010 §5).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RetrievalHit {
-    /// The chunk this hit refers to.
-    pub chunk_id: ChunkId,
+    /// The event this hit refers to.
+    pub event_id: EventId,
     /// Min-max-normalized BM25 / FTS5 rank (`lex_hat` in ADR-0010 §5).
     pub score_lexical: f32,
     /// Min-max-normalized semantic cosine (`sem_hat` in ADR-0010 §5).

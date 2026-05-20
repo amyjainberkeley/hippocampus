@@ -25,8 +25,25 @@ stubs = []
 [dependencies]
 mci-core  = { path = ".." }
 thiserror = "1"
+# `rusqlite` is already on the workspace lockfile via `mci-core` with the
+# same feature set (`bundled-sqlcipher-vendored-openssl`). Listing it here
+# does NOT add a new third-party crate to the lockfile — Cargo unifies the
+# version + features across the workspace, so both crates link a SINGLE
+# `SQLCipher` binary. P3.2's CSO sign-off block asserts this. The
+# `bundled-sqlcipher-vendored-openssl` feature is binding per ADR-0008 —
+# no plaintext `SQLite` fallback path; the store refuses to open an
+# unencrypted DB.
+rusqlite  = { version = "0.39.0", features = ["bundled-sqlcipher-vendored-openssl"] }
 
 [dev-dependencies]
 # Tests exercise the stub impls; gate them via the `stubs` feature on this
 # crate so the public surface is identical to the prod build path.
 mci-brain = { path = ".", features = ["stubs"] }
+# Test-only access to mci-core's `InMemoryKeyWrap` for spinning up an
+# ephemeral `SQLCipher` db under a test key. Mirrors the gate mci-core
+# uses for its own store-open tests (see `core/src/store/open.rs`
+# `#[cfg(test)]` block).
+mci-core  = { path = "..", features = ["insecure-test-keywrap"] }
+# tempfile is already on the workspace lockfile via `mci-core`'s
+# dev-dependencies. Re-listing it here does NOT add a new lockfile entry.
+tempfile  = "3.27.0"

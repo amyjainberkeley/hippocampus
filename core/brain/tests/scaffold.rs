@@ -1,27 +1,40 @@
 //! Integration tests for the Phase 3 brain scaffold.
 //!
 //! Exercises the four traits + stub impls against the public API. Real
-//! impls (`SQLCipher` / FTS5 / sqlite-vec store, arctic-embed-s embedder,
-//! anchor-then-window query router) land in the Phase 3 PR sequence per
-//! `docs/decisions/0010-event-episode-retrieval-unit-cc-fusion.md` and
-//! `docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md`.
+//! impls (`SQLCipher` / FTS5 / sqlite-vec store land in P3.2;
+//! arctic-embed-s embedder in P3.3; anchor-then-window query router in
+//! P3.7) per `docs/decisions/0010-event-episode-retrieval-unit-cc-fusion.md`,
+//! `docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md`, and
+//! `docs/decisions/0016-phase-3-ocr-brain.md`.
 
 use std::sync::Arc;
 
 use mci_brain::{
     stubs::{FixedDimEmbedder, InMemoryBrainStore, NoopChunker, StubRetriever},
-    BrainStore, Chunk, ChunkId, Chunker, ChunkerError, EmbedError, Embedder, EventId,
-    RetrievalQuery, RetrieveError, Retriever, StoreError, TimeRange,
+    BrainStore, Chunker, ChunkerError, EmbedError, Embedder, Event, EventId, RetrievalQuery,
+    RetrieveError, Retriever, StoreError, TimeRange,
 };
 
 const MICROS_PER_HOUR: u64 = 3_600_000_000;
 
-fn chunk_at(text: &str, ev: u64, ts_us: u64, embedding: Option<Vec<f32>>) -> Chunk {
-    Chunk {
-        id: ChunkId(0),
+fn event_at(
+    text: &str,
+    ts_us: u64,
+    app: Option<&str>,
+    embedding: Option<Vec<f32>>,
+) -> Event {
+    Event {
+        id: EventId(0),
+        ts_us,
+        app_bundle_id: app.map(str::to_string),
+        window_title: None,
+        url: None,
         text: text.into(),
-        source_event_id: EventId(ev),
-        created_at_us: ts_us,
+        summary: None,
+        entities: None,
+        episode_id: None,
+        cascade_reason: 0,
+        keyframe_blob: None,
         embedding,
     }
 }
@@ -112,21 +125,32 @@ fn fixed_dim_embedder_zero_dim_rejected() {
 fn store_put_then_get_round_trip() {
     let s = InMemoryBrainStore::new();
     let id = s
-        .put_chunk(&chunk_at("hello", 1, 1_000_000, None))
+        .put_event(&event_at("hello", 1_000_000, None, None))
         .expect("put");
-    let got = s.get_chunk(id).expect("get").expect("some");
+    let got = s.get_event(id).expect("get").expect("some");
     assert_eq!(got.id, id);
     assert_eq!(got.text, "hello");
-    assert_eq!(got.source_event_id, EventId(1));
-    assert_eq!(got.created_at_us, 1_000_000);
+    assert_eq!(got.ts_us, 1_000_000);
     assert!(got.embedding.is_none());
 }
 
 #[test]
 fn store_get_unknown_id_is_ok_none() {
     let s = InMemoryBrainStore::new();
-    let got = s.get_chunk(ChunkId(9_999)).expect("get");
+    let got = s.get_event(EventId(9_999)).expect("get");
     assert!(got.is_none());
+}
+
+#[test]
+fn store_rejects_event_with_nonzero_cascade_reason() {
+    // ADR-0016 §4.3 — `.suppress`-decided events MUST NOT reach put_event.
+    // The stub asserts the defence-in-depth tripwire so production impls
+    // stay aligned.
+    let s = InMemoryBrainStore::new();
+    let mut e = event_at("anything", 0, None, None);
+    e.cascade_reason = 6;
+    let err = s.put_event(&e).unwrap_err();
+    assert!(matches!(err, StoreError::InvalidInput(_)));
 }
 
 #[test]
@@ -134,18 +158,18 @@ fn store_fts5_hits_ordered_by_descending_score() {
     let s = InMemoryBrainStore::new();
     // Higher density of "rust" in shorter text scores higher.
     let dense = s
-        .put_chunk(&chunk_at("rust rust rust", 1, 0, None))
+        .put_event(&event_at("rust rust rust", 0, None, None))
         .expect("put dense");
     let sparse = s
-        .put_chunk(&chunk_at(
+        .put_event(&event_at(
             "this is a long passage with one rust word buried in it",
-            2,
             0,
+            None,
             None,
         ))
         .expect("put sparse");
     let _miss = s
-        .put_chunk(&chunk_at("nothing here", 3, 0, None))
+        .put_event(&event_at("nothing here", 0, None, None))
         .expect("put miss");
     let hits = s.fts5_search("rust", 10).expect("fts5");
     assert_eq!(hits.len(), 2, "miss row must be excluded; got {hits:?}");
@@ -166,13 +190,13 @@ fn store_vec_search_hits_ordered_by_descending_cosine() {
     let vec_b = vec![0.0, 1.0, 0.0];
     let vec_c = vec![0.0, 0.0, 1.0];
     let id_a = store
-        .put_chunk(&chunk_at("a", 1, 0, Some(vec_a)))
+        .put_event(&event_at("a", 0, None, Some(vec_a)))
         .expect("put a");
     let id_b = store
-        .put_chunk(&chunk_at("b", 2, 0, Some(vec_b)))
+        .put_event(&event_at("b", 0, None, Some(vec_b)))
         .expect("put b");
     let _id_c = store
-        .put_chunk(&chunk_at("c", 3, 0, Some(vec_c)))
+        .put_event(&event_at("c", 0, None, Some(vec_c)))
         .expect("put c");
 
     let query = vec![0.9, 0.4, 0.0];
@@ -197,72 +221,51 @@ fn store_fts5_empty_query_rejected() {
 // Retriever — end-to-end
 // ---------------------------------------------------------------------------
 
-fn make_retriever_with_fixtures() -> (Arc<InMemoryBrainStore>, StubRetriever<FixedDimEmbedder>, Vec<ChunkId>) {
+fn make_retriever_with_fixtures() -> (Arc<InMemoryBrainStore>, StubRetriever<FixedDimEmbedder>, Vec<EventId>) {
     let store = Arc::new(InMemoryBrainStore::new());
     let emb = FixedDimEmbedder::default();
-    // 5 chunks across 2 apps + 3 time bands. The retriever's "now" is at
+    // 5 events across 2 apps + 3 time bands. The retriever's "now" is at
     // 100 hours past the epoch so recency-decay is monotonic and obvious.
     let now_us = 100 * MICROS_PER_HOUR;
 
-    // event 1 — Safari, 0 hours ago, contains "rust"
-    let c1 = store
-        .put_chunk(&chunk_at(
-            "rust async runtime tokio",
-            1,
-            now_us,
-            Some(emb.embed_one("rust async runtime tokio").unwrap()),
-        ))
-        .unwrap();
-    store.set_event_app(EventId(1), "com.apple.Safari");
+    let mk = |text: &str, ts_us: u64, app: &str| -> Event {
+        event_at(text, ts_us, Some(app), Some(emb.embed_one(text).unwrap()))
+    };
 
-    // event 2 — Safari, 10 hours ago, "rust" again but less dense
-    let c2 = store
-        .put_chunk(&chunk_at(
+    let e1 = store
+        .put_event(&mk("rust async runtime tokio", now_us, "com.apple.Safari"))
+        .unwrap();
+    let e2 = store
+        .put_event(&mk(
             "we wrote a small rust crate to test the trait shape",
-            2,
             now_us - 10 * MICROS_PER_HOUR,
-            Some(emb.embed_one("we wrote a small rust crate to test the trait shape").unwrap()),
+            "com.apple.Safari",
         ))
         .unwrap();
-    store.set_event_app(EventId(2), "com.apple.Safari");
-
-    // event 3 — Terminal, 1 hour ago, "rust"
-    let c3 = store
-        .put_chunk(&chunk_at(
+    let e3 = store
+        .put_event(&mk(
             "cargo test rust workspace",
-            3,
             now_us - MICROS_PER_HOUR,
-            Some(emb.embed_one("cargo test rust workspace").unwrap()),
+            "com.apple.Terminal",
         ))
         .unwrap();
-    store.set_event_app(EventId(3), "com.apple.Terminal");
-
-    // event 4 — Terminal, 50 hours ago, no "rust"
-    let c4 = store
-        .put_chunk(&chunk_at(
+    let e4 = store
+        .put_event(&mk(
             "unrelated python notebook page",
-            4,
             now_us - 50 * MICROS_PER_HOUR,
-            Some(emb.embed_one("unrelated python notebook page").unwrap()),
+            "com.apple.Terminal",
         ))
         .unwrap();
-    store.set_event_app(EventId(4), "com.apple.Terminal");
-
-    // event 5 — Safari, 200 hours ago (older than now_us itself? no — now is
-    // 100h; this would underflow. Bump now to make it possible). Use 5h ago
-    // instead so we still have a far-past sample without underflow.
-    let c5 = store
-        .put_chunk(&chunk_at(
+    let e5 = store
+        .put_event(&mk(
             "introduction to rust ownership rules",
-            5,
             now_us - 5 * MICROS_PER_HOUR,
-            Some(emb.embed_one("introduction to rust ownership rules").unwrap()),
+            "com.apple.Safari",
         ))
         .unwrap();
-    store.set_event_app(EventId(5), "com.apple.Safari");
 
     let r = StubRetriever::new(emb, Arc::clone(&store), now_us);
-    (store, r, vec![c1, c2, c3, c4, c5])
+    (store, r, vec![e1, e2, e3, e4, e5])
 }
 
 #[test]
@@ -312,12 +315,11 @@ fn retriever_normalized_scores_in_unit_range() {
 }
 
 #[test]
-fn retriever_time_filter_excludes_out_of_range_chunks() {
+fn retriever_time_filter_excludes_out_of_range_events() {
     let (store, retriever, _ids) = make_retriever_with_fixtures();
     let now_us = 100 * MICROS_PER_HOUR;
-    // Window the past 2 hours only. Fixtures within: event 1 (0h ago),
-    // event 3 (1h ago). Fixtures outside: event 2 (10h), event 4 (50h),
-    // event 5 (5h).
+    // Window the past 2 hours only. Fixtures within: event @ 0h ago,
+    // event @ 1h ago. Outside: events @ 5h / 10h / 50h.
     let q = RetrievalQuery {
         text: "rust".into(),
         limit: 10,
@@ -328,27 +330,21 @@ fn retriever_time_filter_excludes_out_of_range_chunks() {
         app_filter: None,
     };
     let hits = retriever.retrieve(&q).expect("retrieve");
-    let events: Vec<EventId> = hits
-        .iter()
-        .map(|h| {
-            let c = store.get_chunk(h.chunk_id).unwrap().unwrap();
-            c.source_event_id
-        })
-        .collect();
-    for ev in &events {
+    let mut any = false;
+    for h in &hits {
+        let e = store.get_event(h.event_id).unwrap().unwrap();
         assert!(
-            *ev == EventId(1) || *ev == EventId(3),
-            "time_filter must exclude events outside the window, got {ev:?}"
+            e.ts_us >= now_us - 2 * MICROS_PER_HOUR && e.ts_us <= now_us,
+            "time_filter must exclude events outside the window, got ts_us={}",
+            e.ts_us
         );
+        any = true;
     }
-    assert!(
-        events.contains(&EventId(1)) || events.contains(&EventId(3)),
-        "time_filter must retain at least one in-window event"
-    );
+    assert!(any, "time_filter must retain at least one in-window event");
 }
 
 #[test]
-fn retriever_app_filter_excludes_wrong_bundle_chunks() {
+fn retriever_app_filter_excludes_wrong_bundle_events() {
     let (store, retriever, _ids) = make_retriever_with_fixtures();
     let q = RetrievalQuery {
         text: "rust".into(),
@@ -358,12 +354,10 @@ fn retriever_app_filter_excludes_wrong_bundle_chunks() {
     };
     let hits = retriever.retrieve(&q).expect("retrieve");
     for h in &hits {
-        let c = store.get_chunk(h.chunk_id).unwrap().unwrap();
-        let app = store
-            .get_event_app(c.source_event_id)
-            .expect("event has app");
+        let e = store.get_event(h.event_id).unwrap().unwrap();
         assert_eq!(
-            app, "com.apple.Terminal",
+            e.app_bundle_id.as_deref(),
+            Some("com.apple.Terminal"),
             "app_filter must exclude wrong-bundle hits"
         );
     }

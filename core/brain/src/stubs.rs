@@ -1,10 +1,11 @@
 //! Test-only stub impls of the four brain traits.
 //!
 //! These are **not** production impls — production lands in the Phase 3 PR
-//! sequence (P3.x) per `docs/decisions/0010-event-episode-retrieval-unit-cc-fusion.md`
-//! and `docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md`. The
-//! stubs exist so upstream wiring (`apps/agent` and friends) can compile and
-//! exercise the trait shapes while the production impls are being written.
+//! sequence (P3.x) per `docs/decisions/0010-event-episode-retrieval-unit-cc-fusion.md`,
+//! `docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md`, and
+//! `docs/decisions/0016-phase-3-ocr-brain.md`. The stubs exist so upstream
+//! wiring (`apps/agent` and friends) can compile and exercise the trait
+//! shapes while the production impls are being written.
 //!
 //! Module is `#[cfg(any(test, feature = "stubs"))]`-gated. Never in a release
 //! binary; the `compile_error!`-style guard is the test-build itself —
@@ -16,8 +17,8 @@ use std::{
 };
 
 use crate::{
-    BrainStore, Chunk, ChunkId, Chunker, ChunkerError, EmbedError, Embedder, EventId,
-    RetrievalHit, RetrievalQuery, RetrieveError, Retriever, StoreError,
+    BrainStore, Chunker, ChunkerError, EmbedError, Embedder, Event, EventId, RetrievalHit,
+    RetrievalQuery, RetrieveError, Retriever, StoreError,
 };
 
 // ---------------------------------------------------------------------------
@@ -132,10 +133,11 @@ fn next_signed_unit_f32(state: &mut u64) -> f32 {
 /// force `vec_search` (cosine over stored embeddings). Useful for
 /// retrieval-shape tests without spinning up `SQLCipher`.
 ///
-/// The production impl is `SQLCipher` + FTS5 + sqlite-vec (ADR-0008). This
-/// stub deliberately does NOT implement the `events` join the production
-/// store does — instead it exposes a small side-table the [`StubRetriever`]
-/// reads to apply `app_filter`. Production retrievers use the join instead.
+/// The production impl is `SQLCipher` + FTS5 + sqlite-vec
+/// (`SqlCipherBrainStore`, ADR-0008 / ADR-0016 §1.4). Both this stub and the
+/// production store implement the same event-centric [`BrainStore`] trait
+/// surface — `put_event` / `get_event` / `fts5_search` (returning
+/// `EventId`) / `vec_search` (returning `EventId`).
 #[derive(Debug, Default)]
 pub struct InMemoryBrainStore {
     inner: Mutex<Inner>,
@@ -144,8 +146,7 @@ pub struct InMemoryBrainStore {
 #[derive(Debug, Default)]
 struct Inner {
     next_id: u64,
-    chunks: HashMap<ChunkId, Chunk>,
-    event_app: HashMap<EventId, String>,
+    events: HashMap<EventId, Event>,
 }
 
 impl InMemoryBrainStore {
@@ -154,62 +155,60 @@ impl InMemoryBrainStore {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Bind an event id to an `app_bundle` (e.g. `"com.apple.Safari"`) so
-    /// the [`StubRetriever`]'s `app_filter` path has something to match
-    /// against. Production stores join `events` for the same effect.
-    pub fn set_event_app(&self, ev: EventId, bundle: impl Into<String>) {
-        let mut inner = self.inner.lock().expect("poisoned");
-        inner.event_app.insert(ev, bundle.into());
-    }
-
-    /// Look up an event's `app_bundle`, if known. Used by [`StubRetriever`].
-    #[must_use]
-    pub fn get_event_app(&self, ev: EventId) -> Option<String> {
-        let inner = self.inner.lock().expect("poisoned");
-        inner.event_app.get(&ev).cloned()
-    }
 }
 
 impl BrainStore for InMemoryBrainStore {
-    fn put_chunk(&self, chunk: &Chunk) -> Result<ChunkId, StoreError> {
+    fn put_event(&self, event: &Event) -> Result<EventId, StoreError> {
+        if event.cascade_reason != 0 {
+            return Err(StoreError::InvalidInput(format!(
+                "cascade_reason must be 0 (`.suppress`-decided events MUST NOT reach put_event); got {}",
+                event.cascade_reason
+            )));
+        }
         let mut inner = self.inner.lock().expect("poisoned");
-        let id = ChunkId(inner.next_id);
-        inner.next_id = inner.next_id.wrapping_add(1);
-        let mut stored = chunk.clone();
+        let id = EventId(inner.next_id.wrapping_add(1));
+        inner.next_id = id.0;
+        let mut stored = event.clone();
         stored.id = id;
-        inner.chunks.insert(id, stored);
+        inner.events.insert(id, stored);
         Ok(id)
     }
 
-    fn get_chunk(&self, id: ChunkId) -> Result<Option<Chunk>, StoreError> {
+    fn get_event(&self, id: EventId) -> Result<Option<Event>, StoreError> {
         let inner = self.inner.lock().expect("poisoned");
-        Ok(inner.chunks.get(&id).cloned())
+        Ok(inner.events.get(&id).cloned())
     }
 
-    fn fts5_search(&self, query: &str, limit: usize) -> Result<Vec<(ChunkId, f32)>, StoreError> {
+    fn fts5_search(&self, query: &str, limit: usize) -> Result<Vec<(EventId, f32)>, StoreError> {
         if query.is_empty() {
             return Err(StoreError::InvalidInput("empty FTS5 query".into()));
         }
         let inner = self.inner.lock().expect("poisoned");
         let q = query.to_lowercase();
-        let mut hits: Vec<(ChunkId, f32)> = inner
-            .chunks
+        let mut hits: Vec<(EventId, f32)> = inner
+            .events
             .values()
-            .filter_map(|c| {
-                let t = c.text.to_lowercase();
-                let matches = t.matches(&q).count();
+            .filter_map(|e| {
+                // Mirror the FTS5 column set: text + summary + window_title + url.
+                let haystack = format!(
+                    "{}\n{}\n{}\n{}",
+                    e.text.to_lowercase(),
+                    e.summary.as_deref().unwrap_or("").to_lowercase(),
+                    e.window_title.as_deref().unwrap_or("").to_lowercase(),
+                    e.url.as_deref().unwrap_or("").to_lowercase(),
+                );
+                let matches = haystack.matches(&q).count();
                 if matches == 0 {
                     return None;
                 }
                 // Cheap pseudo-BM25: matches × query-len / text-len. Higher
-                // for denser matches in shorter chunks. Production uses real
+                // for denser matches in shorter haystacks. Production uses real
                 // BM25 from FTS5. Precision loss is acceptable — this is the
                 // stub's relative-ranking score, not stored anywhere.
                 #[allow(clippy::cast_precision_loss)]
                 let score =
-                    (matches as f32) * (q.len() as f32) / (t.len().max(1) as f32);
-                Some((c.id, score))
+                    (matches as f32) * (q.len() as f32) / (haystack.len().max(1) as f32);
+                Some((e.id, score))
             })
             .collect();
         hits.sort_by(|a, b| {
@@ -223,24 +222,25 @@ impl BrainStore for InMemoryBrainStore {
         &self,
         query_embedding: &[f32],
         limit: usize,
-    ) -> Result<Vec<(ChunkId, f32)>, StoreError> {
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
         if query_embedding.is_empty() {
             return Err(StoreError::InvalidInput(
                 "empty query embedding".into(),
             ));
         }
         let inner = self.inner.lock().expect("poisoned");
-        let mut hits: Vec<(ChunkId, f32)> = inner
-            .chunks
+        let mut hits: Vec<(EventId, f32)> = inner
+            .events
             .values()
-            .filter_map(|c| {
-                let e = c.embedding.as_ref()?;
-                if e.len() != query_embedding.len() {
+            .filter_map(|e| {
+                let emb = e.embedding.as_ref()?;
+                if emb.len() != query_embedding.len() {
                     return None;
                 }
                 // Vectors are L2-normalized per ADR-0009, so cosine == dot.
-                let dot: f32 = e.iter().zip(query_embedding.iter()).map(|(a, b)| a * b).sum();
-                Some((c.id, dot))
+                let dot: f32 =
+                    emb.iter().zip(query_embedding.iter()).map(|(a, b)| a * b).sum();
+                Some((e.id, dot))
             })
             .collect();
         hits.sort_by(|a, b| {
@@ -276,15 +276,16 @@ pub const DEFAULT_CANDIDATE_POOL: usize = 64;
 /// post-fetch, fuse with the default convex weights, sort by combined
 /// score, truncate to `query.limit`.
 ///
-/// Production retriever has the same shape but joins `events` for app/time
-/// filters and routes to the anchor-then-window or LLM-time-range paths
-/// per ADR-0010 §6. The stub implements plain hybrid only.
+/// Production retriever has the same shape but applies `WHERE`-pre-filters
+/// in SQL for app/time and routes to the anchor-then-window or
+/// LLM-time-range paths per ADR-0010 §6. The stub implements plain hybrid
+/// only.
 pub struct StubRetriever<E: Embedder> {
     /// Embedder used at query time only. Stored by value so the retriever
     /// owns the runtime; production retrievers do the same.
     pub embedder: E,
     /// The store the retriever reads. Shared `&` reference so a test can
-    /// `put_chunk` directly through the store and have the retriever see
+    /// `put_event` directly through the store and have the retriever see
     /// the inserts.
     pub store: std::sync::Arc<InMemoryBrainStore>,
     /// Wall-clock-equivalent "now", microseconds since UNIX epoch. Held on
@@ -348,31 +349,30 @@ impl<E: Embedder> Retriever for StubRetriever<E> {
             .vec_search(&q_emb, pool)
             .map_err(|e| RetrieveError::Backend(e.to_string()))?;
 
-        let lex_map: HashMap<ChunkId, f32> = lex.into_iter().collect();
-        let sem_map: HashMap<ChunkId, f32> = sem.into_iter().collect();
+        let lex_map: HashMap<EventId, f32> = lex.into_iter().collect();
+        let sem_map: HashMap<EventId, f32> = sem.into_iter().collect();
         let lex_bounds = minmax(lex_map.values().copied());
         let sem_bounds = minmax(sem_map.values().copied());
 
-        let mut candidate_ids: HashSet<ChunkId> = HashSet::new();
+        let mut candidate_ids: HashSet<EventId> = HashSet::new();
         candidate_ids.extend(lex_map.keys().copied());
         candidate_ids.extend(sem_map.keys().copied());
 
         let mut hits: Vec<RetrievalHit> = Vec::with_capacity(candidate_ids.len());
         for id in candidate_ids {
-            let chunk_opt = self
+            let event_opt = self
                 .store
-                .get_chunk(id)
+                .get_event(id)
                 .map_err(|e| RetrieveError::Backend(e.to_string()))?;
-            let Some(chunk) = chunk_opt else { continue };
+            let Some(event) = event_opt else { continue };
 
             if let Some(tr) = &query.time_filter {
-                if chunk.created_at_us < tr.from_us || chunk.created_at_us > tr.to_us {
+                if event.ts_us < tr.from_us || event.ts_us > tr.to_us {
                     continue;
                 }
             }
             if let Some(target) = &query.app_filter {
-                let app = self.store.get_event_app(chunk.source_event_id);
-                if app.as_deref() != Some(target.as_str()) {
+                if event.app_bundle_id.as_deref() != Some(target.as_str()) {
                     continue;
                 }
             }
@@ -381,12 +381,12 @@ impl<E: Embedder> Retriever for StubRetriever<E> {
             let sem_raw = sem_map.get(&id).copied().unwrap_or(0.0);
             let lex_hat = minmax_normalize(lex_raw, lex_bounds.0, lex_bounds.1);
             let sem_hat = minmax_normalize(sem_raw, sem_bounds.0, sem_bounds.1);
-            let recency = recency_decay(self.now_us, chunk.created_at_us);
+            let recency = recency_decay(self.now_us, event.ts_us);
             let combined = self
                 .w_sem
                 .mul_add(sem_hat, self.w_lex.mul_add(lex_hat, self.w_rec * recency));
             hits.push(RetrievalHit {
-                chunk_id: id,
+                event_id: id,
                 score_lexical: lex_hat,
                 score_semantic: sem_hat,
                 score_recency: recency,
@@ -433,9 +433,9 @@ fn minmax_normalize(v: f32, mn: f32, mx: f32) -> f32 {
     ((v - mn) / (mx - mn)).clamp(0.0, 1.0)
 }
 
-/// Recency decay term per ADR-0010 §5: `0.99^Δt_hours`. The chunk's
-/// `created_at_us` may be ahead of `now_us` in tests; `saturating_sub`
-/// keeps that case from underflowing and returns `1.0` (max recency).
+/// Recency decay term per ADR-0010 §5: `0.99^Δt_hours`. The event's
+/// `ts_us` may be ahead of `now_us` in tests; `saturating_sub` keeps that
+/// case from underflowing and returns `1.0` (max recency).
 fn recency_decay(now_us: u64, then_us: u64) -> f32 {
     // f32 precision is fine: 0.99^Δt_h is bounded in [0, 1] and we only
     // need ranking accuracy, not exact arithmetic.
