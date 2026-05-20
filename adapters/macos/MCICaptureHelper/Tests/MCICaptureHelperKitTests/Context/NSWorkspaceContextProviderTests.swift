@@ -13,10 +13,15 @@
 //      / NSWorkspace / TCC permission is involved.
 //   3. `stop()` halts further ticks — counter does not advance after.
 //   4. `start()` is idempotent — calling twice does not double-fire.
-//   5. Only `appBundleId` is populated in P2.1; `windowTitle` / `url`
-//      / `pageText` stay nil. Pins ADR-0015 §6 P2.1 scope —
-//      regression-guards future PRs from accidentally writing the
-//      P2.2/P2.3/P2.4 fields out of order.
+//   5. With NO `windowTitleProvider` injected (the default) only
+//      `appBundleId` is populated; `windowTitle` / `url` / `pageText`
+//      stay nil. Pins the P2.1 byte-for-byte shape so this PR
+//      (P2.2) does not silently regress P2.1's no-injection path.
+//   6. With a `windowTitleProvider` injected, `windowTitle`
+//      propagates into the snapshot — the provider is consulted
+//      with the polled bundle id, and a polled-bundle-id of `nil`
+//      short-circuits to `windowTitle: nil` without consulting the
+//      provider. ADR-0015 §6 P2.2 wiring.
 
 import XCTest
 @testable import MCICaptureHelperKit
@@ -50,6 +55,32 @@ final class StubFrontmostAppSource: FrontmostAppSource, @unchecked Sendable {
     }
 }
 
+/// Programmable `WindowTitleProvider` for headless tests. Records
+/// every `forFrontmost` bundle id passed in and returns whichever
+/// title the test loaded into `titles` (missing → nil, matching
+/// the production "no permission / no focused window / unsupported
+/// bundle" leg).
+final class StubWindowTitleProvider: WindowTitleProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var titles: [String: String?]
+    private var _lookups: [String] = []
+
+    init(titles: [String: String?]) {
+        self.titles = titles
+    }
+
+    var lookups: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return _lookups
+    }
+
+    func title(forFrontmost bundleId: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        _lookups.append(bundleId)
+        return titles[bundleId] ?? nil
+    }
+}
+
 final class NSWorkspaceContextProviderTests: XCTestCase {
     func testTickOncePushesObservedBundleIdToSnapshot() async {
         let stub = StubFrontmostAppSource(initial: "com.apple.Safari")
@@ -70,19 +101,134 @@ final class NSWorkspaceContextProviderTests: XCTestCase {
         XCTAssertNil(store.currentSync().appBundleId)
     }
 
-    func testOnlyAppBundleIdIsPopulatedInP21() async {
-        // ADR-0015 §6 P2.1 scope guard: this PR ships `appBundleId`
-        // only. `windowTitle` (P2.2), `url` (P2.3/P2.4), `pageText`
-        // (Phase 3) all stay nil. A future PR that accidentally
-        // writes them through this provider trips this test.
+    func testOnlyAppBundleIdIsPopulatedWithoutTitleProviderInjected() async {
+        // ADR-0015 §6 P2.1 byte-for-byte shape: with NO
+        // `windowTitleProvider` injected (the default), the provider
+        // writes `appBundleId` only. `windowTitle` (needs the P2.2
+        // provider), `url` (P2.3/P2.4 — wired at P2.5 composite),
+        // `pageText` (Phase 3) all stay nil. Pins the P2.2 default-
+        // off contract so this PR does not silently regress P2.1.
         let stub = StubFrontmostAppSource(initial: "com.apple.Safari")
         let store = WorkflowContextSnapshot()
         await NSWorkspaceContextProvider.tickOnce(source: stub, store: store)
         let ctx = store.currentSync()
         XCTAssertEqual(ctx.appBundleId, "com.apple.Safari")
-        XCTAssertNil(ctx.windowTitle, "P2.2 owns windowTitle, not P2.1")
-        XCTAssertNil(ctx.url, "P2.3/P2.4 own url, not P2.1")
+        XCTAssertNil(
+            ctx.windowTitle,
+            "Without a WindowTitleProvider injected, windowTitle stays nil"
+        )
+        XCTAssertNil(ctx.url, "P2.3/P2.4 own url, wired at P2.5 composite")
         XCTAssertNil(ctx.pageText, "Phase 3 (Vision OCR) owns pageText")
+    }
+
+    // MARK: – P2.2 windowTitle propagation
+
+    /// With a `windowTitleProvider` injected, `tickOnce` reads the
+    /// title for the polled bundle id and stores it in the
+    /// snapshot. Pins the P2.2 wiring end-to-end at the provider
+    /// boundary.
+    func testTickOncePropagatesWindowTitleWhenProviderInjected() async {
+        let stub = StubFrontmostAppSource(initial: "com.apple.Safari")
+        let titleStub = StubWindowTitleProvider(
+            titles: ["com.apple.Safari": "Apple — Official Site"]
+        )
+        let store = WorkflowContextSnapshot()
+        await NSWorkspaceContextProvider.tickOnce(
+            source: stub,
+            titleProvider: titleStub,
+            store: store
+        )
+        let ctx = store.currentSync()
+        XCTAssertEqual(ctx.appBundleId, "com.apple.Safari")
+        XCTAssertEqual(ctx.windowTitle, "Apple — Official Site")
+        XCTAssertEqual(
+            titleStub.lookups.count, 1,
+            "Title provider must be consulted exactly once per tick"
+        )
+        XCTAssertEqual(
+            titleStub.lookups.first, "com.apple.Safari",
+            "Title provider must be called with the polled bundle id"
+        )
+    }
+
+    /// Polled bundle id is `nil` → provider is NOT consulted, and
+    /// `windowTitle` stays nil. Pins the "no frontmost app → no
+    /// title read" short-circuit in `buildContext`. The cascade is
+    /// fail-closed on `appBundleId == nil` anyway; we don't want to
+    /// waste an AX read for a tick that will redact regardless.
+    func testNilBundleIdShortCircuitsTitleProvider() async {
+        let stub = StubFrontmostAppSource(initial: nil)
+        let titleStub = StubWindowTitleProvider(
+            titles: ["com.apple.Safari": "should-not-be-read"]
+        )
+        let store = WorkflowContextSnapshot()
+        await NSWorkspaceContextProvider.tickOnce(
+            source: stub,
+            titleProvider: titleStub,
+            store: store
+        )
+        let ctx = store.currentSync()
+        XCTAssertNil(ctx.appBundleId)
+        XCTAssertNil(ctx.windowTitle)
+        XCTAssertEqual(
+            titleStub.lookups.count, 0,
+            "Title provider MUST NOT be called when bundle id is nil"
+        )
+    }
+
+    /// Provider returns `nil` (no permission / no focused window /
+    /// timeout / unsupported bundle) → `windowTitle: nil`,
+    /// `appBundleId` still flows through. Pins per-field
+    /// independence (ADR-0015 §2 alternatives-rejected reasoning).
+    func testTitleProviderNilDoesNotZeroOutBundleId() async {
+        let stub = StubFrontmostAppSource(initial: "com.apple.Safari")
+        let titleStub = StubWindowTitleProvider(titles: [:])  // every bundle → nil
+        let store = WorkflowContextSnapshot()
+        await NSWorkspaceContextProvider.tickOnce(
+            source: stub,
+            titleProvider: titleStub,
+            store: store
+        )
+        let ctx = store.currentSync()
+        XCTAssertEqual(ctx.appBundleId, "com.apple.Safari")
+        XCTAssertNil(ctx.windowTitle)
+        XCTAssertEqual(titleStub.lookups.count, 1)
+    }
+
+    /// Live timer path: a `windowTitleProvider` injected into the
+    /// `init` propagates through to the snapshot on each tick.
+    /// Pins that the optional dep flows through `start()` /
+    /// `setEventHandler` capture (regression-guard against a future
+    /// refactor that drops the capture).
+    func testInitInjectedTitleProviderPropagatesAcrossLiveTicks() async {
+        let stub = StubFrontmostAppSource(initial: "com.test.live")
+        let titleStub = StubWindowTitleProvider(
+            titles: ["com.test.live": "Live Title"]
+        )
+        let store = WorkflowContextSnapshot()
+        let provider = NSWorkspaceContextProvider(
+            snapshotStore: store,
+            source: stub,
+            windowTitleProvider: titleStub,
+            intervalMs: 100
+        )
+        provider.start()
+        defer { provider.stop() }
+
+        let deadline = Date().addingTimeInterval(1.0)
+        while Date() < deadline {
+            let ctx = store.currentSync()
+            if ctx.appBundleId == "com.test.live"
+                && ctx.windowTitle == "Live Title"
+            {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail(
+            "windowTitle did not propagate within 1 s — final="
+            + "\(String(describing: store.currentSync().windowTitle))"
+        )
     }
 
     func testStartFiresAtLeastOneTickWithinPollInterval() async {

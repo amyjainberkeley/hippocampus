@@ -14,11 +14,18 @@
 // the provider is not yet wired into `SCStreamCaptureSession.swift`
 // — that's PR P2.5).
 //
-// `windowTitle`, `url`, `pageText` stay `nil` in P2.1:
-//   - `windowTitle` — P2.2 (`AXWindowTitleProvider`, reuses the
-//     PR #38 AX path).
+// Field population across the Phase-2 PR ladder:
+//   - `appBundleId` — P2.1 (this provider, polled 1 Hz).
+//   - `windowTitle` — P2.2 (`AXWindowTitleProvider`, optionally
+//     injected here via the `windowTitleProvider` init param —
+//     default `nil` preserves P2.1 byte-for-byte behaviour; when
+//     supplied, each tick reads `windowTitleProvider.title(...)`
+//     against the polled bundle id and folds the result into the
+//     snapshot. The cascade does NOT yet consume this — P2.5 wires
+//     the snapshot through `SCStreamCaptureSession.swift`).
 //   - `url` — P2.3 (`SafariURLProvider`) + P2.4 (Chromium / Firefox /
-//     Arc).
+//     Arc) — same optional-injection shape lands at the composite
+//     in P2.5; not wired here.
 //   - `pageText` — Phase 3 (Vision OCR) per ADR-0015 §1.4.
 //
 // The `NSWorkspace` read is factored behind a small internal
@@ -74,11 +81,12 @@ public struct NSWorkspaceFrontmostAppSource: FrontmostAppSource {
 /// instance — actor isolation on `WorkflowContextSnapshot.store(_:)`
 /// serializes fan-in.
 ///
-/// For P2.1 only the `appBundleId` field is populated; the provider
-/// always writes `WorkflowContext(appBundleId: ..., windowTitle: nil,
-/// url: nil, pageText: nil)`. Subsequent PRs fold their per-field
-/// providers into a `CompositeContextProvider` (ADR-0015 §2); the
-/// in-isolation P2.1 shape is intentional.
+/// In P2.1 only `appBundleId` is populated; P2.2 adds optional
+/// `windowTitle` via the `windowTitleProvider` init parameter
+/// (default `nil` preserves the P2.1 shape byte-for-byte).
+/// Subsequent PRs fold the URL providers into a
+/// `CompositeContextProvider` (ADR-0015 §2); per-field optional
+/// injection is intentional so each PR ships in isolation.
 public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Sendable {
     /// Shared snapshot the provider writes to and `snapshot()` reads
     /// from. Multiple providers may share one snapshot in later PRs.
@@ -87,6 +95,13 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     /// Source of frontmost-app readings. Production:
     /// `NSWorkspaceFrontmostAppSource`. Tests: stub.
     private let source: FrontmostAppSource
+
+    /// Optional focused-window-title provider (P2.2). `nil` keeps
+    /// the P2.1 behaviour intact — every tick writes
+    /// `windowTitle: nil`. When supplied, every tick reads the
+    /// title for the polled bundle id and includes it in the
+    /// snapshot.
+    private let windowTitleProvider: WindowTitleProvider?
 
     /// Polling cadence, milliseconds. Default 1000 ms (1 Hz) — see
     /// ADR-0015 §3.
@@ -109,6 +124,13 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     ///     P2.2+ MUST pass the shared instance.
     ///   - source: frontmost-app source. Defaults to the real
     ///     `NSWorkspace` reader.
+    ///   - windowTitleProvider: optional `WindowTitleProvider`
+    ///     (P2.2). Default `nil` preserves the P2.1 shape (every
+    ///     tick writes `windowTitle: nil`). When non-nil, each tick
+    ///     reads `title(forFrontmost: polledBundleId)` and stores
+    ///     the result. A polled-bundle-id of `nil` (no frontmost
+    ///     app) short-circuits to `windowTitle: nil` without
+    ///     invoking the provider.
     ///   - intervalMs: poll period, milliseconds. Defaults to 1000
     ///     (1 Hz) per ADR-0015 §3.
     ///   - queue: dispatch queue for the timer. Defaults to a
@@ -116,6 +138,7 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     public init(
         snapshotStore: WorkflowContextSnapshot = WorkflowContextSnapshot(),
         source: FrontmostAppSource = NSWorkspaceFrontmostAppSource(),
+        windowTitleProvider: WindowTitleProvider? = nil,
         intervalMs: UInt64 = 1000,
         queue: DispatchQueue = DispatchQueue(
             label: "mci.context.nsworkspace",
@@ -124,6 +147,7 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     ) {
         self.snapshotStore = snapshotStore
         self.source = source
+        self.windowTitleProvider = windowTitleProvider
         self.intervalMs = intervalMs
         self.queue = queue
     }
@@ -161,9 +185,14 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         // closure be the sole owner of a top-level object).
         let source = self.source
         let store = self.snapshotStore
+        let titleProvider = self.windowTitleProvider
         t.setEventHandler { [weak self] in
             guard self != nil else { return }
-            Self.tick(source: source, store: store)
+            Self.tick(
+                source: source,
+                titleProvider: titleProvider,
+                store: store
+            )
         }
         timer = t
         t.resume()
@@ -186,20 +215,20 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         snapshotStore.currentSync()
     }
 
-    /// One poll tick — read the source, build the context, push to
+    /// One poll tick — read the source, optionally read the window
+    /// title for the polled bundle id, build the context, push to
     /// the snapshot. Static so the timer block does not capture
-    /// `self`; testable in isolation via the `tickOnce(source:store:)`
-    /// public test helper below.
+    /// `self`; testable in isolation via the
+    /// `tickOnce(source:titleProvider:store:)` public test helper
+    /// below.
     private static func tick(
         source: FrontmostAppSource,
+        titleProvider: WindowTitleProvider?,
         store: WorkflowContextSnapshot
     ) {
-        let bundleId = source.currentBundleId()
-        let ctx = WorkflowContext(
-            appBundleId: bundleId,
-            windowTitle: nil,
-            url: nil,
-            pageText: nil
+        let ctx = buildContext(
+            source: source,
+            titleProvider: titleProvider
         )
         // The actor-isolated `store(_:)` is `async`; schedule onto a
         // detached task. Ordering across ticks is preserved by the
@@ -211,6 +240,33 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         }
     }
 
+    /// Pure builder — read each sub-provider and assemble a
+    /// `WorkflowContext`. Factored out so `tick` and `tickOnce`
+    /// share one truth.
+    ///
+    /// A `nil` `bundleId` short-circuits the title read: there is
+    /// no frontmost app to read a focused window from, and we want
+    /// `windowTitle: nil` rather than "title of whatever app
+    /// happens to claim AX focus right now."
+    private static func buildContext(
+        source: FrontmostAppSource,
+        titleProvider: WindowTitleProvider?
+    ) -> WorkflowContext {
+        let bundleId = source.currentBundleId()
+        let title: String?
+        if let provider = titleProvider, let id = bundleId {
+            title = provider.title(forFrontmost: id)
+        } else {
+            title = nil
+        }
+        return WorkflowContext(
+            appBundleId: bundleId,
+            windowTitle: title,
+            url: nil,
+            pageText: nil
+        )
+    }
+
     /// Synchronous test hook — one tick, awaiting the store write.
     /// Lets unit tests drive the polling logic without sleeping on
     /// the timer cadence. Production code does NOT call this; the
@@ -220,13 +276,18 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         source: FrontmostAppSource,
         store: WorkflowContextSnapshot
     ) async {
-        let bundleId = source.currentBundleId()
-        let ctx = WorkflowContext(
-            appBundleId: bundleId,
-            windowTitle: nil,
-            url: nil,
-            pageText: nil
-        )
+        await tickOnce(source: source, titleProvider: nil, store: store)
+    }
+
+    /// Synchronous test hook with optional `WindowTitleProvider`
+    /// injection. P2.2 overload — kept distinct from the no-title
+    /// variant above so P2.1 callers stay byte-for-byte unchanged.
+    public static func tickOnce(
+        source: FrontmostAppSource,
+        titleProvider: WindowTitleProvider?,
+        store: WorkflowContextSnapshot
+    ) async {
+        let ctx = buildContext(source: source, titleProvider: titleProvider)
         await store.store(ctx)
     }
 }
