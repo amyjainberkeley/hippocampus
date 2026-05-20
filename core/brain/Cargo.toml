@@ -1,0 +1,32 @@
+[package]
+name                   = "mci-brain"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI brain — OS-free traits + types for OCR / embed / chunk / retrieve / index. Phase 3 fills these with production impls."
+
+[lints]
+workspace = true
+
+[features]
+# Test-only stub impls (NoopChunker, FixedDimEmbedder, InMemoryBrainStore,
+# StubRetriever). Always available under `cfg(test)`; the explicit feature
+# exists for downstream integration-test crates that cannot see this
+# crate's `cfg(test)`. Never enabled in a release build of any binary.
+# Mirrors the pattern of `mci-core`'s `insecure-test-keywrap` feature, but
+# carries no protected-set risk — these stubs touch no crypto / sync / store
+# surface (the production impls land in the Phase 3 PR sequence per
+# `docs/decisions/0010-event-episode-retrieval-unit-cc-fusion.md` and
+# `docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md`).
+stubs = []
+
+[dependencies]
+mci-core  = { path = ".." }
+thiserror = "1"
+
+[dev-dependencies]
+# Tests exercise the stub impls; gate them via the `stubs` feature on this
+# crate so the public surface is identical to the prod build path.
+mci-brain = { path = ".", features = ["stubs"] }

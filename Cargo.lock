@@ -252,6 +252,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci-brain"
+version = "0.0.1"
+dependencies = [
+ "mci-brain",
+ "mci-core",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "mci-core"
 version = "0.0.1"
 dependencies = [
