@@ -6,7 +6,8 @@
 # This tool touches NO protected-set code (AGENT_PROTOCOL §5). It only
 # parses a `--output` file produced by `mci-capture-helper`. It is the
 # observation harness for Track B · Step 1 (live SCStream runtime
-# verification of the merged `// UNVERIFIED` shapes).
+# verification of the merged `// UNVERIFIED` shapes) AND Step 2 §7
+# OS-integration corpus.
 #
 # Wire format mirrors `adapters/macos/.../IPC/Wire.swift` /
 # `core/src/ipc/wire.rs` (binary, little-endian):
@@ -34,9 +35,15 @@
 #   and NOT counted as corruption.
 #
 # This is NOT the ADR-0013 §7 corpus and NOT the G2 footprint proof.
+#
+# `--verbose` / `-v` adds a per-frame table dump for temporal
+# correlation against a paper log (e.g. "sudo prompt opened at T+30s
+# → which tombstone seqs cluster around T+30s?"). Off by default;
+# steady-state output is unchanged.
 
-import sys
+import argparse
 import struct
+import sys
 from collections import Counter
 
 MAGIC = 0x4D
@@ -61,7 +68,29 @@ REASON = {
 }
 
 
-def main(path):
+def parse_tombstone_payload(p):
+    """Decode a PrivacyTombstone payload.
+
+    Layout: tsUs(u64) + appBundleLen(u16) + appBundle(utf8 bytes) + reason(u8).
+    Returns (ts_us, app_bundle, reason) or (None, None, None) on short payload.
+    """
+    if len(p) < 8 + 2 + 1:
+        return (None, None, None)
+    ts_us = struct.unpack_from("<Q", p, 0)[0]
+    bundle_len = struct.unpack_from("<H", p, 8)[0]
+    bundle_start = 10
+    bundle_end = bundle_start + bundle_len
+    if bundle_end + 1 > len(p):
+        return (ts_us, None, None)
+    try:
+        app_bundle = p[bundle_start:bundle_end].decode("utf-8", errors="replace")
+    except Exception:
+        app_bundle = "<utf8-decode-error>"
+    reason = p[-1]
+    return (ts_us, app_bundle, reason)
+
+
+def main(path, verbose):
     with open(path, "rb") as f:
         buf = f.read()
 
@@ -79,7 +108,7 @@ def main(path):
         if magic != MAGIC or ver != VERSION:
             corrupt.append(
                 f"@{off}: bad header magic=0x{magic:02X} ver=0x{ver:02X} "
-                f"(expected 0x4D/0x02) — stopping decode here"
+                f"(expected 0x4D/0x{VERSION:02X}) — stopping decode here"
             )
             break
         if n - off - HEADER < plen:
@@ -138,6 +167,25 @@ def main(path):
     print("--- StateTransitionEvent (0x0010) ---")
     print(f"  count           : {len(state_events)}  (MUST be 0 — any > 0 = pixels/event reached IPC)")
 
+    if verbose:
+        # Per-frame dump for temporal correlation against a paper log
+        # (e.g. "sudo prompt opened at T+30s → which tombstone seqs
+        # cluster around T+30s?"). Tombstones get ts_us + reason +
+        # appBundle parsed out; other message types print the raw
+        # msg_type + seq + payload size.
+        print("--- per-frame (verbose) ---")
+        print(f"  {'idx':>5}  {'msg_type':<22}  {'seq':>10}  {'ts_us':>17}  {'reason':<22}  app_bundle")
+        for i, (m, seq, p) in enumerate(frames):
+            mname = MSG.get(m, f"unknown(0x{m:04X})")
+            if m == 0x0011:
+                ts_us, app, r = parse_tombstone_payload(p)
+                rname = REASON.get(r, f"UNKNOWN({r})") if r is not None else "<no-payload>"
+                ts_str = f"{ts_us}" if ts_us is not None else "-"
+                app_str = app if app is not None else ""
+                print(f"  {i:>5}  {mname:<22}  {seq:>10}  {ts_str:>17}  {rname:<22}  {app_str}")
+            else:
+                print(f"  {i:>5}  {mname:<22}  {seq:>10}  {'-':>17}  {'-':<22}  <payload={len(p)}B>")
+
     # ---- mechanical verdict ----
     fails = []
     if state_events:
@@ -168,7 +216,20 @@ def main(path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.stderr.write("usage: wire_decode.py <helper --output file>\n")
-        sys.exit(2)
-    sys.exit(main(sys.argv[1]))
+    parser = argparse.ArgumentParser(
+        description="READ-ONLY decoder for the MCI helper IPC wire stream.",
+        epilog="Outputs an aggregate report by default. Use --verbose for "
+               "per-frame rows useful for temporal correlation against a paper log "
+               "during Step-2 §7 corpus runs.",
+    )
+    parser.add_argument(
+        "path",
+        help="path to a helper --output file (binary wire stream)",
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="dump per-frame rows (idx, msg_type, seq, ts_us, reason, appBundle)",
+    )
+    args = parser.parse_args()
+    sys.exit(main(args.path, args.verbose))
