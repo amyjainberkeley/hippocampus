@@ -16,6 +16,12 @@ workspace = true
 
 [dependencies]
 mci-core    = { path = "../../core" }
+# Phase 3 P3.6.6 — the agent shell is now the wire-to-brain ingest
+# point. mci-brain is a workspace path dep (no net-new third-party
+# crate; ADR-0008 dependency-addition gate not triggered). The
+# `stubs` feature is NEVER enabled on this dep (production binary
+# path); test-side stub access lives in [dev-dependencies] below.
+mci-brain   = { path = "../../core/brain" }
 tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "io-std", "process", "signal", "fs"] }
 tracing     = { version = "0.1", default-features = false, features = ["std"] }
 thiserror   = "1"
@@ -29,3 +35,7 @@ thiserror   = "1"
 [dev-dependencies]
 tempfile    = "3"
 tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "process", "signal", "fs", "test-util"] }
+# P3.6.6 — tests inject stub `BrainStore` / `Embedder` impls from
+# `mci_brain::stubs`. Production agent never enables this feature; it
+# is dev-only by Cargo's [dev-dependencies] gate.
+mci-brain   = { path = "../../core/brain", features = ["stubs"] }

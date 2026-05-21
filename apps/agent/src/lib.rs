@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod brain_ingest;
 pub mod device_id;
 pub mod health_log;
 pub mod health_pump;
@@ -26,12 +27,13 @@ pub mod runner;
 pub mod supervisor;
 pub mod wall_clock;
 
+pub use brain_ingest::{BrainIngestor, BrainPump, IngestError, IngestOutcome, NoopBrainIngestor};
 pub use device_id::{load_or_generate, DeviceId, DeviceIdError, DeviceIdSource};
 pub use health_log::{HealthLog, HealthLogConfig, HealthLogError, HealthLogRecord};
 pub use health_pump::{pump_one, PumpError};
 pub use health_summary::{
     parse_jsonl_line, summarize_file, summarize_lines, HealthSummary, ParseError, SummaryError,
 };
-pub use runner::{drain_to_log, RunError, RunStats};
+pub use runner::{drain_to_log, drain_to_log_with_brain, RunError, RunStats};
 pub use supervisor::{HelperSpawnConfig, SupervisorError};
 pub use wall_clock::{format_unix_ms, SystemWallClock, WallClock};
