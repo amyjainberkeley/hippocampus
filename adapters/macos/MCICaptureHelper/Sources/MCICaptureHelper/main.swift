@@ -367,6 +367,34 @@ let nsWorkspaceContextProvider = NSWorkspaceContextProvider(
 
 let captureSession: SCStreamCaptureSession?
 if captureOptions.captureEnabled {
+    // Shared FrameSequence — monotonic seq numbers across tombstones
+    // AND OCREvents on the same wire. Both SCStreamPipeline and
+    // CascadeTwiceOCREmitter allocate from this single actor so the
+    // Rust-side decoder sees strictly increasing seq regardless of
+    // which emitter produced the frame.
+    let sharedSequence = FrameSequence()
+    let sharedSink = FileHandleFrameSink(handle: outputHandle)
+
+    // ADR-0016 P3.6.7 — OCR worker + cascade-twice emitter. The
+    // worker is started below (before the SCStream session) so the
+    // consumer loop is ready to drain submissions on the first
+    // `.allow` frame. The emitter is the ONLY call site that emits
+    // `OCREvent` in the helper (ADR-0016 §4.2 invariant).
+    let ocrEngine: OCREngine = VisionOCRRunner()
+    let ocrWorker = VisionOCRWorker(engine: ocrEngine)
+    let ocrEmitter: any OCRPostAllowEmitter = CascadeTwiceOCREmitter(
+        worker: ocrWorker,
+        cascade: cascade,
+        sink: sharedSink,
+        sequence: sharedSequence,
+        counters: loop.counters
+    )
+    // Start OCR worker consumer loop BEFORE the SCStream session so
+    // submissions from the first `.allow` frame drain immediately.
+    // Retained by emitter → session → top-level `captureSession`
+    // binding (process-lifetime, SCSTREAM-LIVE-001 discipline).
+    await ocrWorker.start()
+
     // STEP-2-FINDING-005 fix — pass `loop.counters` to the pipeline so
     // pipeline writes (`recordDelivered` / `recordSuppressed` /
     // `recordRedactedByFailsafe` / `recordCascadeForced` /
@@ -388,7 +416,8 @@ if captureOptions.captureEnabled {
             // (ADR-0013 Amendment 1 §4) — deliberately NOT autonomous.
             encoder: DeferredVideoToolboxEncoder(),
             counters: loop.counters,
-            sink: FileHandleFrameSink(handle: outputHandle),
+            sequence: sharedSequence,
+            sink: sharedSink,
             floorIntervalMs: policy.cascadeFloorIntervalMs
         ),
         denylist: Denylist(entries: denylistEntries),
@@ -402,7 +431,8 @@ if captureOptions.captureEnabled {
         // synchronously per frame and dispatches the URL read against
         // the snapshot's frontmost bundle id.
         contextSnapshot: contextSnapshot,
-        urlProvider: urlProvider
+        urlProvider: urlProvider,
+        ocrPostAllowEmitter: ocrEmitter
     )
 } else {
     captureSession = nil

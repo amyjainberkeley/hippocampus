@@ -288,3 +288,98 @@ final class AllowlistBundledSeedTests: XCTestCase {
         XCTAssertEqual(allowlist.bundleIdSet, expectedBundledSeedBundles)
     }
 }
+
+// MARK: - P3.6.7 multi-path resolver tests
+
+/// Tests for the fallback URL resolver chain that covers both SPM dev
+/// builds and hand-bundled `.app` installs. Uses injected resolvers
+/// so the tests are hermetic (no filesystem side-effects, no
+/// reliance on Bundle.module actually being present).
+final class AllowlistTOMLLoaderResolverTests: XCTestCase {
+    private let sampleTOML = """
+    [[entries]]
+    bundle_id = "com.example.test"
+    rationale = "Unit test seed."
+    cso_ratified_by = "test"
+    ratified_at = "2026-05-20"
+    """
+
+    /// When the first resolver finds the TOML, subsequent resolvers
+    /// are never consulted.
+    func testFirstResolverWins() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path1 = tmpDir.appendingPathComponent("first.toml")
+        let path2 = tmpDir.appendingPathComponent("second.toml")
+        try sampleTOML.write(to: path1, atomically: true, encoding: .utf8)
+        try """
+        [[entries]]
+        bundle_id = "com.example.second"
+        rationale = "Should not be reached."
+        cso_ratified_by = "test"
+        ratified_at = "2026-05-20"
+        """.write(to: path2, atomically: true, encoding: .utf8)
+
+        let allowlist = try AllowlistTOMLLoader.loadBundled(urlResolvers: [
+            { path1 },
+            { path2 },
+        ])
+        XCTAssertTrue(allowlist.contains("com.example.test"))
+        XCTAssertFalse(allowlist.contains("com.example.second"))
+    }
+
+    /// When the first resolver returns nil, falls through to the next.
+    func testFallsThroughNilResolvers() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("fallback.toml")
+        try sampleTOML.write(to: path, atomically: true, encoding: .utf8)
+
+        let allowlist = try AllowlistTOMLLoader.loadBundled(urlResolvers: [
+            { nil },
+            { nil },
+            { path },
+        ])
+        XCTAssertTrue(allowlist.contains("com.example.test"))
+    }
+
+    /// When ALL resolvers return nil, returns empty Allowlist (§7
+    /// fail-closed preserved — `Allowlist.contains(_:)` returns false
+    /// for everything).
+    func testAllResolversNilReturnsEmptyAllowlist() throws {
+        let allowlist = try AllowlistTOMLLoader.loadBundled(urlResolvers: [
+            { nil },
+            { nil },
+        ])
+        XCTAssertTrue(allowlist.entries.isEmpty)
+        XCTAssertFalse(allowlist.contains("com.apple.Safari"))
+    }
+
+    /// Malformed TOML at any resolver path still throws (never
+    /// silently degrades to empty).
+    func testMalformedTOMLAtResolvedPathThrows() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let bad = tmpDir.appendingPathComponent("bad.toml")
+        try "this is not TOML".write(to: bad, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try AllowlistTOMLLoader.loadBundled(urlResolvers: [
+            { bad },
+        ]))
+    }
+
+    /// Empty resolver array returns empty Allowlist.
+    func testEmptyResolverArrayReturnsEmptyAllowlist() throws {
+        let allowlist = try AllowlistTOMLLoader.loadBundled(urlResolvers: [])
+        XCTAssertTrue(allowlist.entries.isEmpty)
+    }
+}
