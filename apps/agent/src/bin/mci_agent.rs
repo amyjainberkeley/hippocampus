@@ -34,6 +34,7 @@ use mci_agent::health_summary::summarize_file;
 use mci_agent::episode_worker;
 use mci_agent::idle_batch;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
+use mci_agent::retention_worker;
 use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
 use mci_agent::panic_uploader::{self, PanicUploader};
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
@@ -85,6 +86,11 @@ fn default_db_path() -> PathBuf {
     // Expand $HOME at run-time (no glob-style ~ expansion in env vars).
     let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     home.join("Library/Application Support/MCI/mci.sqlite")
+}
+
+fn default_retention_json_path() -> PathBuf {
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    home.join("Library/Application Support/MCI/retention.json")
 }
 
 fn parse_args(argv: &[String]) -> Args {
@@ -349,6 +355,33 @@ async fn main() -> ExitCode {
                                         }
                                         Err(e) => {
                                             eprintln!("mci-agent: episode-worker error: {e}");
+                                        }
+                                    }
+                                });
+
+                                // Spawn retention-purger daily cron (ADR-0017 §4).
+                                let retention_store = Arc::clone(&store);
+                                let retention_shutdown = shutdown_rx.clone();
+                                let retention_json = default_retention_json_path();
+                                tokio::spawn(async move {
+                                    match retention_worker::run_retention_worker(
+                                        retention_store,
+                                        retention_json,
+                                        std::time::Duration::from_secs(86_400), // 24h
+                                        retention_shutdown,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats) => {
+                                            eprintln!(
+                                                "mci-agent: retention worker exited. cycles={} events_deleted={} vectors_deleted={} episodes_deleted={} errors={}",
+                                                stats.cycles_run, stats.total_events_deleted,
+                                                stats.total_vectors_deleted, stats.total_episodes_deleted,
+                                                stats.cycle_errors,
+                                            );
+                                        }
+                                        Err(e) => {
+                                            eprintln!("mci-agent: retention worker error: {e}");
                                         }
                                     }
                                 });

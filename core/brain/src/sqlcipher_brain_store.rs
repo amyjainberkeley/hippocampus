@@ -60,7 +60,7 @@ use crate::{BrainStats, Event, EventId, EventRecord, StoreError};
 /// `open()` (ADR-0008 protected-set code) is reused exactly. mci-brain
 /// never reimplements `PRAGMA key` or the wrong-key probe; we inherit it.
 pub struct SqlCipherBrainStore {
-    db: Mutex<Db>,
+    pub(crate) db: Mutex<Db>,
 }
 
 impl SqlCipherBrainStore {

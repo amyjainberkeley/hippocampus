@@ -63,8 +63,10 @@ pub mod event_chunker;
 pub use event_chunker::EventChunker;
 
 mod sqlcipher_brain_store;
+pub mod retention_purger;
 
 pub use sqlcipher_brain_store::SqlCipherBrainStore;
+pub use retention_purger::{PurgeStats, RetentionConfig};
 
 // ---------------------------------------------------------------------------
 // Read-only views used by the agent-API loopback (P3.10b) and recall UI

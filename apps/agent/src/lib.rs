@@ -30,6 +30,7 @@ pub mod mcp;
 pub mod page_content;
 pub mod panic_hook;
 pub mod panic_uploader;
+pub mod retention_worker;
 pub mod runner;
 pub mod supervisor;
 pub mod wall_clock;
