@@ -47,3 +47,11 @@ mci-core  = { path = "..", features = ["insecure-test-keywrap"] }
 # tempfile is already on the workspace lockfile via `mci-core`'s
 # dev-dependencies. Re-listing it here does NOT add a new lockfile entry.
 tempfile  = "3.27.0"
+# criterion for the hybrid_recall benchmark harness. Dev-only; never in a
+# release binary. Adds transitive deps to the lockfile but they are all
+# build/test-time. See PR body for ADR-0008 §1 dependency note.
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name    = "hybrid_recall"
+harness = false
