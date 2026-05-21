@@ -21,10 +21,12 @@
 use std::sync::{Arc, Mutex};
 
 use mci_agent::mcp::{
-    serve_stdio, BrainReader, BrainReaderError, JsonRpcId, JsonRpcRequest, JsonRpcResponse, McpHit,
-    Server, ToolName, INVALID_PARAMS, METHOD_NOT_FOUND, PARSE_ERROR,
+    serve_stdio, BrainReader, BrainReaderError, JsonRpcId, JsonRpcRequest, JsonRpcResponse,
+    LiveBrainReader, McpHit, Server, ToolName, INVALID_PARAMS, METHOD_NOT_FOUND, PARSE_ERROR,
 };
-use mci_brain::{BrainStats, EventId, EventRecord};
+use mci_brain::{BrainStats, BrainStore, Embedder, Event, EventId, EventRecord, SqlCipherBrainStore};
+use mci_brain::stubs::FixedDimEmbedder;
+use mci_core::crypto::DbKey;
 
 // ---------------------------------------------------------------------------
 // StubBrainReader — canned data + per-call invocation log so tests can
@@ -479,4 +481,172 @@ fn invalid_jsonrpc_field_returns_invalid_request() {
     let resp = s.dispatch(bad).expect("response");
     let err = resp.error.expect("error");
     assert_eq!(err.code, INVALID_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// P3.10d — HybridRetriever integration tests
+//
+// These use a real `SqlCipherBrainStore` (temp dir) + `FixedDimEmbedder`
+// (stub) to exercise the hybrid path through `LiveBrainReader` →
+// `Server::dispatch`, pinning the three behaviours the prompt requires.
+// ---------------------------------------------------------------------------
+
+fn make_test_event(text: &str, ts_us: u64) -> Event {
+    Event {
+        id: EventId(0),
+        ts_us,
+        app_bundle_id: Some("com.example.test".into()),
+        window_title: Some("Test Window".into()),
+        url: Some("https://example.com".into()),
+        text: text.into(),
+        summary: None,
+        entities: None,
+        episode_id: None,
+        cascade_reason: 0,
+        keyframe_blob: None,
+        embedding: None,
+    }
+}
+
+fn make_test_event_with_embedding(text: &str, ts_us: u64, embedder: &dyn Embedder) -> Event {
+    let emb = embedder.embed_one(text).unwrap();
+    Event {
+        embedding: Some(emb),
+        ..make_test_event(text, ts_us)
+    }
+}
+
+fn open_temp_store() -> (tempfile::TempDir, Arc<SqlCipherBrainStore>) {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.sqlite");
+    let key = DbKey::from_bytes([0xAA; 32]);
+    let store = Arc::new(SqlCipherBrainStore::new(&db_path, &key).unwrap());
+    (dir, store)
+}
+
+#[test]
+fn mci_recall_with_no_embedder_falls_back_to_fts5() {
+    let (_dir, store) = open_temp_store();
+
+    store.put_event(&make_test_event("hello world testing", 1_000_000)).unwrap();
+    store.put_event(&make_test_event("goodbye universe", 2_000_000)).unwrap();
+
+    let reader = LiveBrainReader::from_store_with_embedder(store, None);
+    let srv = Server::new(Arc::new(reader));
+
+    let resp = srv
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_recall",
+                "arguments": {"query": "hello", "limit": 10}
+            })),
+        ))
+        .expect("response");
+
+    let result = resp.result.expect("result — FTS5 fallback must succeed");
+    let hits = result
+        .get("hits")
+        .and_then(|v| v.as_array())
+        .expect("hits array");
+    assert_eq!(hits.len(), 1, "FTS5 should find 'hello' in one event");
+    assert_eq!(
+        hits[0].get("text_snippet").and_then(|v| v.as_str()),
+        Some("hello world testing")
+    );
+}
+
+#[test]
+fn mci_recall_with_embedder_calls_hybrid_retriever() {
+    let (_dir, store) = open_temp_store();
+    let embedder = Arc::new(FixedDimEmbedder::default());
+
+    store
+        .put_event(&make_test_event_with_embedding(
+            "database performance optimization",
+            1_000_000,
+            embedder.as_ref(),
+        ))
+        .unwrap();
+    store
+        .put_event(&make_test_event_with_embedding(
+            "sqlite query tuning strategies",
+            2_000_000,
+            embedder.as_ref(),
+        ))
+        .unwrap();
+
+    let reader = LiveBrainReader::from_store_with_embedder(
+        store,
+        Some(embedder as Arc<dyn Embedder>),
+    );
+    let srv = Server::new(Arc::new(reader));
+
+    let resp = srv
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_recall",
+                "arguments": {"query": "database optimization", "limit": 10}
+            })),
+        ))
+        .expect("response");
+
+    let result = resp.result.expect("result — hybrid recall must succeed");
+    let hits = result
+        .get("hits")
+        .and_then(|v| v.as_array())
+        .expect("hits array");
+    assert!(
+        !hits.is_empty(),
+        "hybrid retriever should return hits (lexical + semantic)"
+    );
+    for hit in hits {
+        let score = hit.get("score").and_then(|v| v.as_f64());
+        assert!(score.is_some(), "each hit should have a score");
+        assert!(
+            score.unwrap() > 0.0,
+            "hybrid fused scores should be positive"
+        );
+    }
+}
+
+#[test]
+fn mci_recall_handles_hyphen_in_query_gracefully() {
+    let (_dir, store) = open_temp_store();
+
+    store
+        .put_event(&make_test_event(
+            "sqlite-vec is a vector search extension for sqlite",
+            1_000_000,
+        ))
+        .unwrap();
+
+    let reader = LiveBrainReader::from_store_with_embedder(store, None);
+    let srv = Server::new(Arc::new(reader));
+
+    // "sqlite-vec" previously caused FTS5 to interpret `-` as NOT,
+    // returning wrong results or errors.
+    let resp = srv
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_recall",
+                "arguments": {"query": "sqlite-vec", "limit": 10}
+            })),
+        ))
+        .expect("response");
+
+    let result = resp
+        .result
+        .expect("result — hyphen query must not error");
+    let hits = result
+        .get("hits")
+        .and_then(|v| v.as_array())
+        .expect("hits array");
+    assert_eq!(
+        hits.len(),
+        1,
+        "sqlite-vec (sanitized) should match the event containing that text"
+    );
 }
