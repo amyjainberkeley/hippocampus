@@ -7,11 +7,12 @@
 //!
 //! # Read-only invariant (structural)
 //!
-//! [`Server::dispatch`] reaches the `BrainReader` only via three named
-//! arms — `Recall` / `EventsSince` / `Stats`. There is **no fall-through**
-//! branch that touches the brain; an unknown tool name returns
-//! `METHOD_NOT_FOUND` synchronously. The `BrainReader` trait itself has
-//! no mutating methods (per `brain_reader.rs`).
+//! [`Server::dispatch`] reaches the `BrainReader` only via five named
+//! arms — `Recall` / `EventsSince` / `Stats` / `Episodes` /
+//! `EventsByApp`. There is **no fall-through** branch that touches the
+//! brain; an unknown tool name returns `METHOD_NOT_FOUND` synchronously.
+//! The `BrainReader` trait itself has no mutating methods (per
+//! `brain_reader.rs`).
 
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -27,6 +28,15 @@ use crate::mcp::jsonrpc::{
     PARSE_ERROR, SERVER_ERROR_GENERIC,
 };
 use crate::mcp::tools::{tool_definitions, ToolName};
+
+/// Default `limit` for `mci_episodes` when the client omits it.
+const DEFAULT_EPISODES_LIMIT: usize = 20;
+/// Hard cap for `mci_episodes`'s `limit` parameter.
+const MAX_EPISODES_LIMIT: usize = 100;
+/// Default `limit` for `mci_events_by_app` when the client omits it.
+const DEFAULT_EVENTS_BY_APP_LIMIT: usize = 50;
+/// Hard cap for `mci_events_by_app`'s `limit` parameter.
+const MAX_EVENTS_BY_APP_LIMIT: usize = 500;
 
 /// MCP protocol version this server advertises in `initialize`.
 ///
@@ -61,6 +71,10 @@ pub struct ServerCounters {
     pub events_since_count: AtomicU64,
     /// `mci_stats` invocations.
     pub stats_count: AtomicU64,
+    /// `mci_episodes` invocations.
+    pub episodes_count: AtomicU64,
+    /// `mci_events_by_app` invocations.
+    pub events_by_app_count: AtomicU64,
     /// Frames that did not parse as JSON-RPC 2.0.
     pub parse_error_count: AtomicU64,
     /// Frames that named an unknown method or unknown tool.
@@ -68,13 +82,15 @@ pub struct ServerCounters {
 }
 
 impl ServerCounters {
-    /// Snapshot the four counters atomically-as-of-now.
+    /// Snapshot the counters atomically-as-of-now.
     #[must_use]
-    pub fn snapshot(&self) -> (u64, u64, u64, u64, u64) {
+    pub fn snapshot(&self) -> (u64, u64, u64, u64, u64, u64, u64) {
         (
             self.recall_count.load(Ordering::SeqCst),
             self.events_since_count.load(Ordering::SeqCst),
             self.stats_count.load(Ordering::SeqCst),
+            self.episodes_count.load(Ordering::SeqCst),
+            self.events_by_app_count.load(Ordering::SeqCst),
             self.parse_error_count.load(Ordering::SeqCst),
             self.unknown_method_count.load(Ordering::SeqCst),
         )
@@ -218,7 +234,7 @@ impl Server {
             return JsonRpcResponse::err(id, METHOD_NOT_FOUND, format!("unknown tool: {name}"));
         };
 
-        // STRUCTURAL READ-ONLY POINT — three named branches, no fall-through.
+        // STRUCTURAL READ-ONLY POINT — five named branches, no fall-through.
         match tool {
             ToolName::Recall => {
                 self.counters.recall_count.fetch_add(1, Ordering::SeqCst);
@@ -233,6 +249,16 @@ impl Server {
             ToolName::Stats => {
                 self.counters.stats_count.fetch_add(1, Ordering::SeqCst);
                 self.handle_stats(id)
+            }
+            ToolName::Episodes => {
+                self.counters.episodes_count.fetch_add(1, Ordering::SeqCst);
+                self.handle_episodes(id, args)
+            }
+            ToolName::EventsByApp => {
+                self.counters
+                    .events_by_app_count
+                    .fetch_add(1, Ordering::SeqCst);
+                self.handle_events_by_app(id, args)
             }
         }
     }
@@ -368,6 +394,123 @@ impl Server {
                             }
                         ],
                         "stats": payload,
+                        "isError": false,
+                    }),
+                )
+            }
+            Err(e) => brain_err_to_response(id, &e),
+        }
+    }
+
+    fn handle_episodes(&self, id: JsonRpcId, args: serde_json::Value) -> JsonRpcResponse {
+        #[derive(Deserialize)]
+        struct EpisodesArgs {
+            #[serde(default)]
+            limit: Option<usize>,
+        }
+        let parsed: EpisodesArgs = match serde_json::from_value::<EpisodesArgs>(args) {
+            Ok(v) => v,
+            Err(e) => {
+                return JsonRpcResponse::err(
+                    id,
+                    INVALID_PARAMS,
+                    format!("mci_episodes args: {e}"),
+                )
+            }
+        };
+        let limit = parsed
+            .limit
+            .unwrap_or(DEFAULT_EPISODES_LIMIT)
+            .clamp(1, MAX_EPISODES_LIMIT);
+
+        match self.reader.episodes(limit) {
+            Ok(eps) => {
+                let eps_json: Vec<serde_json::Value> = eps
+                    .iter()
+                    .map(|ep| {
+                        serde_json::json!({
+                            "id": ep.id,
+                            "app_bundle_id": ep.app_bundle_id,
+                            "ts_start": ep.ts_start,
+                            "ts_end": ep.ts_end,
+                            "event_count": ep.event_count,
+                        })
+                    })
+                    .collect();
+                JsonRpcResponse::ok(
+                    id,
+                    serde_json::json!({
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": serde_json::to_string(&eps_json)
+                                    .unwrap_or_else(|_| "[]".to_owned()),
+                            }
+                        ],
+                        "episodes": eps_json,
+                        "isError": false,
+                    }),
+                )
+            }
+            Err(e) => brain_err_to_response(id, &e),
+        }
+    }
+
+    fn handle_events_by_app(&self, id: JsonRpcId, args: serde_json::Value) -> JsonRpcResponse {
+        #[derive(Deserialize)]
+        struct EventsByAppArgs {
+            app_bundle_id: String,
+            #[serde(default)]
+            limit: Option<usize>,
+        }
+        let parsed: EventsByAppArgs = match serde_json::from_value::<EventsByAppArgs>(args) {
+            Ok(v) => v,
+            Err(e) => {
+                return JsonRpcResponse::err(
+                    id,
+                    INVALID_PARAMS,
+                    format!("mci_events_by_app args: {e}"),
+                )
+            }
+        };
+        if parsed.app_bundle_id.trim().is_empty() {
+            return JsonRpcResponse::err(
+                id,
+                INVALID_PARAMS,
+                "mci_events_by_app: app_bundle_id must be non-empty",
+            );
+        }
+        let limit = parsed
+            .limit
+            .unwrap_or(DEFAULT_EVENTS_BY_APP_LIMIT)
+            .clamp(1, MAX_EVENTS_BY_APP_LIMIT);
+
+        match self.reader.events_by_app(&parsed.app_bundle_id, limit) {
+            Ok(rows) => {
+                let rows_json: Vec<serde_json::Value> = rows
+                    .iter()
+                    .map(|r| {
+                        serde_json::json!({
+                            "event_id": r.event_id.0,
+                            "ts_us": r.ts_us,
+                            "app_bundle_id": r.app_bundle_id,
+                            "window_title": r.window_title,
+                            "url": r.url,
+                            "text_snippet": r.text_snippet,
+                        })
+                    })
+                    .collect();
+                JsonRpcResponse::ok(
+                    id,
+                    serde_json::json!({
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": serde_json::to_string(&rows_json)
+                                    .unwrap_or_else(|_| "[]".to_owned()),
+                            }
+                        ],
+                        "events": rows_json,
                         "isError": false,
                     }),
                 )

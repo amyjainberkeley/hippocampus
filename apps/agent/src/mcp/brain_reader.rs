@@ -5,7 +5,7 @@
 //! headless stub without exposing the test stub on the public mci-brain
 //! API.
 
-use mci_brain::{BrainStats, EventRecord};
+use mci_brain::{BrainStats, EpisodeRecord, EventRecord};
 use thiserror::Error;
 
 /// Compact recall hit shape the MCP server returns. Strictly a superset of
@@ -63,4 +63,15 @@ pub trait BrainReader: Send + Sync {
 
     /// Content-free aggregate.
     fn stats(&self) -> Result<BrainStats, BrainReaderError>;
+
+    /// Recent episodes ordered by `ts_start` DESC, capped at `limit`.
+    fn episodes(&self, limit: usize) -> Result<Vec<EpisodeRecord>, BrainReaderError>;
+
+    /// Events matching exact `app_bundle_id`, ordered by `ts_us` DESC,
+    /// capped at `limit`.
+    fn events_by_app(
+        &self,
+        app_bundle_id: &str,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, BrainReaderError>;
 }

@@ -2,7 +2,7 @@
 //!
 //! Exposes a **read-only** view of the Phase-3 brain to any MCP-compatible
 //! client (Claude Code, Cursor, Codex, etc.) over a JSON-RPC 2.0 stdio
-//! transport. Three tools:
+//! transport. Five tools:
 //!
 //! - `mci_recall(query, limit)` — lexical FTS5 search, returns the top
 //!   hits as compact [`EventRecord`](mci_brain::EventRecord)-shaped rows.
@@ -10,6 +10,8 @@
 //!   the cursor, ordered ascending.
 //! - `mci_stats()` — content-free aggregate (event count + oldest +
 //!   newest `ts_us`). Lets an agent know "how much memory is available".
+//! - `mci_episodes(limit)` — recent episodes with event counts.
+//! - `mci_events_by_app(app_bundle_id, limit)` — events filtered by app.
 //!
 //! # Protocol
 //!
@@ -29,7 +31,7 @@
 //! - **Read-only by construction** — there is no tools/call route that
 //!   mutates the store. Adding a write tool requires a separate
 //!   CSO-signed PR. The dispatcher in [`server`] structurally enumerates
-//!   the three read tools; an unknown tool name returns a JSON-RPC error,
+//!   the five read tools; an unknown tool name returns a JSON-RPC error,
 //!   never falls through to a write path.
 //! - **Privacy moments (`PrivacyTombstone`) are NOT exposed by P3.10b.**
 //!   An `mci_privacy_moments` tool is a future opt-in PR per ADR-0017 §5.

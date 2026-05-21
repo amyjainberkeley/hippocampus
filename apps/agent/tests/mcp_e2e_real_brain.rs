@@ -128,11 +128,11 @@ fn extract_error(resp: Option<JsonRpcResponse>) -> (i64, String) {
 }
 
 // ---------------------------------------------------------------------------
-// tools/list — exactly 3 tools
+// tools/list — exactly 5 tools
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_exactly_three_tools_real_brain() {
+fn tools_list_returns_exactly_five_tools_real_brain() {
     let (_dir, store) = open_temp_store();
     let srv = server_fts_only(store);
 
@@ -141,7 +141,7 @@ fn tools_list_returns_exactly_three_tools_real_brain() {
         .get("tools")
         .and_then(|v| v.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 3, "MCP server must advertise exactly 3 tools");
+    assert_eq!(tools.len(), 5, "MCP server must advertise exactly 5 tools");
 
     let names: Vec<&str> = tools
         .iter()
@@ -150,6 +150,8 @@ fn tools_list_returns_exactly_three_tools_real_brain() {
     assert!(names.contains(&"mci_recall"));
     assert!(names.contains(&"mci_events_since"));
     assert!(names.contains(&"mci_stats"));
+    assert!(names.contains(&"mci_episodes"));
+    assert!(names.contains(&"mci_events_by_app"));
 }
 
 // ---------------------------------------------------------------------------
@@ -943,7 +945,8 @@ fn counters_track_real_brain_dispatches() {
         })),
     ));
 
-    let (recall, events, stats, _parse, unknown) = counters.snapshot();
+    let (recall, events, stats, _episodes, _events_by_app, _parse, unknown) =
+        counters.snapshot();
     assert_eq!(recall, 2, "recall_count");
     assert_eq!(events, 1, "events_since_count");
     assert_eq!(stats, 3, "stats_count");

@@ -635,6 +635,115 @@ impl SqlCipherBrainStore {
         }))
     }
 
+    /// Return up to `limit` episodes ordered by `ts_start` DESC, with a
+    /// derived `event_count` per episode. SELECT-only — no write side.
+    ///
+    /// Surface for the `mci_episodes` MCP tool. The correlated subquery is
+    /// O(episodes × events_per_episode) which is fine inside Phase 3's
+    /// corpus regime; the `events_episode` index covers it.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn recent_episodes(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<crate::EpisodeRecord>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT e.id, e.app_bundle_id, e.ts_start, e.ts_end,
+                        (SELECT COUNT(*) FROM events ev WHERE ev.episode_id = e.id) AS event_count
+                 FROM episodes e
+                 ORDER BY e.ts_start DESC
+                 LIMIT ?1",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare recent_episodes: {e}")))?;
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![lim], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })
+            .map_err(|e| StoreError::Backend(format!("query recent_episodes: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, app, ts_start, ts_end, event_count) =
+                r.map_err(|e| StoreError::Backend(format!("row recent_episodes: {e}")))?;
+            out.push(crate::EpisodeRecord {
+                id: u64::try_from(id).unwrap_or(0),
+                app_bundle_id: app,
+                ts_start: u64::try_from(ts_start).unwrap_or(0),
+                ts_end: u64::try_from(ts_end).unwrap_or(0),
+                event_count: u64::try_from(event_count).unwrap_or(0),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Return up to `limit` events matching exact `app_bundle_id`, ordered
+    /// by `ts_us` DESC. SELECT-only — no write side.
+    ///
+    /// Surface for the `mci_events_by_app` MCP tool. Uses the
+    /// `events_app` index for efficient lookup.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn events_by_app_bundle_id(
+        &self,
+        app_bundle_id: &str,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, ts_us, app_bundle_id, window_title, url, text
+                 FROM events
+                 WHERE app_bundle_id = ?1
+                 ORDER BY ts_us DESC
+                 LIMIT ?2",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare events_by_app: {e}")))?;
+        let rows = stmt
+            .query_map(params![app_bundle_id, lim], |r| {
+                let id: i64 = r.get(0)?;
+                let ts_us: i64 = r.get(1)?;
+                let app: Option<String> = r.get(2)?;
+                let title: Option<String> = r.get(3)?;
+                let url: Option<String> = r.get(4)?;
+                let text: String = r.get(5)?;
+                Ok((id, ts_us, app, title, url, text))
+            })
+            .map_err(|e| StoreError::Backend(format!("query events_by_app: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, ts_us, app, title, url, text) =
+                r.map_err(|e| StoreError::Backend(format!("row events_by_app: {e}")))?;
+            out.push(EventRecord {
+                event_id: EventId(u64::try_from(id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text_snippet: EventRecord::truncate_snippet(&text),
+            });
+        }
+        Ok(out)
+    }
+
     /// Copy + defragment the encrypted brain to `dest` via `VACUUM INTO`.
     /// Output inherits this store's `SQLCipher` key.
     ///
