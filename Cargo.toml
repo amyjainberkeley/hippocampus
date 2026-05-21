@@ -23,6 +23,13 @@ members = [
     # library (no dep download, no link). See
     # `adapters/macos/mci-embed-coreml/Cargo.toml`.
     "adapters/macos/mci-embed-coreml",
+    # macOS-only Rust adapter: C-ABI FFI shim that exposes a READ-ONLY
+    # view of the Phase-3 brain to the SwiftUI recall-ui app at
+    # `apps/recall-ui/`. Skeleton lands at P3.9a (extern "C" surface +
+    # stub bodies + Rust-side tests); P3.9b wires real readonly
+    # `SqlCipherBrainStore` + `HybridRetriever`. See
+    # `adapters/macos/mci-brain-ffi/Cargo.toml`.
+    "adapters/macos/mci-brain-ffi",
 ]
 
 [workspace.package]
