@@ -15,16 +15,17 @@
 //! causing errors or unexpected results (e.g. hyphens parsed as NOT,
 //! which made `"sqlite-vec"` return wrong hits in the demo).
 //!
-//! # Read-only discipline
+//! # Read-only discipline (P3.10e — ADR-0016 §6 gap closure)
 //!
-//! This wrapper exposes ONLY the three `BrainReader` methods. It does
-//! not surface `BrainStore::put_event`. The store handle is private and
-//! the trait impl performs SELECT-only calls.
+//! The store handle is opened via `SqlCipherBrainStore::open_readonly`
+//! which pins `SQLITE_OPEN_READ_ONLY` at the driver level — writes fail
+//! with `SQLITE_READONLY` before touching disk. `FtsSanitizingStore`
+//! implements `BrainStore` (required by `HybridRetriever`'s type bound)
+//! but its `put_event` is `unreachable!` — defence-in-depth atop the
+//! driver-level pin.
 //!
-//! When P3.9b lands a read-only `SqlCipherBrainStore::open_read_only(...)`
-//! opener (sqlite `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_URI`), this
-//! reader's constructor swaps to that opener — preserving the trait
-//! shape. The CSO sign-off on P3.10b notes this swap is binding.
+//! After P3.10e, all four read surfaces (Recall UI + MCP + Brain CLI +
+//! Hippocampus.app) use `open_readonly`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -74,8 +75,8 @@ struct FtsSanitizingStore {
 }
 
 impl BrainStore for FtsSanitizingStore {
-    fn put_event(&self, event: &Event) -> Result<EventId, StoreError> {
-        self.inner.put_event(event)
+    fn put_event(&self, _event: &Event) -> Result<EventId, StoreError> {
+        unreachable!("MCP server is read-only (P3.10e — ADR-0016 §6)")
     }
     fn get_event(&self, id: EventId) -> Result<Option<Event>, StoreError> {
         self.inner.get_event(id)
@@ -174,8 +175,8 @@ impl LiveBrainReader {
         key: &DbKey,
         embedder: Option<Arc<dyn Embedder>>,
     ) -> Result<Self, BrainReaderError> {
-        let store = SqlCipherBrainStore::new(path, key)
-            .map_err(|e| BrainReaderError::Backend(format!("open store: {e}")))?;
+        let store = SqlCipherBrainStore::open_readonly(path, key)
+            .map_err(|e| BrainReaderError::Backend(format!("open store (read-only): {e}")))?;
         Ok(Self {
             store: Arc::new(store),
             embedder,
@@ -330,6 +331,84 @@ impl BrainReader for LiveBrainReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // Read-only invariant tests (P3.10e — ADR-0016 §6)
+    // -----------------------------------------------------------------------
+
+    fn make_test_db() -> (tempfile::TempDir, std::path::PathBuf, DbKey) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sqlite");
+        let key = DbKey::from_bytes([0xAA; 32]);
+        // Writer opens + applies migration so schema exists.
+        let _writer = SqlCipherBrainStore::new(&path, &key).unwrap();
+        (dir, path, key)
+    }
+
+    #[test]
+    fn mcp_reader_opens_readonly_handle() {
+        let (_dir, path, key) = make_test_db();
+        let reader = LiveBrainReader::open_with_embedder(&path, &key, None);
+        assert!(reader.is_ok(), "open_with_embedder should succeed on existing DB");
+        let reader = reader.unwrap();
+        let stats = reader.stats().unwrap();
+        assert_eq!(stats.event_count, 0);
+    }
+
+    #[test]
+    fn mcp_server_readonly_handle_rejects_write() {
+        let (_dir, path, key) = make_test_db();
+        // Open via open_readonly — same path LiveBrainReader now uses.
+        let ro_store = SqlCipherBrainStore::open_readonly(&path, &key).unwrap();
+        let event = Event {
+            id: EventId(0),
+            ts_us: 1_000_000,
+            app_bundle_id: Some("com.test".into()),
+            window_title: Some("Test".into()),
+            url: None,
+            text: "hello world".into(),
+            summary: None,
+            entities: None,
+            episode_id: None,
+            cascade_reason: 0,
+            keyframe_blob: None,
+            embedding: None,
+        };
+        let result = ro_store.put_event(&event);
+        assert!(result.is_err(), "put_event on read-only handle must fail");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("readonly") || err_msg.contains("READONLY") || err_msg.contains("read-only"),
+            "error should indicate read-only rejection, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "MCP server is read-only")]
+    fn fts_sanitizing_store_put_event_panics() {
+        let (_dir, path, key) = make_test_db();
+        let store = Arc::new(SqlCipherBrainStore::open_readonly(&path, &key).unwrap());
+        let wrapper = FtsSanitizingStore { inner: store };
+        let event = Event {
+            id: EventId(0),
+            ts_us: 1_000_000,
+            app_bundle_id: None,
+            window_title: None,
+            url: None,
+            text: "test".into(),
+            summary: None,
+            entities: None,
+            episode_id: None,
+            cascade_reason: 0,
+            keyframe_blob: None,
+            embedding: None,
+        };
+        let _ = wrapper.put_event(&event);
+    }
+
+    // -----------------------------------------------------------------------
+    // Sanitizer tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn sanitize_plain_words_unchanged() {
