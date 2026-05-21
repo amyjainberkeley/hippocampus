@@ -1,8 +1,9 @@
-name: Swift — MCICaptureHelper + recall-ui
+name: Swift — MCICaptureHelper + recall-ui + installer
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 concurrency:
@@ -42,3 +43,82 @@ jobs:
           restore-keys: swift-recall-${{ runner.os }}-
 
       - run: swift test --package-path apps/recall-ui
+
+  installer-smoke:
+    name: Installer script smoke test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check build-installer.sh
+        run: bash -n scripts/build-installer.sh
+
+      - name: Verify prereq-missing exits non-zero
+        run: |
+          # build-installer.sh should fail when .app is missing
+          if scripts/build-installer.sh --skip-build 2>&1; then
+            echo "FAIL: expected non-zero exit when .app is absent"
+            exit 1
+          fi
+          echo "PASS: script correctly exits non-zero when .app is missing"
+
+  installer-dmg:
+    name: Build DMG installer
+    runs-on: macos-14
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [helper, recall-ui]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-installer-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-installer-${{ runner.os }}-
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/hippocampus/.build
+            adapters/macos/MCICaptureHelper/.build
+          key: swift-installer-${{ runner.os }}-${{ hashFiles('apps/hippocampus/Package.resolved', 'adapters/macos/MCICaptureHelper/Package.resolved') }}
+          restore-keys: swift-installer-${{ runner.os }}-
+
+      - name: Build all binaries
+        run: |
+          swift build -c release --package-path apps/hippocampus
+          swift build -c release --package-path adapters/macos/MCICaptureHelper
+          cargo build --workspace --release
+
+      - name: Build DMG
+        run: scripts/build-installer.sh --skip-build
+
+      - name: Verify DMG contents
+        run: |
+          DMG=$(ls dist/Hippocampus-*.dmg | head -1)
+          cd dist && shasum -a 256 -c "$(basename "$DMG").sha256" && cd ..
+          MOUNT=$(hdiutil attach "$DMG" -nobrowse | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
+          MOUNT=$(echo "$MOUNT" | xargs)
+          echo "--- DMG contents ---"
+          ls -la "$MOUNT/"
+          test -d "$MOUNT/Hippocampus.app"
+          test -L "$MOUNT/Applications"
+          hdiutil detach "$MOUNT" -quiet
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hippocampus-dmg
+          path: |
+            dist/Hippocampus-*.dmg
+            dist/Hippocampus-*.dmg.sha256
