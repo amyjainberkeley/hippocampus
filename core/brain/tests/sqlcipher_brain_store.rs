@@ -517,3 +517,82 @@ fn put_event_atomicity_on_fk_failure_leaves_no_orphans() {
     let g = store.get_event(good_id).expect("get").expect("present");
     assert_eq!(g.text, "good");
 }
+
+// ---------------------------------------------------------------------------
+// events_since + stats (P3.10b — read-only views the MCP server uses)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn events_since_returns_rows_strictly_after_cursor_in_ts_order() {
+    let (_dir, path) = tmp("events_since.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in [10_u64, 20, 30, 40, 50] {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+    let out = store.events_since(20, 10).expect("events_since");
+    let ts_seq: Vec<u64> = out.iter().map(|r| r.ts_us).collect();
+    assert_eq!(ts_seq, vec![30, 40, 50], "strictly > cursor, ascending");
+}
+
+#[test]
+fn events_since_respects_limit() {
+    let (_dir, path) = tmp("events_since_limit.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in 1_u64..=10 {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+    let out = store.events_since(0, 3).expect("events_since");
+    assert_eq!(out.len(), 3);
+    let ts_seq: Vec<u64> = out.iter().map(|r| r.ts_us).collect();
+    assert_eq!(ts_seq, vec![1, 2, 3], "ascending order, capped at limit");
+}
+
+#[test]
+fn events_since_zero_limit_returns_empty_without_query() {
+    let (_dir, path) = tmp("events_since_zero.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    store.put_event(&blank_event(1, "anything")).expect("put");
+    let out = store.events_since(0, 0).expect("events_since");
+    assert!(out.is_empty(), "limit=0 short-circuits");
+}
+
+#[test]
+fn events_since_truncates_long_text_to_snippet_cap() {
+    use mci_brain::EventRecord;
+    let (_dir, path) = tmp("events_since_trunc.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let long = "a".repeat(EventRecord::SNIPPET_MAX_CHARS * 3);
+    store.put_event(&blank_event(100, &long)).expect("put");
+    let out = store.events_since(0, 10).expect("events_since");
+    assert_eq!(out.len(), 1);
+    assert!(out[0].text_snippet.len() <= EventRecord::SNIPPET_MAX_CHARS);
+}
+
+#[test]
+fn stats_on_empty_store_reports_zero_and_none() {
+    let (_dir, path) = tmp("stats_empty.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let s = store.stats().expect("stats");
+    assert_eq!(s.event_count, 0);
+    assert_eq!(s.oldest_ts_us, None);
+    assert_eq!(s.newest_ts_us, None);
+}
+
+#[test]
+fn stats_reports_count_min_max_after_inserts() {
+    let (_dir, path) = tmp("stats_after.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in [7_u64, 42, 100, 1] {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+    let s = store.stats().expect("stats");
+    assert_eq!(s.event_count, 4);
+    assert_eq!(s.oldest_ts_us, Some(1));
+    assert_eq!(s.newest_ts_us, Some(100));
+}

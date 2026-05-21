@@ -66,6 +66,84 @@ mod sqlcipher_brain_store;
 
 pub use sqlcipher_brain_store::SqlCipherBrainStore;
 
+// ---------------------------------------------------------------------------
+// Read-only views used by the agent-API loopback (P3.10b) and recall UI
+// ---------------------------------------------------------------------------
+
+/// Compact, copy-friendly view of an `events` row.
+///
+/// Surface for the agent-API loopback (P3.10b MCP server) and the recall-UI
+/// timeline. Distinct from [`Event`] (the producer/storage shape) because:
+///
+/// - It carries `event_id` already typed as [`EventId`] — convenient for
+///   downstream `Display`.
+/// - It elides the raw `embedding: Option<Vec<f32>>` and `episode_id`
+///   columns the read API does not need to surface (the embedding is a 1.5
+///   KB blob; episode mapping is an internal pointer the recall UX does
+///   not show).
+/// - It carries `text_snippet`, not the full `text`, so a query that asks
+///   "give me the last 100 events" cannot accidentally page hundreds of
+///   KB of OCR'd text through the MCP socket. Producers truncate to
+///   [`EventRecord::SNIPPET_MAX_CHARS`] characters at the boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventRecord {
+    /// Stable event id.
+    pub event_id: EventId,
+    /// Capture-time timestamp in microseconds since UNIX epoch.
+    pub ts_us: u64,
+    /// `appBundleId` of the frontmost app at capture time.
+    pub app_bundle_id: Option<String>,
+    /// Focused window title at capture time.
+    pub window_title: Option<String>,
+    /// Active browser tab URL at capture time.
+    pub url: Option<String>,
+    /// First [`Self::SNIPPET_MAX_CHARS`] characters of the event's text,
+    /// truncated on a UTF-8 boundary. Callers wanting the full text should
+    /// call [`crate::BrainStore::get_event`].
+    pub text_snippet: String,
+}
+
+impl EventRecord {
+    /// Maximum length of [`EventRecord::text_snippet`], in **bytes** (the
+    /// truncation respects UTF-8 boundaries so the resulting string is
+    /// always valid). 512 bytes ≈ a paragraph; the MCP / recall-UI surface
+    /// never needs more, and the cap prevents a single response from
+    /// ballooning the local socket.
+    pub const SNIPPET_MAX_CHARS: usize = 512;
+
+    /// Truncate `text` to at most [`Self::SNIPPET_MAX_CHARS`] bytes on a
+    /// UTF-8 character boundary. Public so callers building `EventRecord`
+    /// outside of this crate (e.g. test fixtures, stub readers) follow the
+    /// same discipline.
+    #[must_use]
+    pub fn truncate_snippet(text: &str) -> String {
+        if text.len() <= Self::SNIPPET_MAX_CHARS {
+            return text.to_owned();
+        }
+        // Walk back to the previous UTF-8 boundary at or before the limit.
+        let mut end = Self::SNIPPET_MAX_CHARS;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text[..end].to_owned()
+    }
+}
+
+/// Content-free aggregate counts the agent-API surface exposes.
+///
+/// Returned by [`SqlCipherBrainStore::stats`] and the `mci_stats` MCP tool.
+/// "How much memory is in the brain?" — a content-free answer (counts +
+/// timestamps; never row content).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrainStats {
+    /// Total number of rows in `events`.
+    pub event_count: u64,
+    /// Smallest `events.ts_us`. `None` when the store is empty.
+    pub oldest_ts_us: Option<u64>,
+    /// Largest `events.ts_us`. `None` when the store is empty.
+    pub newest_ts_us: Option<u64>,
+}
+
 pub mod hybrid_retriever;
 
 pub use hybrid_retriever::{FusionWeights, HybridRetriever, RetrievalShape};

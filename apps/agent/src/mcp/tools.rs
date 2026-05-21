@@ -1,0 +1,168 @@
+//! Tool definitions — names + MCP `tools/list` schemas.
+//!
+//! Three **read-only** tools (CSO veto-gate on any addition that mutates):
+//!
+//! - [`ToolName::Recall`] — `mci_recall { query, limit }`.
+//! - [`ToolName::EventsSince`] — `mci_events_since { ts_us, limit }`.
+//! - [`ToolName::Stats`] — `mci_stats {}`.
+//!
+//! The dispatcher in `super::server` enumerates exactly these three by
+//! matching `ToolName::from_str`; an unknown name returns
+//! `METHOD_NOT_FOUND`, never falls through to a write surface.
+
+use std::fmt;
+
+/// The three tool names. Used by the dispatcher to route `tools/call`
+/// and by `tool_definitions` to assemble the `tools/list` response.
+///
+/// **Structural read-only invariant** — adding a variant here is the
+/// only way a new tool reaches the wire. Any mutating tool MUST land
+/// behind a separate CSO-signed PR (per ADR-0017 §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolName {
+    /// `mci_recall` — lexical (eventually hybrid) recall.
+    Recall,
+    /// `mci_events_since` — timeline cursor.
+    EventsSince,
+    /// `mci_stats` — content-free aggregate.
+    Stats,
+}
+
+impl ToolName {
+    /// Wire name (the string an MCP client passes in `tools/call`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Recall => "mci_recall",
+            Self::EventsSince => "mci_events_since",
+            Self::Stats => "mci_stats",
+        }
+    }
+
+    /// Parse the wire name. Unknown names return `None` so the
+    /// dispatcher can emit `METHOD_NOT_FOUND` without panicking.
+    #[must_use]
+    pub fn from_wire(s: &str) -> Option<Self> {
+        match s {
+            "mci_recall" => Some(Self::Recall),
+            "mci_events_since" => Some(Self::EventsSince),
+            "mci_stats" => Some(Self::Stats),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ToolName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Build the `tools` array the MCP `tools/list` response carries.
+///
+/// Each entry is the canonical MCP tool descriptor:
+/// `{ "name", "description", "inputSchema" }`. We keep the schemas
+/// hand-written here (no `schemars` dep) — they're small and stable.
+#[must_use]
+pub fn tool_definitions() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "name": ToolName::Recall.as_str(),
+            "description": "Search MCI's screen-recall brain by natural-language query. \
+                             Returns the most relevant captured events (app, window, URL, \
+                             text snippet, score). Lexical FTS5 today; hybrid retrieval \
+                             (semantic + lexical + recency) lands when the on-device \
+                             embedder is wired (P3.3 → P3.7).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The natural-language query."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum hits to return. Defaults to 10.",
+                        "minimum": 1,
+                        "maximum": 100
+                    }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": ToolName::EventsSince.as_str(),
+            "description": "Return events captured after the given microsecond timestamp, \
+                             ordered ascending. Useful for incremental polling.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ts_us": {
+                        "type": "integer",
+                        "description": "Microseconds since UNIX epoch. Events with ts_us > this are returned.",
+                        "minimum": 0
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum events to return. Defaults to 100.",
+                        "minimum": 1,
+                        "maximum": 1000
+                    }
+                },
+                "required": ["ts_us"]
+            }
+        },
+        {
+            "name": ToolName::Stats.as_str(),
+            "description": "Content-free aggregate over the brain: total event count, oldest \
+                             ts_us, newest ts_us. Lets an agent ask 'how much memory is \
+                             available?' without reading any row content.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_tool_names() {
+        for t in [ToolName::Recall, ToolName::EventsSince, ToolName::Stats] {
+            assert_eq!(ToolName::from_wire(t.as_str()), Some(t));
+        }
+    }
+
+    #[test]
+    fn unknown_tool_name_returns_none() {
+        assert!(ToolName::from_wire("mci_put_event").is_none());
+        assert!(ToolName::from_wire("mci_delete").is_none());
+        assert!(ToolName::from_wire("").is_none());
+    }
+
+    #[test]
+    fn tool_definitions_has_three_entries() {
+        let defs = tool_definitions();
+        let arr = defs.as_array().expect("tools is an array");
+        assert_eq!(arr.len(), 3);
+        let names: Vec<&str> = arr
+            .iter()
+            .map(|t| t.get("name").and_then(|n| n.as_str()).unwrap_or(""))
+            .collect();
+        assert!(names.contains(&"mci_recall"));
+        assert!(names.contains(&"mci_events_since"));
+        assert!(names.contains(&"mci_stats"));
+    }
+
+    #[test]
+    fn tool_definitions_carry_input_schemas() {
+        let defs = tool_definitions();
+        for tool in defs.as_array().expect("array") {
+            assert!(tool.get("description").is_some(), "missing description");
+            assert!(tool.get("inputSchema").is_some(), "missing inputSchema");
+        }
+    }
+}

@@ -43,7 +43,7 @@ use mci_core::store::{
 };
 use rusqlite::params;
 
-use crate::{Event, EventId, StoreError};
+use crate::{BrainStats, Event, EventId, EventRecord, StoreError};
 
 /// Phase 3 production `BrainStore`.
 ///
@@ -86,7 +86,8 @@ impl SqlCipherBrainStore {
 
     /// Open the brain store at `path` with `key` in **READ-ONLY** mode for
     /// consumers that must never mutate the brain (the recall UI through
-    /// `adapters/macos/mci-brain-ffi`, the future agent-API loopback).
+    /// `adapters/macos/mci-brain-ffi`, the agent-API loopback `mcp-serve`
+    /// subcommand from P3.10b).
     ///
     /// Wraps [`mci_core::store::open_readonly`] (PR P3.9b extension), which
     /// opens the underlying `SQLite` handle with `SQLITE_OPEN_READ_ONLY |
@@ -184,6 +185,99 @@ impl SqlCipherBrainStore {
             });
         }
         Ok(out)
+    }
+
+    /// Read-only timeline cursor: events with `ts_us > since_ts_us`, ordered
+    /// by `ts_us` ascending, capped at `limit`. SELECT-only — no write side.
+    ///
+    /// Surface for the agent-API loopback (`mci_events_since` MCP tool,
+    /// P3.10b) and the recall-UI timeline view (P3.9/P4.7). The `text`
+    /// column is truncated to [`EventRecord::SNIPPET_MAX_CHARS`] on a
+    /// UTF-8 boundary so a "give me the last 100 events" call cannot
+    /// page hundreds of KB through the local socket.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any rusqlite failure. `limit == 0`
+    /// returns `Ok(Vec::new())` without touching SQLite.
+    pub fn events_since(
+        &self,
+        since_ts_us: u64,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let since = i64::try_from(since_ts_us).unwrap_or(i64::MAX);
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, ts_us, app_bundle_id, window_title, url, text
+                 FROM events
+                 WHERE ts_us > ?1
+                 ORDER BY ts_us ASC
+                 LIMIT ?2",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare events_since: {e}")))?;
+        let rows = stmt
+            .query_map(params![since, lim], |r| {
+                let id: i64 = r.get(0)?;
+                let ts_us: i64 = r.get(1)?;
+                let app: Option<String> = r.get(2)?;
+                let title: Option<String> = r.get(3)?;
+                let url: Option<String> = r.get(4)?;
+                let text: String = r.get(5)?;
+                Ok((id, ts_us, app, title, url, text))
+            })
+            .map_err(|e| StoreError::Backend(format!("query events_since: {e}")))?;
+        let mut out: Vec<EventRecord> = Vec::new();
+        for r in rows {
+            let (id, ts_us, app, title, url, text) =
+                r.map_err(|e| StoreError::Backend(format!("row events_since: {e}")))?;
+            out.push(EventRecord {
+                event_id: EventId(u64::try_from(id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text_snippet: EventRecord::truncate_snippet(&text),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Content-free aggregate counts. SELECT-only — no write side.
+    ///
+    /// Surface for the agent-API loopback (`mci_stats` MCP tool, P3.10b)
+    /// so a local agent can know "how much memory is available" without
+    /// reading any row content. Returns `(0, None, None)` on an empty
+    /// store.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any rusqlite failure.
+    pub fn stats(&self) -> Result<BrainStats, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        // One query — COUNT + MIN + MAX over the same scan.
+        let row = guard
+            .conn()
+            .query_row(
+                "SELECT COUNT(*), MIN(ts_us), MAX(ts_us) FROM events",
+                [],
+                |r| {
+                    let count: i64 = r.get(0)?;
+                    let min_ts: Option<i64> = r.get(1)?;
+                    let max_ts: Option<i64> = r.get(2)?;
+                    Ok((count, min_ts, max_ts))
+                },
+            )
+            .map_err(|e| StoreError::Backend(format!("query stats: {e}")))?;
+        let (count, min_ts, max_ts) = row;
+        Ok(BrainStats {
+            event_count: u64::try_from(count).unwrap_or(0),
+            oldest_ts_us: min_ts.map(|v| u64::try_from(v).unwrap_or(0)),
+            newest_ts_us: max_ts.map(|v| u64::try_from(v).unwrap_or(0)),
+        })
     }
 }
 

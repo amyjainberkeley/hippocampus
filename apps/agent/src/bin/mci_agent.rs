@@ -24,13 +24,16 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
+use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
 use mci_agent::runner::drain_to_log;
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
+use mci_core::crypto::DbKey;
 
 const VERSION: &str = "0.0.3-phase1-cycle2-iter12";
 
@@ -47,6 +50,9 @@ enum Mode {
     Version,
     DrainStdin,
     HealthSummary { window_seconds: u64 },
+    /// P3.10b — localhost MCP server over stdio JSON-RPC 2.0.
+    /// Resolves `db_path` and the DB key from env at start-up.
+    McpServe { db_path: PathBuf },
 }
 
 fn default_device_id_path() -> PathBuf {
@@ -58,6 +64,13 @@ fn default_log_path() -> PathBuf {
     HealthLogConfig::default_for_user().path
 }
 
+fn default_db_path() -> PathBuf {
+    // ~/Library/Application Support/MCI/mci.sqlite per ADR-0008 §1.4.
+    // Expand $HOME at run-time (no glob-style ~ expansion in env vars).
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    home.join("Library/Application Support/MCI/mci.sqlite")
+}
+
 fn parse_args(argv: &[String]) -> Args {
     // Two-pass: first scan resolves the mode flag, second scan binds
     // mode-specific options. Keeps `--window-seconds 600
@@ -66,6 +79,7 @@ fn parse_args(argv: &[String]) -> Args {
     let mut log_path = default_log_path();
     let mut mode_kind = ModeKind::Help;
     let mut window_seconds = DEFAULT_HEALTH_SUMMARY_WINDOW_SECONDS;
+    let mut db_path: Option<PathBuf> = None;
 
     let mut i = 1;
     while i < argv.len() {
@@ -78,8 +92,13 @@ fn parse_args(argv: &[String]) -> Args {
                 log_path = PathBuf::from(&argv[i + 1]);
                 i += 1;
             }
+            "--db-path" if i + 1 < argv.len() => {
+                db_path = Some(PathBuf::from(&argv[i + 1]));
+                i += 1;
+            }
             "--drain-stdin" => mode_kind = ModeKind::DrainStdin,
             "--health-summary" => mode_kind = ModeKind::HealthSummary,
+            "mcp-serve" => mode_kind = ModeKind::McpServe,
             "--window-seconds" if i + 1 < argv.len() => {
                 if let Ok(n) = argv[i + 1].parse::<u64>() {
                     if n > 0 {
@@ -103,6 +122,11 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::Version => Mode::Version,
         ModeKind::DrainStdin => Mode::DrainStdin,
         ModeKind::HealthSummary => Mode::HealthSummary { window_seconds },
+        ModeKind::McpServe => Mode::McpServe {
+            db_path: db_path
+                .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
+                .unwrap_or_else(default_db_path),
+        },
     };
     Args {
         device_id_path,
@@ -117,6 +141,7 @@ enum ModeKind {
     Version,
     DrainStdin,
     HealthSummary,
+    McpServe,
 }
 
 fn print_usage() {
@@ -128,13 +153,22 @@ fn print_usage() {
         Modes:\n\
         \x20 --drain-stdin              read wire frames from stdin and write JSONL\n\
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
+        \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 --version                  print version and exit\n\
         \x20 -h, --help                 print this and exit\n\
         \n\
         Options:\n\
         \x20 --device-id-path PATH      default ~/.mci/device-id\n\
         \x20 --log-path PATH            default ~/Library/Logs/MCI/helper-health.jsonl\n\
-        \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n"
+        \x20 --db-path PATH             default $MCI_DB_PATH or\n\
+        \x20                            ~/Library/Application Support/MCI/mci.sqlite\n\
+        \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n\
+        \n\
+        Env:\n\
+        \x20 MCI_DB_PATH                (mcp-serve) brain SQLCipher path\n\
+        \x20 MCI_DB_KEY_HEX             (mcp-serve) 64-char hex SQLCipher key (TEMP — see\n\
+        \x20                            docs/claude-code-mcp-setup.md; Keychain integration\n\
+        \x20                            lands in Phase 4 onboarding)\n"
     );
 }
 
@@ -189,6 +223,10 @@ async fn main() -> ExitCode {
                 }
             }
         }
+        Mode::McpServe { db_path } => match run_mcp_serve(db_path).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::HealthSummary { window_seconds } => {
             // Compute the cutoff RFC-3339 string once. The summary
             // comparator does a lexicographic compare against each
@@ -212,5 +250,75 @@ async fn main() -> ExitCode {
                 }
             }
         }
+    }
+}
+
+/// Resolve the `SQLCipher` key from `MCI_DB_KEY_HEX`, open the brain
+/// read-only, build the [`Server`], and run [`serve_stdio`].
+///
+/// `MCI_DB_KEY_HEX` is the **interim** key-resolution mechanism for
+/// P3.10b. Phase-4 onboarding wires the Keychain-backed `KeyWrap`
+/// surface; the env-var path stays as a developer / CI fallback. See
+/// `docs/claude-code-mcp-setup.md` for the full operator note.
+async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
+    let Ok(key_hex) = std::env::var("MCI_DB_KEY_HEX") else {
+        eprintln!(
+            "mci-agent mcp-serve: MCI_DB_KEY_HEX not set. \
+             See docs/claude-code-mcp-setup.md."
+        );
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!(
+            "mci-agent mcp-serve: MCI_DB_KEY_HEX must be 64 lowercase-or-uppercase \
+             hex characters (32 bytes)."
+        );
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+    let reader = match LiveBrainReader::open(&db_path, &key) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!(
+                "mci-agent mcp-serve: open brain at {}: {e}",
+                db_path.display()
+            );
+            return Err(12);
+        }
+    };
+    let server = Arc::new(Server::new(Arc::new(reader)));
+    eprintln!(
+        "mci-agent mcp-serve: ready on stdio. db={} (read-only via SqlCipherBrainStore)",
+        db_path.display()
+    );
+    let stdout = tokio::io::stdout();
+    if let Err(e) = serve_stdio(server, stdout).await {
+        eprintln!("mci-agent mcp-serve: stdio loop error: {e}");
+        return Err(13);
+    }
+    Ok(())
+}
+
+/// Decode a 64-char hex string into a 32-byte key. Returns `None` on any
+/// non-hex character or length mismatch.
+fn decode_hex32(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, chunk) in s.as_bytes().chunks_exact(2).enumerate() {
+        let hi = hex_nibble(chunk[0])?;
+        let lo = hex_nibble(chunk[1])?;
+        out[i] = (hi << 4) | lo;
+    }
+    Some(out)
+}
+
+fn hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
     }
 }
