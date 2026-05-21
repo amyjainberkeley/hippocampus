@@ -431,4 +431,3 @@ fn minmax_normalize(v: f32, mn: f32, mx: f32) -> f32 {
     }
     ((v - mn) / (mx - mn)).clamp(0.0, 1.0)
 }
-

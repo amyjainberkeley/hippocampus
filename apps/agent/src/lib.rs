@@ -21,6 +21,7 @@
 pub mod brain_cli;
 pub mod brain_ingest;
 pub mod device_id;
+pub mod episode_worker;
 pub mod health_log;
 pub mod health_pump;
 pub mod health_summary;
@@ -31,7 +32,6 @@ pub mod panic_uploader;
 pub mod runner;
 pub mod supervisor;
 pub mod wall_clock;
-pub mod episode_worker;
 
 pub use brain_ingest::{BrainIngestor, BrainPump, IngestError, IngestOutcome, NoopBrainIngestor};
 pub use device_id::{load_or_generate, DeviceId, DeviceIdError, DeviceIdSource};

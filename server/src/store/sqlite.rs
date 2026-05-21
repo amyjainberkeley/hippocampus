@@ -14,11 +14,11 @@ use rusqlite::{params, Connection};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use super::{StoreError, WorkspaceStore};
 use crate::model::{
-    BriefEnvelope, CreateBriefRequest, EnrollmentRequest, EnrollmentState, MemberKeyWrap, MemberId,
+    BriefEnvelope, CreateBriefRequest, EnrollmentRequest, EnrollmentState, MemberId, MemberKeyWrap,
     VouchToken, WorkspaceId,
 };
-use super::{StoreError, WorkspaceStore};
 
 /// Production workspace store backed by a single `SQLite` file.
 ///

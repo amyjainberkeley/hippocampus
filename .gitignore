@@ -39,3 +39,4 @@ Thumbs.db
 .claude/scheduled_tasks.lock
 .claude/sessions/
 .claude/.skill-cache/
+.claude/worktrees/

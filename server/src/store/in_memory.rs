@@ -6,11 +6,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use super::{StoreError, WorkspaceStore};
 use crate::model::{
     BriefEnvelope, CreateBriefRequest, EnrollmentRequest, EnrollmentState, MemberId, VouchToken,
     WorkspaceId,
 };
-use super::{StoreError, WorkspaceStore};
 
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryWorkspaceStore {

@@ -65,7 +65,9 @@ impl LlamaBackend for StubLlamaBackend {
     fn generate(&self, _prompt: &str) -> Result<String, GenerateError> {
         let mut body_lines = Vec::new();
         for &id in &self.event_ids {
-            body_lines.push(format!("- Worked on task related to event {id} [event:{id}]"));
+            body_lines.push(format!(
+                "- Worked on task related to event {id} [event:{id}]"
+            ));
         }
         let body = body_lines.join("\n");
 

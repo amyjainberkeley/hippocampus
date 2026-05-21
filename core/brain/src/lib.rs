@@ -144,8 +144,8 @@ pub struct BrainStats {
     pub newest_ts_us: Option<u64>,
 }
 
-pub mod hybrid_retriever;
 pub mod episode_segmenter;
+pub mod hybrid_retriever;
 
 pub use hybrid_retriever::{FusionWeights, HybridRetriever, RetrievalShape};
 

@@ -117,15 +117,11 @@ impl LlamaCoreMLBackend {
         let out_key = NSString::from_str("logits");
 
         inputs.objectForKey(&in_key).ok_or_else(|| {
-            GenerateError::Backend(
-                "model missing required input feature \"input_ids\"".into(),
-            )
+            GenerateError::Backend("model missing required input feature \"input_ids\"".into())
         })?;
 
         let out_desc = outputs.objectForKey(&out_key).ok_or_else(|| {
-            GenerateError::Backend(
-                "model missing required output feature \"logits\"".into(),
-            )
+            GenerateError::Backend("model missing required output feature \"logits\"".into())
         })?;
 
         let out_type = unsafe { out_desc.r#type() };
@@ -187,18 +183,13 @@ mod tests {
     #[test]
     fn open_rejects_empty_path() {
         let err = LlamaCoreMLBackend::open(Path::new("")).expect_err("empty path");
-        assert!(
-            matches!(err, GenerateError::Backend(_)),
-            "{err:?}"
-        );
+        assert!(matches!(err, GenerateError::Backend(_)), "{err:?}");
     }
 
     #[test]
     fn open_returns_error_for_missing_file() {
-        let err = LlamaCoreMLBackend::open(Path::new(
-            "/tmp/mci-test-nonexistent-llama.mlpackage",
-        ))
-        .expect_err("missing path");
+        let err = LlamaCoreMLBackend::open(Path::new("/tmp/mci-test-nonexistent-llama.mlpackage"))
+            .expect_err("missing path");
         match err {
             GenerateError::Backend(msg) => assert!(
                 msg.contains("not found"),

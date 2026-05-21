@@ -349,7 +349,10 @@ mod tests {
     fn mcp_reader_opens_readonly_handle() {
         let (_dir, path, key) = make_test_db();
         let reader = LiveBrainReader::open_with_embedder(&path, &key, None);
-        assert!(reader.is_ok(), "open_with_embedder should succeed on existing DB");
+        assert!(
+            reader.is_ok(),
+            "open_with_embedder should succeed on existing DB"
+        );
         let reader = reader.unwrap();
         let stats = reader.stats().unwrap();
         assert_eq!(stats.event_count, 0);
@@ -378,7 +381,9 @@ mod tests {
         assert!(result.is_err(), "put_event on read-only handle must fail");
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("readonly") || err_msg.contains("READONLY") || err_msg.contains("read-only"),
+            err_msg.contains("readonly")
+                || err_msg.contains("READONLY")
+                || err_msg.contains("read-only"),
             "error should indicate read-only rejection, got: {err_msg}"
         );
     }

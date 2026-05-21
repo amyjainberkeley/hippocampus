@@ -80,7 +80,8 @@ pub trait EpisodeWriter: Send + Sync {
 
     /// Set `events.episode_id` for an existing event. Only writes the
     /// single column; never touches other event fields.
-    fn set_event_episode(&self, event_id: EventId, episode_id: EpisodeId) -> Result<(), StoreError>;
+    fn set_event_episode(&self, event_id: EventId, episode_id: EpisodeId)
+        -> Result<(), StoreError>;
 
     /// Update an existing episode's `ts_end` (extends the episode as
     /// new events are assigned to it).
@@ -147,16 +148,14 @@ impl EpisodeSegmenter for HeuristicEpisodeSegmenter {
         };
 
         // Carry forward from last segmented event.
-        let mut current_episode: Option<EpisodeId> = last_segmented
-            .and_then(|e| e.episode_id)
-            .map(EpisodeId);
-        let mut prev_app: Option<String> =
-            last_segmented.and_then(|e| e.app_bundle_id.clone());
+        let mut current_episode: Option<EpisodeId> =
+            last_segmented.and_then(|e| e.episode_id).map(EpisodeId);
+        let mut prev_app: Option<String> = last_segmented.and_then(|e| e.app_bundle_id.clone());
         let mut prev_ts: u64 = last_segmented.map_or(0, |e| e.ts_us);
 
         for event in unsegmented {
-            let need_new = current_episode.is_none()
-                || self.should_break(prev_app.as_deref(), prev_ts, event);
+            let need_new =
+                current_episode.is_none() || self.should_break(prev_app.as_deref(), prev_ts, event);
 
             if need_new {
                 let ep_id = writer.create_episode(
@@ -215,10 +214,11 @@ mod tests {
             let mut id_guard = self.next_ep_id.lock().unwrap();
             let id = *id_guard;
             *id_guard = id + 1;
-            self.episodes_created
-                .lock()
-                .unwrap()
-                .push((ts_start, ts_end, app_bundle_id.map(String::from)));
+            self.episodes_created.lock().unwrap().push((
+                ts_start,
+                ts_end,
+                app_bundle_id.map(String::from),
+            ));
             Ok(EpisodeId(id))
         }
 
@@ -277,7 +277,10 @@ mod tests {
         let stats = seg.segment(&events, None, &w).unwrap();
         assert_eq!(stats.events_assigned, 1);
         assert_eq!(stats.episodes_created, 1);
-        assert_eq!(w.event_episodes.lock().unwrap()[0], (EventId(1), EpisodeId(1)));
+        assert_eq!(
+            w.event_episodes.lock().unwrap()[0],
+            (EventId(1), EpisodeId(1))
+        );
     }
 
     #[test]
@@ -338,11 +341,7 @@ mod tests {
         // Exactly 10 minutes = at threshold, NOT exceeded
         let events = [
             make_event(1, base, Some("com.apple.Safari")),
-            make_event(
-                2,
-                base + 10 * 60 * 1_000_000,
-                Some("com.apple.Safari"),
-            ),
+            make_event(2, base + 10 * 60 * 1_000_000, Some("com.apple.Safari")),
         ];
         let stats = seg.segment(&events, None, &w).unwrap();
         assert_eq!(stats.episodes_created, 1);
@@ -370,7 +369,11 @@ mod tests {
         };
 
         // Same app, within gap — should continue episode 42
-        let events = [make_event(11, base + 2 * 60 * 1_000_000, Some("com.apple.Safari"))];
+        let events = [make_event(
+            11,
+            base + 2 * 60 * 1_000_000,
+            Some("com.apple.Safari"),
+        )];
         let stats = seg.segment(&events, Some(&last), &w).unwrap();
         assert_eq!(stats.episodes_created, 0);
         assert_eq!(stats.events_assigned, 1);
