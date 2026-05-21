@@ -37,7 +37,10 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use mci_core::crypto::DbKey;
-use mci_core::store::{open as mci_core_open, Db, StoreError as CoreStoreError};
+use mci_core::store::{
+    open as mci_core_open, open_readonly as mci_core_open_readonly, Db,
+    StoreError as CoreStoreError,
+};
 use rusqlite::params;
 
 use crate::{Event, EventId, StoreError};
@@ -79,6 +82,108 @@ impl SqlCipherBrainStore {
         Ok(Self {
             db: Mutex::new(db),
         })
+    }
+
+    /// Open the brain store at `path` with `key` in **READ-ONLY** mode for
+    /// consumers that must never mutate the brain (the recall UI through
+    /// `adapters/macos/mci-brain-ffi`, the future agent-API loopback).
+    ///
+    /// Wraps [`mci_core::store::open_readonly`] (PR P3.9b extension), which
+    /// opens the underlying `SQLite` handle with `SQLITE_OPEN_READ_ONLY |
+    /// SQLITE_OPEN_NO_MUTEX | SQLITE_OPEN_URI`. The migration is **NOT**
+    /// run — a read-only handle cannot apply DDL anyway, and the production
+    /// agent (writer-side) is expected to have applied the brain schema
+    /// first via [`SqlCipherBrainStore::new`]. Calling `put_event` on a
+    /// store constructed this way fails at the driver level with
+    /// `SQLITE_READONLY` (the CSO invariant in ADR-0017 §5 / ADR-0016 §4.3
+    /// that the recall UI cannot tamper with the brain).
+    ///
+    /// # Errors
+    /// - [`StoreError::Backend`] for driver-level open failures (missing
+    ///   file, EPERM, etc.) — wraps `mci_core::store::open_readonly`.
+    /// - [`StoreError::Backend`] for wrong-key / not-an-MCI-database
+    ///   (the inner error is intentionally indistinguishable per ADR-0008).
+    pub fn open_readonly(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
+        let db = mci_core_open_readonly(path, key).map_err(|e| map_core_err(&e))?;
+        Ok(Self {
+            db: Mutex::new(db),
+        })
+    }
+
+    /// Read the N most-recent events ordered by `ts_us` DESC.
+    ///
+    /// Used by the recall UI's timeline view via the FFI shim. The
+    /// `embedding` field on each returned [`Event`] is `None` — the
+    /// timeline only needs metadata + snippet text. Vector data is opened
+    /// lazily by [`BrainStore::vec_search`] / [`BrainStore::get_event`].
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] for any underlying `SQLite` failure.
+    pub fn recent_events(&self, limit: usize) -> Result<Vec<Event>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, ts_us, app_bundle_id, window_title, url,
+                        text, summary, entities, episode_id,
+                        cascade_reason, keyframe_blob
+                 FROM events
+                 ORDER BY ts_us DESC
+                 LIMIT ?1",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare recent_events: {e}")))?;
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![lim], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<String>>(7)?,
+                    r.get::<_, Option<i64>>(8)?,
+                    r.get::<_, i64>(9)?,
+                    r.get::<_, Option<String>>(10)?,
+                ))
+            })
+            .map_err(|e| StoreError::Backend(format!("query recent_events: {e}")))?;
+        let mut out: Vec<Event> = Vec::new();
+        for r in rows {
+            let (
+                ev_id,
+                ts_us,
+                app,
+                title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id,
+                cascade_reason,
+                keyframe_blob,
+            ) = r.map_err(|e| StoreError::Backend(format!("row recent_events: {e}")))?;
+            out.push(Event {
+                id: EventId(u64::try_from(ev_id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
+                cascade_reason,
+                keyframe_blob,
+                embedding: None,
+            });
+        }
+        Ok(out)
     }
 }
 

@@ -32,3 +32,10 @@ serde_json = "1"
 # InMemoryBrainStore / StubRetriever for headless tests. Same pattern
 # mci-embed-coreml uses.
 mci-brain  = { path = "../../../core/brain", features = ["stubs"] }
+# Test-only access to mci-core's `InMemoryKeyWrap` for spinning up an
+# ephemeral SQLCipher brain DB under a test key. Mirrors the gate
+# mci-core uses for its own store-open tests; never in a shipped build.
+mci-core   = { path = "../../../core", features = ["insecure-test-keywrap"] }
+# Already on the workspace lockfile via mci-core dev-dependencies.
+tempfile   = "3.27.0"
+rusqlite   = { version = "0.39.0", features = ["bundled-sqlcipher-vendored-openssl"] }

@@ -1,0 +1,18 @@
+// CMciBrainFFI — SwiftPM system-library shim around the C ABI exposed by
+// the `mci-brain-ffi` Rust staticlib (`adapters/macos/mci-brain-ffi/`).
+//
+// The actual static library is built by Cargo at workspace `target/<profile>/`
+// as `libmci_brain_ffi.a`. The `link "mci_brain_ffi"` directive below makes
+// SwiftPM add `-lmci_brain_ffi` to the linker invocation; the `-L<path>`
+// search path is supplied via the consumer target's `linkerSettings`
+// (see `Package.swift`).
+//
+// `[system]` tags the module as exempt from the Swift module-cache
+// invalidation that fires on regular C-target rebuilds — appropriate
+// because the headers + library are produced out-of-band by Cargo.
+
+module CMciBrainFFI [system] {
+    header "mci_brain_ffi.h"
+    link "mci_brain_ffi"
+    export *
+}

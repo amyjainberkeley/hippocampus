@@ -40,7 +40,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 use crate::crypto::DbKey;
 use crate::store::schema::{all_ddl, CREATE_EVENT_VECTORS, SCHEMA_VERSION};
@@ -167,6 +167,57 @@ pub fn open(path: &Path, key: &DbKey) -> Result<Db, StoreError> {
 
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| StoreError::Open(format!("PRAGMA journal_mode=WAL: {e}")))?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(|e| StoreError::Open(format!("PRAGMA foreign_keys=ON: {e}")))?;
+
+    Ok(Db { conn })
+}
+
+/// Open the encrypted store at `path` with `key` in **READ-ONLY** mode.
+///
+/// Used by consumer surfaces that must never mutate the brain: the Phase 3
+/// recall UI (via `adapters/macos/mci-brain-ffi`) and the future agent-API
+/// loopback (P3.10). Matches the [`open`] behaviour (PRAGMA key + wrong-key
+/// probe + `foreign_keys=ON`) but opens the underlying `SQLite` connection
+/// with `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX | SQLITE_OPEN_URI` so
+/// any `INSERT` / `UPDATE` / `DELETE` / `CREATE` / `DROP` issued through the
+/// returned [`Db`] fails at the driver level with `SQLITE_READONLY`
+/// (rusqlite error code 8). The `journal_mode` PRAGMA is **NOT** set — that
+/// is a writer-side concern and would itself attempt a write.
+///
+/// This is the structural enforcement of ADR-0017 §5 / ADR-0016 §4.3
+/// "recall UI cannot modify the brain". The CSO read-only verification
+/// test in `mci-brain-ffi` is the load-bearing assertion.
+///
+/// # Errors
+/// [`StoreError::Open`] for driver-level failures (e.g. file missing — a
+/// read-only open does NOT create the file, by design);
+/// [`StoreError::WrongKey`] if the key does not decrypt the file.
+pub fn open_readonly(path: &Path, key: &DbKey) -> Result<Db, StoreError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_URI;
+    let conn =
+        Connection::open_with_flags(path, flags).map_err(|e| StoreError::Open(e.to_string()))?;
+
+    // Set the raw 256-bit key on the read-only connection. `PRAGMA key`
+    // is a metadata operation in `SQLCipher` (configures the cipher; does
+    // not touch DB pages), so it is honored under `SQLITE_OPEN_READ_ONLY`.
+    {
+        let pragma = key.expose_sqlcipher_pragma_value();
+        conn.pragma_update(None, "key", pragma.as_str())
+            .map_err(|e| StoreError::Open(format!("PRAGMA key: {e}")))?;
+    }
+
+    // Probe the key with a read. Wrong key → SQLITE_NOTADB on first read.
+    conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
+        r.get::<_, i64>(0)
+    })
+    .map_err(|_| StoreError::WrongKey)?;
+
+    // `foreign_keys` is per-connection and applies to query-time integrity
+    // checks; safe on read-only. `journal_mode=WAL` is NOT set here — it
+    // is a write-path concern and would itself attempt a write.
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(|e| StoreError::Open(format!("PRAGMA foreign_keys=ON: {e}")))?;
 
@@ -455,6 +506,101 @@ mod tests {
             matches!(err, StoreError::VecExtensionLoadDeferred),
             "valid path must defer the load, not fake success — got {err:?}"
         );
+    }
+
+    #[test]
+    fn open_readonly_round_trips_then_refuses_writes() {
+        // Seed an encrypted DB with one row via the writer path, close it,
+        // then reopen via `open_readonly` and confirm:
+        //   1. the seeded row is readable (read path OK);
+        //   2. an `INSERT` through the read-only connection fails at the
+        //      driver level with the `SQLITE_READONLY` extended error code.
+        // The latter is the structural CSO invariant the recall-UI relies on
+        // (ADR-0017 §5 / ADR-0016 §4.3): a read-only handle CANNOT mutate
+        // the brain, full stop.
+        let (_dir, path) = tmp("ro.sqlite");
+        let key = DbKey::generate().expect("csprng");
+        {
+            let mut db = open(&path, &key).expect("open fresh");
+            init_schema(&mut db, &SchemaPolicy::WithoutVectorIndex).expect("schema");
+            db.conn()
+                .execute(
+                    "INSERT INTO meta (key, value) VALUES (?1, ?2)",
+                    rusqlite::params!["probe", "seed-value"],
+                )
+                .expect("seed insert");
+        }
+
+        let ro = open_readonly(&path, &key).expect("reopen readonly");
+
+        // Read works.
+        let v: String = ro
+            .conn()
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                rusqlite::params!["probe"],
+                |r| r.get(0),
+            )
+            .expect("read works on ro conn");
+        assert_eq!(v, "seed-value");
+
+        // Write fails with SQLITE_READONLY (extended code 8).
+        let err = ro
+            .conn()
+            .execute(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2)",
+                rusqlite::params!["nope", "should-fail"],
+            )
+            .expect_err("write must fail on readonly conn");
+        match err {
+            rusqlite::Error::SqliteFailure(sqlite_err, _) => {
+                assert_eq!(
+                    sqlite_err.code,
+                    rusqlite::ErrorCode::ReadOnly,
+                    "expected SQLITE_READONLY, got {sqlite_err:?}"
+                );
+            }
+            other => panic!("expected SqliteFailure(SQLITE_READONLY), got {other:?}"),
+        }
+
+        // A CREATE TABLE through the readonly conn must also fail.
+        let err = ro
+            .conn()
+            .execute("CREATE TABLE injected (x INTEGER)", [])
+            .expect_err("CREATE TABLE must fail on readonly conn");
+        assert!(
+            matches!(
+                err,
+                rusqlite::Error::SqliteFailure(sqlite_err, _)
+                    if sqlite_err.code == rusqlite::ErrorCode::ReadOnly
+            ),
+            "expected SQLITE_READONLY on CREATE TABLE, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn open_readonly_with_wrong_key_fails_wrongkey() {
+        let (_dir, path) = tmp("ro_wrongkey.sqlite");
+        let key = DbKey::generate().expect("csprng");
+        {
+            let mut db = open(&path, &key).expect("open fresh");
+            init_schema(&mut db, &SchemaPolicy::WithoutVectorIndex).expect("schema");
+        }
+        let wrong = DbKey::from_bytes([0xAAu8; 32]);
+        let err = open_readonly(&path, &wrong).expect_err("wrong key must fail");
+        assert!(matches!(err, StoreError::WrongKey), "got {err:?}");
+    }
+
+    #[test]
+    fn open_readonly_refuses_missing_file() {
+        // Unlike `open` (which creates a fresh DB on a missing path),
+        // `open_readonly` MUST surface an Open error — a read-only consumer
+        // that silently creates an empty store would be a privacy footgun.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.sqlite");
+        let key = DbKey::generate().expect("csprng");
+        let err = open_readonly(&path, &key).expect_err("missing file must fail");
+        assert!(matches!(err, StoreError::Open(_)), "got {err:?}");
     }
 
     #[test]

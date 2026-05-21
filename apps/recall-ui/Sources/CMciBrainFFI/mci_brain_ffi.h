@@ -1,6 +1,14 @@
 /*
  * mci_brain_ffi.h — C ABI for the MCI Phase-3 brain, READ-ONLY.
  *
+ * THIS IS A COPY OF `adapters/macos/mci-brain-ffi/include/mci_brain_ffi.h`,
+ * kept inside the recall-ui SwiftPM tree because SwiftPM cannot reach
+ * headers outside the package root. Both copies MUST stay byte-identical;
+ * any change here without the matching change to the canonical header is a
+ * P3.9 trust-boundary regression. A future cycle should generate this
+ * file from the Rust source via a build-time hook (cbindgen) and remove
+ * the manual duplication — tracked as a follow-on against ADR-0016 §6 P3.9c.
+ *
  * Consumed by the Swift recall-ui app (apps/recall-ui/).
  *
  * Allocator discipline: every `char *` this header returns by value

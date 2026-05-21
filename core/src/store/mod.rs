@@ -36,8 +36,8 @@ pub mod tombstone;
 
 pub use migrations::MIGRATIONS;
 pub use open::{
-    init_schema, open, validate_vec_extension_path, verify_schema_version, Db, SchemaPolicy,
-    StoreError,
+    init_schema, open, open_readonly, validate_vec_extension_path, verify_schema_version, Db,
+    SchemaPolicy, StoreError,
 };
 pub use schema::{all_ddl, SCHEMA_VERSION};
 pub use tombstone::{EventRow, TOMBSTONE_SOURCE_TYPE};

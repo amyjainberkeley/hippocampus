@@ -1,64 +1,47 @@
 //! MCI macOS adapter — C-ABI FFI shim exposing a **READ-ONLY** view of the
 //! Phase-3 brain to the Swift recall-ui app (`apps/recall-ui/`).
 //!
-//! # Scope: P3.9a skeleton
+//! # Scope: P3.9b — real read-only store wired
 //!
-//! This crate ships the FFI **shape** the recall-ui app links against:
-//! handle lifecycle, JSON-in / JSON-out signatures, allocator discipline
-//! for returned strings. Production wiring (read-only `SQLCipher`
-//! connection + real `HybridRetriever` calls + tombstone-table reads)
-//! lands in **P3.9b** once `HybridRetriever` (P3.7) and the
-//! tombstone-persistence path (P3.6) merge. Each `extern "C"` entry
-//! point below currently returns either canned stub JSON or an empty
-//! list — the Swift side already exercises every code path via its
-//! `BrainReader` protocol with a Swift-native `StubBrainReader`, so the
-//! cut-over is a one-line `BrainReader` swap, not a rewrite.
+//! Every entry point now holds a live read-only `SqlCipherBrainStore`
+//! handle. `mci_brain_ffi_open` decodes the hex SQLCipher key, opens the
+//! store via [`mci_brain::SqlCipherBrainStore::open_readonly`] (which goes
+//! through [`mci_core::store::open_readonly`] with `SQLITE_OPEN_READ_ONLY |
+//! SQLITE_OPEN_NO_MUTEX | SQLITE_OPEN_URI`), and stashes it in an opaque
+//! [`Handle`]. `mci_brain_ffi_search` runs FTS5 lexical search (the
+//! `HybridRetriever` from P3.7 needs an [`mci_brain::Embedder`] backed by
+//! the bundled arctic-embed-s `.mlpackage`; P3.3's Core ML runtime is the
+//! follow-on PR that wires that, at which point search swaps to the full
+//! hybrid path with a one-line ctor change). `mci_brain_ffi_recent_events`
+//! issues `SELECT ... FROM events ORDER BY ts_us DESC LIMIT ?` via the
+//! store's `recent_events` helper. `mci_brain_ffi_recent_privacy_moments`
+//! returns an empty list — the tombstone log lives in a separate
+//! `mci-tombstones.bin` file and surfacing it in the recall UI is P3.9c
+//! (see the function-level deferral note).
 //!
-//! # READ-ONLY by construction (ADR-0016 §4 invariant)
+//! # READ-ONLY by construction (ADR-0017 §5 / ADR-0016 §4.3 invariant)
 //!
-//! Every entry point that touches the store will open the `SQLCipher`
-//! handle with `OpenFlags::SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_URI`
-//! (P3.9b). The `rusqlite::Connection` returned by that open path
-//! refuses any `INSERT` / `UPDATE` / `DELETE` / `CREATE` /
-//! `DROP` at the driver level (`SQLITE_READONLY`). The recall-ui app
-//! is structurally a **consumer** of the brain; it can never write to
-//! it. The FFI surface mirrors that discipline — there is no
-//! `put_event` / `delete_event` / `mutate_*` function exported.
-//! Adding one is an `AGENT_PROTOCOL` §5 protected-set violation.
+//! [`mci_core::store::open_readonly`] sets `SQLITE_OPEN_READ_ONLY` on the
+//! underlying connection. Any `INSERT` / `UPDATE` / `DELETE` / `CREATE` /
+//! `DROP` issued through the resulting `rusqlite::Connection` fails at the
+//! driver level with `SQLITE_READONLY` (extended code 8). The recall-ui
+//! app is structurally a **consumer** of the brain; it cannot write to it.
+//! The FFI surface mirrors that discipline — there is no `put_event` /
+//! `delete_event` / `mutate_*` function exported. Adding one is an
+//! `AGENT_PROTOCOL` §5 protected-set violation.
 //!
-//! # No protected-set surface this PR
-//!
-//! P3.9a touches:
-//! - This crate (new, `adapters/macos/mci-brain-ffi/`).
-//! - The workspace `Cargo.toml` members list (one new line).
-//! - The new `SwiftUI` app under `apps/recall-ui/` (separate Swift
-//!   Package, no Cargo touch).
-//!
-//! It does **not** touch:
-//! - `core/**` crypto / key-management / sync.
-//! - The cascade, denylist, redaction, or incognito-exclusion code.
-//! - The `mci.sqlite` write path or the blob store.
-//! - Secrets / entitlements / TCC / notarization code.
-//!
-//! Per `AGENT_PROTOCOL` §5 a CSO sign-off block is therefore **not
-//! required** on this PR; the read-only discipline + no-mutation
-//! invariant are documented here in source so the eventual P3.9b
-//! protected-set review has a concrete contract to verify.
+//! The CSO read-only verification is load-bearing: it lives in
+//! `core/src/store/open.rs::tests::open_readonly_round_trips_then_refuses_writes`
+//! (driver-level proof of `SQLITE_READONLY`) and in
+//! `tests/readonly_invariant.rs` (this crate's integration test that opens
+//! via the FFI shim and confirms the brain is read-only end-to-end).
 //!
 //! # Allocator discipline
 //!
-//! Every `*mut c_char` this crate returns was allocated by Rust's
-//! global allocator (via `CString::into_raw`). The Swift caller MUST
-//! return that pointer to [`mci_brain_ffi_string_free`] so Rust can
-//! reclaim it (`CString::from_raw`). Calling Swift's `free()` directly
-//! is undefined behavior on macOS because Apple's libsystem allocator
-//! and Rust's allocator may be the same `malloc` under the hood but
-//! the contract is not guaranteed — we keep ownership symmetric:
-//! Rust allocates, Rust frees.
-//!
-//! Likewise, every `*const c_char` parameter is borrowed for the
-//! duration of the call only; the Swift caller owns it and may free
-//! it after the FFI returns.
+//! Every `*mut c_char` this crate returns was allocated by Rust's global
+//! allocator (via `CString::into_raw`). The Swift caller MUST return that
+//! pointer to [`mci_brain_ffi_string_free`] so Rust can reclaim it
+//! (`CString::from_raw`).
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![deny(missing_docs)]
@@ -67,8 +50,12 @@
 #![allow(unsafe_code)]
 
 use std::ffi::{c_char, CStr, CString};
+use std::path::PathBuf;
 use std::ptr;
+use std::sync::Arc;
 
+use mci_brain::{BrainStore, SqlCipherBrainStore};
+use mci_core::crypto::DbKey;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -94,16 +81,18 @@ pub struct HitJson {
     /// `events.url` (nullable).
     pub url: Option<String>,
     /// First N characters of `events.text` for snippet display. The
-    /// FFI caps this at 280 chars at the Rust boundary so the Swift
-    /// list cells never receive megabytes of OCR text per row.
+    /// FFI caps this at [`SNIPPET_CHAR_CAP`] characters at the Rust
+    /// boundary so the Swift list cells never receive megabytes of OCR
+    /// text per row.
     pub ocr_text_snippet: String,
     /// Which retrieval source produced this hit. `"lexical"` for plain
-    /// FTS5 timeline; `"hybrid"` once P3.7 lands. The UI tags rows so
-    /// the user can tell which retrieval path lit the result up.
+    /// FTS5 search (P3.9b); `"timeline"` for recent-events list;
+    /// `"hybrid"` once the `HybridRetriever` + Core ML embedder backend
+    /// (P3.3) is wired.
     pub source: String,
-    /// Fused score in `[0.0, 1.0]` (P3.7) or BM25-derived lexical
-    /// score (P3.9a stub). `None` for plain timeline rows where no
-    /// query was issued.
+    /// Fused score in `[0.0, 1.0]` (P3.7 hybrid) or BM25-derived
+    /// monotone-with-relevance lexical score. `None` for plain timeline
+    /// rows where no query was issued.
     pub score: Option<f32>,
 }
 
@@ -146,12 +135,11 @@ pub struct QueryJson {
 // Handle — opaque pointer the Swift side holds across calls
 // ---------------------------------------------------------------------------
 
-/// Opaque handle the recall-ui retains across FFI calls. Today it owns
-/// nothing because every entry point returns canned/empty data; P3.9b
-/// wires the read-only `SqlCipherBrainStore` + `HybridRetriever` behind
-/// this struct.
+/// Opaque handle the recall-ui retains across FFI calls. Wraps a live
+/// read-only [`SqlCipherBrainStore`] (`SQLITE_OPEN_READ_ONLY`) for the
+/// duration the recall-ui keeps the brain open.
 pub struct Handle {
-    _private: (),
+    store: Arc<SqlCipherBrainStore>,
 }
 
 // ---------------------------------------------------------------------------
@@ -160,42 +148,69 @@ pub struct Handle {
 
 /// Open the brain at `path` with the hex-encoded `SQLCipher` key `key_hex`.
 ///
-/// Returns a non-null opaque [`Handle`] pointer on success; on failure
-/// returns null and [`mci_brain_ffi_last_error_message`] can be polled
-/// for a stable English diagnostic string.
+/// `key_hex` MUST be exactly 64 lower-or-upper-case hex characters
+/// (32 bytes = 256 bits per ADR-0008). The store opens with
+/// `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX | SQLITE_OPEN_URI` —
+/// any mutating SQL through the resulting handle fails with
+/// `SQLITE_READONLY` (the load-bearing invariant in ADR-0017 §5).
 ///
-/// **Read-only** — P3.9b opens the connection with
-/// `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_URI`. The recall-ui never
-/// receives a writable handle.
+/// Returns a non-null opaque [`Handle`] pointer on success; on failure
+/// returns null and [`mci_brain_ffi_last_error_message`] carries the
+/// diagnostic.
 ///
 /// # Safety
 ///
 /// `path` and `key_hex` MUST be non-null, null-terminated UTF-8
 /// C strings. The caller retains ownership; this function does not
-/// store the pointers past return. P3.9a accepts any inputs and
-/// returns a stub handle so the Swift side can exercise the lifecycle
-/// path under test.
+/// store the pointers past return.
 #[no_mangle]
 pub unsafe extern "C" fn mci_brain_ffi_open(
     path: *const c_char,
     key_hex: *const c_char,
 ) -> *mut Handle {
-    // Validate inputs before touching anything else. Null in, null out.
     if path.is_null() || key_hex.is_null() {
         set_last_error("mci_brain_ffi_open: null pointer argument");
         return ptr::null_mut();
     }
     // Safety: caller guarantees the pointers are valid null-terminated
     // UTF-8 C strings. We only borrow them for the duration of this call.
-    let path_ok = unsafe { CStr::from_ptr(path) }.to_str().is_ok();
-    let key_ok = unsafe { CStr::from_ptr(key_hex) }.to_str().is_ok();
-    if !path_ok || !key_ok {
-        set_last_error("mci_brain_ffi_open: non-UTF8 path or key");
-        return ptr::null_mut();
-    }
-    // P3.9b: open `SqlCipherBrainStore` read-only here. P3.9a stubs.
-    let h = Box::new(Handle { _private: () });
+    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("mci_brain_ffi_open: non-UTF8 path");
+            return ptr::null_mut();
+        }
+    };
+    let key_str = match unsafe { CStr::from_ptr(key_hex) }.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("mci_brain_ffi_open: non-UTF8 key_hex");
+            return ptr::null_mut();
+        }
+    };
+
+    let key_bytes = match decode_hex_key(key_str) {
+        Ok(b) => b,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_open: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let p = PathBuf::from(path_str);
+    let store = match SqlCipherBrainStore::open_readonly(&p, &key) {
+        Ok(s) => s,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_open: {e}"));
+            return ptr::null_mut();
+        }
+    };
+
     clear_last_error();
+    let h = Box::new(Handle {
+        store: Arc::new(store),
+    });
     Box::into_raw(h)
 }
 
@@ -222,6 +237,12 @@ pub unsafe extern "C" fn mci_brain_ffi_close(h: *mut Handle) {
 /// rows. Allocated by Rust — caller MUST pass the returned pointer back
 /// to [`mci_brain_ffi_string_free`].
 ///
+/// P3.9b uses lexical FTS5 only (`source: "lexical"`); the full
+/// `HybridRetriever` (P3.7) needs an `Embedder` backed by the bundled
+/// arctic-embed-s `.mlpackage`, which is the P3.3 Core ML adapter's
+/// payload. When that lands, this function swaps to `HybridRetriever`
+/// with a one-line ctor change and the `source` tag flips to `"hybrid"`.
+///
 /// Returns null on input-parse failure or unexpected internal error;
 /// [`mci_brain_ffi_last_error_message`] carries the diagnostic.
 ///
@@ -242,25 +263,72 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
         set_last_error("mci_brain_ffi_search: null query");
         return ptr::null_mut();
     }
+    // Safety: caller guarantees a valid live handle that has not been
+    // freed via mci_brain_ffi_close.
+    let handle = unsafe { &*h };
     // Safety: caller guarantees a valid null-terminated UTF-8 string.
     let query_cstr = unsafe { CStr::from_ptr(query_json) };
     let Ok(query_str) = query_cstr.to_str() else {
         set_last_error("mci_brain_ffi_search: non-UTF8 query");
         return ptr::null_mut();
     };
-    let _query: QueryJson = match serde_json::from_str(query_str) {
+    let query: QueryJson = match serde_json::from_str(query_str) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_search: bad query JSON: {e}"));
             return ptr::null_mut();
         }
     };
-    // P3.9b: route through HybridRetriever. P3.9a returns an empty list
-    // so the Swift side sees a valid empty-result code path (it has a
-    // separate StubBrainReader for canned demo data; the FFI itself
-    // does not fabricate hits).
-    let empty: Vec<HitJson> = Vec::new();
-    json_to_c_string(&empty)
+    if query.text.is_empty() {
+        // Empty query is a malformed search request, not an empty result —
+        // FTS5 rejects it too. Surface as an empty list with no error.
+        let empty: Vec<HitJson> = Vec::new();
+        return json_to_c_string(&empty);
+    }
+    let limit = query.limit.min(MAX_LIMIT as usize).max(1);
+
+    // P3.9b: FTS5-only lexical search. See module docs for the HybridRetriever
+    // swap point (P3.3 Core ML embedder needs to land first).
+    let hits_raw = match handle.store.fts5_search(&query.text, limit) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_search: fts5_search: {e}"));
+            return ptr::null_mut();
+        }
+    };
+
+    let mut hits_json: Vec<HitJson> = Vec::with_capacity(hits_raw.len());
+    for (event_id, score) in hits_raw {
+        match handle.store.get_event(event_id) {
+            Ok(Some(ev)) => {
+                if !passes_filters(
+                    ev.ts_us,
+                    ev.app_bundle_id.as_deref(),
+                    query.time_from_us,
+                    query.time_to_us,
+                    query.app_filter.as_deref(),
+                ) {
+                    continue;
+                }
+                hits_json.push(HitJson {
+                    event_id: event_id.0,
+                    ts_us: ev.ts_us,
+                    app_bundle_id: ev.app_bundle_id,
+                    window_title: ev.window_title,
+                    url: ev.url,
+                    ocr_text_snippet: snippet(&ev.text),
+                    source: "lexical".into(),
+                    score: Some(score),
+                });
+            }
+            Ok(None) => continue,
+            Err(e) => {
+                set_last_error(&format!("mci_brain_ffi_search: get_event: {e}"));
+                return ptr::null_mut();
+            }
+        }
+    }
+    json_to_c_string(&hits_json)
 }
 
 /// Fetch the N most recent events for the plain timeline view. Returns
@@ -269,9 +337,9 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
 ///
 /// # Safety
 ///
-/// `h` must be a live handle. `limit` is treated as `usize` and clamped
-/// to a reasonable ceiling internally so a hostile / negative value
-/// cannot allocate unbounded memory.
+/// `h` must be a live handle. `limit` is treated as `u32` and clamped
+/// to [`MAX_LIMIT`] internally so a hostile value cannot allocate
+/// unbounded memory.
 #[no_mangle]
 pub unsafe extern "C" fn mci_brain_ffi_recent_events(
     h: *mut Handle,
@@ -281,10 +349,31 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(
         set_last_error("mci_brain_ffi_recent_events: null handle");
         return ptr::null_mut();
     }
-    let _limit = limit.min(MAX_LIMIT) as usize;
-    // P3.9b: SELECT ... FROM events ORDER BY ts_us DESC LIMIT ?.
-    let empty: Vec<HitJson> = Vec::new();
-    json_to_c_string(&empty)
+    // Safety: caller guarantees a valid live handle.
+    let handle = unsafe { &*h };
+    let limit_clamped = limit.min(MAX_LIMIT) as usize;
+
+    let events = match handle.store.recent_events(limit_clamped) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_recent_events: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    let hits: Vec<HitJson> = events
+        .into_iter()
+        .map(|ev| HitJson {
+            event_id: ev.id.0,
+            ts_us: ev.ts_us,
+            app_bundle_id: ev.app_bundle_id,
+            window_title: ev.window_title,
+            url: ev.url,
+            ocr_text_snippet: snippet(&ev.text),
+            source: "timeline".into(),
+            score: None,
+        })
+        .collect();
+    json_to_c_string(&hits)
 }
 
 /// Fetch the N most recent privacy-moment cards. Returns a JSON array
@@ -293,6 +382,20 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(
 /// **Carries no content** — only `app_bundle_id` + `ts_us` + `reason_code`
 /// per ADR-0017 §5.1 + ADR-0016 §4.5. The reason→friendly-string map
 /// lives in the Swift `Localizable.strings` per ADR-0017 §5.2.
+///
+/// # Deferred to P3.9c
+///
+/// The cascade tombstone log lives in a separate file (`mci-tombstones.bin`,
+/// the wire-frame log) — it is **NOT** a table inside the encrypted brain
+/// store. Surfacing tombstones to the recall UI requires either (a) reading
+/// the tombstone log directly from the shim, or (b) the agent's daemon
+/// process maintaining a derived `privacy_moments` table inside the brain
+/// store from the wire-frame stream. The trust-boundary choice between
+/// (a) and (b) is CSO-gated and is the P3.9c PR's scope. Until then this
+/// function returns an empty list and the Swift `PrivacyMomentsView`
+/// renders the empty-state copy. Returning canned data here would be a
+/// trust-boundary violation (ADR-0017 §5.1 — privacy moments carry no
+/// content; faked rows are content-free but the *count* itself is signal).
 ///
 /// # Safety
 ///
@@ -307,10 +410,6 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_privacy_moments(
         return ptr::null_mut();
     }
     let _limit = limit.min(MAX_LIMIT) as usize;
-    // P3.9b/P3.6: SELECT ... FROM privacy_moments (table TBD by P3.6 /
-    // ADR-0017 §5) ORDER BY ts_us DESC LIMIT ?. Until then the table
-    // does not exist; FFI returns an empty list and the Swift view
-    // shows the empty-state copy.
     let empty: Vec<PrivacyMomentJson> = Vec::new();
     json_to_c_string(&empty)
 }
@@ -355,13 +454,18 @@ pub unsafe extern "C" fn mci_brain_ffi_last_error_message() -> *const c_char {
 }
 
 // ---------------------------------------------------------------------------
-// Internals — thread-local error slot, JSON helper, limit cap
+// Internals — thread-local error slot, hex decoder, JSON helper, snippet
 // ---------------------------------------------------------------------------
 
 /// Soft cap on `limit` arguments. The recall-ui's list view paginates
 /// far below this anyway; the cap exists so a hostile caller cannot
 /// trick the FFI into allocating gigabytes of `Vec<HitJson>`.
-const MAX_LIMIT: u32 = 10_000;
+pub const MAX_LIMIT: u32 = 10_000;
+
+/// Maximum characters of OCR text returned per hit in the snippet field.
+/// 280 is the headline cap the Swift list cell can render in two lines
+/// without re-flowing; raise only when the UI grows a long-form preview.
+pub const SNIPPET_CHAR_CAP: usize = 280;
 
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<Option<CString>> = const {
@@ -383,6 +487,74 @@ fn clear_last_error() {
     LAST_ERROR.with(|cell| {
         *cell.borrow_mut() = None;
     });
+}
+
+/// Decode a 64-character hex string into the 32-byte SQLCipher key.
+///
+/// Accepts upper-, lower-, or mixed-case hex. Rejects any other length
+/// (the 256-bit key is fixed per ADR-0008) and any non-hex byte.
+fn decode_hex_key(s: &str) -> Result<[u8; 32], String> {
+    let bytes = s.as_bytes();
+    if bytes.len() != 64 {
+        return Err(format!(
+            "key_hex must be 64 hex chars (32 bytes); got {}",
+            bytes.len()
+        ));
+    }
+    let mut out = [0u8; 32];
+    for (i, pair) in bytes.chunks_exact(2).enumerate() {
+        let hi = hex_nibble(pair[0])?;
+        let lo = hex_nibble(pair[1])?;
+        out[i] = (hi << 4) | lo;
+    }
+    Ok(out)
+}
+
+fn hex_nibble(b: u8) -> Result<u8, String> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        other => Err(format!("non-hex byte 0x{other:02x} in key_hex")),
+    }
+}
+
+/// Truncate `s` to at most [`SNIPPET_CHAR_CAP`] characters (not bytes —
+/// multi-byte UTF-8 is preserved). Appends nothing; the recall-UI adds
+/// an ellipsis affordance if it likes.
+fn snippet(s: &str) -> String {
+    if s.chars().count() <= SNIPPET_CHAR_CAP {
+        return s.to_string();
+    }
+    s.chars().take(SNIPPET_CHAR_CAP).collect()
+}
+
+/// Post-fetch filter that matches the optional `time_filter` /
+/// `app_filter` semantics from [`QueryJson`]. Pure function so it is
+/// trivially testable.
+fn passes_filters(
+    ts_us: u64,
+    app_bundle_id: Option<&str>,
+    time_from_us: Option<u64>,
+    time_to_us: Option<u64>,
+    app_filter: Option<&str>,
+) -> bool {
+    if let Some(from) = time_from_us {
+        if ts_us < from {
+            return false;
+        }
+    }
+    if let Some(to) = time_to_us {
+        if ts_us > to {
+            return false;
+        }
+    }
+    if let Some(want) = app_filter {
+        if app_bundle_id != Some(want) {
+            return false;
+        }
+    }
+    true
 }
 
 /// Serialize `v` as JSON, push it into a `CString`, and hand the raw
@@ -408,32 +580,104 @@ fn json_to_c_string<T: Serialize>(v: &T) -> *mut c_char {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — exercise every entry point under Rust-side stub data; the
-// Swift side has its own headless tests against the BrainReader protocol.
+// Tests — narrow unit tests on the pure helpers. Integration tests against
+// a real ephemeral SQLCipher brain live in `tests/`.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn cstr(s: &str) -> CString {
-        CString::new(s).expect("no NUL in test literal")
+    #[test]
+    fn decode_hex_key_round_trip_lower_case() {
+        let raw = [0xABu8; 32];
+        let hex: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let back = decode_hex_key(&hex).expect("valid hex");
+        assert_eq!(back, raw);
     }
 
     #[test]
-    fn open_close_lifecycle_roundtrips() {
-        let p = cstr("/tmp/never-touched.sqlite");
-        let k = cstr("00".repeat(32).as_str());
-        let h = unsafe { mci_brain_ffi_open(p.as_ptr(), k.as_ptr()) };
-        assert!(!h.is_null());
-        unsafe { mci_brain_ffi_close(h) };
-        // double-close protection is the Swift wrapper's job; the FFI
-        // contract is single-close. Nothing to assert here past "no panic".
+    fn decode_hex_key_accepts_upper_case() {
+        let hex = "DEADBEEF".repeat(8);
+        assert_eq!(hex.len(), 64);
+        let back = decode_hex_key(&hex).expect("valid upper hex");
+        assert_eq!(back[0], 0xDE);
+        assert_eq!(back[1], 0xAD);
+        assert_eq!(back[2], 0xBE);
+        assert_eq!(back[3], 0xEF);
+    }
+
+    #[test]
+    fn decode_hex_key_rejects_short_input() {
+        let e = decode_hex_key("00").unwrap_err();
+        assert!(e.contains("64 hex chars"));
+    }
+
+    #[test]
+    fn decode_hex_key_rejects_non_hex_byte() {
+        let mut s = "00".repeat(31);
+        s.push_str("zz");
+        let e = decode_hex_key(&s).unwrap_err();
+        assert!(e.contains("non-hex"));
+    }
+
+    #[test]
+    fn snippet_caps_long_text() {
+        let long = "x".repeat(SNIPPET_CHAR_CAP + 100);
+        let s = snippet(&long);
+        assert_eq!(s.chars().count(), SNIPPET_CHAR_CAP);
+    }
+
+    #[test]
+    fn snippet_passes_short_text() {
+        let short = "hello";
+        assert_eq!(snippet(short), "hello");
+    }
+
+    #[test]
+    fn snippet_preserves_multibyte_char_boundaries() {
+        // Each emoji is multiple bytes; ensure we cut on char count, not bytes.
+        let s: String = "🦀".repeat(SNIPPET_CHAR_CAP + 5);
+        let cut = snippet(&s);
+        assert_eq!(cut.chars().count(), SNIPPET_CHAR_CAP);
+        // Round-trip via str so we know we didn't slice mid-codepoint.
+        assert!(cut.is_char_boundary(cut.len()));
+    }
+
+    #[test]
+    fn passes_filters_no_filters_always_true() {
+        assert!(passes_filters(1000, Some("com.apple.Safari"), None, None, None));
+    }
+
+    #[test]
+    fn passes_filters_time_window_inclusive() {
+        assert!(passes_filters(1000, None, Some(1000), Some(1000), None));
+        assert!(!passes_filters(999, None, Some(1000), Some(2000), None));
+        assert!(!passes_filters(2001, None, Some(1000), Some(2000), None));
+    }
+
+    #[test]
+    fn passes_filters_app_filter_requires_exact_match() {
+        assert!(passes_filters(
+            0,
+            Some("com.apple.Safari"),
+            None,
+            None,
+            Some("com.apple.Safari")
+        ));
+        assert!(!passes_filters(
+            0,
+            Some("com.apple.Safari"),
+            None,
+            None,
+            Some("com.microsoft.VSCode")
+        ));
+        assert!(!passes_filters(0, None, None, None, Some("com.apple.Safari")));
     }
 
     #[test]
     fn open_with_null_path_returns_null_and_sets_error() {
-        let k = cstr("00".repeat(32).as_str());
+        let k = CString::new("00".repeat(32)).unwrap();
         let h = unsafe { mci_brain_ffi_open(std::ptr::null(), k.as_ptr()) };
         assert!(h.is_null());
         let err = unsafe { mci_brain_ffi_last_error_message() };
@@ -445,65 +689,27 @@ mod tests {
     }
 
     #[test]
-    fn search_returns_empty_json_array_for_well_formed_query() {
-        let p = cstr("/tmp/never-touched.sqlite");
-        let k = cstr("00".repeat(32).as_str());
+    fn open_with_short_hex_key_fails() {
+        let p = CString::new("/tmp/never-touched.sqlite").unwrap();
+        let k = CString::new("deadbeef").unwrap();
         let h = unsafe { mci_brain_ffi_open(p.as_ptr(), k.as_ptr()) };
-        let q = cstr(r#"{"text":"contract clause","limit":20}"#);
-        let json_ptr = unsafe { mci_brain_ffi_search(h, q.as_ptr()) };
-        assert!(!json_ptr.is_null(), "well-formed query must succeed");
-        let s = unsafe { CStr::from_ptr(json_ptr) }
-            .to_string_lossy()
-            .into_owned();
-        let parsed: Vec<HitJson> = serde_json::from_str(&s).expect("valid JSON array");
-        assert!(parsed.is_empty(), "P3.9a returns empty until P3.9b wires retriever");
-        unsafe { mci_brain_ffi_string_free(json_ptr) };
-        unsafe { mci_brain_ffi_close(h) };
-    }
-
-    #[test]
-    fn search_returns_null_on_malformed_query_json() {
-        let p = cstr("/tmp/never-touched.sqlite");
-        let k = cstr("00".repeat(32).as_str());
-        let h = unsafe { mci_brain_ffi_open(p.as_ptr(), k.as_ptr()) };
-        let q = cstr("not json at all");
-        let json_ptr = unsafe { mci_brain_ffi_search(h, q.as_ptr()) };
-        assert!(json_ptr.is_null(), "malformed query must error");
+        assert!(h.is_null());
         let err = unsafe { mci_brain_ffi_last_error_message() };
         assert!(!err.is_null());
-        unsafe { mci_brain_ffi_close(h) };
+        let msg = unsafe { CStr::from_ptr(err) }
+            .to_string_lossy()
+            .into_owned();
+        assert!(msg.contains("64 hex chars"), "got {msg}");
     }
 
     #[test]
-    fn recent_events_returns_empty_json_array() {
-        let p = cstr("/tmp/never-touched.sqlite");
-        let k = cstr("00".repeat(32).as_str());
+    fn open_with_missing_file_fails_gracefully() {
+        let p = CString::new("/no/such/dir/no-file.sqlite").unwrap();
+        let k = CString::new("00".repeat(32)).unwrap();
         let h = unsafe { mci_brain_ffi_open(p.as_ptr(), k.as_ptr()) };
-        let json_ptr = unsafe { mci_brain_ffi_recent_events(h, 50) };
-        assert!(!json_ptr.is_null());
-        let s = unsafe { CStr::from_ptr(json_ptr) }
-            .to_string_lossy()
-            .into_owned();
-        let parsed: Vec<HitJson> = serde_json::from_str(&s).expect("valid JSON");
-        assert!(parsed.is_empty());
-        unsafe { mci_brain_ffi_string_free(json_ptr) };
-        unsafe { mci_brain_ffi_close(h) };
-    }
-
-    #[test]
-    fn recent_privacy_moments_returns_empty_json_array() {
-        let p = cstr("/tmp/never-touched.sqlite");
-        let k = cstr("00".repeat(32).as_str());
-        let h = unsafe { mci_brain_ffi_open(p.as_ptr(), k.as_ptr()) };
-        let json_ptr = unsafe { mci_brain_ffi_recent_privacy_moments(h, 50) };
-        assert!(!json_ptr.is_null());
-        let s = unsafe { CStr::from_ptr(json_ptr) }
-            .to_string_lossy()
-            .into_owned();
-        let parsed: Vec<PrivacyMomentJson> = serde_json::from_str(&s).expect("valid JSON");
-        assert!(parsed.is_empty(), "no tombstone table yet — P3.6 / P4.7 owe it");
-        unsafe { mci_brain_ffi_string_free(json_ptr) };
-        unsafe { mci_brain_ffi_close(h) };
+        assert!(h.is_null());
+        let err = unsafe { mci_brain_ffi_last_error_message() };
+        assert!(!err.is_null());
     }
 
     #[test]
@@ -547,14 +753,12 @@ mod tests {
 
     #[test]
     fn query_json_accepts_optional_filters() {
-        // Without filters
         let q: QueryJson =
             serde_json::from_str(r#"{"text":"a","limit":5}"#).expect("parses without filters");
         assert_eq!(q.text, "a");
         assert_eq!(q.limit, 5);
         assert!(q.time_from_us.is_none());
         assert!(q.app_filter.is_none());
-        // With filters
         let q2: QueryJson = serde_json::from_str(
             r#"{"text":"b","limit":10,"time_from_us":100,"time_to_us":200,"app_filter":"com.apple.Safari"}"#,
         )
@@ -566,9 +770,6 @@ mod tests {
 
     #[test]
     fn limit_clamps_at_max() {
-        // A non-clamping bug would be invisible at the API surface but
-        // catastrophic if a future wire change accepts the raw value
-        // into a Vec::with_capacity. Pin the constant.
         assert_eq!(MAX_LIMIT, 10_000);
     }
 }
