@@ -20,6 +20,9 @@ let package = Package(
         .executable(name: "Hippocampus", targets: ["Hippocampus"]),
         .library(name: "HippocampusKit", targets: ["HippocampusKit"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+    ],
     targets: [
         .executableTarget(
             name: "Hippocampus",
@@ -31,6 +34,9 @@ let package = Package(
         ),
         .target(
             name: "HippocampusKit",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             path: "Sources/HippocampusKit",
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),

@@ -9,14 +9,21 @@ struct HippocampusApp: App {
         locator: BundleBinaryLocator(),
         keyStore: FileKeyStore()
     )
+    @StateObject private var loginItemVM = LoginItemViewModel(service: SMLoginItemService())
+    private let updater = SparkleUpdaterService()
 
     var body: some Scene {
         MenuBarExtra {
-            StatusMenuView(supervisor: supervisor)
-                .task {
-                    appDelegate.supervisorRef = supervisor
-                    supervisor.start()
-                }
+            StatusMenuView(
+                supervisor: supervisor,
+                loginItemVM: loginItemVM,
+                updater: updater
+            )
+            .task {
+                appDelegate.supervisorRef = supervisor
+                supervisor.start()
+                updater.startUpdater()
+            }
         } label: {
             MenuBarIcon(supervisor: supervisor)
         }

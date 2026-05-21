@@ -66,6 +66,20 @@ AGENT_BIN="$REPO_ROOT/target/$PROFILE/mci-agent"
 KNOWN_SAFE="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml"
 INFO_PLIST="$SCRIPT_DIR/Info.plist"
 
+FRAMEWORKS="$CONTENTS/Frameworks"
+
+# Locate Sparkle.framework from SwiftPM build artifacts
+SPARKLE_FRAMEWORK=""
+for candidate in \
+    "$PKG_DIR/.build/$PROFILE/Sparkle.framework" \
+    "$PKG_DIR/.build/artifacts/sparkle/Sparkle/Sparkle.framework" \
+    "$PKG_DIR/.build/artifacts/Sparkle/Sparkle.framework"; do
+    if [[ -d "$candidate" ]]; then
+        SPARKLE_FRAMEWORK="$candidate"
+        break
+    fi
+done
+
 echo "=== Hippocampus.app assembly ==="
 echo "Profile:   $PROFILE"
 echo "Output:    $APP"
@@ -82,7 +96,7 @@ done
 
 # Clean and create structure
 rm -rf "$APP"
-mkdir -p "$MACOS" "$RESOURCES"
+mkdir -p "$MACOS" "$RESOURCES" "$FRAMEWORKS"
 
 # Copy binaries
 cp "$HIPPOCAMPUS_BIN" "$MACOS/Hippocampus"
@@ -95,15 +109,26 @@ if [[ -f "$KNOWN_SAFE" ]]; then
     cp "$KNOWN_SAFE" "$RESOURCES/known-safe-apps.toml"
 fi
 
-# Placeholder icon — real icon is Wave 2.B
-# (AppIcon.icns would go here)
+# Embed Sparkle.framework (ships pre-signed; we re-codesign the outer app)
+if [[ -n "$SPARKLE_FRAMEWORK" && -d "$SPARKLE_FRAMEWORK" ]]; then
+    echo "Embedding Sparkle.framework from: $SPARKLE_FRAMEWORK"
+    cp -R "$SPARKLE_FRAMEWORK" "$FRAMEWORKS/"
 
-# Ad-hoc codesign each binary + the top-level app
+    # Sparkle 2.x XPC services need to be inside the framework
+    # The framework ships pre-signed — we only codesign the outer bundle.
+else
+    echo "WARNING: Sparkle.framework not found. Auto-update will not work."
+    echo "  Build with 'swift build -c $PROFILE' first to resolve the SPM dependency."
+fi
+
+# Ad-hoc codesign each binary + framework + the top-level app
 echo "Codesigning..."
 codesign --force --sign - "$MACOS/MCICaptureHelper"
 codesign --force --sign - "$MACOS/mci-agent"
 codesign --force --sign - "$MACOS/Hippocampus"
-codesign --force --sign - "$APP"
+# --deep re-signs embedded frameworks (Sparkle ships pre-signed but
+# the outer app signature must cover everything)
+codesign --force --deep --sign - "$APP"
 
 echo ""
 echo "=== Done ==="
