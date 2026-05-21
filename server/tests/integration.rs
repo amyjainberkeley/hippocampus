@@ -281,6 +281,8 @@ fn server_rejects_plaintext_brief_field() {
     assert_eq!(nonce, &[4u8, 5, 6]);
 }
 
+/// ADR-0019 §4 invariant #10: NO BACKDOOR KEY.
+/// No endpoint decrypts content. No server-side source file calls decrypt/unwrap.
 #[tokio::test]
 async fn server_has_no_backdoor_key() {
     let app = test_app_from(memory_store());
@@ -312,6 +314,7 @@ async fn server_has_no_backdoor_key() {
         }
     }
 
+    // Source-level proof: server-side modules never reference decrypt/unwrap.
     let handler_src = include_str!("../src/handlers.rs");
     assert!(
         !handler_src.contains("decrypt"),
@@ -324,6 +327,41 @@ async fn server_has_no_backdoor_key() {
     assert!(
         !handler_src.contains("plaintext"),
         "handlers.rs must not reference 'plaintext'"
+    );
+
+    // main.rs: must not import or use the crypto module at all.
+    let main_src = include_str!("../src/main.rs");
+    assert!(
+        !main_src.contains("decrypt"),
+        "main.rs must not contain 'decrypt'"
+    );
+    assert!(
+        !main_src.contains("key_wrap"),
+        "main.rs must not reference key_wrap"
+    );
+    assert!(
+        !main_src.contains("crypto::"),
+        "main.rs must not import the crypto module"
+    );
+    assert!(
+        !main_src.contains("AeadKey"),
+        "main.rs must not reference AeadKey"
+    );
+
+    // store.rs: must not import or use any crypto primitives.
+    // (field name `member_key_wraps` is a model field, not a crypto import.)
+    let store_src = include_str!("../src/store/in_memory.rs");
+    assert!(
+        !store_src.contains("decrypt"),
+        "store.rs must not contain 'decrypt'"
+    );
+    assert!(
+        !store_src.contains("crypto::"),
+        "store.rs must not import the crypto module"
+    );
+    assert!(
+        !store_src.contains("AeadKey"),
+        "store.rs must not reference AeadKey"
     );
 
     let model_src = include_str!("../src/model.rs");
@@ -452,4 +490,84 @@ async fn sqlite_schema_all_content_columns_are_blob() {
     let state = ecols.iter().find(|(n, _)| n == "state");
     assert!(state.is_some());
     assert_eq!(state.unwrap().1, "TEXT");
+}
+
+/// E2E: workspace key → AEAD encrypt brief → key-wrap per member →
+/// store via HTTP → retrieve → key-unwrap → AEAD decrypt → original.
+#[tokio::test]
+async fn e2e_real_crypto_through_http() {
+    use mci_server::crypto::aead::{self, AeadKey, AeadNonce};
+    use mci_server::crypto::key_wrap;
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let (app, ws_id, member_id) = test_app_with_workspace_from(memory_store()).await;
+
+    // 1. Generate workspace key + member keypair (client-side).
+    let workspace_key = AeadKey::generate().unwrap();
+    let member_private = StaticSecret::random();
+    let member_public = PublicKey::from(&member_private);
+
+    // 2. Encrypt a brief under the workspace key.
+    let brief_content = b"Meeting notes: Q3 OKRs approved, headcount +2 eng.";
+    let aad_bytes = format!("ws:{},ts:1716000000", ws_id.0);
+    let (ciphertext, nonce) = aead::encrypt(brief_content, &workspace_key, aad_bytes.as_bytes())
+        .unwrap();
+
+    // 3. Wrap workspace key for this member.
+    let wrapped = key_wrap::wrap(workspace_key.as_bytes(), &member_public).unwrap();
+    let wrapped_bytes = wrapped.to_bytes();
+
+    // 4. Upload through HTTP (server sees only opaque bytes).
+    let create_req = CreateBriefRequest {
+        uploaded_by: member_id,
+        ts_brief_us: 1_716_000_000,
+        ciphertext: ciphertext.clone(),
+        nonce: nonce.0.to_vec(),
+        aad: aad_bytes.as_bytes().to_vec(),
+        member_key_wraps: vec![MemberKeyWrap {
+            member_id,
+            wrapped_key: wrapped_bytes,
+        }],
+    };
+
+    let put_req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/briefs", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&create_req).unwrap()))
+        .unwrap();
+
+    let put_resp = app.clone().oneshot(put_req).await.unwrap();
+    assert_eq!(put_resp.status(), StatusCode::CREATED);
+
+    // 5. Retrieve through HTTP.
+    let get_req = Request::builder()
+        .uri(format!("/v1/workspaces/{}/briefs", ws_id.0))
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.oneshot(get_req).await.unwrap();
+    let body = get_resp.into_body().collect().await.unwrap().to_bytes();
+    let briefs: Vec<BriefEnvelope> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(briefs.len(), 1);
+
+    let envelope = &briefs[0];
+
+    // 6. Client-side: unwrap the workspace key.
+    let member_wrap = &envelope.member_key_wraps[0];
+    let restored_wrapped = key_wrap::WrappedKey::from_bytes(&member_wrap.wrapped_key).unwrap();
+    let restored_ws_key_bytes = key_wrap::unwrap(&restored_wrapped, &member_private).unwrap();
+    let restored_ws_key = AeadKey::from_bytes(restored_ws_key_bytes);
+
+    // 7. Client-side: decrypt the brief.
+    let mut nonce_arr = [0u8; 12];
+    nonce_arr.copy_from_slice(&envelope.nonce);
+    let decrypted = aead::decrypt(
+        &envelope.ciphertext,
+        &AeadNonce(nonce_arr),
+        &restored_ws_key,
+        &envelope.aad,
+    )
+    .unwrap();
+
+    assert_eq!(decrypted, brief_content);
 }
