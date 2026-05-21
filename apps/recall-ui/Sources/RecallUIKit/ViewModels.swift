@@ -10,6 +10,9 @@ public final class SearchViewModel: ObservableObject {
     @Published public private(set) var hits: [Hit] = []
     @Published public private(set) var isSearching: Bool = false
     @Published public private(set) var errorMessage: String?
+    @Published public var selectedHitId: UInt64?
+    @Published public var isDetailFocused: Bool = false
+    @Published public var filters: FilterState = FilterState()
 
     private let reader: BrainReader
 
@@ -17,9 +20,14 @@ public final class SearchViewModel: ObservableObject {
         self.reader = reader
     }
 
+    public var selectedHit: Hit? {
+        guard let id = selectedHitId else { return nil }
+        return hits.first { $0.id == id }
+    }
+
     public func runSearch() async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else {
+        guard !q.isEmpty || filters.anyActive else {
             hits = []
             errorMessage = nil
             return
@@ -28,7 +36,17 @@ public final class SearchViewModel: ObservableObject {
         errorMessage = nil
         defer { isSearching = false }
         do {
-            hits = try await reader.search(SearchOptions(text: q, limit: 50))
+            let opts = SearchOptions(
+                text: q.isEmpty ? "*" : q,
+                limit: 50,
+                appFilter: filters.appFilter,
+                timeFromUs: filters.timeFromUs()
+            )
+            var results = try await reader.search(opts)
+            if filters.hasUrl {
+                results = results.filter { $0.url != nil && !$0.url!.isEmpty }
+            }
+            hits = results
         } catch {
             hits = []
             errorMessage = "\(error)"
@@ -39,6 +57,37 @@ public final class SearchViewModel: ObservableObject {
         query = ""
         hits = []
         errorMessage = nil
+        filters = FilterState()
+    }
+
+    public func moveSelectionUp() {
+        guard !hits.isEmpty else { return }
+        guard let current = selectedHitId,
+              let idx = hits.firstIndex(where: { $0.id == current }), idx > 0
+        else {
+            selectedHitId = hits.first?.id
+            return
+        }
+        selectedHitId = hits[idx - 1].id
+    }
+
+    public func moveSelectionDown() {
+        guard !hits.isEmpty else { return }
+        guard let current = selectedHitId,
+              let idx = hits.firstIndex(where: { $0.id == current }), idx < hits.count - 1
+        else {
+            selectedHitId = hits.first?.id
+            return
+        }
+        selectedHitId = hits[idx + 1].id
+    }
+
+    public func focusDetail() {
+        if selectedHitId != nil { isDetailFocused = true }
+    }
+
+    public func dismissDetail() {
+        isDetailFocused = false
     }
 }
 
@@ -47,6 +96,8 @@ public final class TimelineViewModel: ObservableObject {
     @Published public private(set) var hits: [Hit] = []
     @Published public private(set) var isLoading: Bool = false
     @Published public private(set) var errorMessage: String?
+    @Published public var selectedHitId: UInt64?
+    @Published public var isDetailFocused: Bool = false
 
     private let reader: BrainReader
     private let pageSize: Int
@@ -54,6 +105,11 @@ public final class TimelineViewModel: ObservableObject {
     public init(reader: BrainReader, pageSize: Int = 100) {
         self.reader = reader
         self.pageSize = pageSize
+    }
+
+    public var selectedHit: Hit? {
+        guard let id = selectedHitId else { return nil }
+        return hits.first { $0.id == id }
     }
 
     public func reload() async {
@@ -66,6 +122,36 @@ public final class TimelineViewModel: ObservableObject {
             hits = []
             errorMessage = "\(error)"
         }
+    }
+
+    public func moveSelectionUp() {
+        guard !hits.isEmpty else { return }
+        guard let current = selectedHitId,
+              let idx = hits.firstIndex(where: { $0.id == current }), idx > 0
+        else {
+            selectedHitId = hits.first?.id
+            return
+        }
+        selectedHitId = hits[idx - 1].id
+    }
+
+    public func moveSelectionDown() {
+        guard !hits.isEmpty else { return }
+        guard let current = selectedHitId,
+              let idx = hits.firstIndex(where: { $0.id == current }), idx < hits.count - 1
+        else {
+            selectedHitId = hits.first?.id
+            return
+        }
+        selectedHitId = hits[idx + 1].id
+    }
+
+    public func focusDetail() {
+        if selectedHitId != nil { isDetailFocused = true }
+    }
+
+    public func dismissDetail() {
+        isDetailFocused = false
     }
 }
 

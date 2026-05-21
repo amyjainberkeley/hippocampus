@@ -1,45 +1,21 @@
-// MCIRecallApp.swift — SwiftUI @main scene for the MCI recall-ui v1.
-//
-// # P3.9b — FFIBrainReader wired against the real read-only brain
-//
-// The reader now opens `~/Library/Application Support/MCI/mci.sqlite` with
-// the SQLCipher key from the `MCI_DB_KEY_HEX` environment variable. If
-// the env var is missing OR the open fails (no DB yet, wrong key, file
-// missing), the app falls back to `StubBrainReader` so the SwiftUI views
-// still have something to render — the user sees the canned demo corpus
-// instead of an empty window or a crashed app.
-//
-// # TODO — Keychain integration (P4.6 retention work or follow-on)
-//
-// The env-var key source is a developer-mode demo handle. The production
-// key path per ADR-0008 is the macOS Keychain (Secure-Enclave-wrapped,
-// biometric-controlled, non-exportable). When that adapter lands in
-// `adapters/macos/` (currently behind the `KeyWrap` trait in `mci-core`),
-// this site swaps `MCI_DB_KEY_HEX` for a Keychain lookup. The trust-
-// boundary moment is CSO-gated.
-
-import SwiftUI
+import AppKit
 import RecallUIKit
+import SwiftUI
 
 @main
 struct MCIRecallApp: App {
-    /// Single shared reader for the whole app session. Constructed once
-    /// at process start; the `@MainActor` annotation pins construction
-    /// to the main actor (every view model is built on it).
     @MainActor
     private static let reader: BrainReader = Self.makeReader()
 
     var body: some Scene {
-        WindowGroup("MCI Recall") {
+        WindowGroup("Hippocampus Recall") {
             RootView(reader: MCIRecallApp.reader)
                 .frame(minWidth: 720, minHeight: 480)
+                .background(Color.brandBgPrimary)
+                .preferredColorScheme(.dark)
         }
     }
 
-    /// Construct the production `FFIBrainReader` if a real brain exists +
-    /// the env-var key is set, else fall back to `StubBrainReader` so the
-    /// UI is still rendered. The fallback is dev-mode only; once the
-    /// Keychain integration lands the env-var path goes away.
     @MainActor
     private static func makeReader() -> BrainReader {
         guard let keyHex = ProcessInfo.processInfo.environment["MCI_DB_KEY_HEX"],
@@ -50,15 +26,10 @@ struct MCIRecallApp: App {
         do {
             return try FFIBrainReader(path: defaultBrainPath(), keyHex: keyHex)
         } catch {
-            // Open failed (file missing, wrong key, etc.) — fall back to
-            // the stub so the SwiftUI scenes still render. A future
-            // onboarding UX (Phase 4 P4.2) surfaces this as a banner.
             return StubBrainReader()
         }
     }
 
-    /// Canonical brain path: `~/Library/Application Support/MCI/mci.sqlite`.
-    /// Matches ADR-0008's app-support-dir convention.
     @MainActor
     private static func defaultBrainPath() -> String {
         let supportDir = NSSearchPathForDirectoriesInDomains(
@@ -71,22 +42,54 @@ struct MCIRecallApp: App {
     }
 }
 
+enum Tab: Int, Hashable {
+    case search = 1
+    case timeline = 2
+    case privacy = 3
+}
+
 struct RootView: View {
     let reader: BrainReader
+    @State private var selectedTab: Tab = .search
+    @State private var searchFocusTrigger = false
 
     var body: some View {
-        TabView {
-            SearchView(viewModel: SearchViewModel(reader: reader))
-                .tabItem { Label("Search", systemImage: "magnifyingglass") }
+        TabView(selection: $selectedTab) {
+            SearchView(
+                viewModel: SearchViewModel(reader: reader),
+                focusTrigger: searchFocusTrigger
+            )
+            .tag(Tab.search)
+            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+
             TimelineView(viewModel: TimelineViewModel(reader: reader))
+                .tag(Tab.timeline)
                 .tabItem { Label("Timeline", systemImage: "clock") }
+
             PrivacyMomentsView(
                 viewModel: PrivacyMomentsViewModel(reader: reader)
             )
-            .tabItem {
-                Label("Privacy Moments", systemImage: "eye.slash")
-            }
+            .tag(Tab.privacy)
+            .tabItem { Label("Privacy Moments", systemImage: "eye.slash") }
         }
         .padding(.top, 6)
+        .background(Color.brandBgPrimary)
+        .focusable()
+        .onKeyPress(keys: [.init("1"), .init("2"), .init("3")], phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            switch press.key {
+            case KeyEquivalent("1"): selectedTab = .search
+            case KeyEquivalent("2"): selectedTab = .timeline
+            case KeyEquivalent("3"): selectedTab = .privacy
+            default: return .ignored
+            }
+            return .handled
+        }
+        .onKeyPress(.init("f"), phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            selectedTab = .search
+            searchFocusTrigger.toggle()
+            return .handled
+        }
     }
 }

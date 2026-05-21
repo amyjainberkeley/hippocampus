@@ -57,6 +57,29 @@ public enum Formatters {
         }
     }
 
+    /// Relative time display: "just now", "3 min ago", "2 hours ago", etc.
+    /// Falls back to absolute UTC string for dates older than 30 days.
+    /// The `now` parameter exists for testability.
+    public static func relativeTime(usSinceEpoch: UInt64, now: Date = Date()) -> String {
+        let secs = Double(usSinceEpoch) / 1_000_000.0
+        let date = Date(timeIntervalSince1970: secs)
+        let diff = now.timeIntervalSince(date)
+        guard diff >= 0 else { return tsString(usSinceEpoch: usSinceEpoch) }
+        if diff < 60 { return "just now" }
+        if diff < 3600 {
+            let m = Int(diff / 60)
+            return "\(m) min ago"
+        }
+        if diff < 86400 {
+            let h = Int(diff / 3600)
+            return h == 1 ? "1 hour ago" : "\(h) hours ago"
+        }
+        if diff < 172800 { return "yesterday" }
+        let d = Int(diff / 86400)
+        if d < 30 { return "\(d) days ago" }
+        return tsString(usSinceEpoch: usSinceEpoch)
+    }
+
     /// Score → percent string with one decimal, or empty for nil.
     public static func scoreString(_ s: Float?) -> String {
         guard let s else { return "" }

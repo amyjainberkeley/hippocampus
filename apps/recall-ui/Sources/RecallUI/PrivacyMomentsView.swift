@@ -1,12 +1,6 @@
-// PrivacyMomentsView.swift — opaque cards for cascade-suppressed events.
-//
-// Each card carries ONLY {appBundleId, ts, reason-string} per ADR-0017
-// §5.1. NEVER the OCR'd text (it didn't reach OCR), NEVER the keyframe
-// (it wasn't stored), NEVER the windowTitle/url (content-as-content
-// invariant). The friendly-string map lives in ReasonStrings.
-
-import SwiftUI
+import AppKit
 import RecallUIKit
+import SwiftUI
 
 struct PrivacyMomentsView: View {
     @StateObject var viewModel: PrivacyMomentsViewModel
@@ -14,32 +8,47 @@ struct PrivacyMomentsView: View {
     var body: some View {
         Group {
             if let err = viewModel.errorMessage {
-                ContentUnavailableView(
-                    "Privacy moments failed to load",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(err)
-                )
+                VStack(spacing: 16) {
+                    ContentUnavailableView(
+                        "Couldn't open your brain",
+                        systemImage: "exclamationmark.triangle.fill",
+                        description: Text("Check that the helper is running.\n\(err)")
+                    )
+                    .foregroundStyle(Color.brandError)
+
+                    Button("Open Hippocampus.app") {
+                        let appPath = NSHomeDirectory() + "/Applications/MCICaptureHelper.app"
+                        NSWorkspace.shared.open(URL(fileURLWithPath: appPath))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.brandMint)
+                }
             } else if viewModel.isLoading && viewModel.moments.isEmpty {
-                ProgressView("Loading privacy moments…")
+                ShimmerLoadingView(isLoading: true)
             } else if viewModel.moments.isEmpty {
                 ContentUnavailableView(
                     "No privacy moments yet",
                     systemImage: "eye.slash",
                     description: Text(
-                        "MCI hasn't redacted anything for this brain yet."
+                        "Hippocampus hasn't redacted anything for this brain yet."
                     )
                 )
+                .foregroundStyle(Color.brandFgSecondary)
             } else {
                 List(viewModel.moments) { moment in
                     PrivacyMomentCard(moment: moment)
                         .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Color.brandBgPrimary)
                 .refreshable {
                     await viewModel.reload()
                 }
             }
         }
+        .background(Color.brandBgPrimary)
         .task {
             await viewModel.reload()
         }
@@ -53,38 +62,47 @@ struct PrivacyMomentCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Image(systemName: "eye.slash.fill")
-                    .foregroundStyle(.secondary)
-                Text("MCI redacted this")
+                    .foregroundStyle(Color.brandMintDim)
+                Text("Hippocampus redacted this")
                     .font(.headline)
+                    .foregroundStyle(Color.brandFgPrimary)
                 Spacer()
                 Text(ReasonStrings.sectionTag(for: moment.reasonCode))
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.brandMintDim)
             }
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
                 GridRow {
-                    Text("App:").foregroundStyle(.secondary)
+                    Text("App:").foregroundStyle(Color.brandFgMuted)
                     Text(moment.appBundleId ?? "(unknown)")
                         .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(Color.brandFgSecondary)
                 }
                 GridRow {
-                    Text("Time:").foregroundStyle(.secondary)
-                    Text(Formatters.tsString(usSinceEpoch: moment.tsUs))
-                        .font(.system(.body, design: .monospaced))
+                    Text("Time:").foregroundStyle(Color.brandFgMuted)
+                    Text(Formatters.relativeTime(usSinceEpoch: moment.tsUs))
+                        .font(.system(.body, design: .default))
+                        .foregroundStyle(Color.brandFgSecondary)
+                        .help(Formatters.tsString(usSinceEpoch: moment.tsUs))
                 }
                 GridRow {
-                    Text("Reason:").foregroundStyle(.secondary)
+                    Text("Reason:").foregroundStyle(Color.brandFgMuted)
                     Text(ReasonStrings.string(for: moment.reasonCode))
+                        .foregroundStyle(Color.brandFgSecondary)
                 }
             }
             Text("(no content captured)")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.brandFgMuted)
         }
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(.secondary.opacity(0.4), lineWidth: 0.5)
+                .fill(Color.brandCardBg)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.brandCardBorder, lineWidth: 0.5)
         )
         .padding(.vertical, 4)
     }

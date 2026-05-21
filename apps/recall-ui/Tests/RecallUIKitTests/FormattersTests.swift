@@ -104,4 +104,49 @@ final class FormattersTests: XCTestCase {
         XCTAssertEqual(Formatters.scoreString(-0.5), "0.0%")
         XCTAssertEqual(Formatters.scoreString(2.0), "100.0%")
     }
+
+    // MARK: - relativeTime
+
+    func testRelativeTimeJustNow() {
+        let now = Date()
+        let tsUs = UInt64(now.addingTimeInterval(-10).timeIntervalSince1970 * 1_000_000)
+        XCTAssertEqual(Formatters.relativeTime(usSinceEpoch: tsUs, now: now), "just now")
+    }
+
+    func testRelativeTimeMinutesAgo() {
+        let now = Date()
+        let tsUs = UInt64(now.addingTimeInterval(-180).timeIntervalSince1970 * 1_000_000)
+        XCTAssertEqual(Formatters.relativeTime(usSinceEpoch: tsUs, now: now), "3 min ago")
+    }
+
+    func testRelativeTimeOneHourAgo() {
+        let now = Date()
+        let tsUs = UInt64(now.addingTimeInterval(-3660).timeIntervalSince1970 * 1_000_000)
+        XCTAssertEqual(Formatters.relativeTime(usSinceEpoch: tsUs, now: now), "1 hour ago")
+    }
+
+    func testRelativeTimeMultipleHoursAgo() {
+        let now = Date()
+        let tsUs = UInt64(now.addingTimeInterval(-7260).timeIntervalSince1970 * 1_000_000)
+        XCTAssertEqual(Formatters.relativeTime(usSinceEpoch: tsUs, now: now), "2 hours ago")
+    }
+
+    func testRelativeTimeYesterday() {
+        let now = Date()
+        let tsUs = UInt64(now.addingTimeInterval(-100_000).timeIntervalSince1970 * 1_000_000)
+        XCTAssertEqual(Formatters.relativeTime(usSinceEpoch: tsUs, now: now), "yesterday")
+    }
+
+    func testRelativeTimeDaysAgo() {
+        let now = Date()
+        let tsUs = UInt64(now.addingTimeInterval(-475_200).timeIntervalSince1970 * 1_000_000)
+        XCTAssertEqual(Formatters.relativeTime(usSinceEpoch: tsUs, now: now), "5 days ago")
+    }
+
+    func testRelativeTimeFallsBackToAbsolute() {
+        let now = Date()
+        let tsUs = UInt64(now.addingTimeInterval(-90 * 86400).timeIntervalSince1970 * 1_000_000)
+        let result = Formatters.relativeTime(usSinceEpoch: tsUs, now: now)
+        XCTAssertTrue(result.hasSuffix("UTC"))
+    }
 }

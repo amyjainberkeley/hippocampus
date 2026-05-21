@@ -89,6 +89,105 @@ final class TimelineViewModelTests: XCTestCase {
 }
 
 @MainActor
+final class TimelineSelectionTests: XCTestCase {
+    func testMoveSelectionDownFromNilSelectsFirst() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.moveSelectionDown()
+        XCTAssertEqual(vm.selectedHitId, vm.hits.first?.id)
+    }
+
+    func testMoveSelectionDownAdvances() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.selectedHitId = vm.hits[0].id
+        vm.moveSelectionDown()
+        XCTAssertEqual(vm.selectedHitId, vm.hits[1].id)
+    }
+
+    func testMoveSelectionDownAtEndStaysAtEnd() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.selectedHitId = vm.hits.last?.id
+        vm.moveSelectionDown()
+        XCTAssertEqual(vm.selectedHitId, vm.hits.first?.id)
+    }
+
+    func testMoveSelectionUpFromNilSelectsFirst() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.moveSelectionUp()
+        XCTAssertEqual(vm.selectedHitId, vm.hits.first?.id)
+    }
+
+    func testMoveSelectionUpRetreats() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.selectedHitId = vm.hits[1].id
+        vm.moveSelectionUp()
+        XCTAssertEqual(vm.selectedHitId, vm.hits[0].id)
+    }
+
+    func testMoveSelectionUpAtTopStaysAtTop() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.selectedHitId = vm.hits[0].id
+        vm.moveSelectionUp()
+        XCTAssertEqual(vm.selectedHitId, vm.hits.first?.id)
+    }
+
+    func testFocusDetailWhenSelected() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.selectedHitId = vm.hits[0].id
+        vm.focusDetail()
+        XCTAssertTrue(vm.isDetailFocused)
+    }
+
+    func testFocusDetailWhenNilSelectionDoesNothing() {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        vm.focusDetail()
+        XCTAssertFalse(vm.isDetailFocused)
+    }
+
+    func testDismissDetail() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.selectedHitId = vm.hits[0].id
+        vm.focusDetail()
+        vm.dismissDetail()
+        XCTAssertFalse(vm.isDetailFocused)
+    }
+
+    func testSelectedHitReturnsCorrectHit() async {
+        let vm = TimelineViewModel(reader: StubBrainReader())
+        await vm.reload()
+        vm.selectedHitId = vm.hits[1].id
+        XCTAssertEqual(vm.selectedHit?.id, vm.hits[1].id)
+    }
+}
+
+@MainActor
+final class SearchSelectionTests: XCTestCase {
+    func testMoveSelectionDownFromNilSelectsFirst() async {
+        let vm = SearchViewModel(reader: StubBrainReader())
+        vm.query = "privacy"
+        await vm.runSearch()
+        vm.moveSelectionDown()
+        XCTAssertEqual(vm.selectedHitId, vm.hits.first?.id)
+    }
+
+    func testClearResetsFilters() async {
+        let vm = SearchViewModel(reader: StubBrainReader())
+        vm.filters.toggle(.appSafari)
+        vm.query = "test"
+        vm.clear()
+        XCTAssertFalse(vm.filters.anyActive)
+        XCTAssertEqual(vm.query, "")
+    }
+}
+
+@MainActor
 final class PrivacyMomentsViewModelTests: XCTestCase {
     func testReloadPopulatesMomentsMostRecentFirst() async {
         let vm = PrivacyMomentsViewModel(reader: StubBrainReader())
