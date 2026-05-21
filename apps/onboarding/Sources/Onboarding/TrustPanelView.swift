@@ -97,26 +97,78 @@ struct TrustPanelView: View {
     @ViewBuilder
     private var denylistSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Denylist Categories")
+            Text("Denied Items")
                 .font(.headline)
-            Text("You can tell Hippocampus to ignore specific apps, URLs, or window titles. These are strictly additive — they only block, never allow.")
+            Text("Apps, URLs, or window titles Hippocampus ignores. Strictly additive — only blocks, never allows.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ForEach(trustVM.denylistCategories) { cat in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "minus.circle")
-                        .foregroundStyle(.red)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(cat.name)
-                            .font(.callout)
-                            .fontWeight(.medium)
-                        Text(cat.description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            if trustVM.denylistEntries.isEmpty {
+                Text("No deny entries yet.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(trustVM.denylistEntries) { entry in
+                    HStack(spacing: 10) {
+                        Image(systemName: "minus.circle")
+                            .foregroundStyle(.red)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.value)
+                                .font(.system(.callout, design: .monospaced))
+                            Text(denyTypeLabel(entry.type))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if entry.source == .csoRatified {
+                            Image(systemName: "lock.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Button {
+                                Task { await trustVM.removeDenyEntry(id: entry.id) }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
+                    .padding(.vertical, 2)
                 }
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Add deny entry")
+                    .font(.callout)
+                    .fontWeight(.medium)
+                HStack(spacing: 8) {
+                    Picker("Type", selection: $trustVM.newDenyType) {
+                        Text("Bundle ID").tag(DenylistEntry.EntryType.bundleId)
+                        Text("Window Title").tag(DenylistEntry.EntryType.windowTitle)
+                        Text("URL Pattern").tag(DenylistEntry.EntryType.urlPattern)
+                    }
+                    .frame(width: 140)
+                    TextField("Value", text: $trustVM.newDenyValue)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Add") {
+                        Task { await trustVM.addDenyEntry() }
+                    }
+                    .disabled(trustVM.newDenyValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func denyTypeLabel(_ type: DenylistEntry.EntryType) -> String {
+        switch type {
+        case .bundleId: return "App Bundle ID"
+        case .windowTitle: return "Window Title Pattern"
+        case .urlPattern: return "URL Pattern"
         }
     }
 
