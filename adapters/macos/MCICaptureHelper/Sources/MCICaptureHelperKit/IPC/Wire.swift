@@ -36,7 +36,7 @@ import Foundation
 public let frameMagic: UInt8 = 0x4D
 
 /// Wire-format version byte. MUST match `core::ipc::wire::FRAME_VERSION`.
-public let frameVersion: UInt8 = 0x04
+public let frameVersion: UInt8 = 0x05
 
 /// Minimum frame header size in bytes.
 public let minFrameHeaderBytes = 1 + 1 + 2 + 8 + 4
@@ -68,6 +68,8 @@ public enum MessageType: UInt16, Sendable {
     /// claimed by `surfaceReleased`; the ADR owes a follow-up doc PR
     /// to reflect the actual assigned slot).
     case ocrEvent = 0x0040
+    /// Phase 7 — browser extension full page content event.
+    case pageContentEvent = 0x0050
 }
 
 /// A privacy tombstone — the only message the helper emits in this cycle.
@@ -221,6 +223,85 @@ public func encodeOCREvent(
     payload.append(contentsOf: textBytes)
 
     return .success(assembleFrame(msgType: .ocrEvent, seq: seq, payload: payload))
+}
+
+/// Per-event page content text cap (200 KB). Mirrors
+/// `core::ipc::wire::MAX_PAGE_CONTENT_TEXT_BYTES`.
+public let maxPageContentTextBytes: Int = 200 * 1024
+
+/// Browser extension page content event — Phase 7 pull-forward.
+/// Full page text from `document.body.innerText` via native messaging.
+public struct PageContentEvent: Sendable, Equatable {
+    public let seq: UInt64
+    public let tsUs: UInt64
+    public let url: String
+    public let title: String
+    public let fullText: String
+    public let sourceBrowser: String
+    public let tabId: UInt32
+
+    public init(
+        seq: UInt64,
+        tsUs: UInt64,
+        url: String,
+        title: String,
+        fullText: String,
+        sourceBrowser: String,
+        tabId: UInt32 = 0
+    ) {
+        self.seq = seq
+        self.tsUs = tsUs
+        self.url = url
+        self.title = title
+        self.fullText = fullText
+        self.sourceBrowser = sourceBrowser
+        self.tabId = tabId
+    }
+}
+
+/// Errors the PageContentEvent encoder surfaces.
+public enum PageContentEventEncodeError: Error, Equatable {
+    case fullTextOverCap(byteCount: Int)
+    case fieldOverflow(field: String, byteCount: Int)
+}
+
+/// Encode a PageContentEvent as a complete wire frame.
+public func encodePageContentEvent(
+    seq: UInt64,
+    event: PageContentEvent
+) -> Result<Data, PageContentEventEncodeError> {
+    let urlBytes = Array(event.url.utf8)
+    let titleBytes = Array(event.title.utf8)
+    let textBytes = Array(event.fullText.utf8)
+    let browserBytes = Array(event.sourceBrowser.utf8)
+
+    guard textBytes.count <= maxPageContentTextBytes else {
+        return .failure(.fullTextOverCap(byteCount: textBytes.count))
+    }
+    guard urlBytes.count <= Int(UInt16.max) else {
+        return .failure(.fieldOverflow(field: "url", byteCount: urlBytes.count))
+    }
+    guard titleBytes.count <= Int(UInt16.max) else {
+        return .failure(.fieldOverflow(field: "title", byteCount: titleBytes.count))
+    }
+    guard browserBytes.count <= Int(UInt8.max) else {
+        return .failure(.fieldOverflow(field: "source_browser", byteCount: browserBytes.count))
+    }
+
+    var payload = Data()
+    payload.appendUInt64LE(event.seq)
+    payload.appendUInt64LE(event.tsUs)
+    payload.appendUInt16LE(UInt16(urlBytes.count))
+    payload.appendUInt16LE(UInt16(titleBytes.count))
+    payload.appendUInt32LE(UInt32(textBytes.count))
+    payload.append(UInt8(browserBytes.count))
+    payload.appendUInt32LE(event.tabId)
+    payload.append(contentsOf: urlBytes)
+    payload.append(contentsOf: titleBytes)
+    payload.append(contentsOf: textBytes)
+    payload.append(contentsOf: browserBytes)
+
+    return .success(assembleFrame(msgType: .pageContentEvent, seq: seq, payload: payload))
 }
 
 /// Encode a periodic helper-health counter frame.

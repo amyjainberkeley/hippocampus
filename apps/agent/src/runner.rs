@@ -185,21 +185,16 @@ where
                     }
                 }
             }
-            Message::OCREvent { .. } => {
+            Message::OCREvent { .. } | Message::PageContentEvent { .. } => {
                 match brain.ingest_ocr_event(&frame.message)? {
                     IngestOutcome::Stored { .. } => {
                         stats.frames_to_brain += 1;
                     }
                     IngestOutcome::NotOcrEvent => {
-                        // Unreachable: just matched OCREvent. Defensive.
                         stats.frames_non_health += 1;
                     }
                 }
             }
-            // §4.3: tombstone NEVER reaches brain. Same content-free
-            // counter as every other non-routed variant. The
-            // exhaustive `match` is the syntactic wall — adding a new
-            // Message variant requires a new arm here.
             Message::PrivacyTombstone { .. }
             | Message::StateTransitionEvent { .. }
             | Message::SurfaceReleased { .. }

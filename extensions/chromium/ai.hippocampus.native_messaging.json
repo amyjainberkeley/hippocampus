@@ -1,0 +1,9 @@
+{
+  "name": "ai.hippocampus.native_messaging",
+  "description": "Hippocampus native messaging host — forwards page content to the MCI agent",
+  "path": "/usr/local/bin/hippocampus-native-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://EXTENSION_ID_HERE/"
+  ]
+}

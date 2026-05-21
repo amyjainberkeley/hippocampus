@@ -45,12 +45,20 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// [`MessageType::SurfaceReleased`] (assigned in PR #15); this PR
 /// assigns `0x0040`. ADR-0016 §1.6 owes a follow-up doc PR to align.
 ///
+/// `0x04 → 0x05` (2026-05-21, Phase 7 pull-forward): new
+/// [`MessageType::PageContentEvent`] variant added — browser extension
+/// full-page-content capture. Carries `full_text` (up to 200 KB) from
+/// `document.body.innerText` via the native messaging host. Same
+/// secret-pattern filtering discipline as `OCREvent`; text passes §6
+/// regex before encoding.
+///
 /// The decoder rejects any other version: helper and core ship
 /// **version-locked** in the same signed bundle and capture is
 /// default-OFF, so there are no persisted or in-flight `0x01` / `0x02`
-/// / `0x03` frames to remain compatible with — a hard version break is
-/// the correct, auditable choice over a silently mis-parsed payload.
-pub const FRAME_VERSION: u8 = 0x04;
+/// / `0x03` / `0x04` frames to remain compatible with — a hard version
+/// break is the correct, auditable choice over a silently mis-parsed
+/// payload.
+pub const FRAME_VERSION: u8 = 0x05;
 
 /// Header size in bytes: magic(1) + version(1) + `msg_type(2)` + seq(8) + len(4).
 pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
@@ -79,6 +87,19 @@ pub const OCR_EVENT_APP_BUNDLE_ID_LEN: usize = 64;
 /// (blake3 of the keyframe blob; all-zero bytes signals "no blob yet"
 /// in P3.6 — the blob writer lands at P3.6.5). ADR-0016 §1.6.
 pub const OCR_EVENT_KEYFRAME_HASH_LEN: usize = 32;
+
+/// Maximum bytes of full page text the native messaging host is permitted
+/// to emit in a single [`super::Message::PageContentEvent`] payload.
+/// Over-cap text is truncated at a sentence boundary in the native host
+/// before encoding. 200 KB matches the content script's
+/// `document.body.innerText.slice(0, 200_000)` cap.
+pub const MAX_PAGE_CONTENT_TEXT_BYTES: u32 = 200 * 1024;
+
+/// Fixed-portion byte length of a `PageContentEvent` payload, before the
+/// variable-length `url` / `title` / `full_text` / `source_browser` bytes:
+///   `seq(8)` + `ts_us(8)` + `url_len(2)` + `title_len(2)`
+///   + `full_text_len(4)` + `source_browser_len(1)` + `tab_id(4)` = 29.
+pub const PAGE_CONTENT_EVENT_FIXED_HEADER_BYTES: usize = 8 + 8 + 2 + 2 + 4 + 1 + 4;
 
 /// Fixed-portion byte length of an `OCREvent` payload, before the
 /// variable-length `window_title` / url / `ocr_text` bytes. ADR-0016 §1.6:
@@ -110,6 +131,9 @@ pub enum MessageType {
     /// Helper → core twice-cleared OCR event with user content
     /// (see [`super::Message::OCREvent`]). ADR-0016 P3.6.
     OCREvent = 0x0040,
+    /// Browser extension → agent full page content
+    /// (see [`super::Message::PageContentEvent`]). Phase 7 pull-forward.
+    PageContentEvent = 0x0050,
 }
 
 impl MessageType {
@@ -126,6 +150,7 @@ impl MessageType {
             0x0020 => Self::SurfaceReleased,
             0x0030 => Self::HelperHealth,
             0x0040 => Self::OCREvent,
+            0x0050 => Self::PageContentEvent,
             other => {
                 return Err(DecodeError::InvalidEnum {
                     field: "MessageType",
@@ -364,6 +389,51 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             out.extend_from_slice(url.as_bytes());
             out.extend_from_slice(ocr_text.as_bytes());
         }
+        Message::PageContentEvent {
+            seq,
+            ts_us,
+            url,
+            title,
+            full_text,
+            source_browser,
+            tab_id,
+        } => {
+            out.extend_from_slice(&seq.to_le_bytes());
+            out.extend_from_slice(&ts_us.to_le_bytes());
+            debug_assert!(
+                u16::try_from(url.len()).is_ok(),
+                "PageContentEvent url too long for u16 length prefix"
+            );
+            debug_assert!(
+                u16::try_from(title.len()).is_ok(),
+                "PageContentEvent title too long for u16 length prefix"
+            );
+            debug_assert!(
+                full_text.len() as u64 <= u64::from(MAX_PAGE_CONTENT_TEXT_BYTES),
+                "PageContentEvent full_text exceeds MAX_PAGE_CONTENT_TEXT_BYTES"
+            );
+            debug_assert!(
+                u8::try_from(source_browser.len()).is_ok(),
+                "PageContentEvent source_browser too long for u8 length prefix"
+            );
+            #[allow(clippy::cast_possible_truncation)]
+            let url_len = url.len() as u16;
+            #[allow(clippy::cast_possible_truncation)]
+            let title_len = title.len() as u16;
+            #[allow(clippy::cast_possible_truncation)]
+            let full_text_len = full_text.len() as u32;
+            #[allow(clippy::cast_possible_truncation)]
+            let source_browser_len = source_browser.len() as u8;
+            out.extend_from_slice(&url_len.to_le_bytes());
+            out.extend_from_slice(&title_len.to_le_bytes());
+            out.extend_from_slice(&full_text_len.to_le_bytes());
+            out.push(source_browser_len);
+            out.extend_from_slice(&tab_id.to_le_bytes());
+            out.extend_from_slice(url.as_bytes());
+            out.extend_from_slice(title.as_bytes());
+            out.extend_from_slice(full_text.as_bytes());
+            out.extend_from_slice(source_browser.as_bytes());
+        }
     }
 }
 
@@ -531,6 +601,34 @@ fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usi
                 url,
                 ocr_text,
                 keyframe_hash,
+            }
+        }
+        MessageType::PageContentEvent => {
+            let seq = p.u64_le()?;
+            let ts_us = p.u64_le()?;
+            let url_len = p.u16_le()? as usize;
+            let title_len = p.u16_le()? as usize;
+            let full_text_len_raw = p.u32_le()?;
+            if full_text_len_raw > MAX_PAGE_CONTENT_TEXT_BYTES {
+                return Err(DecodeError::OversizedPayload {
+                    len: full_text_len_raw,
+                });
+            }
+            let full_text_len = full_text_len_raw as usize;
+            let source_browser_len = p.u8_le()? as usize;
+            let tab_id = p.u32_le()?;
+            let url = p.string_bytes(url_len)?;
+            let title = p.string_bytes(title_len)?;
+            let full_text = p.string_bytes(full_text_len)?;
+            let source_browser = p.string_bytes(source_browser_len)?;
+            Message::PageContentEvent {
+                seq,
+                ts_us,
+                url,
+                title,
+                full_text,
+                source_browser,
+                tab_id,
             }
         }
     };
@@ -715,13 +813,6 @@ mod tests {
 
     #[test]
     fn helper_health_cross_side_fixture() {
-        // Byte-exact mirror of the Swift
-        // `WireFixturesTests.testHelperHealthCrossSideFixture` and the
-        // layout parsed by `tools/wire_decode.py`. If any of those
-        // three drift, the IPC contract is broken silently. This
-        // fixture is the observable trip-wire. Wire 0x04 (P3.6) bumps
-        // only the version byte for the new OCREvent variant;
-        // HelperHealth's payload layout is unchanged.
         let buf = encode(
             42,
             &Message::HelperHealth {
@@ -735,8 +826,8 @@ mod tests {
             },
         );
         let expected: [u8; 72] = [
-            0x4D, 0x04, 0x30, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00,
-            0x00, 0x00, // u64 LE × 7
+            0x4D, 0x05, 0x30, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00,
+            0x00, 0x00,
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00,
@@ -745,7 +836,7 @@ mod tests {
         assert_eq!(
             buf,
             expected.to_vec(),
-            "HelperHealth v0x04 cross-side fixture"
+            "HelperHealth v0x05 cross-side fixture"
         );
 
         // And the round-trip decoder reads exactly back what the
@@ -794,23 +885,22 @@ mod tests {
     }
 
     #[test]
-    fn frame_version_is_0x04() {
-        // Trip-wire: the wire bump for OCREvent moved the version
-        // 0x03 → 0x04 (ADR-0016 P3.6). The Swift `Wire.swift` mirror
-        // and the byte fixtures in `WireTests.swift` MUST match.
-        assert_eq!(FRAME_VERSION, 0x04);
+    fn frame_version_is_0x05() {
+        assert_eq!(FRAME_VERSION, 0x05);
         let buf = encode(0, &Message::CaptureStop);
-        assert_eq!(buf[1], 0x04, "version byte in the framed header");
+        assert_eq!(buf[1], 0x05, "version byte in the framed header");
     }
 
     #[test]
-    fn decode_rejects_old_0x03_frame_at_v0x04_layout() {
-        // Lock-step cross-version regression guard (PR #44 precedent
-        // for 0x02→0x03; this is the 0x03→0x04 analog). A stale signed
-        // helper from a prior bundle pumping 0x03 bytes into a 0x04
-        // core MUST be rejected at the trust boundary before the
-        // payload decoder runs — otherwise an OCREvent emitted as a
-        // 0x03 frame could be silently mis-parsed.
+    fn decode_rejects_old_0x04_frame_at_v0x05_layout() {
+        let mut buf = encode(0, &Message::CaptureStop);
+        buf[1] = 0x04;
+        let err = decode(&buf).unwrap_err();
+        assert!(matches!(err, DecodeError::UnsupportedVersion { got: 0x04 }));
+    }
+
+    #[test]
+    fn decode_rejects_old_0x03_frame() {
         let mut buf = encode(0, &Message::CaptureStop);
         buf[1] = 0x03;
         let err = decode(&buf).unwrap_err();
@@ -819,9 +909,6 @@ mod tests {
 
     #[test]
     fn decode_rejects_old_0x02_frame() {
-        // Helper + core ship version-locked; an 0x02 frame is a stale
-        // peer, not a compatible one. The decoder rejects it loudly
-        // rather than mis-parsing a `HelperHealth` whose layout moved.
         let mut buf = encode(0, &Message::CaptureStop);
         buf[1] = 0x02;
         let err = decode(&buf).unwrap_err();
@@ -829,14 +916,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_old_0x01_frame_at_v0x04_layout() {
-        // Cross-version regression guard. The decoder MUST refuse to
-        // read a 0x01 (or any non-FRAME_VERSION) frame at the v0x04
-        // payload layout. Without this, a stale signed helper from a
-        // prior bundle could pump 0x01 bytes into a 0x04 core and the
-        // strict payload-length consumption tripwire downstream would
-        // not catch it (the version check fails first, which is the
-        // whole point — fail loud at the trust boundary).
+    fn decode_rejects_old_0x01_frame() {
         let mut buf = encode(0, &Message::CaptureStop);
         buf[1] = 0x01;
         let err = decode(&buf).unwrap_err();
@@ -1063,9 +1143,7 @@ mod tests {
         );
         assert_eq!(buf.len(), 140);
 
-        // Header: magic 4D, version 04, msg_type 0040 LE, seq 42 LE,
-        //         len 124 LE.
-        assert_eq!(&buf[0..4], &[0x4D, 0x04, 0x40, 0x00]);
+        assert_eq!(&buf[0..4], &[0x4D, 0x05, 0x40, 0x00]);
         assert_eq!(&buf[4..12], &42u64.to_le_bytes());
         assert_eq!(&buf[12..16], &124u32.to_le_bytes());
 
@@ -1186,13 +1264,130 @@ mod tests {
 
     #[test]
     fn header_size_constant_matches_layout() {
-        // Trip-wire test: if someone changes the header without
-        // updating MIN_FRAME_HEADER_BYTES, this catches it.
         let buf = encode(0, &Message::CaptureStop);
         assert_eq!(
             buf.len(),
             MIN_FRAME_HEADER_BYTES,
             "CaptureStop has zero-byte payload"
+        );
+    }
+
+    #[test]
+    fn roundtrip_page_content_event_minimal() {
+        roundtrip(&Message::PageContentEvent {
+            seq: 0,
+            ts_us: 0,
+            url: String::new(),
+            title: String::new(),
+            full_text: String::new(),
+            source_browser: String::new(),
+            tab_id: 0,
+        });
+    }
+
+    #[test]
+    fn roundtrip_page_content_event_populated() {
+        roundtrip(&Message::PageContentEvent {
+            seq: 99,
+            ts_us: 1_700_000_000_000_000,
+            url: "https://example.com/pricing".to_string(),
+            title: "Pricing — Example Corp".to_string(),
+            full_text: "Plans start at $10/mo.\nEnterprise pricing available.".to_string(),
+            source_browser: "chrome".to_string(),
+            tab_id: 42,
+        });
+    }
+
+    #[test]
+    fn page_content_event_cross_side_fixture() {
+        let buf = encode(
+            7,
+            &Message::PageContentEvent {
+                seq: 7,
+                ts_us: 0x0102_0304_0506_0708,
+                url: "U".to_string(),
+                title: "T".to_string(),
+                full_text: "Hi".to_string(),
+                source_browser: "chrome".to_string(),
+                tab_id: 99,
+            },
+        );
+        // Fixed header = 8+8+2+2+4+1+4 = 29
+        // Variable = 1(U) + 1(T) + 2(Hi) + 6(chrome) = 10
+        // Total payload = 39. Frame total = 16 + 39 = 55.
+        assert_eq!(
+            buf.len(),
+            MIN_FRAME_HEADER_BYTES + PAGE_CONTENT_EVENT_FIXED_HEADER_BYTES + 10
+        );
+        assert_eq!(buf.len(), 55);
+
+        // Header check.
+        assert_eq!(&buf[0..4], &[0x4D, 0x05, 0x50, 0x00]);
+        assert_eq!(&buf[4..12], &7u64.to_le_bytes());
+        assert_eq!(&buf[12..16], &39u32.to_le_bytes());
+
+        // Payload: seq u64 = 7.
+        assert_eq!(&buf[16..24], &7u64.to_le_bytes());
+        // ts_us u64.
+        assert_eq!(&buf[24..32], &0x0102_0304_0506_0708u64.to_le_bytes());
+        // url_len u16 = 1.
+        assert_eq!(&buf[32..34], &1u16.to_le_bytes());
+        // title_len u16 = 1.
+        assert_eq!(&buf[34..36], &1u16.to_le_bytes());
+        // full_text_len u32 = 2.
+        assert_eq!(&buf[36..40], &2u32.to_le_bytes());
+        // source_browser_len u8 = 6.
+        assert_eq!(buf[40], 6);
+        // tab_id u32 = 99.
+        assert_eq!(&buf[41..45], &99u32.to_le_bytes());
+        // Variable: url(1) + title(1) + full_text(2) + source_browser(6).
+        assert_eq!(&buf[45..46], b"U");
+        assert_eq!(&buf[46..47], b"T");
+        assert_eq!(&buf[47..49], b"Hi");
+        assert_eq!(&buf[49..55], b"chrome");
+
+        let (frame, used) = decode(&buf).expect("decode PageContentEvent fixture");
+        assert_eq!(used, buf.len());
+        assert_eq!(frame.seq, 7);
+        match frame.message {
+            Message::PageContentEvent {
+                seq, ts_us, url, title, full_text, source_browser, tab_id,
+            } => {
+                assert_eq!(seq, 7);
+                assert_eq!(ts_us, 0x0102_0304_0506_0708);
+                assert_eq!(url, "U");
+                assert_eq!(title, "T");
+                assert_eq!(full_text, "Hi");
+                assert_eq!(source_browser, "chrome");
+                assert_eq!(tab_id, 99);
+            }
+            other => panic!("expected PageContentEvent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_oversized_page_content_text() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u64.to_le_bytes()); // seq
+        payload.extend_from_slice(&0u64.to_le_bytes()); // ts_us
+        payload.extend_from_slice(&0u16.to_le_bytes()); // url_len
+        payload.extend_from_slice(&0u16.to_le_bytes()); // title_len
+        payload.extend_from_slice(&(MAX_PAGE_CONTENT_TEXT_BYTES + 1).to_le_bytes());
+        payload.push(0); // source_browser_len
+        payload.extend_from_slice(&0u32.to_le_bytes()); // tab_id
+
+        let mut buf = vec![FRAME_MAGIC, FRAME_VERSION];
+        buf.extend_from_slice(&(MessageType::PageContentEvent as u16).to_le_bytes());
+        buf.extend_from_slice(&0u64.to_le_bytes());
+        #[allow(clippy::cast_possible_truncation)]
+        let payload_len = payload.len() as u32;
+        buf.extend_from_slice(&payload_len.to_le_bytes());
+        buf.extend_from_slice(&payload);
+
+        let err = decode(&buf).unwrap_err();
+        assert!(
+            matches!(err, DecodeError::OversizedPayload { .. }),
+            "expected OversizedPayload on over-cap page content text, got {err:?}"
         );
     }
 }
