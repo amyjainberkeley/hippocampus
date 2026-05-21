@@ -11,6 +11,17 @@ description            = "MCI macOS menu-bar / system-tray agent shell. Supervis
 name = "mci-agent"
 path = "src/bin/mci_agent.rs"
 
+# DEMO-ONLY: synthetic-event seeder for the encrypted brain. Used to
+# unblock the recall-UI and `mci-agent mcp-serve` demos while the
+# P3.6.7 helper-side `.allow` → OCREvent fix is in flight. See the
+# module docs at `src/bin/mci_seed_brain.rs` and `docs/STATE.md`
+# Path B. Writes hand-authored Events with app_bundle_id in the
+# `com.mci.demo.seed.*` namespace; refuses to overwrite a non-empty
+# brain unless `--force` is passed.
+[[bin]]
+name = "mci-seed-brain"
+path = "src/bin/mci_seed_brain.rs"
+
 [lints]
 workspace = true
 
