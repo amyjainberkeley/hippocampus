@@ -149,7 +149,26 @@ pub struct BrainStats {
 pub mod episode_segmenter;
 pub mod hybrid_retriever;
 
+pub use episode_segmenter::EpisodeId;
 pub use hybrid_retriever::{FusionWeights, HybridRetriever, RetrievalShape};
+
+/// Compact view of an `episodes` row for the MCP / recall-UI surface.
+///
+/// Includes a derived `event_count` (number of events assigned to this
+/// episode) so the consumer can gauge episode size without a second query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpisodeRecord {
+    /// Episode id (maps to `episodes.id` rowid).
+    pub id: u64,
+    /// App bundle identifier for the episode's primary app.
+    pub app_bundle_id: Option<String>,
+    /// Episode start timestamp (microseconds since UNIX epoch).
+    pub ts_start: u64,
+    /// Episode end timestamp (microseconds since UNIX epoch).
+    pub ts_end: u64,
+    /// Number of events assigned to this episode.
+    pub event_count: u64,
+}
 
 // ---------------------------------------------------------------------------
 // Newtype ids — keep `events` / `chunks` PKs out of arithmetic with raw u64

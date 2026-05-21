@@ -32,8 +32,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_brain::{
-    BrainStats, BrainStore, EmbedError, Embedder, Event, EventId, EventRecord, HybridRetriever,
-    RetrievalQuery, Retriever, SqlCipherBrainStore, StoreError,
+    BrainStats, BrainStore, EmbedError, Embedder, EpisodeRecord, Event, EventId, EventRecord,
+    HybridRetriever, RetrievalQuery, Retriever, SqlCipherBrainStore, StoreError,
 };
 use mci_core::crypto::DbKey;
 
@@ -321,6 +321,22 @@ impl BrainReader for LiveBrainReader {
         self.store
             .stats()
             .map_err(|e| BrainReaderError::Backend(format!("stats: {e}")))
+    }
+
+    fn episodes(&self, limit: usize) -> Result<Vec<EpisodeRecord>, BrainReaderError> {
+        self.store
+            .recent_episodes(limit)
+            .map_err(|e| BrainReaderError::Backend(format!("recent_episodes: {e}")))
+    }
+
+    fn events_by_app(
+        &self,
+        app_bundle_id: &str,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, BrainReaderError> {
+        self.store
+            .events_by_app_bundle_id(app_bundle_id, limit)
+            .map_err(|e| BrainReaderError::Backend(format!("events_by_app: {e}")))
     }
 }
 

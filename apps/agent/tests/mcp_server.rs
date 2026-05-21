@@ -26,7 +26,8 @@ use mci_agent::mcp::{
 };
 use mci_brain::stubs::FixedDimEmbedder;
 use mci_brain::{
-    BrainStats, BrainStore, Embedder, Event, EventId, EventRecord, SqlCipherBrainStore,
+    BrainStats, BrainStore, Embedder, EpisodeRecord, Event, EventId, EventRecord,
+    SqlCipherBrainStore,
 };
 use mci_core::crypto::DbKey;
 
@@ -40,6 +41,8 @@ struct Invocations {
     recall: Vec<(String, usize)>,
     events_since: Vec<(u64, usize)>,
     stats: usize,
+    episodes: Vec<usize>,
+    events_by_app: Vec<(String, usize)>,
 }
 
 #[derive(Clone)]
@@ -47,6 +50,7 @@ struct StubBrainReader {
     hits: Vec<McpHit>,
     events: Vec<EventRecord>,
     stats_value: BrainStats,
+    episode_records: Vec<EpisodeRecord>,
     fail_next_recall: Arc<Mutex<bool>>,
     invocations: Arc<Mutex<Invocations>>,
 }
@@ -69,6 +73,13 @@ impl StubBrainReader {
                 oldest_ts_us: Some(1_000_000),
                 newest_ts_us: Some(9_000_000),
             },
+            episode_records: vec![sample_episode(
+                1,
+                "com.example.app",
+                5_000_000,
+                8_000_000,
+                3,
+            )],
             fail_next_recall: Arc::new(Mutex::new(false)),
             invocations: Arc::new(Mutex::new(Invocations::default())),
         }
@@ -115,6 +126,30 @@ impl BrainReader for StubBrainReader {
         self.invocations.lock().unwrap().stats += 1;
         Ok(self.stats_value)
     }
+
+    fn episodes(&self, limit: usize) -> Result<Vec<EpisodeRecord>, BrainReaderError> {
+        self.invocations.lock().unwrap().episodes.push(limit);
+        Ok(self.episode_records.iter().take(limit).cloned().collect())
+    }
+
+    fn events_by_app(
+        &self,
+        app_bundle_id: &str,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, BrainReaderError> {
+        self.invocations
+            .lock()
+            .unwrap()
+            .events_by_app
+            .push((app_bundle_id.to_owned(), limit));
+        Ok(self
+            .events
+            .iter()
+            .filter(|e| e.app_bundle_id.as_deref() == Some(app_bundle_id))
+            .take(limit)
+            .cloned()
+            .collect())
+    }
 }
 
 fn sample_hit(id: u64, ts_us: u64, text: &str, url: Option<&str>) -> McpHit {
@@ -142,6 +177,16 @@ fn sample_record(id: u64, ts_us: u64, text: &str) -> EventRecord {
     }
 }
 
+fn sample_episode(id: u64, app: &str, ts_start: u64, ts_end: u64, event_count: u64) -> EpisodeRecord {
+    EpisodeRecord {
+        id,
+        app_bundle_id: Some(app.to_owned()),
+        ts_start,
+        ts_end,
+        event_count,
+    }
+}
+
 fn req(method: &str, params: Option<serde_json::Value>) -> JsonRpcRequest {
     JsonRpcRequest {
         jsonrpc: "2.0".into(),
@@ -163,7 +208,7 @@ fn server() -> (Server, StubBrainReader) {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_exactly_three_tools() {
+fn tools_list_returns_exactly_five_tools() {
     let (s, _) = server();
     let resp = s.dispatch(req("tools/list", None)).expect("response");
     let result = resp.result.expect("result");
@@ -171,7 +216,7 @@ fn tools_list_returns_exactly_three_tools() {
         .get("tools")
         .and_then(|v| v.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 3, "exactly three tools advertised");
+    assert_eq!(tools.len(), 5, "exactly five tools advertised");
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
@@ -179,6 +224,8 @@ fn tools_list_returns_exactly_three_tools() {
     assert!(names.contains(&"mci_recall"));
     assert!(names.contains(&"mci_events_since"));
     assert!(names.contains(&"mci_stats"));
+    assert!(names.contains(&"mci_episodes"));
+    assert!(names.contains(&"mci_events_by_app"));
 }
 
 #[test]
@@ -370,20 +417,20 @@ fn notification_returns_no_response() {
 }
 
 #[test]
-fn structural_read_only_check_only_three_tools_are_reachable() {
-    // Read-only invariant per CSO sign-off: the dispatcher's tools/call
-    // arm enumerates exactly the three known tool variants. The variants
-    // are enumerated in ToolName::from_wire — if a write tool is ever
-    // added, this assertion will fail when the new wire name appears.
-    let read_only_names = ["mci_recall", "mci_events_since", "mci_stats"];
+fn structural_read_only_check_only_five_tools_are_reachable() {
+    let read_only_names = [
+        "mci_recall",
+        "mci_events_since",
+        "mci_stats",
+        "mci_episodes",
+        "mci_events_by_app",
+    ];
     for &n in &read_only_names {
         assert!(
             ToolName::from_wire(n).is_some(),
             "expected read-only tool {n} present"
         );
     }
-    // Any plausible write/mutate name MUST resolve to None — there is
-    // no fall-through path to the brain.
     for n in [
         "mci_put_event",
         "mci_delete_event",
@@ -444,7 +491,162 @@ fn counters_increment_per_tool_call() {
     assert_eq!(snap.0, 2, "recall_count");
     assert_eq!(snap.1, 1, "events_since_count");
     assert_eq!(snap.2, 3, "stats_count");
-    assert_eq!(snap.4, 1, "unknown_method_count from unknown tool");
+    assert_eq!(snap.6, 1, "unknown_method_count from unknown tool");
+}
+
+// ---------------------------------------------------------------------------
+// mci_episodes tests (3: empty, normal, limit-respected)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tools_call_mci_episodes_empty_brain_returns_empty_array() {
+    let mut stub = StubBrainReader::new();
+    stub.episode_records = vec![];
+    let arc = Arc::new(stub.clone());
+    let srv = Server::new(arc);
+    let resp = srv
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_episodes",
+                "arguments": {}
+            })),
+        ))
+        .expect("response");
+    let result = resp.result.expect("result");
+    let episodes = result
+        .get("episodes")
+        .and_then(|v| v.as_array())
+        .expect("episodes array");
+    assert_eq!(episodes.len(), 0);
+}
+
+#[test]
+fn tools_call_mci_episodes_returns_canned_episode() {
+    let (s, stub) = server();
+    let resp = s
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_episodes",
+                "arguments": {"limit": 10}
+            })),
+        ))
+        .expect("response");
+    let result = resp.result.expect("result");
+    let episodes = result
+        .get("episodes")
+        .and_then(|v| v.as_array())
+        .expect("episodes array");
+    assert_eq!(episodes.len(), 1);
+    assert_eq!(
+        episodes[0].get("id").and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        episodes[0]
+            .get("app_bundle_id")
+            .and_then(|v| v.as_str()),
+        Some("com.example.app")
+    );
+    assert_eq!(
+        episodes[0]
+            .get("event_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(3)
+    );
+    let invs = stub.invocations();
+    assert_eq!(invs.episodes, vec![10]);
+}
+
+#[test]
+fn tools_call_mci_episodes_default_limit_is_twenty() {
+    let (s, stub) = server();
+    let _ = s
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_episodes",
+                "arguments": {}
+            })),
+        ))
+        .expect("response");
+    let invs = stub.invocations();
+    assert_eq!(invs.episodes, vec![20]);
+}
+
+// ---------------------------------------------------------------------------
+// mci_events_by_app tests (3: empty, normal, limit-respected)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tools_call_mci_events_by_app_no_match_returns_empty() {
+    let (s, _) = server();
+    let resp = s
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_events_by_app",
+                "arguments": {"app_bundle_id": "com.nonexistent.app"}
+            })),
+        ))
+        .expect("response");
+    let result = resp.result.expect("result");
+    let events = result
+        .get("events")
+        .and_then(|v| v.as_array())
+        .expect("events array");
+    assert_eq!(events.len(), 0);
+}
+
+#[test]
+fn tools_call_mci_events_by_app_returns_matching_events() {
+    let (s, stub) = server();
+    let resp = s
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_events_by_app",
+                "arguments": {"app_bundle_id": "com.example.app", "limit": 10}
+            })),
+        ))
+        .expect("response");
+    let result = resp.result.expect("result");
+    let events = result
+        .get("events")
+        .and_then(|v| v.as_array())
+        .expect("events array");
+    assert_eq!(events.len(), 2);
+    assert_eq!(
+        events[0]
+            .get("app_bundle_id")
+            .and_then(|v| v.as_str()),
+        Some("com.example.app")
+    );
+    let invs = stub.invocations();
+    assert_eq!(
+        invs.events_by_app,
+        vec![("com.example.app".to_owned(), 10)]
+    );
+}
+
+#[test]
+fn tools_call_mci_events_by_app_default_limit_is_fifty() {
+    let (s, stub) = server();
+    let _ = s
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_events_by_app",
+                "arguments": {"app_bundle_id": "com.example.app"}
+            })),
+        ))
+        .expect("response");
+    let invs = stub.invocations();
+    assert_eq!(
+        invs.events_by_app,
+        vec![("com.example.app".to_owned(), 50)]
+    );
 }
 
 // ---------------------------------------------------------------------------
