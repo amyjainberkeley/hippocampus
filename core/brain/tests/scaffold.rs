@@ -17,12 +17,7 @@ use mci_brain::{
 
 const MICROS_PER_HOUR: u64 = 3_600_000_000;
 
-fn event_at(
-    text: &str,
-    ts_us: u64,
-    app: Option<&str>,
-    embedding: Option<Vec<f32>>,
-) -> Event {
+fn event_at(text: &str, ts_us: u64, app: Option<&str>, embedding: Option<Vec<f32>>) -> Event {
     Event {
         id: EventId(0),
         ts_us,
@@ -53,7 +48,9 @@ fn noop_chunker_empty_text_returns_empty_vec() {
 #[test]
 fn noop_chunker_single_paragraph_is_one_chunk() {
     let c = NoopChunker;
-    let out = c.chunk("a single paragraph with no blank lines").expect("chunk");
+    let out = c
+        .chunk("a single paragraph with no blank lines")
+        .expect("chunk");
     assert_eq!(out.len(), 1);
     assert_eq!(out[0], "a single paragraph with no blank lines");
 }
@@ -61,7 +58,9 @@ fn noop_chunker_single_paragraph_is_one_chunk() {
 #[test]
 fn noop_chunker_double_newline_splits() {
     let c = NoopChunker;
-    let out = c.chunk("first para\n\nsecond para\n\nthird").expect("chunk");
+    let out = c
+        .chunk("first para\n\nsecond para\n\nthird")
+        .expect("chunk");
     assert_eq!(out.len(), 3);
     assert_eq!(out[0], "first para");
     assert_eq!(out[1], "second para");
@@ -102,7 +101,9 @@ fn fixed_dim_embedder_different_text_different_vector() {
 fn fixed_dim_embedder_vectors_are_unit_norm() {
     // ADR-0009: stored vectors are L2-normalized so cosine == dot product.
     let e = FixedDimEmbedder::default();
-    let v = e.embed_one("the quick brown fox jumps over the lazy dog").expect("embed");
+    let v = e
+        .embed_one("the quick brown fox jumps over the lazy dog")
+        .expect("embed");
     let mag: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     assert!(
         (mag - 1.0).abs() < 1e-6,
@@ -175,10 +176,7 @@ fn store_fts5_hits_ordered_by_descending_score() {
     assert_eq!(hits.len(), 2, "miss row must be excluded; got {hits:?}");
     assert_eq!(hits[0].0, dense, "dense match must rank first");
     assert_eq!(hits[1].0, sparse);
-    assert!(
-        hits[0].1 >= hits[1].1,
-        "fts5 must return scores descending"
-    );
+    assert!(hits[0].1 >= hits[1].1, "fts5 must return scores descending");
 }
 
 #[test]
@@ -221,7 +219,11 @@ fn store_fts5_empty_query_rejected() {
 // Retriever — end-to-end
 // ---------------------------------------------------------------------------
 
-fn make_retriever_with_fixtures() -> (Arc<InMemoryBrainStore>, StubRetriever<FixedDimEmbedder>, Vec<EventId>) {
+fn make_retriever_with_fixtures() -> (
+    Arc<InMemoryBrainStore>,
+    StubRetriever<FixedDimEmbedder>,
+    Vec<EventId>,
+) {
     let store = Arc::new(InMemoryBrainStore::new());
     let emb = FixedDimEmbedder::default();
     // 5 events across 2 apps + 3 time bands. The retriever's "now" is at

@@ -53,7 +53,7 @@ pub enum Routed {
     /// `CaptureStart` / `CaptureStop` originate at the core; receiving
     /// them FROM the helper is also a protocol bug.
     EchoedControl(Frame),
-    /// Helper emitted a twice-cleared OCREvent (ADR-0016 P3.6). The
+    /// Helper emitted a twice-cleared `OCREvent` (ADR-0016 P3.6). The
     /// brain-ingestor consumer lands at P3.7+; until then the
     /// connection passes the frame through for caller no-op or
     /// structural assertion. **CSO-protected**: this variant is the

@@ -4,7 +4,7 @@
 //! # Scope: P3.9b — real read-only store wired
 //!
 //! Every entry point now holds a live read-only `SqlCipherBrainStore`
-//! handle. `mci_brain_ffi_open` decodes the hex SQLCipher key, opens the
+//! handle. `mci_brain_ffi_open` decodes the hex `SQLCipher` key, opens the
 //! store via [`mci_brain::SqlCipherBrainStore::open_readonly`] (which goes
 //! through [`mci_core::store::open_readonly`] with `SQLITE_OPEN_READ_ONLY |
 //! SQLITE_OPEN_NO_MUTEX | SQLITE_OPEN_URI`), and stashes it in an opaque
@@ -174,19 +174,13 @@ pub unsafe extern "C" fn mci_brain_ffi_open(
     }
     // Safety: caller guarantees the pointers are valid null-terminated
     // UTF-8 C strings. We only borrow them for the duration of this call.
-    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => {
-            set_last_error("mci_brain_ffi_open: non-UTF8 path");
-            return ptr::null_mut();
-        }
+    let Ok(path_str) = unsafe { CStr::from_ptr(path) }.to_str() else {
+        set_last_error("mci_brain_ffi_open: non-UTF8 path");
+        return ptr::null_mut();
     };
-    let key_str = match unsafe { CStr::from_ptr(key_hex) }.to_str() {
-        Ok(s) => s,
-        Err(_) => {
-            set_last_error("mci_brain_ffi_open: non-UTF8 key_hex");
-            return ptr::null_mut();
-        }
+    let Ok(key_str) = unsafe { CStr::from_ptr(key_hex) }.to_str() else {
+        set_last_error("mci_brain_ffi_open: non-UTF8 key_hex");
+        return ptr::null_mut();
     };
 
     let key_bytes = match decode_hex_key(key_str) {
@@ -267,8 +261,8 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
     // freed via mci_brain_ffi_close.
     let handle = unsafe { &*h };
     // Safety: caller guarantees a valid null-terminated UTF-8 string.
-    let query_cstr = unsafe { CStr::from_ptr(query_json) };
-    let Ok(query_str) = query_cstr.to_str() else {
+    let query_c = unsafe { CStr::from_ptr(query_json) };
+    let Ok(query_str) = query_c.to_str() else {
         set_last_error("mci_brain_ffi_search: non-UTF8 query");
         return ptr::null_mut();
     };
@@ -321,7 +315,7 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
                     score: Some(score),
                 });
             }
-            Ok(None) => continue,
+            Ok(None) => {}
             Err(e) => {
                 set_last_error(&format!("mci_brain_ffi_search: get_event: {e}"));
                 return ptr::null_mut();
@@ -341,10 +335,7 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
 /// to [`MAX_LIMIT`] internally so a hostile value cannot allocate
 /// unbounded memory.
 #[no_mangle]
-pub unsafe extern "C" fn mci_brain_ffi_recent_events(
-    h: *mut Handle,
-    limit: u32,
-) -> *mut c_char {
+pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32) -> *mut c_char {
     if h.is_null() {
         set_last_error("mci_brain_ffi_recent_events: null handle");
         return ptr::null_mut();
@@ -475,8 +466,7 @@ thread_local! {
 
 fn set_last_error(msg: &str) {
     let c = CString::new(msg).unwrap_or_else(|_| {
-        CString::new("mci-brain-ffi: error message contained a NUL byte")
-            .expect("static literal")
+        CString::new("mci-brain-ffi: error message contained a NUL byte").expect("static literal")
     });
     LAST_ERROR.with(|cell| {
         *cell.borrow_mut() = Some(c);
@@ -489,7 +479,7 @@ fn clear_last_error() {
     });
 }
 
-/// Decode a 64-character hex string into the 32-byte SQLCipher key.
+/// Decode a 64-character hex string into the 32-byte `SQLCipher` key.
 ///
 /// Accepts upper-, lower-, or mixed-case hex. Rejects any other length
 /// (the 256-bit key is fixed per ADR-0008) and any non-hex byte.
@@ -591,7 +581,11 @@ mod tests {
     #[test]
     fn decode_hex_key_round_trip_lower_case() {
         let raw = [0xABu8; 32];
-        let hex: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let hex: String = raw.iter().fold(String::new(), |mut s, b| {
+            use std::fmt::Write;
+            write!(s, "{b:02x}").unwrap();
+            s
+        });
         let back = decode_hex_key(&hex).expect("valid hex");
         assert_eq!(back, raw);
     }
@@ -646,7 +640,13 @@ mod tests {
 
     #[test]
     fn passes_filters_no_filters_always_true() {
-        assert!(passes_filters(1000, Some("com.apple.Safari"), None, None, None));
+        assert!(passes_filters(
+            1000,
+            Some("com.apple.Safari"),
+            None,
+            None,
+            None
+        ));
     }
 
     #[test]
@@ -672,7 +672,13 @@ mod tests {
             None,
             Some("com.microsoft.VSCode")
         ));
-        assert!(!passes_filters(0, None, None, None, Some("com.apple.Safari")));
+        assert!(!passes_filters(
+            0,
+            None,
+            None,
+            None,
+            Some("com.apple.Safari")
+        ));
     }
 
     #[test]

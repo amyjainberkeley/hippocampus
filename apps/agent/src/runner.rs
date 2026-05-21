@@ -472,10 +472,7 @@ mod tests {
         )
     }
 
-    fn make_pump(
-        store: Arc<RecordingStore>,
-        embedder: Option<Arc<dyn Embedder>>,
-    ) -> BrainPump {
+    fn make_pump(store: Arc<RecordingStore>, embedder: Option<Arc<dyn Embedder>>) -> BrainPump {
         BrainPump::new(store as Arc<dyn BrainStore>, embedder)
     }
 
@@ -615,7 +612,10 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, RunError::Brain(crate::brain_ingest::IngestError::Store(_))),
+            matches!(
+                err,
+                RunError::Brain(crate::brain_ingest::IngestError::Store(_))
+            ),
             "expected RunError::Brain(IngestError::Store), got {err:?}"
         );
         // No event reached the inner store because the dim check ran

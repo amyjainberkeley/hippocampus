@@ -89,11 +89,10 @@ pub fn validate_citations(brief: &Brief, store: &dyn BrainStore) -> Vec<Citation
 /// tripwire; semantic overlap replaces this in the LLM PR.
 fn extract_content_words(text: &str) -> Vec<&str> {
     const STOPWORDS: &[&str] = &[
-        "the", "and", "that", "this", "with", "from", "have", "been",
-        "were", "will", "would", "could", "should", "about", "which",
-        "their", "there", "what", "when", "where", "into", "also",
-        "then", "than", "them", "each", "other", "some", "more",
-        "very", "just", "like", "only",
+        "the", "and", "that", "this", "with", "from", "have", "been", "were", "will", "would",
+        "could", "should", "about", "which", "their", "there", "what", "when", "where", "into",
+        "also", "then", "than", "them", "each", "other", "some", "more", "very", "just", "like",
+        "only",
     ];
     text.split_whitespace()
         .filter(|w| w.len() >= 4)

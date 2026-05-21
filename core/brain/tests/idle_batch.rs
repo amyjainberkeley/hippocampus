@@ -1,7 +1,7 @@
 //! Integration tests for the P3.8 idle-batch embedder.
 //!
 //! Exercises `SqlCipherBrainStore::unembedded_events` and
-//! `set_event_embedding` end-to-end against a real encrypted SQLCipher
+//! `set_event_embedding` end-to-end against a real encrypted `SQLCipher`
 //! store, then tests the async `run_idle_batch_worker` loop against
 //! the same store + stub embedder.
 
@@ -60,9 +60,15 @@ fn unembedded_events_returns_events_without_vectors() {
     let key = test_key();
     let store = SqlCipherBrainStore::new(&path, &key).unwrap();
 
-    let id1 = store.put_event(&blank_event(1_000_000, "event one")).unwrap();
-    let id2 = store.put_event(&blank_event(2_000_000, "event two")).unwrap();
-    let id3 = store.put_event(&blank_event(3_000_000, "event three")).unwrap();
+    let id1 = store
+        .put_event(&blank_event(1_000_000, "event one"))
+        .unwrap();
+    let id2 = store
+        .put_event(&blank_event(2_000_000, "event two"))
+        .unwrap();
+    let id3 = store
+        .put_event(&blank_event(3_000_000, "event three"))
+        .unwrap();
 
     // All three should be unembedded.
     let unembedded = store.unembedded_events(100).unwrap();
@@ -91,7 +97,9 @@ fn unembedded_events_respects_limit() {
     let store = SqlCipherBrainStore::new(&path, &key).unwrap();
 
     for i in 0..10 {
-        store.put_event(&blank_event((i + 1) * 1_000_000, &format!("ev {i}"))).unwrap();
+        store
+            .put_event(&blank_event((i + 1) * 1_000_000, &format!("ev {i}")))
+            .unwrap();
     }
 
     let batch = store.unembedded_events(3).unwrap();
@@ -104,7 +112,9 @@ fn unembedded_events_returns_empty_when_all_embedded() {
     let key = test_key();
     let store = SqlCipherBrainStore::new(&path, &key).unwrap();
 
-    let id = store.put_event(&blank_event(1_000_000, "solo event")).unwrap();
+    let id = store
+        .put_event(&blank_event(1_000_000, "solo event"))
+        .unwrap();
     store.set_event_embedding(id, &axis_unit_vec(1)).unwrap();
 
     let unembedded = store.unembedded_events(100).unwrap();
@@ -132,7 +142,9 @@ fn set_event_embedding_writes_retrievable_vector() {
     let key = test_key();
     let store = SqlCipherBrainStore::new(&path, &key).unwrap();
 
-    let id = store.put_event(&blank_event(1_000_000, "roundtrip test")).unwrap();
+    let id = store
+        .put_event(&blank_event(1_000_000, "roundtrip test"))
+        .unwrap();
     let emb = axis_unit_vec(42);
     store.set_event_embedding(id, &emb).unwrap();
 
@@ -157,7 +169,9 @@ fn set_event_embedding_rejects_duplicate() {
 
     let id = store.put_event(&blank_event(1_000_000, "dup")).unwrap();
     store.set_event_embedding(id, &axis_unit_vec(0)).unwrap();
-    let err = store.set_event_embedding(id, &axis_unit_vec(1)).unwrap_err();
+    let err = store
+        .set_event_embedding(id, &axis_unit_vec(1))
+        .unwrap_err();
     assert!(
         matches!(err, StoreError::Backend(_)),
         "expected Backend (UNIQUE constraint), got {err:?}"
@@ -183,7 +197,9 @@ fn worker_simulation_drains_unembedded_events() {
     // Seed 5 events with no embedding.
     let mut ids = Vec::new();
     for i in 0..5 {
-        let id = store.put_event(&blank_event((i + 1) * 1_000_000, &format!("text {i}"))).unwrap();
+        let id = store
+            .put_event(&blank_event((i + 1) * 1_000_000, &format!("text {i}")))
+            .unwrap();
         ids.push(id);
     }
 
@@ -214,7 +230,9 @@ fn worker_simulation_respects_batch_size() {
     let embedder = FixedDimEmbedder::default();
 
     for i in 0..10 {
-        store.put_event(&blank_event((i + 1) * 1_000_000, &format!("text {i}"))).unwrap();
+        store
+            .put_event(&blank_event((i + 1) * 1_000_000, &format!("text {i}")))
+            .unwrap();
     }
 
     // First batch of 3.

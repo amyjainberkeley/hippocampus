@@ -351,7 +351,7 @@ impl EmbedderBackend for ZeroBackend {
 /// Candidate paths follow the Bundle.module fallback pattern from
 /// PR #86's `AllowlistTOMLLoader` resolver chain:
 ///
-/// 1. `Bundle.module` resource path (SwiftPM / Xcode build)
+/// 1. `Bundle.module` resource path (`SwiftPM` / Xcode build)
 /// 2. Executable-relative `../Resources/` (`.app` bundle layout)
 /// 3. Explicit override via env var `MCI_ARCTIC_MODEL_PATH`
 pub fn try_load_coreml_backend(candidate_paths: &[&Path]) -> Result<CoreMLBackend, EmbedError> {
@@ -371,6 +371,7 @@ pub fn try_load_coreml_backend(candidate_paths: &[&Path]) -> Result<CoreMLBacken
 /// Returns `(backend, is_real)` where `is_real` is `true` when the
 /// Core ML model loaded successfully. Callers should log the
 /// degradation when `is_real == false`.
+#[must_use]
 pub fn load_backend_or_fallback(
     candidate_paths: &[&Path],
 ) -> (std::sync::Arc<dyn EmbedderBackend>, bool) {

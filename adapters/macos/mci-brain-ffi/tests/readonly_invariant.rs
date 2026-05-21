@@ -1,5 +1,5 @@
 //! Integration tests for the P3.9b FFI wiring against a real ephemeral
-//! SQLCipher brain DB.
+//! `SQLCipher` brain DB.
 //!
 //! # The CSO load-bearing test (`ffi_open_yields_a_strictly_read_only_brain`)
 //!
@@ -12,13 +12,13 @@
 //!    confirm read works (`mci_brain_ffi_recent_events` returns the row).
 //! 3. Reopen the same file through `mci_core::store::open_readonly`
 //!    (the same code path the FFI uses internally) and attempt a write —
-//!    must fail at the SQLite driver level with `SQLITE_READONLY`.
+//!    must fail at the `SQLite` driver level with `SQLITE_READONLY`.
 //!
 //! Step 3 is the structural assertion. The FFI does not export a write
 //! surface (no `put_event` / `delete_event` / `mutate_*` extern fn) and
 //! the underlying connection it opens is `SQLITE_OPEN_READ_ONLY`, so the
 //! invariant is enforced TWICE — once by the absent FFI surface and once
-//! by the SQLite driver. Either check alone would be load-bearing; both
+//! by the `SQLite` driver. Either check alone would be load-bearing; both
 //! together are the protected-set wall.
 
 use std::ffi::{CStr, CString};
@@ -39,7 +39,11 @@ use tempfile::TempDir;
 /// Tests construct the `DbKey` via [`DbKey::from_bytes`] from the same
 /// `raw_bytes` so the writer + the FFI-side key match exactly.
 fn key_hex_for(raw_bytes: [u8; 32]) -> String {
-    raw_bytes.iter().map(|b| format!("{b:02x}")).collect()
+    raw_bytes.iter().fold(String::new(), |mut s, b| {
+        use std::fmt::Write;
+        write!(s, "{b:02x}").unwrap();
+        s
+    })
 }
 
 fn make_test_db() -> (TempDir, PathBuf, [u8; 32]) {
@@ -201,7 +205,10 @@ fn ffi_search_returns_lexical_fts5_hits_for_matching_query() {
     let hits: Vec<HitJson> = serde_json::from_str(&s).expect("valid JSON");
     unsafe { mci_brain_ffi_string_free(j) };
 
-    assert!(!hits.is_empty(), "FTS5 should match 'privacy' in seeded text");
+    assert!(
+        !hits.is_empty(),
+        "FTS5 should match 'privacy' in seeded text"
+    );
     assert_eq!(hits[0].source, "lexical");
     assert_eq!(hits[0].app_bundle_id.as_deref(), Some("com.apple.Safari"));
 
@@ -240,7 +247,8 @@ fn ffi_search_honors_app_filter() {
     let key_c = CString::new(key_hex_for(raw_key)).unwrap();
     let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
 
-    let q = CString::new(r#"{"text":"signal","limit":10,"app_filter":"com.apple.Safari"}"#).unwrap();
+    let q =
+        CString::new(r#"{"text":"signal","limit":10,"app_filter":"com.apple.Safari"}"#).unwrap();
     let j = unsafe { mci_brain_ffi_search(h, q.as_ptr()) };
     let s = unsafe { CStr::from_ptr(j) }.to_string_lossy().into_owned();
     let hits: Vec<HitJson> = serde_json::from_str(&s).unwrap();
@@ -266,8 +274,8 @@ fn ffi_search_honors_time_window() {
     let key_c = CString::new(key_hex_for(raw_key)).unwrap();
     let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
 
-    let q = CString::new(r#"{"text":"foo","limit":10,"time_from_us":150,"time_to_us":250}"#)
-        .unwrap();
+    let q =
+        CString::new(r#"{"text":"foo","limit":10,"time_from_us":150,"time_to_us":250}"#).unwrap();
     let j = unsafe { mci_brain_ffi_search(h, q.as_ptr()) };
     let s = unsafe { CStr::from_ptr(j) }.to_string_lossy().into_owned();
     let hits: Vec<HitJson> = serde_json::from_str(&s).unwrap();

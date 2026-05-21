@@ -277,8 +277,7 @@ mod tests {
     #[test]
     fn query_mode_uses_the_model_card_prefix() {
         let b = rec_backend(ARCTIC_EMBED_S_DIMENSION);
-        let e =
-            ArcticEmbedSEmbedder::new_query(Arc::clone(&b) as Arc<dyn EmbedderBackend>);
+        let e = ArcticEmbedSEmbedder::new_query(Arc::clone(&b) as Arc<dyn EmbedderBackend>);
         let _ = e.embed_one("how do I configure tokio?").unwrap();
         let seen = b.last().expect("backend was called");
         assert!(

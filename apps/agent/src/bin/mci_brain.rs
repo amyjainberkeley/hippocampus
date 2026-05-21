@@ -122,9 +122,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                     match argv[i].parse::<usize>() {
                         Ok(n) if n > 0 => limit = Some(n),
                         _ => {
-                            return ParseOutcome::Error(
-                                "--limit must be a positive integer".into(),
-                            )
+                            return ParseOutcome::Error("--limit must be a positive integer".into())
                         }
                     }
                 }
@@ -203,9 +201,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
             match positionals[0].parse::<u64>() {
                 Ok(v) => Command::Show { event_id: v, json },
                 Err(_) => {
-                    return ParseOutcome::Error(
-                        "EVENT_ID must be a non-negative integer".into(),
-                    )
+                    return ParseOutcome::Error("EVENT_ID must be a non-negative integer".into())
                 }
             }
         }
@@ -333,12 +329,7 @@ fn run_recent(store: &SqlCipherBrainStore, limit: usize, json: bool) -> ExitCode
     }
 }
 
-fn run_search(
-    store: &SqlCipherBrainStore,
-    query: &str,
-    limit: usize,
-    json: bool,
-) -> ExitCode {
+fn run_search(store: &SqlCipherBrainStore, query: &str, limit: usize, json: bool) -> ExitCode {
     let sanitized = brain_cli::sanitize_fts5_query(query);
     if sanitized.is_empty() {
         eprintln!("mci-brain search: empty query");
@@ -513,10 +504,7 @@ fn main() -> ExitCode {
     let store = match SqlCipherBrainStore::open_readonly(&args.db_path, &key) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
-                "mci-brain: open brain at {}: {e}",
-                args.db_path.display()
-            );
+            eprintln!("mci-brain: open brain at {}: {e}", args.db_path.display());
             return ExitCode::from(12);
         }
     };
@@ -620,7 +608,10 @@ mod tests {
     fn parse_args_show_rejects_non_integer() {
         match parse_args(&argv(&["show", "abc"])) {
             ParseOutcome::Error(msg) => {
-                assert!(msg.contains("integer"), "error should mention integer: {msg}");
+                assert!(
+                    msg.contains("integer"),
+                    "error should mention integer: {msg}"
+                );
             }
             _ => panic!("expected Error for non-integer event_id"),
         }
@@ -633,11 +624,7 @@ mod tests {
             other => panic!("expected Run, got {:?}", variant_name(&other)),
         };
         match args.command {
-            Command::Export {
-                format,
-                out,
-                since,
-            } => {
+            Command::Export { format, out, since } => {
                 assert!(matches!(format, ExportFormat::Jsonl));
                 assert!(out.is_none());
                 assert_eq!(since, 0);

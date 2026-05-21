@@ -53,11 +53,7 @@ impl BriefAuthor for StubBriefAuthor {
 
         let citations = retrieval.iter().map(|r| r.event_id).collect();
 
-        let now_us = retrieval
-            .iter()
-            .map(|r| r.ts_us)
-            .max()
-            .unwrap_or(0);
+        let now_us = retrieval.iter().map(|r| r.ts_us).max().unwrap_or(0);
 
         Ok(Brief {
             id: BriefId(0),

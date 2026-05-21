@@ -85,10 +85,7 @@ pub fn format_event_human(e: &Event) -> String {
         "Window: {}\n",
         e.window_title.as_deref().unwrap_or("(none)")
     ));
-    out.push_str(&format!(
-        "URL: {}\n",
-        e.url.as_deref().unwrap_or("(none)")
-    ));
+    out.push_str(&format!("URL: {}\n", e.url.as_deref().unwrap_or("(none)")));
     out.push_str(&format!(
         "Summary: {}\n",
         e.summary.as_deref().unwrap_or("(none)")

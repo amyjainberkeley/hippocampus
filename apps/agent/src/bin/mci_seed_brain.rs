@@ -7,7 +7,7 @@
 //! live capture session, which blocks demoing the **read** side of the
 //! pipeline (the recall UI in `apps/recall-ui/`, the localhost MCP server
 //! `mci-agent mcp-serve`, the agent-API loopback in general). Until
-//! Director-Recording's P3.6.7 PR fixes the `.allow` → OCREvent emission
+//! Director-Recording's P3.6.7 PR fixes the `.allow` → `OCREvent` emission
 //! gap, this binary writes 20 synthetic [`mci_brain::Event`] rows so the
 //! downstream surfaces have something to read against.
 //!
@@ -32,7 +32,7 @@
 //! - The binary refuses to write into a non-empty brain unless the
 //!   operator passes `--force`. Default behaviour: never overwrite a
 //!   real-capture brain.
-//! - The SQLCipher key comes from `MCI_DB_KEY_HEX` (matches the
+//! - The `SQLCipher` key comes from `MCI_DB_KEY_HEX` (matches the
 //!   `mci-agent mcp-serve` convention so the same key reads back what
 //!   this binary writes).
 //! - Embeddings are intentionally `None` — lexical FTS5 search still
@@ -164,6 +164,8 @@ fn hex_nibble(b: u8) -> Option<u8> {
 /// (the ADR-0016 §4.3 wall the store enforces at `put_event`) and an
 /// `app_bundle_id` in the `com.mci.demo.seed.*` namespace so demo data
 /// is trivially distinguishable from real-capture events.
+#[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn canned_events(now_us: u64) -> Vec<Event> {
     // Anchor the most-recent event one minute before `now_us`; older
     // events step back in ~6-minute increments so the timeline spans
@@ -331,13 +333,12 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
 fn now_us() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
 fn main() -> ExitCode {
-    let argv: Vec<String> = std::env::args().collect();
-    let args = match parse_args(&argv) {
+    let raw_argv: Vec<String> = std::env::args().collect();
+    let args = match parse_args(&raw_argv) {
         ParseOutcome::Help => {
             print_usage();
             return ExitCode::SUCCESS;
@@ -369,10 +370,7 @@ fn main() -> ExitCode {
     if let Some(parent) = args.db_path.parent() {
         if !parent.exists() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!(
-                    "mci-seed-brain: create_dir_all({}): {e}",
-                    parent.display()
-                );
+                eprintln!("mci-seed-brain: create_dir_all({}): {e}", parent.display());
                 return ExitCode::from(12);
             }
         }
@@ -500,7 +498,11 @@ mod tests {
     #[test]
     fn decode_hex32_round_trips() {
         let bytes = [0xab_u8; 32];
-        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let hex: String = bytes.iter().fold(String::new(), |mut s, b| {
+            use std::fmt::Write;
+            write!(s, "{b:02x}").unwrap();
+            s
+        });
         assert_eq!(decode_hex32(&hex), Some(bytes));
     }
 

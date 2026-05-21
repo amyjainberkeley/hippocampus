@@ -103,10 +103,7 @@ impl Server {
     /// Construct with explicit counters (useful for tests that want to
     /// observe the increment behavior).
     #[must_use]
-    pub fn new_with_counters(
-        reader: Arc<dyn BrainReader>,
-        counters: Arc<ServerCounters>,
-    ) -> Self {
+    pub fn new_with_counters(reader: Arc<dyn BrainReader>, counters: Arc<ServerCounters>) -> Self {
         Self { reader, counters }
     }
 
@@ -139,13 +136,8 @@ impl Server {
             ));
         }
 
-        // Notifications (`id` absent) — handle silently per the spec.
-        if req.id.is_none() {
-            // `notifications/initialized` is the standard MCP one.
-            // Anything else: also silent. The spec is explicit that the
-            // server MUST NOT send a response to a notification.
-            return None;
-        }
+        // Notifications (`id` absent) — silent per spec.
+        req.id.as_ref()?;
 
         let id = req.id.clone().unwrap_or(JsonRpcId::Null);
 
@@ -203,7 +195,11 @@ impl Server {
                 "tools/call requires params {name, arguments}",
             );
         };
-        let Some(name) = params.get("name").and_then(|v| v.as_str()).map(str::to_owned) else {
+        let Some(name) = params
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+        else {
             return JsonRpcResponse::err(
                 id,
                 INVALID_PARAMS,
@@ -383,12 +379,8 @@ impl Server {
 
 fn brain_err_to_response(id: JsonRpcId, e: &BrainReaderError) -> JsonRpcResponse {
     match e {
-        BrainReaderError::InvalidInput(m) => {
-            JsonRpcResponse::err(id, INVALID_PARAMS, m.clone())
-        }
-        BrainReaderError::Backend(m) => {
-            JsonRpcResponse::err(id, SERVER_ERROR_GENERIC, m.clone())
-        }
+        BrainReaderError::InvalidInput(m) => JsonRpcResponse::err(id, INVALID_PARAMS, m.clone()),
+        BrainReaderError::Backend(m) => JsonRpcResponse::err(id, SERVER_ERROR_GENERIC, m.clone()),
     }
 }
 
@@ -463,4 +455,3 @@ fn _server_is_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Server>();
 }
-

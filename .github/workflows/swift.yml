@@ -1,0 +1,44 @@
+name: Swift — MCICaptureHelper + recall-ui
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: swift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  helper:
+    name: MCICaptureHelper tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache SwiftPM .build
+        uses: actions/cache@v4
+        with:
+          path: adapters/macos/MCICaptureHelper/.build
+          key: swift-helper-${{ runner.os }}-${{ hashFiles('adapters/macos/MCICaptureHelper/Package.resolved') }}
+          restore-keys: swift-helper-${{ runner.os }}-
+
+      - run: swift test --package-path adapters/macos/MCICaptureHelper
+
+  recall-ui:
+    name: recall-ui tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache SwiftPM .build
+        uses: actions/cache@v4
+        with:
+          path: apps/recall-ui/.build
+          key: swift-recall-${{ runner.os }}-${{ hashFiles('apps/recall-ui/Package.resolved') }}
+          restore-keys: swift-recall-${{ runner.os }}-
+
+      - run: swift test --package-path apps/recall-ui

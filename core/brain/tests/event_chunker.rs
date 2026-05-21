@@ -65,7 +65,10 @@ fn single_paragraph_under_window_returns_one_chunk_equal_to_input() {
     let input = "a short event with thirteen words, all in one paragraph here.";
     let out = c.chunk(input).expect("chunk");
     assert_eq!(out.len(), 1);
-    assert_eq!(out[0], input, "short single-paragraph input → exact round-trip");
+    assert_eq!(
+        out[0], input,
+        "short single-paragraph input → exact round-trip"
+    );
 }
 
 #[test]
@@ -252,7 +255,11 @@ fn long_input_chunks_preserve_paragraph_separator_when_packed_together() {
     let p3 = n_words(15) + ".";
     let input = format!("{p1}\n\n{p2}\n\n{p3}");
     let out = c.chunk(&input).expect("chunk");
-    assert_eq!(out.len(), 2, "expect 2 chunks for 15+15+15 at window=40, got {out:?}");
+    assert_eq!(
+        out.len(),
+        2,
+        "expect 2 chunks for 15+15+15 at window=40, got {out:?}"
+    );
     assert!(
         out[0].contains("\n\n"),
         "first chunk should hold both paras joined with \\n\\n; got {:?}",

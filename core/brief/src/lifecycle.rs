@@ -62,13 +62,20 @@ pub enum LifecycleError {
 /// `(state, action)` pair is handled explicitly. Bypassing the
 /// tripwire or the human-approver requirement requires changing this
 /// function — visible in code review.
+#[allow(clippy::too_many_lines)]
 pub fn advance(brief: &mut Brief, action: LifecycleAction) -> Result<(), LifecycleError> {
     match (&brief.state, action) {
         (BriefState::Draft, LifecycleAction::Submit) => {
             brief.state = BriefState::Reviewing;
             Ok(())
         }
-        (BriefState::Reviewing, LifecycleAction::Approve { human_approver_id, citation_violations }) => {
+        (
+            BriefState::Reviewing,
+            LifecycleAction::Approve {
+                human_approver_id,
+                citation_violations,
+            },
+        ) => {
             if human_approver_id.is_empty() {
                 return Err(LifecycleError::MissingApprover);
             }
@@ -89,25 +96,89 @@ pub fn advance(brief: &mut Brief, action: LifecycleAction) -> Result<(), Lifecyc
         }
 
         // Exhaustive rejection of all invalid (state, action) pairs.
-        (BriefState::Draft, LifecycleAction::Approve { .. }) => Err(LifecycleError::InvalidTransition { from: BriefState::Draft, action: "Approve" }),
-        (BriefState::Draft, LifecycleAction::Sync) => Err(LifecycleError::InvalidTransition { from: BriefState::Draft, action: "Sync" }),
-        (BriefState::Draft, LifecycleAction::Archive) => Err(LifecycleError::InvalidTransition { from: BriefState::Draft, action: "Archive" }),
+        (BriefState::Draft, LifecycleAction::Approve { .. }) => {
+            Err(LifecycleError::InvalidTransition {
+                from: BriefState::Draft,
+                action: "Approve",
+            })
+        }
+        (BriefState::Draft, LifecycleAction::Sync) => Err(LifecycleError::InvalidTransition {
+            from: BriefState::Draft,
+            action: "Sync",
+        }),
+        (BriefState::Draft, LifecycleAction::Archive) => Err(LifecycleError::InvalidTransition {
+            from: BriefState::Draft,
+            action: "Archive",
+        }),
 
-        (BriefState::Reviewing, LifecycleAction::Submit) => Err(LifecycleError::InvalidTransition { from: BriefState::Reviewing, action: "Submit" }),
-        (BriefState::Reviewing, LifecycleAction::Sync) => Err(LifecycleError::InvalidTransition { from: BriefState::Reviewing, action: "Sync" }),
-        (BriefState::Reviewing, LifecycleAction::Archive) => Err(LifecycleError::InvalidTransition { from: BriefState::Reviewing, action: "Archive" }),
+        (BriefState::Reviewing, LifecycleAction::Submit) => {
+            Err(LifecycleError::InvalidTransition {
+                from: BriefState::Reviewing,
+                action: "Submit",
+            })
+        }
+        (BriefState::Reviewing, LifecycleAction::Sync) => Err(LifecycleError::InvalidTransition {
+            from: BriefState::Reviewing,
+            action: "Sync",
+        }),
+        (BriefState::Reviewing, LifecycleAction::Archive) => {
+            Err(LifecycleError::InvalidTransition {
+                from: BriefState::Reviewing,
+                action: "Archive",
+            })
+        }
 
-        (BriefState::Approved, LifecycleAction::Submit) => Err(LifecycleError::InvalidTransition { from: BriefState::Approved, action: "Submit" }),
-        (BriefState::Approved, LifecycleAction::Approve { .. }) => Err(LifecycleError::InvalidTransition { from: BriefState::Approved, action: "Approve" }),
-        (BriefState::Approved, LifecycleAction::Archive) => Err(LifecycleError::InvalidTransition { from: BriefState::Approved, action: "Archive" }),
+        (BriefState::Approved, LifecycleAction::Submit) => Err(LifecycleError::InvalidTransition {
+            from: BriefState::Approved,
+            action: "Submit",
+        }),
+        (BriefState::Approved, LifecycleAction::Approve { .. }) => {
+            Err(LifecycleError::InvalidTransition {
+                from: BriefState::Approved,
+                action: "Approve",
+            })
+        }
+        (BriefState::Approved, LifecycleAction::Archive) => {
+            Err(LifecycleError::InvalidTransition {
+                from: BriefState::Approved,
+                action: "Archive",
+            })
+        }
 
-        (BriefState::Synced, LifecycleAction::Submit) => Err(LifecycleError::InvalidTransition { from: BriefState::Synced, action: "Submit" }),
-        (BriefState::Synced, LifecycleAction::Approve { .. }) => Err(LifecycleError::InvalidTransition { from: BriefState::Synced, action: "Approve" }),
-        (BriefState::Synced, LifecycleAction::Sync) => Err(LifecycleError::InvalidTransition { from: BriefState::Synced, action: "Sync" }),
+        (BriefState::Synced, LifecycleAction::Submit) => Err(LifecycleError::InvalidTransition {
+            from: BriefState::Synced,
+            action: "Submit",
+        }),
+        (BriefState::Synced, LifecycleAction::Approve { .. }) => {
+            Err(LifecycleError::InvalidTransition {
+                from: BriefState::Synced,
+                action: "Approve",
+            })
+        }
+        (BriefState::Synced, LifecycleAction::Sync) => Err(LifecycleError::InvalidTransition {
+            from: BriefState::Synced,
+            action: "Sync",
+        }),
 
-        (BriefState::Archived, LifecycleAction::Submit) => Err(LifecycleError::InvalidTransition { from: BriefState::Archived, action: "Submit" }),
-        (BriefState::Archived, LifecycleAction::Approve { .. }) => Err(LifecycleError::InvalidTransition { from: BriefState::Archived, action: "Approve" }),
-        (BriefState::Archived, LifecycleAction::Sync) => Err(LifecycleError::InvalidTransition { from: BriefState::Archived, action: "Sync" }),
-        (BriefState::Archived, LifecycleAction::Archive) => Err(LifecycleError::InvalidTransition { from: BriefState::Archived, action: "Archive" }),
+        (BriefState::Archived, LifecycleAction::Submit) => Err(LifecycleError::InvalidTransition {
+            from: BriefState::Archived,
+            action: "Submit",
+        }),
+        (BriefState::Archived, LifecycleAction::Approve { .. }) => {
+            Err(LifecycleError::InvalidTransition {
+                from: BriefState::Archived,
+                action: "Approve",
+            })
+        }
+        (BriefState::Archived, LifecycleAction::Sync) => Err(LifecycleError::InvalidTransition {
+            from: BriefState::Archived,
+            action: "Sync",
+        }),
+        (BriefState::Archived, LifecycleAction::Archive) => {
+            Err(LifecycleError::InvalidTransition {
+                from: BriefState::Archived,
+                action: "Archive",
+            })
+        }
     }
 }

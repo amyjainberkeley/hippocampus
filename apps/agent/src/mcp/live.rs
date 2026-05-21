@@ -31,8 +31,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_brain::{
-    BrainStats, BrainStore, EmbedError, Embedder, Event, EventId, EventRecord,
-    HybridRetriever, RetrievalQuery, Retriever, SqlCipherBrainStore, StoreError,
+    BrainStats, BrainStore, EmbedError, Embedder, Event, EventId, EventRecord, HybridRetriever,
+    RetrievalQuery, Retriever, SqlCipherBrainStore, StoreError,
 };
 use mci_core::crypto::DbKey;
 
@@ -201,11 +201,7 @@ impl LiveBrainReader {
     }
 
     /// FTS5-only recall (Embedder=None fallback).
-    fn recall_fts5_only(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<McpHit>, BrainReaderError> {
+    fn recall_fts5_only(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError> {
         let sanitized = sanitize_fts5_query(query);
         if sanitized.is_empty() {
             return Ok(Vec::new());

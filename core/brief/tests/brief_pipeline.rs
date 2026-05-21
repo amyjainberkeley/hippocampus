@@ -170,7 +170,12 @@ fn lifecycle_rejects_skipping_states() {
 
 #[test]
 fn lifecycle_blocks_approval_without_human_approver() {
-    let mut brief = make_brief("no approver", "body", vec![EventId(1)], BriefState::Reviewing);
+    let mut brief = make_brief(
+        "no approver",
+        "body",
+        vec![EventId(1)],
+        BriefState::Reviewing,
+    );
     let err = advance(
         &mut brief,
         LifecycleAction::Approve {
@@ -203,7 +208,10 @@ fn lifecycle_blocks_approval_with_tripwire_violations() {
             citation_violations: violations,
         },
     );
-    assert!(matches!(err.unwrap_err(), LifecycleError::TripwireFailed(_)));
+    assert!(matches!(
+        err.unwrap_err(),
+        LifecycleError::TripwireFailed(_)
+    ));
     assert_eq!(brief.state, BriefState::Reviewing);
 }
 
@@ -261,7 +269,10 @@ fn tripwire_passes_valid_citations() {
         BriefState::Reviewing,
     );
     let violations = validate_citations(&brief, store.as_ref());
-    assert!(violations.is_empty(), "expected no violations: {violations:?}");
+    assert!(
+        violations.is_empty(),
+        "expected no violations: {violations:?}"
+    );
 }
 
 #[test]
