@@ -8,17 +8,25 @@ struct OnboardingApp: App {
     @StateObject private var retentionVM: RetentionViewModel
 
     init() {
-        let sr = StubTCCPermission(kind: .screenRecording)
-        let ax = StubTCCPermission(kind: .accessibility)
-        let auto = StubTCCPermission(kind: .automation)
+        #if canImport(AppKit)
+        let sr: any TCCPermission = RealScreenRecordingPermission()
+        let ax: any TCCPermission = RealAccessibilityPermission()
+        let auto: any TCCPermission = RealAutomationPermission()
+        #else
+        let sr: any TCCPermission = StubTCCPermission(kind: .screenRecording)
+        let ax: any TCCPermission = StubTCCPermission(kind: .accessibility)
+        let auto: any TCCPermission = StubTCCPermission(kind: .automation)
+        #endif
+
         _flowVM = StateObject(wrappedValue: OnboardingFlowViewModel(
             screenRecording: sr, accessibility: ax, automation: auto
         ))
         _trustVM = StateObject(wrappedValue: TrustPanelViewModel(
-            store: StubAllowlistStore()
+            allowlistStore: StubAllowlistStore(),
+            denylistStore: DiskDenylistEditorStore()
         ))
         _retentionVM = StateObject(wrappedValue: RetentionViewModel(
-            store: StubRetentionStore()
+            store: DiskRetentionStore()
         ))
     }
 
