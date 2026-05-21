@@ -23,6 +23,7 @@ pub mod device_id;
 pub mod health_log;
 pub mod health_pump;
 pub mod health_summary;
+pub mod idle_batch;
 pub mod mcp;
 pub mod runner;
 pub mod supervisor;

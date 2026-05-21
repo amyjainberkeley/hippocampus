@@ -316,9 +316,90 @@ fn format_ns_error(prefix: &str, err: &objc2_foundation::NSError) -> String {
     format!("{prefix}: code={code} {desc}")
 }
 
+/// Zero-vector fallback backend for when the `.mlpackage` is not bundled.
+///
+/// Produces a deterministic 384-d zero vector for every input. Events
+/// embedded with this backend are marked "embedded" in `event_vectors`
+/// so the idle-batch worker does not re-process them, but they carry no
+/// semantic signal — recall falls back to FTS5-only for these events.
+///
+/// This is the graceful-degradation arm documented in ADR-0016 §1.3:
+/// development / early builds that don't bundle the Core ML model can
+/// still run the full pipeline without the embedder busy-looping on
+/// the same un-embedded events forever.
+pub struct ZeroBackend;
+
+impl std::fmt::Debug for ZeroBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ZeroBackend").finish()
+    }
+}
+
+impl EmbedderBackend for ZeroBackend {
+    fn forward(&self, _text: &str) -> Result<Vec<f32>, EmbedError> {
+        Ok(vec![0.0_f32; ARCTIC_EMBED_S_DIMENSION])
+    }
+}
+
+/// Attempt to load the Core ML backend from a list of candidate paths.
+///
+/// Tries each path in order. On the first successful load, returns
+/// `Ok(CoreMLBackend)`. If all paths fail (typically because the
+/// `.mlpackage` isn't bundled in this build), returns `Err` with the
+/// last error encountered.
+///
+/// Candidate paths follow the Bundle.module fallback pattern from
+/// PR #86's `AllowlistTOMLLoader` resolver chain:
+///
+/// 1. `Bundle.module` resource path (SwiftPM / Xcode build)
+/// 2. Executable-relative `../Resources/` (`.app` bundle layout)
+/// 3. Explicit override via env var `MCI_ARCTIC_MODEL_PATH`
+pub fn try_load_coreml_backend(candidate_paths: &[&Path]) -> Result<CoreMLBackend, EmbedError> {
+    let mut last_err = EmbedError::Backend("no candidate paths provided".into());
+    for path in candidate_paths {
+        match CoreMLBackend::open(path) {
+            Ok(backend) => return Ok(backend),
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
+}
+
+/// Load the best available embedder backend: Core ML if the `.mlpackage`
+/// exists at any candidate path, otherwise the zero-vector fallback.
+///
+/// Returns `(backend, is_real)` where `is_real` is `true` when the
+/// Core ML model loaded successfully. Callers should log the
+/// degradation when `is_real == false`.
+pub fn load_backend_or_fallback(
+    candidate_paths: &[&Path],
+) -> (std::sync::Arc<dyn EmbedderBackend>, bool) {
+    match try_load_coreml_backend(candidate_paths) {
+        Ok(backend) => (std::sync::Arc::new(backend), true),
+        Err(_) => (std::sync::Arc::new(ZeroBackend), false),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_backend_produces_384_zeros() {
+        let b = ZeroBackend;
+        let v = b.forward("hello").unwrap();
+        assert_eq!(v.len(), ARCTIC_EMBED_S_DIMENSION);
+        assert!(v.iter().all(|x| *x == 0.0));
+    }
+
+    #[test]
+    fn load_backend_or_fallback_returns_zero_for_missing_paths() {
+        let paths: Vec<&Path> = vec![Path::new("/nonexistent/model.mlpackage")];
+        let (backend, is_real) = load_backend_or_fallback(&paths);
+        assert!(!is_real);
+        let v = backend.forward("test").unwrap();
+        assert_eq!(v.len(), ARCTIC_EMBED_S_DIMENSION);
+    }
 
     #[test]
     fn open_rejects_empty_path() {

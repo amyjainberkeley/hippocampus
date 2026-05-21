@@ -31,6 +31,7 @@ use mci_agent::brain_ingest::BrainPump;
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
+use mci_agent::idle_batch;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
 use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
@@ -221,75 +222,110 @@ async fn main() -> ExitCode {
             let clock = SystemWallClock;
             let mut stdin = tokio::io::stdin();
 
-            // P3.10c — open the brain store IFF `MCI_DB_KEY_HEX` is
-            // set. The brain-aware drain routes `OCREvent` frames to
-            // `BrainPump::ingest_ocr_event(...)`; the legacy
-            // `drain_to_log` path counts them as `frames_non_health`
-            // and never writes to disk. Embedder is `None` for now
-            // (the on-disk `arctic-embed-s.mlpackage` ships at P3.8);
-            // events ingest with `embedding = None` and fall back to
-            // FTS5-only lexical recall until then.
+            // P3.10c + P3.8 — open the brain store IFF `MCI_DB_KEY_HEX`
+            // is set. The store is shared between:
+            //   1. BrainPump (ingest: OCREvent → events table)
+            //   2. idle-batch worker (embed: events → event_vectors)
             //
-            // The `MCI_DB_KEY_HEX` env var matches the `mcp-serve`
-            // convention (same docs/claude-code-mcp-setup.md note,
-            // Phase-4 Keychain integration supersedes both). When the
-            // key is absent, the binary preserves pre-P3.10c
-            // behaviour — no brain writes, no failure.
-            let brain_pump: Option<BrainPump> = match std::env::var("MCI_DB_KEY_HEX") {
-                Ok(key_hex) => match decode_hex32(&key_hex) {
-                    Some(key_bytes) => {
-                        if let Some(parent) = db_path.parent() {
-                            if !parent.exists() {
-                                if let Err(e) = std::fs::create_dir_all(parent) {
-                                    eprintln!(
-                                        "mci-agent: create_dir_all({}): {e}",
-                                        parent.display()
+            // Shutdown channel coordinates both halves on SIGINT/SIGTERM.
+            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+            let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> =
+                match std::env::var("MCI_DB_KEY_HEX") {
+                    Ok(key_hex) => match decode_hex32(&key_hex) {
+                        Some(key_bytes) => {
+                            if let Some(parent) = db_path.parent() {
+                                if !parent.exists() {
+                                    if let Err(e) = std::fs::create_dir_all(parent) {
+                                        eprintln!(
+                                            "mci-agent: create_dir_all({}): {e}",
+                                            parent.display()
+                                        );
+                                        return ExitCode::from(20);
+                                    }
+                                }
+                            }
+                            let key = DbKey::from_bytes(key_bytes);
+                            match SqlCipherBrainStore::new(&db_path, &key) {
+                                Ok(store) => {
+                                    let store = Arc::new(store);
+                                    // P3.8: load the embedder backend. Core ML if
+                                    // .mlpackage found, zero-vector fallback otherwise.
+                                    let embedder = load_embedder_backend();
+                                    let pump = BrainPump::new(
+                                        Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
+                                        None, // ingest-time embed stays None; idle-batch handles it
                                     );
-                                    return ExitCode::from(20);
+                                    eprintln!(
+                                        "mci-agent: brain ingest + idle-batch enabled. db={} embedder={}",
+                                        db_path.display(),
+                                        if embedder.1 { "CoreML" } else { "zero-fallback" },
+                                    );
+
+                                    // Spawn idle-batch worker alongside the drain loop.
+                                    let worker_store = Arc::clone(&store);
+                                    let worker_embedder = embedder.0;
+                                    let worker_shutdown = shutdown_rx.clone();
+                                    tokio::spawn(async move {
+                                        match idle_batch::run_idle_batch_worker(
+                                            worker_store,
+                                            worker_embedder,
+                                            32, // batch_size
+                                            std::time::Duration::from_secs(5),
+                                            worker_shutdown,
+                                        )
+                                        .await
+                                        {
+                                            Ok(stats) => {
+                                                eprintln!(
+                                                    "mci-agent: idle-batch exited. embedded={} batches={} embed_errors={} store_errors={}",
+                                                    stats.events_embedded, stats.batches_run,
+                                                    stats.embed_errors, stats.store_errors,
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!("mci-agent: idle-batch error: {e}");
+                                            }
+                                        }
+                                    });
+
+                                    Some((pump, store))
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "mci-agent: open brain at {}: {e}. Falling back to health-only drain.",
+                                        db_path.display()
+                                    );
+                                    None
                                 }
                             }
                         }
-                        let key = DbKey::from_bytes(key_bytes);
-                        match SqlCipherBrainStore::new(&db_path, &key) {
-                            Ok(store) => {
-                                eprintln!(
-                                    "mci-agent: brain ingest enabled. db={} (writer; embedder=None — FTS5-only until P3.8)",
-                                    db_path.display()
-                                );
-                                let store: Arc<dyn mci_brain::BrainStore> = Arc::new(store);
-                                Some(BrainPump::new(store, None))
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "mci-agent: open brain at {}: {e}. Falling back to health-only drain.",
-                                    db_path.display()
-                                );
-                                None
-                            }
+                        None => {
+                            eprintln!(
+                                "mci-agent: MCI_DB_KEY_HEX must be 64 hex chars (32 bytes). Falling back to health-only drain."
+                            );
+                            None
                         }
-                    }
-                    None => {
+                    },
+                    Err(_) => {
                         eprintln!(
-                            "mci-agent: MCI_DB_KEY_HEX must be 64 hex chars (32 bytes). Falling back to health-only drain."
+                            "mci-agent: MCI_DB_KEY_HEX not set — health-only drain. Set it to write OCR events into the encrypted brain."
                         );
                         None
                     }
-                },
-                Err(_) => {
-                    eprintln!(
-                        "mci-agent: MCI_DB_KEY_HEX not set — health-only drain. Set it to write OCR events into the encrypted brain."
-                    );
-                    None
-                }
-            };
+                };
 
             let drain_result = match brain_pump.as_ref() {
-                Some(pump) => {
+                Some((pump, _store)) => {
                     drain_to_log_with_brain(&mut stdin, &log, &clock, &device_id, pump)
                         .await
                 }
                 None => drain_to_log(&mut stdin, &log, &clock, &device_id).await,
             };
+
+            // Signal shutdown to idle-batch worker.
+            let _ = shutdown_tx.send(true);
+
             match drain_result {
                 Ok(stats) => {
                     eprintln!(
@@ -382,6 +418,63 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
         return Err(13);
     }
     Ok(())
+}
+
+/// Load the best available embedder backend for the idle-batch worker.
+///
+/// On macOS: tries to load the Core ML `.mlpackage` from candidate
+/// paths; falls back to the zero-vector backend when the model isn't
+/// bundled (development builds). Returns `(Arc<dyn Embedder>, is_real)`.
+///
+/// The ArcticEmbedSEmbedder wrapper applies the model-card prefix
+/// discipline + L2-norm (ADR-0011 §3). Document-side prefix (empty
+/// for arctic-embed-s) is used for idle-batch embedding.
+#[cfg(target_os = "macos")]
+fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
+    use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
+    use mci_embed_coreml::load_backend_or_fallback;
+    use std::path::Path;
+
+    let home = std::env::var_os("HOME").map_or_else(
+        || std::path::PathBuf::from("/tmp"),
+        std::path::PathBuf::from,
+    );
+    let env_path = std::env::var_os("MCI_ARCTIC_MODEL_PATH")
+        .map(std::path::PathBuf::from);
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(p) = &env_path {
+        candidates.push(p.clone());
+    }
+    // Bundle.module resource path (SwiftPM / Xcode build layout)
+    candidates.push(home.join("Applications/MCICaptureHelper.app/Contents/Resources/arctic-embed-s.mlpackage"));
+    // Executable-relative path
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("arctic-embed-s.mlpackage"));
+            candidates.push(dir.join("../Resources/arctic-embed-s.mlpackage"));
+        }
+    }
+
+    let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
+    let (backend, is_real) = load_backend_or_fallback(&path_refs);
+    let embedder = ArcticEmbedSEmbedder::new_document(backend);
+    (Arc::new(embedder), is_real)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
+    // Non-macOS: no Core ML / ONNX available yet (Phase 8).
+    // Zero-vector embedder marks events "embedded" to avoid busy-loop.
+    struct ZeroEmbedder;
+    impl mci_brain::Embedder for ZeroEmbedder {
+        fn dimension(&self) -> usize { 384 }
+        fn embed_one(&self, _text: &str) -> Result<Vec<f32>, mci_brain::EmbedError> {
+            Ok(vec![0.0_f32; 384])
+        }
+    }
+    eprintln!("mci-agent: non-macOS platform — using zero-vector embedder fallback");
+    (Arc::new(ZeroEmbedder), false)
 }
 
 /// Decode a 64-char hex string into a 32-byte key. Returns `None` on any

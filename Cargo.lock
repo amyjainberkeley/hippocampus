@@ -246,6 +246,7 @@ version = "0.0.1"
 dependencies = [
  "mci-brain",
  "mci-core",
+ "mci-embed-coreml",
  "serde",
  "serde_json",
  "tempfile",
