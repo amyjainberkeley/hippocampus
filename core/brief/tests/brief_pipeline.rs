@@ -364,6 +364,121 @@ fn stub_author_rejects_empty_input() {
 }
 
 // ---------------------------------------------------------------------------
+// LlamaBriefAuthor integration tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn llama_author_produces_brief_that_passes_tripwire() {
+    use mci_brief::llama_author::LlamaBriefAuthor;
+    use mci_brief::llama_backend::StubLlamaBackend;
+
+    let store = Arc::new(InMemoryBrainStore::new());
+    let ids = seed_store_with_events(
+        &store,
+        &[
+            "Worked on task related to event deployment pipeline",
+            "Worked on task related to event database migration",
+        ],
+    );
+
+    let records: Vec<EventRecord> = ids
+        .iter()
+        .map(|&id| {
+            let event = store.get_event(id).unwrap().unwrap();
+            EventRecord {
+                event_id: id,
+                ts_us: event.ts_us,
+                app_bundle_id: event.app_bundle_id.clone(),
+                window_title: event.window_title.clone(),
+                url: event.url.clone(),
+                text_snippet: EventRecord::truncate_snippet(&event.text),
+            }
+        })
+        .collect();
+
+    let backend = std::sync::Arc::new(StubLlamaBackend::with_event_ids(
+        ids.iter().map(|id| id.0).collect(),
+    ));
+    let author = LlamaBriefAuthor::new(backend);
+    let brief = author.author(&records, "Daily summary").unwrap();
+
+    // Produces Draft state
+    assert_eq!(brief.state, BriefState::Draft);
+    assert!(brief.human_approver_id.is_none());
+
+    // All citations present
+    for id in &ids {
+        assert!(
+            brief.citations.contains(id),
+            "llama author missing citation {id}"
+        );
+    }
+
+    // Tripwire passes
+    let violations = validate_citations(&brief, store.as_ref());
+    assert!(
+        violations.is_empty(),
+        "llama author brief failed tripwire: {violations:?}"
+    );
+}
+
+#[test]
+fn llama_author_draft_flows_through_full_lifecycle() {
+    use mci_brief::llama_author::LlamaBriefAuthor;
+    use mci_brief::llama_backend::StubLlamaBackend;
+
+    let store = Arc::new(InMemoryBrainStore::new());
+    let ids = seed_store_with_events(
+        &store,
+        &["Worked on task related to event code review session"],
+    );
+
+    let records: Vec<EventRecord> = ids
+        .iter()
+        .map(|&id| {
+            let event = store.get_event(id).unwrap().unwrap();
+            EventRecord {
+                event_id: id,
+                ts_us: event.ts_us,
+                app_bundle_id: event.app_bundle_id.clone(),
+                window_title: event.window_title.clone(),
+                url: event.url.clone(),
+                text_snippet: EventRecord::truncate_snippet(&event.text),
+            }
+        })
+        .collect();
+
+    let backend = std::sync::Arc::new(StubLlamaBackend::with_event_ids(
+        ids.iter().map(|id| id.0).collect(),
+    ));
+    let author = LlamaBriefAuthor::new(backend);
+    let mut brief = author.author(&records, "Code review").unwrap();
+
+    // Draft → Reviewing
+    advance(&mut brief, LifecycleAction::Submit).unwrap();
+    assert_eq!(brief.state, BriefState::Reviewing);
+
+    // Run tripwire
+    let violations = validate_citations(&brief, store.as_ref());
+    assert!(violations.is_empty());
+
+    // Reviewing → Approved
+    advance(
+        &mut brief,
+        LifecycleAction::Approve {
+            human_approver_id: "user:ceo@mci.dev".into(),
+            citation_violations: violations,
+        },
+    )
+    .unwrap();
+    assert_eq!(brief.state, BriefState::Approved);
+    assert_eq!(
+        brief.human_approver_id.as_deref(),
+        Some("user:ceo@mci.dev")
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Store tests
 // ---------------------------------------------------------------------------
 
