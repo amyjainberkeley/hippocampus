@@ -22,6 +22,16 @@ path = "src/bin/mci_agent.rs"
 name = "mci-seed-brain"
 path = "src/bin/mci_seed_brain.rs"
 
+# P3.10a — read-only CLI for the encrypted brain store. ADR-0016 §6
+# + ADR-0019 "Tier 1": "your brain as a file you own." Opens via
+# SqlCipherBrainStore::open_readonly (SQLITE_OPEN_READ_ONLY pin from
+# PR #82 P3.9b). Subcommands: stats, recent, search, show, export.
+# No new third-party crates (same serde + serde_json already on the
+# workspace lockfile). CSO invariant: read-only handle ONLY.
+[[bin]]
+name = "mci-brain"
+path = "src/bin/mci_brain.rs"
+
 [lints]
 workspace = true
 
