@@ -5,7 +5,8 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
     case screenRecording = 1
     case accessibility = 2
     case automation = 3
-    case done = 4
+    case browserExtension = 4
+    case done = 5
 
     public var id: Int { rawValue }
 
@@ -15,6 +16,7 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
         case .screenRecording: return "Screen Recording"
         case .accessibility: return "Accessibility"
         case .automation: return "Automation"
+        case .browserExtension: return "Browser Extension"
         case .done: return "You're Set"
         }
     }

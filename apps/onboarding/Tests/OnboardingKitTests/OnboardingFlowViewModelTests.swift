@@ -26,13 +26,15 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         vm.advance()
         XCTAssertEqual(vm.currentStep, .automation)
         vm.advance()
+        XCTAssertEqual(vm.currentStep, .browserExtension)
+        vm.advance()
         XCTAssertEqual(vm.currentStep, .done)
     }
 
     func testAdvancePastDoneIsNoop() {
         let vm = makeVM()
         // Walk to done
-        for _ in 0..<4 { vm.advance() }
+        for _ in 0..<5 { vm.advance() }
         XCTAssertEqual(vm.currentStep, .done)
         vm.advance()
         XCTAssertEqual(vm.currentStep, .done)
@@ -60,7 +62,7 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testCanAdvanceIsFalseAtDone() {
         let vm = makeVM()
-        for _ in 0..<4 { vm.advance() }
+        for _ in 0..<5 { vm.advance() }
         XCTAssertFalse(vm.canAdvance)
     }
 
@@ -81,8 +83,8 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         XCTAssertFalse(vm.isTrustPanelPresented)
     }
 
-    func testFiveStepsExist() {
-        XCTAssertEqual(OnboardingStep.allCases.count, 5)
+    func testSixStepsExist() {
+        XCTAssertEqual(OnboardingStep.allCases.count, 6)
     }
 
     func testStepLabelsAreNonEmpty() {

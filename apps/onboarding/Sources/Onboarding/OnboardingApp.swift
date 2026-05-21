@@ -6,6 +6,7 @@ struct OnboardingApp: App {
     @StateObject private var flowVM: OnboardingFlowViewModel
     @StateObject private var trustVM: TrustPanelViewModel
     @StateObject private var retentionVM: RetentionViewModel
+    @StateObject private var extensionVM: BrowserExtensionViewModel
 
     init() {
         #if canImport(AppKit)
@@ -28,6 +29,15 @@ struct OnboardingApp: App {
         _retentionVM = StateObject(wrappedValue: RetentionViewModel(
             store: DiskRetentionStore()
         ))
+
+        #if canImport(AppKit)
+        let detector: any BrowserDetector = RealBrowserDetector()
+        #else
+        let detector: any BrowserDetector = StubBrowserDetector()
+        #endif
+        _extensionVM = StateObject(wrappedValue: BrowserExtensionViewModel(
+            detector: detector
+        ))
     }
 
     var body: some Scene {
@@ -36,6 +46,7 @@ struct OnboardingApp: App {
                 .environmentObject(flowVM)
                 .environmentObject(trustVM)
                 .environmentObject(retentionVM)
+                .environmentObject(extensionVM)
                 .frame(width: 640, height: 480)
         }
         .windowResizability(.contentSize)
