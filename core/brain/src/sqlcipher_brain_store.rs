@@ -353,6 +353,103 @@ impl SqlCipherBrainStore {
         Ok(out)
     }
 
+    /// Paginated full-column cursor: events strictly AFTER `(ts_us, after_id)`
+    /// ordered by `(ts_us ASC, id ASC)`, capped at `limit`.
+    ///
+    /// Handles timestamp ties by breaking on `id` — the cursor is stable
+    /// across calls even when multiple events share the same `ts_us`.
+    /// When `after_id` is `None`, returns events with `ts_us > ts_us_cursor`
+    /// (first page of an export starting at a given timestamp).
+    ///
+    /// Returns full [`Event`] rows (embedding = `None`; callers wanting
+    /// vectors should use [`BrainStore::get_event`] per-id). Replaces the
+    /// N+1 pattern the export subcommand previously used
+    /// (`events_since` → `get_event` per row).
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn paged_events_since(
+        &self,
+        ts_us_cursor: u64,
+        after_id: Option<EventId>,
+        limit: usize,
+    ) -> Result<Vec<Event>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let ts = i64::try_from(ts_us_cursor).unwrap_or(i64::MAX);
+        let aid = after_id.map_or(0_i64, |eid| i64::try_from(eid.0).unwrap_or(0));
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+
+        let mut stmt = guard
+            .conn()
+            .prepare(if after_id.is_some() {
+                "SELECT id, ts_us, app_bundle_id, window_title, url,
+                        text, summary, entities, episode_id,
+                        cascade_reason, keyframe_blob
+                 FROM events
+                 WHERE ts_us > ?1 OR (ts_us = ?1 AND id > ?2)
+                 ORDER BY ts_us ASC, id ASC
+                 LIMIT ?3"
+            } else {
+                "SELECT id, ts_us, app_bundle_id, window_title, url,
+                        text, summary, entities, episode_id,
+                        cascade_reason, keyframe_blob
+                 FROM events
+                 WHERE ts_us > ?1
+                 ORDER BY ts_us ASC, id ASC
+                 LIMIT ?2"
+            })
+            .map_err(|e| StoreError::Backend(format!("prepare paged_events_since: {e}")))?;
+
+        let rows = if after_id.is_some() {
+            stmt.query_map(params![ts, aid, lim], row_to_event_tuple)
+                .map_err(|e| {
+                    StoreError::Backend(format!("query paged_events_since: {e}"))
+                })?
+        } else {
+            stmt.query_map(params![ts, lim], row_to_event_tuple)
+                .map_err(|e| {
+                    StoreError::Backend(format!("query paged_events_since: {e}"))
+                })?
+        };
+
+        let mut out: Vec<Event> = Vec::new();
+        for r in rows {
+            let (
+                ev_id,
+                ts_us,
+                app,
+                title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id,
+                cascade_reason,
+                keyframe_blob,
+            ) = r.map_err(|e| {
+                StoreError::Backend(format!("row paged_events_since: {e}"))
+            })?;
+            out.push(Event {
+                id: EventId(u64::try_from(ev_id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
+                cascade_reason,
+                keyframe_blob,
+                embedding: None,
+            });
+        }
+        Ok(out)
+    }
+
     /// Write an embedding for an existing event into `event_vectors`.
     ///
     /// The idle-batch worker calls this after embedding an event's text.
@@ -441,6 +538,24 @@ type EventRow = (
     i64,            // cascade_reason
     Option<String>, // keyframe_blob
 );
+
+/// Row mapper for the 11-column `events` SELECT used by `recent_events`,
+/// `paged_events_since`, and `unembedded_events`.
+fn row_to_event_tuple(r: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
+    Ok((
+        r.get::<_, i64>(0)?,
+        r.get::<_, i64>(1)?,
+        r.get::<_, Option<String>>(2)?,
+        r.get::<_, Option<String>>(3)?,
+        r.get::<_, Option<String>>(4)?,
+        r.get::<_, String>(5)?,
+        r.get::<_, Option<String>>(6)?,
+        r.get::<_, Option<String>>(7)?,
+        r.get::<_, Option<i64>>(8)?,
+        r.get::<_, i64>(9)?,
+        r.get::<_, Option<String>>(10)?,
+    ))
+}
 
 /// Serialize a 384-d L2-normalized f32 vector to a little-endian BLOB.
 fn embedding_to_blob(v: &[f32]) -> Vec<u8> {

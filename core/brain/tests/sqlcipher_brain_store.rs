@@ -601,3 +601,132 @@ fn stats_reports_count_min_max_after_inserts() {
     assert_eq!(s.oldest_ts_us, Some(1));
     assert_eq!(s.newest_ts_us, Some(100));
 }
+
+// ---------------------------------------------------------------------------
+// paged_events_since — cursor-based full-event pagination
+// ---------------------------------------------------------------------------
+
+#[test]
+fn paged_events_since_no_after_id_returns_events_strictly_after_ts() {
+    let (_dir, path) = tmp("paged_basic.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in [10_u64, 20, 30, 40, 50] {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+    let out = store.paged_events_since(20, None, 100).expect("paged");
+    let ts_seq: Vec<u64> = out.iter().map(|e| e.ts_us).collect();
+    assert_eq!(ts_seq, vec![30, 40, 50], "strictly > cursor_ts, ascending");
+}
+
+#[test]
+fn paged_events_since_cursor_stability_under_ts_ties() {
+    let (_dir, path) = tmp("paged_ties.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        let id = store
+            .put_event(&blank_event(100, &format!("tie-event-{i}")))
+            .expect("put");
+        ids.push(id);
+    }
+
+    let page1 = store.paged_events_since(0, None, 2).expect("page1");
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1[0].id, ids[0]);
+    assert_eq!(page1[1].id, ids[1]);
+
+    let page2 = store
+        .paged_events_since(page1[1].ts_us, Some(page1[1].id), 2)
+        .expect("page2");
+    assert_eq!(page2.len(), 2);
+    assert_eq!(page2[0].id, ids[2]);
+    assert_eq!(page2[1].id, ids[3]);
+
+    let page3 = store
+        .paged_events_since(page2[1].ts_us, Some(page2[1].id), 2)
+        .expect("page3");
+    assert_eq!(page3.len(), 1);
+    assert_eq!(page3[0].id, ids[4]);
+
+    let page4 = store
+        .paged_events_since(page3[0].ts_us, Some(page3[0].id), 2)
+        .expect("page4");
+    assert!(page4.is_empty(), "past end returns empty");
+}
+
+#[test]
+fn paged_events_since_empty_past_end() {
+    let (_dir, path) = tmp("paged_past_end.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    store.put_event(&blank_event(100, "only")).expect("put");
+
+    let out = store.paged_events_since(100, None, 10).expect("paged");
+    assert!(out.is_empty(), "no events after ts=100");
+}
+
+#[test]
+fn paged_events_since_returns_full_text_columns() {
+    let (_dir, path) = tmp("paged_full_cols.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    let mut ev = blank_event(50, "full text content here");
+    ev.app_bundle_id = Some("com.test.app".into());
+    ev.window_title = Some("Test Window".into());
+    ev.url = Some("https://example.com".into());
+    ev.summary = Some("a summary".into());
+    ev.entities = Some(r#"["entity"]"#.into());
+    store.put_event(&ev).expect("put");
+
+    let out = store.paged_events_since(0, None, 10).expect("paged");
+    assert_eq!(out.len(), 1);
+    let got = &out[0];
+    assert_eq!(got.text, "full text content here");
+    assert_eq!(got.app_bundle_id.as_deref(), Some("com.test.app"));
+    assert_eq!(got.window_title.as_deref(), Some("Test Window"));
+    assert_eq!(got.url.as_deref(), Some("https://example.com"));
+    assert_eq!(got.summary.as_deref(), Some("a summary"));
+    assert_eq!(got.entities.as_deref(), Some(r#"["entity"]"#));
+    assert!(got.embedding.is_none());
+}
+
+#[test]
+fn paged_events_since_respects_limit() {
+    let (_dir, path) = tmp("paged_limit.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in 1_u64..=20 {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+    let out = store.paged_events_since(0, None, 5).expect("paged");
+    assert_eq!(out.len(), 5);
+    let ts_seq: Vec<u64> = out.iter().map(|e| e.ts_us).collect();
+    assert_eq!(ts_seq, vec![1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn paged_events_since_zero_limit_returns_empty() {
+    let (_dir, path) = tmp("paged_zero_limit.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    store.put_event(&blank_event(1, "x")).expect("put");
+    let out = store.paged_events_since(0, None, 0).expect("paged");
+    assert!(out.is_empty(), "limit=0 short-circuits");
+}
+
+#[test]
+fn paged_events_since_large_page_returns_all() {
+    let (_dir, path) = tmp("paged_large.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in 1_u64..=50 {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+    let out = store.paged_events_since(0, None, 10_000).expect("paged");
+    assert_eq!(out.len(), 50, "large limit returns everything");
+    assert_eq!(out.first().unwrap().ts_us, 1);
+    assert_eq!(out.last().unwrap().ts_us, 50);
+}
