@@ -27,12 +27,14 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use mci_agent::brain_ingest::BrainPump;
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
-use mci_agent::runner::drain_to_log;
+use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
+use mci_brain::SqlCipherBrainStore;
 use mci_core::crypto::DbKey;
 
 const VERSION: &str = "0.0.3-phase1-cycle2-iter12";
@@ -48,7 +50,12 @@ struct Args {
 enum Mode {
     Help,
     Version,
-    DrainStdin,
+    /// P3.6.6 + P3.6.7 + P3.10c — wire-frame drainer.
+    ///
+    /// Health frames always go to JSONL. `OCREvent` frames go to the
+    /// SQLCipher brain store IFF `MCI_DB_KEY_HEX` is set; otherwise
+    /// they fall into the non-health counter (legacy behaviour).
+    DrainStdin { db_path: PathBuf },
     HealthSummary { window_seconds: u64 },
     /// P3.10b — localhost MCP server over stdio JSON-RPC 2.0.
     /// Resolves `db_path` and the DB key from env at start-up.
@@ -117,15 +124,18 @@ fn parse_args(argv: &[String]) -> Args {
         i += 1;
     }
 
+    let resolved_db_path = db_path
+        .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
+        .unwrap_or_else(default_db_path);
     let mode = match mode_kind {
         ModeKind::Help => Mode::Help,
         ModeKind::Version => Mode::Version,
-        ModeKind::DrainStdin => Mode::DrainStdin,
+        ModeKind::DrainStdin => Mode::DrainStdin {
+            db_path: resolved_db_path.clone(),
+        },
         ModeKind::HealthSummary => Mode::HealthSummary { window_seconds },
         ModeKind::McpServe => Mode::McpServe {
-            db_path: db_path
-                .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
-                .unwrap_or_else(default_db_path),
+            db_path: resolved_db_path,
         },
     };
     Args {
@@ -165,10 +175,13 @@ fn print_usage() {
         \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n\
         \n\
         Env:\n\
-        \x20 MCI_DB_PATH                (mcp-serve) brain SQLCipher path\n\
-        \x20 MCI_DB_KEY_HEX             (mcp-serve) 64-char hex SQLCipher key (TEMP — see\n\
+        \x20 MCI_DB_PATH                brain SQLCipher path (--drain-stdin + mcp-serve)\n\
+        \x20 MCI_DB_KEY_HEX             64-char hex SQLCipher key (TEMP — see\n\
         \x20                            docs/claude-code-mcp-setup.md; Keychain integration\n\
-        \x20                            lands in Phase 4 onboarding)\n"
+        \x20                            lands in Phase 4 onboarding). With --drain-stdin,\n\
+        \x20                            absence falls back to health-only drain (no brain\n\
+        \x20                            writes); presence routes OCREvents through the\n\
+        \x20                            P3.6.6 wire-to-brain ingest pump.\n"
     );
 }
 
@@ -186,7 +199,7 @@ async fn main() -> ExitCode {
             print_usage();
             ExitCode::SUCCESS
         }
-        Mode::DrainStdin => {
+        Mode::DrainStdin { db_path } => {
             let (device_id, source) = match load_or_generate(args.device_id_path.clone()).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -206,13 +219,85 @@ async fn main() -> ExitCode {
                 max_bytes: 10 * 1024 * 1024,
             });
             let clock = SystemWallClock;
-
             let mut stdin = tokio::io::stdin();
-            match drain_to_log(&mut stdin, &log, &clock, &device_id).await {
+
+            // P3.10c — open the brain store IFF `MCI_DB_KEY_HEX` is
+            // set. The brain-aware drain routes `OCREvent` frames to
+            // `BrainPump::ingest_ocr_event(...)`; the legacy
+            // `drain_to_log` path counts them as `frames_non_health`
+            // and never writes to disk. Embedder is `None` for now
+            // (the on-disk `arctic-embed-s.mlpackage` ships at P3.8);
+            // events ingest with `embedding = None` and fall back to
+            // FTS5-only lexical recall until then.
+            //
+            // The `MCI_DB_KEY_HEX` env var matches the `mcp-serve`
+            // convention (same docs/claude-code-mcp-setup.md note,
+            // Phase-4 Keychain integration supersedes both). When the
+            // key is absent, the binary preserves pre-P3.10c
+            // behaviour — no brain writes, no failure.
+            let brain_pump: Option<BrainPump> = match std::env::var("MCI_DB_KEY_HEX") {
+                Ok(key_hex) => match decode_hex32(&key_hex) {
+                    Some(key_bytes) => {
+                        if let Some(parent) = db_path.parent() {
+                            if !parent.exists() {
+                                if let Err(e) = std::fs::create_dir_all(parent) {
+                                    eprintln!(
+                                        "mci-agent: create_dir_all({}): {e}",
+                                        parent.display()
+                                    );
+                                    return ExitCode::from(20);
+                                }
+                            }
+                        }
+                        let key = DbKey::from_bytes(key_bytes);
+                        match SqlCipherBrainStore::new(&db_path, &key) {
+                            Ok(store) => {
+                                eprintln!(
+                                    "mci-agent: brain ingest enabled. db={} (writer; embedder=None — FTS5-only until P3.8)",
+                                    db_path.display()
+                                );
+                                let store: Arc<dyn mci_brain::BrainStore> = Arc::new(store);
+                                Some(BrainPump::new(store, None))
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "mci-agent: open brain at {}: {e}. Falling back to health-only drain.",
+                                    db_path.display()
+                                );
+                                None
+                            }
+                        }
+                    }
+                    None => {
+                        eprintln!(
+                            "mci-agent: MCI_DB_KEY_HEX must be 64 hex chars (32 bytes). Falling back to health-only drain."
+                        );
+                        None
+                    }
+                },
+                Err(_) => {
+                    eprintln!(
+                        "mci-agent: MCI_DB_KEY_HEX not set — health-only drain. Set it to write OCR events into the encrypted brain."
+                    );
+                    None
+                }
+            };
+
+            let drain_result = match brain_pump.as_ref() {
+                Some(pump) => {
+                    drain_to_log_with_brain(&mut stdin, &log, &clock, &device_id, pump)
+                        .await
+                }
+                None => drain_to_log(&mut stdin, &log, &clock, &device_id).await,
+            };
+            match drain_result {
                 Ok(stats) => {
                     eprintln!(
-                        "mci-agent: drained {} frame(s); {} logged, {} non-health",
-                        stats.frames_seen, stats.frames_logged, stats.frames_non_health
+                        "mci-agent: drained {} frame(s); {} logged, {} non-health, {} to brain",
+                        stats.frames_seen,
+                        stats.frames_logged,
+                        stats.frames_non_health,
+                        stats.frames_to_brain
                     );
                     eprintln!("mci-agent: log = {}", args.log_path.display());
                     ExitCode::SUCCESS
