@@ -30,6 +30,7 @@ members = [
     # `SqlCipherBrainStore` + `HybridRetriever`. See
     # `adapters/macos/mci-brain-ffi/Cargo.toml`.
     "adapters/macos/mci-brain-ffi",
+    "server",
 ]
 
 [workspace.package]
