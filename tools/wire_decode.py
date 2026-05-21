@@ -48,7 +48,7 @@ import sys
 from collections import Counter
 
 MAGIC = 0x4D
-VERSION = 0x05  # wire bumped 0x04->0x05 (Phase 7: PageContentEvent variant)
+VERSION = 0x06  # wire bumped 0x05->0x06 (OCR/PageContent merge; semantic-only)
 HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
 # HelperHealth v0x04 payload = 7 × u64 LE = 56 bytes (unchanged from 0x03):
 #   uptime_ms · frames_delivered · frames_suppressed ·

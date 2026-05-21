@@ -36,7 +36,10 @@ import Foundation
 public let frameMagic: UInt8 = 0x4D
 
 /// Wire-format version byte. MUST match `core::ipc::wire::FRAME_VERSION`.
-public let frameVersion: UInt8 = 0x05
+/// 0x05→0x06: OCR/PageContent merge — agent merges cached extension text
+/// into brain events when URL matches. Wire byte layout unchanged;
+/// semantic-only bump.
+public let frameVersion: UInt8 = 0x06
 
 /// Minimum frame header size in bytes.
 public let minFrameHeaderBytes = 1 + 1 + 2 + 8 + 4
