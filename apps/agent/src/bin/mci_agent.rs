@@ -31,6 +31,7 @@ use mci_agent::brain_ingest::BrainPump;
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
+use mci_agent::episode_worker;
 use mci_agent::idle_batch;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
 use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
@@ -323,6 +324,35 @@ async fn main() -> ExitCode {
                                     }
                                 });
 
+                                // Spawn episode-segmenter worker alongside idle-batch.
+                                let ep_store = Arc::clone(&store);
+                                let ep_shutdown = shutdown_rx.clone();
+                                tokio::spawn(async move {
+                                    let segmenter = Arc::new(
+                                        mci_brain::episode_segmenter::HeuristicEpisodeSegmenter::new(),
+                                    );
+                                    match episode_worker::run_episode_worker(
+                                        ep_store,
+                                        segmenter,
+                                        64, // batch_size
+                                        std::time::Duration::from_secs(5),
+                                        ep_shutdown,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats) => {
+                                            eprintln!(
+                                                "mci-agent: episode-worker exited. assigned={} created={} batches={}",
+                                                stats.events_assigned, stats.episodes_created,
+                                                stats.batches_run,
+                                            );
+                                        }
+                                        Err(e) => {
+                                            eprintln!("mci-agent: episode-worker error: {e}");
+                                        }
+                                    }
+                                });
+
                                 Some((pump, store))
                             }
                             Err(e) => {
@@ -356,7 +386,7 @@ async fn main() -> ExitCode {
                 None => drain_to_log(&mut stdin, &log, &clock, &device_id).await,
             };
 
-            // Signal shutdown to idle-batch worker.
+            // Signal shutdown to idle-batch + episode workers.
             let _ = shutdown_tx.send(true);
 
             match drain_result {
