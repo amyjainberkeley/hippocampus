@@ -36,6 +36,7 @@ members = [
     # `adapters/macos/mci-brain-ffi/Cargo.toml`.
     "adapters/macos/mci-brain-ffi",
     "server",
+    "tools/perf-soak",
 ]
 
 [workspace.package]

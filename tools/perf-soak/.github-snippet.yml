@@ -1,0 +1,23 @@
+# Paste into .github/workflows/ci.yml under `jobs:` when ready.
+# Do not edit the workflow file directly from this PR — the orchestrator
+# integrates snippets to avoid merge conflicts between concurrent waves.
+
+perf-soak:
+  name: Footprint regression (perf-soak)
+  runs-on: macos-14
+  timeout-minutes: 10
+  steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Build soak harness
+      run: cargo build --release -p mci-perf-soak
+    - name: Run 120 s soak (4 writers, 2 readers)
+      run: |
+        ./target/release/mci-perf-soak \
+          --duration 120 --writers 4 --readers 2 \
+          | tee perf-soak.jsonl
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: perf-soak-results
+        path: perf-soak.jsonl
