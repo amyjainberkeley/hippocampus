@@ -17,6 +17,7 @@
 //! handlers never call `crypto::aead::decrypt` or `crypto::key_wrap::unwrap`.
 //! Those primitives exist for client-side use. Integration tests pin this.
 
+pub mod crash_report;
 pub mod crypto;
 pub mod enrollment;
 pub mod handlers;

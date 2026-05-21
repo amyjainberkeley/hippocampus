@@ -34,6 +34,7 @@ use mci_agent::health_summary::summarize_file;
 use mci_agent::idle_batch;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
 use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
+use mci_agent::panic_uploader::{self, PanicUploader};
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
 use mci_brain::SqlCipherBrainStore;
 use mci_core::crypto::DbKey;
@@ -192,7 +193,11 @@ fn print_usage() {
         \x20 MCI_EMBEDDER_DISABLED      set to 1 to force lexical-only recall in mcp-serve\n\
         \x20                            (skips HybridRetriever even if an embedder is\n\
         \x20                            available). Default fusion weights per ADR-0010:\n\
-        \x20                            w_sem=0.5, w_lex=0.3, w_rec=0.15, w_src=0.05.\n"
+        \x20                            w_sem=0.5, w_lex=0.3, w_rec=0.15, w_src=0.05.\n\
+        \x20 MCI_CRASH_REPORT_URL       HTTP endpoint for crash report uploads (e.g.\n\
+        \x20                            http://127.0.0.1:3100/v1/crash-report).\n\
+        \x20 MCI_CRASH_REPORT_OPTED_IN  set to 1 to enable crash report uploads.\n\
+        \x20                            BOTH URL + OPTED_IN required. Default: OFF.\n"
     );
 }
 
@@ -200,6 +205,21 @@ fn print_usage() {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     mci_agent::panic_hook::install();
+
+    // Best-effort drain of prior crash reports. Spawned early so it
+    // runs in the background while the main mode proceeds. Default
+    // OFF — both MCI_CRASH_REPORT_URL and MCI_CRASH_REPORT_OPTED_IN=1
+    // must be set.
+    if let Some(uploader) = PanicUploader::from_env() {
+        let panic_log = mci_agent::panic_hook::default_panic_log_path();
+        tokio::spawn(async move {
+            match panic_uploader::drain_pending(&uploader, &panic_log).await {
+                Ok(0) => {}
+                Ok(n) => eprintln!("mci-agent: uploaded {n} crash report(s)"),
+                Err(e) => eprintln!("mci-agent: crash report upload error: {e}"),
+            }
+        });
+    }
 
     let raw_argv: Vec<String> = std::env::args().collect();
     let args = parse_args(&raw_argv);

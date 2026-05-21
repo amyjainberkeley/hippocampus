@@ -8,6 +8,11 @@ struct StatusMenuView: View {
     let updater: SparkleUpdaterService
 
     @State private var showAbout = false
+    // Crash-report opt-in toggle. Persists to UserDefaults.
+    // TODO(wave-6-follow-up): wire this into ProcessSupervisor's
+    // agent-spawn env to set MCI_CRASH_REPORT_OPTED_IN=1 on the
+    // mci-agent child process. Currently UI-only.
+    @AppStorage("crashReportOptedIn") private var crashReportOptedIn = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -81,6 +86,8 @@ struct StatusMenuView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Toggle("Send Crash Reports", isOn: $crashReportOptedIn)
 
             Button("View Logs in Console") {
                 let logDir = FileManager.default.homeDirectoryForCurrentUser
