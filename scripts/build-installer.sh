@@ -200,13 +200,13 @@ echo "--- Staging DMG contents ---"
 cp -R "$APP_PATH" "$DMG_STAGING/Hippocampus.app"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-# Copy volume icon if available
-VOLUME_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
+# Copy volume icon
+VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
 if [[ -f "$VOLUME_ICON" ]]; then
     cp "$VOLUME_ICON" "$DMG_STAGING/.VolumeIcon.icns"
 fi
 
-# Generate background image if not already present
+# Regenerate background image if missing
 BACKGROUND_PNG="$INSTALLER_ASSETS/background.png"
 if [[ ! -f "$BACKGROUND_PNG" ]]; then
     echo "Generating DMG background image..."
@@ -216,6 +216,15 @@ if [[ ! -f "$BACKGROUND_PNG" ]]; then
     else
         echo "WARNING: No background generator found, DMG will use default Finder background"
     fi
+fi
+
+# Regenerate EULA / SLA resources if missing
+EULA_RTF="$INSTALLER_ASSETS/EULA.rtf"
+SLA_R="$INSTALLER_ASSETS/sla.r"
+GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
+if [[ ! -f "$EULA_RTF" || ! -f "$SLA_R" ]] && [[ -f "$GENERATE_EULA" ]]; then
+    echo "Generating EULA.rtf + sla.r from terms-of-service.md..."
+    python3 "$GENERATE_EULA"
 fi
 
 # Create .background directory (hidden in DMG)
@@ -290,6 +299,32 @@ hdiutil convert \
     -o "$FINAL_DMG"
 
 rm -f "$TEMP_DMG"
+
+# --- Step 6.5: Attach Software License Agreement ---
+
+SLA_R="$INSTALLER_ASSETS/sla.r"
+if [[ -f "$SLA_R" ]]; then
+    if command -v Rez &>/dev/null; then
+        echo ""
+        echo "--- Attaching Software License Agreement ---"
+        if hdiutil unflatten "$FINAL_DMG" 2>/dev/null; then
+            if Rez -append "$SLA_R" -o "$FINAL_DMG" 2>/dev/null; then
+                hdiutil flatten "$FINAL_DMG" 2>/dev/null
+                echo "  SLA attached (license shown on DMG mount)."
+            else
+                echo "WARNING: Rez failed — SLA not attached (non-fatal)."
+                echo "         EULA available at hippocampus.ai/legal"
+                hdiutil flatten "$FINAL_DMG" 2>/dev/null || true
+            fi
+        else
+            echo "WARNING: hdiutil unflatten failed — SLA not attached (non-fatal)."
+        fi
+    else
+        echo ""
+        echo "NOTE: Rez not found — skipping SLA attachment."
+        echo "      Install Xcode Command Line Tools for SLA support."
+    fi
+fi
 
 # --- Step 7: Notarize + staple (Developer ID only) ---
 
