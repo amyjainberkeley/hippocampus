@@ -90,6 +90,11 @@ dual_store_tests!(
     put_brief_then_get_returns_same_envelope,
     since_query_filters_briefs_by_ts,
     enrollment_flow_state_machine,
+    creator_full_crypto_round_trip,
+    vouch_admits_new_member_who_reads_briefs,
+    invalid_vouch_nonexistent_enrollment,
+    invalid_vouch_already_active,
+    server_blobs_undecryptable_without_private_key,
 );
 
 // ---------------------------------------------------------------------------
@@ -239,6 +244,371 @@ async fn enrollment_flow_state_machine(factory: fn() -> Box<dyn WorkspaceStore>)
     let vouch_body = vouch_resp.into_body().collect().await.unwrap().to_bytes();
     let updated: EnrollmentRequest = serde_json::from_slice(&vouch_body).unwrap();
     assert_eq!(updated.state, EnrollmentState::Active);
+}
+
+/// ADR-0019 §4: workspace creator (MemberId(0)) enrolls, uploads an encrypted
+/// brief with real AEAD + key-wrap crypto, retrieves it, decrypts client-side.
+/// Full HTTP round-trip through both store backends.
+async fn creator_full_crypto_round_trip(factory: fn() -> Box<dyn WorkspaceStore>) {
+    use mci_server::crypto::aead::{self, AeadKey, AeadNonce};
+    use mci_server::crypto::key_wrap;
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let store = factory();
+    let ws_id = WorkspaceId(Uuid::new_v4());
+    let creator_id = MemberId(Uuid::new_v4());
+    store
+        .seed_workspace(ws_id, vec![creator_id])
+        .await
+        .expect("seed");
+    let app = {
+        let state = Arc::new(AppState::new(store));
+        router(state)
+    };
+
+    let creator_private = StaticSecret::random();
+    let creator_public = PublicKey::from(&creator_private);
+    let workspace_key = AeadKey::generate().unwrap();
+
+    let content = b"Q3 OKR brief: ship workspace sync by 2026-07.";
+    let aad_str = format!("ws:{},ts:5000000", ws_id.0);
+    let (ciphertext, nonce) = aead::encrypt(content, &workspace_key, aad_str.as_bytes()).unwrap();
+    let wrapped = key_wrap::wrap(workspace_key.as_bytes(), &creator_public).unwrap();
+
+    let create_req = CreateBriefRequest {
+        uploaded_by: creator_id,
+        ts_brief_us: 5_000_000,
+        ciphertext: ciphertext.clone(),
+        nonce: nonce.0.to_vec(),
+        aad: aad_str.as_bytes().to_vec(),
+        member_key_wraps: vec![MemberKeyWrap {
+            member_id: creator_id,
+            wrapped_key: wrapped.to_bytes(),
+        }],
+    };
+
+    let put_req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/briefs", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&create_req).unwrap()))
+        .unwrap();
+    let put_resp = app.clone().oneshot(put_req).await.unwrap();
+    assert_eq!(put_resp.status(), StatusCode::CREATED);
+
+    let get_req = Request::builder()
+        .uri(format!("/v1/workspaces/{}/briefs", ws_id.0))
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.oneshot(get_req).await.unwrap();
+    assert_eq!(get_resp.status(), StatusCode::OK);
+
+    let body = get_resp.into_body().collect().await.unwrap().to_bytes();
+    let briefs: Vec<BriefEnvelope> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(briefs.len(), 1);
+    let envelope = &briefs[0];
+
+    let member_wrap = &envelope.member_key_wraps[0];
+    assert_eq!(member_wrap.member_id, creator_id);
+    let restored = key_wrap::WrappedKey::from_bytes(&member_wrap.wrapped_key).unwrap();
+    let ws_key_bytes = key_wrap::unwrap(&restored, &creator_private).unwrap();
+    let restored_key = AeadKey::from_bytes(ws_key_bytes);
+
+    let mut nonce_arr = [0u8; 12];
+    nonce_arr.copy_from_slice(&envelope.nonce);
+    let decrypted =
+        aead::decrypt(&envelope.ciphertext, &AeadNonce(nonce_arr), &restored_key, &envelope.aad)
+            .unwrap();
+    assert_eq!(decrypted, content);
+}
+
+/// ADR-0019 §2.2: existing member vouches for new candidate → candidate admitted
+/// → new member can read briefs (with their own key wrap).
+async fn vouch_admits_new_member_who_reads_briefs(factory: fn() -> Box<dyn WorkspaceStore>) {
+    use mci_server::crypto::aead::{self, AeadKey, AeadNonce};
+    use mci_server::crypto::key_wrap;
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let (app, ws_id, creator_id) = test_app_with_workspace_from(factory()).await;
+
+    let creator_private = StaticSecret::random();
+    let creator_public = PublicKey::from(&creator_private);
+    let new_member_id = MemberId(Uuid::new_v4());
+    let new_member_private = StaticSecret::random();
+    let new_member_public = PublicKey::from(&new_member_private);
+    let workspace_key = AeadKey::generate().unwrap();
+
+    // Step 1: new member enrolls.
+    let enroll_req = EnrollmentRequest {
+        id: Uuid::nil(),
+        workspace_id: ws_id,
+        requester_id: new_member_id,
+        ephemeral_pubkey: new_member_public.as_bytes().to_vec(),
+        state: EnrollmentState::Pending,
+    };
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/enroll", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&enroll_req).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let enrollment: EnrollmentRequest =
+        serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(enrollment.state, EnrollmentState::Pending);
+
+    // Step 2: existing member vouches — wraps workspace key for new member.
+    let vouch_wrapped = key_wrap::wrap(workspace_key.as_bytes(), &new_member_public).unwrap();
+    let vouch = VouchToken {
+        enrollment_id: enrollment.id,
+        voucher_id: creator_id,
+        wrapped_workspace_key: vouch_wrapped.to_bytes(),
+    };
+    let vouch_req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/vouch", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&vouch).unwrap()))
+        .unwrap();
+    let vouch_resp = app.clone().oneshot(vouch_req).await.unwrap();
+    assert_eq!(vouch_resp.status(), StatusCode::OK);
+    let updated: EnrollmentRequest = serde_json::from_slice(
+        &vouch_resp
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes(),
+    )
+    .unwrap();
+    assert_eq!(updated.state, EnrollmentState::Active);
+
+    // Step 3: creator uploads brief with key wraps for BOTH members.
+    let content = b"Workspace sync design: delta protocol + CRDT merge.";
+    let aad_str = format!("ws:{},ts:9000000", ws_id.0);
+    let (ciphertext, nonce) = aead::encrypt(content, &workspace_key, aad_str.as_bytes()).unwrap();
+    let wrap_creator = key_wrap::wrap(workspace_key.as_bytes(), &creator_public).unwrap();
+    let wrap_new = key_wrap::wrap(workspace_key.as_bytes(), &new_member_public).unwrap();
+
+    let create_req = CreateBriefRequest {
+        uploaded_by: creator_id,
+        ts_brief_us: 9_000_000,
+        ciphertext: ciphertext.clone(),
+        nonce: nonce.0.to_vec(),
+        aad: aad_str.as_bytes().to_vec(),
+        member_key_wraps: vec![
+            MemberKeyWrap {
+                member_id: creator_id,
+                wrapped_key: wrap_creator.to_bytes(),
+            },
+            MemberKeyWrap {
+                member_id: new_member_id,
+                wrapped_key: wrap_new.to_bytes(),
+            },
+        ],
+    };
+    let put_req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/briefs", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&create_req).unwrap()))
+        .unwrap();
+    let put_resp = app.clone().oneshot(put_req).await.unwrap();
+    assert_eq!(put_resp.status(), StatusCode::CREATED);
+
+    // Step 4: new member retrieves and decrypts using THEIR private key.
+    let get_req = Request::builder()
+        .uri(format!("/v1/workspaces/{}/briefs", ws_id.0))
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.oneshot(get_req).await.unwrap();
+    assert_eq!(get_resp.status(), StatusCode::OK);
+    let body = get_resp.into_body().collect().await.unwrap().to_bytes();
+    let briefs: Vec<BriefEnvelope> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(briefs.len(), 1);
+
+    let new_member_wrap = briefs[0]
+        .member_key_wraps
+        .iter()
+        .find(|w| w.member_id == new_member_id)
+        .expect("new member must have a key wrap");
+    let restored = key_wrap::WrappedKey::from_bytes(&new_member_wrap.wrapped_key).unwrap();
+    let ws_key_bytes = key_wrap::unwrap(&restored, &new_member_private).unwrap();
+    let restored_key = AeadKey::from_bytes(ws_key_bytes);
+
+    let mut nonce_arr = [0u8; 12];
+    nonce_arr.copy_from_slice(&briefs[0].nonce);
+    let decrypted = aead::decrypt(
+        &briefs[0].ciphertext,
+        &AeadNonce(nonce_arr),
+        &restored_key,
+        &briefs[0].aad,
+    )
+    .unwrap();
+    assert_eq!(decrypted, content);
+}
+
+/// Invalid vouch: non-existent enrollment_id → error response.
+async fn invalid_vouch_nonexistent_enrollment(factory: fn() -> Box<dyn WorkspaceStore>) {
+    let (app, ws_id, creator_id) = test_app_with_workspace_from(factory()).await;
+
+    let vouch = VouchToken {
+        enrollment_id: Uuid::new_v4(),
+        voucher_id: creator_id,
+        wrapped_workspace_key: vec![0xBB; 32],
+    };
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/vouch", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&vouch).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert!(
+        resp.status().is_client_error(),
+        "vouch on non-existent enrollment must be rejected (got {})",
+        resp.status()
+    );
+}
+
+/// Invalid vouch: already-active enrollment (double vouch) → error response.
+async fn invalid_vouch_already_active(factory: fn() -> Box<dyn WorkspaceStore>) {
+    let (app, ws_id, creator_id) = test_app_with_workspace_from(factory()).await;
+    let new_member = MemberId(Uuid::new_v4());
+
+    // Enroll.
+    let enroll_req = EnrollmentRequest {
+        id: Uuid::nil(),
+        workspace_id: ws_id,
+        requester_id: new_member,
+        ephemeral_pubkey: vec![0xAA; 32],
+        state: EnrollmentState::Pending,
+    };
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/enroll", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&enroll_req).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let enrollment: EnrollmentRequest =
+        serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+
+    // First vouch — succeeds.
+    let vouch = VouchToken {
+        enrollment_id: enrollment.id,
+        voucher_id: creator_id,
+        wrapped_workspace_key: vec![0xBB; 32],
+    };
+    let vouch_req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/vouch", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&vouch).unwrap()))
+        .unwrap();
+    let vouch_resp = app.clone().oneshot(vouch_req).await.unwrap();
+    assert_eq!(vouch_resp.status(), StatusCode::OK);
+
+    // Second vouch — must be rejected (already active).
+    let vouch2 = VouchToken {
+        enrollment_id: enrollment.id,
+        voucher_id: creator_id,
+        wrapped_workspace_key: vec![0xCC; 32],
+    };
+    let vouch_req2 = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/vouch", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&vouch2).unwrap()))
+        .unwrap();
+    let vouch_resp2 = app.oneshot(vouch_req2).await.unwrap();
+    assert!(
+        vouch_resp2.status().is_client_error(),
+        "double vouch must be rejected (got {})",
+        vouch_resp2.status()
+    );
+}
+
+/// ADR-0019 §4.10 NO BACKDOOR: server-stored ciphertext + key wraps are
+/// undecryptable without the member's X25519 private key.
+async fn server_blobs_undecryptable_without_private_key(factory: fn() -> Box<dyn WorkspaceStore>) {
+    use mci_server::crypto::aead::{self, AeadKey, AeadNonce};
+    use mci_server::crypto::key_wrap;
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let (app, ws_id, member_id) = test_app_with_workspace_from(factory()).await;
+
+    let member_private = StaticSecret::random();
+    let member_public = PublicKey::from(&member_private);
+    let workspace_key = AeadKey::generate().unwrap();
+
+    let content = b"Confidential: employee compensation data.";
+    let aad_str = format!("ws:{},ts:7000000", ws_id.0);
+    let (ciphertext, nonce) = aead::encrypt(content, &workspace_key, aad_str.as_bytes()).unwrap();
+    let wrapped = key_wrap::wrap(workspace_key.as_bytes(), &member_public).unwrap();
+
+    let create_req = CreateBriefRequest {
+        uploaded_by: member_id,
+        ts_brief_us: 7_000_000,
+        ciphertext: ciphertext.clone(),
+        nonce: nonce.0.to_vec(),
+        aad: aad_str.as_bytes().to_vec(),
+        member_key_wraps: vec![MemberKeyWrap {
+            member_id,
+            wrapped_key: wrapped.to_bytes(),
+        }],
+    };
+    let put_req = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/workspaces/{}/briefs", ws_id.0))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&create_req).unwrap()))
+        .unwrap();
+    let put_resp = app.clone().oneshot(put_req).await.unwrap();
+    assert_eq!(put_resp.status(), StatusCode::CREATED);
+
+    let get_req = Request::builder()
+        .uri(format!("/v1/workspaces/{}/briefs", ws_id.0))
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.oneshot(get_req).await.unwrap();
+    let body = get_resp.into_body().collect().await.unwrap().to_bytes();
+    let briefs: Vec<BriefEnvelope> = serde_json::from_slice(&body).unwrap();
+    let envelope = &briefs[0];
+
+    // Server admin has DB access → has ciphertext, nonce, aad, and wrapped_key bytes.
+    // But WITHOUT the member's private key, they cannot recover the workspace key.
+    let attacker_private = StaticSecret::random();
+    let stolen_wrap =
+        key_wrap::WrappedKey::from_bytes(&envelope.member_key_wraps[0].wrapped_key).unwrap();
+    assert!(
+        key_wrap::unwrap(&stolen_wrap, &attacker_private).is_err(),
+        "attacker without member private key must not unwrap workspace key"
+    );
+
+    // Even with a random AES key, ciphertext is undecryptable (tag check fails).
+    let random_key = AeadKey::generate().unwrap();
+    let mut nonce_arr = [0u8; 12];
+    nonce_arr.copy_from_slice(&envelope.nonce);
+    assert!(
+        aead::decrypt(
+            &envelope.ciphertext,
+            &AeadNonce(nonce_arr),
+            &random_key,
+            &envelope.aad,
+        )
+        .is_err(),
+        "random key must not decrypt brief ciphertext"
+    );
+
+    // Correct private key DOES work (control proof).
+    let ws_key_bytes = key_wrap::unwrap(&stolen_wrap, &member_private).unwrap();
+    let restored_key = AeadKey::from_bytes(ws_key_bytes);
+    let decrypted =
+        aead::decrypt(&envelope.ciphertext, &AeadNonce(nonce_arr), &restored_key, &envelope.aad)
+            .unwrap();
+    assert_eq!(decrypted, content);
 }
 
 // ---------------------------------------------------------------------------
