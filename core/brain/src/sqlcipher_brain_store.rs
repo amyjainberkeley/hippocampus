@@ -42,6 +42,7 @@ use mci_core::store::{
     StoreError as CoreStoreError,
 };
 use rusqlite::params;
+use crate::episode_segmenter::EpisodeId;
 
 use crate::{BrainStats, Event, EventId, EventRecord, StoreError};
 
@@ -488,6 +489,139 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("commit set_event_embedding tx: {e}")))?;
         Ok(())
     }
+
+    /// Return up to `limit` events where `episode_id IS NULL`, ordered
+    /// by `ts_us` ASC.
+    ///
+    /// The episode-segmenter worker polls this to find work.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn unsegmented_events(&self, limit: usize) -> Result<Vec<Event>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, ts_us, app_bundle_id, window_title, url,
+                        text, summary, entities, episode_id,
+                        cascade_reason, keyframe_blob
+                 FROM events
+                 WHERE episode_id IS NULL
+                 ORDER BY ts_us ASC
+                 LIMIT ?1",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare unsegmented_events: {e}")))?;
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![lim], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<String>>(7)?,
+                    r.get::<_, Option<i64>>(8)?,
+                    r.get::<_, i64>(9)?,
+                    r.get::<_, Option<String>>(10)?,
+                ))
+            })
+            .map_err(|e| StoreError::Backend(format!("query unsegmented_events: {e}")))?;
+        let mut out: Vec<Event> = Vec::new();
+        for r in rows {
+            let (
+                ev_id, ts_us, app, title, url, text, summary, entities,
+                episode_id, cascade_reason, keyframe_blob,
+            ) = r.map_err(|e| StoreError::Backend(format!("row unsegmented_events: {e}")))?;
+            out.push(Event {
+                id: EventId(u64::try_from(ev_id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
+                cascade_reason,
+                keyframe_blob,
+                embedding: None,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Return the most-recent event that already has an `episode_id`,
+    /// ordered by `ts_us DESC LIMIT 1`. Used by the episode-segmenter
+    /// worker for continuity across batches.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn last_segmented_event(&self) -> Result<Option<Event>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let row: Option<EventRow> = guard
+            .conn()
+            .query_row(
+                "SELECT id, ts_us, app_bundle_id, window_title, url,
+                        text, summary, entities, episode_id,
+                        cascade_reason, keyframe_blob
+                 FROM events
+                 WHERE episode_id IS NOT NULL
+                 ORDER BY ts_us DESC
+                 LIMIT 1",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                        r.get(9)?,
+                        r.get(10)?,
+                    ))
+                },
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(StoreError::Backend(format!(
+                    "SELECT last_segmented_event: {other}"
+                ))),
+            })?;
+
+        let Some((
+            ev_id, ts_us, app, title, url, text, summary, entities,
+            episode_id, cascade_reason, keyframe_blob,
+        )) = row
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(Event {
+            id: EventId(u64::try_from(ev_id).unwrap_or(0)),
+            ts_us: u64::try_from(ts_us).unwrap_or(0),
+            app_bundle_id: app,
+            window_title: title,
+            url,
+            text,
+            summary,
+            entities,
+            episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
+            cascade_reason,
+            keyframe_blob,
+            embedding: None,
+        }))
+    }
 }
 
 /// Schema migration — ADR-0016 §1.4. Idempotent: every `CREATE` is
@@ -850,5 +984,76 @@ impl crate::BrainStore for SqlCipherBrainStore {
         hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         hits.truncate(limit);
         Ok(hits)
+    }
+}
+
+impl crate::episode_segmenter::EpisodeWriter for SqlCipherBrainStore {
+    fn create_episode(
+        &self,
+        ts_start: u64,
+        ts_end: u64,
+        app_bundle_id: Option<&str>,
+    ) -> Result<EpisodeId, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin create_episode tx: {e}")))?;
+        tx.execute(
+            "INSERT INTO episodes (ts_start, ts_end, app_bundle_id) VALUES (?1, ?2, ?3)",
+            params![
+                i64::try_from(ts_start).unwrap_or(i64::MAX),
+                i64::try_from(ts_end).unwrap_or(i64::MAX),
+                app_bundle_id,
+            ],
+        )
+        .map_err(|e| StoreError::Backend(format!("INSERT episodes: {e}")))?;
+        let row_id = tx.last_insert_rowid();
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit create_episode tx: {e}")))?;
+        Ok(EpisodeId(u64::try_from(row_id).unwrap_or(0)))
+    }
+
+    fn set_event_episode(
+        &self,
+        event_id: EventId,
+        episode_id: EpisodeId,
+    ) -> Result<(), StoreError> {
+        let ev = i64::try_from(event_id.0).map_err(|e| {
+            StoreError::InvalidInput(format!("event id {} out of i64 range: {e}", event_id.0))
+        })?;
+        let ep = i64::try_from(episode_id.0).map_err(|e| {
+            StoreError::InvalidInput(format!(
+                "episode id {} out of i64 range: {e}",
+                episode_id.0
+            ))
+        })?;
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .execute(
+                "UPDATE events SET episode_id = ?1 WHERE id = ?2",
+                params![ep, ev],
+            )
+            .map_err(|e| StoreError::Backend(format!("UPDATE events.episode_id: {e}")))?;
+        Ok(())
+    }
+
+    fn extend_episode(&self, episode_id: EpisodeId, ts_end: u64) -> Result<(), StoreError> {
+        let ep = i64::try_from(episode_id.0).map_err(|e| {
+            StoreError::InvalidInput(format!(
+                "episode id {} out of i64 range: {e}",
+                episode_id.0
+            ))
+        })?;
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .execute(
+                "UPDATE episodes SET ts_end = ?1 WHERE id = ?2",
+                params![i64::try_from(ts_end).unwrap_or(i64::MAX), ep],
+            )
+            .map_err(|e| StoreError::Backend(format!("UPDATE episodes.ts_end: {e}")))?;
+        Ok(())
     }
 }

@@ -29,6 +29,7 @@ pub mod mcp;
 pub mod runner;
 pub mod supervisor;
 pub mod wall_clock;
+pub mod episode_worker;
 
 pub use brain_ingest::{BrainIngestor, BrainPump, IngestError, IngestOutcome, NoopBrainIngestor};
 pub use device_id::{load_or_generate, DeviceId, DeviceIdError, DeviceIdSource};

@@ -145,6 +145,7 @@ pub struct BrainStats {
 }
 
 pub mod hybrid_retriever;
+pub mod episode_segmenter;
 
 pub use hybrid_retriever::{FusionWeights, HybridRetriever, RetrievalShape};
 
