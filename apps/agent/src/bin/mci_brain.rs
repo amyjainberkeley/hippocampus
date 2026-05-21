@@ -395,10 +395,6 @@ fn run_export(
     out: Option<PathBuf>,
     since: u64,
 ) -> ExitCode {
-    // Stream events in ASC order via events_since as a cursor, then
-    // get_event per row for full text. The N+1 query pattern is fine
-    // for Phase 3 corpus size; a batched full-text ASC API is a
-    // follow-on if export of large stores becomes a need.
     const BATCH: usize = 500;
     let mut writer: Box<dyn Write> = match &out {
         Some(path) => match std::fs::File::create(path) {
@@ -418,10 +414,11 @@ fn run_export(
         }
     }
 
-    let mut cursor = since;
+    let mut cursor_ts = since;
+    let mut cursor_id: Option<EventId> = None;
     let mut total = 0_u64;
     loop {
-        let batch = match store.events_since(cursor, BATCH) {
+        let batch = match store.paged_events_since(cursor_ts, cursor_id, BATCH) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("mci-brain export: {e}");
@@ -431,19 +428,12 @@ fn run_export(
         if batch.is_empty() {
             break;
         }
-        for rec in &batch {
-            cursor = rec.ts_us;
-            let event = match store.get_event(rec.event_id) {
-                Ok(Some(ev)) => ev,
-                Ok(None) => continue,
-                Err(e) => {
-                    eprintln!("mci-brain export: get_event({}): {e}", rec.event_id);
-                    continue;
-                }
-            };
+        for event in &batch {
+            cursor_ts = event.ts_us;
+            cursor_id = Some(event.id);
             let line = match format {
-                ExportFormat::Jsonl => brain_cli::format_event_jsonl(&event),
-                ExportFormat::Csv => brain_cli::format_event_csv_row(&event),
+                ExportFormat::Jsonl => brain_cli::format_event_jsonl(event),
+                ExportFormat::Csv => brain_cli::format_event_csv_row(event),
             };
             if let Err(e) = writeln!(writer, "{line}") {
                 eprintln!("mci-brain export: write: {e}");
