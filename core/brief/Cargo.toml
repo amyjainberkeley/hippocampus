@@ -1,0 +1,18 @@
+[package]
+name                   = "mci-brief"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI brief authoring pipeline — 5-state lifecycle, hallucination tripwire, BriefAuthor trait. ADR-0018 scaffold."
+
+[lints]
+workspace = true
+
+[dependencies]
+mci-brain = { path = "../brain" }
+thiserror = "1"
+
+[dev-dependencies]
+mci-brain = { path = "../brain", features = ["stubs"] }

@@ -16,6 +16,7 @@ members = [
     "apps/agent",
     "core",
     "core/brain",
+    "core/brief",
     # macOS-only Rust adapter: Core ML / ANE backend for the
     # snowflake-arctic-embed-s embedder. Deps + lib body are gated by
     # `cfg(target_os = "macos")` inside the crate so `cargo build
