@@ -1,5 +1,6 @@
 -- dmg-layout.applescript — Set DMG Finder window appearance.
 -- Called by build-installer.sh after mounting the read-write DMG.
+-- Window: 640x400 (1x coords); background.png is 1280x800 (2x Retina).
 -- Usage: osascript dmg-layout.applescript /Volumes/Hippocampus
 
 on run argv
@@ -12,7 +13,7 @@ on run argv
             set current view of container window to icon view
             set toolbar visible of container window to false
             set statusbar visible of container window to false
-            set bounds of container window to {100, 100, 740, 580}
+            set bounds of container window to {100, 100, 740, 500}
 
             set theViewOptions to icon view options of container window
             set arrangement of theViewOptions to not arranged
@@ -21,8 +22,9 @@ on run argv
             set background picture of theViewOptions to file ".background:background.png"
 
             -- Icon positions: app on left, Applications on right
-            set position of item "Hippocampus.app" of container window to {190, 260}
-            set position of item "Applications" of container window to {450, 260}
+            -- These map to (340, 460) and (940, 460) in the 2x background image
+            set position of item "Hippocampus.app" of container window to {170, 230}
+            set position of item "Applications" of container window to {470, 230}
 
             update without registering applications
             delay 1
