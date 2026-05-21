@@ -337,6 +337,8 @@ fn now_us() -> u64 {
 }
 
 fn main() -> ExitCode {
+    mci_agent::panic_hook::install();
+
     let raw_argv: Vec<String> = std::env::args().collect();
     let args = match parse_args(&raw_argv) {
         ParseOutcome::Help => {

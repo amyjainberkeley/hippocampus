@@ -517,6 +517,8 @@ fn run_export(
 // ---------------------------------------------------------------------------
 
 fn main() -> ExitCode {
+    mci_agent::panic_hook::install();
+
     let argv: Vec<String> = std::env::args().collect();
     let args = match parse_args(&argv) {
         ParseOutcome::Help => {
