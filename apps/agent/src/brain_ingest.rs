@@ -144,7 +144,7 @@ impl NoopBrainIngestor {
 
 impl BrainIngestor for NoopBrainIngestor {
     fn ingest_ocr_event(&self, msg: &Message) -> Result<IngestOutcome, IngestError> {
-        if matches!(msg, Message::OCREvent { .. }) {
+        if matches!(msg, Message::OCREvent { .. } | Message::PageContentEvent { .. }) {
             self.seen.fetch_add(1, Ordering::Relaxed);
             Ok(IngestOutcome::Stored {
                 id: EventId(0),
@@ -207,50 +207,45 @@ impl BrainPump {
 impl BrainIngestor for BrainPump {
     #[allow(clippy::too_many_lines)]
     fn ingest_ocr_event(&self, msg: &Message) -> Result<IngestOutcome, IngestError> {
-        // ADR-0016 §4.3 defence-in-depth — exhaustive match against the
-        // Message enum. ANY non-OCREvent variant returns NotOcrEvent
-        // *without* a store call. PrivacyTombstone in particular MUST
-        // dead-end here. The structural wall (the IPC `Routed` enum)
-        // already prevents reaching this code with a Tombstone, but
-        // this second wall is the in-source CSO-sign-off evidence the
-        // PR body references.
-        let Message::OCREvent {
-            seq: _,
-            ts_us,
-            app_bundle_id,
-            window_title,
-            url,
-            ocr_text,
-            keyframe_hash,
-        } = msg
-        else {
-            return Ok(IngestOutcome::NotOcrEvent);
+        let (ts_us, app, title, u, text, keyframe_blob) = match msg {
+            Message::OCREvent {
+                seq: _,
+                ts_us,
+                app_bundle_id,
+                window_title,
+                url,
+                ocr_text,
+                keyframe_hash,
+            } => {
+                let app = bundle_id_from_padded_bytes(app_bundle_id);
+                let title = if window_title.is_empty() { None } else { Some(window_title.clone()) };
+                let u = if url.is_empty() { None } else { Some(url.clone()) };
+                let kb = if keyframe_hash.iter().all(|b| *b == 0) {
+                    None
+                } else {
+                    Some(hex_lower(keyframe_hash))
+                };
+                (ts_us, app, title, u, ocr_text.clone(), kb)
+            }
+            Message::PageContentEvent {
+                seq: _,
+                ts_us,
+                url,
+                title,
+                full_text,
+                source_browser,
+                tab_id: _,
+            } => {
+                let app = browser_bundle_id(source_browser);
+                let t = if title.is_empty() { None } else { Some(title.clone()) };
+                let u = if url.is_empty() { None } else { Some(url.clone()) };
+                (ts_us, app, t, u, full_text.clone(), None)
+            }
+            _ => return Ok(IngestOutcome::NotOcrEvent),
         };
 
-        let app = bundle_id_from_padded_bytes(app_bundle_id);
-        let title = if window_title.is_empty() {
-            None
-        } else {
-            Some(window_title.clone())
-        };
-        let u = if url.is_empty() {
-            None
-        } else {
-            Some(url.clone())
-        };
-        let keyframe_blob = if keyframe_hash.iter().all(|b| *b == 0) {
-            None
-        } else {
-            Some(hex_lower(keyframe_hash))
-        };
-
-        // Embedder runs BEFORE put_event so a mis-dim or backend
-        // failure on the embedder cannot leave a half-stored event row
-        // in the brain. If the embedder is absent, embedding stays
-        // `None` (column is nullable per ADR-0016 §1.4); recall falls
-        // back to FTS5-only.
         let embedding: Option<Vec<f32>> = match &self.embedder {
-            Some(e) if !ocr_text.is_empty() => Some(e.embed_one(ocr_text)?),
+            Some(e) if !text.is_empty() => Some(e.embed_one(&text)?),
             _ => None,
         };
 
@@ -260,7 +255,7 @@ impl BrainIngestor for BrainPump {
             app_bundle_id: app,
             window_title: title,
             url: u,
-            text: ocr_text.clone(),
+            text,
             summary: None,
             entities: None,
             episode_id: None,
@@ -281,6 +276,20 @@ impl BrainIngestor for BrainPump {
     fn events_ingested_count(&self) -> u64 {
         self.counter.load(Ordering::Relaxed)
     }
+}
+
+/// Map a `source_browser` string from the extension to a macOS bundle id.
+fn browser_bundle_id(source: &str) -> Option<String> {
+    let id = match source {
+        "safari" => "com.apple.Safari",
+        "chrome" => "com.google.Chrome",
+        "arc" => "company.thebrowser.Browser",
+        "edge" => "com.microsoft.edgemac",
+        "brave" => "com.brave.Browser",
+        "firefox" => "org.mozilla.firefox",
+        _ => return Some(source.to_owned()),
+    };
+    Some(id.to_owned())
 }
 
 /// Decode the wire's null-padded 64-byte app-bundle-id field into an
@@ -389,6 +398,48 @@ mod tests {
             IngestOutcome::NotOcrEvent => panic!("expected Stored, got NotOcrEvent"),
         }
         assert_eq!(pump.events_ingested_count(), 1);
+    }
+
+    fn make_page_content_event(ts_us: u64, text: &str) -> Message {
+        Message::PageContentEvent {
+            seq: 1,
+            ts_us,
+            url: "https://example.com/pricing".to_string(),
+            title: "Pricing — Example Corp".to_string(),
+            full_text: text.to_string(),
+            source_browser: "chrome".to_string(),
+            tab_id: 42,
+        }
+    }
+
+    #[test]
+    fn pump_stores_page_content_event() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let embedder: Arc<dyn Embedder> = Arc::new(FixedDimEmbedder::default());
+        let pump = BrainPump::new(store.clone(), Some(embedder));
+        let out = pump
+            .ingest_ocr_event(&make_page_content_event(2_000_000, "Full page text here"))
+            .expect("ingest ok");
+        match out {
+            IngestOutcome::Stored { id, embedded } => {
+                assert!(embedded);
+                let ev = store.get_event(id).unwrap().unwrap();
+                assert_eq!(ev.ts_us, 2_000_000);
+                assert_eq!(ev.text, "Full page text here");
+                assert_eq!(ev.app_bundle_id.as_deref(), Some("com.google.Chrome"));
+                assert_eq!(ev.url.as_deref(), Some("https://example.com/pricing"));
+                assert_eq!(ev.window_title.as_deref(), Some("Pricing — Example Corp"));
+                assert_eq!(ev.keyframe_blob, None);
+            }
+            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        }
+    }
+
+    #[test]
+    fn noop_ingestor_counts_page_content_events() {
+        let n = NoopBrainIngestor::new();
+        let _ = n.ingest_ocr_event(&make_page_content_event(1, "hi")).unwrap();
+        assert_eq!(n.events_ingested_count(), 1);
     }
 
     #[test]

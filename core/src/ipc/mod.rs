@@ -58,8 +58,9 @@ pub use fdpass::{
 pub use reader::{FrameReader, ReadError, READER_BUFFER_CAP};
 pub use wire::{
     decode, encode, DecodeError, Frame, MessageType, FRAME_MAGIC, FRAME_VERSION,
-    MAX_OCR_TEXT_BYTES, MIN_FRAME_HEADER_BYTES, OCR_EVENT_APP_BUNDLE_ID_LEN,
-    OCR_EVENT_FIXED_HEADER_BYTES, OCR_EVENT_KEYFRAME_HASH_LEN,
+    MAX_OCR_TEXT_BYTES, MAX_PAGE_CONTENT_TEXT_BYTES, MIN_FRAME_HEADER_BYTES,
+    OCR_EVENT_APP_BUNDLE_ID_LEN, OCR_EVENT_FIXED_HEADER_BYTES, OCR_EVENT_KEYFRAME_HASH_LEN,
+    PAGE_CONTENT_EVENT_FIXED_HEADER_BYTES,
 };
 pub use writer::{FrameWriter, WriteError};
 
@@ -186,6 +187,36 @@ pub enum Message {
         keyframe_hash: [u8; 32],
     },
 
+    /// Browser extension → agent (via native messaging host). Full page
+    /// content extracted from the browser DOM — lossless text that
+    /// pixel-OCR cannot match. ADR-0015 §6 Phase 7 pull-forward.
+    ///
+    /// The native messaging host runs the §6 secret-pattern filter on
+    /// `full_text` BEFORE encoding this variant. Events that fail the
+    /// filter become [`PrivacyTombstone`] with reason
+    /// [`RedactionReason::OcrTimeSecret`] instead — same discipline as
+    /// [`OCREvent`]'s cascade-twice path.
+    ///
+    /// Full text is capped at 200 KB; over-cap triggers sentence-boundary
+    /// truncation in the native messaging host before encoding.
+    PageContentEvent {
+        /// Event-level sequence number.
+        seq: u64,
+        /// Timestamp microseconds since epoch.
+        ts_us: u64,
+        /// Active tab URL. UTF-8, length-prefixed on wire.
+        url: String,
+        /// Page title (`document.title`). UTF-8, length-prefixed on wire.
+        title: String,
+        /// Full page text (`document.body.innerText`, capped at 200 KB).
+        full_text: String,
+        /// Source browser identifier: `"safari"` | `"chrome"` | `"arc"`
+        /// | `"edge"` | `"brave"` | `"firefox"`.
+        source_browser: String,
+        /// Browser-assigned tab id. 0 = not available.
+        tab_id: u32,
+    },
+
     /// Helper → core. Periodic counters for the CRS Telemetry-Gap analyst.
     /// Content-free (`AGENT_PROTOCOL` §9.3 / ADR-0001 NG3).
     HelperHealth {
@@ -245,6 +276,7 @@ impl Message {
             Self::PrivacyTombstone { .. } => MessageType::PrivacyTombstone,
             Self::SurfaceReleased { .. } => MessageType::SurfaceReleased,
             Self::OCREvent { .. } => MessageType::OCREvent,
+            Self::PageContentEvent { .. } => MessageType::PageContentEvent,
             Self::HelperHealth { .. } => MessageType::HelperHealth,
         }
     }
@@ -474,6 +506,15 @@ mod tests {
                 url: "https://example.com".to_string(),
                 ocr_text: "hello world".to_string(),
                 keyframe_hash: [0u8; 32],
+            },
+            Message::PageContentEvent {
+                seq: 0,
+                ts_us: 1,
+                url: "https://example.com".to_string(),
+                title: "Example".to_string(),
+                full_text: "page content".to_string(),
+                source_browser: "chrome".to_string(),
+                tab_id: 42,
             },
         ];
         for m in &msgs {

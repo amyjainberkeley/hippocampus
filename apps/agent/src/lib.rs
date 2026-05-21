@@ -27,6 +27,7 @@ pub mod health_pump;
 pub mod health_summary;
 pub mod idle_batch;
 pub mod mcp;
+pub mod page_content;
 pub mod panic_hook;
 pub mod panic_uploader;
 pub mod runner;
@@ -34,6 +35,7 @@ pub mod supervisor;
 pub mod wall_clock;
 
 pub use brain_ingest::{BrainIngestor, BrainPump, IngestError, IngestOutcome, NoopBrainIngestor};
+pub use page_content::{CachedPageContent, PageContentCache};
 pub use device_id::{load_or_generate, DeviceId, DeviceIdError, DeviceIdSource};
 pub use health_log::{HealthLog, HealthLogConfig, HealthLogError, HealthLogRecord};
 pub use health_pump::{pump_one, PumpError};

@@ -48,7 +48,7 @@ import sys
 from collections import Counter
 
 MAGIC = 0x4D
-VERSION = 0x04  # wire bumped 0x03->0x04 (ADR-0016 P3.6: OCREvent variant)
+VERSION = 0x05  # wire bumped 0x04->0x05 (Phase 7: PageContentEvent variant)
 HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
 # HelperHealth v0x04 payload = 7 × u64 LE = 56 bytes (unchanged from 0x03):
 #   uptime_ms · frames_delivered · frames_suppressed ·
@@ -72,6 +72,7 @@ MSG = {
     0x0020: "surfaceReleased",
     0x0030: "helperHealth",
     0x0040: "ocrEvent",
+    0x0050: "pageContentEvent",
 }
 REASON = {
     1: "denylist-source",
