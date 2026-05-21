@@ -9,6 +9,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private let locator: BinaryLocator
     private let keyStore: KeyStore
+    private let runtimeConfig: RuntimeConfig
     private let logger = Logger(subsystem: "ai.hippocampus", category: "supervisor")
 
     private var helperProcess: Process?
@@ -19,13 +20,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var retryCount = 0
     private var retryTask: Task<Void, Never>?
     private var healthTimer: Timer?
+    private var brainStatsTask: Task<Void, Never>?
+    private var currentKeyHex: String?
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
 
-    public init(locator: BinaryLocator, keyStore: KeyStore) {
+    public init(locator: BinaryLocator, keyStore: KeyStore, runtimeConfig: RuntimeConfig = RuntimeConfig()) {
         self.locator = locator
         self.keyStore = keyStore
+        self.runtimeConfig = runtimeConfig
     }
 
     public func start() {
@@ -35,6 +39,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
         do {
             let keyHex = try resolveKey()
+            currentKeyHex = keyHex
             try spawnChildren(keyHex: keyHex)
             state = .running
             startHealthPolling()
@@ -48,6 +53,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     public func stop() {
         retryTask?.cancel()
         retryTask = nil
+        brainStatsTask?.cancel()
+        brainStatsTask = nil
         healthTimer?.invalidate()
         healthTimer = nil
 
@@ -185,6 +192,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         agent.standardInput = bridgePipe
         var agentEnv = ProcessInfo.processInfo.environment
         agentEnv["MCI_DB_KEY_HEX"] = keyHex
+        if runtimeConfig.crashReportOptedIn {
+            agentEnv["MCI_CRASH_REPORT_OPTED_IN"] = "1"
+        }
         agent.environment = agentEnv
         agent.standardError = aStderr
         agent.terminationHandler = { [weak self] proc in
@@ -249,13 +259,45 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
+    public var isCrashReportOptedIn: Bool {
+        runtimeConfig.crashReportOptedIn
+    }
+
+    public func setCrashReportOptedIn(_ value: Bool) {
+        try? runtimeConfig.setCrashReportOptedIn(value)
+    }
+
     private func startHealthPolling() {
-        healthTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+        healthTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.health = HealthSnapshot.readFromLog()
+                guard let self else { return }
+                if var snapshot = HealthSnapshot.readFromLog() {
+                    if let existing = self.health {
+                        snapshot = snapshot.withBrainEventCount(existing.brainEventCount)
+                    }
+                    self.health = snapshot
+                }
             }
         }
         health = HealthSnapshot.readFromLog()
+        startBrainStatsPolling()
+    }
+
+    private func startBrainStatsPolling() {
+        brainStatsTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let brainPath = self.locator.brainCLIPath()
+                let keyHex = self.currentKeyHex
+                let count = await Task.detached {
+                    HealthSnapshot.readBrainStats(brainPath: brainPath, keyHex: keyHex)
+                }.value
+                if let h = self.health {
+                    self.health = h.withBrainEventCount(count)
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            }
+        }
     }
 }
 
