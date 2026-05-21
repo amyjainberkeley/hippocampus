@@ -1,0 +1,58 @@
+[package]
+name                   = "mci-llama-coreml"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI macOS adapter: Core ML backend for Llama-3.2-1B int4 brief generation. Implements mci_brief::llama_backend::LlamaBackend. See docs/decisions/0018-brief-authoring-approval-pipeline.md §1.2."
+
+[lints]
+workspace = true
+
+# ---------------------------------------------------------------------------
+# Unsafe surface — adapter, NOT core
+# ---------------------------------------------------------------------------
+# This crate calls Apple's Core ML through `objc2-core-ml` / `objc2-foundation`,
+# which expose Objective-C selectors via `unsafe fn`. The unsafe surface is
+# audited per call site; `mci-brief` stays `#![forbid(unsafe_code)]`.
+# Same adapter-below-the-seam split as `mci-embed-coreml`.
+
+[dependencies]
+mci-brief = { path = "../../../core/brief" }
+thiserror = "1"
+
+# macOS-only deps — mirrors mci-embed-coreml gating pattern.
+# On Linux this crate compiles to an empty library.
+#
+# CSO supply-chain audit: ZERO net-new transitive crates — all objc2-*
+# crates already on the lockfile via mci-embed-coreml (PR #70). No new
+# dep-addition gate triggered per ADR-0008.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2             = { version = "0.6", default-features = false, features = ["std"] }
+objc2-foundation  = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+    "NSError",
+    "NSURL",
+    "NSValue",
+    "NSObject",
+    "NSArray",
+    "NSDictionary",
+    "NSData",
+] }
+objc2-core-ml     = { version = "0.3", default-features = false, features = [
+    "std",
+    "MLModel",
+    "MLModelDescription",
+    "MLFeatureDescription",
+    "MLFeatureProvider",
+    "MLFeatureValue",
+    "MLFeatureType",
+    "MLDictionaryFeatureProvider",
+    "MLMultiArray",
+    "MLModelConfiguration",
+] }
+
+[dev-dependencies]
+mci-brief = { path = "../../../core/brief" }

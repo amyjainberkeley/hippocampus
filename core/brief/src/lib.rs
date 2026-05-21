@@ -18,13 +18,21 @@
 //!    violations. Bypassing requires a code change visible in review.
 //! 3. **5-state lifecycle is exhaustive.** Every `(state, action)` pair
 //!    is handled explicitly with `Ok` or `Err`.
-//! 4. **LLM integration STUBBED.** Real `LlamaBriefAuthor` is deferred.
+//! 4. **LLM backend trait + stub.** [`llama_backend::LlamaBackend`] is
+//!    the pluggable generation surface; [`llama_backend::StubLlamaBackend`]
+//!    provides shaped output for tests. Production Core ML backend lives
+//!    in `adapters/macos/mci-llama-coreml/`.
+//! 5. **`LlamaBriefAuthor`** implements [`author::BriefAuthor`] via a
+//!    [`llama_backend::LlamaBackend`], with prompt rendering + citation
+//!    parsing. Hallucinated citations (IDs not in input) are filtered.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 pub mod author;
 pub mod lifecycle;
+pub mod llama_author;
+pub mod llama_backend;
 pub mod model;
 pub mod store;
 pub mod tripwire;

@@ -558,6 +558,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci-llama-coreml"
+version = "0.0.1"
+dependencies = [
+ "mci-brief",
+ "objc2",
+ "objc2-core-ml",
+ "objc2-foundation",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "mci-server"
 version = "0.0.1"
 dependencies = [
