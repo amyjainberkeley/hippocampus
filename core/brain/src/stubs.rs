@@ -17,6 +17,7 @@ use std::{
 };
 
 use crate::{
+    hybrid_retriever::{recency_decay, DEFAULT_HALF_LIFE_HOURS},
     BrainStore, Chunker, ChunkerError, EmbedError, Embedder, Event, EventId, RetrievalHit,
     RetrievalQuery, RetrieveError, Retriever, StoreError,
 };
@@ -379,7 +380,7 @@ impl<E: Embedder> Retriever for StubRetriever<E> {
             let sem_raw = sem_map.get(&id).copied().unwrap_or(0.0);
             let lex_hat = minmax_normalize(lex_raw, lex_bounds.0, lex_bounds.1);
             let sem_hat = minmax_normalize(sem_raw, sem_bounds.0, sem_bounds.1);
-            let recency = recency_decay(self.now_us, event.ts_us);
+            let recency = recency_decay(self.now_us, event.ts_us, DEFAULT_HALF_LIFE_HOURS);
             let combined = self
                 .w_sem
                 .mul_add(sem_hat, self.w_lex.mul_add(lex_hat, self.w_rec * recency));
@@ -431,14 +432,3 @@ fn minmax_normalize(v: f32, mn: f32, mx: f32) -> f32 {
     ((v - mn) / (mx - mn)).clamp(0.0, 1.0)
 }
 
-/// Recency decay term per ADR-0010 §5: `0.99^Δt_hours`. The event's
-/// `ts_us` may be ahead of `now_us` in tests; `saturating_sub` keeps that
-/// case from underflowing and returns `1.0` (max recency).
-fn recency_decay(now_us: u64, then_us: u64) -> f32 {
-    // f32 precision is fine: 0.99^Δt_h is bounded in [0, 1] and we only
-    // need ranking accuracy, not exact arithmetic.
-    #[allow(clippy::cast_precision_loss)]
-    let dt_us = now_us.saturating_sub(then_us) as f32;
-    let dt_h = dt_us / 3_600_000_000.0;
-    0.99_f32.powf(dt_h)
-}

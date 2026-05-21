@@ -12,7 +12,10 @@
 use std::sync::Arc;
 
 use mci_brain::{
-    hybrid_retriever::{minmax, minmax_normalize, recency_decay, ANCHOR_WINDOW_US, DEFAULT_K_LEX},
+    hybrid_retriever::{
+        minmax, minmax_normalize, recency_decay, ANCHOR_WINDOW_US, DEFAULT_HALF_LIFE_HOURS,
+        DEFAULT_K_LEX, RecencyConfig,
+    },
     stubs::{FixedDimEmbedder, InMemoryBrainStore},
     BrainStore, Embedder, Event, EventId, FusionWeights, HybridRetriever, RetrievalQuery,
     RetrievalShape, RetrieveError, Retriever, TimeRange,
@@ -545,20 +548,31 @@ fn default_fusion_weights_and_pool_sizes_match_adr_0010() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn recency_decay_math_matches_adr_0010_formula() {
-    // 0 hours → 1.0; 100 hours → 0.99^100 ≈ 0.366.
+fn recency_decay_exponential_with_default_half_life() {
+    let hl = DEFAULT_HALF_LIFE_HOURS;
     let now = 1_000 * MICROS_PER_HOUR;
-    assert!((recency_decay(now, now) - 1.0).abs() < 1e-6);
 
+    // Δt = 0 → 1.0.
+    assert!((recency_decay(now, now, hl) - 1.0).abs() < 1e-6);
+
+    // At exactly the half-life (24h) → 0.5.
+    let at_hl = now - (hl as u64) * MICROS_PER_HOUR;
+    let r_hl = recency_decay(now, at_hl, hl);
+    assert!(
+        (r_hl - 0.5).abs() < 1e-4,
+        "at half-life got {r_hl}, want ~0.5"
+    );
+
+    // 100 hours → exp(-ln(2)/24 * 100) ≈ 0.0558.
     let then = now - 100 * MICROS_PER_HOUR;
-    let r = recency_decay(now, then);
-    let expected = 0.99_f32.powf(100.0);
+    let r = recency_decay(now, then, hl);
+    let lambda = std::f32::consts::LN_2 / hl;
+    let expected = (-lambda * 100.0).exp();
     assert!((r - expected).abs() < 1e-4, "got {r}, expected ~{expected}");
 
-    // Future event (then > now) saturates to 1.0 — defends against
-    // underflow on clock-skew during tests.
+    // Future event (then > now) saturates to 1.0.
     let future = now + MICROS_PER_DAY;
-    assert!((recency_decay(now, future) - 1.0).abs() < 1e-6);
+    assert!((recency_decay(now, future, hl) - 1.0).abs() < 1e-6);
 }
 
 // ---------------------------------------------------------------------------
@@ -579,4 +593,175 @@ fn inverted_time_filter_is_invalid_input() {
     };
     let err = r.retrieve(&q).unwrap_err();
     assert!(matches!(err, RetrieveError::InvalidInput(_)));
+}
+
+// ---------------------------------------------------------------------------
+// 16. Recency config wires through to retrieval scores
+// ---------------------------------------------------------------------------
+
+#[test]
+fn with_recency_config_affects_score() {
+    let e = embedder();
+    let now = 200 * MICROS_PER_HOUR;
+    let old = event_at("rust", 0, None, Some(e.embed_one("rust").unwrap()));
+    let store = store_with(vec![old]);
+
+    let fast_decay = HybridRetriever::new(store.clone(), e.clone(), now)
+        .with_recency(RecencyConfig { half_life_hours: 1.0 });
+    let slow_decay = HybridRetriever::new(store, e, now)
+        .with_recency(RecencyConfig { half_life_hours: 1000.0 });
+
+    let q = RetrievalQuery {
+        text: "rust".into(),
+        limit: 1,
+        time_filter: None,
+        app_filter: None,
+    };
+
+    let fast_score = fast_decay.retrieve(&q).unwrap()[0].score_recency;
+    let slow_score = slow_decay.retrieve(&q).unwrap()[0].score_recency;
+    assert!(
+        fast_score < slow_score,
+        "fast decay ({fast_score}) should be less than slow ({slow_score})"
+    );
+}
+
+// ===========================================================================
+// PROPERTY TESTS — hand-rolled deterministic fuzz (256 iterations)
+//
+// proptest is not on the workspace lockfile. Rather than trigger the
+// ADR-0008 §1 dependency-addition gate for a dev-only crate, we use a
+// xorshift64 PRNG to generate random inputs. 256 iterations matches
+// proptest's default. If proptest is ever added, these can be trivially
+// ported.
+// ===========================================================================
+
+fn xorshift64(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
+}
+
+fn rand_f32_unit(state: &mut u64) -> f32 {
+    (xorshift64(state) % 10_001) as f32 / 10_000.0
+}
+
+// ---------------------------------------------------------------------------
+// P1. For any FusionWeights summing to 1.0, all arm scores in [0,1] →
+//     fused score in [0,1].
+// ---------------------------------------------------------------------------
+
+#[test]
+fn property_fused_score_in_unit_interval_for_unit_weights() {
+    let mut rng = 0xDEAD_BEEF_CAFE_BABEu64;
+    for _ in 0..256 {
+        let a = rand_f32_unit(&mut rng);
+        let b = rand_f32_unit(&mut rng) * (1.0 - a);
+        let c = rand_f32_unit(&mut rng) * (1.0 - a - b);
+        let d = 1.0 - a - b - c;
+        let w = FusionWeights {
+            w_sem: a,
+            w_lex: b,
+            w_rec: c,
+            w_src: d,
+        };
+
+        let sem = rand_f32_unit(&mut rng);
+        let lex = rand_f32_unit(&mut rng);
+        let rec = rand_f32_unit(&mut rng);
+        let src = rand_f32_unit(&mut rng);
+
+        let fused = w.w_sem.mul_add(sem, w.w_lex.mul_add(lex, w.w_rec.mul_add(rec, w.w_src * src)));
+        assert!(
+            fused >= -1e-6 && fused <= 1.0 + 1e-6,
+            "fused {fused} out of [0,1] for w={w:?} scores=({sem},{lex},{rec},{src})"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// P2. Monotonicity: increasing one arm's score (others held) never
+//     decreases the fused score (for non-zero weight).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn property_monotonicity_of_fusion() {
+    let mut rng = 0x1234_5678_9ABC_DEF0u64;
+    for _ in 0..256 {
+        let w = FusionWeights {
+            w_sem: 0.1 + rand_f32_unit(&mut rng) * 0.4,
+            w_lex: 0.1 + rand_f32_unit(&mut rng) * 0.3,
+            w_rec: 0.05 + rand_f32_unit(&mut rng) * 0.2,
+            w_src: 0.01 + rand_f32_unit(&mut rng) * 0.1,
+        };
+
+        let base_sem = rand_f32_unit(&mut rng) * 0.8;
+        let base_lex = rand_f32_unit(&mut rng);
+        let base_rec = rand_f32_unit(&mut rng);
+        let base_src = rand_f32_unit(&mut rng);
+
+        let bump = 0.01 + rand_f32_unit(&mut rng) * 0.19;
+        let bumped_sem = (base_sem + bump).min(1.0);
+
+        let score_lo = w.w_sem.mul_add(
+            base_sem,
+            w.w_lex
+                .mul_add(base_lex, w.w_rec.mul_add(base_rec, w.w_src * base_src)),
+        );
+        let score_hi = w.w_sem.mul_add(
+            bumped_sem,
+            w.w_lex
+                .mul_add(base_lex, w.w_rec.mul_add(base_rec, w.w_src * base_src)),
+        );
+        assert!(
+            score_hi >= score_lo - 1e-6,
+            "monotonicity violated: bumping sem {base_sem}->{bumped_sem} dropped score {score_lo}->{score_hi}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// P3. Recency: 1-second-old event always scores >= 1-day-old event
+//     (same content, same store, default config).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn property_recent_event_always_outscores_old_event() {
+    let mut rng = 0xFEED_FACE_0000_0001u64;
+
+    for _ in 0..256 {
+        let now = 100 * MICROS_PER_DAY + xorshift64(&mut rng) % (50 * MICROS_PER_DAY);
+        let recent_ts = now - 1_000_000;
+        let old_ts = now - MICROS_PER_DAY;
+
+        let hl = 1.0 + rand_f32_unit(&mut rng) * 100.0;
+        let r_recent = recency_decay(now, recent_ts, hl);
+        let r_old = recency_decay(now, old_ts, hl);
+        assert!(
+            r_recent >= r_old,
+            "recent ({r_recent}) < old ({r_old}) at hl={hl}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// P4. recency_decay always in [0, 1] for any non-negative inputs.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn property_recency_decay_bounded_unit_interval() {
+    let mut rng = 0xAAAA_BBBB_CCCC_DDDDu64;
+    for _ in 0..256 {
+        let now = xorshift64(&mut rng);
+        let then = xorshift64(&mut rng);
+        let hl = 0.001 + rand_f32_unit(&mut rng) * 10_000.0;
+        let r = recency_decay(now, then, hl);
+        assert!(
+            (0.0..=1.0).contains(&r),
+            "recency_decay({now}, {then}, {hl}) = {r} out of [0,1]"
+        );
+    }
 }

@@ -21,7 +21,7 @@
 //! - **Min-max normalization** of both score lists across the
 //!   response set (Bruch et al. ACM TOIS 2023, arXiv:2210.11934).
 //! - **Fuse** per ADR-0010 §5:
-//!   `score = w_sem · sem̂ + w_lex · lex̂ + w_rec · 0.99^Δt_h + w_src · src`
+//!   `score = w_sem · sem̂ + w_lex · lex̂ + w_rec · exp(−λ · Δt_h) + w_src · src`
 //!   with default weights [`FusionWeights::default`] =
 //!   `0.5 / 0.3 / 0.15 / 0.05`.
 //! - **App / time pre-filter** drops candidate hits whose `app_bundle_id`
@@ -29,6 +29,26 @@
 //!   [`RetrievalQuery::time_filter`] (the OS-free analog of the SQL
 //!   `WHERE` pre-filter the production `SqlCipherBrainStore` will
 //!   eventually push into the store layer).
+//!
+//! # Recency decay — ADR-0010 §5 exponential arm
+//!
+//! The recency term uses a configurable exponential decay:
+//!
+//! ```text
+//! recency(e) = exp(−λ · Δt_h)
+//! λ          = ln(2) / half_life_hours
+//! ```
+//!
+//! Default [`RecencyConfig::half_life_hours`] = [`DEFAULT_HALF_LIFE_HOURS`]
+//! (24.0) so an event's recency score drops to 0.5 at 24 hours, ~0.25 at
+//! 48 hours, and ~0.125 at 72 hours. The score stays bounded in `[0, 1]`
+//! by construction (`exp(−x)` for `x ≥ 0`).
+//!
+//! The prior `0.99^Δt_h` formula (half-life ≈ 69 hours) decayed too slowly
+//! for a lifelog where "what I saw this morning" should rank materially
+//! higher than "what I saw 3 days ago." The configurable half-life lets
+//! the eval gate at P3.7 close (ADR-0010 §7) tune the decay curve without
+//! a code change.
 //!
 //! # OS-purity (ADR-0003 / `AGENT_PROTOCOL` §4)
 //!
@@ -73,6 +93,11 @@ pub const DEFAULT_K_SEM: usize = 200;
 /// `±5 min` around the anchor's `ts_us`; this constant is that bound.
 pub const ANCHOR_WINDOW_US: u64 = 5 * 60 * 1_000_000;
 
+/// Default recency half-life in hours. An event 24 hours old scores 0.5
+/// on the recency arm; 48 hours → ~0.25; 72 hours → ~0.125. Tunable via
+/// [`RecencyConfig`] and the eval gate at P3.7 close (ADR-0010 §7).
+pub const DEFAULT_HALF_LIFE_HOURS: f32 = 24.0;
+
 // ---------------------------------------------------------------------------
 // FusionWeights — defaults per ADR-0010 §5
 // ---------------------------------------------------------------------------
@@ -90,7 +115,7 @@ pub struct FusionWeights {
     pub w_sem: f32,
     /// Weight on the min-max-normalized BM25 / FTS5 rank.
     pub w_lex: f32,
-    /// Weight on the recency-decay term `0.99^Δt_hours`.
+    /// Weight on the recency-decay term `exp(−λ · Δt_hours)`.
     pub w_rec: f32,
     /// Weight on the source-quality prior. Reserved for Phase 7
     /// (browser-extension page-text > AX > OCR); the Phase-3
@@ -106,6 +131,30 @@ impl Default for FusionWeights {
             w_lex: 0.3,
             w_rec: 0.15,
             w_src: 0.05,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RecencyConfig — exponential decay tuning
+// ---------------------------------------------------------------------------
+
+/// Configures the exponential decay for the recency arm of the
+/// min-max CC fusion (ADR-0010 §5).
+///
+/// `recency(e) = exp(−λ · Δt_h)` where `λ = ln(2) / half_life_hours`.
+/// The default [`DEFAULT_HALF_LIFE_HOURS`] = 24.0 gives a score of 0.5
+/// at one day and ~0.0625 at four days.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RecencyConfig {
+    /// Hours until recency score drops to 0.5. Must be positive.
+    pub half_life_hours: f32,
+}
+
+impl Default for RecencyConfig {
+    fn default() -> Self {
+        Self {
+            half_life_hours: DEFAULT_HALF_LIFE_HOURS,
         }
     }
 }
@@ -156,6 +205,7 @@ pub struct HybridRetriever<S: BrainStore, E: Embedder> {
     store: Arc<S>,
     embedder: Arc<E>,
     weights: FusionWeights,
+    recency: RecencyConfig,
     /// Microseconds since UNIX epoch — held on the retriever so tests
     /// pin recency-decay computations to a deterministic instant. The
     /// production agent shell refreshes this on each request from
@@ -169,13 +219,15 @@ pub struct HybridRetriever<S: BrainStore, E: Embedder> {
 
 impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     /// Construct a retriever with the [`FusionWeights::default`] weights
-    /// (ADR-0010 §5 starting set) and the [`DEFAULT_K_LEX`] /
-    /// [`DEFAULT_K_SEM`] candidate pools.
+    /// (ADR-0010 §5 starting set), [`RecencyConfig::default`] (24h
+    /// half-life), and the [`DEFAULT_K_LEX`] / [`DEFAULT_K_SEM`]
+    /// candidate pools.
     pub fn new(store: Arc<S>, embedder: Arc<E>, now_us: u64) -> Self {
         Self {
             store,
             embedder,
             weights: FusionWeights::default(),
+            recency: RecencyConfig::default(),
             now_us,
             k_lex: DEFAULT_K_LEX,
             k_sem: DEFAULT_K_SEM,
@@ -187,6 +239,15 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     #[must_use]
     pub fn with_weights(mut self, weights: FusionWeights) -> Self {
         self.weights = weights;
+        self
+    }
+
+    /// Override the recency decay curve. The eval gate at P3.7 close
+    /// (ADR-0010 §7) is the canonical place to tune this alongside
+    /// the fusion weights.
+    #[must_use]
+    pub fn with_recency(mut self, config: RecencyConfig) -> Self {
+        self.recency = config;
         self
     }
 
@@ -204,6 +265,12 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     #[must_use]
     pub fn weights(&self) -> FusionWeights {
         self.weights
+    }
+
+    /// The currently-configured recency decay.
+    #[must_use]
+    pub fn recency_config(&self) -> RecencyConfig {
+        self.recency
     }
 
     /// Classify a [`RetrievalQuery`] into one of the three
@@ -333,7 +400,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             let sem_raw = sem_map.get(&id).copied().unwrap_or(0.0);
             let lex_hat = minmax_normalize(lex_raw, lex_bounds.0, lex_bounds.1);
             let sem_hat = minmax_normalize(sem_raw, sem_bounds.0, sem_bounds.1);
-            let recency = recency_decay(self.now_us, event.ts_us);
+            let recency = recency_decay(self.now_us, event.ts_us, self.recency.half_life_hours);
             // Phase 3 has no source-quality prior wired yet (extension
             // page-text path is Phase 7; manual user-tag is later).
             // `src ≡ 0.0` for every event keeps the term inert until
@@ -439,15 +506,26 @@ pub fn minmax_normalize(v: f32, mn: f32, mx: f32) -> f32 {
     ((v - mn) / (mx - mn)).clamp(0.0, 1.0)
 }
 
-/// Recency decay term per ADR-0010 §5: `0.99^Δt_hours`. The event's
-/// `ts_us` may be ahead of `now_us` in tests; `saturating_sub` keeps
-/// that case from underflowing and returns `1.0` (max recency).
+/// Exponential recency decay per ADR-0010 §5:
+/// `exp(−λ · Δt_h)` where `λ = ln(2) / half_life_hours`.
+///
+/// The event's `ts_us` may be ahead of `now_us` in tests;
+/// `saturating_sub` keeps that case from underflowing and returns
+/// `1.0` (max recency). A non-positive `half_life_hours` collapses
+/// to a step function (1.0 at Δt=0, 0.0 otherwise).
 #[must_use]
-pub fn recency_decay(now_us: u64, then_us: u64) -> f32 {
+pub fn recency_decay(now_us: u64, then_us: u64, half_life_hours: f32) -> f32 {
     #[allow(clippy::cast_precision_loss)]
     let dt_us = now_us.saturating_sub(then_us) as f32;
+    if dt_us == 0.0 {
+        return 1.0;
+    }
+    if half_life_hours <= 0.0 {
+        return 0.0;
+    }
+    let lambda = std::f32::consts::LN_2 / half_life_hours;
     let dt_h = dt_us / 3_600_000_000.0;
-    0.99_f32.powf(dt_h)
+    (-lambda * dt_h).exp()
 }
 
 /// Intersect two optional [`TimeRange`]s. `None ∩ None = None`;
@@ -619,5 +697,49 @@ mod tests {
         assert!((w.w_lex - 0.3).abs() < f32::EPSILON);
         assert!((w.w_rec - 0.15).abs() < f32::EPSILON);
         assert!((w.w_src - 0.05).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn recency_config_default_is_24h() {
+        let c = RecencyConfig::default();
+        assert!((c.half_life_hours - 24.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn recency_decay_at_zero_delta_is_one() {
+        let now = 1_000 * MICROS_PER_HOUR;
+        assert!((recency_decay(now, now, DEFAULT_HALF_LIFE_HOURS) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn recency_decay_at_half_life_is_half() {
+        let now = 1_000 * MICROS_PER_HOUR;
+        let then = now - (DEFAULT_HALF_LIFE_HOURS as u64) * MICROS_PER_HOUR;
+        let r = recency_decay(now, then, DEFAULT_HALF_LIFE_HOURS);
+        assert!((r - 0.5).abs() < 1e-4, "at half-life got {r}, want ~0.5");
+    }
+
+    #[test]
+    fn recency_decay_future_event_saturates_to_one() {
+        let now = 100 * MICROS_PER_HOUR;
+        let future = now + MICROS_PER_DAY;
+        assert!((recency_decay(now, future, DEFAULT_HALF_LIFE_HOURS) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn recency_decay_very_old_event_approaches_zero() {
+        let now = 100_000 * MICROS_PER_HOUR;
+        let ancient = 0_u64;
+        let r = recency_decay(now, ancient, DEFAULT_HALF_LIFE_HOURS);
+        assert!(r < 1e-10, "ancient event should be near zero, got {r}");
+    }
+
+    #[test]
+    fn recency_decay_nonpositive_half_life_is_step() {
+        let now = 100 * MICROS_PER_HOUR;
+        assert!((recency_decay(now, now, 0.0) - 1.0).abs() < 1e-6);
+        assert!(recency_decay(now, now - MICROS_PER_HOUR, 0.0).abs() < 1e-6);
+        assert!((recency_decay(now, now, -5.0) - 1.0).abs() < 1e-6);
+        assert!(recency_decay(now, now - 1, -5.0).abs() < 1e-6);
     }
 }

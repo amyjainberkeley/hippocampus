@@ -55,3 +55,12 @@ pedantic         = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 missing_errors_doc      = "allow"
 missing_panics_doc      = "allow"
+
+# mci-core's `insecure-test-keywrap` feature has a `compile_error!` gated
+# on `not(debug_assertions)` (security: test-only InMemoryKeyWrap must not
+# ship). mci-brain's dev-dep enables that feature for its SqlCipher
+# integration tests. Cargo unifies features across test + bench profiles,
+# so `cargo bench -p mci-brain` would fail without this override. Scoped
+# to mci-core only — benchmark code itself runs without debug assertions.
+[profile.bench.package.mci-core]
+debug-assertions = true
