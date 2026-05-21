@@ -622,6 +622,42 @@ impl SqlCipherBrainStore {
             embedding: None,
         }))
     }
+
+    /// Copy + defragment the encrypted brain to `dest` via `VACUUM INTO`.
+    /// Output inherits this store's `SQLCipher` key.
+    ///
+    /// # Errors
+    /// - [`StoreError::Backend`] if `VACUUM INTO` fails (disk full, dest
+    ///   exists, permission denied, etc.).
+    pub fn vacuum_into(&self, dest: &std::path::Path) -> Result<(), StoreError> {
+        let dest_str = dest.to_str().ok_or_else(|| {
+            StoreError::InvalidInput("destination path is not valid UTF-8".into())
+        })?;
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .execute(&format!("VACUUM INTO '{}'", dest_str.replace('\'', "''")), [])
+            .map_err(|e| StoreError::Backend(format!("VACUUM INTO: {e}")))?;
+        Ok(())
+    }
+
+    /// Run `PRAGMA integrity_check` and return result lines.
+    /// Healthy DB returns `["ok"]`; any other content indicates corruption.
+    pub fn integrity_check(&self) -> Result<Vec<String>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare("PRAGMA integrity_check")
+            .map_err(|e| StoreError::Backend(format!("prepare integrity_check: {e}")))?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| StoreError::Backend(format!("query integrity_check: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| StoreError::Backend(format!("row integrity_check: {e}")))?);
+        }
+        Ok(out)
+    }
 }
 
 /// Schema migration — ADR-0016 §1.4. Idempotent: every `CREATE` is

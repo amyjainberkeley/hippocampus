@@ -65,6 +65,15 @@ enum Command {
         out: Option<PathBuf>,
         since: u64,
     },
+    Backup {
+        out: PathBuf,
+        integrity_check: bool,
+    },
+    Restore {
+        from: PathBuf,
+        to: PathBuf,
+        force: bool,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -163,7 +172,13 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                     }
                 }
                 _ => {
-                    return ParseOutcome::Error(format!("unknown flag: {arg}"));
+                    // Subcommand-specific flags (e.g. --integrity-check, --force) get
+                    // routed to the subcommand parser via positionals.
+                    if subcmd.is_some() {
+                        positionals.push(arg.clone());
+                    } else {
+                        return ParseOutcome::Error(format!("unknown flag: {arg}"));
+                    }
                 }
             }
         } else if subcmd.is_none() {
@@ -210,6 +225,50 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
             out,
             since,
         },
+        Some("backup") => {
+            let mut integrity_check = false;
+            for arg in positionals.iter() {
+                match arg.as_str() {
+                    "--integrity-check" => integrity_check = true,
+                    other => return ParseOutcome::Error(format!("backup: unknown arg: {other}")),
+                }
+            }
+            let out = match out.clone() {
+                Some(p) => p,
+                None => return ParseOutcome::Error("backup: --out PATH is required".into()),
+            };
+            Command::Backup { out, integrity_check }
+        }
+        Some("restore") => {
+            let mut from: Option<PathBuf> = None;
+            let mut to: Option<PathBuf> = None;
+            let mut force = false;
+            let mut i = 0;
+            while i < positionals.len() {
+                match positionals[i].as_str() {
+                    "--from" => {
+                        if i + 1 >= positionals.len() {
+                            return ParseOutcome::Error("restore: --from requires a PATH".into());
+                        }
+                        from = Some(PathBuf::from(&positionals[i + 1]));
+                        i += 2;
+                    }
+                    "--to" => {
+                        if i + 1 >= positionals.len() {
+                            return ParseOutcome::Error("restore: --to requires a PATH".into());
+                        }
+                        to = Some(PathBuf::from(&positionals[i + 1]));
+                        i += 2;
+                    }
+                    "--force" => { force = true; i += 1; }
+                    other => return ParseOutcome::Error(format!("restore: unknown arg: {other}")),
+                }
+            }
+            match (from, to) {
+                (Some(from), Some(to)) => Command::Restore { from, to, force },
+                _ => return ParseOutcome::Error("restore: --from and --to are required".into()),
+            }
+        }
         Some(other) => return ParseOutcome::Error(format!("unknown command: {other}")),
         None => return ParseOutcome::Help,
     };
@@ -491,6 +550,11 @@ fn main() -> ExitCode {
     };
     let key = DbKey::from_bytes(key_bytes);
 
+    // Restore doesn't need the global store — it operates on --from/--to.
+    if let Command::Restore { from, to, force } = &args.command {
+        return run_restore(from, to, *force, &key);
+    }
+
     let store = match SqlCipherBrainStore::open_readonly(&args.db_path, &key) {
         Ok(s) => s,
         Err(e) => {
@@ -505,7 +569,66 @@ fn main() -> ExitCode {
         Command::Search { query, limit, json } => run_search(&store, &query, limit, json),
         Command::Show { event_id, json } => run_show(&store, event_id, json),
         Command::Export { format, out, since } => run_export(&store, format, out, since),
+        Command::Backup { out, integrity_check } => run_backup(&store, &out, integrity_check),
+        Command::Restore { .. } => unreachable!("handled above"),
     }
+}
+
+fn run_backup(store: &SqlCipherBrainStore, out: &std::path::Path, integrity_check: bool) -> ExitCode {
+    if integrity_check {
+        match store.integrity_check() {
+            Ok(v) if v == vec!["ok".to_string()] => {}
+            Ok(v) => {
+                eprintln!("mci-brain backup: integrity_check failed: {v:?}");
+                return ExitCode::from(31);
+            }
+            Err(e) => {
+                eprintln!("mci-brain backup: integrity_check error: {e}");
+                return ExitCode::from(32);
+            }
+        }
+    }
+    if out.exists() {
+        eprintln!("mci-brain backup: --out path already exists: {}", out.display());
+        return ExitCode::from(33);
+    }
+    if let Err(e) = store.vacuum_into(out) {
+        eprintln!("mci-brain backup: vacuum_into failed: {e}");
+        return ExitCode::from(34);
+    }
+    eprintln!("mci-brain backup: wrote {} (encrypted with same key)", out.display());
+    ExitCode::SUCCESS
+}
+
+fn run_restore(from: &std::path::Path, to: &std::path::Path, force: bool, key: &DbKey) -> ExitCode {
+    if !from.exists() {
+        eprintln!("mci-brain restore: --from does not exist: {}", from.display());
+        return ExitCode::from(40);
+    }
+    // Validate source decrypts with current key (read-only probe + stats).
+    match SqlCipherBrainStore::open_readonly(from, key) {
+        Ok(s) => match s.stats() {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("mci-brain restore: source open OK but stats failed: {e}");
+                return ExitCode::from(41);
+            }
+        },
+        Err(e) => {
+            eprintln!("mci-brain restore: source not decryptable with current key: {e}");
+            return ExitCode::from(42);
+        }
+    }
+    if to.exists() && !force {
+        eprintln!("mci-brain restore: --to already exists. Pass --force to overwrite.");
+        return ExitCode::from(43);
+    }
+    if let Err(e) = std::fs::copy(from, to) {
+        eprintln!("mci-brain restore: copy failed: {e}");
+        return ExitCode::from(44);
+    }
+    eprintln!("mci-brain restore: restored {} → {}", from.display(), to.display());
+    ExitCode::SUCCESS
 }
 
 // ---------------------------------------------------------------------------
