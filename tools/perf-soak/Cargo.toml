@@ -1,0 +1,24 @@
+[package]
+name                   = "mci-perf-soak"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "Sustained-load footprint regression harness for the MCI brain store."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mci-perf-soak"
+path = "src/main.rs"
+
+[dependencies]
+# Path deps already on the workspace lockfile — zero new third-party crates.
+mci-brain = { path = "../../core/brain" }
+mci-core  = { path = "../../core" }
+tempfile  = "3.27.0"
+# libc is a transitive dep of rusqlite; listing it here does NOT add a new
+# lockfile entry. Used for getrusage(2) CPU-time measurement.
+libc      = "0.2"
