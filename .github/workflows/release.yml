@@ -125,6 +125,43 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
+      - name: Publish appcast
+        if: secrets.SPARKLE_PRIVATE_KEY != ''
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          scripts/publish-appcast.sh --hosting-mode ghpages
+
+      - name: Deploy appcast to GitHub Pages
+        if: secrets.SPARKLE_PRIVATE_KEY != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DMG=$(ls dist/Hippocampus-*.dmg | head -1)
+          WORK=$(mktemp -d)
+
+          # Clone or init the appcast repo gh-pages branch
+          if git ls-remote --exit-code "https://github.com/${{ github.repository_owner }}/hippocampus-appcast.git" refs/heads/gh-pages &>/dev/null; then
+            git clone --branch gh-pages --single-branch --depth 1 \
+              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/hippocampus-appcast.git" \
+              "$WORK"
+          else
+            echo "WARNING: hippocampus-appcast repo or gh-pages branch not found — skipping deploy."
+            echo "  Create the repo and branch per docs/appcast-hosting.md Option A."
+            exit 0
+          fi
+
+          cp dist/appcast.xml "$WORK/"
+          cp "$DMG" "$WORK/"
+
+          cd "$WORK"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "No appcast changes."; exit 0; }
+          git commit -m "release: Hippocampus ${{ steps.version.outputs.tag }}"
+          git push origin gh-pages
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -135,3 +172,4 @@ jobs:
           files: |
             dist/Hippocampus-*.dmg
             dist/Hippocampus-*.dmg.sha256
+            dist/appcast.xml
