@@ -182,7 +182,11 @@ fn print_usage() {
         \x20                            lands in Phase 4 onboarding). With --drain-stdin,\n\
         \x20                            absence falls back to health-only drain (no brain\n\
         \x20                            writes); presence routes OCREvents through the\n\
-        \x20                            P3.6.6 wire-to-brain ingest pump.\n"
+        \x20                            P3.6.6 wire-to-brain ingest pump.\n\
+        \x20 MCI_EMBEDDER_DISABLED      set to 1 to force lexical-only recall in mcp-serve\n\
+        \x20                            (skips HybridRetriever even if an embedder is\n\
+        \x20                            available). Default fusion weights per ADR-0010:\n\
+        \x20                            w_sem=0.5, w_lex=0.3, w_rec=0.15, w_src=0.05.\n"
     );
 }
 
@@ -374,8 +378,20 @@ async fn main() -> ExitCode {
     }
 }
 
-/// Resolve the `SQLCipher` key from `MCI_DB_KEY_HEX`, open the brain
-/// read-only, build the [`Server`], and run [`serve_stdio`].
+/// Resolve the `SQLCipher` key from `MCI_DB_KEY_HEX`, open the brain,
+/// optionally construct the embedder for hybrid recall, build the
+/// [`Server`], and run [`serve_stdio`].
+///
+/// # Embedder resolution (P3.10d)
+///
+/// - `MCI_EMBEDDER_DISABLED=1` → force lexical-only mode.
+/// - Otherwise, attempt to construct the production `ArcticEmbedSEmbedder`
+///   via the Core ML backend. If construction fails (no `.mlpackage`
+///   bundled — expected until P3.8 ships the model), log a warning and
+///   fall back to `Embedder=None`. The server still boots with FTS5-only
+///   recall; when embeddings exist in `event_vectors` AND a working
+///   embedder is constructed, the same code path lights up full hybrid
+///   (ADR-0010 min-max CC fusion) automatically.
 ///
 /// `MCI_DB_KEY_HEX` is the **interim** key-resolution mechanism for
 /// P3.10b. Phase-4 onboarding wires the Keychain-backed `KeyWrap`
@@ -397,7 +413,31 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
-    let reader = match LiveBrainReader::open(&db_path, &key) {
+
+    let embedder: Option<Arc<dyn mci_brain::Embedder>> =
+        if std::env::var("MCI_EMBEDDER_DISABLED").as_deref() == Ok("1") {
+            eprintln!(
+                "mci-agent mcp-serve: embedder disabled (MCI_EMBEDDER_DISABLED=1). \
+                 Lexical-only recall."
+            );
+            None
+        } else {
+            // TODO(P3.8): attempt ArcticEmbedSEmbedder::new_query(CoreMlBackend::new(...))
+            // when the .mlpackage is bundled. Until then, fall back gracefully.
+            eprintln!(
+                "mci-agent mcp-serve: no embedder backend available yet \
+                 (ships at P3.8). Lexical-only recall."
+            );
+            None
+        };
+
+    let recall_mode = if embedder.is_some() {
+        "hybrid (FTS5 + semantic, ADR-0010 min-max CC)"
+    } else {
+        "lexical-only (FTS5)"
+    };
+
+    let reader = match LiveBrainReader::open_with_embedder(&db_path, &key, embedder) {
         Ok(r) => r,
         Err(e) => {
             eprintln!(
@@ -409,7 +449,7 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     };
     let server = Arc::new(Server::new(Arc::new(reader)));
     eprintln!(
-        "mci-agent mcp-serve: ready on stdio. db={} (read-only via SqlCipherBrainStore)",
+        "mci-agent mcp-serve: ready on stdio. db={} recall={recall_mode}",
         db_path.display()
     );
     let stdout = tokio::io::stdout();
