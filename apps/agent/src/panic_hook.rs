@@ -50,7 +50,8 @@ fn install_to(path: PathBuf) {
     }));
 }
 
-fn default_panic_log_path() -> PathBuf {
+/// The default panic log path: `~/Library/Logs/MCI/panic.jsonl`.
+pub fn default_panic_log_path() -> PathBuf {
     let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     home.join("Library/Logs/MCI/panic.jsonl")
 }

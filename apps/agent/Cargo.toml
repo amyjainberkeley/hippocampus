@@ -45,7 +45,7 @@ mci-core    = { path = "../../core" }
 # this dep (production binary path); test-side stub access lives in
 # [dev-dependencies] below.
 mci-brain   = { path = "../../core/brain" }
-tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "io-std", "process", "signal", "fs"] }
+tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "io-std", "process", "signal", "fs", "net"] }
 tracing     = { version = "0.1", default-features = false, features = ["std"] }
 thiserror   = "1"
 # JSON-RPC 2.0 framing for the P3.10b MCP server. `serde` + `serde_json`

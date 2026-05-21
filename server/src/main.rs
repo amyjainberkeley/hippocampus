@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use mci_server::crash_report::{crash_report_router, CrashReportLog, CrashReportLogConfig};
 use mci_server::handlers::{router, AppState};
 use mci_server::store::{InMemoryWorkspaceStore, SqliteWorkspaceStore, WorkspaceStore};
 
@@ -41,7 +42,12 @@ async fn main() {
 
     let store = build_store();
     let state = Arc::new(AppState::new(store));
-    let app = router(state);
+    let workspace_app = router(state);
+
+    let crash_log = Arc::new(CrashReportLog::new(CrashReportLogConfig::from_env()));
+    let crash_app = crash_report_router(crash_log);
+
+    let app = workspace_app.merge(crash_app);
 
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
         .await
