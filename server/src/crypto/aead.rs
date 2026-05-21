@@ -189,7 +189,10 @@ mod tests {
     fn empty_plaintext_round_trip() {
         let key = AeadKey::generate().unwrap();
         let (ct, nonce) = encrypt(b"", &key, b"aad").unwrap();
-        assert!(!ct.is_empty(), "ciphertext includes tag even for empty plaintext");
+        assert!(
+            !ct.is_empty(),
+            "ciphertext includes tag even for empty plaintext"
+        );
 
         let decrypted = decrypt(&ct, &nonce, &key, b"aad").unwrap();
         assert!(decrypted.is_empty());

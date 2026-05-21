@@ -1,0 +1,147 @@
+mci-capture-helper: --capture is a DEV-ONLY, UNVERIFIED path (ADR-0013 Amendment 1 §4). Live SCStream capture is NOT enabled in default builds and stores no frame in this build (no retain, no encoder). Starting live session…
+mci-capture-helper: SCStream callback alive: first sample received.
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: -25212) role=nil subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: -25212) role=nil subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: -25212) role=nil subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: -25212) role=nil subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: -25212) role=nil subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXSystemDialog id=nil title=Control Center descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXSystemDialog id=nil title=Control Center descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXSystemDialog id=nil title=Control Center descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXSystemDialog id=nil title=Control Center descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXSystemDialog id=nil title=Control Center descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXSystemDialog id=nil title=Control Center descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: -25212) role=nil subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: SCStream stopped with error: Error Domain=com.apple.ScreenCaptureKit.SCStreamErrorDomain Code=-3805 "Failed during stream due to application connection being interrupted" UserInfo={NSLocalizedDescription=Failed during stream due to application connection being interrupted}
+ title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: SCStream stopped with error: Error Domain=com.apple.ScreenCaptureKit.SCStreamErrorDomain Code=-3805 "Failed during stream due to application connection being interrupted" UserInfo={NSLocalizedDescription=Failed during stream due to application connection being interrupted}
+en=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXTextArea subrole=nil id=nil title=nil descendant=neg value-hidden=neg id-regex=err result=nil
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=TV descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXUnknown subrole=nil id=_NS:494 title=nil descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: probe(ax-subrole) focus=AXError(rawValue: 0) role=AXWindow subrole=AXStandardWindow id=nil title=This Is What Happens descendant=neg value-hidden=neg id-regex=neg result=false
+mci-capture-helper: SCStream stopped with error: Error Domain=com.apple.ScreenCaptureKit.SCStreamErrorDomain Code=-3805 "Failed during stream due to application connection being interrupted" UserInfo={NSLocalizedDescription=Failed during stream due to application connection being interrupted}

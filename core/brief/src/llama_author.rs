@@ -157,10 +157,7 @@ fn parse_title_body(raw: &str) -> (String, String) {
         body_lines.push(*line);
     }
 
-    let body = body_lines
-        .join("\n")
-        .trim()
-        .to_owned();
+    let body = body_lines.join("\n").trim().to_owned();
 
     (title, body)
 }

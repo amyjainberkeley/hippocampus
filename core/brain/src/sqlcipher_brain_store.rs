@@ -36,13 +36,13 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use crate::episode_segmenter::EpisodeId;
 use mci_core::crypto::DbKey;
 use mci_core::store::{
     open as mci_core_open, open_readonly as mci_core_open_readonly, Db,
     StoreError as CoreStoreError,
 };
 use rusqlite::params;
-use crate::episode_segmenter::EpisodeId;
 
 use crate::{BrainStats, Event, EventId, EventRecord, StoreError};
 
@@ -406,14 +406,10 @@ impl SqlCipherBrainStore {
 
         let rows = if after_id.is_some() {
             stmt.query_map(params![ts, aid, lim], row_to_event_tuple)
-                .map_err(|e| {
-                    StoreError::Backend(format!("query paged_events_since: {e}"))
-                })?
+                .map_err(|e| StoreError::Backend(format!("query paged_events_since: {e}")))?
         } else {
             stmt.query_map(params![ts, lim], row_to_event_tuple)
-                .map_err(|e| {
-                    StoreError::Backend(format!("query paged_events_since: {e}"))
-                })?
+                .map_err(|e| StoreError::Backend(format!("query paged_events_since: {e}")))?
         };
 
         let mut out: Vec<Event> = Vec::new();
@@ -430,9 +426,7 @@ impl SqlCipherBrainStore {
                 episode_id,
                 cascade_reason,
                 keyframe_blob,
-            ) = r.map_err(|e| {
-                StoreError::Backend(format!("row paged_events_since: {e}"))
-            })?;
+            ) = r.map_err(|e| StoreError::Backend(format!("row paged_events_since: {e}")))?;
             out.push(Event {
                 id: EventId(u64::try_from(ev_id).unwrap_or(0)),
                 ts_us: u64::try_from(ts_us).unwrap_or(0),
@@ -535,8 +529,17 @@ impl SqlCipherBrainStore {
         let mut out: Vec<Event> = Vec::new();
         for r in rows {
             let (
-                ev_id, ts_us, app, title, url, text, summary, entities,
-                episode_id, cascade_reason, keyframe_blob,
+                ev_id,
+                ts_us,
+                app,
+                title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id,
+                cascade_reason,
+                keyframe_blob,
             ) = r.map_err(|e| StoreError::Backend(format!("row unsegmented_events: {e}")))?;
             out.push(Event {
                 id: EventId(u64::try_from(ev_id).unwrap_or(0)),
@@ -600,8 +603,17 @@ impl SqlCipherBrainStore {
             })?;
 
         let Some((
-            ev_id, ts_us, app, title, url, text, summary, entities,
-            episode_id, cascade_reason, keyframe_blob,
+            ev_id,
+            ts_us,
+            app,
+            title,
+            url,
+            text,
+            summary,
+            entities,
+            episode_id,
+            cascade_reason,
+            keyframe_blob,
         )) = row
         else {
             return Ok(None);
@@ -636,7 +648,10 @@ impl SqlCipherBrainStore {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         guard
             .conn()
-            .execute(&format!("VACUUM INTO '{}'", dest_str.replace('\'', "''")), [])
+            .execute(
+                &format!("VACUUM INTO '{}'", dest_str.replace('\'', "''")),
+                [],
+            )
             .map_err(|e| StoreError::Backend(format!("VACUUM INTO: {e}")))?;
         Ok(())
     }
@@ -1059,10 +1074,7 @@ impl crate::episode_segmenter::EpisodeWriter for SqlCipherBrainStore {
             StoreError::InvalidInput(format!("event id {} out of i64 range: {e}", event_id.0))
         })?;
         let ep = i64::try_from(episode_id.0).map_err(|e| {
-            StoreError::InvalidInput(format!(
-                "episode id {} out of i64 range: {e}",
-                episode_id.0
-            ))
+            StoreError::InvalidInput(format!("episode id {} out of i64 range: {e}", episode_id.0))
         })?;
         let guard = self.db.lock().expect("brain store mutex poisoned");
         guard
@@ -1077,10 +1089,7 @@ impl crate::episode_segmenter::EpisodeWriter for SqlCipherBrainStore {
 
     fn extend_episode(&self, episode_id: EpisodeId, ts_end: u64) -> Result<(), StoreError> {
         let ep = i64::try_from(episode_id.0).map_err(|e| {
-            StoreError::InvalidInput(format!(
-                "episode id {} out of i64 range: {e}",
-                episode_id.0
-            ))
+            StoreError::InvalidInput(format!("episode id {} out of i64 range: {e}", episode_id.0))
         })?;
         let guard = self.db.lock().expect("brain store mutex poisoned");
         guard

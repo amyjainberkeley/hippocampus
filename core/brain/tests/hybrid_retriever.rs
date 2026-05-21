@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use mci_brain::{
     hybrid_retriever::{
-        minmax, minmax_normalize, recency_decay, ANCHOR_WINDOW_US, DEFAULT_HALF_LIFE_HOURS,
-        DEFAULT_K_LEX, RecencyConfig,
+        minmax, minmax_normalize, recency_decay, RecencyConfig, ANCHOR_WINDOW_US,
+        DEFAULT_HALF_LIFE_HOURS, DEFAULT_K_LEX,
     },
     stubs::{FixedDimEmbedder, InMemoryBrainStore},
     BrainStore, Embedder, Event, EventId, FusionWeights, HybridRetriever, RetrievalQuery,
@@ -606,10 +606,13 @@ fn with_recency_config_affects_score() {
     let old = event_at("rust", 0, None, Some(e.embed_one("rust").unwrap()));
     let store = store_with(vec![old]);
 
-    let fast_decay = HybridRetriever::new(store.clone(), e.clone(), now)
-        .with_recency(RecencyConfig { half_life_hours: 1.0 });
-    let slow_decay = HybridRetriever::new(store, e, now)
-        .with_recency(RecencyConfig { half_life_hours: 1000.0 });
+    let fast_decay =
+        HybridRetriever::new(store.clone(), e.clone(), now).with_recency(RecencyConfig {
+            half_life_hours: 1.0,
+        });
+    let slow_decay = HybridRetriever::new(store, e, now).with_recency(RecencyConfig {
+        half_life_hours: 1000.0,
+    });
 
     let q = RetrievalQuery {
         text: "rust".into(),
@@ -674,7 +677,10 @@ fn property_fused_score_in_unit_interval_for_unit_weights() {
         let rec = rand_f32_unit(&mut rng);
         let src = rand_f32_unit(&mut rng);
 
-        let fused = w.w_sem.mul_add(sem, w.w_lex.mul_add(lex, w.w_rec.mul_add(rec, w.w_src * src)));
+        let fused = w.w_sem.mul_add(
+            sem,
+            w.w_lex.mul_add(lex, w.w_rec.mul_add(rec, w.w_src * src)),
+        );
         assert!(
             fused >= -1e-6 && fused <= 1.0 + 1e-6,
             "fused {fused} out of [0,1] for w={w:?} scores=({sem},{lex},{rec},{src})"

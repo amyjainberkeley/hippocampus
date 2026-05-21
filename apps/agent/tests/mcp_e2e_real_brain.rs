@@ -110,10 +110,7 @@ fn server_fts_only(store: Arc<SqlCipherBrainStore>) -> Server {
     Server::new(Arc::new(reader))
 }
 
-fn server_with_embedder(
-    store: Arc<SqlCipherBrainStore>,
-    embedder: Arc<dyn Embedder>,
-) -> Server {
+fn server_with_embedder(store: Arc<SqlCipherBrainStore>, embedder: Arc<dyn Embedder>) -> Server {
     let reader = LiveBrainReader::from_store_with_embedder(store, Some(embedder));
     Server::new(Arc::new(reader))
 }
@@ -182,7 +179,10 @@ fn stats_matches_actual_row_count_after_seeding() {
     let (_dir, store) = open_temp_store();
     for i in 0..7 {
         store
-            .put_event(&make_event(&format!("event number {i}"), 1_000_000 + i * 100_000))
+            .put_event(&make_event(
+                &format!("event number {i}"),
+                1_000_000 + i * 100_000,
+            ))
             .unwrap();
     }
     let srv = server_fts_only(store);
@@ -336,11 +336,7 @@ fn recall_default_limit_caps_at_ten() {
         .get("hits")
         .and_then(|v| v.as_array())
         .expect("hits array");
-    assert!(
-        hits.len() <= 10,
-        "default limit is 10, got {}",
-        hits.len()
-    );
+    assert!(hits.len() <= 10, "default limit is 10, got {}", hits.len());
 }
 
 // ---------------------------------------------------------------------------
@@ -462,10 +458,7 @@ fn recall_hybrid_returns_hits_with_positive_scores() {
         .get("hits")
         .and_then(|v| v.as_array())
         .expect("hits array");
-    assert!(
-        !hits.is_empty(),
-        "hybrid retriever should return hits"
-    );
+    assert!(!hits.is_empty(), "hybrid retriever should return hits");
     for hit in hits {
         let score = hit.get("score").and_then(|v| v.as_f64()).unwrap();
         assert!(score > 0.0, "fused scores must be positive: {score}");
@@ -526,10 +519,7 @@ fn recall_hit_carries_all_event_fields() {
             "arguments": {"query": "field presence", "limit": 1}
         })),
     )));
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits");
+    let hits = result.get("hits").and_then(|v| v.as_array()).expect("hits");
     assert_eq!(hits.len(), 1);
     let hit = &hits[0];
     assert!(hit.get("event_id").and_then(|v| v.as_u64()).is_some());
@@ -726,7 +716,10 @@ fn events_since_pagination_cursor_advances() {
         .get("events")
         .and_then(|v| v.as_array())
         .expect("page5");
-    assert!(page5.is_empty(), "cursor past all events should return empty");
+    assert!(
+        page5.is_empty(),
+        "cursor past all events should return empty"
+    );
 }
 
 #[test]

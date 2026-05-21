@@ -83,8 +83,7 @@ fn main() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("soak.sqlite");
     let key = DbKey::generate().expect("csprng");
-    let store =
-        Arc::new(SqlCipherBrainStore::new(&db_path, &key).expect("open brain store"));
+    let store = Arc::new(SqlCipherBrainStore::new(&db_path, &key).expect("open brain store"));
 
     let stop = Arc::new(AtomicBool::new(false));
     let ops_count = Arc::new(AtomicU64::new(0));

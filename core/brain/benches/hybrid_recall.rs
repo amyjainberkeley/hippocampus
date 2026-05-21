@@ -22,26 +22,8 @@ const CORPUS_SIZE: usize = 1000;
 const QUERY_COUNT: usize = 100;
 
 const WORDS: &[&str] = &[
-    "rust",
-    "python",
-    "memory",
-    "capture",
-    "brain",
-    "search",
-    "event",
-    "window",
-    "browser",
-    "code",
-    "debug",
-    "test",
-    "deploy",
-    "build",
-    "config",
-    "parse",
-    "token",
-    "index",
-    "query",
-    "score",
+    "rust", "python", "memory", "capture", "brain", "search", "event", "window", "browser", "code",
+    "debug", "test", "deploy", "build", "config", "parse", "token", "index", "query", "score",
 ];
 
 struct Corpus {
@@ -97,11 +79,7 @@ fn bench_hybrid_recall(c: &mut Criterion) {
     let corpus = build_corpus();
 
     c.bench_function("hybrid_default_1000ev_100q", |b| {
-        let r = HybridRetriever::new(
-            corpus.store.clone(),
-            corpus.embedder.clone(),
-            corpus.now_us,
-        );
+        let r = HybridRetriever::new(corpus.store.clone(), corpus.embedder.clone(), corpus.now_us);
         b.iter(|| {
             for q in &corpus.queries {
                 let query = RetrievalQuery {
@@ -116,17 +94,13 @@ fn bench_hybrid_recall(c: &mut Criterion) {
     });
 
     c.bench_function("lexical_only_1000ev_100q", |b| {
-        let r = HybridRetriever::new(
-            corpus.store.clone(),
-            corpus.embedder.clone(),
-            corpus.now_us,
-        )
-        .with_weights(FusionWeights {
-            w_sem: 0.0,
-            w_lex: 1.0,
-            w_rec: 0.0,
-            w_src: 0.0,
-        });
+        let r = HybridRetriever::new(corpus.store.clone(), corpus.embedder.clone(), corpus.now_us)
+            .with_weights(FusionWeights {
+                w_sem: 0.0,
+                w_lex: 1.0,
+                w_rec: 0.0,
+                w_src: 0.0,
+            });
         b.iter(|| {
             for q in &corpus.queries {
                 let query = RetrievalQuery {
@@ -141,17 +115,13 @@ fn bench_hybrid_recall(c: &mut Criterion) {
     });
 
     c.bench_function("semantic_only_1000ev_100q", |b| {
-        let r = HybridRetriever::new(
-            corpus.store.clone(),
-            corpus.embedder.clone(),
-            corpus.now_us,
-        )
-        .with_weights(FusionWeights {
-            w_sem: 1.0,
-            w_lex: 0.0,
-            w_rec: 0.0,
-            w_src: 0.0,
-        });
+        let r = HybridRetriever::new(corpus.store.clone(), corpus.embedder.clone(), corpus.now_us)
+            .with_weights(FusionWeights {
+                w_sem: 1.0,
+                w_lex: 0.0,
+                w_rec: 0.0,
+                w_src: 0.0,
+            });
         b.iter(|| {
             for q in &corpus.queries {
                 let query = RetrievalQuery {

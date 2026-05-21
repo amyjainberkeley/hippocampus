@@ -103,7 +103,12 @@ pub fn unwrap(
     let shared = member_private.diffie_hellman(&ephemeral_pub);
     let aes_key = derive_wrap_key(shared.as_bytes())?;
 
-    let plaintext = aead::decrypt(&wrapped.ciphertext, &AeadNonce(wrapped.nonce), &aes_key, b"")?;
+    let plaintext = aead::decrypt(
+        &wrapped.ciphertext,
+        &AeadNonce(wrapped.nonce),
+        &aes_key,
+        b"",
+    )?;
 
     if plaintext.len() != 32 {
         return Err(CryptoError::InvalidKeyLength {
@@ -202,7 +207,8 @@ mod tests {
 
         for window in bytes.windows(32) {
             assert_ne!(
-                window, &workspace_key[..],
+                window,
+                &workspace_key[..],
                 "workspace key must not appear in plaintext in wrapped output"
             );
         }

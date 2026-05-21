@@ -237,7 +237,10 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                 Some(p) => p,
                 None => return ParseOutcome::Error("backup: --out PATH is required".into()),
             };
-            Command::Backup { out, integrity_check }
+            Command::Backup {
+                out,
+                integrity_check,
+            }
         }
         Some("restore") => {
             let mut from: Option<PathBuf> = None;
@@ -260,7 +263,10 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                         to = Some(PathBuf::from(&positionals[i + 1]));
                         i += 2;
                     }
-                    "--force" => { force = true; i += 1; }
+                    "--force" => {
+                        force = true;
+                        i += 1;
+                    }
                     other => return ParseOutcome::Error(format!("restore: unknown arg: {other}")),
                 }
             }
@@ -571,12 +577,19 @@ fn main() -> ExitCode {
         Command::Search { query, limit, json } => run_search(&store, &query, limit, json),
         Command::Show { event_id, json } => run_show(&store, event_id, json),
         Command::Export { format, out, since } => run_export(&store, format, out, since),
-        Command::Backup { out, integrity_check } => run_backup(&store, &out, integrity_check),
+        Command::Backup {
+            out,
+            integrity_check,
+        } => run_backup(&store, &out, integrity_check),
         Command::Restore { .. } => unreachable!("handled above"),
     }
 }
 
-fn run_backup(store: &SqlCipherBrainStore, out: &std::path::Path, integrity_check: bool) -> ExitCode {
+fn run_backup(
+    store: &SqlCipherBrainStore,
+    out: &std::path::Path,
+    integrity_check: bool,
+) -> ExitCode {
     if integrity_check {
         match store.integrity_check() {
             Ok(v) if v == vec!["ok".to_string()] => {}
@@ -591,20 +604,29 @@ fn run_backup(store: &SqlCipherBrainStore, out: &std::path::Path, integrity_chec
         }
     }
     if out.exists() {
-        eprintln!("mci-brain backup: --out path already exists: {}", out.display());
+        eprintln!(
+            "mci-brain backup: --out path already exists: {}",
+            out.display()
+        );
         return ExitCode::from(33);
     }
     if let Err(e) = store.vacuum_into(out) {
         eprintln!("mci-brain backup: vacuum_into failed: {e}");
         return ExitCode::from(34);
     }
-    eprintln!("mci-brain backup: wrote {} (encrypted with same key)", out.display());
+    eprintln!(
+        "mci-brain backup: wrote {} (encrypted with same key)",
+        out.display()
+    );
     ExitCode::SUCCESS
 }
 
 fn run_restore(from: &std::path::Path, to: &std::path::Path, force: bool, key: &DbKey) -> ExitCode {
     if !from.exists() {
-        eprintln!("mci-brain restore: --from does not exist: {}", from.display());
+        eprintln!(
+            "mci-brain restore: --from does not exist: {}",
+            from.display()
+        );
         return ExitCode::from(40);
     }
     // Validate source decrypts with current key (read-only probe + stats).
@@ -629,7 +651,11 @@ fn run_restore(from: &std::path::Path, to: &std::path::Path, force: bool, key: &
         eprintln!("mci-brain restore: copy failed: {e}");
         return ExitCode::from(44);
     }
-    eprintln!("mci-brain restore: restored {} → {}", from.display(), to.display());
+    eprintln!(
+        "mci-brain restore: restored {} → {}",
+        from.display(),
+        to.display()
+    );
     ExitCode::SUCCESS
 }
 

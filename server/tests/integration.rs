@@ -443,9 +443,7 @@ async fn sqlite_schema_all_content_columns_are_blob() {
     let conn = rusqlite::Connection::open(&path).expect("raw open");
 
     // briefs table: ciphertext, nonce, aad must be BLOB.
-    let mut stmt = conn
-        .prepare("PRAGMA table_info(briefs)")
-        .expect("pragma");
+    let mut stmt = conn.prepare("PRAGMA table_info(briefs)").expect("pragma");
     let cols: Vec<(String, String)> = stmt
         .query_map([], |row| {
             let name: String = row.get(1)?;
@@ -456,14 +454,19 @@ async fn sqlite_schema_all_content_columns_are_blob() {
         .filter_map(Result::ok)
         .collect();
 
-    for blob_col in ["envelope_id", "workspace_id", "uploaded_by", "ciphertext", "nonce", "aad"] {
+    for blob_col in [
+        "envelope_id",
+        "workspace_id",
+        "uploaded_by",
+        "ciphertext",
+        "nonce",
+        "aad",
+    ] {
         let col = cols.iter().find(|(n, _)| n == blob_col);
-        assert!(
-            col.is_some(),
-            "briefs table must have column {blob_col}"
-        );
+        assert!(col.is_some(), "briefs table must have column {blob_col}");
         assert_eq!(
-            col.unwrap().1, "BLOB",
+            col.unwrap().1,
+            "BLOB",
             "briefs.{blob_col} must be BLOB, got {}",
             col.unwrap().1
         );
@@ -510,8 +513,8 @@ async fn e2e_real_crypto_through_http() {
     // 2. Encrypt a brief under the workspace key.
     let brief_content = b"Meeting notes: Q3 OKRs approved, headcount +2 eng.";
     let aad_bytes = format!("ws:{},ts:1716000000", ws_id.0);
-    let (ciphertext, nonce) = aead::encrypt(brief_content, &workspace_key, aad_bytes.as_bytes())
-        .unwrap();
+    let (ciphertext, nonce) =
+        aead::encrypt(brief_content, &workspace_key, aad_bytes.as_bytes()).unwrap();
 
     // 3. Wrap workspace key for this member.
     let wrapped = key_wrap::wrap(workspace_key.as_bytes(), &member_public).unwrap();

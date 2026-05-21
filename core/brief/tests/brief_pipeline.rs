@@ -472,10 +472,7 @@ fn llama_author_draft_flows_through_full_lifecycle() {
     )
     .unwrap();
     assert_eq!(brief.state, BriefState::Approved);
-    assert_eq!(
-        brief.human_approver_id.as_deref(),
-        Some("user:ceo@mci.dev")
-    );
+    assert_eq!(brief.human_approver_id.as_deref(), Some("user:ceo@mci.dev"));
 }
 
 // ---------------------------------------------------------------------------

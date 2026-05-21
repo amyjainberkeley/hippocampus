@@ -82,7 +82,11 @@ pub async fn run_episode_worker(
         let store_c = Arc::clone(&store);
         let seg = Arc::clone(&segmenter);
         let result = tokio::task::spawn_blocking(move || {
-            seg.segment(&batch, last.as_ref(), store_c.as_ref() as &dyn EpisodeWriter)
+            seg.segment(
+                &batch,
+                last.as_ref(),
+                store_c.as_ref() as &dyn EpisodeWriter,
+            )
         })
         .await
         .map_err(|e| EpisodeWorkerError::Store(e.to_string()))?
