@@ -1,11 +1,5 @@
-// HitRow.swift — single-row cell for SearchView / TimelineView.
-//
-// Carries content-minimal columns: timestamp, app, window title /url,
-// OCR snippet, source tag. All post-cascade events (ADR-0016 §4.3) —
-// no suppressed content can ever reach this view.
-
-import SwiftUI
 import RecallUIKit
+import SwiftUI
 
 struct HitRow: View {
     let hit: Hit
@@ -13,11 +7,13 @@ struct HitRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Formatters.tsString(usSinceEpoch: hit.tsUs))
+                Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.brandMint)
+                    .help(Formatters.tsString(usSinceEpoch: hit.tsUs))
                 Text(Formatters.contextLine(hit))
                     .font(.system(.body, design: .default).weight(.semibold))
+                    .foregroundStyle(Color.brandFgPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
@@ -27,17 +23,18 @@ struct HitRow: View {
                     .padding(.vertical, 2)
                     .background(
                         RoundedRectangle(cornerRadius: 4)
-                            .stroke(.secondary, lineWidth: 0.5)
+                            .stroke(Color.brandMintDim, lineWidth: 0.5)
                     )
+                    .foregroundStyle(Color.brandMintDim)
                 if !Formatters.scoreString(hit.score).isEmpty {
                     Text(Formatters.scoreString(hit.score))
                         .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.brandFgMuted)
                 }
             }
             Text(Formatters.snippet(hit.ocrTextSnippet))
                 .font(.system(.body, design: .default))
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.brandFgSecondary)
                 .lineLimit(3)
         }
         .padding(.vertical, 6)

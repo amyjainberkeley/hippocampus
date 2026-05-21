@@ -170,13 +170,25 @@ public struct StubBrainReader: BrainReader {
     public init() {}
 
     public func search(_ opts: SearchOptions) async throws -> [Hit] {
-        guard !opts.text.isEmpty else { return [] }
-        // Substring match on snippet/window/url; deterministic.
         let needle = opts.text.lowercased()
-        let matches = Self.demoHits.filter { h in
-            h.ocrTextSnippet.lowercased().contains(needle)
-                || (h.windowTitle?.lowercased().contains(needle) ?? false)
-                || (h.url?.lowercased().contains(needle) ?? false)
+        let isWildcard = opts.text == "*"
+        guard !opts.text.isEmpty else { return [] }
+        var matches = Self.demoHits
+        if !isWildcard {
+            matches = matches.filter { h in
+                h.ocrTextSnippet.lowercased().contains(needle)
+                    || (h.windowTitle?.lowercased().contains(needle) ?? false)
+                    || (h.url?.lowercased().contains(needle) ?? false)
+            }
+        }
+        if let app = opts.appFilter {
+            matches = matches.filter { $0.appBundleId == app }
+        }
+        if let from = opts.timeFromUs {
+            matches = matches.filter { $0.tsUs >= from }
+        }
+        if let to = opts.timeToUs {
+            matches = matches.filter { $0.tsUs <= to }
         }
         return Array(matches.prefix(opts.limit))
     }
