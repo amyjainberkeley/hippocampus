@@ -6,6 +6,7 @@ public protocol BinaryLocator: Sendable {
     func agentPath() -> URL?
     func recallUIPath() -> URL?
     func onboardingPath() -> URL?
+    func brainCLIPath() -> URL?
     func knownSafeAppsPath() -> URL?
 }
 
@@ -30,6 +31,10 @@ public struct BundleBinaryLocator: BinaryLocator, Sendable {
 
     public func onboardingPath() -> URL? {
         resolve("onboarding")
+    }
+
+    public func brainCLIPath() -> URL? {
+        resolve("mci-brain")
     }
 
     public func knownSafeAppsPath() -> URL? {
@@ -85,6 +90,11 @@ public struct BundleBinaryLocator: BinaryLocator, Sendable {
             devPaths = [
                 "apps/onboarding/.build/debug/onboarding",
                 "apps/onboarding/.build/release/onboarding",
+            ]
+        case "mci-brain":
+            devPaths = [
+                "target/debug/mci-brain",
+                "target/release/mci-brain",
             ]
         default:
             devPaths = []

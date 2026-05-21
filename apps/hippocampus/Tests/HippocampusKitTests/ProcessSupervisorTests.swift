@@ -9,12 +9,14 @@ final class FakeBinaryLocator: BinaryLocator, @unchecked Sendable {
     var agentURL: URL?
     var recallURL: URL?
     var onboardingURL: URL?
+    var brainCLIURL: URL?
     var knownSafeURL: URL?
 
     func helperPath() -> URL? { helperURL }
     func agentPath() -> URL? { agentURL }
     func recallUIPath() -> URL? { recallURL }
     func onboardingPath() -> URL? { onboardingURL }
+    func brainCLIPath() -> URL? { brainCLIURL }
     func knownSafeAppsPath() -> URL? { knownSafeURL }
 }
 
@@ -206,10 +208,42 @@ final class ProcessSupervisorTests: XCTestCase {
 
     // MARK: - Health Snapshot
 
-    func test_health_snapshot_display() {
-        let snapshot = HealthSnapshot(eventCount: 18, lastUpdated: Date().addingTimeInterval(-180))
+    func test_health_snapshot_display_with_brain_count() {
+        let snapshot = HealthSnapshot(
+            framesDelivered: 100,
+            framesSuppressed: 10,
+            brainEventCount: 42,
+            lastCaptureTs: Date().addingTimeInterval(-180),
+            lastUpdated: Date()
+        )
         let text = snapshot.displayText
-        XCTAssertTrue(text.contains("18 events"), "Expected event count in: \(text)")
+        XCTAssertTrue(text.contains("42 events"), "Brain count preferred: \(text)")
+    }
+
+    func test_health_snapshot_display_falls_back_to_frames() {
+        let snapshot = HealthSnapshot(
+            framesDelivered: 77,
+            framesSuppressed: 5,
+            brainEventCount: nil,
+            lastCaptureTs: Date().addingTimeInterval(-60),
+            lastUpdated: Date()
+        )
+        let text = snapshot.displayText
+        XCTAssertTrue(text.contains("77 events"), "Fallback to frames_delivered: \(text)")
+    }
+
+    func test_health_snapshot_with_brain_event_count() {
+        let snapshot = HealthSnapshot(
+            framesDelivered: 100,
+            framesSuppressed: 10,
+            brainEventCount: nil,
+            lastCaptureTs: nil,
+            lastUpdated: Date()
+        )
+        let updated = snapshot.withBrainEventCount(55)
+        XCTAssertEqual(updated.brainEventCount, 55)
+        XCTAssertEqual(updated.eventCount, 55)
+        XCTAssertEqual(updated.framesDelivered, 100)
     }
 
     // MARK: - Onboarding detection
