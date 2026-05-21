@@ -1,12 +1,28 @@
 //! MCI Workspace Server binary.
 //!
 //! Reads `PORT` env (default 3100), binds localhost, serves.
+//! `MCI_SERVER_DB_PATH` selects `SQLite` store; absent = in-memory (backwards-compat).
 //! Logs to stderr — NO content logs, counts only.
 
 use std::sync::Arc;
 
 use mci_server::handlers::{router, AppState};
-use mci_server::store::InMemoryWorkspaceStore;
+use mci_server::store::{InMemoryWorkspaceStore, SqliteWorkspaceStore, WorkspaceStore};
+
+fn build_store() -> Box<dyn WorkspaceStore> {
+    match std::env::var("MCI_SERVER_DB_PATH") {
+        Ok(path) if !path.is_empty() => {
+            tracing::info!(path = %path, "opening SQLite workspace store");
+            let store = SqliteWorkspaceStore::open(std::path::Path::new(&path))
+                .expect("failed to open SQLite store");
+            Box::new(store)
+        }
+        _ => {
+            tracing::info!("no MCI_SERVER_DB_PATH set — using in-memory store (non-durable)");
+            Box::new(InMemoryWorkspaceStore::new())
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -23,7 +39,7 @@ async fn main() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(3100);
 
-    let store = InMemoryWorkspaceStore::new();
+    let store = build_store();
     let state = Arc::new(AppState::new(store));
     let app = router(state);
 
