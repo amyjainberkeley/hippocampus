@@ -40,3 +40,6 @@ Thumbs.db
 .claude/sessions/
 .claude/.skill-cache/
 .claude/worktrees/
+
+# Output redirects from CLI flag-as-filename mistakes (e.g. --skip-sudo)
+/--*
