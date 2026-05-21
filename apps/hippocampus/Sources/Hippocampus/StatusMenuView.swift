@@ -4,18 +4,18 @@ import HippocampusKit
 
 struct StatusMenuView: View {
     @ObservedObject var supervisor: ProcessSupervisor
+    @ObservedObject var loginItemVM: LoginItemViewModel
+    let updater: SparkleUpdaterService
 
     @State private var showAbout = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Status line
             Text(supervisor.state.statusText)
                 .font(.headline)
 
             Divider()
 
-            // Pause / Resume
             if supervisor.state == .running {
                 Button("Pause") {
                     supervisor.setPaused(true)
@@ -26,7 +26,6 @@ struct StatusMenuView: View {
                 }
             }
 
-            // Start / Stop
             if !supervisor.state.isActive && supervisor.state != .starting {
                 Button("Start Recording") {
                     supervisor.start()
@@ -52,7 +51,27 @@ struct StatusMenuView: View {
 
             Divider()
 
-            // Health snapshot
+            // Login Item
+            Toggle("Launch at Login", isOn: Binding(
+                get: { loginItemVM.isEnabled },
+                set: { _ in loginItemVM.toggle() }
+            ))
+
+            Divider()
+
+            // Sparkle updates
+            Button("Check for Updates…") {
+                updater.checkForUpdates()
+            }
+            .disabled(!updater.canCheckForUpdates)
+
+            Toggle("Auto-Check for Updates", isOn: Binding(
+                get: { updater.automaticallyChecksForUpdates },
+                set: { updater.automaticallyChecksForUpdates = $0 }
+            ))
+
+            Divider()
+
             if let health = supervisor.health {
                 Text(health.displayText)
                     .font(.caption)
@@ -63,7 +82,6 @@ struct StatusMenuView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // View logs
             Button("View Logs in Console") {
                 let logDir = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Library/Logs/MCI")
@@ -83,6 +101,11 @@ struct StatusMenuView: View {
             }
             .keyboardShortcut("q")
         }
+        .task {
+            if loginItemVM.shouldPrompt {
+                loginItemVM.markPrompted()
+            }
+        }
     }
 
     private func openAboutWindow() {
@@ -97,10 +120,9 @@ struct StatusMenuView: View {
             Your brain lives at:
             \(dbPath)
 
-            Built by MCI — Memory Context Interface.
-            See docs/decisions/ for the ADR ladder.
+            Launch at Login: \(loginItemVM.isEnabled ? "ON" : "OFF")
 
-            // TODO: SMAppService LoginItem registration (Wave 2.A)
+            Built by MCI — Memory Context Interface.
             """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")

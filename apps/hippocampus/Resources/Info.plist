@@ -26,5 +26,14 @@
     <string>Hippocampus uses Accessibility to detect password fields and secure input, so it can automatically stop capturing when you type sensitive information.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Hippocampus reads the URL of your active browser tab so your brain knows what page you were looking at. No page content is sent anywhere.</string>
+    <!-- Sparkle 2.x auto-update configuration -->
+    <key>SUFeedURL</key>
+    <string>https://hippocampus.ai/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>XRC6iJSDpOpPuA78CqB0vC6Lw1YUyZalLIXgyBCfG00=</string>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
+    <key>SUEnableInstallerLauncher</key>
+    <true/>
 </dict>
 </plist>
