@@ -54,13 +54,19 @@ enum Mode {
     /// P3.6.6 + P3.6.7 + P3.10c — wire-frame drainer.
     ///
     /// Health frames always go to JSONL. `OCREvent` frames go to the
-    /// SQLCipher brain store IFF `MCI_DB_KEY_HEX` is set; otherwise
+    /// `SQLCipher` brain store IFF `MCI_DB_KEY_HEX` is set; otherwise
     /// they fall into the non-health counter (legacy behaviour).
-    DrainStdin { db_path: PathBuf },
-    HealthSummary { window_seconds: u64 },
+    DrainStdin {
+        db_path: PathBuf,
+    },
+    HealthSummary {
+        window_seconds: u64,
+    },
     /// P3.10b — localhost MCP server over stdio JSON-RPC 2.0.
     /// Resolves `db_path` and the DB key from env at start-up.
-    McpServe { db_path: PathBuf },
+    McpServe {
+        db_path: PathBuf,
+    },
 }
 
 fn default_device_id_path() -> PathBuf {
@@ -190,6 +196,7 @@ fn print_usage() {
     );
 }
 
+#[allow(clippy::too_many_lines)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let raw_argv: Vec<String> = std::env::args().collect();
@@ -234,95 +241,95 @@ async fn main() -> ExitCode {
             // Shutdown channel coordinates both halves on SIGINT/SIGTERM.
             let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-            let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> =
-                match std::env::var("MCI_DB_KEY_HEX") {
-                    Ok(key_hex) => match decode_hex32(&key_hex) {
-                        Some(key_bytes) => {
-                            if let Some(parent) = db_path.parent() {
-                                if !parent.exists() {
-                                    if let Err(e) = std::fs::create_dir_all(parent) {
-                                        eprintln!(
-                                            "mci-agent: create_dir_all({}): {e}",
-                                            parent.display()
-                                        );
-                                        return ExitCode::from(20);
-                                    }
+            let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> = match std::env::var(
+                "MCI_DB_KEY_HEX",
+            ) {
+                Ok(key_hex) => match decode_hex32(&key_hex) {
+                    Some(key_bytes) => {
+                        if let Some(parent) = db_path.parent() {
+                            if !parent.exists() {
+                                if let Err(e) = std::fs::create_dir_all(parent) {
+                                    eprintln!(
+                                        "mci-agent: create_dir_all({}): {e}",
+                                        parent.display()
+                                    );
+                                    return ExitCode::from(20);
                                 }
                             }
-                            let key = DbKey::from_bytes(key_bytes);
-                            match SqlCipherBrainStore::new(&db_path, &key) {
-                                Ok(store) => {
-                                    let store = Arc::new(store);
-                                    // P3.8: load the embedder backend. Core ML if
-                                    // .mlpackage found, zero-vector fallback otherwise.
-                                    let embedder = load_embedder_backend();
-                                    let pump = BrainPump::new(
-                                        Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
-                                        None, // ingest-time embed stays None; idle-batch handles it
-                                    );
-                                    eprintln!(
+                        }
+                        let key = DbKey::from_bytes(key_bytes);
+                        match SqlCipherBrainStore::new(&db_path, &key) {
+                            Ok(store) => {
+                                let store = Arc::new(store);
+                                // P3.8: load the embedder backend. Core ML if
+                                // .mlpackage found, zero-vector fallback otherwise.
+                                let embedder = load_embedder_backend();
+                                let pump = BrainPump::new(
+                                    Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
+                                    None, // ingest-time embed stays None; idle-batch handles it
+                                );
+                                eprintln!(
                                         "mci-agent: brain ingest + idle-batch enabled. db={} embedder={}",
                                         db_path.display(),
                                         if embedder.1 { "CoreML" } else { "zero-fallback" },
                                     );
 
-                                    // Spawn idle-batch worker alongside the drain loop.
-                                    let worker_store = Arc::clone(&store);
-                                    let worker_embedder = embedder.0;
-                                    let worker_shutdown = shutdown_rx.clone();
-                                    tokio::spawn(async move {
-                                        match idle_batch::run_idle_batch_worker(
-                                            worker_store,
-                                            worker_embedder,
-                                            32, // batch_size
-                                            std::time::Duration::from_secs(5),
-                                            worker_shutdown,
-                                        )
-                                        .await
-                                        {
-                                            Ok(stats) => {
-                                                eprintln!(
+                                // Spawn idle-batch worker alongside the drain loop.
+                                let worker_store = Arc::clone(&store);
+                                let worker_embedder = embedder.0;
+                                let worker_shutdown = shutdown_rx.clone();
+                                tokio::spawn(async move {
+                                    match idle_batch::run_idle_batch_worker(
+                                        worker_store,
+                                        worker_embedder,
+                                        32, // batch_size
+                                        std::time::Duration::from_secs(5),
+                                        worker_shutdown,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats) => {
+                                            eprintln!(
                                                     "mci-agent: idle-batch exited. embedded={} batches={} embed_errors={} store_errors={}",
                                                     stats.events_embedded, stats.batches_run,
                                                     stats.embed_errors, stats.store_errors,
                                                 );
-                                            }
-                                            Err(e) => {
-                                                eprintln!("mci-agent: idle-batch error: {e}");
-                                            }
                                         }
-                                    });
+                                        Err(e) => {
+                                            eprintln!("mci-agent: idle-batch error: {e}");
+                                        }
+                                    }
+                                });
 
-                                    Some((pump, store))
-                                }
-                                Err(e) => {
-                                    eprintln!(
+                                Some((pump, store))
+                            }
+                            Err(e) => {
+                                eprintln!(
                                         "mci-agent: open brain at {}: {e}. Falling back to health-only drain.",
                                         db_path.display()
                                     );
-                                    None
-                                }
+                                None
                             }
                         }
-                        None => {
-                            eprintln!(
+                    }
+                    None => {
+                        eprintln!(
                                 "mci-agent: MCI_DB_KEY_HEX must be 64 hex chars (32 bytes). Falling back to health-only drain."
                             );
-                            None
-                        }
-                    },
-                    Err(_) => {
-                        eprintln!(
-                            "mci-agent: MCI_DB_KEY_HEX not set — health-only drain. Set it to write OCR events into the encrypted brain."
-                        );
                         None
                     }
-                };
+                },
+                Err(_) => {
+                    eprintln!(
+                            "mci-agent: MCI_DB_KEY_HEX not set — health-only drain. Set it to write OCR events into the encrypted brain."
+                        );
+                    None
+                }
+            };
 
             let drain_result = match brain_pump.as_ref() {
                 Some((pump, _store)) => {
-                    drain_to_log_with_brain(&mut stdin, &log, &clock, &device_id, pump)
-                        .await
+                    drain_to_log_with_brain(&mut stdin, &log, &clock, &device_id, pump).await
                 }
                 None => drain_to_log(&mut stdin, &log, &clock, &device_id).await,
             };
@@ -479,15 +486,16 @@ fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
         || std::path::PathBuf::from("/tmp"),
         std::path::PathBuf::from,
     );
-    let env_path = std::env::var_os("MCI_ARCTIC_MODEL_PATH")
-        .map(std::path::PathBuf::from);
+    let env_path = std::env::var_os("MCI_ARCTIC_MODEL_PATH").map(std::path::PathBuf::from);
 
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     if let Some(p) = &env_path {
         candidates.push(p.clone());
     }
     // Bundle.module resource path (SwiftPM / Xcode build layout)
-    candidates.push(home.join("Applications/MCICaptureHelper.app/Contents/Resources/arctic-embed-s.mlpackage"));
+    candidates.push(
+        home.join("Applications/MCICaptureHelper.app/Contents/Resources/arctic-embed-s.mlpackage"),
+    );
     // Executable-relative path
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
@@ -508,7 +516,9 @@ fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     // Zero-vector embedder marks events "embedded" to avoid busy-loop.
     struct ZeroEmbedder;
     impl mci_brain::Embedder for ZeroEmbedder {
-        fn dimension(&self) -> usize { 384 }
+        fn dimension(&self) -> usize {
+            384
+        }
         fn embed_one(&self, _text: &str) -> Result<Vec<f32>, mci_brain::EmbedError> {
             Ok(vec![0.0_f32; 384])
         }

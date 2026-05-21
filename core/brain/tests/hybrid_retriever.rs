@@ -12,9 +12,7 @@
 use std::sync::Arc;
 
 use mci_brain::{
-    hybrid_retriever::{
-        minmax, minmax_normalize, recency_decay, ANCHOR_WINDOW_US, DEFAULT_K_LEX,
-    },
+    hybrid_retriever::{minmax, minmax_normalize, recency_decay, ANCHOR_WINDOW_US, DEFAULT_K_LEX},
     stubs::{FixedDimEmbedder, InMemoryBrainStore},
     BrainStore, Embedder, Event, EventId, FusionWeights, HybridRetriever, RetrievalQuery,
     RetrievalShape, RetrieveError, Retriever, TimeRange,
@@ -23,12 +21,7 @@ use mci_brain::{
 const MICROS_PER_HOUR: u64 = 3_600_000_000;
 const MICROS_PER_DAY: u64 = 24 * MICROS_PER_HOUR;
 
-fn event_at(
-    text: &str,
-    ts_us: u64,
-    app: Option<&str>,
-    embedding: Option<Vec<f32>>,
-) -> Event {
+fn event_at(text: &str, ts_us: u64, app: Option<&str>, embedding: Option<Vec<f32>>) -> Event {
     Event {
         id: EventId(0),
         ts_us,
@@ -122,13 +115,12 @@ fn pure_semantic_path_ranks_by_embedding_cosine() {
         .collect();
     let store = store_with(events);
 
-    let r = HybridRetriever::new(store, e, 0)
-        .with_weights(FusionWeights {
-            w_sem: 1.0,
-            w_lex: 0.0,
-            w_rec: 0.0,
-            w_src: 0.0,
-        });
+    let r = HybridRetriever::new(store, e, 0).with_weights(FusionWeights {
+        w_sem: 1.0,
+        w_lex: 0.0,
+        w_rec: 0.0,
+        w_src: 0.0,
+    });
 
     let q = RetrievalQuery {
         text: "gamma".into(),
@@ -164,12 +156,7 @@ fn pure_lexical_path_ranks_by_fts_match_density() {
     // once. Per the InMemoryBrainStore's pseudo-BM25 the shorter
     // matches denser → higher lex score → top hit. Set w_lex=1 so the
     // combined ranking is the lexical ranking alone.
-    let short = event_at(
-        "rust",
-        0,
-        None,
-        Some(e.embed_one("rust").unwrap()),
-    );
+    let short = event_at("rust", 0, None, Some(e.embed_one("rust").unwrap()));
     let long = event_at(
         "rust appears once in this much longer paragraph of unrelated text padding",
         0,
@@ -195,11 +182,7 @@ fn pure_lexical_path_ranks_by_fts_match_density() {
     assert_eq!(hits.len(), 2);
 
     // Top hit should be the short event (denser match).
-    let top_text = store
-        .get_event(hits[0].event_id)
-        .unwrap()
-        .unwrap()
-        .text;
+    let top_text = store.get_event(hits[0].event_id).unwrap().unwrap().text;
     assert_eq!(top_text, "rust");
 }
 
@@ -243,13 +226,14 @@ fn hybrid_fusion_beats_lexical_only_when_lexical_misses_the_intent() {
     };
 
     // Pure-lexical ranks the dense match on top.
-    let lex_only = HybridRetriever::new(store.clone(), e.clone(), MICROS_PER_HOUR)
-        .with_weights(FusionWeights {
+    let lex_only = HybridRetriever::new(store.clone(), e.clone(), MICROS_PER_HOUR).with_weights(
+        FusionWeights {
             w_sem: 0.0,
             w_lex: 1.0,
             w_rec: 0.0,
             w_src: 0.0,
-        });
+        },
+    );
     let lex_top = &lex_only.retrieve(&q).unwrap()[0];
     let lex_top_text = store.get_event(lex_top.event_id).unwrap().unwrap().text;
     assert_eq!(lex_top_text, "rust");
@@ -299,11 +283,7 @@ fn router_classifies_anchor_then_window_for_right_before_phrase() {
 #[test]
 fn router_classifies_time_range_extraction_for_last_weekday_phrase() {
     let now_us = 30 * MICROS_PER_DAY;
-    let r = HybridRetriever::new(
-        Arc::new(InMemoryBrainStore::new()),
-        embedder(),
-        now_us,
-    );
+    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), now_us);
     let q = RetrievalQuery {
         text: "show me last Tuesday afternoon".into(),
         limit: 5,
@@ -329,16 +309,15 @@ fn router_classifies_time_range_extraction_for_last_weekday_phrase() {
         time_filter: None,
         app_filter: None,
     };
-    assert!(matches!(r.route(&q2), RetrievalShape::TimeRangeExtraction(_)));
+    assert!(matches!(
+        r.route(&q2),
+        RetrievalShape::TimeRangeExtraction(_)
+    ));
 }
 
 #[test]
 fn router_falls_back_to_plain_for_non_temporal_queries() {
-    let r = HybridRetriever::new(
-        Arc::new(InMemoryBrainStore::new()),
-        embedder(),
-        0,
-    );
+    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let q = RetrievalQuery {
         text: "rust workspace cargo build".into(),
         limit: 5,
@@ -428,12 +407,7 @@ fn recency_decay_tips_ties_in_combined_score() {
     let e = embedder();
     // Two events: same text, same embedding ⇒ same lex̂ and sem̂.
     // Recency decay is the only differentiator.
-    let old = event_at(
-        "rust",
-        0,
-        None,
-        Some(e.embed_one("rust").unwrap()),
-    );
+    let old = event_at("rust", 0, None, Some(e.embed_one("rust").unwrap()));
     let recent = event_at(
         "rust",
         100 * MICROS_PER_HOUR,
@@ -523,11 +497,7 @@ fn anchor_then_window_keeps_events_within_five_minutes_of_anchor() {
 
 #[test]
 fn empty_query_is_invalid_input() {
-    let r = HybridRetriever::new(
-        Arc::new(InMemoryBrainStore::new()),
-        embedder(),
-        0,
-    );
+    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let q = RetrievalQuery {
         text: String::new(),
         limit: 5,
@@ -544,11 +514,7 @@ fn empty_query_is_invalid_input() {
 
 #[test]
 fn zero_limit_returns_empty_result_set_without_calling_store() {
-    let r = HybridRetriever::new(
-        Arc::new(InMemoryBrainStore::new()),
-        embedder(),
-        0,
-    );
+    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let q = RetrievalQuery {
         text: "anything".into(),
         limit: 0,
@@ -565,11 +531,7 @@ fn zero_limit_returns_empty_result_set_without_calling_store() {
 
 #[test]
 fn default_fusion_weights_and_pool_sizes_match_adr_0010() {
-    let r = HybridRetriever::new(
-        Arc::new(InMemoryBrainStore::new()),
-        embedder(),
-        0,
-    );
+    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let w = r.weights();
     assert!((w.w_sem - 0.5).abs() < f32::EPSILON);
     assert!((w.w_lex - 0.3).abs() < f32::EPSILON);
@@ -605,11 +567,7 @@ fn recency_decay_math_matches_adr_0010_formula() {
 
 #[test]
 fn inverted_time_filter_is_invalid_input() {
-    let r = HybridRetriever::new(
-        Arc::new(InMemoryBrainStore::new()),
-        embedder(),
-        0,
-    );
+    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let q = RetrievalQuery {
         text: "anything".into(),
         limit: 5,

@@ -6,12 +6,12 @@
 //! stdio loop with a [`tokio::io::duplex`] pipe in place of real
 //! stdin/stdout.
 //!
-//! No SQLCipher dependency — every test uses the [`StubBrainReader`]
+//! No `SQLCipher` dependency — every test uses the [`StubBrainReader`]
 //! below so the JSON-RPC surface is exercised in isolation. The
 //! `LiveBrainReader` path is covered by the existing
 //! `core/brain/tests/sqlcipher_brain_store.rs` integration suite (the
 //! P3.2 store tests already cover `fts5_search` / `get_event` /
-//! `events_since` / `stats` against a real ephemeral SQLCipher DB).
+//! `events_since` / `stats` against a real ephemeral `SQLCipher` DB).
 //!
 //! Read-only structural check (per P3.10b PR body CSO sign-off):
 //! `tool_routing_is_three_known_tools_only` enumerates every accepted
@@ -24,8 +24,10 @@ use mci_agent::mcp::{
     serve_stdio, BrainReader, BrainReaderError, JsonRpcId, JsonRpcRequest, JsonRpcResponse,
     LiveBrainReader, McpHit, Server, ToolName, INVALID_PARAMS, METHOD_NOT_FOUND, PARSE_ERROR,
 };
-use mci_brain::{BrainStats, BrainStore, Embedder, Event, EventId, EventRecord, SqlCipherBrainStore};
 use mci_brain::stubs::FixedDimEmbedder;
+use mci_brain::{
+    BrainStats, BrainStore, Embedder, Event, EventId, EventRecord, SqlCipherBrainStore,
+};
 use mci_core::crypto::DbKey;
 
 // ---------------------------------------------------------------------------
@@ -52,7 +54,12 @@ struct StubBrainReader {
 impl StubBrainReader {
     fn new() -> Self {
         Self {
-            hits: vec![sample_hit(101, 1_000_000, "hello world", Some("https://example.com"))],
+            hits: vec![sample_hit(
+                101,
+                1_000_000,
+                "hello world",
+                Some("https://example.com"),
+            )],
             events: vec![
                 sample_record(200, 2_000_000, "first"),
                 sample_record(201, 3_000_000, "second"),
@@ -281,7 +288,9 @@ fn tools_call_mci_events_since_returns_filtered_events() {
     // Only ts_us=3_000_000 (id 201) is > 2_500_000.
     assert_eq!(events.len(), 1);
     assert_eq!(
-        events[0].get("event_id").and_then(serde_json::Value::as_u64),
+        events[0]
+            .get("event_id")
+            .and_then(serde_json::Value::as_u64),
         Some(201)
     );
     let invs = stub.invocations();
@@ -307,11 +316,15 @@ fn tools_call_mci_stats_returns_counts() {
         Some(42)
     );
     assert_eq!(
-        stats.get("oldest_ts_us").and_then(serde_json::Value::as_u64),
+        stats
+            .get("oldest_ts_us")
+            .and_then(serde_json::Value::as_u64),
         Some(1_000_000)
     );
     assert_eq!(
-        stats.get("newest_ts_us").and_then(serde_json::Value::as_u64),
+        stats
+            .get("newest_ts_us")
+            .and_then(serde_json::Value::as_u64),
         Some(9_000_000)
     );
     assert_eq!(stub.invocations().stats, 1);
@@ -528,8 +541,12 @@ fn open_temp_store() -> (tempfile::TempDir, Arc<SqlCipherBrainStore>) {
 fn mci_recall_with_no_embedder_falls_back_to_fts5() {
     let (_dir, store) = open_temp_store();
 
-    store.put_event(&make_test_event("hello world testing", 1_000_000)).unwrap();
-    store.put_event(&make_test_event("goodbye universe", 2_000_000)).unwrap();
+    store
+        .put_event(&make_test_event("hello world testing", 1_000_000))
+        .unwrap();
+    store
+        .put_event(&make_test_event("goodbye universe", 2_000_000))
+        .unwrap();
 
     let reader = LiveBrainReader::from_store_with_embedder(store, None);
     let srv = Server::new(Arc::new(reader));
@@ -576,10 +593,8 @@ fn mci_recall_with_embedder_calls_hybrid_retriever() {
         ))
         .unwrap();
 
-    let reader = LiveBrainReader::from_store_with_embedder(
-        store,
-        Some(embedder as Arc<dyn Embedder>),
-    );
+    let reader =
+        LiveBrainReader::from_store_with_embedder(store, Some(embedder as Arc<dyn Embedder>));
     let srv = Server::new(Arc::new(reader));
 
     let resp = srv
@@ -637,9 +652,7 @@ fn mci_recall_handles_hyphen_in_query_gracefully() {
         ))
         .expect("response");
 
-    let result = resp
-        .result
-        .expect("result — hyphen query must not error");
+    let result = resp.result.expect("result — hyphen query must not error");
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())

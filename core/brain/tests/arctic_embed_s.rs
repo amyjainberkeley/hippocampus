@@ -68,7 +68,9 @@ impl EmbedderBackend for RecordingBackend {
         let mut state = if seed == 0 { 0x9E37_79B9 } else { seed };
         let mut v = vec![0.0_f32; self.out_dim];
         for slot in &mut v {
-            state = state.wrapping_mul(2_862_933_555_777_941_757).wrapping_add(3_037_000_493);
+            state = state
+                .wrapping_mul(2_862_933_555_777_941_757)
+                .wrapping_add(3_037_000_493);
             #[allow(clippy::cast_precision_loss)]
             let u = (((state >> 33) & 0x00FF_FFFF) as f32) / 16_777_216.0;
             *slot = u.mul_add(2.0, -1.0);
@@ -185,10 +187,7 @@ fn output_is_l2_normalized() {
         .expect("embed");
     assert_eq!(v.len(), ARCTIC_EMBED_S_DIMENSION);
     let mag: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-    assert!(
-        (mag - 1.0).abs() < 1e-6,
-        "expected ||v|| ≈ 1.0, got {mag}"
-    );
+    assert!((mag - 1.0).abs() < 1e-6, "expected ||v|| ≈ 1.0, got {mag}");
 }
 
 #[test]
@@ -286,9 +285,6 @@ fn batch_matches_per_item() {
     assert_eq!(batched.len(), 3);
     for (i, t) in texts.iter().enumerate() {
         let single = e.embed_one(t).expect("single");
-        assert_eq!(
-            batched[i], single,
-            "batch[{i}] must match embed_one({t:?})"
-        );
+        assert_eq!(batched[i], single, "batch[{i}] must match embed_one({t:?})");
     }
 }

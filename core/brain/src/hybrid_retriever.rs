@@ -585,18 +585,30 @@ mod tests {
 
     #[test]
     fn intersect_ranges_carries_the_only_set_side() {
-        let r = TimeRange { from_us: 10, to_us: 20 };
+        let r = TimeRange {
+            from_us: 10,
+            to_us: 20,
+        };
         assert_eq!(intersect_ranges(Some(r), None), Some(r));
         assert_eq!(intersect_ranges(None, Some(r)), Some(r));
     }
 
     #[test]
     fn intersect_ranges_takes_overlap() {
-        let a = TimeRange { from_us: 0, to_us: 100 };
-        let b = TimeRange { from_us: 50, to_us: 150 };
+        let a = TimeRange {
+            from_us: 0,
+            to_us: 100,
+        };
+        let b = TimeRange {
+            from_us: 50,
+            to_us: 150,
+        };
         assert_eq!(
             intersect_ranges(Some(a), Some(b)),
-            Some(TimeRange { from_us: 50, to_us: 100 })
+            Some(TimeRange {
+                from_us: 50,
+                to_us: 100
+            })
         );
     }
 

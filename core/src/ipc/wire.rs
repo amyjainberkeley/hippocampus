@@ -80,10 +80,10 @@ pub const OCR_EVENT_APP_BUNDLE_ID_LEN: usize = 64;
 /// in P3.6 — the blob writer lands at P3.6.5). ADR-0016 §1.6.
 pub const OCR_EVENT_KEYFRAME_HASH_LEN: usize = 32;
 
-/// Fixed-portion byte length of an OCREvent payload, before the
-/// variable-length window_title / url / ocr_text bytes. ADR-0016 §1.6:
-///   seq(8) + ts_us(8) + app_bundle_id(64) + window_title_len(2)
-///   + url_len(2) + ocr_text_len(4) + keyframe_hash(32) = 120 bytes.
+/// Fixed-portion byte length of an `OCREvent` payload, before the
+/// variable-length `window_title` / url / `ocr_text` bytes. ADR-0016 §1.6:
+///   `seq(8)` + `ts_us(8)` + `app_bundle_id(64)` + `window_title_len(2)`
+///   + `url_len(2)` + `ocr_text_len(4)` + `keyframe_hash(32)` = 120 bytes.
 pub const OCR_EVENT_FIXED_HEADER_BYTES: usize =
     8 + 8 + OCR_EVENT_APP_BUNDLE_ID_LEN + 2 + 2 + 4 + OCR_EVENT_KEYFRAME_HASH_LEN;
 
@@ -252,6 +252,7 @@ pub fn encode(seq: u64, msg: &Message) -> Vec<u8> {
     out
 }
 
+#[allow(clippy::too_many_lines)]
 fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
     match msg {
         Message::CaptureStart {
@@ -430,6 +431,7 @@ pub fn decode(buf: &[u8]) -> Result<(Frame, usize), DecodeError> {
     Ok((Frame { seq, message }, total))
 }
 
+#[allow(clippy::too_many_lines)]
 fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usize), DecodeError> {
     let mut p = Parser::new(payload);
     let msg = match msg_type {
@@ -733,19 +735,18 @@ mod tests {
             },
         );
         let expected: [u8; 72] = [
-            0x4D, 0x04, 0x30, 0x00,
-            0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x38, 0x00, 0x00, 0x00,
-            // u64 LE × 7
-            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x4D, 0x04, 0x30, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00,
+            0x00, 0x00, // u64 LE × 7
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        assert_eq!(buf, expected.to_vec(), "HelperHealth v0x04 cross-side fixture");
+        assert_eq!(
+            buf,
+            expected.to_vec(),
+            "HelperHealth v0x04 cross-side fixture"
+        );
 
         // And the round-trip decoder reads exactly back what the
         // encoder produced — proves the v0x04 layout is self-consistent.
@@ -1046,9 +1047,9 @@ mod tests {
                 seq: 42,
                 ts_us: 0x0102_0304_0506_0708,
                 app_bundle_id: bundle,
-                window_title: "T".to_string(),       // 1 byte
-                url: "U".to_string(),                 // 1 byte
-                ocr_text: "Hi".to_string(),           // 2 bytes
+                window_title: "T".to_string(), // 1 byte
+                url: "U".to_string(),          // 1 byte
+                ocr_text: "Hi".to_string(),    // 2 bytes
                 keyframe_hash: hash,
             },
         );
@@ -1056,7 +1057,10 @@ mod tests {
         //                + 2 + 2 + 4 (lens) + 32 (keyframe_hash) = 120
         // Variable    = 1 + 1 + 2 = 4
         // Total payload = 124. Frame total = 16 (header) + 124 = 140.
-        assert_eq!(buf.len(), MIN_FRAME_HEADER_BYTES + OCR_EVENT_FIXED_HEADER_BYTES + 4);
+        assert_eq!(
+            buf.len(),
+            MIN_FRAME_HEADER_BYTES + OCR_EVENT_FIXED_HEADER_BYTES + 4
+        );
         assert_eq!(buf.len(), 140);
 
         // Header: magic 4D, version 04, msg_type 0040 LE, seq 42 LE,
@@ -1161,7 +1165,7 @@ mod tests {
         payload.extend_from_slice(&[0u8; 64]); // app_bundle_id
         payload.extend_from_slice(&0u16.to_le_bytes()); // window_title_len
         payload.extend_from_slice(&0u16.to_le_bytes()); // url_len
-        // ocr_text_len > MAX_OCR_TEXT_BYTES — strictly above cap.
+                                                        // ocr_text_len > MAX_OCR_TEXT_BYTES — strictly above cap.
         payload.extend_from_slice(&(MAX_OCR_TEXT_BYTES + 1).to_le_bytes());
         payload.extend_from_slice(&[0u8; 32]); // keyframe_hash
 

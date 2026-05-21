@@ -56,10 +56,7 @@ pub trait WorkspaceStore: Send + Sync {
     async fn apply_vouch(&self, vouch: VouchToken) -> Result<EnrollmentRequest, StoreError>;
 
     /// List enrolled (active) members for a workspace.
-    async fn list_members(
-        &self,
-        workspace_id: WorkspaceId,
-    ) -> Result<Vec<MemberId>, StoreError>;
+    async fn list_members(&self, workspace_id: WorkspaceId) -> Result<Vec<MemberId>, StoreError>;
 }
 
 /// In-memory workspace store for tests and dev. NOT for production — no durability.
@@ -78,15 +75,8 @@ impl InMemoryWorkspaceStore {
 
     /// Seed a workspace with initial members (for test setup).
     pub async fn seed_workspace(&self, workspace_id: WorkspaceId, members: Vec<MemberId>) {
-        self.members
-            .write()
-            .await
-            .insert(workspace_id, members);
-        self.briefs
-            .write()
-            .await
-            .entry(workspace_id)
-            .or_default();
+        self.members.write().await.insert(workspace_id, members);
+        self.briefs.write().await.entry(workspace_id).or_default();
     }
 }
 
@@ -123,10 +113,7 @@ impl WorkspaceStore for InMemoryWorkspaceStore {
         since: Option<u64>,
     ) -> Result<Vec<BriefEnvelope>, StoreError> {
         let guard = self.briefs.read().await;
-        let briefs = guard
-            .get(&workspace_id)
-            .cloned()
-            .unwrap_or_default();
+        let briefs = guard.get(&workspace_id).cloned().unwrap_or_default();
         Ok(match since {
             Some(ts) => briefs
                 .into_iter()
@@ -140,10 +127,7 @@ impl WorkspaceStore for InMemoryWorkspaceStore {
         &self,
         req: EnrollmentRequest,
     ) -> Result<EnrollmentRequest, StoreError> {
-        self.enrollments
-            .write()
-            .await
-            .insert(req.id, req.clone());
+        self.enrollments.write().await.insert(req.id, req.clone());
         Ok(req)
     }
 
@@ -173,10 +157,7 @@ impl WorkspaceStore for InMemoryWorkspaceStore {
         Ok(enrollment.clone())
     }
 
-    async fn list_members(
-        &self,
-        workspace_id: WorkspaceId,
-    ) -> Result<Vec<MemberId>, StoreError> {
+    async fn list_members(&self, workspace_id: WorkspaceId) -> Result<Vec<MemberId>, StoreError> {
         Ok(self
             .members
             .read()

@@ -52,7 +52,9 @@ pub mod wire;
 pub mod writer;
 
 pub use connection::{ConnectionError, HelperConnection, Routed};
-pub use fdpass::{recv_with_fds, send_with_fds, socket_pair, FdPassError, RecvOutcome, MAX_SCM_FDS};
+pub use fdpass::{
+    recv_with_fds, send_with_fds, socket_pair, FdPassError, RecvOutcome, MAX_SCM_FDS,
+};
 pub use reader::{FrameReader, ReadError, READER_BUFFER_CAP};
 pub use wire::{
     decode, encode, DecodeError, Frame, MessageType, FRAME_MAGIC, FRAME_VERSION,
@@ -157,7 +159,7 @@ pub enum Message {
         /// Event-level sequence number — distinct concept from the
         /// wire-frame `seq` in the envelope, though in production the
         /// helper sets both to the same allocated value (one frame per
-        /// OCREvent). Carried in-payload so a future split of event
+        /// `OCREvent`). Carried in-payload so a future split of event
         /// sequencing from wire sequencing does not require a wire
         /// bump.
         seq: u64,
@@ -213,8 +215,8 @@ pub enum Message {
         /// `cascadeFloorIntervalMs`, so the helper pipeline forced the
         /// cascade anyway. Surfaced on the wire by the `0x02 → 0x03`
         /// bump (STEP-2-FINDING-004): under a static secure surface
-        /// (FairPlay, sudo password entry, secure-field focus) the
-        /// SmartCaptureFilter eats every frame; this counter is how
+        /// (`FairPlay`, sudo password entry, secure-field focus) the
+        /// `SmartCaptureFilter` eats every frame; this counter is how
         /// the Telemetry-Gap analyst observes that the floor is doing
         /// what the filter cannot. **Strictly disjoint** from the
         /// existing filter-passed cascade calls (a single `process()`

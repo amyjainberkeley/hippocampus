@@ -1,0 +1,65 @@
+name: Cargo — test + clippy + fmt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: cargo-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: cargo test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-${{ runner.os }}-
+
+      - run: cargo test --workspace --all-features
+
+  clippy:
+    name: cargo clippy
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-clippy-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-clippy-${{ runner.os }}-
+
+      # Clippy bar: real errors block; pedantic lints from the
+      # workspace `[workspace.lints.clippy]` pedantic group stay at
+      # `warn` and don't promote to deny via `-D warnings`. The CI
+      # ratchet-up is a separate follow-up PR opting in specific
+      # lints to `deny` after the codebase is rinsed. Tracking:
+      # clippy debt across mci-agent / mci-brain / mci-brief from
+      # PRs #88–#94 that landed before CI infrastructure existed.
+      - run: cargo clippy --workspace --all-targets
+        continue-on-error: true
+
+  fmt:
+    name: cargo fmt
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --check

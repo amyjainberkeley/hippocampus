@@ -81,7 +81,9 @@ impl Embedder for FixedDimEmbedder {
             // xorshift64 traps at 0; seed away from it.
             state = 0x9E37_79B9_7F4A_7C15;
         }
-        let mut v: Vec<f32> = (0..self.dim).map(|_| next_signed_unit_f32(&mut state)).collect();
+        let mut v: Vec<f32> = (0..self.dim)
+            .map(|_| next_signed_unit_f32(&mut state))
+            .collect();
         // L2-normalize so cosine collapses to dot product (ADR-0009).
         let mag_sq: f32 = v.iter().map(|x| x * x).sum();
         let mag = mag_sq.sqrt();
@@ -206,14 +208,11 @@ impl BrainStore for InMemoryBrainStore {
                 // BM25 from FTS5. Precision loss is acceptable — this is the
                 // stub's relative-ranking score, not stored anywhere.
                 #[allow(clippy::cast_precision_loss)]
-                let score =
-                    (matches as f32) * (q.len() as f32) / (haystack.len().max(1) as f32);
+                let score = (matches as f32) * (q.len() as f32) / (haystack.len().max(1) as f32);
                 Some((e.id, score))
             })
             .collect();
-        hits.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         hits.truncate(limit);
         Ok(hits)
     }
@@ -224,9 +223,7 @@ impl BrainStore for InMemoryBrainStore {
         limit: usize,
     ) -> Result<Vec<(EventId, f32)>, StoreError> {
         if query_embedding.is_empty() {
-            return Err(StoreError::InvalidInput(
-                "empty query embedding".into(),
-            ));
+            return Err(StoreError::InvalidInput("empty query embedding".into()));
         }
         let inner = self.inner.lock().expect("poisoned");
         let mut hits: Vec<(EventId, f32)> = inner
@@ -238,14 +235,15 @@ impl BrainStore for InMemoryBrainStore {
                     return None;
                 }
                 // Vectors are L2-normalized per ADR-0009, so cosine == dot.
-                let dot: f32 =
-                    emb.iter().zip(query_embedding.iter()).map(|(a, b)| a * b).sum();
+                let dot: f32 = emb
+                    .iter()
+                    .zip(query_embedding.iter())
+                    .map(|(a, b)| a * b)
+                    .sum();
                 Some((e.id, dot))
             })
             .collect();
-        hits.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         hits.truncate(limit);
         Ok(hits)
     }

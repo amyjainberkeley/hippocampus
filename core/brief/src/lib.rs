@@ -23,8 +23,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-pub mod model;
 pub mod author;
 pub mod lifecycle;
+pub mod model;
 pub mod store;
 pub mod tripwire;

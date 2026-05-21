@@ -13,8 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mci_brain::arctic_embed_s::{
-    ArcticEmbedSEmbedder, EmbedderBackend, ARCTIC_EMBED_S_DIMENSION,
-    ARCTIC_EMBED_S_QUERY_PREFIX,
+    ArcticEmbedSEmbedder, EmbedderBackend, ARCTIC_EMBED_S_DIMENSION, ARCTIC_EMBED_S_QUERY_PREFIX,
 };
 use mci_brain::{EmbedError, Embedder};
 use mci_embed_coreml::CoreMLBackend;

@@ -94,7 +94,10 @@ impl std::fmt::Display for FdPassError {
                 write!(f, "SCM_RIGHTS ancillary truncated (MSG_CTRUNC); rejected")
             }
             Self::TooManyFdsReceived { got, max } => {
-                write!(f, "received {got} fds, accept ceiling {max}; rejected + closed")
+                write!(
+                    f,
+                    "received {got} fds, accept ceiling {max}; rejected + closed"
+                )
             }
         }
     }

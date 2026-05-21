@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use mci_server::handlers::{router, AppState};
 use mci_server::model::{
-    BriefEnvelope, CreateBriefRequest, EnrollmentRequest, EnrollmentState, MemberKeyWrap, MemberId,
+    BriefEnvelope, CreateBriefRequest, EnrollmentRequest, EnrollmentState, MemberId, MemberKeyWrap,
     VouchToken, WorkspaceId,
 };
 use mci_server::store::InMemoryWorkspaceStore;
@@ -126,10 +126,7 @@ async fn since_query_filters_briefs_by_ts() {
 
     // GET with since=1_500_000 — should only return the second brief.
     let get_req = Request::builder()
-        .uri(format!(
-            "/v1/workspaces/{}/briefs?since=1500000",
-            ws_id.0
-        ))
+        .uri(format!("/v1/workspaces/{}/briefs?since=1500000", ws_id.0))
         .body(Body::empty())
         .unwrap();
 
@@ -142,7 +139,7 @@ async fn since_query_filters_briefs_by_ts() {
 
 #[tokio::test]
 async fn enrollment_flow_state_machine() {
-    let (app, ws_id, _member_id) = test_app_with_workspace().await;
+    let (app, ws_id, member_id) = test_app_with_workspace().await;
     let new_member = MemberId(Uuid::new_v4());
 
     // Step 1: Request enrollment.
@@ -171,7 +168,7 @@ async fn enrollment_flow_state_machine() {
     // Step 2: Existing member vouches.
     let vouch = VouchToken {
         enrollment_id: enrollment.id,
-        voucher_id: _member_id,
+        voucher_id: member_id,
         wrapped_workspace_key: vec![0xBB; 32],
     };
     let vouch_req = Request::builder()

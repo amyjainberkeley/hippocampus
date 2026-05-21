@@ -111,7 +111,10 @@ fn new_creates_encrypted_db_and_runs_migration() {
             |r| r.get(0),
         )
         .expect("vec_events count");
-    assert_eq!(vec0_count, 0, "vec_events (vec0) must NOT be created in P3.2");
+    assert_eq!(
+        vec0_count, 0,
+        "vec_events (vec0) must NOT be created in P3.2"
+    );
 
     let v: String = db
         .conn()
@@ -318,10 +321,7 @@ fn fts5_search_returns_bm25_ranked_hits() {
     assert_eq!(hits[0].0, id_a, "shorter doc with the term ranks first");
 
     for w in hits.windows(2) {
-        assert!(
-            w[0].1 >= w[1].1,
-            "fts5 scores must be descending: {hits:?}"
-        );
+        assert!(w[0].1 >= w[1].1, "fts5 scores must be descending: {hits:?}");
     }
 }
 
@@ -352,7 +352,10 @@ fn fts5_indexes_summary_window_title_and_url_columns() {
     let hit_ids: Vec<EventId> = hits.iter().map(|(id, _)| *id).collect();
     assert!(hit_ids.contains(&id_t), "text column must be searchable");
     assert!(hit_ids.contains(&id_s), "summary column must be searchable");
-    assert!(hit_ids.contains(&id_w), "window_title column must be searchable");
+    assert!(
+        hit_ids.contains(&id_w),
+        "window_title column must be searchable"
+    );
     assert!(hit_ids.contains(&id_u), "url column must be searchable");
     assert_eq!(hits.len(), 4, "exactly the 4 matching events");
 }
@@ -494,7 +497,9 @@ fn put_event_atomicity_on_fk_failure_leaves_no_orphans() {
     let mut bad = blank_event(2, "bad");
     bad.embedding = Some(axis_unit_vec(1));
     bad.episode_id = Some(999_999); // no episode row → FK violation
-    let err = store.put_event(&bad).expect_err("FK violation must surface");
+    let err = store
+        .put_event(&bad)
+        .expect_err("FK violation must surface");
     assert!(
         matches!(err, StoreError::Backend(_)),
         "expected Backend (FK violation), got {err:?}"

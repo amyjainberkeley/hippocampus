@@ -477,9 +477,13 @@ mod tests {
         let calls = Arc::new(AtomicUsize::new(0));
         let c = Arc::clone(&calls);
         {
-            let lease = SurfaceLease::new(1920, 1080, Box::new(move || {
-                c.fetch_add(1, Ordering::SeqCst);
-            }));
+            let lease = SurfaceLease::new(
+                1920,
+                1080,
+                Box::new(move || {
+                    c.fetch_add(1, Ordering::SeqCst);
+                }),
+            );
             assert_eq!(lease.width_px(), 1920);
             assert_eq!(lease.height_px(), 1080);
             assert_eq!(calls.load(Ordering::SeqCst), 0, "not released until drop");
@@ -499,9 +503,13 @@ mod tests {
         };
         let calls = Arc::new(AtomicUsize::new(0));
         let c = Arc::clone(&calls);
-        let lease = SurfaceLease::new(640, 480, Box::new(move || {
-            c.fetch_add(1, Ordering::SeqCst);
-        }));
+        let lease = SurfaceLease::new(
+            640,
+            480,
+            Box::new(move || {
+                c.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
         lease.release(); // consumes; releaser runs here
         assert_eq!(
             calls.load(Ordering::SeqCst),
@@ -544,9 +552,13 @@ mod tests {
         let r = Arc::clone(&released);
         let (tx, mut rx) = mpsc::channel::<StateTransition>(DEFAULT_CHANNEL_BOUND);
         tx.send(StateTransition {
-            surface: SurfaceLease::new(800, 600, Box::new(move || {
-                r.fetch_add(1, Ordering::SeqCst);
-            })),
+            surface: SurfaceLease::new(
+                800,
+                600,
+                Box::new(move || {
+                    r.fetch_add(1, Ordering::SeqCst);
+                }),
+            ),
             dirty_rects: vec![DirtyRect {
                 x: 0,
                 y: 0,

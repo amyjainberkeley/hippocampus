@@ -79,9 +79,7 @@ impl SqlCipherBrainStore {
     pub fn new(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
         let mut db = mci_core_open(path, key).map_err(|e| map_core_err(&e))?;
         run_brain_migration(&mut db)?;
-        Ok(Self {
-            db: Mutex::new(db),
-        })
+        Ok(Self { db: Mutex::new(db) })
     }
 
     /// Open the brain store at `path` with `key` in **READ-ONLY** mode for
@@ -106,9 +104,7 @@ impl SqlCipherBrainStore {
     ///   (the inner error is intentionally indistinguishable per ADR-0008).
     pub fn open_readonly(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
         let db = mci_core_open_readonly(path, key).map_err(|e| map_core_err(&e))?;
-        Ok(Self {
-            db: Mutex::new(db),
-        })
+        Ok(Self { db: Mutex::new(db) })
     }
 
     /// Read the N most-recent events ordered by `ts_us` DESC.
@@ -198,7 +194,7 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// [`StoreError::Backend`] on any rusqlite failure. `limit == 0`
-    /// returns `Ok(Vec::new())` without touching SQLite.
+    /// returns `Ok(Vec::new())` without touching `SQLite`.
     pub fn events_since(
         &self,
         since_ts_us: u64,
@@ -284,10 +280,10 @@ impl SqlCipherBrainStore {
     ///
     /// The idle-batch embedder polls this to find work. Uses a LEFT JOIN
     /// anti-pattern (`WHERE ev.event_id IS NULL`) rather than `NOT IN`
-    /// for SQLite query-planner friendliness on large tables.
+    /// for `SQLite` query-planner friendliness on large tables.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on any underlying SQLite failure.
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
     pub fn unembedded_events(&self, limit: usize) -> Result<Vec<Event>, StoreError> {
         if limit == 0 {
             return Ok(Vec::new());
@@ -326,8 +322,19 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("query unembedded_events: {e}")))?;
         let mut out: Vec<Event> = Vec::new();
         for r in rows {
-            let (ev_id, ts_us, app, title, url, text, summary, entities, episode_id, cascade_reason, keyframe_blob) =
-                r.map_err(|e| StoreError::Backend(format!("row unembedded_events: {e}")))?;
+            let (
+                ev_id,
+                ts_us,
+                app,
+                title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id,
+                cascade_reason,
+                keyframe_blob,
+            ) = r.map_err(|e| StoreError::Backend(format!("row unembedded_events: {e}")))?;
             out.push(Event {
                 id: EventId(u64::try_from(ev_id).unwrap_or(0)),
                 ts_us: u64::try_from(ts_us).unwrap_or(0),
@@ -354,7 +361,7 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// - [`StoreError::InvalidInput`] if `embedding.len() != 384` (ADR-0009).
-    /// - [`StoreError::Backend`] on SQLite failure (including UNIQUE
+    /// - [`StoreError::Backend`] on `SQLite` failure (including UNIQUE
     ///   constraint violation if the event already has a vector).
     pub fn set_event_embedding(&self, id: EventId, embedding: &[f32]) -> Result<(), StoreError> {
         if embedding.len() != EMBEDDING_DIM {
@@ -422,17 +429,17 @@ const EMBEDDING_BYTES: usize = EMBEDDING_DIM * std::mem::size_of::<f32>();
 /// `get_event` so the function body keeps its expression-shape (`clippy::
 /// items_after_statements`).
 type EventRow = (
-    i64,                // id
-    i64,                // ts_us
-    Option<String>,     // app_bundle_id
-    Option<String>,     // window_title
-    Option<String>,     // url
-    String,             // text
-    Option<String>,     // summary
-    Option<String>,     // entities
-    Option<i64>,        // episode_id
-    i64,                // cascade_reason
-    Option<String>,     // keyframe_blob
+    i64,            // id
+    i64,            // ts_us
+    Option<String>, // app_bundle_id
+    Option<String>, // window_title
+    Option<String>, // url
+    String,         // text
+    Option<String>, // summary
+    Option<String>, // entities
+    Option<i64>,    // episode_id
+    i64,            // cascade_reason
+    Option<String>, // keyframe_blob
 );
 
 /// Serialize a 384-d L2-normalized f32 vector to a little-endian BLOB.
@@ -507,7 +514,9 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 &event.text,
                 &event.summary,
                 &event.entities,
-                event.episode_id.map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
+                event
+                    .episode_id
+                    .map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
                 event.cascade_reason,
                 &event.keyframe_blob,
             ],
@@ -655,8 +664,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
 
         let mut out: Vec<(EventId, f32)> = Vec::new();
         for r in rows {
-            let (row_id, rank) =
-                r.map_err(|e| StoreError::Backend(format!("row fts5: {e}")))?;
+            let (row_id, rank) = r.map_err(|e| StoreError::Backend(format!("row fts5: {e}")))?;
             // Negate so larger-positive = better (monotone with relevance).
             #[allow(clippy::cast_possible_truncation)]
             let score = (-rank) as f32;
@@ -724,9 +732,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 .sum();
             hits.push((EventId(u64::try_from(event_id).unwrap_or(0)), dot));
         }
-        hits.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         hits.truncate(limit);
         Ok(hits)
     }
