@@ -31,12 +31,26 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// surfaced on the wire so the Telemetry-Gap analyst can observe
 /// floor-forced evaluations on static secure surfaces.
 ///
+/// `0x03 → 0x04` (2026-05-20, ADR-0016 P3.6): new
+/// [`MessageType::OCREvent`] variant added — the FIRST message variant
+/// carrying user content (OCR'd text) across the IPC seam. The variant
+/// is gated by the ADR-0013 cascade running TWICE — once on pixels at
+/// frame time (§1–§5 + §7), once on OCR'd text (§6 OCR-time secret/PII
+/// regex). [`RedactionReason::OcrTimeSecret`] (= 6) is added so the
+/// twice-fired path emits a [`Message::PrivacyTombstone`] with the
+/// distinct reason instead of an `OCREvent`. The wire-frame-version
+/// bump is lock-step with `adapters/macos/.../IPC/Wire.swift` and
+/// `tools/wire_decode.py` per the PR #44 precedent. ADR-0016 §1.6
+/// proposed `OCR_EVENT_MSG_TYPE = 0x0020` but that slot is occupied by
+/// [`MessageType::SurfaceReleased`] (assigned in PR #15); this PR
+/// assigns `0x0040`. ADR-0016 §1.6 owes a follow-up doc PR to align.
+///
 /// The decoder rejects any other version: helper and core ship
 /// **version-locked** in the same signed bundle and capture is
 /// default-OFF, so there are no persisted or in-flight `0x01` / `0x02`
-/// frames to remain compatible with — a hard version break is the
-/// correct, auditable choice over a silently mis-parsed payload.
-pub const FRAME_VERSION: u8 = 0x03;
+/// / `0x03` frames to remain compatible with — a hard version break is
+/// the correct, auditable choice over a silently mis-parsed payload.
+pub const FRAME_VERSION: u8 = 0x04;
 
 /// Header size in bytes: magic(1) + version(1) + `msg_type(2)` + seq(8) + len(4).
 pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
@@ -47,6 +61,31 @@ pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
 /// Hard cap so a fuzzed / malicious helper cannot ask the core to allocate
 /// gigabytes by sending a giant `len` header.
 pub const MAX_FRAME_PAYLOAD_BYTES: u32 = 1 << 20; // 1 MiB
+
+/// Maximum bytes of OCR'd text the helper is permitted to emit in a
+/// single [`super::Message::OCREvent`] payload (ADR-0016 §4.9). Over-cap
+/// OCR results fail closed: the helper emits a
+/// [`super::Message::PrivacyTombstone`] with reason
+/// [`super::RedactionReason::FailsafeUnknown`] instead. Defense-in-depth
+/// against an OCR run that pathologically produces megabytes of text
+/// from one frame (ADR-0013 §7 fail-closed default).
+pub const MAX_OCR_TEXT_BYTES: u32 = 64 * 1024;
+
+/// Fixed app-bundle-id field length in [`super::Message::OCREvent`]
+/// (null-padded). ADR-0016 §1.6.
+pub const OCR_EVENT_APP_BUNDLE_ID_LEN: usize = 64;
+
+/// Fixed keyframe-hash field length in [`super::Message::OCREvent`]
+/// (blake3 of the keyframe blob; all-zero bytes signals "no blob yet"
+/// in P3.6 — the blob writer lands at P3.6.5). ADR-0016 §1.6.
+pub const OCR_EVENT_KEYFRAME_HASH_LEN: usize = 32;
+
+/// Fixed-portion byte length of an OCREvent payload, before the
+/// variable-length window_title / url / ocr_text bytes. ADR-0016 §1.6:
+///   seq(8) + ts_us(8) + app_bundle_id(64) + window_title_len(2)
+///   + url_len(2) + ocr_text_len(4) + keyframe_hash(32) = 120 bytes.
+pub const OCR_EVENT_FIXED_HEADER_BYTES: usize =
+    8 + 8 + OCR_EVENT_APP_BUNDLE_ID_LEN + 2 + 2 + 4 + OCR_EVENT_KEYFRAME_HASH_LEN;
 
 /// Wire-protocol message-type discriminant (the `msg_type` header field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +107,9 @@ pub enum MessageType {
     /// Helper → core periodic health counters
     /// (see [`super::Message::HelperHealth`]).
     HelperHealth = 0x0030,
+    /// Helper → core twice-cleared OCR event with user content
+    /// (see [`super::Message::OCREvent`]). ADR-0016 P3.6.
+    OCREvent = 0x0040,
 }
 
 impl MessageType {
@@ -83,6 +125,7 @@ impl MessageType {
             0x0011 => Self::PrivacyTombstone,
             0x0020 => Self::SurfaceReleased,
             0x0030 => Self::HelperHealth,
+            0x0040 => Self::OCREvent,
             other => {
                 return Err(DecodeError::InvalidEnum {
                     field: "MessageType",
@@ -278,6 +321,48 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             out.extend_from_slice(&frames_dropped_backpressure.to_le_bytes());
             out.extend_from_slice(&frames_dropped_late_ack.to_le_bytes());
         }
+        Message::OCREvent {
+            seq,
+            ts_us,
+            app_bundle_id,
+            window_title,
+            url,
+            ocr_text,
+            keyframe_hash,
+        } => {
+            out.extend_from_slice(&seq.to_le_bytes());
+            out.extend_from_slice(&ts_us.to_le_bytes());
+            out.extend_from_slice(app_bundle_id);
+            debug_assert!(
+                u16::try_from(window_title.len()).is_ok(),
+                "OCREvent window_title too long for u16 length prefix"
+            );
+            debug_assert!(
+                u16::try_from(url.len()).is_ok(),
+                "OCREvent url too long for u16 length prefix"
+            );
+            debug_assert!(
+                u32::try_from(ocr_text.len()).is_ok(),
+                "OCREvent ocr_text too long for u32 length prefix"
+            );
+            debug_assert!(
+                ocr_text.len() as u64 <= u64::from(MAX_OCR_TEXT_BYTES),
+                "OCREvent ocr_text exceeds MAX_OCR_TEXT_BYTES (ADR-0016 §4.9)"
+            );
+            #[allow(clippy::cast_possible_truncation)]
+            let window_title_len = window_title.len() as u16;
+            #[allow(clippy::cast_possible_truncation)]
+            let url_len = url.len() as u16;
+            #[allow(clippy::cast_possible_truncation)]
+            let ocr_text_len = ocr_text.len() as u32;
+            out.extend_from_slice(&window_title_len.to_le_bytes());
+            out.extend_from_slice(&url_len.to_le_bytes());
+            out.extend_from_slice(&ocr_text_len.to_le_bytes());
+            out.extend_from_slice(keyframe_hash);
+            out.extend_from_slice(window_title.as_bytes());
+            out.extend_from_slice(url.as_bytes());
+            out.extend_from_slice(ocr_text.as_bytes());
+        }
     }
 }
 
@@ -419,6 +504,33 @@ fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usi
                 frames_dropped_late_ack,
             }
         }
+        MessageType::OCREvent => {
+            let seq = p.u64_le()?;
+            let ts_us = p.u64_le()?;
+            let app_bundle_id = p.fixed_64()?;
+            let window_title_len = p.u16_le()? as usize;
+            let url_len = p.u16_le()? as usize;
+            let ocr_text_len_raw = p.u32_le()?;
+            if ocr_text_len_raw > MAX_OCR_TEXT_BYTES {
+                return Err(DecodeError::OversizedPayload {
+                    len: ocr_text_len_raw,
+                });
+            }
+            let ocr_text_len = ocr_text_len_raw as usize;
+            let keyframe_hash = p.fixed_32()?;
+            let window_title = p.string_bytes(window_title_len)?;
+            let url = p.string_bytes(url_len)?;
+            let ocr_text = p.string_bytes(ocr_text_len)?;
+            Message::OCREvent {
+                seq,
+                ts_us,
+                app_bundle_id,
+                window_title,
+                url,
+                ocr_text,
+                keyframe_hash,
+            }
+        }
     };
     Ok((msg, p.cursor()))
 }
@@ -467,6 +579,24 @@ impl<'a> Parser<'a> {
         std::str::from_utf8(bytes)
             .map(ToOwned::to_owned)
             .map_err(|_| DecodeError::InvalidUtf8)
+    }
+    fn string_bytes(&mut self, n: usize) -> Result<String, DecodeError> {
+        let bytes = self.take(n)?;
+        std::str::from_utf8(bytes)
+            .map(ToOwned::to_owned)
+            .map_err(|_| DecodeError::InvalidUtf8)
+    }
+    fn fixed_32(&mut self) -> Result<[u8; 32], DecodeError> {
+        let bytes = self.take(32)?;
+        let mut out = [0u8; 32];
+        out.copy_from_slice(bytes);
+        Ok(out)
+    }
+    fn fixed_64(&mut self) -> Result<[u8; 64], DecodeError> {
+        let bytes = self.take(64)?;
+        let mut out = [0u8; 64];
+        out.copy_from_slice(bytes);
+        Ok(out)
     }
 }
 
@@ -587,7 +717,9 @@ mod tests {
         // `WireFixturesTests.testHelperHealthCrossSideFixture` and the
         // layout parsed by `tools/wire_decode.py`. If any of those
         // three drift, the IPC contract is broken silently. This
-        // fixture is the observable trip-wire.
+        // fixture is the observable trip-wire. Wire 0x04 (P3.6) bumps
+        // only the version byte for the new OCREvent variant;
+        // HelperHealth's payload layout is unchanged.
         let buf = encode(
             42,
             &Message::HelperHealth {
@@ -601,7 +733,7 @@ mod tests {
             },
         );
         let expected: [u8; 72] = [
-            0x4D, 0x03, 0x30, 0x00,
+            0x4D, 0x04, 0x30, 0x00,
             0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x38, 0x00, 0x00, 0x00,
             // u64 LE × 7
@@ -613,11 +745,11 @@ mod tests {
             0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        assert_eq!(buf, expected.to_vec(), "HelperHealth v0x03 cross-side fixture");
+        assert_eq!(buf, expected.to_vec(), "HelperHealth v0x04 cross-side fixture");
 
         // And the round-trip decoder reads exactly back what the
-        // encoder produced — proves the v0x03 layout is self-consistent.
-        let (frame, used) = decode(&buf).expect("decode v0x03 fixture");
+        // encoder produced — proves the v0x04 layout is self-consistent.
+        let (frame, used) = decode(&buf).expect("decode v0x04 fixture");
         assert_eq!(used, buf.len());
         assert_eq!(frame.seq, 42);
         assert_eq!(
@@ -661,24 +793,34 @@ mod tests {
     }
 
     #[test]
-    fn frame_version_is_0x03() {
-        // Trip-wire: the wire bump for `cascade_forced_count` moved
-        // the version 0x02 → 0x03 (STEP-2-FINDING-004). The Swift
-        // `Wire.swift` mirror and the byte fixtures in `WireTests.swift`
-        // MUST match this.
-        assert_eq!(FRAME_VERSION, 0x03);
+    fn frame_version_is_0x04() {
+        // Trip-wire: the wire bump for OCREvent moved the version
+        // 0x03 → 0x04 (ADR-0016 P3.6). The Swift `Wire.swift` mirror
+        // and the byte fixtures in `WireTests.swift` MUST match.
+        assert_eq!(FRAME_VERSION, 0x04);
         let buf = encode(0, &Message::CaptureStop);
-        assert_eq!(buf[1], 0x03, "version byte in the framed header");
+        assert_eq!(buf[1], 0x04, "version byte in the framed header");
+    }
+
+    #[test]
+    fn decode_rejects_old_0x03_frame_at_v0x04_layout() {
+        // Lock-step cross-version regression guard (PR #44 precedent
+        // for 0x02→0x03; this is the 0x03→0x04 analog). A stale signed
+        // helper from a prior bundle pumping 0x03 bytes into a 0x04
+        // core MUST be rejected at the trust boundary before the
+        // payload decoder runs — otherwise an OCREvent emitted as a
+        // 0x03 frame could be silently mis-parsed.
+        let mut buf = encode(0, &Message::CaptureStop);
+        buf[1] = 0x03;
+        let err = decode(&buf).unwrap_err();
+        assert!(matches!(err, DecodeError::UnsupportedVersion { got: 0x03 }));
     }
 
     #[test]
     fn decode_rejects_old_0x02_frame() {
         // Helper + core ship version-locked; an 0x02 frame is a stale
         // peer, not a compatible one. The decoder rejects it loudly
-        // rather than mis-parsing a `HelperHealth` whose layout moved
-        // (0x02 had 6 u64s; 0x03 has 7 — reading 0x02's payload at
-        // 0x03's layout would either truncate or silently mis-cluster
-        // the disjoint cascade-forced counter).
+        // rather than mis-parsing a `HelperHealth` whose layout moved.
         let mut buf = encode(0, &Message::CaptureStop);
         buf[1] = 0x02;
         let err = decode(&buf).unwrap_err();
@@ -686,11 +828,11 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_old_0x01_frame_at_v0x03_layout() {
+    fn decode_rejects_old_0x01_frame_at_v0x04_layout() {
         // Cross-version regression guard. The decoder MUST refuse to
-        // read a 0x01 (or any non-FRAME_VERSION) frame at the v0x03
+        // read a 0x01 (or any non-FRAME_VERSION) frame at the v0x04
         // payload layout. Without this, a stale signed helper from a
-        // prior bundle could pump 0x01 bytes into a 0x03 core and the
+        // prior bundle could pump 0x01 bytes into a 0x04 core and the
         // strict payload-length consumption tripwire downstream would
         // not catch it (the version check fails first, which is the
         // whole point — fail loud at the trust boundary).
@@ -856,6 +998,186 @@ mod tests {
             }
         ));
         assert_eq!(f3.seq, 3);
+    }
+
+    #[test]
+    fn roundtrip_ocr_event_minimal() {
+        roundtrip(&Message::OCREvent {
+            seq: 0,
+            ts_us: 0,
+            app_bundle_id: [0u8; 64],
+            window_title: String::new(),
+            url: String::new(),
+            ocr_text: String::new(),
+            keyframe_hash: [0u8; 32],
+        });
+    }
+
+    #[test]
+    fn roundtrip_ocr_event_populated() {
+        let mut bundle = [0u8; 64];
+        let id = b"com.apple.Safari";
+        bundle[..id.len()].copy_from_slice(id);
+        roundtrip(&Message::OCREvent {
+            seq: 42,
+            ts_us: 1_234_567_890,
+            app_bundle_id: bundle,
+            window_title: "Login — example.com".to_string(),
+            url: "https://example.com/login".to_string(),
+            ocr_text: "username: alice\nthis is OCR'd UI text\n".to_string(),
+            keyframe_hash: [0xAB; 32],
+        });
+    }
+
+    #[test]
+    fn ocr_event_cross_side_fixture() {
+        // Byte-exact mirror of the Swift
+        // `WireFixturesTests.testOCREventCrossSideFixture` and the
+        // layout parsed by `tools/wire_decode.py`. Pins the v0x04
+        // OCREvent layout across all three sides; any drift = silent
+        // IPC contract break. ADR-0016 §1.6 byte order.
+        let mut bundle = [0u8; 64];
+        let id = b"com.apple.Safari";
+        bundle[..id.len()].copy_from_slice(id);
+        let hash: [u8; 32] = [0xAB; 32];
+        let buf = encode(
+            42,
+            &Message::OCREvent {
+                seq: 42,
+                ts_us: 0x0102_0304_0506_0708,
+                app_bundle_id: bundle,
+                window_title: "T".to_string(),       // 1 byte
+                url: "U".to_string(),                 // 1 byte
+                ocr_text: "Hi".to_string(),           // 2 bytes
+                keyframe_hash: hash,
+            },
+        );
+        // Fixed payload = 8 (seq) + 8 (ts_us) + 64 (app_bundle_id)
+        //                + 2 + 2 + 4 (lens) + 32 (keyframe_hash) = 120
+        // Variable    = 1 + 1 + 2 = 4
+        // Total payload = 124. Frame total = 16 (header) + 124 = 140.
+        assert_eq!(buf.len(), MIN_FRAME_HEADER_BYTES + OCR_EVENT_FIXED_HEADER_BYTES + 4);
+        assert_eq!(buf.len(), 140);
+
+        // Header: magic 4D, version 04, msg_type 0040 LE, seq 42 LE,
+        //         len 124 LE.
+        assert_eq!(&buf[0..4], &[0x4D, 0x04, 0x40, 0x00]);
+        assert_eq!(&buf[4..12], &42u64.to_le_bytes());
+        assert_eq!(&buf[12..16], &124u32.to_le_bytes());
+
+        // Payload starts at offset 16. seq u64 = 42.
+        assert_eq!(&buf[16..24], &42u64.to_le_bytes());
+        // ts_us u64.
+        assert_eq!(&buf[24..32], &0x0102_0304_0506_0708u64.to_le_bytes());
+        // app_bundle_id 64 bytes — null-padded "com.apple.Safari".
+        assert_eq!(&buf[32..32 + 16], id);
+        for &b in &buf[32 + 16..32 + 64] {
+            assert_eq!(b, 0, "app_bundle_id must be null-padded");
+        }
+        // window_title_len u16 = 1.
+        assert_eq!(&buf[96..98], &1u16.to_le_bytes());
+        // url_len u16 = 1.
+        assert_eq!(&buf[98..100], &1u16.to_le_bytes());
+        // ocr_text_len u32 = 2.
+        assert_eq!(&buf[100..104], &2u32.to_le_bytes());
+        // keyframe_hash 32 bytes.
+        assert_eq!(&buf[104..136], &hash);
+        // Variable: window_title (1) + url (1) + ocr_text (2).
+        assert_eq!(&buf[136..137], b"T");
+        assert_eq!(&buf[137..138], b"U");
+        assert_eq!(&buf[138..140], b"Hi");
+
+        // Round-trip decode confirms the layout is self-consistent.
+        let (frame, used) = decode(&buf).expect("decode OCREvent fixture");
+        assert_eq!(used, buf.len());
+        assert_eq!(frame.seq, 42);
+        match frame.message {
+            Message::OCREvent {
+                seq,
+                ts_us,
+                app_bundle_id,
+                window_title,
+                url,
+                ocr_text,
+                keyframe_hash,
+            } => {
+                assert_eq!(seq, 42);
+                assert_eq!(ts_us, 0x0102_0304_0506_0708);
+                assert_eq!(app_bundle_id, bundle);
+                assert_eq!(window_title, "T");
+                assert_eq!(url, "U");
+                assert_eq!(ocr_text, "Hi");
+                assert_eq!(keyframe_hash, hash);
+            }
+            other => panic!("expected OCREvent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_truncated_ocr_event_payload() {
+        // Build a valid OCREvent and lop off the last byte of the
+        // variable trailer — strict consumption MUST surface as
+        // Truncated. This is the payload-strict-consumption tripwire
+        // for the v0x04 layout, mirroring PR #44's discipline.
+        let mut bundle = [0u8; 64];
+        let id = b"com.apple.Safari";
+        bundle[..id.len()].copy_from_slice(id);
+        let buf = encode(
+            7,
+            &Message::OCREvent {
+                seq: 7,
+                ts_us: 0,
+                app_bundle_id: bundle,
+                window_title: "x".to_string(),
+                url: "y".to_string(),
+                ocr_text: "z".to_string(),
+                keyframe_hash: [0u8; 32],
+            },
+        );
+        // Crafted full frame; now truncate the LAST byte of the
+        // payload while preserving the declared `len` field so the
+        // decoder slices on declared, then runs out reading the
+        // trailer.
+        let mut bad = buf.clone();
+        bad.pop();
+        let err = decode(&bad).unwrap_err();
+        assert!(
+            matches!(err, DecodeError::Truncated { .. }),
+            "expected Truncated on a 1-byte-short OCREvent payload, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn decode_rejects_oversized_ocr_text_len() {
+        // ADR-0016 §4.9: OCR text per-event capped at 64 KB on the
+        // helper side. The CORE-side decoder enforces the same cap as
+        // a belt-and-suspenders trust-boundary check: a misbehaving
+        // helper claiming `ocr_text_len > 64 KB` is rejected before any
+        // allocation. Test by hand-crafting a payload-length header
+        // that declares a larger ocr_text_len than the cap allows.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u64.to_le_bytes()); // seq
+        payload.extend_from_slice(&0u64.to_le_bytes()); // ts_us
+        payload.extend_from_slice(&[0u8; 64]); // app_bundle_id
+        payload.extend_from_slice(&0u16.to_le_bytes()); // window_title_len
+        payload.extend_from_slice(&0u16.to_le_bytes()); // url_len
+        // ocr_text_len > MAX_OCR_TEXT_BYTES — strictly above cap.
+        payload.extend_from_slice(&(MAX_OCR_TEXT_BYTES + 1).to_le_bytes());
+        payload.extend_from_slice(&[0u8; 32]); // keyframe_hash
+
+        let mut buf = vec![FRAME_MAGIC, FRAME_VERSION];
+        buf.extend_from_slice(&(MessageType::OCREvent as u16).to_le_bytes());
+        buf.extend_from_slice(&0u64.to_le_bytes());
+        #[allow(clippy::cast_possible_truncation)]
+        let payload_len = payload.len() as u32;
+        buf.extend_from_slice(&payload_len.to_le_bytes());
+        buf.extend_from_slice(&payload);
+
+        let err = decode(&buf).unwrap_err();
+        assert!(
+            matches!(err, DecodeError::OversizedPayload { .. }),
+            "expected OversizedPayload on over-cap ocr_text_len, got {err:?}"
+        );
     }
 
     #[test]

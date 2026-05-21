@@ -122,18 +122,29 @@ public actor VisionOCRWorker {
         dirtyRectsBoundingROI: CGRect,
         completion: @Sendable @escaping (OCRResult) -> Void
     ) {
-        guard !stopped else { return }
-        if queue.count >= capacity {
-            _ = queue.removeFirst()
-            dropped &+= 1
-        }
-        queue.append(Job(
+        submit(
             input: OCREngineInput(
                 pixelBuffer: pixelBuffer,
                 roi: dirtyRectsBoundingROI
             ),
             completion: completion
-        ))
+        )
+    }
+
+    /// Sendable-input overload (ADR-0016 P3.6). `OCREngineInput` is
+    /// `@unchecked Sendable` so the caller can construct it in a
+    /// non-actor context and pass it across the actor boundary
+    /// without tripping Swift 6 strict-concurrency `sending` checks.
+    public func submit(
+        input: OCREngineInput,
+        completion: @Sendable @escaping (OCRResult) -> Void
+    ) {
+        guard !stopped else { return }
+        if queue.count >= capacity {
+            _ = queue.removeFirst()
+            dropped &+= 1
+        }
+        queue.append(Job(input: input, completion: completion))
         if let a = awaiter {
             awaiter = nil
             a.resume()

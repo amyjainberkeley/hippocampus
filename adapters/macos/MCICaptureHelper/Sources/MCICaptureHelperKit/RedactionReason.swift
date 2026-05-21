@@ -7,8 +7,10 @@
 // an equivalent change there breaks the helper-to-core contract silently.
 //
 // The numbering matches ADR-0013's cascade rule numbers. §6 (OCR-time
-// regex) runs in `core/`, never in the helper, so it does NOT have a
-// discriminant here — the cascade `decide()` function cannot return it.
+// regex) was a `core/`-side concern under wire 0x03, so it did NOT have
+// a helper-side discriminant. Wire 0x04 (ADR-0016 P3.6) moves OCR into
+// the helper, so §6 now emits a tombstone from the helper and gets its
+// own discriminant: `ocrTimeSecret = 6`.
 
 public enum RedactionReason: UInt8, Sendable, Equatable, CaseIterable {
     /// Cascade §1 — `SCContentFilter` denylist excluded the source.
@@ -21,6 +23,12 @@ public enum RedactionReason: UInt8, Sendable, Equatable, CaseIterable {
     case axSecureSubrole = 4
     /// Cascade §5 — post-capture denylist match on `WorkflowContext`.
     case denylistPostCapture = 5
+    /// Cascade §6 — OCR-time secret/PII regex matched on OCR'd text.
+    /// ADR-0016 P3.6 cascade-twice fire: frame cleared the pixel-time
+    /// cascade (§1–§5 + §7), then §6 fired against the OCR'd text.
+    /// No OCR text bytes cross the IPC seam on this path; only the
+    /// tombstone does.
+    case ocrTimeSecret = 6
     /// Cascade §7 — fail-safe: unknown classification ⇒ redact.
     case failsafeUnknown = 7
 
@@ -34,6 +42,7 @@ public enum RedactionReason: UInt8, Sendable, Equatable, CaseIterable {
         case .secureEventInput: return "secure-event-input"
         case .axSecureSubrole: return "ax-secure-subrole"
         case .denylistPostCapture: return "denylist-postcapture"
+        case .ocrTimeSecret: return "ocr-time-secret"
         case .failsafeUnknown: return "failsafe-unknown"
         }
     }

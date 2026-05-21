@@ -15,6 +15,13 @@
 // query, denylist load) lives in adapter implementations of these
 // protocols. This separation is what lets the binding decision logic
 // be testable without a running OS pipeline.
+//
+// ADR-0016 P3.6 — cascade-twice. The orchestrator gains a second
+// decision method `decideOcr(text:context:)` that runs the §6 OCR-time
+// secret/PII regex over OCR'd text AFTER the pixel-time cascade
+// returned `.allow`. Events that fail the OCR re-cascade emit a
+// `PrivacyTombstone(reason=ocrTimeSecret)` and never reach the wire
+// as an `OCREvent`.
 
 import Foundation
 
@@ -162,4 +169,75 @@ public struct SuppressionCascade: Sendable {
             return .suppress(reason: .failsafeUnknown)
         }
     }
+
+    // MARK: - ADR-0016 P3.6 — §6 OCR-time cascade (cascade-twice)
+
+    /// Run the §6 OCR-time secret/PII regex over `text` AFTER the
+    /// pixel-time cascade has returned `.allow`. Returns `.allow` iff
+    /// no regex in the SecretBench-tuned set matches; otherwise
+    /// `.suppress(reason: .ocrTimeSecret)`.
+    ///
+    /// LOAD-BEARING (ADR-0016 §4.2): this is the second cascade pass.
+    /// `OCREvent`s that reach the IPC wire MUST have passed BOTH
+    /// `decide(context:)` on pixels AND `decideOcr(text:context:)` on
+    /// OCR'd text. ADR-0013 §6 defense-in-depth — SecretBench shows
+    /// best detectors at ~52–88% recall, so §6 is a backstop, never a
+    /// primary guarantee.
+    ///
+    /// `context` is currently unused; carried so a future per-app
+    /// regex policy (e.g. relax patterns inside `1Password` if it ever
+    /// lands on the known-safe allowlist) can land without re-shaping
+    /// the call signature.
+    public func decideOcr(text: String, context _: WorkflowContext) -> SuppressionDecision {
+        if Self.containsSecretOrPII(text) {
+            return .suppress(reason: .ocrTimeSecret)
+        }
+        return .allow
+    }
+
+    /// Returns true iff `text` contains any pattern in the §6 OCR-time
+    /// regex set. The set is intentionally small + high-precision per
+    /// ADR-0013 §6 (Basak et al. arXiv:2307.00714 — best-tool recall
+    /// 52–88%, so we lean toward precision and add patterns under
+    /// CSO review only).
+    ///
+    /// Patterns covered:
+    ///   1. `password|passwd|secret|api[_-]?key|token|bearer
+    ///       |access[_-]?token` followed by `:` or `=` and a non-empty
+    ///       value (covers `password: hunter2` shape).
+    ///   2. GitHub PAT (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` prefix
+    ///       + 36 hex/alphanumeric chars).
+    ///   3. AWS access key id (20-char `AKIA` / `ASIA` prefix).
+    ///   4. JWT shape `eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`.
+    ///
+    /// Static / immutable so the regex compile cost is paid once per
+    /// process, not per OCR'd frame.
+    static func containsSecretOrPII(_ text: String) -> Bool {
+        for pattern in ocrSecretPatterns {
+            if pattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Compiled regex set used by `containsSecretOrPII`. ADR-0013 §6.
+    /// Process-static: compile cost is paid once, not per OCR call.
+    static let ocrSecretPatterns: [NSRegularExpression] = {
+        // Patterns are case-insensitive where it matters; the GitHub
+        // PAT / AWS / JWT shapes are case-sensitive by spec.
+        let specs: [(String, NSRegularExpression.Options)] = [
+            // (1) key-value secrets.
+            (#"(?i)(password|passwd|secret|api[_-]?key|token|bearer|access[_-]?token)\s*[:=]\s*\S+"#,
+             []),
+            // (2) GitHub Personal Access Token / OAuth / refresh.
+            (#"\bgh[poursAS]_[A-Za-z0-9_]{20,}\b"#, []),
+            // (3) AWS Access Key ID — `AKIA` / `ASIA` + 16 uppercase /
+            //     digit chars (20-char total).
+            (#"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#, []),
+            // (4) JWT three-segment shape.
+            (#"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"#, []),
+        ]
+        return specs.compactMap { try? NSRegularExpression(pattern: $0.0, options: $0.1) }
+    }()
 }

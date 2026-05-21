@@ -12,17 +12,18 @@
 # Wire format mirrors `adapters/macos/.../IPC/Wire.swift` /
 # `core/src/ipc/wire.rs` (binary, little-endian):
 #
-#   magic(1=0x4D) + version(1=0x03) + msg_type(2) + seq(8) + len(4) + payload(len)
+#   magic(1=0x4D) + version(1=0x04) + msg_type(2) + seq(8) + len(4) + payload(len)
 #
 # msg_type discriminants (MUST match Wire.swift `MessageType`):
 #   0x0001 captureStart   0x0002 captureStop
 #   0x0010 stateTransitionEvent   0x0011 privacyTombstone
 #   0x0020 surfaceReleased        0x0030 helperHealth
+#   0x0040 ocrEvent               (wire 0x04 / ADR-0016 P3.6)
 #
 # RedactionReason byte (PrivacyTombstone payload tail; MUST match
 # RedactionReason.swift): 1 denylist-source · 2 os-blacked-region ·
 # 3 secure-event-input · 4 ax-secure-subrole · 5 denylist-postcapture ·
-# 7 failsafe-unknown
+# 6 ocr-time-secret (wire 0x04 / ADR-0016 P3.6) · 7 failsafe-unknown
 #
 # STEP-1 MECHANICAL VERDICT (printed at the end):
 #   PASS shape  ⇔  ALL of:
@@ -47,13 +48,21 @@ import sys
 from collections import Counter
 
 MAGIC = 0x4D
-VERSION = 0x03  # wire bumped 0x02->0x03 (STEP-2-FINDING-004: HelperHealth cascade_forced_count)
+VERSION = 0x04  # wire bumped 0x03->0x04 (ADR-0016 P3.6: OCREvent variant)
 HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
-# HelperHealth v0x03 payload = 7 × u64 LE = 56 bytes:
+# HelperHealth v0x04 payload = 7 × u64 LE = 56 bytes (unchanged from 0x03):
 #   uptime_ms · frames_delivered · frames_suppressed ·
 #   frames_redacted_by_failsafe · cascade_forced_count ·
 #   frames_dropped_backpressure · frames_dropped_late_ack
 HELPER_HEALTH_PAYLOAD = 7 * 8
+# OCREvent v0x04 fixed-header layout (ADR-0016 §1.6):
+#   seq u64 · ts_us u64 · app_bundle_id [u8; 64] ·
+#   window_title_len u16 · url_len u16 · ocr_text_len u32 ·
+#   keyframe_hash [u8; 32]
+# = 8 + 8 + 64 + 2 + 2 + 4 + 32 = 120 bytes; trailer is
+#   window_title + url + ocr_text bytes.
+OCR_EVENT_FIXED_HEADER = 8 + 8 + 64 + 2 + 2 + 4 + 32
+MAX_OCR_TEXT_BYTES = 64 * 1024  # ADR-0016 §4.9
 
 MSG = {
     0x0001: "captureStart",
@@ -62,6 +71,7 @@ MSG = {
     0x0011: "privacyTombstone",
     0x0020: "surfaceReleased",
     0x0030: "helperHealth",
+    0x0040: "ocrEvent",
 }
 REASON = {
     1: "denylist-source",
@@ -69,8 +79,50 @@ REASON = {
     3: "secure-event-input",
     4: "ax-secure-subrole",
     5: "denylist-postcapture",
+    6: "ocr-time-secret",
     7: "failsafe-unknown",
 }
+
+
+def parse_ocr_event_payload(p):
+    """Decode an OCREvent payload (ADR-0016 P3.6 §1.6).
+
+    Layout (little-endian):
+      seq u64 · ts_us u64 · app_bundle_id [u8; 64] ·
+      window_title_len u16 · url_len u16 · ocr_text_len u32 ·
+      keyframe_hash [u8; 32] · window_title bytes · url bytes ·
+      ocr_text bytes.
+
+    Returns a dict or ``None`` on short / malformed payload.
+    """
+    if len(p) < OCR_EVENT_FIXED_HEADER:
+        return None
+    seq, ts_us = struct.unpack_from("<QQ", p, 0)
+    bundle_bytes = p[16:16 + 64]
+    bundle = bundle_bytes.rstrip(b"\x00").decode("utf-8", errors="replace")
+    wt_len, url_len = struct.unpack_from("<HH", p, 16 + 64)
+    text_len = struct.unpack_from("<I", p, 16 + 64 + 4)[0]
+    keyframe_hash = p[OCR_EVENT_FIXED_HEADER - 32: OCR_EVENT_FIXED_HEADER]
+    off = OCR_EVENT_FIXED_HEADER
+    if off + wt_len + url_len + text_len > len(p):
+        return None
+    if text_len > MAX_OCR_TEXT_BYTES:
+        return None  # over-cap = trust-boundary violation per ADR-0016 §4.9
+    wt = p[off:off + wt_len].decode("utf-8", errors="replace")
+    off += wt_len
+    url = p[off:off + url_len].decode("utf-8", errors="replace")
+    off += url_len
+    text = p[off:off + text_len].decode("utf-8", errors="replace")
+    return {
+        "seq": seq,
+        "ts_us": ts_us,
+        "app_bundle_id": bundle,
+        "window_title": wt,
+        "url": url,
+        "ocr_text_len": text_len,
+        "ocr_text": text,
+        "keyframe_hash_hex": keyframe_hash.hex(),
+    }
 
 
 def parse_tombstone_payload(p):
@@ -128,6 +180,7 @@ def main(path, verbose):
     tombstones = [(s, p) for (m, s, p) in frames if m == 0x0011]
     state_events = [(s, p) for (m, s, p) in frames if m == 0x0010]
     health_frames = [(s, p) for (m, s, p) in frames if m == 0x0030]
+    ocr_events = [(s, p) for (m, s, p) in frames if m == 0x0040]
 
     # HelperHealth v0x03 payload: 7 u64s. Parse what we can — a
     # malformed payload-length-mismatch is reported, not silently
@@ -201,6 +254,30 @@ def main(path, verbose):
     print(f"  reason histogram: {dict(reason_hist)}")
     print("--- StateTransitionEvent (0x0010) ---")
     print(f"  count           : {len(state_events)}  (MUST be 0 — any > 0 = pixels/event reached IPC)")
+
+    # ---- OCREvent (wire 0x04) ----
+    ocr_parsed = []
+    ocr_malformed = []
+    ocr_text_bytes_total = 0
+    for s, p in ocr_events:
+        parsed = parse_ocr_event_payload(p)
+        if parsed is None:
+            ocr_malformed.append((s, len(p)))
+            continue
+        ocr_parsed.append((s, parsed))
+        ocr_text_bytes_total += parsed["ocr_text_len"]
+    print("--- OCREvent (0x0040) — ADR-0016 P3.6 user-content channel ---")
+    print(f"  count           : {len(ocr_events)}")
+    if ocr_malformed:
+        print(f"  MALFORMED       : {len(ocr_malformed)} frame(s) — short / over-cap")
+        for s, ln in ocr_malformed[:10]:
+            print(f"    seq={s} len={ln}")
+    if ocr_parsed:
+        print(f"  total ocr_text  : {ocr_text_bytes_total} bytes across {len(ocr_parsed)} event(s)")
+        sample = ocr_parsed[0][1]
+        print(f"  first event     : seq={ocr_parsed[0][0]}  app={sample['app_bundle_id']!r}")
+        print(f"                    title={sample['window_title']!r}  url={sample['url']!r}")
+        print(f"                    ocr_text_len={sample['ocr_text_len']}")
 
     # ---- HelperHealth (wire 0x03) ----
     print("--- HelperHealth (0x0030) ---")

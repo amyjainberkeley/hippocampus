@@ -72,14 +72,16 @@ final class WireFixturesTests: XCTestCase {
         XCTAssertEqual(RedactionReason.secureEventInput.rawValue, 3)
         XCTAssertEqual(RedactionReason.axSecureSubrole.rawValue, 4)
         XCTAssertEqual(RedactionReason.denylistPostCapture.rawValue, 5)
+        XCTAssertEqual(RedactionReason.ocrTimeSecret.rawValue, 6)
         XCTAssertEqual(RedactionReason.failsafeUnknown.rawValue, 7)
     }
 
-    func testRedactionReasonSkipsSix() {
-        // §6 is OCR-time regex; runs in `core/`, never crosses IPC.
-        // The discriminant numbering must skip 6 to match the cascade's
-        // §-numbering. This test is the trip-wire for that contract.
-        XCTAssertNil(RedactionReason(rawValue: 6))
+    func testRedactionReasonSixIsOcrTimeSecret() {
+        // Wire 0x03 reserved 6 (§6 was core/-side). Wire 0x04
+        // (ADR-0016 P3.6) re-homes §6 to the helper — OCR now happens
+        // in the helper, so §6 emits a tombstone with reason=6.
+        let r = RedactionReason(rawValue: 6)
+        XCTAssertEqual(r, .ocrTimeSecret)
     }
 
     func testRedactionReasonDBStringsAreStable() {
@@ -91,6 +93,7 @@ final class WireFixturesTests: XCTestCase {
         XCTAssertEqual(RedactionReason.secureEventInput.dbString, "secure-event-input")
         XCTAssertEqual(RedactionReason.axSecureSubrole.dbString, "ax-secure-subrole")
         XCTAssertEqual(RedactionReason.denylistPostCapture.dbString, "denylist-postcapture")
+        XCTAssertEqual(RedactionReason.ocrTimeSecret.dbString, "ocr-time-secret")
         XCTAssertEqual(RedactionReason.failsafeUnknown.dbString, "failsafe-unknown")
     }
 
@@ -128,18 +131,21 @@ final class WireFixturesTests: XCTestCase {
     }
 
     /// Cross-side version lock — mirrors the Rust
-    /// `wire::tests::frame_version_is_0x03` trip-wire. If the two
+    /// `wire::tests::frame_version_is_0x04` trip-wire. If the two
     /// sides ever disagree the IPC contract is silently broken.
-    func testFrameVersionIs0x03() {
-        XCTAssertEqual(frameVersion, 0x03)
+    func testFrameVersionIs0x04() {
+        XCTAssertEqual(frameVersion, 0x04)
     }
 
-    /// Byte-exact cross-side fixture — pin the full HelperHealth v0x03
-    /// frame. The Rust-side `wire::tests::helper_health_cross_side_fixture`
-    /// asserts the SAME 72-byte vector for the SAME input tuple, and
+    /// Byte-exact cross-side fixture — pin the full HelperHealth frame
+    /// at wire 0x04. The Rust-side
+    /// `wire::tests::helper_health_cross_side_fixture` asserts the
+    /// SAME 72-byte vector for the SAME input tuple, and
     /// `tools/wire_decode.py` parses the same layout. If any of those
     /// three drifts, the IPC contract is broken — this is the
-    /// observable trip-wire.
+    /// observable trip-wire. Wire 0x04 (P3.6) bumps only the version
+    /// byte for the new OCREvent variant; HelperHealth's payload
+    /// layout is unchanged.
     func testHelperHealthCrossSideFixture() {
         let frame = encodeHelperHealth(
             seq: 42,
@@ -151,11 +157,11 @@ final class WireFixturesTests: XCTestCase {
             framesDroppedBackpressure: 6,
             framesDroppedLateAck: 7
         )
-        // Header(16): magic(4D) ver(03) msg_type(30 00 LE = 0x0030)
+        // Header(16): magic(4D) ver(04) msg_type(30 00 LE = 0x0030)
         //             seq(2A 00 ... LE = 42) len(38 00 00 00 = 56)
         // Payload(56): 7 u64 LE = 1, 2, 3, 4, 5, 6, 7 (little-endian)
         let expected: [UInt8] = [
-            0x4D, 0x03, 0x30, 0x00,
+            0x4D, 0x04, 0x30, 0x00,
             0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x38, 0x00, 0x00, 0x00,
             // u64 LE × 7
@@ -168,7 +174,115 @@ final class WireFixturesTests: XCTestCase {
             0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]
         XCTAssertEqual(frame.count, 72)
-        XCTAssertEqual(Array(frame), expected, "HelperHealth v0x03 byte-exact cross-side fixture")
+        XCTAssertEqual(Array(frame), expected, "HelperHealth v0x04 byte-exact cross-side fixture")
+    }
+
+    /// Byte-exact cross-side fixture — pin the full OCREvent frame at
+    /// wire 0x04. Mirrors the Rust-side
+    /// `wire::tests::ocr_event_cross_side_fixture` and is parsed by
+    /// `tools/wire_decode.py`. ADR-0016 §1.6 byte order.
+    ///
+    /// LOAD-BEARING (ADR-0016 §4). Drift on this layout breaks the
+    /// IPC contract for the FIRST message variant carrying USER
+    /// CONTENT across the seam.
+    func testOCREventCrossSideFixture() {
+        let hash = [UInt8](repeating: 0xAB, count: 32)
+        let result = encodeOCREvent(
+            seq: 42,
+            event: OCREvent(
+                seq: 42,
+                tsUs: 0x0102_0304_0506_0708,
+                appBundleId: "com.apple.Safari",
+                windowTitle: "T",
+                url: "U",
+                ocrText: "Hi",
+                keyframeHash: hash
+            )
+        )
+        guard case .success(let frame) = result else {
+            return XCTFail("OCREvent encode unexpectedly failed: \(result)")
+        }
+        // Fixed payload = 8 + 8 + 64 + 2 + 2 + 4 + 32 = 120
+        // Variable    = 1 + 1 + 2 = 4
+        // Total payload = 124. Frame total = 16 + 124 = 140.
+        XCTAssertEqual(frame.count, 140)
+
+        var expected = [UInt8]()
+        // Header: magic 4D, version 04, msg_type 0040 LE.
+        expected += [0x4D, 0x04, 0x40, 0x00]
+        // seq u64 LE = 42.
+        expected += [0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        // len u32 LE = 124.
+        expected += [0x7C, 0x00, 0x00, 0x00]
+        // Payload — seq u64 LE = 42.
+        expected += [0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        // ts_us u64 LE = 0x0102_0304_0506_0708.
+        expected += [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+        // app_bundle_id [u8; 64] — "com.apple.Safari" null-padded.
+        let bundleBytes = Array("com.apple.Safari".utf8)
+        expected += bundleBytes + [UInt8](repeating: 0, count: 64 - bundleBytes.count)
+        // window_title_len u16 LE = 1.
+        expected += [0x01, 0x00]
+        // url_len u16 LE = 1.
+        expected += [0x01, 0x00]
+        // ocr_text_len u32 LE = 2.
+        expected += [0x02, 0x00, 0x00, 0x00]
+        // keyframe_hash [u8; 32] = all 0xAB.
+        expected += hash
+        // window_title "T", url "U", ocr_text "Hi".
+        expected += Array("T".utf8) + Array("U".utf8) + Array("Hi".utf8)
+
+        XCTAssertEqual(Array(frame), expected, "OCREvent v0x04 byte-exact cross-side fixture")
+    }
+
+    /// OCR text over the 64 KB cap fails closed at encode time
+    /// (ADR-0016 §4.9). Caller emits PrivacyTombstone(reason=
+    /// failsafeUnknown) instead per ADR-0013 §7. This test pins that
+    /// the encoder reports `ocrTextOverCap` rather than truncating
+    /// silently.
+    func testOCREventOverCapFailsClosed() {
+        let overCap = String(repeating: "a", count: maxOCRTextBytes + 1)
+        let result = encodeOCREvent(
+            seq: 1,
+            event: OCREvent(
+                seq: 1,
+                tsUs: 0,
+                appBundleId: "com.example.app",
+                windowTitle: "",
+                url: "",
+                ocrText: overCap
+            )
+        )
+        switch result {
+        case .success:
+            XCTFail("encoder MUST fail closed on over-cap OCR text")
+        case .failure(let err):
+            switch err {
+            case .ocrTextOverCap(let byteCount):
+                XCTAssertEqual(byteCount, maxOCRTextBytes + 1)
+            case .fieldOverflow:
+                XCTFail("expected ocrTextOverCap, got fieldOverflow")
+            }
+        }
+    }
+
+    /// At exactly 64 KB, OCR text MUST be permitted (boundary check).
+    func testOCREventAtCapBoundaryIsAccepted() {
+        let exactlyCap = String(repeating: "a", count: maxOCRTextBytes)
+        let result = encodeOCREvent(
+            seq: 1,
+            event: OCREvent(
+                seq: 1,
+                tsUs: 0,
+                appBundleId: "com.example.app",
+                windowTitle: "",
+                url: "",
+                ocrText: exactlyCap
+            )
+        )
+        guard case .success = result else {
+            return XCTFail("at-cap OCR text should encode successfully")
+        }
     }
 
     /// MessageType discriminants match the Rust spec.
@@ -179,5 +293,6 @@ final class WireFixturesTests: XCTestCase {
         XCTAssertEqual(MessageType.privacyTombstone.rawValue, 0x0011)
         XCTAssertEqual(MessageType.surfaceReleased.rawValue, 0x0020)
         XCTAssertEqual(MessageType.helperHealth.rawValue, 0x0030)
+        XCTAssertEqual(MessageType.ocrEvent.rawValue, 0x0040)
     }
 }

@@ -53,6 +53,15 @@ pub enum Routed {
     /// `CaptureStart` / `CaptureStop` originate at the core; receiving
     /// them FROM the helper is also a protocol bug.
     EchoedControl(Frame),
+    /// Helper emitted a twice-cleared OCREvent (ADR-0016 P3.6). The
+    /// brain-ingestor consumer lands at P3.7+; until then the
+    /// connection passes the frame through for caller no-op or
+    /// structural assertion. **CSO-protected**: this variant is the
+    /// IPC-seam evidence that `OCREvent` and `PrivacyTombstone` are
+    /// disjoint dispatch targets — an enum-match dispatcher cannot
+    /// deliver a `PrivacyTombstone` to the brain by construction
+    /// (ADR-0016 §4.3 invariant).
+    OCREvent(Frame),
 }
 
 /// Errors `HelperConnection` surfaces. Distinguishes wire-level
@@ -169,6 +178,7 @@ where
             Message::StateTransitionEvent { .. } => Routed::StateTransition(frame),
             Message::HelperHealth { .. } => Routed::Health(frame),
             Message::SurfaceReleased { .. } => Routed::ProtocolMisuse(frame),
+            Message::OCREvent { .. } => Routed::OCREvent(frame),
             Message::CaptureStart { .. } | Message::CaptureStop => Routed::EchoedControl(frame),
         }
     }

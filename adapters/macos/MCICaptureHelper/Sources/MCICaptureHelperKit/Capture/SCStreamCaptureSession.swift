@@ -127,6 +127,17 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// timeout. `nil` preserves pre-P2.5 behaviour (no URL ever
     /// reaches the cascade).
     private let urlProvider: URLProvider?
+    /// ADR-0016 §1.6 P3.6 — cascade-twice OCR emitter. Invoked after
+    /// `pipeline.process(...)` returns `.encoded(seq:_:)` (the
+    /// pixel-time cascade returned `.allow`). The emitter submits the
+    /// retained `CVPixelBuffer` to `VisionOCRWorker`, runs cascade §6
+    /// over the OCR'd text, and emits either an `OCREvent` (both
+    /// cascades cleared) or a `PrivacyTombstone` (§6 fired, or 64 KB
+    /// cap exceeded). `nil` preserves pre-P3.6 behaviour (no OCR
+    /// invocation, no OCREvent ever reaches the wire) — used by
+    /// headless tests + the live SCStream path before the OCR worker
+    /// is wired up.
+    private let ocrPostAllowEmitter: (any OCRPostAllowEmitter)?
 
     private let lock = NSLock()
     private var priorDHash: DHash?
@@ -149,7 +160,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         policy: StreamPolicy = .default,
         blackedRegionProbe: PixelGridBlackedRegionProbe? = nil,
         contextSnapshot: WorkflowContextSnapshot? = nil,
-        urlProvider: URLProvider? = nil
+        urlProvider: URLProvider? = nil,
+        ocrPostAllowEmitter: (any OCRPostAllowEmitter)? = nil
     ) {
         self.pipeline = pipeline
         self.denylist = denylist
@@ -157,6 +169,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         self.blackedRegionProbe = blackedRegionProbe
         self.contextSnapshot = contextSnapshot
         self.urlProvider = urlProvider
+        self.ocrPostAllowEmitter = ocrPostAllowEmitter
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
     }
@@ -374,31 +387,73 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // back to the no-retain releaser (still correct — nothing to
         // free). Either way the §4 pool budget is respected because
         // the hold is bounded by the cascade + no-op encoder.
+        //
+        // ADR-0016 P3.6: ALSO capture the CVPixelBuffer reference
+        // (Swift-side strong ref) so the OCR worker can read it after
+        // the lease releases. The pixel-buffer reference is distinct
+        // from the IOSurface lease; the worker holds it for the
+        // duration of its Vision OCR submission. The §11 live-Mac
+        // audit verifies the OS does not recycle the underlying
+        // IOSurface storage during that window in practice.
         let releaser: any SurfaceReleasing
+        // Build the OCR input in the callback's synchronous frame —
+        // `OCREngineInput` is `@unchecked Sendable` (it documents the
+        // single-owner-while-in-flight contract), so it crosses the
+        // `Task.detached` boundary into the cascade-twice path cleanly.
+        // `nil` when the sample carries no pixel buffer; the OCR path
+        // is then skipped (no OCREvent ever reaches the wire).
+        let ocrInput: OCREngineInput?
         if let pb = CMSampleBufferGetImageBuffer(sampleBuffer) {
             // UNVERIFIED — needs live macOS; do not claim working.
             releaser = PixelSurfaceReleaser(
                 surface: CVPixelBufferRetainedSurface(retaining: pb)
             )
+            let roi = OCRROIComputer.normalizedBoundingROI(
+                widthPx: CVPixelBufferGetWidth(pb),
+                heightPx: CVPixelBufferGetHeight(pb),
+                dirtyRects: sample.dirtyRects
+            )
+            ocrInput = OCREngineInput(pixelBuffer: pb, roi: roi)
         } else {
             releaser = BorrowedNoRetainReleaser()
+            ocrInput = nil
         }
         let lease = SurfaceLease(releaser: releaser)
 
         // Only `Sendable` values are captured — NOT the sample buffer.
         let pipeline = self.pipeline
+        let ocrEmitter = self.ocrPostAllowEmitter
         Task.detached {
             // The single sink for a captured frame is the cascade-gated
             // pipeline. `DeferredVideoToolboxEncoder` (still in place
             // this PR) is a no-op, so an `.allow` decision encodes
             // nothing; a `.suppress` decision emits a tombstone and
             // never reaches encode. Either way: no stored frame.
-            _ = try? await pipeline.process(
+            let outcome = try? await pipeline.process(
                 frame: frame,
                 context: context,
                 nowUs: nowUs,
                 lease: lease
             )
+            // ADR-0016 P3.6 — cascade-twice. On `.encoded` (pixel-time
+            // cascade returned `.allow`), submit to OCR + run §6
+            // re-cascade + emit OCREvent or tombstone-6. The emitter
+            // owns ALL of that; the callback's only job is to dispatch.
+            //
+            // Privacy invariant (ADR-0016 §4.2): there is NO call site
+            // that emits `OCREvent` other than `ocrEmitter` here, and
+            // that call is structurally gated by the pixel-time
+            // cascade's `.encoded` outcome.
+            if case .encoded = outcome,
+               let emitter = ocrEmitter,
+               let input = ocrInput
+            {
+                await emitter.processAfterAllow(
+                    tsUs: nowUs,
+                    context: context,
+                    input: input
+                )
+            }
         }
     }
 

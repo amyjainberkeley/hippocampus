@@ -28,7 +28,7 @@
 //! ```text
 //! +-----------+--------+------------------+
 //! | magic     | u8     | 0x4D = 'M'       |
-//! | version   | u8     | currently 0x03   |
+//! | version   | u8     | currently 0x04   |
 //! | msg_type  | u16 LE | discriminant     |
 //! | seq       | u64 LE | monotonic seq id |
 //! | len       | u32 LE | payload bytes    |
@@ -56,7 +56,8 @@ pub use fdpass::{recv_with_fds, send_with_fds, socket_pair, FdPassError, RecvOut
 pub use reader::{FrameReader, ReadError, READER_BUFFER_CAP};
 pub use wire::{
     decode, encode, DecodeError, Frame, MessageType, FRAME_MAGIC, FRAME_VERSION,
-    MIN_FRAME_HEADER_BYTES,
+    MAX_OCR_TEXT_BYTES, MIN_FRAME_HEADER_BYTES, OCR_EVENT_APP_BUNDLE_ID_LEN,
+    OCR_EVENT_FIXED_HEADER_BYTES, OCR_EVENT_KEYFRAME_HASH_LEN,
 };
 pub use writer::{FrameWriter, WriteError};
 
@@ -136,6 +137,53 @@ pub enum Message {
         ack_seq: u64,
     },
 
+    /// Helper → core. An ADR-0016 P3.6 OCR'd-event payload — an event
+    /// that cleared the ADR-0013 cascade TWICE: once on pixels at frame
+    /// time (§1–§5 + §7) and once on OCR'd text (§6 OCR-time secret/PII
+    /// regex). Only events that cleared BOTH cascades become `OCREvent`
+    /// frames on the wire. Events that cleared pixels but failed §6 on
+    /// text become [`PrivacyTombstone`] with reason
+    /// [`RedactionReason::OcrTimeSecret`] instead — no OCR'd text bytes
+    /// cross the seam.
+    ///
+    /// LOAD-BEARING (ADR-0016 §4): this is the first message variant
+    /// carrying USER CONTENT (OCR'd text) across the IPC seam. Per-event
+    /// OCR text is capped at 64 KB helper-side; over-cap triggers a
+    /// fail-closed `PrivacyTombstone(reason=FailsafeUnknown)` instead.
+    ///
+    /// Keyframe blob writes are vacuous in this PR — the helper passes
+    /// `keyframe_hash = [0u8; 32]` until P3.6.5 adds the blob writer.
+    OCREvent {
+        /// Event-level sequence number — distinct concept from the
+        /// wire-frame `seq` in the envelope, though in production the
+        /// helper sets both to the same allocated value (one frame per
+        /// OCREvent). Carried in-payload so a future split of event
+        /// sequencing from wire sequencing does not require a wire
+        /// bump.
+        seq: u64,
+        /// Monotonic helper-side timestamp, microseconds since epoch.
+        ts_us: u64,
+        /// Bundle identifier of the foreground app, null-padded to
+        /// 64 bytes (mirrors the bounded discipline used by
+        /// `PrivacyTombstone.app_bundle`).
+        app_bundle_id: [u8; 64],
+        /// Window title at OCR time. UTF-8; helper-side enforcement
+        /// caps the length so the variable trailer cannot balloon.
+        window_title: String,
+        /// Active browser tab URL at OCR time (post-ADR-0015 P2.5
+        /// context join). Empty string when not a browser context.
+        url: String,
+        /// OCR'd text, capped at 64 KB helper-side per ADR-0016 §4.9.
+        /// Always passes the cascade §6 regex re-run before reaching
+        /// the wire — the trust boundary is enforced on the helper
+        /// side, not the core.
+        ocr_text: String,
+        /// blake3 of the keyframe blob the event references. All-zero
+        /// bytes signals "no blob yet" (vacuous in P3.6; blob writer
+        /// lands at P3.6.5).
+        keyframe_hash: [u8; 32],
+    },
+
     /// Helper → core. Periodic counters for the CRS Telemetry-Gap analyst.
     /// Content-free (`AGENT_PROTOCOL` §9.3 / ADR-0001 NG3).
     HelperHealth {
@@ -194,6 +242,7 @@ impl Message {
             Self::StateTransitionEvent { .. } => MessageType::StateTransitionEvent,
             Self::PrivacyTombstone { .. } => MessageType::PrivacyTombstone,
             Self::SurfaceReleased { .. } => MessageType::SurfaceReleased,
+            Self::OCREvent { .. } => MessageType::OCREvent,
             Self::HelperHealth { .. } => MessageType::HelperHealth,
         }
     }
@@ -236,6 +285,13 @@ pub enum RedactionReason {
     /// Cascade §5 — `WorkflowContext` matched the post-capture denylist
     /// (belt-and-suspenders for §1).
     DenylistPostCapture,
+    /// Cascade §6 — OCR-time secret/PII regex matched on OCR'd text.
+    /// Operationally meaningful starting at ADR-0016 P3.6: a cascade-
+    /// twice fire — the frame cleared the pixel-time cascade
+    /// (§1–§5 + §7) but the OCR'd text re-run of §6 matched a
+    /// SecretBench-tuned pattern. No OCR'd text bytes reach the wire
+    /// on this path; only the tombstone does.
+    OcrTimeSecret,
     /// Cascade §7 — fail-safe default: helper could not positively classify
     /// the focused element with reasonable confidence.
     FailsafeUnknown,
@@ -251,6 +307,7 @@ impl RedactionReason {
             Self::SecureEventInput => 3,
             Self::AxSecureSubrole => 4,
             Self::DenylistPostCapture => 5,
+            Self::OcrTimeSecret => 6,
             Self::FailsafeUnknown => 7,
         }
     }
@@ -266,6 +323,7 @@ impl RedactionReason {
             3 => Self::SecureEventInput,
             4 => Self::AxSecureSubrole,
             5 => Self::DenylistPostCapture,
+            6 => Self::OcrTimeSecret,
             7 => Self::FailsafeUnknown,
             other => {
                 return Err(DecodeError::InvalidEnum {
@@ -286,6 +344,7 @@ impl RedactionReason {
             Self::SecureEventInput => "secure-event-input",
             Self::AxSecureSubrole => "ax-secure-subrole",
             Self::DenylistPostCapture => "denylist-postcapture",
+            Self::OcrTimeSecret => "ocr-time-secret",
             Self::FailsafeUnknown => "failsafe-unknown",
         }
     }
@@ -335,6 +394,7 @@ mod tests {
             RedactionReason::SecureEventInput,
             RedactionReason::AxSecureSubrole,
             RedactionReason::DenylistPostCapture,
+            RedactionReason::OcrTimeSecret,
             RedactionReason::FailsafeUnknown,
         ] {
             let b = r.as_u8();
@@ -346,12 +406,14 @@ mod tests {
     }
 
     #[test]
-    fn redaction_reason_skips_six_to_match_cascade_numbering() {
-        // The cascade has 7 rules (§1..§7); §6 is OCR-time regex which
-        // runs in core/, not in the helper, so it never emits a tombstone
-        // over IPC. The wire discriminant skips 6 deliberately to match
-        // the cascade's numbering.
-        assert!(RedactionReason::from_u8(6).is_err());
+    fn redaction_reason_six_is_ocr_time_secret() {
+        // Wire 0x03 reserved 6 (§6 OCR-time regex ran in core/, never
+        // emitted a tombstone). Wire 0x04 (ADR-0016 P3.6) re-homes §6
+        // to the helper because OCR now happens in the helper; §6
+        // tombstones cross the wire as reason=6.
+        let r = RedactionReason::from_u8(6).expect("reason=6 is OcrTimeSecret on wire 0x04");
+        assert_eq!(r, RedactionReason::OcrTimeSecret);
+        assert_eq!(r.as_db_str(), "ocr-time-secret");
     }
 
     #[test]
@@ -401,6 +463,15 @@ mod tests {
                 cascade_forced_count: 0,
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
+            },
+            Message::OCREvent {
+                seq: 0,
+                ts_us: 1,
+                app_bundle_id: [0u8; 64],
+                window_title: "Title".to_string(),
+                url: "https://example.com".to_string(),
+                ocr_text: "hello world".to_string(),
+                keyframe_hash: [0u8; 32],
             },
         ];
         for m in &msgs {

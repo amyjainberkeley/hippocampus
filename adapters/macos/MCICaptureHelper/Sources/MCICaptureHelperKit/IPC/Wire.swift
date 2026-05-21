@@ -11,7 +11,7 @@
 //
 // Wire format (binary, little-endian) — identical to the Rust spec:
 //
-//   magic(1=0x4D) + version(1=0x03) + msg_type(2) + seq(8) + len(4) + payload(len)
+//   magic(1=0x4D) + version(1=0x04) + msg_type(2) + seq(8) + len(4) + payload(len)
 //
 // version 0x01 → 0x02 (2026-05-19): HelperHealth gained the
 // frames_redacted_by_failsafe counter.
@@ -19,6 +19,14 @@
 // cascade_forced_count counter (STEP-2-FINDING-004 — floor-forced
 // cascade evaluations are now observable on the wire, strictly
 // disjoint from filter-passed evaluations).
+// version 0x03 → 0x04 (2026-05-20, ADR-0016 P3.6): new OCREvent message
+// type (0x0040) — the FIRST message variant carrying user content
+// (OCR'd text) across the IPC seam. Gated by ADR-0013 cascade running
+// TWICE (once on pixels at frame time, once on OCR'd text via §6).
+// RedactionReason 6 (`ocrTimeSecret`) added so the twice-fired path
+// emits a PrivacyTombstone with the distinct reason. ADR-0016 §1.6
+// proposed slot 0x0020 but that slot was claimed by SurfaceReleased in
+// PR #15; this bump assigns 0x0040.
 // Helper + core ship version-locked; the Rust decoder rejects any
 // other version.
 
@@ -28,10 +36,24 @@ import Foundation
 public let frameMagic: UInt8 = 0x4D
 
 /// Wire-format version byte. MUST match `core::ipc::wire::FRAME_VERSION`.
-public let frameVersion: UInt8 = 0x03
+public let frameVersion: UInt8 = 0x04
 
 /// Minimum frame header size in bytes.
 public let minFrameHeaderBytes = 1 + 1 + 2 + 8 + 4
+
+/// Per-event OCR text cap (ADR-0016 §4.9). Over-cap OCR results
+/// fail closed — the helper emits a PrivacyTombstone(reason=
+/// failsafeUnknown) instead of an OCREvent. Mirrors
+/// `core::ipc::wire::MAX_OCR_TEXT_BYTES`.
+public let maxOCRTextBytes: Int = 64 * 1024
+
+/// Fixed app-bundle-id length in OCREvent (null-padded). Mirrors
+/// `core::ipc::wire::OCR_EVENT_APP_BUNDLE_ID_LEN`.
+public let ocrEventAppBundleIdLen: Int = 64
+
+/// Fixed keyframe-hash length in OCREvent. Mirrors
+/// `core::ipc::wire::OCR_EVENT_KEYFRAME_HASH_LEN`.
+public let ocrEventKeyframeHashLen: Int = 32
 
 /// Wire `msg_type` discriminants. MUST match `core::ipc::wire::MessageType`.
 public enum MessageType: UInt16, Sendable {
@@ -41,6 +63,11 @@ public enum MessageType: UInt16, Sendable {
     case privacyTombstone = 0x0011
     case surfaceReleased = 0x0020
     case helperHealth = 0x0030
+    /// ADR-0016 P3.6 — twice-cleared OCR event carrying USER CONTENT
+    /// (OCR'd text). Slot 0x0040 (0x0020 from ADR-0016 §1.6 was already
+    /// claimed by `surfaceReleased`; the ADR owes a follow-up doc PR
+    /// to reflect the actual assigned slot).
+    case ocrEvent = 0x0040
 }
 
 /// A privacy tombstone — the only message the helper emits in this cycle.
@@ -84,6 +111,116 @@ public func encodePrivacyTombstone(seq: UInt64, tombstone: PrivacyTombstone) -> 
 /// ready to be torn down.
 public func encodeCaptureStop(seq: UInt64) -> Data {
     assembleFrame(msgType: .captureStop, seq: seq, payload: Data())
+}
+
+/// Errors the OCREvent encoder surfaces when its input violates the
+/// helper-side trust-boundary contract (ADR-0016 §4.9). Surfaced as
+/// values, not throws, so the caller (cascade-after-OCR emitter) can
+/// translate them into the documented fail-closed
+/// `PrivacyTombstone(reason=failsafeUnknown)` arm.
+public enum OCREventEncodeError: Error, Equatable {
+    /// OCR text exceeded `maxOCRTextBytes` (ADR-0016 §4.9). Helper-side
+    /// fail-closed default: caller emits a tombstone with reason 7.
+    case ocrTextOverCap(byteCount: Int)
+    /// window_title or url length exceeded `UInt16.max` — defensive,
+    /// not expected in real-world apps; caller should also fail closed.
+    case fieldOverflow(field: String, byteCount: Int)
+}
+
+/// A twice-cleared OCR event payload — ADR-0016 P3.6 §1.6. The cascade
+/// has fired on pixels at frame time AND on OCR'd text via §6, and BOTH
+/// returned `.allow`. Only then does this struct exist; only then does
+/// the helper emit `encodeOCREvent(...)` bytes.
+///
+/// PROTECTED-SET per AGENT_PROTOCOL §5. The bytes carry USER CONTENT
+/// (the OCR'd text). Any change to how this struct reaches the wire
+/// requires CSO review per ADR-0016 §4 invariants.
+public struct OCREvent: Sendable, Equatable {
+    /// Event-level sequence; in production matches the wire-frame seq.
+    public let seq: UInt64
+    public let tsUs: UInt64
+    /// Bundle id of the foreground app, plain UTF-8 (the encoder
+    /// null-pads to `ocrEventAppBundleIdLen` bytes on the wire).
+    public let appBundleId: String
+    public let windowTitle: String
+    public let url: String
+    /// Post-cascade-twice OCR'd text. MUST be ≤ `maxOCRTextBytes`
+    /// (UTF-8 byte length); over-cap fails closed via the encoder.
+    public let ocrText: String
+    /// blake3 of the keyframe blob. All-zero bytes signals "no blob
+    /// yet" — P3.6.5 lands the blob writer.
+    public let keyframeHash: [UInt8]
+
+    public init(
+        seq: UInt64,
+        tsUs: UInt64,
+        appBundleId: String,
+        windowTitle: String,
+        url: String,
+        ocrText: String,
+        keyframeHash: [UInt8] = [UInt8](repeating: 0, count: 32)
+    ) {
+        precondition(keyframeHash.count == ocrEventKeyframeHashLen,
+                     "OCREvent keyframeHash MUST be \(ocrEventKeyframeHashLen) bytes")
+        self.seq = seq
+        self.tsUs = tsUs
+        self.appBundleId = appBundleId
+        self.windowTitle = windowTitle
+        self.url = url
+        self.ocrText = ocrText
+        self.keyframeHash = keyframeHash
+    }
+}
+
+/// Encode an OCREvent as a complete wire frame. The 64 KB OCR-text cap
+/// is enforced helper-side here; over-cap returns
+/// `.failure(.ocrTextOverCap(...))` so the caller emits a
+/// `PrivacyTombstone(reason=failsafeUnknown)` instead per ADR-0013 §7.
+///
+/// Returns the bytes in exactly the layout `core::ipc::wire::decode`
+/// expects for `MessageType::OCREvent`. ADR-0016 §1.6 byte order:
+///   seq u64 LE · ts_us u64 LE · app_bundle_id [u8; 64] null-padded
+///   · window_title_len u16 LE · url_len u16 LE · ocr_text_len u32 LE
+///   · keyframe_hash [u8; 32]
+///   · window_title bytes · url bytes · ocr_text bytes
+public func encodeOCREvent(
+    seq: UInt64,
+    event: OCREvent
+) -> Result<Data, OCREventEncodeError> {
+    let titleBytes = Array(event.windowTitle.utf8)
+    let urlBytes = Array(event.url.utf8)
+    let textBytes = Array(event.ocrText.utf8)
+
+    guard textBytes.count <= maxOCRTextBytes else {
+        return .failure(.ocrTextOverCap(byteCount: textBytes.count))
+    }
+    guard titleBytes.count <= Int(UInt16.max) else {
+        return .failure(.fieldOverflow(field: "window_title", byteCount: titleBytes.count))
+    }
+    guard urlBytes.count <= Int(UInt16.max) else {
+        return .failure(.fieldOverflow(field: "url", byteCount: urlBytes.count))
+    }
+
+    var bundlePadded = [UInt8](repeating: 0, count: ocrEventAppBundleIdLen)
+    let bundleBytes = Array(event.appBundleId.utf8)
+    let copyLen = min(bundleBytes.count, ocrEventAppBundleIdLen)
+    if copyLen > 0 {
+        bundlePadded.replaceSubrange(0..<copyLen, with: bundleBytes.prefix(copyLen))
+    }
+
+    var payload = Data()
+    payload.appendUInt64LE(event.seq)
+    payload.appendUInt64LE(event.tsUs)
+    payload.append(contentsOf: bundlePadded)
+    payload.appendUInt16LE(UInt16(titleBytes.count))
+    payload.appendUInt16LE(UInt16(urlBytes.count))
+    payload.appendUInt32LE(UInt32(textBytes.count))
+    payload.append(contentsOf: event.keyframeHash)
+    payload.append(contentsOf: titleBytes)
+    payload.append(contentsOf: urlBytes)
+    payload.append(contentsOf: textBytes)
+
+    return .success(assembleFrame(msgType: .ocrEvent, seq: seq, payload: payload))
 }
 
 /// Encode a periodic helper-health counter frame.
