@@ -32,6 +32,15 @@ let package = Package(
         .target(
             name: "MCICaptureHelperKit",
             path: "Sources/MCICaptureHelperKit",
+            resources: [
+                // ADR-0013 §3 + ADR-0015 §5 + ADR-0017 §3.1 — CSO-ratified
+                // known-safe-apps allowlist. Lives in the signed bundle's
+                // Resources (NOT user-writable in v1 per ADR-0017 §3.1);
+                // loaded at helper startup via `Bundle.module`. `.copy`
+                // (not `.process`) — the TOML is a verbatim trust
+                // artifact, no SwiftPM transformation desired.
+                .copy("Resources/known-safe-apps.toml"),
+            ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
             ]

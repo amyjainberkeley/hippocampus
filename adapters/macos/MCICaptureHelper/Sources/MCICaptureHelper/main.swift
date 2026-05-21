@@ -171,6 +171,24 @@ if let toml = try? String(contentsOfFile: args.denylistPath, encoding: .utf8) {
     denylistEntries = []
 }
 
+// Allowlist load — CSO-ratified known-safe-apps (ADR-0013 §3 + §6;
+// ADR-0015 §5; ADR-0017 §3.1). Lives in the signed bundle's Resources
+// (NOT user-writable v1) and is parsed at startup. Missing resource ⇒
+// empty allowlist ⇒ cascade fail-closes on every app (the safe
+// direction — `Allowlist.contains(_:)` returns false for everything).
+// Parse error ⇒ exit: a damaged bundle MUST NOT be silently downgraded
+// to "no apps ratified" without surfacing the bundle problem.
+let allowlist: Allowlist
+do {
+    allowlist = try AllowlistTOMLLoader.loadBundled()
+} catch {
+    FileHandle.standardError.write(
+        "mci-capture-helper: known-safe-apps.toml parse error: \(error)\n"
+            .data(using: .utf8)!
+    )
+    exit(6)
+}
+
 // Build cascade with concrete probes.
 //
 // ADR-0013 §2: `BlackedRegionProbe` is now the real
@@ -244,12 +262,19 @@ if args.probeDebug {
     axProbeDebugSink = nil
 }
 
+// CSO-ratified known-safe bundle ids — feeds cascade §1 source-level
+// allow path (per ADR-0013 §3 + ADR-0015 §5 + ADR-0017 §3.1). Missing
+// seed resource ⇒ empty Set ⇒ cascade fail-closes per ADR-0013 §7.
+// The cascade's §2-§7 redaction order is preserved verbatim — the
+// allowlist STRICTLY ADDS `.allow` decisions (only after AX returns a
+// positive non-secure classification) and cannot widen past any
+// redaction signal. See `Allowlist.swift` for the trust contract.
 let cascade = SuppressionCascade(
     secureEventInput: CarbonSecureEventInputProbe(),
     axSecureSubrole: AXSubroleProbe(debugLog: axProbeDebugSink),
     denylist: Denylist(entries: denylistEntries),
     blackedRegion: blackedRegionProbe,
-    knownSafeAppBundles: []
+    knownSafeAppBundles: allowlist.bundleIdSet
 )
 
 let loop = HelperMainLoop(
