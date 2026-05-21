@@ -140,3 +140,51 @@ Required GitHub secrets for signed releases:
 | `NOTARYTOOL_PASSWORD` | App-Specific Password for notarization |
 
 If secrets are absent, the workflow still runs but produces an ad-hoc signed DMG.
+
+---
+
+## demo.sh
+
+Reproducible E2E pitch demo for Hippocampus / MCI. Automates the full demo pipeline: clean state, seed brain with synthetic data, build + launch app, run queries, exercise MCP server, capture screenshots, tear down.
+
+### Prerequisites
+
+- macOS with Xcode Command Line Tools
+- Rust toolchain (`cargo`)
+- Swift toolchain (`swift build`)
+- `openssl` (ships with macOS)
+
+### Subcommands
+
+| Command | What it does |
+|---|---|
+| `clean` | Kill all MCI processes, delete demo brain + WAL/SHM files, archive logs to `/tmp` |
+| `seed` | Generate ephemeral SQLCipher key at `/tmp/mci-demo-key.hex` (mode 0600), run `mci-seed-brain` to write 20 synthetic events |
+| `boot` | Build Hippocampus.app via `build-app.sh`, embed Sparkle.framework, add `@executable_path/../Frameworks` rpath, ad-hoc codesign, launch |
+| `query` | Run `mci-brain` CLI: stats, recent, search "snowflake", search "Cure53", search "zero-knowledge", show event 1 |
+| `mcp-demo` | Send JSON-RPC 2.0 requests (initialize, tools/list, mci_recall, mci_stats) to `mci-agent mcp-serve` via stdin pipe |
+| `screenshot` | Interactive `screencapture -w` for Hippocampus menu-bar and Recall UI windows; saves to `dist/demo-screenshots/` |
+| `teardown` | Kill processes, archive demo brain to `/tmp`, delete key file |
+| `full` | Run all subcommands in sequence: clean → seed → boot → query → mcp-demo → screenshot → teardown |
+
+### Usage
+
+```bash
+# Full end-to-end demo
+./scripts/demo.sh full
+
+# Individual steps (e.g. iterate on query output)
+./scripts/demo.sh clean
+./scripts/demo.sh seed
+./scripts/demo.sh query
+
+# Just the MCP demo (after seed)
+./scripts/demo.sh mcp-demo
+```
+
+### Security posture
+
+- **Ephemeral key**: generated per-demo at `/tmp/mci-demo-key.hex`, mode 0600. Never exported to shell history.
+- **Synthetic data only**: all seed events use `app_bundle_id = com.mci.demo.seed.*`. No real user content.
+- **Teardown deletes**: demo brain archived to `/tmp` then removed from `~/Library/Application Support/MCI/`.
+- **No network**: entire demo runs locally. No external calls.
