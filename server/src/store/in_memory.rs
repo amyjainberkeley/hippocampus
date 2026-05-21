@@ -1,12 +1,8 @@
-//! Workspace store trait + in-memory implementation.
-//!
-//! The `WorkspaceStore` trait defines read/write operations for briefs and
-//! enrollment. The in-memory implementation (`InMemoryWorkspaceStore`) is for
-//! tests and dev; a SQLite/Postgres-backed production implementation is
-//! DEFERRED to a separate ADR + PR.
+//! In-memory workspace store for tests and dev. NOT for production — no durability.
 
 use std::collections::HashMap;
 use std::sync::Arc;
+
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -14,52 +10,8 @@ use crate::model::{
     BriefEnvelope, CreateBriefRequest, EnrollmentRequest, EnrollmentState, MemberId, VouchToken,
     WorkspaceId,
 };
+use super::{StoreError, WorkspaceStore};
 
-/// Errors from store operations.
-#[derive(Debug, thiserror::Error)]
-pub enum StoreError {
-    #[error("workspace not found: {0:?}")]
-    WorkspaceNotFound(WorkspaceId),
-    #[error("enrollment not found: {0}")]
-    EnrollmentNotFound(Uuid),
-    #[error("invalid state transition: {from:?} -> {to:?}")]
-    InvalidTransition {
-        from: EnrollmentState,
-        to: EnrollmentState,
-    },
-}
-
-/// Workspace store contract. Implementations must be `Send + Sync` for axum handlers.
-#[async_trait::async_trait]
-pub trait WorkspaceStore: Send + Sync {
-    /// Store a new brief envelope. Returns the server-assigned envelope.
-    async fn put_brief(
-        &self,
-        workspace_id: WorkspaceId,
-        req: CreateBriefRequest,
-    ) -> Result<BriefEnvelope, StoreError>;
-
-    /// Retrieve briefs for a workspace, optionally filtered by `since` timestamp.
-    async fn get_briefs(
-        &self,
-        workspace_id: WorkspaceId,
-        since: Option<u64>,
-    ) -> Result<Vec<BriefEnvelope>, StoreError>;
-
-    /// Start an enrollment request.
-    async fn create_enrollment(
-        &self,
-        req: EnrollmentRequest,
-    ) -> Result<EnrollmentRequest, StoreError>;
-
-    /// Apply a vouch to a pending enrollment, transitioning it to Active.
-    async fn apply_vouch(&self, vouch: VouchToken) -> Result<EnrollmentRequest, StoreError>;
-
-    /// List enrolled (active) members for a workspace.
-    async fn list_members(&self, workspace_id: WorkspaceId) -> Result<Vec<MemberId>, StoreError>;
-}
-
-/// In-memory workspace store for tests and dev. NOT for production — no durability.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryWorkspaceStore {
     briefs: Arc<RwLock<HashMap<WorkspaceId, Vec<BriefEnvelope>>>>,
@@ -71,12 +23,6 @@ impl InMemoryWorkspaceStore {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Seed a workspace with initial members (for test setup).
-    pub async fn seed_workspace(&self, workspace_id: WorkspaceId, members: Vec<MemberId>) {
-        self.members.write().await.insert(workspace_id, members);
-        self.briefs.write().await.entry(workspace_id).or_default();
     }
 }
 
@@ -146,7 +92,6 @@ impl WorkspaceStore for InMemoryWorkspaceStore {
 
         enrollment.state = EnrollmentState::Active;
 
-        // Add member to workspace membership.
         self.members
             .write()
             .await
@@ -165,5 +110,15 @@ impl WorkspaceStore for InMemoryWorkspaceStore {
             .get(&workspace_id)
             .cloned()
             .unwrap_or_default())
+    }
+
+    async fn seed_workspace(
+        &self,
+        workspace_id: WorkspaceId,
+        members: Vec<MemberId>,
+    ) -> Result<(), StoreError> {
+        self.members.write().await.insert(workspace_id, members);
+        self.briefs.write().await.entry(workspace_id).or_default();
+        Ok(())
     }
 }

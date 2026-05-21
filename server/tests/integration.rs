@@ -1,10 +1,12 @@
-//! Integration tests for the MCI workspace server skeleton.
+//! Integration tests for the MCI workspace server.
 //!
-//! ADR-0019 §4 invariants are pinned here:
+//! ADR-0019 §4 invariants pinned here:
 //! - No plaintext fields on `BriefEnvelope`.
 //! - No endpoint that decrypts content (NO BACKDOOR KEY).
 //! - Enrollment state machine requires a vouch.
 //! - `since` query filters briefs by timestamp.
+//!
+//! Tests run against BOTH `InMemoryWorkspaceStore` and `SqliteWorkspaceStore`.
 
 use std::sync::Arc;
 
@@ -19,26 +21,83 @@ use mci_server::model::{
     BriefEnvelope, CreateBriefRequest, EnrollmentRequest, EnrollmentState, MemberId, MemberKeyWrap,
     VouchToken, WorkspaceId,
 };
-use mci_server::store::InMemoryWorkspaceStore;
+use mci_server::store::{InMemoryWorkspaceStore, SqliteWorkspaceStore, WorkspaceStore};
 
-fn test_app() -> axum::Router {
-    let store = InMemoryWorkspaceStore::new();
+// ---------------------------------------------------------------------------
+// Store factories
+// ---------------------------------------------------------------------------
+
+fn memory_store() -> Box<dyn WorkspaceStore> {
+    Box::new(InMemoryWorkspaceStore::new())
+}
+
+fn sqlite_store() -> Box<dyn WorkspaceStore> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("test.db");
+    let store = SqliteWorkspaceStore::open(&path).expect("open sqlite");
+    // Leak the tempdir so the file lives for the test's duration.
+    std::mem::forget(dir);
+    Box::new(store)
+}
+
+fn test_app_from(store: Box<dyn WorkspaceStore>) -> axum::Router {
     let state = Arc::new(AppState::new(store));
     router(state)
 }
 
-async fn test_app_with_workspace() -> (axum::Router, WorkspaceId, MemberId) {
-    let store = InMemoryWorkspaceStore::new();
+async fn test_app_with_workspace_from(
+    store: Box<dyn WorkspaceStore>,
+) -> (axum::Router, WorkspaceId, MemberId) {
     let ws_id = WorkspaceId(Uuid::new_v4());
     let member_id = MemberId(Uuid::new_v4());
-    store.seed_workspace(ws_id, vec![member_id]).await;
+    store
+        .seed_workspace(ws_id, vec![member_id])
+        .await
+        .expect("seed");
     let state = Arc::new(AppState::new(store));
     (router(state), ws_id, member_id)
 }
 
-#[tokio::test]
-async fn health_endpoint_returns_200() {
-    let app = test_app();
+// ---------------------------------------------------------------------------
+// Macro to duplicate every test for both store backends
+// ---------------------------------------------------------------------------
+
+macro_rules! dual_store_tests {
+    ($($test_name:ident),* $(,)?) => {
+        mod in_memory_tests {
+            use super::*;
+            $(
+                #[tokio::test]
+                async fn $test_name() {
+                    super::$test_name(memory_store).await;
+                }
+            )*
+        }
+        mod sqlite_tests {
+            use super::*;
+            $(
+                #[tokio::test]
+                async fn $test_name() {
+                    super::$test_name(sqlite_store).await;
+                }
+            )*
+        }
+    };
+}
+
+dual_store_tests!(
+    health_endpoint_returns_200,
+    put_brief_then_get_returns_same_envelope,
+    since_query_filters_briefs_by_ts,
+    enrollment_flow_state_machine,
+);
+
+// ---------------------------------------------------------------------------
+// Parameterized test implementations
+// ---------------------------------------------------------------------------
+
+async fn health_endpoint_returns_200(factory: fn() -> Box<dyn WorkspaceStore>) {
+    let app = test_app_from(factory());
     let req = Request::builder()
         .uri("/healthz")
         .body(Body::empty())
@@ -51,9 +110,8 @@ async fn health_endpoint_returns_200() {
     assert_eq!(&body[..], b"ok");
 }
 
-#[tokio::test]
-async fn put_brief_then_get_returns_same_envelope() {
-    let (app, ws_id, member_id) = test_app_with_workspace().await;
+async fn put_brief_then_get_returns_same_envelope(factory: fn() -> Box<dyn WorkspaceStore>) {
+    let (app, ws_id, member_id) = test_app_with_workspace_from(factory()).await;
 
     let create_req = CreateBriefRequest {
         uploaded_by: member_id,
@@ -84,6 +142,8 @@ async fn put_brief_then_get_returns_same_envelope() {
     assert_eq!(stored.nonce, vec![0x01, 0x02, 0x03]);
     assert_eq!(stored.workspace_id, ws_id);
     assert_eq!(stored.uploaded_by, member_id);
+    assert_eq!(stored.member_key_wraps.len(), 1);
+    assert_eq!(stored.member_key_wraps[0].wrapped_key, vec![0xFF; 32]);
 
     // GET
     let get_req = Request::builder()
@@ -98,13 +158,12 @@ async fn put_brief_then_get_returns_same_envelope() {
     let briefs: Vec<BriefEnvelope> = serde_json::from_slice(&get_body).unwrap();
     assert_eq!(briefs.len(), 1);
     assert_eq!(briefs[0].ciphertext, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    assert_eq!(briefs[0].member_key_wraps.len(), 1);
 }
 
-#[tokio::test]
-async fn since_query_filters_briefs_by_ts() {
-    let (app, ws_id, member_id) = test_app_with_workspace().await;
+async fn since_query_filters_briefs_by_ts(factory: fn() -> Box<dyn WorkspaceStore>) {
+    let (app, ws_id, member_id) = test_app_with_workspace_from(factory()).await;
 
-    // Insert two briefs at different timestamps.
     for ts in [1_000_000u64, 2_000_000] {
         let req = CreateBriefRequest {
             uploaded_by: member_id,
@@ -124,7 +183,6 @@ async fn since_query_filters_briefs_by_ts() {
         assert_eq!(resp.status(), StatusCode::CREATED);
     }
 
-    // GET with since=1_500_000 — should only return the second brief.
     let get_req = Request::builder()
         .uri(format!("/v1/workspaces/{}/briefs?since=1500000", ws_id.0))
         .body(Body::empty())
@@ -137,12 +195,10 @@ async fn since_query_filters_briefs_by_ts() {
     assert_eq!(briefs[0].ts_brief_us, 2_000_000);
 }
 
-#[tokio::test]
-async fn enrollment_flow_state_machine() {
-    let (app, ws_id, member_id) = test_app_with_workspace().await;
+async fn enrollment_flow_state_machine(factory: fn() -> Box<dyn WorkspaceStore>) {
+    let (app, ws_id, member_id) = test_app_with_workspace_from(factory()).await;
     let new_member = MemberId(Uuid::new_v4());
 
-    // Step 1: Request enrollment.
     let enroll_req = EnrollmentRequest {
         id: Uuid::nil(),
         workspace_id: ws_id,
@@ -165,7 +221,6 @@ async fn enrollment_flow_state_machine() {
     assert_eq!(enrollment.state, EnrollmentState::Pending);
     assert_ne!(enrollment.id, Uuid::nil(), "server must assign a real ID");
 
-    // Step 2: Existing member vouches.
     let vouch = VouchToken {
         enrollment_id: enrollment.id,
         voucher_id: member_id,
@@ -186,14 +241,12 @@ async fn enrollment_flow_state_machine() {
     assert_eq!(updated.state, EnrollmentState::Active);
 }
 
-/// ADR-0019 §4 invariant: `BriefEnvelope` has NO plaintext fields.
-/// This test verifies at the serde layer that any attempt to deserialize
-/// a JSON object with a `text` or `summary` or `url` field into a
-/// `BriefEnvelope` does NOT produce a usable plaintext field — those fields
-/// simply don't exist on the type.
+// ---------------------------------------------------------------------------
+// ADR-0019 §4 invariant tests (not store-specific — structural)
+// ---------------------------------------------------------------------------
+
 #[test]
 fn server_rejects_plaintext_brief_field() {
-    // A JSON object that looks like a brief with plaintext fields.
     let plaintext_attempt = serde_json::json!({
         "id": Uuid::new_v4(),
         "workspaceId": Uuid::new_v4(),
@@ -204,20 +257,14 @@ fn server_rejects_plaintext_brief_field() {
         "nonce": [4, 5, 6],
         "aad": [],
         "memberKeyWraps": [],
-        // Plaintext fields that MUST NOT be present on the type:
         "text": "this is plaintext that should not exist",
         "summary": "plaintext summary",
         "url": "https://example.com/secret"
     });
 
-    // Deserialization succeeds (serde ignores unknown fields by default),
-    // but the resulting struct has no .text / .summary / .url fields.
     let envelope: BriefEnvelope =
         serde_json::from_value(plaintext_attempt).expect("deser should succeed");
 
-    // Structural proof: the type's fields are exhaustively listed here.
-    // If anyone adds a plaintext `text: String` field to BriefEnvelope,
-    // this match will fail to compile (missing field).
     let BriefEnvelope {
         id: _,
         workspace_id: _,
@@ -230,19 +277,14 @@ fn server_rejects_plaintext_brief_field() {
         member_key_wraps: _,
     } = &envelope;
 
-    // The ciphertext is opaque bytes, not the plaintext string.
     assert_eq!(ciphertext, &[1u8, 2, 3]);
     assert_eq!(nonce, &[4u8, 5, 6]);
 }
 
-/// ADR-0019 §4 invariant #10: NO BACKDOOR KEY.
-/// There is no endpoint that decrypts content server-side.
-/// This test asserts at the API surface level.
 #[tokio::test]
 async fn server_has_no_backdoor_key() {
-    let app = test_app();
+    let app = test_app_from(memory_store());
 
-    // Exhaustive list of known routes. None of them are "decrypt" endpoints.
     let decrypt_paths = [
         "/v1/decrypt",
         "/v1/admin/decrypt",
@@ -270,10 +312,6 @@ async fn server_has_no_backdoor_key() {
         }
     }
 
-    // Type-level proof: grep the handlers module source for "decrypt" patterns.
-    // The handlers module source is `server/src/handlers.rs` — it contains no
-    // decrypt function, no AEAD primitive, no key-unwrap call. This is verified
-    // by the absence of any `decrypt` symbol in the crate's public API.
     let handler_src = include_str!("../src/handlers.rs");
     assert!(
         !handler_src.contains("decrypt"),
@@ -289,12 +327,129 @@ async fn server_has_no_backdoor_key() {
     );
 
     let model_src = include_str!("../src/model.rs");
-    // No field named "text", "summary", "plaintext", "content" (as a String) on BriefEnvelope.
-    // The ciphertext field is Vec<u8>, which is opaque bytes.
     for forbidden in ["pub text:", "pub summary:", "pub plaintext:", "pub url:"] {
         assert!(
             !model_src.contains(forbidden),
             "model.rs must not have plaintext field: {forbidden}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite-specific tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn sqlite_schema_migration_idempotent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("idempotent.db");
+
+    // Open twice — second open re-runs CREATE TABLE IF NOT EXISTS.
+    let _store1 = SqliteWorkspaceStore::open(&path).expect("first open");
+    let _store2 = SqliteWorkspaceStore::open(&path).expect("second open must succeed");
+}
+
+#[tokio::test]
+async fn sqlite_crash_recovery() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("crash.db");
+
+    let ws_id = WorkspaceId(Uuid::new_v4());
+    let member_id = MemberId(Uuid::new_v4());
+
+    // Write a brief, then drop the store (simulates crash).
+    {
+        let store = SqliteWorkspaceStore::open(&path).expect("open");
+        store.seed_workspace(ws_id, vec![member_id]).await.unwrap();
+        store
+            .put_brief(
+                ws_id,
+                CreateBriefRequest {
+                    uploaded_by: member_id,
+                    ts_brief_us: 42_000,
+                    ciphertext: vec![0xCA, 0xFE],
+                    nonce: vec![0x01],
+                    aad: vec![],
+                    member_key_wraps: vec![MemberKeyWrap {
+                        member_id,
+                        wrapped_key: vec![0xDD; 16],
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+    }
+    // Store dropped — connection closed.
+
+    // Re-open and verify data survived.
+    let store2 = SqliteWorkspaceStore::open(&path).expect("reopen after crash");
+    let briefs = store2.get_briefs(ws_id, None).await.unwrap();
+    assert_eq!(briefs.len(), 1);
+    assert_eq!(briefs[0].ciphertext, vec![0xCA, 0xFE]);
+    assert_eq!(briefs[0].ts_brief_us, 42_000);
+    assert_eq!(briefs[0].member_key_wraps.len(), 1);
+    assert_eq!(briefs[0].member_key_wraps[0].wrapped_key, vec![0xDD; 16]);
+
+    let members = store2.list_members(ws_id).await.unwrap();
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0], member_id);
+}
+
+#[tokio::test]
+async fn sqlite_schema_all_content_columns_are_blob() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("schema_check.db");
+    let _store = SqliteWorkspaceStore::open(&path).expect("open");
+
+    // Directly verify the schema via sqlite pragma.
+    let conn = rusqlite::Connection::open(&path).expect("raw open");
+
+    // briefs table: ciphertext, nonce, aad must be BLOB.
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(briefs)")
+        .expect("pragma");
+    let cols: Vec<(String, String)> = stmt
+        .query_map([], |row| {
+            let name: String = row.get(1)?;
+            let typ: String = row.get(2)?;
+            Ok((name, typ))
+        })
+        .expect("query")
+        .filter_map(Result::ok)
+        .collect();
+
+    for blob_col in ["envelope_id", "workspace_id", "uploaded_by", "ciphertext", "nonce", "aad"] {
+        let col = cols.iter().find(|(n, _)| n == blob_col);
+        assert!(
+            col.is_some(),
+            "briefs table must have column {blob_col}"
+        );
+        assert_eq!(
+            col.unwrap().1, "BLOB",
+            "briefs.{blob_col} must be BLOB, got {}",
+            col.unwrap().1
+        );
+    }
+
+    // enrollments table: ephemeral_pubkey must be BLOB, state must be TEXT.
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(enrollments)")
+        .expect("pragma");
+    let ecols: Vec<(String, String)> = stmt
+        .query_map([], |row| {
+            let name: String = row.get(1)?;
+            let typ: String = row.get(2)?;
+            Ok((name, typ))
+        })
+        .expect("query")
+        .filter_map(Result::ok)
+        .collect();
+
+    let epk = ecols.iter().find(|(n, _)| n == "ephemeral_pubkey");
+    assert!(epk.is_some());
+    assert_eq!(epk.unwrap().1, "BLOB");
+
+    let state = ecols.iter().find(|(n, _)| n == "state");
+    assert!(state.is_some());
+    assert_eq!(state.unwrap().1, "TEXT");
 }
