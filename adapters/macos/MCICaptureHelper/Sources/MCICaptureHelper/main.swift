@@ -382,12 +382,50 @@ if captureOptions.captureEnabled {
     // `OCREvent` in the helper (ADR-0016 §4.2 invariant).
     let ocrEngine: OCREngine = VisionOCRRunner()
     let ocrWorker = VisionOCRWorker(engine: ocrEngine)
+
+    // P3.6.5: encrypted keyframe blob writer. Reads the DbKey from
+    // MCI_DB_KEY_HEX env var (set by the parent process or demo
+    // recipe). When absent, blobs are not written — OCREvents carry
+    // keyframeHash = [0; 32]. CSO invariant: the DbKey is the SAME
+    // key that opens the SQLCipher brain store (ADR-0008 §5 — no
+    // new key material, no new key custody surface).
+    let blobKeyMaterial: [UInt8]
+    let blobWriter: KeyframeBlobWriter?
+    if let dbKeyHex = ProcessInfo.processInfo.environment["MCI_DB_KEY_HEX"],
+       let keyBytes = hexStringToBytes(dbKeyHex),
+       keyBytes.count == 32
+    {
+        blobKeyMaterial = keyBytes
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let blobDir = appSupport
+            .appendingPathComponent("MCI")
+            .appendingPathComponent("blobs")
+        try? FileManager.default.createDirectory(
+            at: blobDir, withIntermediateDirectories: true
+        )
+        let writer = KeyframeBlobWriter(blobDir: blobDir)
+        await writer.start()
+        blobWriter = writer
+    } else {
+        blobKeyMaterial = []
+        blobWriter = nil
+        FileHandle.standardError.write(
+            ("mci-capture-helper: MCI_DB_KEY_HEX not set or invalid "
+             + "— keyframe blobs will not be written\n")
+                .data(using: .utf8) ?? Data()
+        )
+    }
+
     let ocrEmitter: any OCRPostAllowEmitter = CascadeTwiceOCREmitter(
         worker: ocrWorker,
         cascade: cascade,
         sink: sharedSink,
         sequence: sharedSequence,
-        counters: loop.counters
+        counters: loop.counters,
+        blobWriter: blobWriter,
+        blobKeyMaterial: blobKeyMaterial
     )
     // Start OCR worker consumer loop BEFORE the SCStream session so
     // submissions from the first `.allow` frame drain immediately.
