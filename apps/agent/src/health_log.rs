@@ -11,10 +11,10 @@
 //!
 //! Per the CRS telemetry-gap memo (2026-05-19 + iter-7 refresh), the
 //! sink writes to `~/Library/Logs/MCI/helper-health.jsonl` by default.
-//! Rotation is best-effort: the sink truncates at a configurable
-//! byte ceiling (default 10 MiB) by deleting + recreating the file —
-//! we lose history, not user-visible content, and the live measurement
-//! protocol cares about the last workday only.
+//! Rotation: size-based at 10 MiB, atomic rename chain retaining 5
+//! archived copies (`.1` through `.5`). Oldest archive (`.5`) is
+//! discarded on each rotation. `fsync` on the active file before
+//! rename ensures the last batch of records is durable.
 //!
 //! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
 //!
@@ -23,9 +23,8 @@
 //!   `last_window_title`) requires a fresh CSO ADR amendment.
 //! - The `device_id` field carries the opaque per-device id; never
 //!   the user's name, hostname, or any other identifier.
-//! - Rotation deletes-and-recreates rather than ranging into the file
-//!   — keeps the surface tiny + means the file mode (0600) gets
-//!   re-applied on every rotation.
+//! - Rotated archives inherit 0600 from the active file. Fresh
+//!   active file is re-created at 0600.
 //!
 //! — CSO, 2026-05-19
 
@@ -135,6 +134,9 @@ fn escape_json_string(s: &str) -> String {
     out
 }
 
+/// Maximum number of rotated archives to retain (`.1` … `.5`).
+const MAX_ROTATIONS: u32 = 5;
+
 /// Configuration for the health-log sink.
 #[derive(Debug, Clone)]
 pub struct HealthLogConfig {
@@ -142,8 +144,8 @@ pub struct HealthLogConfig {
     /// `~/Library/Logs/MCI/helper-health.jsonl`.
     pub path: PathBuf,
     /// Rotation ceiling in bytes. When the file exceeds this size,
-    /// the sink truncates by recreating it (lose history, never user
-    /// content). Default 10 MiB.
+    /// the active file is fsync'd and renamed into the archive chain.
+    /// Default 10 MiB.
     pub max_bytes: u64,
 }
 
@@ -178,8 +180,8 @@ impl HealthLog {
     }
 
     /// Append one record. Creates the parent dir + the file at mode
-    /// 0600 on first call. Rotates by truncate-and-recreate if the
-    /// file is over `cfg.max_bytes` after the write.
+    /// 0600 on first call. Rotates via atomic rename chain if the
+    /// file exceeds `cfg.max_bytes` after the write.
     pub async fn record(&self, rec: &HealthLogRecord) -> Result<(), HealthLogError> {
         if let Some(parent) = self.cfg.path.parent() {
             fs::create_dir_all(parent).await?;
@@ -190,12 +192,9 @@ impl HealthLog {
         file.write_all(line.as_bytes()).await?;
         file.write_all(b"\n").await?;
         file.flush().await?;
+        file.sync_all().await?;
         drop(file);
 
-        // Rotate if the file is over the ceiling. The check + truncate
-        // is racy under concurrent writers; the agent has one writer
-        // by design (see struct docs). A torn rotation loses some
-        // recent records but no user content; acceptable.
         let metadata = fs::metadata(&self.cfg.path).await?;
         if metadata.len() > self.cfg.max_bytes {
             self.rotate().await?;
@@ -203,14 +202,37 @@ impl HealthLog {
         Ok(())
     }
 
-    /// Truncate-and-recreate. Drops history. Re-applies 0600 mode.
+    /// Atomic rename chain: `.5` dropped, `.4`→`.5`, … `.1`→`.2`,
+    /// active→`.1`. Fresh empty active file re-created at 0600.
     async fn rotate(&self) -> Result<(), HealthLogError> {
-        fs::remove_file(&self.cfg.path).await?;
-        // Create the empty file with 0600 so the very next record's
-        // open-append doesn't fall back to umask defaults.
-        let _ = open_append_0600(&self.cfg.path).await?;
+        let base = &self.cfg.path;
+
+        // Drop the oldest archive if it exists.
+        let oldest = rotation_path(base, MAX_ROTATIONS);
+        let _ = fs::remove_file(&oldest).await;
+
+        // Shift archives down: .4→.5, .3→.4, .2→.3, .1→.2
+        for i in (1..MAX_ROTATIONS).rev() {
+            let src = rotation_path(base, i);
+            let dst = rotation_path(base, i + 1);
+            let _ = fs::rename(&src, &dst).await;
+        }
+
+        // Active → .1
+        let archive_1 = rotation_path(base, 1);
+        fs::rename(base, &archive_1).await?;
+
+        // Fresh active file at 0600.
+        let _ = open_append_0600(base).await?;
         Ok(())
     }
+}
+
+/// Build the path for the Nth rotated archive (e.g. `foo.jsonl.3`).
+fn rotation_path(base: &std::path::Path, n: u32) -> PathBuf {
+    let mut s = base.as_os_str().to_os_string();
+    s.push(format!(".{n}"));
+    PathBuf::from(s)
 }
 
 async fn open_append_0600(path: &std::path::Path) -> std::io::Result<tokio::fs::File> {
@@ -320,44 +342,129 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_rotates_when_over_ceiling() {
+    async fn record_rotates_into_archive_chain() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("mci/helper-health.jsonl");
         let log = HealthLog::new(HealthLogConfig {
             path: path.clone(),
-            // Tiny ceiling — one record blows past it instantly.
             max_bytes: 1,
         });
-        // First record creates the file + writes + rotates (the file
-        // gets truncated immediately after this single line).
+        // Each record exceeds 1 byte → rotation after every write.
+        // After 2 records: active=empty, .1=1line, .2=1line.
         log.record(&sample_record()).await.unwrap();
-        // Second record: file should be (re-created or truncated) +
-        // contain exactly one line after this call.
         log.record(&sample_record()).await.unwrap();
 
-        let body = tokio::fs::read_to_string(&path).await.unwrap();
-        // After rotation, exactly the most-recent line remains.
-        let line_count = body.lines().count();
-        assert!(
-            line_count <= 1,
-            "after rotation file should have ≤1 line, got {line_count}"
+        // .1 and .2 archives should exist.
+        let archive_1 = rotation_path(&path, 1);
+        assert!(archive_1.exists(), ".1 archive must exist after rotation");
+        let arch_body = tokio::fs::read_to_string(&archive_1).await.unwrap();
+        assert_eq!(
+            arch_body.lines().count(),
+            1,
+            ".1 archive should have 1 line"
         );
 
-        // Mode is still 0600 after rotation.
+        let archive_2 = rotation_path(&path, 2);
+        assert!(
+            archive_2.exists(),
+            ".2 archive must exist after 2 rotations"
+        );
+
+        // Active file is empty (last rotation moved content to .1).
+        let body = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(body.lines().count(), 0, "active file empty after rotation");
+
+        // Mode is still 0600 on active file.
         let meta = tokio::fs::metadata(&path).await.unwrap();
         let mode = meta.permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[tokio::test]
+    async fn rotation_chain_retains_up_to_5_archives() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("mci/helper-health.jsonl");
+        let log = HealthLog::new(HealthLogConfig {
+            path: path.clone(),
+            max_bytes: 1,
+        });
+
+        // 8 records → triggers rotation after each → at most 5 archives.
+        for _ in 0..8 {
+            log.record(&sample_record()).await.unwrap();
+        }
+
+        for i in 1..=5 {
+            let archive = rotation_path(&path, i);
+            assert!(archive.exists(), ".{i} archive must exist");
+        }
+        let archive_6 = rotation_path(&path, 6);
+        assert!(!archive_6.exists(), ".6 must NOT exist (max 5 retained)");
+    }
+
+    #[tokio::test]
+    async fn concurrent_writers_no_panic() {
+        use std::sync::Arc;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("mci/concurrent.jsonl");
+        let log = Arc::new(HealthLog::new(HealthLogConfig {
+            path: path.clone(),
+            max_bytes: 10 * 1024 * 1024,
+        }));
+
+        let mut handles = Vec::new();
+        for t in 0..10u64 {
+            let log = Arc::clone(&log);
+            handles.push(tokio::spawn(async move {
+                for i in 0..20u64 {
+                    let rec = HealthLogRecord {
+                        wall_ts: format!("2026-05-21T00:00:{:02}Z", (t * 20 + i) % 60),
+                        device_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"[..32].to_string(),
+                        uptime_ms: t * 1000 + i,
+                        frames_delivered: i,
+                        frames_suppressed: 0,
+                        frames_redacted_by_failsafe: 0,
+                        cascade_forced_count: 0,
+                        frames_dropped_backpressure: 0,
+                        frames_dropped_late_ack: 0,
+                    };
+                    log.record(&rec).await.unwrap();
+                }
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // All 200 records should be present (no rotation at 10 MiB ceiling).
+        let body = tokio::fs::read_to_string(&path).await.unwrap();
+        let count = body.lines().count();
+        assert_eq!(
+            count, 200,
+            "expected 200 lines from 10 concurrent writers, got {count}"
+        );
     }
 
     #[test]
     fn default_for_user_uses_library_logs_path() {
         let cfg = HealthLogConfig::default_for_user();
         let s = cfg.path.display().to_string();
-        // Either under $HOME or the /tmp fallback — both end with the
-        // canonical relative path.
         assert!(
             s.ends_with("Library/Logs/MCI/helper-health.jsonl"),
             "got {s}"
+        );
+    }
+
+    #[test]
+    fn rotation_path_format() {
+        let base = PathBuf::from("/tmp/test.jsonl");
+        assert_eq!(
+            rotation_path(&base, 1).display().to_string(),
+            "/tmp/test.jsonl.1"
+        );
+        assert_eq!(
+            rotation_path(&base, 5).display().to_string(),
+            "/tmp/test.jsonl.5"
         );
     }
 }

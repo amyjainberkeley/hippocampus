@@ -199,6 +199,8 @@ fn print_usage() {
 #[allow(clippy::too_many_lines)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    mci_agent::panic_hook::install();
+
     let raw_argv: Vec<String> = std::env::args().collect();
     let args = parse_args(&raw_argv);
 

@@ -26,6 +26,7 @@ pub mod health_pump;
 pub mod health_summary;
 pub mod idle_batch;
 pub mod mcp;
+pub mod panic_hook;
 pub mod runner;
 pub mod supervisor;
 pub mod wall_clock;
