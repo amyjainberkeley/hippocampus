@@ -67,6 +67,42 @@ require_cmd() {
 require_cmd hdiutil
 require_cmd codesign
 
+# --- Detect Developer ID signing identity ---
+
+if [[ -z "${DEVELOPER_ID:-}" ]]; then
+    DEVELOPER_ID=$(security find-identity -v -p codesigning | \
+        grep "Developer ID Application" | \
+        head -1 | \
+        sed 's/.*"\(.*\)"/\1/' || true)
+fi
+
+if [[ -n "$DEVELOPER_ID" ]]; then
+    echo "Developer ID: $DEVELOPER_ID"
+    SIGNING_MODE="developer-id"
+else
+    echo "No Developer ID found — falling back to ad-hoc signing"
+    SIGNING_MODE="ad-hoc"
+fi
+
+# --- Detect notarytool credentials ---
+
+NOTARIZE=0
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    if xcrun notarytool history --keychain-profile "notarytool-profile" \
+        &>/dev/null; then
+        NOTARIZE=1
+        echo "Notarization: enabled (keychain profile found)"
+    elif [[ -n "${NOTARYTOOL_APPLE_ID:-}" && -n "${NOTARYTOOL_TEAM_ID:-}" && \
+            -n "${NOTARYTOOL_PASSWORD:-}" ]]; then
+        NOTARIZE=1
+        echo "Notarization: enabled (env credentials)"
+    else
+        echo "WARNING: Notarization skipped — no keychain profile 'notarytool-profile'"
+        echo "         and no NOTARYTOOL_APPLE_ID/TEAM_ID/PASSWORD env vars found."
+        echo "  Setup: xcrun notarytool store-credentials notarytool-profile"
+    fi
+fi
+
 # --- Extract version from Info.plist ---
 
 INFO_PLIST="$REPO_ROOT/apps/hippocampus/Resources/Info.plist"
@@ -108,7 +144,52 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
-# --- Step 2: Prepare DMG staging directory ---
+# --- Step 2: Codesign (Developer ID or ad-hoc) ---
+
+ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements"
+
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    echo "--- Codesigning with Developer ID (hardened runtime) ---"
+
+    # Sign embedded binaries first (inside-out signing order)
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$APP_PATH/Contents/MacOS/MCICaptureHelper"
+
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$APP_PATH/Contents/MacOS/mci-agent"
+
+    # Sign embedded frameworks (Sparkle ships pre-signed but outer sig must cover it)
+    if [[ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]]; then
+        codesign --force --options=runtime --timestamp \
+            --sign "$DEVELOPER_ID" \
+            "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+    fi
+
+    # Sign main executable
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$APP_PATH/Contents/MacOS/Hippocampus"
+
+    # Sign top-level app bundle (covers everything)
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$APP_PATH"
+
+    echo "Verifying signature..."
+    codesign --verify --deep --strict "$APP_PATH"
+    echo "  Signature valid."
+else
+    echo "--- Ad-hoc codesigning (dev iteration) ---"
+    codesign --force --deep --sign - "$APP_PATH"
+fi
+
+# --- Step 3: Prepare DMG staging directory ---
 
 DMG_NAME="Hippocampus-${VERSION}"
 DMG_STAGING=$(mktemp -d -t hippocampus-dmg)
@@ -146,7 +227,7 @@ fi
 echo "  Hippocampus.app -> staging/"
 echo "  Applications symlink -> staging/"
 
-# --- Step 3: Create temporary read-write DMG ---
+# --- Step 4: Create temporary read-write DMG ---
 
 echo ""
 echo "--- Creating DMG ---"
@@ -169,7 +250,7 @@ hdiutil create \
     -size 200m \
     "$TEMP_DMG"
 
-# --- Step 4: Apply window layout via AppleScript ---
+# --- Step 5: Apply window layout via AppleScript ---
 
 APPLESCRIPT="$INSTALLER_ASSETS/dmg-layout.applescript"
 if [[ -f "$APPLESCRIPT" ]] && [[ -f "$BACKGROUND_PNG" ]]; then
@@ -197,7 +278,7 @@ else
     echo "Skipping DMG window layout (no AppleScript or background image)"
 fi
 
-# --- Step 5: Convert to compressed read-only DMG ---
+# --- Step 6: Convert to compressed read-only DMG ---
 
 echo ""
 echo "--- Compressing final DMG ---"
@@ -210,7 +291,36 @@ hdiutil convert \
 
 rm -f "$TEMP_DMG"
 
-# --- Step 6: Write SHA-256 sidecar ---
+# --- Step 7: Notarize + staple (Developer ID only) ---
+
+if [[ "$NOTARIZE" -eq 1 ]]; then
+    echo ""
+    echo "--- Submitting DMG for notarization ---"
+
+    NOTARY_ARGS=()
+    if xcrun notarytool history --keychain-profile "notarytool-profile" \
+        &>/dev/null; then
+        NOTARY_ARGS+=(--keychain-profile "notarytool-profile")
+    else
+        NOTARY_ARGS+=(--apple-id "$NOTARYTOOL_APPLE_ID")
+        NOTARY_ARGS+=(--team-id "$NOTARYTOOL_TEAM_ID")
+        NOTARY_ARGS+=(--password "$NOTARYTOOL_PASSWORD")
+    fi
+
+    if xcrun notarytool submit "$FINAL_DMG" "${NOTARY_ARGS[@]}" --wait; then
+        echo ""
+        echo "--- Stapling notarization ticket ---"
+        xcrun stapler staple "$FINAL_DMG"
+        echo "  DMG notarized and stapled."
+    else
+        echo ""
+        echo "ERROR: Notarization failed. DMG is signed but NOT notarized."
+        echo "  Check: xcrun notarytool log <submission-id> ${NOTARY_ARGS[*]}"
+        exit 1
+    fi
+fi
+
+# --- Step 8: Write SHA-256 sidecar ---
 
 echo ""
 echo "--- Computing SHA-256 ---"
@@ -227,7 +337,17 @@ echo "=== Done ==="
 echo "  DMG:    $FINAL_DMG ($DMG_SIZE)"
 echo "  SHA256: ${FINAL_DMG}.sha256"
 echo "  Hash:   $SHASUM"
-echo ""
-echo "NOTE: This DMG is AD-HOC signed (unsigned for distribution)."
-echo "      Gatekeeper will warn on first launch. Users: right-click -> Open."
-echo "      Notarization requires an Apple Developer ID (follow-on work)."
+echo "  Signed: $SIGNING_MODE"
+if [[ "$NOTARIZE" -eq 1 ]]; then
+    echo "  Notarized: yes (stapled)"
+    echo ""
+    echo "Verify: spctl --assess --verbose=4 --type open --context context:primary-signature $FINAL_DMG"
+elif [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    echo "  Notarized: no (credentials not configured)"
+    echo ""
+    echo "Verify app: spctl --assess --verbose $APP_PATH"
+else
+    echo ""
+    echo "NOTE: Ad-hoc signed (not notarized). Gatekeeper will warn on first launch."
+    echo "      Users: right-click -> Open."
+fi

@@ -1,0 +1,137 @@
+name: Release — signed DMG + notarization
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build, sign, notarize, release
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-release-${{ runner.os }}-
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/hippocampus/.build
+            adapters/macos/MCICaptureHelper/.build
+          key: swift-release-${{ runner.os }}-${{ hashFiles('apps/hippocampus/Package.resolved', 'adapters/macos/MCICaptureHelper/Package.resolved') }}
+          restore-keys: swift-release-${{ runner.os }}-
+
+      - name: Build all binaries
+        run: |
+          swift build -c release --package-path apps/hippocampus
+          swift build -c release --package-path adapters/macos/MCICaptureHelper
+          cargo build --workspace --release
+
+      - name: Import Developer ID certificate
+        if: env.APPLE_CERTIFICATE_P12 != ''
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 24)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+              -k "$KEYCHAIN_PATH" \
+              -P "$APPLE_CERTIFICATE_PASSWORD" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/security
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+              -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Store notarytool credentials
+        if: env.NOTARYTOOL_APPLE_ID != ''
+        env:
+          NOTARYTOOL_APPLE_ID: ${{ secrets.NOTARYTOOL_APPLE_ID }}
+          NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
+          NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials notarytool-profile \
+              --apple-id "$NOTARYTOOL_APPLE_ID" \
+              --team-id "$NOTARYTOOL_TEAM_ID" \
+              --password "$NOTARYTOOL_PASSWORD"
+
+      - name: Detect Developer ID
+        id: detect-identity
+        run: |
+          DEVID=$(security find-identity -v -p codesigning | \
+              grep "Developer ID Application" | \
+              head -1 | \
+              sed 's/.*"\(.*\)"/\1/' || true)
+          echo "developer_id=$DEVID" >> "$GITHUB_OUTPUT"
+          if [[ -n "$DEVID" ]]; then
+            echo "Found Developer ID: $DEVID"
+          else
+            echo "No Developer ID — DMG will be ad-hoc signed"
+          fi
+
+      - name: Build DMG
+        env:
+          DEVELOPER_ID: ${{ steps.detect-identity.outputs.developer_id }}
+        run: scripts/build-installer.sh --skip-build
+
+      - name: Verify DMG
+        run: |
+          DMG=$(ls dist/Hippocampus-*.dmg | head -1)
+          cd dist && shasum -a 256 -c "$(basename "$DMG").sha256" && cd ..
+
+          MOUNT=$(hdiutil attach "$DMG" -nobrowse | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
+          MOUNT=$(echo "$MOUNT" | xargs)
+          echo "--- DMG contents ---"
+          ls -la "$MOUNT/"
+          test -d "$MOUNT/Hippocampus.app"
+          test -L "$MOUNT/Applications"
+
+          if [[ -n "${{ steps.detect-identity.outputs.developer_id }}" ]]; then
+            echo "--- Signature check ---"
+            codesign --verify --deep --strict "$MOUNT/Hippocampus.app"
+            echo "Signature valid."
+          fi
+
+          hdiutil detach "$MOUNT" -quiet
+
+      - name: Extract version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Hippocampus ${{ steps.version.outputs.tag }}
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/Hippocampus-*.dmg
+            dist/Hippocampus-*.dmg.sha256
