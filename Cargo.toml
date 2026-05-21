@@ -36,6 +36,11 @@ members = [
     # `SqlCipherBrainStore` + `HybridRetriever`. See
     # `adapters/macos/mci-brain-ffi/Cargo.toml`.
     "adapters/macos/mci-brain-ffi",
+    # Windows adapter: Windows.Graphics.Capture + UIA + Media Foundation.
+    # Deps + lib body gated by `cfg(target_os = "windows")` so
+    # `cargo build --workspace` on macOS/Linux compiles it as an empty
+    # library. Phase 8 scaffold — all methods stubbed.
+    "adapters/windows",
     "server",
     "tools/perf-soak",
 ]
