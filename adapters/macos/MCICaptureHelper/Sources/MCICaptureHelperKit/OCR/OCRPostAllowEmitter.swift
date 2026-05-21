@@ -30,11 +30,15 @@
 // ingestor (`Routed::OCREvent` vs `Routed::Tombstone` enum dispatch
 // in `core/src/ipc/connection.rs`).
 //
-// Keyframe blob writes are vacuous in P3.6: `keyframeHash = [0u8; 32]`
-// signals "no blob yet"; the blob writer lands at P3.6.5.
+// P3.6.5: keyframe blob writes are now wired. When a
+// `KeyframeBlobWriter` is present, the emitter encodes the captured
+// CVPixelBuffer as a downscaled encrypted JPEG, puts the sha256 in
+// the OCREvent.keyframeHash field, and fire-and-forgets the file
+// write via the blob writer's drop-oldest queue.
 
 import CoreGraphics
 import CoreVideo
+import CryptoKit
 import Foundation
 
 /// Protocol indirection so headless tests can substitute a stub
@@ -72,19 +76,31 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     private let sink: any FrameSink
     private let sequence: FrameSequence
     private let counters: HelperHealthCounters
+    /// P3.6.5: encrypted keyframe blob writer. `nil` when no DbKey
+    /// is available (MCI_DB_KEY_HEX not set) — OCREvents carry
+    /// `keyframeHash = [0; 32]` ("no blob"). CSO invariant: blob
+    /// writes happen ONLY on .allow paths (ADR-0016 §4.8).
+    private let blobWriter: KeyframeBlobWriter?
+    /// P3.6.5: 32-byte DbKey material for per-blob HKDF key derivation.
+    /// Read from `MCI_DB_KEY_HEX` at helper launch, never logged.
+    private let blobKeyMaterial: [UInt8]
 
     public init(
         worker: VisionOCRWorker,
         cascade: SuppressionCascade,
         sink: any FrameSink,
         sequence: FrameSequence,
-        counters: HelperHealthCounters
+        counters: HelperHealthCounters,
+        blobWriter: KeyframeBlobWriter? = nil,
+        blobKeyMaterial: [UInt8] = []
     ) {
         self.worker = worker
         self.cascade = cascade
         self.sink = sink
         self.sequence = sequence
         self.counters = counters
+        self.blobWriter = blobWriter
+        self.blobKeyMaterial = blobKeyMaterial
     }
 
     public func processAfterAllow(
@@ -96,6 +112,13 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         let sinkSnapshot = sink
         let sequenceSnapshot = sequence
         let countersSnapshot = counters
+        let blobWriterSnapshot = blobWriter
+        let blobKeySnapshot = blobKeyMaterial
+        // P3.6.5: capture the pixel buffer reference for the blob
+        // writer. OCREngineInput is @unchecked Sendable; the pixel
+        // buffer stays alive until the job completes (held by the
+        // worker's Job struct + this captured reference).
+        let inputSnapshot = input
         await worker.submit(input: input) { result in
             // Completion is `@Sendable`; spawn a Task to drive the
             // §6 re-cascade + wire emission in an async context.
@@ -107,7 +130,10 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                     cascade: cascadeSnapshot,
                     sink: sinkSnapshot,
                     sequence: sequenceSnapshot,
-                    counters: countersSnapshot
+                    counters: countersSnapshot,
+                    pixelBuffer: inputSnapshot.pixelBuffer,
+                    blobWriter: blobWriterSnapshot,
+                    blobKeyMaterial: blobKeySnapshot
                 )
             }
         }
@@ -134,7 +160,10 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         cascade: SuppressionCascade,
         sink: any FrameSink,
         sequence: FrameSequence,
-        counters: HelperHealthCounters
+        counters: HelperHealthCounters,
+        pixelBuffer: CVPixelBuffer? = nil,
+        blobWriter: KeyframeBlobWriter? = nil,
+        blobKeyMaterial: [UInt8] = []
     ) async {
         let text = result.recognizedLines.map(\.text).joined(separator: "\n")
         let decision = cascade.decideOcr(text: text, context: context)
@@ -142,7 +171,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         case .suppress(let reason):
             // §6 fired — never emit OCREvent on this path. Tombstone
             // carries the reason (.ocrTimeSecret); no OCR text bytes
-            // reach the wire.
+            // reach the wire. NO blob written (ADR-0016 §4.8).
             await emitTombstone(
                 tsUs: tsUs,
                 context: context,
@@ -155,6 +184,26 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         case .allow:
             // Both cascades cleared — emit OCREvent, subject to the
             // 64 KB cap. Over-cap fails closed per ADR-0013 §7.
+
+            // P3.6.5: encode + encrypt the keyframe blob. Best-effort;
+            // failure → keyframeHash = [0; 32] (graceful degradation).
+            // The blob is written ONLY on .allow paths (ADR-0016 §4.8).
+            var keyframeHash = [UInt8](repeating: 0, count: 32)
+            if let pb = pixelBuffer,
+               let bw = blobWriter,
+               !blobKeyMaterial.isEmpty
+            {
+                if let blob = KeyframeBlobEncoder.encodeAndEncrypt(
+                    pixelBuffer: pb,
+                    blobKeyMaterial: blobKeyMaterial
+                ) {
+                    keyframeHash = blob.sha256
+                    // Fire-and-forget: queue the file write. Drop-oldest
+                    // protects against disk I/O backpressure.
+                    await bw.queueWrite(sha256: blob.sha256, ciphertext: blob.ciphertext)
+                }
+            }
+
             let seq = await sequence.allocate()
             let evt = OCREvent(
                 seq: seq,
@@ -162,7 +211,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 appBundleId: context.appBundleId ?? "",
                 windowTitle: context.windowTitle ?? "",
                 url: context.url ?? "",
-                ocrText: text
+                ocrText: text,
+                keyframeHash: keyframeHash
             )
             switch encodeOCREvent(seq: seq, event: evt) {
             case .success(let bytes):
