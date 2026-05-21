@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod brain_cli;
 pub mod brain_ingest;
 pub mod device_id;
 pub mod health_log;
