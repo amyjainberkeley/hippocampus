@@ -66,6 +66,10 @@ mod sqlcipher_brain_store;
 
 pub use sqlcipher_brain_store::SqlCipherBrainStore;
 
+pub mod hybrid_retriever;
+
+pub use hybrid_retriever::{FusionWeights, HybridRetriever, RetrievalShape};
+
 // ---------------------------------------------------------------------------
 // Newtype ids — keep `events` / `chunks` PKs out of arithmetic with raw u64
 // ---------------------------------------------------------------------------
