@@ -53,6 +53,8 @@ use std::sync::Arc;
 use mci_brain::{BrainStore, EmbedError, Embedder, Event, EventId, StoreError};
 use mci_core::ipc::Message;
 
+use crate::page_content::PageContentCache;
+
 /// Outcome of a single `ingest_ocr_event` call.
 #[derive(Debug, Clone, PartialEq)]
 pub enum IngestOutcome {
@@ -183,23 +185,74 @@ impl BrainIngestor for NoopBrainIngestor {
 pub struct BrainPump {
     store: Arc<dyn BrainStore>,
     embedder: Option<Arc<dyn Embedder>>,
+    page_cache: Option<PageContentCache>,
     counter: AtomicU64,
 }
+
+/// Separator injected between extension-sourced page text and the
+/// pixel-OCR text when the agent merges both signals into one brain
+/// event. The label lets downstream consumers (recall UI, agent API)
+/// distinguish the two sources.
+const VISIBLE_OCR_SEPARATOR: &str = "\n\n[VISIBLE-OCR]\n";
 
 impl BrainPump {
     /// Construct a brain pump.
     ///
     /// `embedder = None` is acceptable for demo / development builds
     /// where the bundled `arctic-embed-s.mlpackage` isn't shipped yet.
-    /// Document this in the agent startup log (the binary's `main`
-    /// emits the warning; this module does not — keeps `mci-brain`
-    /// out of `tracing` for OS-purity).
+    /// `page_cache = None` disables OCR/PageContent merge (pre-extension
+    /// builds; the OCR text is stored as-is).
     #[must_use]
     pub fn new(store: Arc<dyn BrainStore>, embedder: Option<Arc<dyn Embedder>>) -> Self {
         Self {
             store,
             embedder,
+            page_cache: None,
             counter: AtomicU64::new(0),
+        }
+    }
+
+    /// Construct a brain pump with page-content merge enabled.
+    #[must_use]
+    pub fn with_page_cache(
+        store: Arc<dyn BrainStore>,
+        embedder: Option<Arc<dyn Embedder>>,
+        page_cache: PageContentCache,
+    ) -> Self {
+        Self {
+            store,
+            embedder,
+            page_cache: Some(page_cache),
+            counter: AtomicU64::new(0),
+        }
+    }
+}
+
+impl BrainPump {
+    /// If a cached extension page-content exists for `url` (within the
+    /// 5 s TTL), merge: extension text (preferred) + separator +
+    /// pixel-OCR text (secondary). Otherwise return OCR text unchanged.
+    ///
+    /// Both sources are already §6-secret-filtered independently
+    /// (OCR by helper cascade-twice, extension by native-host filter).
+    fn maybe_merge_page_content(&self, url: Option<&str>, ocr_text: &str) -> String {
+        let Some(cache) = &self.page_cache else {
+            return ocr_text.to_owned();
+        };
+        let Some(url) = url else {
+            return ocr_text.to_owned();
+        };
+        if url.is_empty() {
+            return ocr_text.to_owned();
+        }
+        match cache.get(url) {
+            Some(cached) if !cached.text.is_empty() => {
+                let mut merged = cached.text;
+                merged.push_str(VISIBLE_OCR_SEPARATOR);
+                merged.push_str(ocr_text);
+                merged
+            }
+            _ => ocr_text.to_owned(),
         }
     }
 }
@@ -225,7 +278,8 @@ impl BrainIngestor for BrainPump {
                 } else {
                     Some(hex_lower(keyframe_hash))
                 };
-                (ts_us, app, title, u, ocr_text.clone(), kb)
+                let merged = self.maybe_merge_page_content(u.as_deref(), ocr_text);
+                (ts_us, app, title, u, merged, kb)
             }
             Message::PageContentEvent {
                 seq: _,
@@ -440,6 +494,96 @@ mod tests {
         let n = NoopBrainIngestor::new();
         let _ = n.ingest_ocr_event(&make_page_content_event(1, "hi")).unwrap();
         assert_eq!(n.events_ingested_count(), 1);
+    }
+
+    // -----------------------------------------------------------
+    // OCR / PageContent merge tests (wire 0x06)
+    // -----------------------------------------------------------
+
+    use crate::page_content::PageContentCache;
+
+    #[test]
+    fn merge_prefers_extension_when_cached() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let cache = PageContentCache::new();
+        cache.insert(
+            "https://example.com/login".into(),
+            "Full DOM text from extension".into(),
+            "Login Page".into(),
+            "chrome".into(),
+        );
+        let pump = BrainPump::with_page_cache(store.clone(), None, cache);
+        let out = pump
+            .ingest_ocr_event(&make_ocr_event(1_000_000, "OCR pixels"))
+            .expect("ingest ok");
+        match out {
+            IngestOutcome::Stored { id, .. } => {
+                let ev = store.get_event(id).unwrap().unwrap();
+                assert!(
+                    ev.text.starts_with("Full DOM text from extension"),
+                    "extension text must be primary; got: {}",
+                    &ev.text[..ev.text.len().min(80)]
+                );
+            }
+            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        }
+    }
+
+    #[test]
+    fn merge_falls_back_to_ocr_when_no_cache() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let cache = PageContentCache::new();
+        // Cache is empty — no extension text for this URL.
+        let pump = BrainPump::with_page_cache(store.clone(), None, cache);
+        let out = pump
+            .ingest_ocr_event(&make_ocr_event(2_000_000, "pure OCR text"))
+            .expect("ingest ok");
+        match out {
+            IngestOutcome::Stored { id, .. } => {
+                let ev = store.get_event(id).unwrap().unwrap();
+                assert_eq!(ev.text, "pure OCR text");
+            }
+            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        }
+    }
+
+    #[test]
+    fn merge_appends_visible_ocr_label() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let cache = PageContentCache::new();
+        cache.insert(
+            "https://example.com/login".into(),
+            "Extension page body".into(),
+            "Login Page".into(),
+            "chrome".into(),
+        );
+        let pump = BrainPump::with_page_cache(store.clone(), None, cache);
+        let out = pump
+            .ingest_ocr_event(&make_ocr_event(3_000_000, "visible pixel text"))
+            .expect("ingest ok");
+        match out {
+            IngestOutcome::Stored { id, .. } => {
+                let ev = store.get_event(id).unwrap().unwrap();
+                assert!(
+                    ev.text.contains("[VISIBLE-OCR]"),
+                    "merged text must contain [VISIBLE-OCR] separator; got: {}",
+                    ev.text
+                );
+                assert!(ev.text.contains("Extension page body"));
+                assert!(ev.text.contains("visible pixel text"));
+                let parts: Vec<&str> = ev.text.split("[VISIBLE-OCR]").collect();
+                assert_eq!(parts.len(), 2, "exactly one separator");
+                assert!(
+                    parts[0].trim().ends_with("Extension page body"),
+                    "extension text before separator"
+                );
+                assert!(
+                    parts[1].trim().starts_with("visible pixel text"),
+                    "OCR text after separator"
+                );
+            }
+            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        }
     }
 
     #[test]

@@ -52,13 +52,22 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// secret-pattern filtering discipline as `OCREvent`; text passes §6
 /// regex before encoding.
 ///
+/// `0x05 → 0x06` (2026-05-21, OCR/PageContent merge): semantic change.
+/// The agent now merges cached extension text (from
+/// [`PageContentCache`]) into brain events when a URL-matched
+/// `PageContentEvent` exists within 5 s of an `OCREvent`. The stored
+/// event's `text` field may contain extension-sourced text labelled
+/// `[VISIBLE-OCR]` as a secondary signal. Wire byte layout is
+/// unchanged; bump is a discipline marker so auditors know events
+/// stored by ≥v0x06 agents may carry merged content.
+///
 /// The decoder rejects any other version: helper and core ship
 /// **version-locked** in the same signed bundle and capture is
 /// default-OFF, so there are no persisted or in-flight `0x01` / `0x02`
-/// / `0x03` / `0x04` frames to remain compatible with — a hard version
-/// break is the correct, auditable choice over a silently mis-parsed
-/// payload.
-pub const FRAME_VERSION: u8 = 0x05;
+/// / `0x03` / `0x04` / `0x05` frames to remain compatible with — a
+/// hard version break is the correct, auditable choice over a silently
+/// mis-parsed payload.
+pub const FRAME_VERSION: u8 = 0x06;
 
 /// Header size in bytes: magic(1) + version(1) + `msg_type(2)` + seq(8) + len(4).
 pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
@@ -826,7 +835,7 @@ mod tests {
             },
         );
         let expected: [u8; 72] = [
-            0x4D, 0x05, 0x30, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00,
+            0x4D, 0x06, 0x30, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00,
             0x00, 0x00,
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
@@ -836,7 +845,7 @@ mod tests {
         assert_eq!(
             buf,
             expected.to_vec(),
-            "HelperHealth v0x05 cross-side fixture"
+            "HelperHealth v0x06 cross-side fixture"
         );
 
         // And the round-trip decoder reads exactly back what the
@@ -885,14 +894,22 @@ mod tests {
     }
 
     #[test]
-    fn frame_version_is_0x05() {
-        assert_eq!(FRAME_VERSION, 0x05);
+    fn frame_version_is_0x06() {
+        assert_eq!(FRAME_VERSION, 0x06);
         let buf = encode(0, &Message::CaptureStop);
-        assert_eq!(buf[1], 0x05, "version byte in the framed header");
+        assert_eq!(buf[1], 0x06, "version byte in the framed header");
     }
 
     #[test]
-    fn decode_rejects_old_0x04_frame_at_v0x05_layout() {
+    fn decode_rejects_old_0x05_frame_at_v0x06_layout() {
+        let mut buf = encode(0, &Message::CaptureStop);
+        buf[1] = 0x05;
+        let err = decode(&buf).unwrap_err();
+        assert!(matches!(err, DecodeError::UnsupportedVersion { got: 0x05 }));
+    }
+
+    #[test]
+    fn decode_rejects_old_0x04_frame() {
         let mut buf = encode(0, &Message::CaptureStop);
         buf[1] = 0x04;
         let err = decode(&buf).unwrap_err();
@@ -1143,7 +1160,7 @@ mod tests {
         );
         assert_eq!(buf.len(), 140);
 
-        assert_eq!(&buf[0..4], &[0x4D, 0x05, 0x40, 0x00]);
+        assert_eq!(&buf[0..4], &[0x4D, 0x06, 0x40, 0x00]);
         assert_eq!(&buf[4..12], &42u64.to_le_bytes());
         assert_eq!(&buf[12..16], &124u32.to_le_bytes());
 
@@ -1322,7 +1339,7 @@ mod tests {
         assert_eq!(buf.len(), 55);
 
         // Header check.
-        assert_eq!(&buf[0..4], &[0x4D, 0x05, 0x50, 0x00]);
+        assert_eq!(&buf[0..4], &[0x4D, 0x06, 0x50, 0x00]);
         assert_eq!(&buf[4..12], &7u64.to_le_bytes());
         assert_eq!(&buf[12..16], &39u32.to_le_bytes());
 

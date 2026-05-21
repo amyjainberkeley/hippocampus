@@ -133,8 +133,8 @@ final class WireFixturesTests: XCTestCase {
     /// Cross-side version lock — mirrors the Rust
     /// `wire::tests::frame_version_is_0x04` trip-wire. If the two
     /// sides ever disagree the IPC contract is silently broken.
-    func testFrameVersionIs0x05() {
-        XCTAssertEqual(frameVersion, 0x05)
+    func testFrameVersionIs0x06() {
+        XCTAssertEqual(frameVersion, 0x06)
     }
 
     /// Byte-exact cross-side fixture — pin the full HelperHealth frame
@@ -161,7 +161,7 @@ final class WireFixturesTests: XCTestCase {
         //             seq(2A 00 ... LE = 42) len(38 00 00 00 = 56)
         // Payload(56): 7 u64 LE = 1, 2, 3, 4, 5, 6, 7 (little-endian)
         let expected: [UInt8] = [
-            0x4D, 0x05, 0x30, 0x00,
+            0x4D, 0x06, 0x30, 0x00,
             0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x38, 0x00, 0x00, 0x00,
             // u64 LE × 7
@@ -174,7 +174,7 @@ final class WireFixturesTests: XCTestCase {
             0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]
         XCTAssertEqual(frame.count, 72)
-        XCTAssertEqual(Array(frame), expected, "HelperHealth v0x05 byte-exact cross-side fixture")
+        XCTAssertEqual(Array(frame), expected, "HelperHealth v0x06 byte-exact cross-side fixture")
     }
 
     /// Byte-exact cross-side fixture — pin the full OCREvent frame at
@@ -209,7 +209,7 @@ final class WireFixturesTests: XCTestCase {
 
         var expected = [UInt8]()
         // Header: magic 4D, version 04, msg_type 0040 LE.
-        expected += [0x4D, 0x05, 0x40, 0x00]
+        expected += [0x4D, 0x06, 0x40, 0x00]
         // seq u64 LE = 42.
         expected += [0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         // len u32 LE = 124.
@@ -232,7 +232,7 @@ final class WireFixturesTests: XCTestCase {
         // window_title "T", url "U", ocr_text "Hi".
         expected += Array("T".utf8) + Array("U".utf8) + Array("Hi".utf8)
 
-        XCTAssertEqual(Array(frame), expected, "OCREvent v0x05 byte-exact cross-side fixture")
+        XCTAssertEqual(Array(frame), expected, "OCREvent v0x06 byte-exact cross-side fixture")
     }
 
     /// OCR text over the 64 KB cap fails closed at encode time
@@ -320,7 +320,7 @@ final class WireFixturesTests: XCTestCase {
         XCTAssertEqual(frame.count, 55)
 
         var expected = [UInt8]()
-        expected += [0x4D, 0x05, 0x50, 0x00]
+        expected += [0x4D, 0x06, 0x50, 0x00]
         expected += [0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] // seq
         expected += [0x27, 0x00, 0x00, 0x00] // len = 39
         // Payload
@@ -336,7 +336,7 @@ final class WireFixturesTests: XCTestCase {
         expected += Array("Hi".utf8)
         expected += Array("chrome".utf8)
 
-        XCTAssertEqual(Array(frame), expected, "PageContentEvent v0x05 byte-exact cross-side fixture")
+        XCTAssertEqual(Array(frame), expected, "PageContentEvent v0x06 byte-exact cross-side fixture")
     }
 
     func testPageContentEventOverCapFailsClosed() {
