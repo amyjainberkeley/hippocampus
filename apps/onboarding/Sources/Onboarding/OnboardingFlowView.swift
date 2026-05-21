@@ -5,6 +5,7 @@ struct OnboardingFlowView: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @EnvironmentObject var trustVM: TrustPanelViewModel
     @EnvironmentObject var retentionVM: RetentionViewModel
+    @EnvironmentObject var extensionVM: BrowserExtensionViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +55,8 @@ struct OnboardingFlowView: View {
             )
         case .automation:
             AutomationStepView()
+        case .browserExtension:
+            BrowserExtensionStepView()
         case .done:
             DoneStepView()
         }
