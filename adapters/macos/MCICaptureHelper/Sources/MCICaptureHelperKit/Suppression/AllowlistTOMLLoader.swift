@@ -299,23 +299,68 @@ extension AllowlistTOMLLoader {
     /// `Package.swift`.
     public static let bundledResourceName = "known-safe-apps"
 
-    /// Loaded from the signed module bundle (`Bundle.module`). Returns
-    /// an empty `Allowlist` if the resource is absent — the cascade's
-    /// §7 fail-closed default keeps the privacy invariant intact when
-    /// the seed file is missing (e.g. some test contexts). Throws
-    /// `AllowlistTOMLError` if the resource is present but malformed —
-    /// CSO-ratified config files MUST round-trip cleanly, and a parse
-    /// failure here points at either a damaged bundle or a hand-edit
-    /// the loader refuses by design (ADR-0017 §3.1).
-    public static func loadBundled() throws -> Allowlist {
-        guard let url = Bundle.module.url(
-            forResource: bundledResourceName,
-            withExtension: "toml"
-        ) else {
-            return Allowlist(entries: [])
+    /// SPM resource bundle name placed alongside the executable by
+    /// `swift build`. Used by the sibling-bundle fallback (path 3).
+    static let spmResourceBundleName = "MCICaptureHelper_MCICaptureHelperKit.bundle"
+
+    /// Load the CSO-ratified known-safe-apps allowlist from the first
+    /// resolver that locates the TOML resource.
+    ///
+    /// Resolver fallback order (intentional — covers both SPM dev
+    /// builds and hand-bundled .app installs):
+    ///   1. `Bundle.module` — SPM `swift test` / `swift run` from
+    ///      the package directory. This is the default SPM path.
+    ///   2. `Bundle.main` — a standard `.app` bundle where the TOML
+    ///      sits at `Contents/Resources/known-safe-apps.toml` (the
+    ///      .app-install scenario: binary copied into
+    ///      `~/Applications/MCICaptureHelper.app/Contents/MacOS/`
+    ///      and the resource placed in `Contents/Resources/`).
+    ///   3. SPM resource bundle as sibling of `Bundle.main.executableURL`
+    ///      — covers `.app` installs where the SPM-generated
+    ///      `MCICaptureHelper_MCICaptureHelperKit.bundle` was copied
+    ///      alongside the executable rather than into Resources/.
+    ///   4. Return empty `Allowlist` — cascade §7 fail-closed default
+    ///      keeps the privacy invariant intact when no resolver finds
+    ///      the TOML (e.g. some test contexts).
+    ///
+    /// All three lookup paths feed the SAME TOML parser — a malformed
+    /// file at any path is still an `AllowlistTOMLError` (exit 6 at
+    /// the call site in main.swift). The empty-allowlist fail-closed
+    /// default is only reached when NO resolver finds the file.
+    ///
+    /// `urlResolvers` is injectable for testability; production call
+    /// sites pass no argument (uses `defaultResolvers()`).
+    public static func loadBundled(
+        urlResolvers: [() -> URL?]? = nil
+    ) throws -> Allowlist {
+        let resolvers = urlResolvers ?? defaultResolvers()
+        for resolver in resolvers {
+            guard let url = resolver() else { continue }
+            let source = try String(contentsOf: url, encoding: .utf8)
+            let entries = try AllowlistTOMLLoader().parse(source)
+            return Allowlist(entries: entries)
         }
-        let source = try String(contentsOf: url, encoding: .utf8)
-        let entries = try AllowlistTOMLLoader().parse(source)
-        return Allowlist(entries: entries)
+        return Allowlist(entries: [])
+    }
+
+    /// Default URL resolver chain. See `loadBundled()` doc for the
+    /// rationale behind each path.
+    public static func defaultResolvers() -> [() -> URL?] {
+        [
+            // Path 1: SPM's Bundle.module (swift test / swift run).
+            { Bundle.module.url(forResource: bundledResourceName, withExtension: "toml") },
+            // Path 2: standard .app bundle (Contents/Resources/).
+            { Bundle.main.url(forResource: bundledResourceName, withExtension: "toml") },
+            // Path 3: SPM resource bundle as sibling of executable.
+            {
+                guard let execURL = Bundle.main.executableURL else { return nil }
+                let sibling = execURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent(spmResourceBundleName)
+                    .appendingPathComponent("\(bundledResourceName).toml")
+                return FileManager.default.fileExists(atPath: sibling.path)
+                    ? sibling : nil
+            },
+        ]
     }
 }

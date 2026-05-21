@@ -102,6 +102,32 @@ private enum LifetimeFixtures {
             denylist: Denylist(entries: [])
         )
     }
+
+    /// Stub emitter that records calls but does no real work.
+    private struct StubOCREmitter: OCRPostAllowEmitter {
+        func processAfterAllow(tsUs _: UInt64, context _: WorkflowContext, input _: OCREngineInput) async {}
+    }
+
+    /// Build a session WITH an OCR emitter wired — the P3.6.7 pattern.
+    static func makeSessionWithOCREmitter() -> SCStreamCaptureSession {
+        let cascade = SuppressionCascade(
+            secureEventInput: NoSEI(),
+            axSecureSubrole: AXNonSecure(),
+            denylist: NoApps(),
+            blackedRegion: NoBlack(),
+            knownSafeAppBundles: []
+        )
+        let pipeline = SCStreamPipeline(
+            cascade: cascade,
+            encoder: NoopEncoder(),
+            sink: NoopSink()
+        )
+        return SCStreamCaptureSession(
+            pipeline: pipeline,
+            denylist: Denylist(entries: []),
+            ocrPostAllowEmitter: StubOCREmitter()
+        )
+    }
 }
 
 final class SCStreamCaptureSessionLifetimeTests: XCTestCase {
@@ -272,6 +298,35 @@ final class SCStreamCaptureSessionLifetimeTests: XCTestCase {
         XCTAssertEqual(
             trueObservations, 1,
             "exactly one caller across \(iterations) concurrent invocations must observe true"
+        )
+    }
+}
+
+// MARK: - P3.6.7 OCR emitter wiring test
+
+/// Proves the OCR emitter wire is connected when constructed with
+/// the same pattern main.swift now uses (P3.6.7 fix). The prior
+/// construction omitted `ocrPostAllowEmitter:`, defaulting it to
+/// `nil` — the `if let emitter` guard in the SCStream callback
+/// evaluated false on every frame and no OCREvent ever reached the wire.
+final class SCStreamCaptureSessionOCRWiringTests: XCTestCase {
+    /// Session constructed WITHOUT `ocrPostAllowEmitter` — the pre-fix
+    /// default. The accessor MUST return nil.
+    func testSessionWithoutEmitterHasNilOCREmitter() {
+        let session = LifetimeFixtures.makeSession()
+        XCTAssertNil(
+            session.ocrPostAllowEmitterForTest,
+            "pre-fix default construction must have nil ocrPostAllowEmitter"
+        )
+    }
+
+    /// Session constructed WITH `ocrPostAllowEmitter` — the P3.6.7
+    /// fix pattern. The accessor MUST return non-nil.
+    func testSessionWithEmitterHasNonNilOCREmitter() {
+        let session = LifetimeFixtures.makeSessionWithOCREmitter()
+        XCTAssertNotNil(
+            session.ocrPostAllowEmitterForTest,
+            "P3.6.7 construction must wire a non-nil ocrPostAllowEmitter"
         )
     }
 }

@@ -139,6 +139,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// is wired up.
     private let ocrPostAllowEmitter: (any OCRPostAllowEmitter)?
 
+    /// Test-only accessor: proves the OCR emitter wire is connected.
+    /// Not public API — `internal` so `@testable import` can read it.
+    internal var ocrPostAllowEmitterForTest: (any OCRPostAllowEmitter)? {
+        ocrPostAllowEmitter
+    }
+
     private let lock = NSLock()
     private var priorDHash: DHash?
     private var stream: SCStream?
