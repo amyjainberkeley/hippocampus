@@ -11,6 +11,7 @@ struct StatusMenuView: View {
     @State private var crashReportOptedIn: Bool = false
     @State private var briefsEnabled: Bool = UserDefaults.standard.bool(forKey: "MCIBriefsEnabled")
     @State private var showDownloadDialog = false
+    @State private var mcpRegistering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -66,6 +67,11 @@ struct StatusMenuView: View {
             Divider()
 
             briefsMenuItem
+
+            Button("Connect to Claude Code…") {
+                connectToClaude()
+            }
+            .disabled(mcpRegistering)
 
             Divider()
 
@@ -162,6 +168,54 @@ struct StatusMenuView: View {
         case .crashed: return .red
         default: return .secondary
         }
+    }
+
+    private func connectToClaude() {
+        guard let agentPath = supervisor.agentBinaryPath else {
+            showAlert(title: "Error", message: "mci-agent binary not found.")
+            return
+        }
+        mcpRegistering = true
+        Task.detached {
+            let proc = Process()
+            proc.executableURL = agentPath
+            proc.arguments = ["register-mcp"]
+            let outPipe = Pipe()
+            let errPipe = Pipe()
+            proc.standardOutput = outPipe
+            proc.standardError = errPipe
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+            } catch {
+                await MainActor.run {
+                    mcpRegistering = false
+                    showAlert(title: "Error", message: "Failed to run register-mcp: \(error.localizedDescription)")
+                }
+                return
+            }
+            let stdout = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            await MainActor.run {
+                mcpRegistering = false
+                if proc.terminationStatus == 0 {
+                    let msg = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                    showAlert(title: "Connected", message: msg.isEmpty ? "Hippocampus registered with Claude Code. Restart Claude Code to connect." : msg)
+                } else {
+                    let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    showAlert(title: "Error", message: detail.isEmpty ? "register-mcp exited with code \(proc.terminationStatus)" : detail)
+                }
+            }
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = title == "Error" ? .warning : .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func openAboutWindow() {

@@ -179,21 +179,23 @@ impl Server {
     }
 
     fn handle_initialize(id: JsonRpcId) -> JsonRpcResponse {
-        // We accept any client protocol version and respond with ours.
-        // Per MCP `initialize` shape: { protocolVersion, capabilities, serverInfo }.
         JsonRpcResponse::ok(
             id,
             serde_json::json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {
-                    // We expose tools only. No prompts, no resources,
-                    // no sampling, no logging surface in P3.10b.
                     "tools": {},
                 },
                 "serverInfo": {
-                    "name": "mci-agent",
+                    "name": "hippocampus",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
+                "instructions": "Hippocampus is your screen memory. It continuously captures \
+                    what you see on your Mac and stores it in a private, encrypted, local-only \
+                    brain. You can search it with mci_recall, browse recent activity with \
+                    mci_events_since, check capture status with mci_stats, see work sessions \
+                    with mci_episodes, or filter by app with mci_events_by_app. All data stays \
+                    on this Mac — nothing is sent to any server.",
             }),
         )
     }

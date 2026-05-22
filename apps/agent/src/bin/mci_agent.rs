@@ -70,6 +70,8 @@ enum Mode {
     McpServe {
         db_path: PathBuf,
     },
+    /// Register Hippocampus as an MCP server in Claude Code's settings.
+    RegisterMcp,
 }
 
 fn default_device_id_path() -> PathBuf {
@@ -121,6 +123,7 @@ fn parse_args(argv: &[String]) -> Args {
             "--drain-stdin" => mode_kind = ModeKind::DrainStdin,
             "--health-summary" => mode_kind = ModeKind::HealthSummary,
             "mcp-serve" => mode_kind = ModeKind::McpServe,
+            "register-mcp" => mode_kind = ModeKind::RegisterMcp,
             "--window-seconds" if i + 1 < argv.len() => {
                 if let Ok(n) = argv[i + 1].parse::<u64>() {
                     if n > 0 {
@@ -152,6 +155,7 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::McpServe => Mode::McpServe {
             db_path: resolved_db_path,
         },
+        ModeKind::RegisterMcp => Mode::RegisterMcp,
     };
     Args {
         device_id_path,
@@ -167,6 +171,7 @@ enum ModeKind {
     DrainStdin,
     HealthSummary,
     McpServe,
+    RegisterMcp,
 }
 
 fn print_usage() {
@@ -179,6 +184,7 @@ fn print_usage() {
         \x20 --drain-stdin              read wire frames from stdin and write JSONL\n\
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
+        \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
         \x20 --version                  print version and exit\n\
         \x20 -h, --help                 print this and exit\n\
         \n\
@@ -440,6 +446,13 @@ async fn main() -> ExitCode {
                 }
             }
         }
+        Mode::RegisterMcp => match register_mcp() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("mci-agent register-mcp: {e}");
+                ExitCode::from(14)
+            }
+        },
         Mode::McpServe { db_path } => match run_mcp_serve(db_path).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
@@ -468,6 +481,59 @@ async fn main() -> ExitCode {
             }
         }
     }
+}
+
+/// Register Hippocampus as an MCP server in Claude Code's user-level
+/// settings (`~/.claude/settings.json`). Merges the `hippocampus` entry
+/// under `mcpServers` without clobbering other servers.
+fn register_mcp() -> Result<(), String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot resolve own binary path: {e}"))?;
+    let exe_str = exe.to_str().ok_or("binary path is not valid UTF-8")?;
+
+    let home = std::env::var("HOME").map_err(|_| "HOME not set")?;
+    let claude_dir = PathBuf::from(&home).join(".claude");
+    let settings_path = claude_dir.join("settings.json");
+
+    let mut root: serde_json::Map<String, serde_json::Value> = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path)
+            .map_err(|e| format!("read {}: {e}", settings_path.display()))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("parse {}: {e}", settings_path.display()))?
+    } else {
+        if !claude_dir.exists() {
+            std::fs::create_dir_all(&claude_dir)
+                .map_err(|e| format!("create_dir_all({}): {e}", claude_dir.display()))?;
+        }
+        serde_json::Map::new()
+    };
+
+    let hippocampus_entry = serde_json::json!({
+        "command": exe_str,
+        "args": ["mcp-serve"]
+    });
+
+    let servers = root
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(obj) = servers.as_object_mut() {
+        if obj.contains_key("hippocampus") {
+            let existing = &obj["hippocampus"];
+            if existing.get("command").and_then(|v| v.as_str()) == Some(exe_str) {
+                println!("Hippocampus already registered with Claude Code (path unchanged).");
+                return Ok(());
+            }
+        }
+        obj.insert("hippocampus".to_owned(), hippocampus_entry);
+    }
+
+    let output = serde_json::to_string_pretty(&root)
+        .map_err(|e| format!("serialize settings: {e}"))?;
+    std::fs::write(&settings_path, output.as_bytes())
+        .map_err(|e| format!("write {}: {e}", settings_path.display()))?;
+
+    println!("Hippocampus registered with Claude Code. Restart Claude Code to connect.");
+    Ok(())
 }
 
 /// Resolve the `SQLCipher` key from `MCI_DB_KEY_HEX`, open the brain,

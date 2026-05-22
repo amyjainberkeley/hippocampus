@@ -1026,7 +1026,11 @@ fn initialize_returns_capabilities_and_server_info_real_brain() {
             .get("serverInfo")
             .and_then(|i| i.get("name"))
             .and_then(|n| n.as_str()),
-        Some("mci-agent")
+        Some("hippocampus")
+    );
+    assert!(
+        result.get("instructions").and_then(|v| v.as_str()).is_some(),
+        "initialize must include instructions for Claude Code"
     );
 }
 
