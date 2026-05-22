@@ -78,27 +78,27 @@ impl LlamaBriefAuthor {
 ///
 /// Placeholders: `{topic}`, `{event_count}`, `{events}`.
 ///
-/// The template instructs the model to:
-/// - Produce a title line, then bullet points with `[event:N]` citations.
-/// - End with `###CITATIONS:` listing all cited IDs.
-/// - Never invent events not in the provided list.
+/// Qwen3 ChatML format per ADR-0028 §3. Direct mode (no thinking
+/// tokens) — the system prompt instructs concise structured output.
 ///
-/// The `###CITATIONS:` line doubles as the greedy-decode stop marker
-/// in the Core ML backend.
+/// The `###CITATIONS:` line doubles as the stop marker in the
+/// Core ML backend.
 const PROMPT_TEMPLATE: &str = "\
-You are a concise daily brief generator for a knowledge worker. \
-Summarize the following {event_count} screen events under the topic \"{topic}\".
-
-RULES:
+<|im_start|>system
+You are a concise daily brief generator for a knowledge worker. Follow these rules exactly:
 1. First line is the brief title (≤10 words).
 2. Then bullet points summarizing what happened, grouped by activity.
 3. Every bullet MUST cite at least one source event using [event:N] where N is the EVENT_ID.
 4. Do NOT invent or reference any EVENT_ID not listed below.
 5. End with a line: ###CITATIONS: [event:X], [event:Y], ...
+/no_think<|im_end|>
+<|im_start|>user
+Summarize the following {event_count} screen events under the topic \"{topic}\".
 
 EVENTS:
-{events}
-BRIEF:";
+{events}<|im_end|>
+<|im_start|>assistant
+";
 
 impl BriefAuthor for LlamaBriefAuthor {
     fn author(&self, retrieval: &[EventRecord], topic: &str) -> Result<Brief, AuthorError> {
@@ -253,6 +253,32 @@ mod tests {
         assert!(prompt.contains("[event:N]"));
         assert!(prompt.contains("###CITATIONS:"));
         assert!(prompt.contains("Do NOT invent"));
+    }
+
+    #[test]
+    fn prompt_uses_chatml_format() {
+        let records = make_records(&[1]);
+        let prompt = LlamaBriefAuthor::render_prompt(&records, "test");
+        assert!(
+            prompt.contains("<|im_start|>system"),
+            "must use Qwen3 ChatML system tag"
+        );
+        assert!(
+            prompt.contains("<|im_end|>"),
+            "must use Qwen3 ChatML end tag"
+        );
+        assert!(
+            prompt.contains("<|im_start|>user"),
+            "must use Qwen3 ChatML user tag"
+        );
+        assert!(
+            prompt.contains("<|im_start|>assistant"),
+            "must use Qwen3 ChatML assistant tag"
+        );
+        assert!(
+            prompt.contains("/no_think"),
+            "must use direct mode (no thinking tokens)"
+        );
     }
 
     #[test]
