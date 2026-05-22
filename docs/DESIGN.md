@@ -315,7 +315,7 @@ mci/
 - **Phase 8 — Windows adapter.** Implement `CaptureSource` on WGC/Media Foundation/Windows.Media.Ocr/UIA. Core unchanged.
 - **Phase 9 — Retention/compaction**, scale hardening, polish.
 
-### Phase status as of 2026-05-22 (cycle 8)
+### Phase status as of 2026-05-22 EOD (cycle 8.5)
 
 | Phase | Status | Notes |
 |---|---|---|
@@ -323,10 +323,10 @@ mci/
 | Phase 1 | ✅ COMPLETE | Capture spine + sensitive-surface suppression. G2.1 preliminary pass; G2.2 4h soak still owed |
 | Phase 2 | ✅ COMPLETE | Context join — all providers + wiring landed |
 | Phase 3 | ✅ CLOSED (cycle 7) | OCR + brain — 11/11 PRs + follow-ons. Real capture verified end-to-end |
-| Phase 4 | ~95% | Retention purger + onboarding scaffold + Keychain wired. Pending: real-capture verify with browser ext |
-| Phase 5 | ~75% structural | LLM stubs replaced with real Rust backend (Qwen3 BPE + generation). `.mlpackage` files still need conversion + HF upload. Workspace server skeleton + crypto + enrollment tests done |
+| Phase 4 | ~95% | Retention purger + onboarding scaffold + Keychain wired + dual-grant TCC pattern (cycle 8.5). Pending: real-capture verify with browser ext + Apple Dev ID for persistent grants |
+| Phase 5 | ~80% | **Real semantic search SHIPPING-GRADE** (cycle 8.5). Arctic Embed S Core ML pipeline rewritten end-to-end: external Rust tokenization via HuggingFace tokenizers crate, FP16 weights, CLS-pool + L2-norm in graph, quality regression test 50/50 cosine sim ≥0.999. Brief author (Qwen3-1.7B) Rust backend complete but `.mlpackage` conversion blocked by coremltools op-coverage gap. Workspace server skeleton + crypto + enrollment tests done |
 | Phase 6 | ~75% | Browser ext working (Chromium MV3 + native messaging + PageContentEvent). Safari `.appex` still scaffold-only |
-| Phase 7 | ~75% | Hippocampus.app shell + Sparkle + LoginItems + DMG. Icon designer pass + real screenshots still owed |
+| Phase 7 | ~75% | Hippocampus.app shell + Sparkle + LoginItems + DMG + rpath fix (cycle 8.5) + MCP auto-registration + Troubleshoot menu. Icon designer pass + real screenshots + Apple Dev ID signing still owed |
 | Phase 8 | Scaffolded | `adapters/windows/` crate (PR #124). Implementation post-v1.0 |
 | Phase 9 | Not started | iOS/Watch separate Xcode targets per ADR-0026. Post-v1.0 |
 
