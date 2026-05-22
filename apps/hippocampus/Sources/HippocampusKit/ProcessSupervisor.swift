@@ -123,6 +123,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         locator.onboardingPath() != nil
     }
 
+    public var agentBinaryPath: URL? {
+        locator.agentPath()
+    }
+
     public var dbPath: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/MCI/mci.sqlite")

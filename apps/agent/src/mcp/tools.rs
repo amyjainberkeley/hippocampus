@@ -78,17 +78,19 @@ pub fn tool_definitions() -> serde_json::Value {
     serde_json::json!([
         {
             "name": ToolName::Recall.as_str(),
-            "description": "Search MCI's screen-recall brain by natural-language query. \
-                             Returns the most relevant captured events (app, window, URL, \
-                             text snippet, score). Lexical FTS5 today; hybrid retrieval \
-                             (semantic + lexical + recency) lands when the on-device \
-                             embedder is wired (P3.3 → P3.7).",
+            "description": "Search your screen memory. Hippocampus continuously captures \
+                             what you see on your Mac — apps, windows, browser tabs, page \
+                             content — and stores it in a private, encrypted local brain. \
+                             Use this tool to recall anything you've seen or done. Query \
+                             with natural language: 'that article about Rust I read \
+                             yesterday', 'what was I working on this morning', 'the URL \
+                             with pricing info'.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The natural-language query."
+                        "description": "Natural-language search query."
                     },
                     "limit": {
                         "type": "integer",
@@ -102,14 +104,16 @@ pub fn tool_definitions() -> serde_json::Value {
         },
         {
             "name": ToolName::EventsSince.as_str(),
-            "description": "Return events captured after the given microsecond timestamp, \
-                             ordered ascending. Useful for incremental polling.",
+            "description": "Get recent screen activity after a timestamp. Each event \
+                             includes the app, window title, URL (if browser), and \
+                             captured text. Use for 'what happened in the last hour' \
+                             or incremental polling.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "ts_us": {
                         "type": "integer",
-                        "description": "Microseconds since UNIX epoch. Events with ts_us > this are returned.",
+                        "description": "Microseconds since UNIX epoch. Events strictly after this timestamp are returned.",
                         "minimum": 0
                     },
                     "limit": {
@@ -124,9 +128,10 @@ pub fn tool_definitions() -> serde_json::Value {
         },
         {
             "name": ToolName::Stats.as_str(),
-            "description": "Content-free aggregate over the brain: total event count, oldest \
-                             ts_us, newest ts_us. Lets an agent ask 'how much memory is \
-                             available?' without reading any row content.",
+            "description": "Quick overview of your screen memory: total events captured, \
+                             time range covered. No content returned — just counts. Use \
+                             to check if Hippocampus is running and how much memory is \
+                             available.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -134,9 +139,10 @@ pub fn tool_definitions() -> serde_json::Value {
         },
         {
             "name": ToolName::Episodes.as_str(),
-            "description": "List recent episodes (contiguous app/task runs) ordered by \
-                             start time descending. Each episode carries its app_bundle_id, \
-                             start/end timestamps, and event count.",
+            "description": "List recent work sessions. An episode is a stretch of focused \
+                             activity in one app (e.g. '45 min in VS Code', '20 min \
+                             browsing docs'). Use for 'what did I work on today' at a \
+                             glance.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -151,15 +157,15 @@ pub fn tool_definitions() -> serde_json::Value {
         },
         {
             "name": ToolName::EventsByApp.as_str(),
-            "description": "Return events for a specific app, identified by exact \
-                             app_bundle_id (e.g. 'com.apple.Safari'), ordered by \
-                             capture time descending.",
+            "description": "Get screen activity for a specific app (by bundle ID like \
+                             'com.apple.Safari'). Use for 'what sites did I visit' or \
+                             'what files did I edit in Xcode'.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "app_bundle_id": {
                         "type": "string",
-                        "description": "Exact app bundle identifier to filter by."
+                        "description": "Exact app bundle identifier (e.g. 'com.apple.Safari', 'com.microsoft.VSCode')."
                     },
                     "limit": {
                         "type": "integer",

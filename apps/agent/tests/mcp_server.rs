@@ -248,7 +248,11 @@ fn initialize_returns_server_info_and_protocol_version() {
             .get("serverInfo")
             .and_then(|i| i.get("name"))
             .and_then(|n| n.as_str()),
-        Some("mci-agent")
+        Some("hippocampus")
+    );
+    assert!(
+        result.get("instructions").and_then(|v| v.as_str()).is_some(),
+        "initialize must include instructions for Claude Code"
     );
 }
 
