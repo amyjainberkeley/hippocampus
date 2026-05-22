@@ -5,7 +5,7 @@ edition.workspace      = true
 rust-version.workspace = true
 publish.workspace      = true
 license.workspace      = true
-description            = "MCI macOS adapter: Core ML backend for Llama-3.2-1B int4 brief generation. Implements mci_brief::llama_backend::LlamaBackend. See docs/decisions/0018-brief-authoring-approval-pipeline.md §1.2."
+description            = "MCI macOS adapter: Core ML backend for Qwen3-1.7B INT4 brief generation. Implements mci_brief::llama_backend::LlamaBackend. See docs/decisions/0028-brief-author-model-qwen3-1.7b-coreml.md."
 
 [lints]
 workspace = true
@@ -22,13 +22,12 @@ workspace = true
 mci-brief = { path = "../../../core/brief" }
 thiserror = "1"
 
-# macOS-only deps — mirrors mci-embed-coreml gating pattern.
-# On Linux this crate compiles to an empty library.
-#
-# CSO supply-chain audit: ZERO net-new transitive crates — all objc2-*
-# crates already on the lockfile via mci-embed-coreml (PR #70). No new
-# dep-addition gate triggered per ADR-0008.
+# serde_json: parse vocab.json for the BPE tokenizer. Already on the
+# lockfile via the server crate. No net-new transitive crates — no
+# ADR-0008 dep-addition gate triggered.
 [target.'cfg(target_os = "macos")'.dependencies]
+serde_json        = "1"
+serde             = { version = "1", features = ["derive"] }
 objc2             = { version = "0.6", default-features = false, features = ["std"] }
 objc2-foundation  = { version = "0.3", default-features = false, features = [
     "std",
@@ -56,3 +55,5 @@ objc2-core-ml     = { version = "0.3", default-features = false, features = [
 
 [dev-dependencies]
 mci-brief = { path = "../../../core/brief" }
+tempfile  = "3"
+serde_json = "1"

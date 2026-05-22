@@ -1,0 +1,9 @@
+# Python dependencies for ML model conversion scripts.
+# NOT used at runtime or in CI — operator-only, manual conversion.
+# See scripts/convert_embedder.py and scripts/convert_brief_model.py.
+coremltools>=8.0
+torch>=2.2
+transformers>=4.40
+optimum>=1.23
+onnx>=1.17
+onnxruntime>=1.20

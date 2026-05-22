@@ -41,5 +41,11 @@ Thumbs.db
 .claude/.skill-cache/
 .claude/worktrees/
 
+# ML model artifacts (produced by conversion scripts, not committed)
+models/*.mlpackage
+models/*.mlmodelc
+*.mlpackage
+*.mlmodelc
+
 # Output redirects from CLI flag-as-filename mistakes (e.g. --skip-sudo)
 /--*
