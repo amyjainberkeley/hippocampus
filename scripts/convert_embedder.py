@@ -16,14 +16,23 @@ Per BUNDLING.md §3 and ADR-0011.
 """
 
 import argparse
+import hashlib
+import logging
 import sys
 from pathlib import Path
 
 MODEL_REPO = "Snowflake/snowflake-arctic-embed-s"
 OUTPUT_DIM = 384
 
+log = logging.getLogger("convert_embedder")
 
-def convert(output_path: str, verify: bool = False) -> None:
+
+def convert(output_path: str, verify: bool = False, quiet: bool = False) -> None:
+    if quiet:
+        logging.basicConfig(level=logging.WARNING)
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     try:
         import coremltools as ct
         import numpy as np
@@ -31,13 +40,16 @@ def convert(output_path: str, verify: bool = False) -> None:
         from transformers import AutoModel, AutoTokenizer
     except ImportError as e:
         print(
-            f"Missing dependency: {e}\n"
-            "Install: pip install coremltools>=8.0 torch>=2.2 transformers>=4.40",
+            f"ERROR: Missing dependency: {e}\n\n"
+            "Fix:\n"
+            "  pip install -r scripts/requirements-ml.txt\n\n"
+            "Or install individually:\n"
+            "  pip install coremltools>=8.0 torch>=2.2 transformers>=4.40",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    print(f"Loading {MODEL_REPO}...")
+    log.info("Loading %s...", MODEL_REPO)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO)
     model = AutoModel.from_pretrained(MODEL_REPO)
     model.eval()
@@ -74,7 +86,7 @@ def convert(output_path: str, verify: bool = False) -> None:
         (inputs["input_ids"], inputs["attention_mask"]),
     )
 
-    print("Converting to Core ML...")
+    log.info("Converting to Core ML...")
     mlmodel = ct.convert(
         traced,
         inputs=[
@@ -87,7 +99,7 @@ def convert(output_path: str, verify: bool = False) -> None:
     )
 
     # INT8 quantization per ADR-0011 §1
-    print("Applying INT8 quantization...")
+    log.info("Applying INT8 quantization...")
     op_config = ct.optimize.coreml.OpLinearQuantizerConfig(
         mode="linear_symmetric", dtype="int8"
     )
@@ -100,19 +112,23 @@ def convert(output_path: str, verify: bool = False) -> None:
     # This script produces the input_ids variant for reference.
     # The download_model.sh script handles the text-input variant.
 
-    print(f"Saving to {output_path}...")
+    log.info("Saving to %s...", output_path)
     mlmodel.save(output_path)
-    print(f"Saved: {output_path}")
+
+    out_p = Path(output_path)
+    if out_p.is_dir():
+        total_size = sum(f.stat().st_size for f in out_p.rglob("*") if f.is_file())
+    else:
+        total_size = out_p.stat().st_size
+    log.info("Saved: %s (%.1f MB)", output_path, total_size / 1e6)
 
     if verify:
-        print("Verifying...")
+        log.info("Verifying...")
         loaded = ct.models.MLModel(output_path)
-        # Quick shape check
         spec = loaded.get_spec()
         out_desc = spec.description.output[0]
-        print(f"  Output: {out_desc.name}, shape: {out_desc.type.multiArrayType.shape}")
+        log.info("  Output: %s, shape: %s", out_desc.name, out_desc.type.multiArrayType.shape)
 
-        # Run inference
         test_ids = tokenizer("hello world", return_tensors="np", padding="max_length", max_length=128)
         pred = loaded.predict({
             "input_ids": test_ids["input_ids"].astype(np.int32),
@@ -121,12 +137,15 @@ def convert(output_path: str, verify: bool = False) -> None:
         emb = pred["embedding"]
         assert emb.shape[-1] == OUTPUT_DIM, f"Expected {OUTPUT_DIM}-d, got {emb.shape}"
         mag = float(np.linalg.norm(emb))
-        print(f"  Embedding magnitude: {mag:.4f} (pre-L2-norm)")
-        print("  Verification passed.")
+        log.info("  Embedding magnitude: %.4f (pre-L2-norm)", mag)
+        log.info("  Verification passed.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--output",
         required=True,
@@ -137,8 +156,13 @@ def main():
         action="store_true",
         help="Run a test embedding after conversion",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress progress output (for CI)",
+    )
     args = parser.parse_args()
-    convert(args.output, args.verify)
+    convert(args.output, args.verify, args.quiet)
 
 
 if __name__ == "__main__":
