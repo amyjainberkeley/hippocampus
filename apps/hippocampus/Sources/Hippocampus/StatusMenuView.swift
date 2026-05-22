@@ -9,6 +9,8 @@ struct StatusMenuView: View {
 
     @State private var showAbout = false
     @State private var crashReportOptedIn: Bool = false
+    @State private var briefsEnabled: Bool = UserDefaults.standard.bool(forKey: "MCIBriefsEnabled")
+    @State private var showDownloadDialog = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -63,6 +65,10 @@ struct StatusMenuView: View {
 
             Divider()
 
+            briefsMenuItem
+
+            Divider()
+
             Toggle("Launch at Login", isOn: Binding(
                 get: { loginItemVM.isEnabled },
                 set: { _ in loginItemVM.toggle() }
@@ -110,6 +116,30 @@ struct StatusMenuView: View {
             crashReportOptedIn = supervisor.isCrashReportOptedIn
             if loginItemVM.shouldPrompt {
                 loginItemVM.markPrompted()
+            }
+        }
+        .sheet(isPresented: $showDownloadDialog) {
+            ModelDownloadView(
+                onDismiss: { showDownloadDialog = false },
+                onComplete: {
+                    briefsEnabled = true
+                    showDownloadDialog = false
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var briefsMenuItem: some View {
+        let modelDownloaded = UserDefaults.standard.bool(forKey: "MCIBriefModelDownloaded")
+        if modelDownloaded {
+            Toggle("Daily Briefs", isOn: $briefsEnabled)
+                .onChange(of: briefsEnabled) { _, newValue in
+                    UserDefaults.standard.set(newValue, forKey: "MCIBriefsEnabled")
+                }
+        } else {
+            Button("Daily Briefs: Off — Download Model…") {
+                showDownloadDialog = true
             }
         }
     }
