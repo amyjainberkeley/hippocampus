@@ -121,6 +121,15 @@ else
     echo "  Build with 'swift build -c $PROFILE' first to resolve the SPM dependency."
 fi
 
+# Add @executable_path/../Frameworks to rpath so dyld finds Sparkle.framework.
+# SwiftPM does not add this automatically; must be set before codesigning.
+if [[ -d "$FRAMEWORKS/Sparkle.framework" ]]; then
+    if ! otool -l "$MACOS/Hippocampus" | grep -A 2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then
+        echo "Adding @executable_path/../Frameworks rpath to Hippocampus binary..."
+        install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACOS/Hippocampus"
+    fi
+fi
+
 # Ad-hoc codesign each binary + framework + the top-level app
 echo "Codesigning..."
 codesign --force --sign - "$MACOS/MCICaptureHelper"
@@ -129,6 +138,15 @@ codesign --force --sign - "$MACOS/Hippocampus"
 # --deep re-signs embedded frameworks (Sparkle ships pre-signed but
 # the outer app signature must cover everything)
 codesign --force --deep --sign - "$APP"
+
+# Verify rpath was added correctly
+echo "Verifying rpath..."
+if otool -l "$MACOS/Hippocampus" | grep -A 2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then
+    echo "  rpath OK: @executable_path/../Frameworks present"
+else
+    echo "  ERROR: rpath missing — app will fail to launch"
+    exit 1
+fi
 
 echo ""
 echo "=== Done ==="
