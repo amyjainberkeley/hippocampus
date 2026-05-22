@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "modelID": "arctic-embed-s-int8",
+      "displayName": "Arctic Embed S (Search)",
+      "bundled": true,
+      "note": "Bundled in app. No download needed."
+    },
+    {
+      "modelID": "qwen3-1.7b-int4",
+      "displayName": "Qwen3-1.7B (Daily Briefs)",
+      "bundled": false,
+      "downloadURL": "https://huggingface.co/amyjainberkeley/hippocampus-coreml-models/resolve/main/Qwen3-1.7B-INT4.mlmodelc.tar.gz",
+      "sha256": "PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED",
+      "sizeBytes": 995000000,
+      "requiredDiskSpace": 1050000000
+    }
+  ]
+}
