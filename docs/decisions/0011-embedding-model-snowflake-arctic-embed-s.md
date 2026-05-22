@@ -65,3 +65,69 @@ These edits are made in the same PR as this ADR.
 - docs/RESEARCH_DIGEST.md Stream D + Verification pass items 7 (arctic-embed-s framing) and 8 (MLX-no-ANE attribution correction)
 - HuggingFace model card: `Snowflake/snowflake-arctic-embed-s`
 - ADR-0009 (384-d schema pin), ADR-0010 (event-unit retrieval — the eval gates this ADR)
+
+## Erratum 2026-05-22 — Wave-17 Core ML pipeline architecture
+
+**Issue.** The original BUNDLING.md §2 plan said "tokenizer baked into
+the Core ML graph; the runtime hands raw UTF-8 strings to the model."
+That plan is **architecturally impossible**. The Core ML MIL (Model
+Intermediate Language) spec has no string ops — `coremltools` will not
+convert a graph whose input is a `String` and whose first hidden layer
+is a tokenizer. Verified by CRS Arxiv/OSS scout pass on 2026-05-22 and
+by Apple's own ml-stable-diffusion / WhisperKit / HuggingFace Core ML
+exporters, all of which use **external tokenization + token-IDs input**.
+
+**Resolution (CEO ratified 2026-05-22).**
+
+1. **Tokenizer moves out of the Core ML graph and into Rust.** The
+   `adapters/macos/mci-embed-coreml` crate links the HuggingFace
+   `tokenizers` crate (Apache-2.0, `version = "0.20"`,
+   `default-features = false`, feature `onig`). The
+   `Snowflake/snowflake-arctic-embed-s` `tokenizer.json` (~700 KB) is
+   committed at `adapters/macos/mci-embed-coreml/resources/tokenizer.json`
+   and embedded into the binary at compile time via `include_bytes!`.
+   No first-launch download — enterprise air-gap + MDM deploy customers
+   must work zero-network.
+2. **The Core ML graph accepts Int32 `input_ids` + `attention_mask`**,
+   both shape `[1, 128]`. CLS-pool + L2-normalize move *inside* the
+   graph (traced as `torch.select(...,1,0)` + `F.normalize(p=2,dim=-1)`,
+   converted to MIL slice + l2_norm). The Rust runtime reads a finished
+   unit vector at the output — no Rust-side post-processing on the
+   primary backend.
+3. **INT8 quantization retained.** Pipeline tradeoff: keep the size
+   win, gate the quality with a regression test. The Rust
+   `tests/quality.rs` cosine-similarity test against a 50-sentence
+   Python FP32 reference fixture is the gate: per-row cosine
+   `>= 0.999` keeps INT8; a failure flips the build to FP16 (no
+   `linear_quantize_weights` step) as the documented fallback.
+4. **No HuggingFace publish until post-v2.0.** The converted
+   `.mlpackage` ships only inside the notarized signed app bundle;
+   publishing the int8-quantized artifact to a third-party hub before
+   product/legal review is out of scope for v1.
+5. **The `mci-brain::arctic_embed_s::ArcticEmbedSEmbedder` wrapper
+   keeps its L2-normalize step** as defense-in-depth for alternate
+   backends (test fakes, future Windows ONNX, `NLEmbedding` fallback).
+   Re-normalizing a unit vector is an idempotent no-op within float
+   precision; the wrapper-level invariant `||v|| = 1` stays binding.
+
+**Files / artifacts affected.**
+
+- `BUNDLING.md` §2 — schema table updated to two-Int32-input + one
+  Float32-output.
+- `scripts/convert_embedder.py` — CLS-pool + L2-normalize moved inside
+  the traced `EmbedWrapper`, `--fixtures` flag added to write the
+  Python FP32 reference, `--tokenizer` flag verifies the bundled
+  resource is present, env pins documented in the script header.
+- `adapters/macos/mci-embed-coreml/src/lib.rs` — `CoreMLBackend` now
+  owns an `Arc<WordPieceTokenizer>`, accepts two Int32 input features
+  via MLMultiArray, no String input.
+- `adapters/macos/mci-embed-coreml/src/tokenizer.rs` (new) — bundled
+  `WordPieceTokenizer` over `include_bytes!` resource.
+- `adapters/macos/mci-embed-coreml/tests/quality.rs` (new) —
+  cosine-similarity regression vs the Python reference; gates the
+  INT8 vs FP16 decision.
+
+**Not changed.** ADR-0011's core decision (model = `snowflake-arctic-embed-s`,
+dim = 384, prefix discipline on the wrapper, ANE compute units, the
+scaling ladder) is unchanged. This erratum only corrects the *runtime
+plumbing* between Rust and the Core ML graph.

@@ -698,17 +698,27 @@ fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     if let Some(p) = &env_path {
         candidates.push(p.clone());
     }
-    // Bundle.module resource path (SwiftPM / Xcode build layout)
-    candidates.push(
-        home.join("Applications/MCICaptureHelper.app/Contents/Resources/arctic-embed-s.mlpackage"),
-    );
-    // Executable-relative path
+    // Hippocampus.app bundle path (per ADR-0028 §4 — embedder bundled in
+    // Contents/Resources/Models/ as produced by build-app.sh + Wave 16).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
+            // exe at Contents/MacOS/mci-agent → Contents/Resources/Models/
+            candidates.push(dir.join("../Resources/Models/ArcticEmbedS_INT8.mlmodelc"));
+            candidates.push(dir.join("../Resources/Models/ArcticEmbedS_INT8.mlpackage"));
+            // Dev/legacy paths (executable-relative)
+            candidates.push(dir.join("ArcticEmbedS_INT8.mlmodelc"));
+            candidates.push(dir.join("ArcticEmbedS_INT8.mlpackage"));
             candidates.push(dir.join("arctic-embed-s.mlpackage"));
             candidates.push(dir.join("../Resources/arctic-embed-s.mlpackage"));
         }
     }
+    // Repo-root dev paths (when running mci-agent from cargo target)
+    candidates.push(home.join("Documents/GitHub/mci/models/ArcticEmbedS_INT8.mlmodelc"));
+    candidates.push(home.join("Documents/GitHub/mci/models/ArcticEmbedS_INT8.mlpackage"));
+    // Old MCICaptureHelper.app path kept for legacy installs
+    candidates.push(
+        home.join("Applications/MCICaptureHelper.app/Contents/Resources/arctic-embed-s.mlpackage"),
+    );
 
     let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
     let (backend, is_real) = load_backend_or_fallback(&path_refs);

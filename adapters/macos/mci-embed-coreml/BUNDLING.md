@@ -23,22 +23,40 @@ the app bundle's `Resources/` directory.
 - **Source:** <https://huggingface.co/Snowflake/snowflake-arctic-embed-s>
 - **ADR:** [`docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md`](../../../docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md)
 
-## 2. Expected `.mlpackage` schema
+## 2. Expected `.mlpackage` schema (Wave-17, corrected)
 
 The runtime (`CoreMLBackend` in `src/lib.rs`) expects the model to expose
-exactly one input feature and one output feature:
+two Int32 input features (`input_ids` + `attention_mask`) and one
+Float32 output feature (`embedding`):
 
-| Direction | Feature name | `MLFeatureType` | dtype             | Shape          |
-|-----------|--------------|-----------------|-------------------|----------------|
-| Input     | `text`       | `String`        | UTF-8 NSString    | scalar         |
-| Output    | `embedding`  | `MultiArray`    | `Float32`         | `[384]` or `[1, 384]` |
+| Direction | Feature name      | `MLFeatureType` | dtype     | Shape          |
+|-----------|-------------------|-----------------|-----------|----------------|
+| Input     | `input_ids`       | `MultiArray`    | `Int32`   | `[1, 128]`     |
+| Input     | `attention_mask`  | `MultiArray`    | `Int32`   | `[1, 128]`     |
+| Output    | `embedding`       | `MultiArray`    | `Float32` | `[384]` (L2-normalized in graph) |
 
-The tokenizer is baked into the model graph via `coremltools` (see §3),
-so the runtime hands raw UTF-8 strings to the model — no tokenizer
-integration is required in Rust. If a future conversion script changes
-the input feature type to `MultiArray<Int32>` (raw token ids), the
-runtime will fail `CoreMLBackend::open()` with a clear schema-mismatch
-diagnostic (covered by the verification in `verify_schema()`).
+The CLS-pool and L2-normalize ops are inside the Core ML graph — the
+Rust side reads the output directly as a unit vector with no
+post-processing.
+
+**Wave-17 architectural pivot.** The original "tokenizer baked into
+the Core ML graph; the runtime hands raw UTF-8 strings to the model"
+plan was architecturally impossible — the Core ML MIL (Model
+Intermediate Language) spec has no string ops, so `coremltools` will
+not convert a graph whose input is a `String` and whose first hidden
+layer is a tokenizer. CRS Arxiv/OSS scout verified this on 2026-05-22,
+and the CEO ratified the pivot the same day. Industry-standard pattern
+(Apple `ml-stable-diffusion`, WhisperKit, HuggingFace's own Core ML
+exporters): tokenize on the host, pass token-IDs into the graph.
+
+Tokenization now happens in Rust via the HuggingFace `tokenizers` crate
+against the `Snowflake/snowflake-arctic-embed-s` `tokenizer.json`,
+which is bundled in this crate at `resources/tokenizer.json` and
+embedded into `mci-agent` / `Hippocampus.app` at compile time via
+`include_bytes!`. Zero runtime filesystem dependency.
+
+See the ADR-0011 erratum (2026-05-22) for the full architectural
+rationale.
 
 ## 3. Conversion recipe
 

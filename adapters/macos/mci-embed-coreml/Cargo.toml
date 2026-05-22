@@ -23,6 +23,17 @@ workspace = true
 [dependencies]
 mci-brain = { path = "../../../core/brain" }
 thiserror = "1"
+# HuggingFace `tokenizers` crate — Apache-2.0. We use it solely as a Rust-side
+# WordPiece runtime: load `tokenizer.json` (bundled in this crate's binary via
+# `include_bytes!`), encode strings to `input_ids` + `attention_mask` Int32
+# arrays. Core ML cannot express tokenization as tensor ops (no string ops in
+# the MIL spec), so the canonical pattern is external tokenization + token-IDs
+# input to the Core ML graph. See Wave 17 PR for the architectural pivot from
+# the prior "tokenizer baked into Core ML graph" plan documented in BUNDLING.md.
+#
+# `default-features = false` keeps the dep surface minimal. The `onig` feature
+# provides the Oniguruma regex backend that BERT-family pretokenizers need.
+tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
 
 # macOS-only deps — objc2 / Core ML bindings. Gating here means a Linux
 # `cargo build --workspace` does not download or compile them. Combined
