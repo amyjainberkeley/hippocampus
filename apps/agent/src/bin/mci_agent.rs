@@ -61,6 +61,7 @@ enum Mode {
     /// they fall into the non-health counter (legacy behaviour).
     DrainStdin {
         db_path: PathBuf,
+        strict: bool,
     },
     HealthSummary {
         window_seconds: u64,
@@ -104,6 +105,7 @@ fn parse_args(argv: &[String]) -> Args {
     let mut mode_kind = ModeKind::Help;
     let mut window_seconds = DEFAULT_HEALTH_SUMMARY_WINDOW_SECONDS;
     let mut db_path: Option<PathBuf> = None;
+    let mut strict = false;
 
     let mut i = 1;
     while i < argv.len() {
@@ -121,6 +123,7 @@ fn parse_args(argv: &[String]) -> Args {
                 i += 1;
             }
             "--drain-stdin" => mode_kind = ModeKind::DrainStdin,
+            "--strict" => strict = true,
             "--health-summary" => mode_kind = ModeKind::HealthSummary,
             "mcp-serve" => mode_kind = ModeKind::McpServe,
             "register-mcp" => mode_kind = ModeKind::RegisterMcp,
@@ -150,6 +153,7 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::Version => Mode::Version,
         ModeKind::DrainStdin => Mode::DrainStdin {
             db_path: resolved_db_path.clone(),
+            strict,
         },
         ModeKind::HealthSummary => Mode::HealthSummary { window_seconds },
         ModeKind::McpServe => Mode::McpServe {
@@ -194,6 +198,8 @@ fn print_usage() {
         \x20 --db-path PATH             default $MCI_DB_PATH or\n\
         \x20                            ~/Library/Application Support/MCI/mci.sqlite\n\
         \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n\
+        \x20 --strict                   (with --drain-stdin) exit non-zero if brain cannot\n\
+        \x20                            be opened, instead of falling back to health-only.\n\
         \n\
         Env:\n\
         \x20 MCI_DB_PATH                brain SQLCipher path (--drain-stdin + mcp-serve)\n\
@@ -246,7 +252,7 @@ async fn main() -> ExitCode {
             print_usage();
             ExitCode::SUCCESS
         }
-        Mode::DrainStdin { db_path } => {
+        Mode::DrainStdin { db_path, strict } => {
             let (device_id, source) = match load_or_generate(args.device_id_path.clone()).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -276,147 +282,163 @@ async fn main() -> ExitCode {
             // Shutdown channel coordinates both halves on SIGINT/SIGTERM.
             let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-            let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> = match std::env::var(
-                "MCI_DB_KEY_HEX",
-            ) {
-                Ok(key_hex) => match decode_hex32(&key_hex) {
-                    Some(key_bytes) => {
-                        if let Some(parent) = db_path.parent() {
-                            if !parent.exists() {
-                                if let Err(e) = std::fs::create_dir_all(parent) {
-                                    eprintln!(
-                                        "mci-agent: create_dir_all({}): {e}",
-                                        parent.display()
-                                    );
-                                    return ExitCode::from(20);
+            let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> =
+                match resolve_key_hex() {
+                    Some(key_hex) => match decode_hex32(&key_hex) {
+                        Some(key_bytes) => {
+                            if let Some(parent) = db_path.parent() {
+                                if !parent.exists() {
+                                    if let Err(e) = std::fs::create_dir_all(parent) {
+                                        eprintln!(
+                                            "mci-agent: create_dir_all({}): {e}",
+                                            parent.display()
+                                        );
+                                        return ExitCode::from(20);
+                                    }
                                 }
                             }
-                        }
-                        let key = DbKey::from_bytes(key_bytes);
-                        match SqlCipherBrainStore::new(&db_path, &key) {
-                            Ok(store) => {
-                                let store = Arc::new(store);
-                                // P3.8: load the embedder backend. Core ML if
-                                // .mlpackage found, zero-vector fallback otherwise.
-                                let embedder = load_embedder_backend();
-                                let pump = BrainPump::new(
-                                    Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
-                                    None, // ingest-time embed stays None; idle-batch handles it
-                                );
-                                eprintln!(
+                            let key = DbKey::from_bytes(key_bytes);
+                            match SqlCipherBrainStore::new(&db_path, &key) {
+                                Ok(store) => {
+                                    let store = Arc::new(store);
+                                    let embedder = load_embedder_backend();
+                                    let pump = BrainPump::new(
+                                        Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
+                                        None,
+                                    );
+                                    eprintln!(
                                         "mci-agent: brain ingest + idle-batch enabled. db={} embedder={}",
                                         db_path.display(),
                                         if embedder.1 { "CoreML" } else { "zero-fallback" },
                                     );
 
-                                // Spawn idle-batch worker alongside the drain loop.
-                                let worker_store = Arc::clone(&store);
-                                let worker_embedder = embedder.0;
-                                let worker_shutdown = shutdown_rx.clone();
-                                tokio::spawn(async move {
-                                    match idle_batch::run_idle_batch_worker(
-                                        worker_store,
-                                        worker_embedder,
-                                        32, // batch_size
-                                        std::time::Duration::from_secs(5),
-                                        worker_shutdown,
-                                    )
-                                    .await
-                                    {
-                                        Ok(stats) => {
-                                            eprintln!(
+                                    let worker_store = Arc::clone(&store);
+                                    let worker_embedder = embedder.0;
+                                    let worker_shutdown = shutdown_rx.clone();
+                                    tokio::spawn(async move {
+                                        match idle_batch::run_idle_batch_worker(
+                                            worker_store,
+                                            worker_embedder,
+                                            32,
+                                            std::time::Duration::from_secs(5),
+                                            worker_shutdown,
+                                        )
+                                        .await
+                                        {
+                                            Ok(stats) => {
+                                                eprintln!(
                                                     "mci-agent: idle-batch exited. embedded={} batches={} embed_errors={} store_errors={}",
                                                     stats.events_embedded, stats.batches_run,
                                                     stats.embed_errors, stats.store_errors,
                                                 );
+                                            }
+                                            Err(e) => {
+                                                eprintln!("mci-agent: idle-batch error: {e}");
+                                            }
                                         }
-                                        Err(e) => {
-                                            eprintln!("mci-agent: idle-batch error: {e}");
-                                        }
-                                    }
-                                });
+                                    });
 
-                                // Spawn episode-segmenter worker alongside idle-batch.
-                                let ep_store = Arc::clone(&store);
-                                let ep_shutdown = shutdown_rx.clone();
-                                tokio::spawn(async move {
-                                    let segmenter = Arc::new(
-                                        mci_brain::episode_segmenter::HeuristicEpisodeSegmenter::new(),
-                                    );
-                                    match episode_worker::run_episode_worker(
-                                        ep_store,
-                                        segmenter,
-                                        64, // batch_size
-                                        std::time::Duration::from_secs(5),
-                                        ep_shutdown,
-                                    )
-                                    .await
-                                    {
-                                        Ok(stats) => {
-                                            eprintln!(
-                                                "mci-agent: episode-worker exited. assigned={} created={} batches={}",
-                                                stats.events_assigned, stats.episodes_created,
-                                                stats.batches_run,
-                                            );
+                                    let ep_store = Arc::clone(&store);
+                                    let ep_shutdown = shutdown_rx.clone();
+                                    tokio::spawn(async move {
+                                        let segmenter = Arc::new(
+                                            mci_brain::episode_segmenter::HeuristicEpisodeSegmenter::new(),
+                                        );
+                                        match episode_worker::run_episode_worker(
+                                            ep_store,
+                                            segmenter,
+                                            64,
+                                            std::time::Duration::from_secs(5),
+                                            ep_shutdown,
+                                        )
+                                        .await
+                                        {
+                                            Ok(stats) => {
+                                                eprintln!(
+                                                    "mci-agent: episode-worker exited. assigned={} created={} batches={}",
+                                                    stats.events_assigned, stats.episodes_created,
+                                                    stats.batches_run,
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!("mci-agent: episode-worker error: {e}");
+                                            }
                                         }
-                                        Err(e) => {
-                                            eprintln!("mci-agent: episode-worker error: {e}");
-                                        }
-                                    }
-                                });
+                                    });
 
-                                // Spawn retention-purger daily cron (ADR-0017 §4).
-                                let retention_store = Arc::clone(&store);
-                                let retention_shutdown = shutdown_rx.clone();
-                                let retention_json = default_retention_json_path();
-                                tokio::spawn(async move {
-                                    match retention_worker::run_retention_worker(
-                                        retention_store,
-                                        retention_json,
-                                        std::time::Duration::from_secs(86_400), // 24h
-                                        retention_shutdown,
-                                    )
-                                    .await
-                                    {
-                                        Ok(stats) => {
-                                            eprintln!(
-                                                "mci-agent: retention worker exited. cycles={} events_deleted={} vectors_deleted={} episodes_deleted={} errors={}",
-                                                stats.cycles_run, stats.total_events_deleted,
-                                                stats.total_vectors_deleted, stats.total_episodes_deleted,
-                                                stats.cycle_errors,
-                                            );
+                                    let retention_store = Arc::clone(&store);
+                                    let retention_shutdown = shutdown_rx.clone();
+                                    let retention_json = default_retention_json_path();
+                                    tokio::spawn(async move {
+                                        match retention_worker::run_retention_worker(
+                                            retention_store,
+                                            retention_json,
+                                            std::time::Duration::from_secs(86_400),
+                                            retention_shutdown,
+                                        )
+                                        .await
+                                        {
+                                            Ok(stats) => {
+                                                eprintln!(
+                                                    "mci-agent: retention worker exited. cycles={} events_deleted={} vectors_deleted={} episodes_deleted={} errors={}",
+                                                    stats.cycles_run, stats.total_events_deleted,
+                                                    stats.total_vectors_deleted, stats.total_episodes_deleted,
+                                                    stats.cycle_errors,
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!("mci-agent: retention worker error: {e}");
+                                            }
                                         }
-                                        Err(e) => {
-                                            eprintln!("mci-agent: retention worker error: {e}");
-                                        }
-                                    }
-                                });
+                                    });
 
-                                Some((pump, store))
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                        "mci-agent: open brain at {}: {e}. Falling back to health-only drain.",
-                                        db_path.display()
-                                    );
-                                None
+                                    Some((pump, store))
+                                }
+                                Err(e) => {
+                                    eprintln!("\n========================================================");
+                                    eprintln!("WARNING: BRAIN OPEN FAILED — CAPTURE IS NOT BEING SAVED");
+                                    eprintln!("========================================================");
+                                    eprintln!("  Error: {e}");
+                                    eprintln!("  Path:  {}", db_path.display());
+                                    eprintln!();
+                                    eprintln!("  Hippocampus is running but your screen activity is NOT");
+                                    eprintln!("  being stored in the brain. Possible causes:");
+                                    eprintln!("    * Stale brain encrypted with old key");
+                                    eprintln!("    * Wrong MCI_DB_KEY_HEX env var");
+                                    eprintln!("    * Permissions issue on brain file");
+                                    eprintln!();
+                                    eprintln!("  To reset: quit Hippocampus.app, delete");
+                                    eprintln!("  ~/Library/Application Support/MCI/mci.sqlite + dev.key,");
+                                    eprintln!("  then relaunch the app to start fresh.");
+                                    eprintln!("========================================================\n");
+                                    if strict {
+                                        return ExitCode::from(21);
+                                    }
+                                    None
+                                }
                             }
                         }
-                    }
+                        None => {
+                            eprintln!(
+                                "mci-agent: brain key must be 64 hex chars (32 bytes). Falling back to health-only drain."
+                            );
+                            if strict {
+                                return ExitCode::from(22);
+                            }
+                            None
+                        }
+                    },
                     None => {
                         eprintln!(
-                                "mci-agent: MCI_DB_KEY_HEX must be 64 hex chars (32 bytes). Falling back to health-only drain."
-                            );
+                            "mci-agent: no brain key found (MCI_DB_KEY_HEX not set, no dev.key). \
+                             Health-only drain. Set the key or launch Hippocampus.app to initialize."
+                        );
+                        if strict {
+                            return ExitCode::from(23);
+                        }
                         None
                     }
-                },
-                Err(_) => {
-                    eprintln!(
-                            "mci-agent: MCI_DB_KEY_HEX not set — health-only drain. Set it to write OCR events into the encrypted brain."
-                        );
-                    None
-                }
-            };
+                };
 
             let drain_result = match brain_pump.as_ref() {
                 Some((pump, _store)) => {
@@ -483,17 +505,36 @@ async fn main() -> ExitCode {
     }
 }
 
-/// Register Hippocampus as an MCP server in Claude Code's user-level
-/// settings (`~/.claude/settings.json`). Merges the `hippocampus` entry
-/// under `mcpServers` without clobbering other servers.
+/// Read the dev.key file (64-char hex) from
+/// `~/Library/Application Support/MCI/dev.key`.
+fn read_dev_key_hex() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let path = PathBuf::from(home).join("Library/Application Support/MCI/dev.key");
+    std::fs::read_to_string(&path)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Resolve the brain key: env var first, then dev.key file.
+fn resolve_key_hex() -> Option<String> {
+    std::env::var("MCI_DB_KEY_HEX")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(read_dev_key_hex)
+}
+
+/// Register Hippocampus as an MCP server in Claude Code's MCP config
+/// (`~/.claude.json`). Merges the `hippocampus` entry under
+/// `mcpServers` without clobbering other servers. Includes an `env`
+/// block with `MCI_DB_KEY_HEX` when the dev.key file exists.
 fn register_mcp() -> Result<(), String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("cannot resolve own binary path: {e}"))?;
     let exe_str = exe.to_str().ok_or("binary path is not valid UTF-8")?;
 
     let home = std::env::var("HOME").map_err(|_| "HOME not set")?;
-    let claude_dir = PathBuf::from(&home).join(".claude");
-    let settings_path = claude_dir.join("settings.json");
+    let settings_path = PathBuf::from(&home).join(".claude.json");
 
     let mut root: serde_json::Map<String, serde_json::Value> = if settings_path.exists() {
         let content = std::fs::read_to_string(&settings_path)
@@ -501,17 +542,28 @@ fn register_mcp() -> Result<(), String> {
         serde_json::from_str(&content)
             .map_err(|e| format!("parse {}: {e}", settings_path.display()))?
     } else {
-        if !claude_dir.exists() {
-            std::fs::create_dir_all(&claude_dir)
-                .map_err(|e| format!("create_dir_all({}): {e}", claude_dir.display()))?;
-        }
         serde_json::Map::new()
     };
 
-    let hippocampus_entry = serde_json::json!({
+    let key_path = PathBuf::from(&home).join("Library/Application Support/MCI/dev.key");
+    let key_hex: Option<String> = std::fs::read_to_string(&key_path)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()));
+
+    let mut hippocampus_entry = serde_json::json!({
+        "type": "stdio",
         "command": exe_str,
         "args": ["mcp-serve"]
     });
+    if let Some(k) = &key_hex {
+        hippocampus_entry["env"] = serde_json::json!({"MCI_DB_KEY_HEX": k});
+    } else {
+        eprintln!(
+            "Note: brain key not yet generated at {}. Launch Hippocampus.app once to initialize, then re-run `mci-agent register-mcp`.",
+            key_path.display()
+        );
+    }
 
     let servers = root
         .entry("mcpServers")
@@ -519,8 +571,10 @@ fn register_mcp() -> Result<(), String> {
     if let Some(obj) = servers.as_object_mut() {
         if obj.contains_key("hippocampus") {
             let existing = &obj["hippocampus"];
-            if existing.get("command").and_then(|v| v.as_str()) == Some(exe_str) {
-                println!("Hippocampus already registered with Claude Code (path unchanged).");
+            if existing.get("command").and_then(|v| v.as_str()) == Some(exe_str)
+                && existing.get("env") == hippocampus_entry.get("env")
+            {
+                println!("Hippocampus already registered with Claude Code (path and key unchanged).");
                 return Ok(());
             }
         }
@@ -556,10 +610,11 @@ fn register_mcp() -> Result<(), String> {
 /// surface; the env-var path stays as a developer / CI fallback. See
 /// `docs/claude-code-mcp-setup.md` for the full operator note.
 async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
-    let Ok(key_hex) = std::env::var("MCI_DB_KEY_HEX") else {
+    let Some(key_hex) = resolve_key_hex() else {
         eprintln!(
-            "mci-agent mcp-serve: MCI_DB_KEY_HEX not set. \
-             See docs/claude-code-mcp-setup.md."
+            "mci-agent mcp-serve: MCI_DB_KEY_HEX not set and no dev.key found at \
+             ~/Library/Application Support/MCI/dev.key. \
+             Launch Hippocampus.app once to initialize, or see docs/claude-code-mcp-setup.md."
         );
         return Err(10);
     };
