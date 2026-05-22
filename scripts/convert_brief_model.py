@@ -23,14 +23,23 @@ Note on approach:
 """
 
 import argparse
+import hashlib
+import logging
 import sys
 from pathlib import Path
 
 MODEL_REPO = "Qwen/Qwen3-1.7B"
 MAX_SEQ_LEN = 4096
 
+log = logging.getLogger("convert_brief_model")
 
-def convert(output_path: str, verify: bool = False) -> None:
+
+def convert(output_path: str, verify: bool = False, quiet: bool = False) -> None:
+    if quiet:
+        logging.basicConfig(level=logging.WARNING)
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     try:
         import coremltools as ct
         import numpy as np
@@ -38,13 +47,16 @@ def convert(output_path: str, verify: bool = False) -> None:
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as e:
         print(
-            f"Missing dependency: {e}\n"
-            "Install: pip install -r scripts/requirements-ml.txt",
+            f"ERROR: Missing dependency: {e}\n\n"
+            "Fix:\n"
+            "  pip install -r scripts/requirements-ml.txt\n\n"
+            "Required packages: coremltools>=8.0 torch>=2.2 transformers>=4.40\n"
+            "Apple Silicon recommended. ~20-40 min conversion time.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    print(f"Loading {MODEL_REPO}...")
+    log.info("Loading %s...", MODEL_REPO)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_REPO, torch_dtype=torch.float16, trust_remote_code=True
@@ -52,7 +64,7 @@ def convert(output_path: str, verify: bool = False) -> None:
     model.eval()
 
     # Export path: trace the model with a fixed sequence length input
-    print("Tracing model...")
+    log.info("Tracing model...")
     sample_len = 32
     sample_ids = torch.randint(0, 1000, (1, sample_len), dtype=torch.long)
 
@@ -73,7 +85,7 @@ def convert(output_path: str, verify: bool = False) -> None:
     with torch.no_grad():
         traced = torch.jit.trace(wrapper, (sample_ids,))
 
-    print("Converting to Core ML...")
+    log.info("Converting to Core ML...")
     try:
         mlmodel = ct.convert(
             traced,
@@ -89,7 +101,7 @@ def convert(output_path: str, verify: bool = False) -> None:
             minimum_deployment_target=ct.target.macOS15,
         )
     except Exception as e:
-        print(f"Variable-length conversion failed ({e}), trying fixed length...")
+        log.info("Variable-length conversion failed (%s), trying fixed length...", e)
         mlmodel = ct.convert(
             traced,
             inputs=[
@@ -105,7 +117,7 @@ def convert(output_path: str, verify: bool = False) -> None:
         )
 
     # INT4 palettization per ADR-0028 §2
-    print("Applying INT4 palettization...")
+    log.info("Applying INT4 palettization...")
     try:
         op_config = ct.optimize.coreml.OpPalettizerConfig(
             mode="kmeans", nbits=4
@@ -113,47 +125,62 @@ def convert(output_path: str, verify: bool = False) -> None:
         config = ct.optimize.coreml.OptimizationConfig(global_config=op_config)
         mlmodel = ct.optimize.coreml.palettize_weights(mlmodel, config=config)
     except Exception as e:
-        print(f"Warning: INT4 palettization failed ({e}), saving FP16 model.")
+        log.warning("INT4 palettization failed (%s), saving FP16 model.", e)
 
-    print(f"Saving to {output_path}...")
+    log.info("Saving to %s...", output_path)
     mlmodel.save(output_path)
 
-    # Copy tokenizer files alongside the model
     out_dir = Path(output_path).parent
-    print(f"Saving tokenizer files to {out_dir}...")
+    log.info("Saving tokenizer files to %s...", out_dir)
     tokenizer.save_pretrained(str(out_dir))
-    # Rename tokenizer.json components to the flat format the Rust
-    # tokenizer expects (vocab.json + merges.txt)
     vocab_src = out_dir / "vocab.json"
     merges_src = out_dir / "merges.txt"
     if not vocab_src.exists():
-        # HuggingFace tokenizers may save as tokenizer.json instead
-        print("Note: vocab.json not found. Extract from tokenizer.json manually.")
+        log.info("Note: vocab.json not found. Extract from tokenizer.json manually.")
     if not merges_src.exists():
-        print("Note: merges.txt not found. Extract from tokenizer.json manually.")
+        log.info("Note: merges.txt not found. Extract from tokenizer.json manually.")
 
-    print(f"Saved: {output_path}")
+    out_p = Path(output_path)
+    if out_p.is_dir():
+        total_size = sum(f.stat().st_size for f in out_p.rglob("*") if f.is_file())
+    else:
+        total_size = out_p.stat().st_size
+    log.info("Saved: %s (%.1f MB)", output_path, total_size / 1e6)
+
+    log.info("")
+    log.info("Next steps:")
+    log.info("  1. Compile .mlpackage → .mlmodelc (if not already):")
+    log.info("     xcrun coremlcompiler compile %s models/", output_path)
+    log.info("  2. Tar.gz the .mlmodelc:")
+    log.info("     tar -czf Qwen3-1.7B-INT4.mlmodelc.tar.gz -C models Qwen3-1.7B-INT4.mlmodelc")
+    log.info("  3. Compute SHA-256:")
+    log.info("     shasum -a 256 Qwen3-1.7B-INT4.mlmodelc.tar.gz")
+    log.info("  4. Upload to HF repo amyjainberkeley/hippocampus-coreml-models")
+    log.info("  5. Update apps/hippocampus/Resources/models.json sha256 field")
 
     if verify:
-        print("Verifying...")
+        log.info("Verifying...")
         loaded = ct.models.MLModel(output_path)
         spec = loaded.get_spec()
-        print(f"  Inputs: {[i.name for i in spec.description.input]}")
-        print(f"  Outputs: {[o.name for o in spec.description.output]}")
+        log.info("  Inputs: %s", [i.name for i in spec.description.input])
+        log.info("  Outputs: %s", [o.name for o in spec.description.output])
 
         test_text = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
         test_ids = tokenizer(test_text, return_tensors="np")["input_ids"].astype(np.int32)
         pred = loaded.predict({"input_ids": test_ids})
         logits = pred["logits"]
-        print(f"  Logits shape: {logits.shape}")
+        log.info("  Logits shape: %s", logits.shape)
         next_token = int(np.argmax(logits[0, -1, :]))
         decoded = tokenizer.decode([next_token])
-        print(f"  First predicted token: {next_token} → '{decoded}'")
-        print("  Verification passed.")
+        log.info("  First predicted token: %d → '%s'", next_token, decoded)
+        log.info("  Verification passed.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--output",
         required=True,
@@ -164,8 +191,13 @@ def main():
         action="store_true",
         help="Run test inference after conversion",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress progress output (for CI)",
+    )
     args = parser.parse_args()
-    convert(args.output, args.verify)
+    convert(args.output, args.verify, args.quiet)
 
 
 if __name__ == "__main__":

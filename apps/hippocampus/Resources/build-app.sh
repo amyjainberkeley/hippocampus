@@ -130,6 +130,28 @@ if [[ -d "$FRAMEWORKS/Sparkle.framework" ]]; then
     fi
 fi
 
+# Embed ArcticEmbedS Core ML model (per ADR-0011 + ADR-0028 §4).
+# The .mlpackage is produced offline by scripts/convert_embedder.py
+# and committed locally (gitignored — too big to checkin).
+EMBEDDER_PACKAGE="$REPO_ROOT/models/ArcticEmbedS_INT8.mlpackage"
+EMBEDDER_COMPILED="$REPO_ROOT/models/ArcticEmbedS_INT8.mlmodelc"
+EMBEDDER_DEST_DIR="$RESOURCES/Models"
+
+if [[ -d "$EMBEDDER_COMPILED" ]]; then
+    echo "Bundling pre-compiled ArcticEmbedS_INT8.mlmodelc"
+    mkdir -p "$EMBEDDER_DEST_DIR"
+    cp -R "$EMBEDDER_COMPILED" "$EMBEDDER_DEST_DIR/"
+elif [[ -d "$EMBEDDER_PACKAGE" ]]; then
+    echo "Compiling ArcticEmbedS_INT8.mlpackage → .mlmodelc"
+    mkdir -p "$EMBEDDER_DEST_DIR"
+    xcrun coremlcompiler compile "$EMBEDDER_PACKAGE" "$EMBEDDER_DEST_DIR"
+else
+    echo "WARNING: ArcticEmbedS .mlpackage not found at $EMBEDDER_PACKAGE."
+    echo "  Semantic search will use zero-vector stub fallback."
+    echo "  To produce: pip install -r scripts/requirements-ml.txt && \\"
+    echo "             python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage"
+fi
+
 # Ad-hoc codesign each binary + framework + the top-level app
 echo "Codesigning..."
 codesign --force --sign - "$MACOS/MCICaptureHelper"
@@ -146,6 +168,14 @@ if otool -l "$MACOS/Hippocampus" | grep -A 2 LC_RPATH | grep -q "@executable_pat
 else
     echo "  ERROR: rpath missing — app will fail to launch"
     exit 1
+fi
+
+# Validate model bundling (non-fatal — prints warnings only)
+VERIFY_SCRIPT="$REPO_ROOT/scripts/verify-models.sh"
+if [[ -x "$VERIFY_SCRIPT" ]]; then
+    echo ""
+    echo "=== Model validation ==="
+    "$VERIFY_SCRIPT" --app "$APP" || true
 fi
 
 echo ""
