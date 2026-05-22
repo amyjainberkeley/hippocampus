@@ -7,6 +7,7 @@ struct PermissionStepView: View {
     let permissionKind: TCCPermissionKind
 
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
+    @State private var userConfirmedHelper = false
 
     private var permission: (any TCCPermission)? {
         switch permissionKind {
@@ -14,6 +15,10 @@ struct PermissionStepView: View {
         case .accessibility: return flowVM.accessibilityPermission
         case .automation: return flowVM.automationPermission
         }
+    }
+
+    private var isDualGrantStep: Bool {
+        permissionKind == .screenRecording
     }
 
     var body: some View {
@@ -31,7 +36,9 @@ struct PermissionStepView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 440)
 
-            if let perm = permission {
+            if isDualGrantStep {
+                dualGrantSection
+            } else if let perm = permission {
                 statusBadge(perm.status)
 
                 Button("Open System Settings") {
@@ -45,6 +52,96 @@ struct PermissionStepView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    @ViewBuilder
+    private var dualGrantSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Two binaries need Screen Recording permission:")
+                .font(.callout)
+                .fontWeight(.medium)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: "menubar.rectangle")
+                        .frame(width: 20)
+                    VStack(alignment: .leading) {
+                        Text("Hippocampus")
+                            .font(.body.weight(.medium))
+                        Text("The menu-bar app")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let perm = permission {
+                        statusDot(perm.status)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Image(systemName: "gearshape")
+                        .frame(width: 20)
+                    VStack(alignment: .leading) {
+                        Text("MCICaptureHelper")
+                            .font(.body.weight(.medium))
+                        Text("The capture engine (child process)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    statusDot(userConfirmedHelper ? .granted : .notRequested)
+                }
+            }
+            .padding()
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: 400)
+
+            Text("macOS evaluates each binary separately. Both must be granted.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 400)
+        }
+
+        if let perm = permission {
+            Button("Open Screen Recording Settings") {
+                perm.requestOrOpenSettings()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+
+        VStack(alignment: .leading, spacing: 6) {
+            Text("If MCICaptureHelper isn't listed:")
+                .font(.callout)
+                .fontWeight(.medium)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Click the + button in System Settings", systemImage: "plus.circle")
+                Label("Press Cmd+Shift+. to show hidden files", systemImage: "keyboard")
+                Label("Navigate to:", systemImage: "folder")
+                Text("~/Applications/Hippocampus.app/Contents/MacOS/MCICaptureHelper")
+                    .font(.system(.caption, design: .monospaced))
+                    .padding(.leading, 28)
+                    .textSelection(.enabled)
+                Label("Select it and toggle on", systemImage: "checkmark.circle")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 400)
+
+        Toggle("I granted both binaries", isOn: $userConfirmedHelper)
+            .toggleStyle(.checkbox)
+    }
+
+    @ViewBuilder
+    private func statusDot(_ status: TCCStatus) -> some View {
+        Circle()
+            .fill(statusColor(status))
+            .frame(width: 8, height: 8)
     }
 
     private var iconName: String {

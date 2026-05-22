@@ -12,6 +12,7 @@ struct StatusMenuView: View {
     @State private var briefsEnabled: Bool = UserDefaults.standard.bool(forKey: "MCIBriefsEnabled")
     @State private var showDownloadDialog = false
     @State private var mcpRegistering = false
+    @State private var showTCCResetConfirm = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,6 +73,10 @@ struct StatusMenuView: View {
                 connectToClaude()
             }
             .disabled(mcpRegistering)
+
+            Divider()
+
+            troubleshootSection
 
             Divider()
 
@@ -168,6 +173,81 @@ struct StatusMenuView: View {
         case .crashed: return .red
         default: return .secondary
         }
+    }
+
+    @ViewBuilder
+    private var troubleshootSection: some View {
+        Menu("Troubleshoot…") {
+            Button("Open Logs Folder") {
+                let logDir = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Logs/MCI")
+                NSWorkspace.shared.open(logDir)
+            }
+
+            Button("Reset TCC Permissions…") {
+                showTCCResetConfirm = true
+            }
+
+            Divider()
+
+            Button("Open Screen Recording Settings") {
+                openSettingsPane("Privacy_ScreenCapture")
+            }
+
+            Button("Open Accessibility Settings") {
+                openSettingsPane("Privacy_Accessibility")
+            }
+
+            Divider()
+
+            Button("Quit and Restart") {
+                quitAndRestart()
+            }
+        }
+        .alert("Reset TCC Permissions?", isPresented: $showTCCResetConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                resetTCCPermissions()
+            }
+        } message: {
+            Text("Will reset Screen Recording, Accessibility, and Files grants. You'll need to re-grant on next launch.")
+        }
+    }
+
+    private func openSettingsPane(_ pane: String) {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?\(pane)"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func resetTCCPermissions() {
+        let services = ["ScreenCapture", "Accessibility", "SystemPolicyAllFiles"]
+        var results: [String] = []
+        for service in services {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            proc.arguments = ["reset", service]
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                results.append("\(service): \(proc.terminationStatus == 0 ? "reset" : "failed")")
+            } catch {
+                results.append("\(service): error — \(error.localizedDescription)")
+            }
+        }
+        showAlert(title: "TCC Reset Complete", message: results.joined(separator: "\n") + "\n\nQuit and relaunch to re-grant.")
+    }
+
+    private func quitAndRestart() {
+        let bundlePath = Bundle.main.bundlePath
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = ["-c", "sleep 1 && open \"\(bundlePath)\""]
+        try? task.run()
+
+        supervisor.stop()
+        NSApp.terminate(nil)
     }
 
     private func connectToClaude() {
