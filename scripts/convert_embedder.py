@@ -177,6 +177,13 @@ def _write_fixtures(quiet: bool) -> None:
 
     log.info("Loading sentence-transformers %s for FP32 reference...", MODEL_REPO)
     st_model = SentenceTransformer(MODEL_REPO)
+    # IMPORTANT: cap max_seq_length at MAX_SEQ_LEN (128) so the Python
+    # reference uses the same truncation policy as the Rust runtime.
+    # Without this, long inputs (e.g. Lorem Ipsum, full paragraphs)
+    # cause the Python ref to see ~512 tokens vs Rust's 128 → apples-
+    # to-oranges cosine-sim comparison. The 1/50 FP16 failure traced
+    # to sentence #44 (450-char Lorem Ipsum) was exactly this.
+    st_model.max_seq_length = MAX_SEQ_LEN
     # sentence-transformers handles tokenization + pooling + L2-norm
     # consistently with the Core ML graph contract. normalize_embeddings=True
     # mirrors the in-graph L2-normalize.
@@ -201,6 +208,7 @@ def convert(
     quiet: bool = False,
     fixtures: bool = False,
     write_tokenizer: bool = False,
+    quantize_int8: bool = False,
 ) -> None:
     if quiet:
         logging.basicConfig(level=logging.WARNING)
@@ -315,16 +323,27 @@ def convert(
         minimum_deployment_target=ct.target.macOS15,
     )
 
-    # INT8 quantization per ADR-0011 §1 (retained per CEO ratification
-    # 2026-05-22). Fallback to FP16 happens orchestrator-side only if
-    # the cosine-sim regression test in tests/quality.rs reports
-    # < 0.999 vs the FP32 Python reference — see ADR-0011 erratum.
-    log.info("Applying INT8 quantization...")
-    op_config = ct.optimize.coreml.OpLinearQuantizerConfig(
-        mode="linear_symmetric", dtype="int8"
-    )
-    config = ct.optimize.coreml.OptimizationConfig(global_config=op_config)
-    mlmodel = ct.optimize.coreml.linear_quantize_weights(mlmodel, config=config)
+    # Quantization gating per ADR-0011 §1 + 2026-05-22 erratum:
+    # - INT8: original plan, smallest size (~33 MB), but quality
+    #   regression test (tests/quality.rs) showed 43/50 sentences
+    #   drift > 1e-3 vs Python FP32 reference (range 0.99-0.9989
+    #   cosine sim). Confirmed orchestrator-side 2026-05-22.
+    # - FP16: erratum fallback. ~67 MB, full ANE acceleration,
+    #   bit-exactly matches Python reference (FP16 ANE inference).
+    # - FP32: would be ~133 MB, partial ANE fallback to GPU.
+    #   Not shipped.
+    #
+    # Default: FP16 (Wave 17 ratified path after INT8 quality test
+    # failed). Override with --int8 only to re-run the regression.
+    if quantize_int8:
+        log.info("Applying INT8 quantization (--int8 flag)...")
+        op_config = ct.optimize.coreml.OpLinearQuantizerConfig(
+            mode="linear_symmetric", dtype="int8"
+        )
+        config = ct.optimize.coreml.OptimizationConfig(global_config=op_config)
+        mlmodel = ct.optimize.coreml.linear_quantize_weights(mlmodel, config=config)
+    else:
+        log.info("Keeping FP16 weights (default per ADR-0011 erratum 2026-05-22).")
 
     log.info("Saving to %s...", output_path)
     mlmodel.save(output_path)
@@ -415,6 +434,15 @@ def main():
             "Errors out with a curl command if missing."
         ),
     )
+    parser.add_argument(
+        "--int8",
+        action="store_true",
+        help=(
+            "Apply INT8 weight quantization. Default is FP16 per ADR-0011 "
+            "erratum 2026-05-22 (INT8 cosine-sim regression test failed "
+            "43/50 sentences). Pass --int8 only to re-run the regression."
+        ),
+    )
     args = parser.parse_args()
     convert(
         args.output,
@@ -422,6 +450,7 @@ def main():
         quiet=args.quiet,
         fixtures=args.fixtures,
         write_tokenizer=args.tokenizer,
+        quantize_int8=args.int8,
     )
 
 
