@@ -192,7 +192,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let agent = Process()
         agent.executableURL = agentURL
         let dbPathStr = dbPath.path
-        agent.arguments = ["--drain-stdin", "--db-path", dbPathStr]
+        agent.arguments = ["--drain-stdin", "--strict", "--db-path", dbPathStr]
         agent.standardInput = bridgePipe
         var agentEnv = ProcessInfo.processInfo.environment
         agentEnv["MCI_DB_KEY_HEX"] = keyHex
