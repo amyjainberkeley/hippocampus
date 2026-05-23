@@ -22,6 +22,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var healthTimer: Timer?
     private var brainStatsTask: Task<Void, Never>?
     private var currentKeyHex: String?
+    private var safariInboxReader: SafariInboxReader?
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -43,6 +44,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             try spawnChildren(keyHex: keyHex)
             state = .running
             startHealthPolling()
+            startSafariInboxReader()
             logger.info("supervisor: started. helper PID \(self.helperProcess?.processIdentifier ?? -1), agent PID \(self.agentProcess?.processIdentifier ?? -1)")
         } catch {
             state = .crashed(reason: error.localizedDescription)
@@ -51,6 +53,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func stop() {
+        safariInboxReader?.stop()
+        safariInboxReader = nil
+
         retryTask?.cancel()
         retryTask = nil
         brainStatsTask?.cancel()
@@ -269,6 +274,18 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     public func setCrashReportOptedIn(_ value: Bool) {
         try? runtimeConfig.setCrashReportOptedIn(value)
+    }
+
+    private func startSafariInboxReader() {
+        let reader = SafariInboxReader()
+        reader.start()
+        safariInboxReader = reader
+        logger.info("supervisor: safari inbox reader started")
+    }
+
+    public var safariInboxStats: (forwarded: UInt64, droppedDenylist: UInt64, droppedSecret: UInt64, failedParse: UInt64)? {
+        guard let r = safariInboxReader else { return nil }
+        return (r.forwarded, r.droppedDenylist, r.droppedSecret, r.failedParse)
     }
 
     private func startHealthPolling() {

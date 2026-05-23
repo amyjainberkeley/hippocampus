@@ -27,13 +27,14 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use mci_agent::brain_ingest::BrainPump;
+use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
 use mci_agent::episode_worker;
 use mci_agent::idle_batch;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
+use mci_agent::page_content::PageContentListener;
 use mci_agent::retention_worker;
 use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
 use mci_agent::panic_uploader::{self, PanicUploader};
@@ -82,6 +83,11 @@ fn default_device_id_path() -> PathBuf {
 
 fn default_log_path() -> PathBuf {
     HealthLogConfig::default_for_user().path
+}
+
+fn page_content_socket_path() -> PathBuf {
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    home.join("Library/Application Support/MCI/page_content.sock")
 }
 
 fn default_db_path() -> PathBuf {
@@ -439,6 +445,37 @@ async fn main() -> ExitCode {
                         None
                     }
                 };
+
+            // Page-content socket listener — accepts PageContentEvent
+            // wire frames from the native messaging host (Chromium) and
+            // the container-app Safari inbox reader. Shares the store
+            // with the main drain loop via a second BrainPump.
+            let _pc_listener_task = if let Some((_, store)) = brain_pump.as_ref() {
+                let sock = page_content_socket_path();
+                match PageContentListener::bind(&sock) {
+                    Ok((listener, unix_listener)) => {
+                        let pc_pump: Arc<dyn BrainIngestor> = Arc::new(BrainPump::new(
+                            Arc::clone(store) as Arc<dyn mci_brain::BrainStore>,
+                            None,
+                        ));
+                        eprintln!(
+                            "mci-agent: page-content listener on {}",
+                            sock.display(),
+                        );
+                        Some(tokio::spawn(async move {
+                            listener.run(unix_listener, pc_pump).await;
+                        }))
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "mci-agent: page-content listener bind failed: {e}"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
 
             let drain_result = match brain_pump.as_ref() {
                 Some((pump, _store)) => {

@@ -17,8 +17,16 @@
 //!   brain ingestor and populating the cache.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use mci_core::ipc::reader::FrameReader;
+use mci_core::ipc::Message;
+use tokio::net::UnixListener;
+
+use crate::brain_ingest::{BrainIngestor, IngestOutcome};
 
 const DEFAULT_TTL: Duration = Duration::from_secs(5);
 
@@ -112,6 +120,96 @@ impl PageContentCache {
 impl Default for PageContentCache {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Accepts connections on a UNIX domain socket and reads `PageContentEvent`
+/// wire frames, forwarding them to the brain ingestor.
+///
+/// Both the Chromium native messaging host and the Safari container-app
+/// inbox reader connect to this socket to deliver page content events.
+pub struct PageContentListener {
+    sock_path: PathBuf,
+    frames_ingested: AtomicU64,
+}
+
+impl PageContentListener {
+    /// Create a new listener bound to `sock_path`. Removes any stale socket
+    /// file left by a prior run.
+    ///
+    /// # Errors
+    /// Returns an IO error if the socket cannot be bound.
+    pub fn bind(sock_path: &Path) -> std::io::Result<(Self, UnixListener)> {
+        let _ = std::fs::remove_file(sock_path);
+        if let Some(parent) = sock_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let listener = UnixListener::bind(sock_path)?;
+        Ok((
+            Self {
+                sock_path: sock_path.to_owned(),
+                frames_ingested: AtomicU64::new(0),
+            },
+            listener,
+        ))
+    }
+
+    /// Number of frames successfully ingested across all connections.
+    #[must_use]
+    pub fn frames_ingested(&self) -> u64 {
+        self.frames_ingested.load(Ordering::Relaxed)
+    }
+
+    /// Accept connections in a loop and feed frames to `brain`. Runs until
+    /// the listener is dropped or the task is cancelled.
+    pub async fn run(&self, listener: UnixListener, brain: Arc<dyn BrainIngestor>) {
+        loop {
+            let (stream, _) = match listener.accept().await {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("page-content-listener: accept error: {e}");
+                    continue;
+                }
+            };
+            let brain = Arc::clone(&brain);
+            let counter = &self.frames_ingested;
+            let mut reader = FrameReader::new();
+            let mut stream = stream;
+            loop {
+                match reader.read_frame(&mut stream).await {
+                    Ok(Some(frame)) => {
+                        if matches!(frame.message, Message::PageContentEvent { .. }) {
+                            match brain.ingest_ocr_event(&frame.message) {
+                                Ok(IngestOutcome::Stored { .. }) => {
+                                    counter.fetch_add(1, Ordering::Relaxed);
+                                }
+                                Ok(IngestOutcome::NotOcrEvent) => {}
+                                Err(e) => {
+                                    eprintln!("page-content-listener: ingest error: {e}");
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        eprintln!("page-content-listener: read error: {e}");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Socket path this listener is bound to.
+    #[must_use]
+    pub fn sock_path(&self) -> &Path {
+        &self.sock_path
+    }
+}
+
+impl Drop for PageContentListener {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.sock_path);
     }
 }
 

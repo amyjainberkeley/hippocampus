@@ -36,7 +36,7 @@ pub mod supervisor;
 pub mod wall_clock;
 
 pub use brain_ingest::{BrainIngestor, BrainPump, IngestError, IngestOutcome, NoopBrainIngestor};
-pub use page_content::{CachedPageContent, PageContentCache};
+pub use page_content::{CachedPageContent, PageContentCache, PageContentListener};
 pub use device_id::{load_or_generate, DeviceId, DeviceIdError, DeviceIdSource};
 pub use health_log::{HealthLog, HealthLogConfig, HealthLogError, HealthLogRecord};
 pub use health_pump::{pump_one, PumpError};
