@@ -36,7 +36,24 @@ Hippocampus.app/
             manifest.json
             background.js
             content.js
+            icons/
+              toolbar-16.png … toolbar-128.png
 ```
+
+## Toolbar icon
+
+The toolbar icon set under `icons/` is generated from
+`assets/branding/AppIcon.iconset/icon_512x512.png` so Safari, Chromium, and the
+macOS app present the same mark. Regenerate after any change to the source
+icon:
+
+```bash
+python3 scripts/generate-extension-toolbar-icons.py
+```
+
+`build-app.sh` copies `icons/` into the `.appex` `Resources/icons/` during
+assembly. Adding files to `Resources/` is not signing-sensitive, so the
+existing ad-hoc / Developer ID codesign step needs no change.
 
 ## Building
 
@@ -105,5 +122,3 @@ invariant from the Chromium extension's `"incognito": "split"` manifest key.
   is an independent message → file write.
 - **Developer ID required for distribution**: Safari will not load unsigned
   `.appex` bundles outside of local development.
-- **No icon yet**: the extension uses Safari's default extension icon. A proper
-  toolbar icon should be added to the manifest and Resources.
