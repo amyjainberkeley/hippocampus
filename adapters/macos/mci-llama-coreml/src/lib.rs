@@ -30,13 +30,15 @@
 //! KV cache optimization is handled at the Core ML graph level by the
 //! conversion script (stateful model via `coremltools` 8.x).
 //!
-//! # Expected `.mlmodelc` schema
+//! # Expected `.mlmodelc` schema (convert_brief_model.py, path a)
 //!
-//! - **Input feature:** `"input_ids"`, `MultiArray` `Int32` `[1, seq_len]`
-//! - **Output feature:** `"logits"`, `MultiArray` `Float32` `[1, seq_len, vocab_size]`
+//! - **Input:** `"input_ids"`, `MultiArray` `Int32` `[1, SEQ_LEN]`
+//! - **Input:** `"attention_mask"`, `MultiArray` `Int32` `[1, SEQ_LEN]`
+//! - **Output:** `"logits"`, `MultiArray` `Float16` `[1, SEQ_LEN, VOCAB_SIZE]`
 //!
-//! Stateful models manage KV cache internally; the Rust code does not
-//! pass cache tensors explicitly.
+//! SEQ_LEN is fixed at conversion time (default 2048). The model is
+//! stateless — no KV cache. The Rust code pads shorter sequences and
+//! constructs an attention_mask (1 = real token, 0 = padding).
 
 pub mod tokenizer;
 
@@ -55,6 +57,7 @@ use objc2_core_ml::{
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL};
 
 const MAX_OUTPUT_TOKENS: usize = 512;
+const DEFAULT_SEQ_LEN: usize = 2048;
 const DEFAULT_TEMPERATURE: f32 = 0.7;
 const DEFAULT_TOP_P: f32 = 0.9;
 
@@ -62,6 +65,7 @@ const DEFAULT_TOP_P: f32 = 0.9;
 pub struct Qwen3CoreMLBackend {
     model: Retained<MLModel>,
     tokenizer: BpeTokenizer,
+    seq_len: usize,
 }
 
 impl std::fmt::Debug for Qwen3CoreMLBackend {
@@ -109,6 +113,7 @@ impl Qwen3CoreMLBackend {
         let me = Self {
             model,
             tokenizer: tok,
+            seq_len: DEFAULT_SEQ_LEN,
         };
         me.verify_schema()?;
         Ok(me)
@@ -120,10 +125,17 @@ impl Qwen3CoreMLBackend {
         let outputs = unsafe { desc.outputDescriptionsByName() };
 
         let in_key = NSString::from_str("input_ids");
+        let mask_key = NSString::from_str("attention_mask");
         let out_key = NSString::from_str("logits");
 
         inputs.objectForKey(&in_key).ok_or_else(|| {
             GenerateError::Backend("model missing required input feature \"input_ids\"".into())
+        })?;
+
+        inputs.objectForKey(&mask_key).ok_or_else(|| {
+            GenerateError::Backend(
+                "model missing required input feature \"attention_mask\"".into(),
+            )
         })?;
 
         let out_desc = outputs.objectForKey(&out_key).ok_or_else(|| {
@@ -141,16 +153,29 @@ impl Qwen3CoreMLBackend {
     }
 
     /// Run a single forward pass on the given token IDs.
-    /// Returns logits for the last token position.
+    ///
+    /// Pads `input_ids` to `self.seq_len` and constructs an attention_mask
+    /// (1 for real tokens, 0 for padding). Returns logits for the last
+    /// real token position.
     #[allow(deprecated)]
     fn forward_pass(&self, input_ids: &[i32]) -> Result<Vec<f32>, GenerateError> {
-        let seq_len = input_ids.len();
+        let real_len = input_ids.len().min(self.seq_len);
 
-        // Build input_ids MLMultiArray [1, seq_len]
+        // Pad input_ids to fixed seq_len
+        let mut padded_ids = vec![0_i32; self.seq_len];
+        padded_ids[..real_len].copy_from_slice(&input_ids[..real_len]);
+
+        // Build attention_mask: 1 for real tokens, 0 for padding
+        let mut mask = vec![0_i32; self.seq_len];
+        for m in mask.iter_mut().take(real_len) {
+            *m = 1;
+        }
+
         let dim0 = NSNumber::new_i64(1);
-        let dim1 = NSNumber::new_i64(seq_len as i64);
+        let dim1 = NSNumber::new_i64(self.seq_len as i64);
         let shape = NSArray::from_slice(&[&*dim0, &*dim1]);
 
+        // Build input_ids MLMultiArray [1, seq_len]
         let input_arr = unsafe {
             MLMultiArray::initWithShape_dataType_error(
                 MLMultiArray::alloc(),
@@ -159,27 +184,48 @@ impl Qwen3CoreMLBackend {
             )
             .map_err(|e| {
                 GenerateError::Backend(format!(
-                    "MLMultiArray alloc failed: {}",
+                    "MLMultiArray alloc (input_ids): {}",
                     e.localizedDescription()
                 ))
             })?
         };
-
-        // Write token IDs directly into the backing buffer.
-        // SAFETY: We just created this MLMultiArray with dtype Int32 and
-        // shape [1, seq_len], so the buffer is seq_len × sizeof(i32).
         unsafe {
             let dst = input_arr.dataPointer().as_ptr().cast::<i32>();
-            std::ptr::copy_nonoverlapping(input_ids.as_ptr(), dst, seq_len);
+            std::ptr::copy_nonoverlapping(padded_ids.as_ptr(), dst, self.seq_len);
         }
 
-        // Build feature provider dictionary
-        let key = NSString::from_str("input_ids");
-        let value: Retained<MLFeatureValue> =
+        // Build attention_mask MLMultiArray [1, seq_len]
+        let mask_arr = unsafe {
+            MLMultiArray::initWithShape_dataType_error(
+                MLMultiArray::alloc(),
+                &shape,
+                MLMultiArrayDataType::Int32,
+            )
+            .map_err(|e| {
+                GenerateError::Backend(format!(
+                    "MLMultiArray alloc (attention_mask): {}",
+                    e.localizedDescription()
+                ))
+            })?
+        };
+        unsafe {
+            let dst = mask_arr.dataPointer().as_ptr().cast::<i32>();
+            std::ptr::copy_nonoverlapping(mask.as_ptr(), dst, self.seq_len);
+        }
+
+        // Build feature provider with both inputs
+        let id_key = NSString::from_str("input_ids");
+        let mask_key = NSString::from_str("attention_mask");
+        let id_val: Retained<MLFeatureValue> =
             unsafe { MLFeatureValue::featureValueWithMultiArray(&input_arr) };
-        let val_obj: &AnyObject = &value;
-        let dict: Retained<NSDictionary<NSString, AnyObject>> =
-            NSDictionary::from_slices(&[&*key], &[val_obj]);
+        let mask_val: Retained<MLFeatureValue> =
+            unsafe { MLFeatureValue::featureValueWithMultiArray(&mask_arr) };
+        let id_obj: &AnyObject = &id_val;
+        let mask_obj: &AnyObject = &mask_val;
+        let dict: Retained<NSDictionary<NSString, AnyObject>> = NSDictionary::from_slices(
+            &[&*id_key, &*mask_key],
+            &[id_obj, mask_obj],
+        );
 
         let provider = unsafe {
             MLDictionaryFeatureProvider::initWithDictionary_error(
@@ -206,7 +252,7 @@ impl Qwen3CoreMLBackend {
                 })?
         };
 
-        // Extract logits at last position
+        // Extract logits at last real token position
         let out_name = NSString::from_str("logits");
         let out_value = unsafe { output.featureValueForName(&out_name) }.ok_or_else(|| {
             GenerateError::Backend("prediction missing output feature \"logits\"".into())
@@ -215,7 +261,7 @@ impl Qwen3CoreMLBackend {
         let logits_arr: Retained<MLMultiArray> = unsafe { out_value.multiArrayValue() }
             .ok_or_else(|| GenerateError::Backend("logits output is not an MLMultiArray".into()))?;
 
-        extract_last_position_logits(&logits_arr, seq_len)
+        extract_last_position_logits(&logits_arr, real_len)
     }
 }
 
