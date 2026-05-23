@@ -33,11 +33,11 @@ struct StatusMenuView: View {
             Divider()
 
             if supervisor.state == .running {
-                Button("Pause") {
+                Button("Pause Capture") {
                     supervisor.setPaused(true)
                 }
             } else if supervisor.state == .paused {
-                Button("Resume") {
+                Button("Resume Capture") {
                     supervisor.setPaused(false)
                 }
             }
@@ -73,6 +73,10 @@ struct StatusMenuView: View {
                 connectToClaude()
             }
             .disabled(mcpRegistering)
+
+            Button("Send Feedback") {
+                sendFeedback()
+            }
 
             Divider()
 
@@ -287,6 +291,15 @@ struct StatusMenuView: View {
                 }
             }
         }
+    }
+
+    private func sendFeedback() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        // TODO: swap to hippocampus.ai/feedback once domain (#21) lands
+        let subject = "Hippocampus feedback v\(version)"
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "mailto:hippocampus@amyjainberkeley.com?subject=\(subject)") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func showAlert(title: String, message: String) {

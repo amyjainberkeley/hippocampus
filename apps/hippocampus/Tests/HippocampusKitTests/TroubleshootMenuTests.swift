@@ -40,6 +40,23 @@ final class TroubleshootMenuTests: XCTestCase {
         XCTAssertTrue(content.contains("MCICaptureHelper"), "Should mention MCICaptureHelper grant instructions")
     }
 
+    func test_feedback_mailto_url_is_valid() {
+        let version = "0.1.0"
+        let subject = "Hippocampus feedback v\(version)"
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "mailto:hippocampus@amyjainberkeley.com?subject=\(subject)"
+        XCTAssertNotNil(URL(string: urlString), "Feedback mailto URL should be valid")
+    }
+
+    func test_feedback_mailto_url_with_special_version() {
+        let version = "1.2.3-beta+build.42"
+        let subject = "Hippocampus feedback v\(version)"
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "mailto:hippocampus@amyjainberkeley.com?subject=\(subject)"
+        let url = URL(string: urlString)
+        XCTAssertNotNil(url, "Feedback mailto URL should handle semver prerelease versions")
+    }
+
     func test_settings_pane_urls_are_valid() {
         let panes = ["Privacy_ScreenCapture", "Privacy_Accessibility"]
         for pane in panes {
