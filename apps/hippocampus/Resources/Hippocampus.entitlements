@@ -24,5 +24,12 @@
 	<!-- DISABLED: No DYLD env overrides in production. -->
 	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
 	<false/>
+
+	<!-- REQUIRED: Shared App Group container for Safari Web Extension (.appex)
+	     to relay page content events to the container app. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.ai.hippocampus</string>
+	</array>
 </dict>
 </plist>

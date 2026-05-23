@@ -13,6 +13,10 @@ api.runtime.onMessage.addListener((message, sender, _sendResponse) => {
   if (message.type !== "page_content") return;
   if (!sender.tab) return;
 
+  // Defense-in-depth: Safari disables extensions in Private Browsing by
+  // default, but guard at runtime too (parity with Chromium extension).
+  if (sender.tab.incognito) return;
+
   const nativeMessage = {
     url: message.payload.url,
     title: message.payload.title,
