@@ -152,6 +152,17 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     echo "--- Codesigning with Developer ID (hardened runtime) ---"
 
     # Sign embedded binaries first (inside-out signing order)
+
+    # Sign Safari extension .appex (innermost)
+    APPEX_PATH="$APP_PATH/Contents/PlugIns/HippocampusSafariExtension.appex"
+    APPEX_ENTITLEMENTS="$REPO_ROOT/extensions/safari/appex/HippocampusSafariExtension.entitlements"
+    if [[ -d "$APPEX_PATH" ]]; then
+        codesign --force --options=runtime --timestamp \
+            --sign "$DEVELOPER_ID" \
+            --entitlements "$APPEX_ENTITLEMENTS" \
+            "$APPEX_PATH"
+    fi
+
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
         --entitlements "$ENTITLEMENTS" \

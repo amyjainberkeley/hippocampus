@@ -152,8 +152,61 @@ else
     echo "             python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage"
 fi
 
+# --- Safari Web Extension .appex ---
+
+SAFARI_EXT_DIR="$REPO_ROOT/extensions/safari"
+APPEX_SRC="$SAFARI_EXT_DIR/appex"
+APPEX_HANDLER="$APPEX_SRC/SafariWebExtensionHandler.swift"
+APPEX_PLIST="$APPEX_SRC/Info.plist"
+APPEX_ENTITLEMENTS="$APPEX_SRC/HippocampusSafariExtension.entitlements"
+
+PLUGINS="$CONTENTS/PlugIns"
+APPEX_BUNDLE="$PLUGINS/HippocampusSafariExtension.appex"
+APPEX_CONTENTS="$APPEX_BUNDLE/Contents"
+APPEX_MACOS="$APPEX_CONTENTS/MacOS"
+APPEX_RESOURCES="$APPEX_CONTENTS/Resources"
+
+if [[ -f "$APPEX_HANDLER" ]]; then
+    echo ""
+    echo "=== Safari Web Extension (.appex) ==="
+    mkdir -p "$APPEX_MACOS" "$APPEX_RESOURCES"
+
+    echo "Compiling SafariWebExtensionHandler..."
+    swiftc \
+        -sdk "$(xcrun --show-sdk-path)" \
+        -target "$(uname -m)-apple-macos14.0" \
+        -framework Foundation \
+        -framework SafariServices \
+        -module-name HippocampusSafariExtension \
+        -emit-executable \
+        -Xlinker -e -Xlinker _NSExtensionMain \
+        -o "$APPEX_MACOS/HippocampusSafariExtension" \
+        "$APPEX_HANDLER"
+
+    cp "$APPEX_PLIST" "$APPEX_CONTENTS/Info.plist"
+
+    for f in manifest.json background.js content.js; do
+        if [[ -f "$SAFARI_EXT_DIR/$f" ]]; then
+            cp "$SAFARI_EXT_DIR/$f" "$APPEX_RESOURCES/$f"
+        fi
+    done
+
+    echo "  .appex assembled at $APPEX_BUNDLE"
+else
+    echo ""
+    echo "WARNING: Safari extension handler not found at $APPEX_HANDLER"
+    echo "  Skipping .appex build. Safari extension will not be available."
+fi
+
 # Ad-hoc codesign each binary + framework + the top-level app
+# Inside-out order: sign .appex first, then main binaries, then outer bundle.
+echo ""
 echo "Codesigning..."
+if [[ -d "$APPEX_BUNDLE" ]]; then
+    codesign --force --sign - \
+        --entitlements "$APPEX_ENTITLEMENTS" \
+        "$APPEX_BUNDLE"
+fi
 codesign --force --sign - "$MACOS/MCICaptureHelper"
 codesign --force --sign - "$MACOS/mci-agent"
 codesign --force --sign - "$MACOS/Hippocampus"
