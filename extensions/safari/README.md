@@ -114,9 +114,6 @@ invariant from the Chromium extension's `"incognito": "split"` manifest key.
 
 ## Known limitations
 
-- **App Group container reader not yet wired**: the container app does not yet
-  poll `safari-inbox/` to forward messages to mci-agent. This is the next
-  integration step.
 - **No persistent native messaging port**: Safari Web Extensions only support
   one-shot `sendNativeMessage`, not `connectNative`. Each page content event
   is an independent message → file write.
