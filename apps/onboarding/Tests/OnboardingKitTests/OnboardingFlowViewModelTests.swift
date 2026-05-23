@@ -6,8 +6,8 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     private func makeVM() -> OnboardingFlowViewModel {
         OnboardingFlowViewModel(
-            screenRecording: StubTCCPermission(kind: .screenRecording),
-            accessibility: StubTCCPermission(kind: .accessibility)
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted)
         )
     }
 
