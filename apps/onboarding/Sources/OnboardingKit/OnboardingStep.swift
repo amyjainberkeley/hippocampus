@@ -2,22 +2,28 @@ import Foundation
 
 public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable {
     case welcome = 0
-    case screenRecording = 1
-    case accessibility = 2
-    case automation = 3
+    case howItWorks = 1
+    case trust = 2
+    case permissions = 3
     case browserExtension = 4
-    case done = 5
+    case livePreview = 5
+    case retention = 6
+    case prepareBrain = 7
+    case done = 8
 
     public var id: Int { rawValue }
 
     public var title: String {
         switch self {
-        case .welcome: return "Welcome"
-        case .screenRecording: return "Screen Recording"
-        case .accessibility: return "Accessibility"
-        case .automation: return "Automation"
-        case .browserExtension: return "Browser Extension"
-        case .done: return "You're Set"
+        case .welcome: "Welcome to Hippocampus"
+        case .howItWorks: "How It Works"
+        case .trust: "Built for Trust"
+        case .permissions: "Permissions"
+        case .browserExtension: "Browser Extension"
+        case .livePreview: "Live Preview"
+        case .retention: "Retention & Privacy"
+        case .prepareBrain: "Preparing Your Brain"
+        case .done: "You're All Set"
         }
     }
 

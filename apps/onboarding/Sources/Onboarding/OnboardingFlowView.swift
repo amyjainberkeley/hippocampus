@@ -3,84 +3,86 @@ import OnboardingKit
 
 struct OnboardingFlowView: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
-    @EnvironmentObject var trustVM: TrustPanelViewModel
+    @EnvironmentObject var prepareBrainVM: PrepareBrainViewModel
     @EnvironmentObject var retentionVM: RetentionViewModel
-    @EnvironmentObject var extensionVM: BrowserExtensionViewModel
 
     var body: some View {
         VStack(spacing: 0) {
-            stepIndicator
+            OnboardingProgressBar(currentStep: flowVM.currentStep)
+
             Divider()
-            stepContent
+
+            slideContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(32)
+
             Divider()
+
             navigationBar
         }
-        .sheet(isPresented: $flowVM.isTrustPanelPresented) {
-            TrustPanelView()
-                .environmentObject(trustVM)
-                .frame(width: 560, height: 520)
-        }
+        .background(.background)
     }
 
     @ViewBuilder
-    private var stepIndicator: some View {
-        HStack(spacing: 12) {
-            ForEach(OnboardingStep.allCases) { step in
-                Circle()
-                    .fill(step == flowVM.currentStep ? Color.accentColor : Color.secondary.opacity(0.3))
-                    .frame(width: 10, height: 10)
-            }
-        }
-        .padding(.vertical, 12)
-    }
-
-    @ViewBuilder
-    private var stepContent: some View {
+    private var slideContent: some View {
         switch flowVM.currentStep {
         case .welcome:
-            WelcomeStepView()
-        case .screenRecording:
-            PermissionStepView(
-                title: "Screen Recording",
-                explanation: "Hippocampus needs Screen Recording permission to see what's on your screen. Without it, nothing can be captured.",
-                permissionKind: .screenRecording
-            )
-        case .accessibility:
-            PermissionStepView(
-                title: "Accessibility",
-                explanation: "Accessibility lets Hippocampus detect which window is focused — and more importantly, detect password fields so it knows NOT to capture them.",
-                permissionKind: .accessibility
-            )
-        case .automation:
-            AutomationStepView()
+            WelcomeSlide()
+        case .howItWorks:
+            HowItWorksSlide()
+        case .trust:
+            TrustSlide()
+        case .permissions:
+            PermissionsSlide()
         case .browserExtension:
-            BrowserExtensionStepView()
+            BrowserExtensionSlide()
+        case .livePreview:
+            LivePreviewSlide()
+        case .retention:
+            RetentionSlide()
+        case .prepareBrain:
+            PrepareBrainSlide()
         case .done:
-            DoneStepView()
+            DoneSlide()
         }
     }
 
-    @ViewBuilder
     private var navigationBar: some View {
         HStack {
             if flowVM.canGoBack {
                 Button("Back") { flowVM.back() }
                     .keyboardShortcut(.cancelAction)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
             }
+
             Spacer()
-            Button("What Hippocampus Sees") {
-                flowVM.isTrustPanelPresented = true
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            Spacer()
-            if flowVM.canAdvance {
-                Button("Continue") { flowVM.advance() }
-                    .keyboardShortcut(.defaultAction)
+
+            if flowVM.currentStep == .done {
+                Button("Get Started") {
+                    UserDefaults.standard.set(true, forKey: "MCIOnboardingCompleted")
+                    #if canImport(AppKit)
+                    NSApplication.shared.terminate(nil)
+                    #endif
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(OnboardingTheme.accentBlue)
+                .controlSize(.regular)
+            } else {
+                Button("Continue") {
+                    if flowVM.currentStep == .retention {
+                        Task { await retentionVM.save() }
+                    }
+                    flowVM.advance()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(OnboardingTheme.accentBlue)
+                .controlSize(.regular)
+                .disabled(!flowVM.canAdvance)
             }
         }
-        .padding(16)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 14)
     }
 }

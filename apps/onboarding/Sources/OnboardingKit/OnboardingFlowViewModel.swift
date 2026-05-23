@@ -3,28 +3,32 @@ import Foundation
 @MainActor
 public final class OnboardingFlowViewModel: ObservableObject {
     @Published public private(set) var currentStep: OnboardingStep = .welcome
-    @Published public var isTrustPanelPresented: Bool = false
 
     public let screenRecordingPermission: any TCCPermission
     public let accessibilityPermission: any TCCPermission
-    public let automationPermission: any TCCPermission
 
     public init(
         screenRecording: any TCCPermission,
-        accessibility: any TCCPermission,
-        automation: any TCCPermission
+        accessibility: any TCCPermission
     ) {
         self.screenRecordingPermission = screenRecording
         self.accessibilityPermission = accessibility
-        self.automationPermission = automation
     }
 
     public var canAdvance: Bool {
-        currentStep != .done
+        if currentStep == .done { return false }
+        if currentStep == .permissions {
+            return screenRecordingPermission.status != .denied
+        }
+        return true
     }
 
     public var canGoBack: Bool {
         currentStep != .welcome
+    }
+
+    public var progress: Double {
+        Double(currentStep.rawValue) / Double(OnboardingStep.allCases.count - 1)
     }
 
     public func advance() {
@@ -41,14 +45,5 @@ public final class OnboardingFlowViewModel: ObservableObject {
 
     public func goTo(_ step: OnboardingStep) {
         currentStep = step
-    }
-
-    public func permissionForCurrentStep() -> (any TCCPermission)? {
-        switch currentStep {
-        case .screenRecording: return screenRecordingPermission
-        case .accessibility: return accessibilityPermission
-        case .automation: return automationPermission
-        default: return nil
-        }
     }
 }

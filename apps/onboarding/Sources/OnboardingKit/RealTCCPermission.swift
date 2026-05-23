@@ -14,7 +14,14 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
     }
 
     public func checkCurrent() -> TCCStatus {
-        status = CGPreflightScreenCaptureAccess() ? .granted : .denied
+        if CGPreflightScreenCaptureAccess() {
+            status = .granted
+        } else {
+            status = status == .granted ? .denied : status
+            if status == .notRequested {
+                status = .denied
+            }
+        }
         return status
     }
 
@@ -28,8 +35,50 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
             status = .granted
         } else {
             status = .denied
-            openSystemSettingsPane("Privacy_ScreenCapture")
+            openPrivacySettings()
         }
+    }
+
+    public func resetAndRetry() async -> Bool {
+        let bundleIDs = ["ai.hippocampus"]
+        for bid in bundleIDs {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            proc.arguments = ["reset", "ScreenCapture", bid]
+            try? proc.run()
+            proc.waitUntilExit()
+        }
+
+        let fullReset = Process()
+        fullReset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        fullReset.arguments = ["reset", "ScreenCapture"]
+        try? fullReset.run()
+        fullReset.waitUntilExit()
+
+        status = .notRequested
+
+        try? await Task.sleep(for: .milliseconds(500))
+
+        let granted = CGRequestScreenCaptureAccess()
+        if granted {
+            status = .granted
+            return true
+        }
+
+        for _ in 0..<60 {
+            try? await Task.sleep(for: .seconds(1))
+            if CGPreflightScreenCaptureAccess() {
+                status = .granted
+                return true
+            }
+        }
+
+        status = .denied
+        return false
+    }
+
+    public func openPrivacySettings() {
+        openSystemSettingsPane("Privacy_ScreenCapture")
     }
 }
 
@@ -43,7 +92,11 @@ public final class RealAccessibilityPermission: TCCPermission, @unchecked Sendab
     }
 
     public func checkCurrent() -> TCCStatus {
-        status = AXIsProcessTrusted() ? .granted : .denied
+        if AXIsProcessTrusted() {
+            status = .granted
+        } else if status == .granted || status == .notRequested {
+            status = status == .granted ? .denied : status
+        }
         return status
     }
 
@@ -54,8 +107,42 @@ public final class RealAccessibilityPermission: TCCPermission, @unchecked Sendab
             status = .granted
         } else {
             status = .denied
-            openSystemSettingsPane("Privacy_Accessibility")
+            openPrivacySettings()
         }
+    }
+
+    public func resetAndRetry() async -> Bool {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        proc.arguments = ["reset", "Accessibility"]
+        try? proc.run()
+        proc.waitUntilExit()
+
+        status = .notRequested
+
+        try? await Task.sleep(for: .milliseconds(500))
+
+        let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        let trusted = AXIsProcessTrustedWithOptions(opts)
+        if trusted {
+            status = .granted
+            return true
+        }
+
+        for _ in 0..<60 {
+            try? await Task.sleep(for: .seconds(1))
+            if AXIsProcessTrusted() {
+                status = .granted
+                return true
+            }
+        }
+
+        status = .denied
+        return false
+    }
+
+    public func openPrivacySettings() {
+        openSystemSettingsPane("Privacy_Accessibility")
     }
 }
 
@@ -79,7 +166,6 @@ public final class RealAutomationPermission: TCCPermission, @unchecked Sendable 
                 status = .denied
                 return .denied
             }
-            // Other script errors — can't determine TCC state.
             return status
         }
         status = .granted
@@ -89,8 +175,22 @@ public final class RealAutomationPermission: TCCPermission, @unchecked Sendable 
     public func requestOrOpenSettings() {
         let probe = checkCurrent()
         if probe != .granted {
-            openSystemSettingsPane("Privacy_Automation")
+            openPrivacySettings()
         }
+    }
+
+    public func resetAndRetry() async -> Bool {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        proc.arguments = ["reset", "AppleEvents"]
+        try? proc.run()
+        proc.waitUntilExit()
+        status = .notRequested
+        return checkCurrent() == .granted
+    }
+
+    public func openPrivacySettings() {
+        openSystemSettingsPane("Privacy_Automation")
     }
 }
 

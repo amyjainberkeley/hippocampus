@@ -7,8 +7,7 @@ final class OnboardingFlowViewModelTests: XCTestCase {
     private func makeVM() -> OnboardingFlowViewModel {
         OnboardingFlowViewModel(
             screenRecording: StubTCCPermission(kind: .screenRecording),
-            accessibility: StubTCCPermission(kind: .accessibility),
-            automation: StubTCCPermission(kind: .automation)
+            accessibility: StubTCCPermission(kind: .accessibility)
         )
     }
 
@@ -17,24 +16,22 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         XCTAssertEqual(vm.currentStep, .welcome)
     }
 
-    func testAdvanceMovesToNextStep() {
+    func testAdvanceThroughAllSteps() {
         let vm = makeVM()
-        vm.advance()
-        XCTAssertEqual(vm.currentStep, .screenRecording)
-        vm.advance()
-        XCTAssertEqual(vm.currentStep, .accessibility)
-        vm.advance()
-        XCTAssertEqual(vm.currentStep, .automation)
-        vm.advance()
-        XCTAssertEqual(vm.currentStep, .browserExtension)
-        vm.advance()
-        XCTAssertEqual(vm.currentStep, .done)
+        let expected: [OnboardingStep] = [
+            .welcome, .howItWorks, .trust, .permissions,
+            .browserExtension, .livePreview, .retention,
+            .prepareBrain, .done,
+        ]
+        for (i, step) in expected.enumerated() {
+            XCTAssertEqual(vm.currentStep, step, "Step \(i)")
+            if i < expected.count - 1 { vm.advance() }
+        }
     }
 
     func testAdvancePastDoneIsNoop() {
         let vm = makeVM()
-        // Walk to done
-        for _ in 0..<5 { vm.advance() }
+        for _ in 0..<8 { vm.advance() }
         XCTAssertEqual(vm.currentStep, .done)
         vm.advance()
         XCTAssertEqual(vm.currentStep, .done)
@@ -42,10 +39,10 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testBackMovesToPriorStep() {
         let vm = makeVM()
-        vm.advance() // -> screenRecording
-        vm.advance() // -> accessibility
+        vm.advance() // howItWorks
+        vm.advance() // trust
         vm.back()
-        XCTAssertEqual(vm.currentStep, .screenRecording)
+        XCTAssertEqual(vm.currentStep, .howItWorks)
     }
 
     func testBackFromWelcomeIsNoop() {
@@ -62,7 +59,7 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testCanAdvanceIsFalseAtDone() {
         let vm = makeVM()
-        for _ in 0..<5 { vm.advance() }
+        for _ in 0..<8 { vm.advance() }
         XCTAssertFalse(vm.canAdvance)
     }
 
@@ -71,20 +68,8 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         XCTAssertFalse(vm.canGoBack)
     }
 
-    func testPermissionForCurrentStep() {
-        let vm = makeVM()
-        XCTAssertNil(vm.permissionForCurrentStep()) // welcome
-        vm.advance()
-        XCTAssertNotNil(vm.permissionForCurrentStep()) // screenRecording
-    }
-
-    func testTrustPanelInitiallyDismissed() {
-        let vm = makeVM()
-        XCTAssertFalse(vm.isTrustPanelPresented)
-    }
-
-    func testSixStepsExist() {
-        XCTAssertEqual(OnboardingStep.allCases.count, 6)
+    func testNineStepsExist() {
+        XCTAssertEqual(OnboardingStep.allCases.count, 9)
     }
 
     func testStepLabelsAreNonEmpty() {
@@ -92,5 +77,22 @@ final class OnboardingFlowViewModelTests: XCTestCase {
             XCTAssertFalse(step.title.isEmpty)
             XCTAssertFalse(step.stepLabel.isEmpty)
         }
+    }
+
+    func testProgressAtWelcomeIsZero() {
+        let vm = makeVM()
+        XCTAssertEqual(vm.progress, 0, accuracy: 0.001)
+    }
+
+    func testProgressAtDoneIsOne() {
+        let vm = makeVM()
+        for _ in 0..<8 { vm.advance() }
+        XCTAssertEqual(vm.progress, 1.0, accuracy: 0.001)
+    }
+
+    func testProgressAtMidpoint() {
+        let vm = makeVM()
+        vm.goTo(.browserExtension) // step 4 of 0-8
+        XCTAssertEqual(vm.progress, 4.0 / 8.0, accuracy: 0.001)
     }
 }

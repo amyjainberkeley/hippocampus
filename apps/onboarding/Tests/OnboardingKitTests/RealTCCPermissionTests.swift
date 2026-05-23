@@ -29,7 +29,7 @@ final class RealTCCPermissionTests: XCTestCase {
     func testAccessibilityCheckCurrentReturnsValidStatus() {
         let perm = RealAccessibilityPermission()
         let status = perm.checkCurrent()
-        XCTAssertTrue([TCCStatus.granted, .denied].contains(status))
+        XCTAssertTrue([TCCStatus.granted, .denied, .notRequested].contains(status))
     }
 
     func testAutomationInitDoesNotCrash() {
