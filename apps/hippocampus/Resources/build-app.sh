@@ -5,7 +5,8 @@ set -euo pipefail
 #
 # This script bridges `swift build` (which only builds the Hippocampus
 # executable) with a working .app bundle (binaries copied in, Info.plist,
-# ad-hoc codesigned).
+# codesigned). Auto-detects Developer ID for stable CDHash; falls back
+# to ad-hoc when no Developer ID cert is present.
 #
 # Prerequisites:
 #   1. swift build -c release   (in apps/hippocampus/)
@@ -80,8 +81,27 @@ for candidate in \
     fi
 done
 
+# --- Detect Developer ID signing identity ---
+
+if [[ -z "${DEVELOPER_ID:-}" ]]; then
+    DEVELOPER_ID=$(security find-identity -v -p codesigning | \
+        grep "Developer ID Application" | \
+        head -1 | \
+        sed 's/.*"\(.*\)"/\1/' || true)
+fi
+
+if [[ -n "$DEVELOPER_ID" ]]; then
+    SIGNING_MODE="developer-id"
+else
+    SIGNING_MODE="ad-hoc"
+fi
+
 echo "=== Hippocampus.app assembly ==="
 echo "Profile:   $PROFILE"
+echo "Signing:   $SIGNING_MODE"
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    echo "Identity:  $DEVELOPER_ID"
+fi
 echo "Output:    $APP"
 echo ""
 
@@ -198,21 +218,101 @@ else
     echo "  Skipping .appex build. Safari extension will not be available."
 fi
 
-# Ad-hoc codesign each binary + framework + the top-level app
-# Inside-out order: sign .appex first, then main binaries, then outer bundle.
+ENTITLEMENTS="$SCRIPT_DIR/Hippocampus.entitlements"
+
 echo ""
-echo "Codesigning..."
-if [[ -d "$APPEX_BUNDLE" ]]; then
-    codesign --force --sign - \
-        --entitlements "$APPEX_ENTITLEMENTS" \
-        "$APPEX_BUNDLE"
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    echo "Codesigning with Developer ID (hardened runtime)..."
+
+    # Inside-out order: sign innermost first.
+    if [[ -d "$APPEX_BUNDLE" ]]; then
+        codesign --force --options=runtime --timestamp \
+            --sign "$DEVELOPER_ID" \
+            --entitlements "$APPEX_ENTITLEMENTS" \
+            "$APPEX_BUNDLE"
+    fi
+
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$MACOS/MCICaptureHelper"
+
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$MACOS/mci-agent"
+
+    # Sign Sparkle.framework inside-out (PR #156 pattern).
+    # Sparkle 2.x ships ad-hoc-signed inner binaries; codesign on the
+    # outer framework does NOT re-sign these — each must be signed
+    # individually for notarization.
+    SPARKLE="$FRAMEWORKS/Sparkle.framework"
+    if [[ -d "$SPARKLE" ]]; then
+        for XPC in Downloader Installer; do
+            XPC_BUNDLE="$SPARKLE/Versions/B/XPCServices/${XPC}.xpc"
+            XPC_BIN="$XPC_BUNDLE/Contents/MacOS/${XPC}"
+            if [[ -f "$XPC_BIN" ]]; then
+                codesign --force --options=runtime --timestamp \
+                    --sign "$DEVELOPER_ID" \
+                    "$XPC_BIN"
+            fi
+            if [[ -d "$XPC_BUNDLE" ]]; then
+                codesign --force --options=runtime --timestamp \
+                    --sign "$DEVELOPER_ID" \
+                    "$XPC_BUNDLE"
+            fi
+        done
+
+        AUTOUPDATE="$SPARKLE/Versions/B/Autoupdate"
+        if [[ -f "$AUTOUPDATE" ]]; then
+            codesign --force --options=runtime --timestamp \
+                --sign "$DEVELOPER_ID" \
+                "$AUTOUPDATE"
+        fi
+
+        UPDATER_APP="$SPARKLE/Versions/B/Updater.app"
+        UPDATER_BIN="$UPDATER_APP/Contents/MacOS/Updater"
+        if [[ -f "$UPDATER_BIN" ]]; then
+            codesign --force --options=runtime --timestamp \
+                --sign "$DEVELOPER_ID" \
+                "$UPDATER_BIN"
+        fi
+        if [[ -d "$UPDATER_APP" ]]; then
+            codesign --force --options=runtime --timestamp \
+                --sign "$DEVELOPER_ID" \
+                "$UPDATER_APP"
+        fi
+
+        codesign --force --options=runtime --timestamp \
+            --sign "$DEVELOPER_ID" \
+            "$SPARKLE"
+    fi
+
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$MACOS/Hippocampus"
+
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$APP"
+
+    echo "Verifying signature..."
+    codesign --verify --deep --strict "$APP"
+    echo "  Signature valid."
+else
+    echo "Codesigning (ad-hoc)..."
+    if [[ -d "$APPEX_BUNDLE" ]]; then
+        codesign --force --sign - \
+            --entitlements "$APPEX_ENTITLEMENTS" \
+            "$APPEX_BUNDLE"
+    fi
+    codesign --force --sign - "$MACOS/MCICaptureHelper"
+    codesign --force --sign - "$MACOS/mci-agent"
+    codesign --force --sign - "$MACOS/Hippocampus"
+    codesign --force --deep --sign - "$APP"
 fi
-codesign --force --sign - "$MACOS/MCICaptureHelper"
-codesign --force --sign - "$MACOS/mci-agent"
-codesign --force --sign - "$MACOS/Hippocampus"
-# --deep re-signs embedded frameworks (Sparkle ships pre-signed but
-# the outer app signature must cover everything)
-codesign --force --deep --sign - "$APP"
 
 # Verify rpath was added correctly
 echo "Verifying rpath..."
