@@ -447,3 +447,6 @@ else
     echo "NOTE: Ad-hoc signed (not notarized). Gatekeeper will warn on first launch."
     echo "      Users: right-click -> Open."
 fi
+
+echo ""
+echo "Next: run scripts/sparkle-publish.sh to publish this DMG."
