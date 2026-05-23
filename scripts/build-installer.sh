@@ -134,7 +134,8 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     if [[ "$BUILD_PROFILE" == "debug" ]]; then
         BUILD_ARGS+=(--debug)
     fi
-    "$BUILD_APP" "${BUILD_ARGS[@]}"
+    # ${VAR[@]+"${VAR[@]}"} expands safely when array is empty under `set -u`.
+    "$BUILD_APP" ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
     echo ""
 fi
 
