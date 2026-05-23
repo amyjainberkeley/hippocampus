@@ -174,11 +174,60 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
         --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/mci-agent"
 
-    # Sign embedded frameworks (Sparkle ships pre-signed but outer sig must cover it)
-    if [[ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]]; then
+    # Sign Sparkle.framework inside-out.
+    #
+    # Sparkle 2.x ships with ad-hoc-signed inner binaries (Updater.app,
+    # Autoupdate, XPCServices/Downloader.xpc, XPCServices/Installer.xpc).
+    # `codesign` on the outer framework does NOT re-sign these; Apple's
+    # notary then rejects the whole DMG because each inner Mach-O lacks
+    # a Developer ID + hardened runtime + secure timestamp.
+    #
+    # See: https://sparkle-project.org/documentation/sandboxing/
+    SPARKLE="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+    if [[ -d "$SPARKLE" ]]; then
+        # Innermost first: each .xpc bundle + its Mach-O.
+        for XPC in Downloader Installer; do
+            XPC_BUNDLE="$SPARKLE/Versions/B/XPCServices/${XPC}.xpc"
+            XPC_BIN="$XPC_BUNDLE/Contents/MacOS/${XPC}"
+            if [[ -f "$XPC_BIN" ]]; then
+                codesign --force --options=runtime --timestamp \
+                    --sign "$DEVELOPER_ID" \
+                    "$XPC_BIN"
+            fi
+            if [[ -d "$XPC_BUNDLE" ]]; then
+                codesign --force --options=runtime --timestamp \
+                    --sign "$DEVELOPER_ID" \
+                    "$XPC_BUNDLE"
+            fi
+        done
+
+        # Autoupdate (standalone executable).
+        AUTOUPDATE="$SPARKLE/Versions/B/Autoupdate"
+        if [[ -f "$AUTOUPDATE" ]]; then
+            codesign --force --options=runtime --timestamp \
+                --sign "$DEVELOPER_ID" \
+                "$AUTOUPDATE"
+        fi
+
+        # Updater.app + its Mach-O.
+        UPDATER_APP="$SPARKLE/Versions/B/Updater.app"
+        UPDATER_BIN="$UPDATER_APP/Contents/MacOS/Updater"
+        if [[ -f "$UPDATER_BIN" ]]; then
+            codesign --force --options=runtime --timestamp \
+                --sign "$DEVELOPER_ID" \
+                "$UPDATER_BIN"
+        fi
+        if [[ -d "$UPDATER_APP" ]]; then
+            codesign --force --options=runtime --timestamp \
+                --sign "$DEVELOPER_ID" \
+                "$UPDATER_APP"
+        fi
+
+        # Outer framework seal — must come last so it incorporates the
+        # updated CDHashes of every inner bundle/binary.
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
-            "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+            "$SPARKLE"
     fi
 
     # Sign main executable
