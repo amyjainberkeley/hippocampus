@@ -9,18 +9,23 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
     public let kind: TCCPermissionKind = .screenRecording
     public private(set) var status: TCCStatus
 
+    private static let tccAttemptedKey = "MCITCCScreenRecordingAttempted"
+
     public init() {
-        status = CGPreflightScreenCaptureAccess() ? .granted : .notRequested
+        if CGPreflightScreenCaptureAccess() {
+            status = .granted
+        } else if UserDefaults.standard.bool(forKey: Self.tccAttemptedKey) {
+            status = .denied
+        } else {
+            status = .notRequested
+        }
     }
 
     public func checkCurrent() -> TCCStatus {
         if CGPreflightScreenCaptureAccess() {
             status = .granted
-        } else {
-            status = status == .granted ? .denied : status
-            if status == .notRequested {
-                status = .denied
-            }
+        } else if status == .granted {
+            status = .denied
         }
         return status
     }
@@ -30,6 +35,7 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
             status = .granted
             return
         }
+        UserDefaults.standard.set(true, forKey: Self.tccAttemptedKey)
         let granted = CGRequestScreenCaptureAccess()
         if granted {
             status = .granted
@@ -49,16 +55,11 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
             proc.waitUntilExit()
         }
 
-        let fullReset = Process()
-        fullReset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        fullReset.arguments = ["reset", "ScreenCapture"]
-        try? fullReset.run()
-        fullReset.waitUntilExit()
-
         status = .notRequested
 
         try? await Task.sleep(for: .milliseconds(500))
 
+        UserDefaults.standard.set(true, forKey: Self.tccAttemptedKey)
         let granted = CGRequestScreenCaptureAccess()
         if granted {
             status = .granted

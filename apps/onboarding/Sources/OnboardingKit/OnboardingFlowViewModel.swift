@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 public final class OnboardingFlowViewModel: ObservableObject {
     @Published public private(set) var currentStep: OnboardingStep = .welcome
+    @Published public private(set) var permissionRefreshCount = 0
 
     public let screenRecordingPermission: any TCCPermission
     public let accessibilityPermission: any TCCPermission
@@ -18,9 +19,15 @@ public final class OnboardingFlowViewModel: ObservableObject {
     public var canAdvance: Bool {
         if currentStep == .done { return false }
         if currentStep == .permissions {
-            return screenRecordingPermission.status != .denied
+            return screenRecordingPermission.status == .granted
         }
         return true
+    }
+
+    public func refreshPermissions() {
+        _ = screenRecordingPermission.checkCurrent()
+        _ = accessibilityPermission.checkCurrent()
+        permissionRefreshCount += 1
     }
 
     public var canGoBack: Bool {

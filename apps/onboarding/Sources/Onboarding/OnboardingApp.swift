@@ -58,5 +58,27 @@ struct OnboardingApp: App {
                 )
         }
         .windowResizability(.contentSize)
+        .commands {
+            CommandMenu("Troubleshoot") {
+                Button("Reset Screen Recording Permission and Retry") {
+                    Task {
+                        flowVM.goTo(.permissions)
+                        _ = await flowVM.screenRecordingPermission.resetAndRetry()
+                        flowVM.refreshPermissions()
+                    }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Open Screen Recording Settings") {
+                    flowVM.screenRecordingPermission.openPrivacySettings()
+                }
+
+                Button("Open Accessibility Settings") {
+                    flowVM.accessibilityPermission.openPrivacySettings()
+                }
+            }
+        }
     }
 }

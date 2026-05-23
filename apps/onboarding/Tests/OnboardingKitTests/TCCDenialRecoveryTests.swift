@@ -16,10 +16,10 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
     // MARK: - Three-state detection
 
-    func testNeverAskedAllowsAdvance() {
+    func testNeverAskedBlocksAdvance() {
         let (vm, _, _) = makeVM(srStatus: .notRequested)
         vm.goTo(.permissions)
-        XCTAssertTrue(vm.canAdvance)
+        XCTAssertFalse(vm.canAdvance, "Must verify grant before advancing past permissions")
     }
 
     func testGrantedAllowsAdvance() {
@@ -32,6 +32,13 @@ final class TCCDenialRecoveryTests: XCTestCase {
         let (vm, _, _) = makeVM(srStatus: .denied)
         vm.goTo(.permissions)
         XCTAssertFalse(vm.canAdvance)
+    }
+
+    func testAdvanceFromNotRequestedPermissionsIsNoop() {
+        let (vm, _, _) = makeVM(srStatus: .notRequested)
+        vm.goTo(.permissions)
+        vm.advance()
+        XCTAssertEqual(vm.currentStep, .permissions)
     }
 
     func testAdvanceFromDeniedPermissionsIsNoop() {
@@ -109,6 +116,24 @@ final class TCCDenialRecoveryTests: XCTestCase {
         let sr = StubTCCPermission(kind: .screenRecording, status: .denied)
         sr.openPrivacySettings()
         XCTAssertEqual(sr.openSettingsCallCount, 1)
+    }
+
+    // MARK: - refreshPermissions triggers re-evaluation
+
+    func testRefreshPermissionsIncrementsCounter() {
+        let (vm, _, _) = makeVM(srStatus: .granted)
+        let before = vm.permissionRefreshCount
+        vm.refreshPermissions()
+        XCTAssertEqual(vm.permissionRefreshCount, before + 1)
+    }
+
+    func testRefreshPermissionsUpdatesCanAdvance() {
+        let (vm, sr, _) = makeVM(srStatus: .notRequested)
+        vm.goTo(.permissions)
+        XCTAssertFalse(vm.canAdvance)
+        sr.simulateGrant()
+        vm.refreshPermissions()
+        XCTAssertTrue(vm.canAdvance)
     }
 
     // MARK: - Non-permission slides unaffected

@@ -44,8 +44,7 @@ struct PermissionsSlide: View {
             }
         }
         .onAppear {
-            _ = screenRecording.checkCurrent()
-            _ = accessibility.checkCurrent()
+            flowVM.refreshPermissions()
         }
     }
 
@@ -110,6 +109,7 @@ struct PermissionsSlide: View {
         let succeeded = await screenRecording.resetAndRetry()
 
         isResetting = false
+        flowVM.refreshPermissions()
 
         if !succeeded {
             showResetFailedFallback = true
@@ -142,13 +142,18 @@ struct PermissionsSlide: View {
             .padding(12)
             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
 
-            if !screenRecordingDenied {
+            if screenRecording.status == .notRequested {
                 Button("Open Screen Recording Settings") {
                     screenRecording.requestOrOpenSettings()
+                    flowVM.refreshPermissions()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(OnboardingTheme.accentBlue)
                 .controlSize(.regular)
+            } else if screenRecording.status == .granted {
+                Label("Screen Recording granted", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.system(size: 13, weight: .medium))
             }
 
             helperInstructions
@@ -179,16 +184,24 @@ struct PermissionsSlide: View {
 
                 if accessibility.status == .denied {
                     Button("Reset & retry") {
-                        Task { await accessibility.resetAndRetry() }
+                        Task {
+                            _ = await accessibility.resetAndRetry()
+                            flowVM.refreshPermissions()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } else if accessibility.status != .granted {
+                    Button("Grant") {
+                        accessibility.requestOrOpenSettings()
+                        flowVM.refreshPermissions()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 } else {
-                    Button("Grant") {
-                        accessibility.requestOrOpenSettings()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.system(size: 14))
                 }
             }
         }
