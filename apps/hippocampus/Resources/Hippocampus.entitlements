@@ -2,31 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Hardened runtime is enabled via codesign --options=runtime.
-	     Each entitlement below is individually justified. -->
-
-	<!-- DISABLED: JIT compilation not used. Keeping false is the hardened-runtime default
-	     but we state it explicitly for audit clarity. -->
 	<key>com.apple.security.cs.allow-jit</key>
 	<false/>
-
-	<!-- REQUIRED: Sparkle 2.x embeds XPC services and dynamically loads its
-	     Autoupdate bundle. Without this, the hardened runtime rejects Sparkle's
-	     code signature (it's signed by Sparkle's own identity, not ours).
-	     See: https://sparkle-project.org/documentation/sandboxing/ -->
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
-
-	<!-- DISABLED: No unsigned executable memory needed. All code is AOT-compiled. -->
 	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
 	<false/>
-
-	<!-- DISABLED: No DYLD env overrides in production. -->
 	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
 	<false/>
-
-	<!-- REQUIRED: Shared App Group container for Safari Web Extension (.appex)
-	     to relay page content events to the container app. -->
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.ai.hippocampus</string>
