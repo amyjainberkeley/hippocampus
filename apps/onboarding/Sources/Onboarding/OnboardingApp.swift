@@ -7,20 +7,19 @@ struct OnboardingApp: App {
     @StateObject private var trustVM: TrustPanelViewModel
     @StateObject private var retentionVM: RetentionViewModel
     @StateObject private var extensionVM: BrowserExtensionViewModel
+    @StateObject private var prepareBrainVM: PrepareBrainViewModel
 
     init() {
         #if canImport(AppKit)
         let sr: any TCCPermission = RealScreenRecordingPermission()
         let ax: any TCCPermission = RealAccessibilityPermission()
-        let auto: any TCCPermission = RealAutomationPermission()
         #else
         let sr: any TCCPermission = StubTCCPermission(kind: .screenRecording)
         let ax: any TCCPermission = StubTCCPermission(kind: .accessibility)
-        let auto: any TCCPermission = StubTCCPermission(kind: .automation)
         #endif
 
         _flowVM = StateObject(wrappedValue: OnboardingFlowViewModel(
-            screenRecording: sr, accessibility: ax, automation: auto
+            screenRecording: sr, accessibility: ax
         ))
         _trustVM = StateObject(wrappedValue: TrustPanelViewModel(
             allowlistStore: StubAllowlistStore(),
@@ -38,6 +37,11 @@ struct OnboardingApp: App {
         _extensionVM = StateObject(wrappedValue: BrowserExtensionViewModel(
             detector: detector
         ))
+
+        _prepareBrainVM = StateObject(wrappedValue: PrepareBrainViewModel(
+            keyGenerator: LocalKeyGenerator(),
+            modelDownloader: RealModelDownloader()
+        ))
     }
 
     var body: some Scene {
@@ -47,7 +51,11 @@ struct OnboardingApp: App {
                 .environmentObject(trustVM)
                 .environmentObject(retentionVM)
                 .environmentObject(extensionVM)
-                .frame(width: 640, height: 480)
+                .environmentObject(prepareBrainVM)
+                .frame(
+                    width: OnboardingTheme.windowWidth,
+                    height: OnboardingTheme.windowHeight
+                )
         }
         .windowResizability(.contentSize)
     }
