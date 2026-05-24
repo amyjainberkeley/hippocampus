@@ -50,10 +50,14 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use mci_brain::{BrainStore, EmbedError, Embedder, Event, EventId, StoreError};
+use mci_brain::{
+    BrainStore, ChunkerError, EmbedError, Embedder, Event, EventChunker, EventId, StoreError,
+};
+use mci_brain::Chunker;
 use mci_core::ipc::Message;
 
 use crate::page_content::PageContentCache;
+use crate::wall_clock::format_unix_ms;
 
 /// Outcome of a single `ingest_ocr_event` call.
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +95,13 @@ pub enum IngestError {
     /// failure).
     #[error("brain ingest: store: {0}")]
     Store(#[from] StoreError),
+    /// The chunker failed on the headered OCR'd text (e.g. invalid UTF-8
+    /// boundary at a sub-chunk cut). Production [`EventChunker`] does not
+    /// surface this in normal operation; the variant exists so a future
+    /// chunker impl that does (e.g. a model-tokenizer-backed split) can
+    /// propagate the error without changing the `BrainIngestor` surface.
+    #[error("brain ingest: chunk: {0}")]
+    Chunk(#[from] ChunkerError),
 }
 
 /// Single-method trait the runner dispatches `OCREvent` frames through.
@@ -175,6 +186,11 @@ impl BrainIngestor for NoopBrainIngestor {
 ///   events still ingest with `embedding = None` (events.embedding
 ///   column already nullable per ADR-0016 §1.4 schema) so the recall
 ///   path falls back to FTS5-only.
+/// - `chunker`: the [`Chunker`] that enforces the ADR-0010 §1.3
+///   "key expansion" discipline (prepend `[app=… | title=… | url=… |
+///   ts=…]\n` to OCR text *before* embedding) and the ADR-0011 §3
+///   per-chunk word-token ceiling (~1500 word-tokens for the
+///   arctic-embed-s effective context). Default = [`EventChunker`].
 /// - `counter`: the content-free `brain_events_ingested_count`.
 ///
 /// The pump is *strictly synchronous at ingest* — embedder runs inline
@@ -182,9 +198,42 @@ impl BrainIngestor for NoopBrainIngestor {
 /// P3.6.6 demo simplicity; the idle-batch optimization (decouple
 /// embedder from ingest so capture-time inserts don't block on the
 /// 5-15 ms Core ML call) is the P3.8 follow-on.
+///
+/// # OCR/PageContent → chunker → event row wire (DOGFOOD v1 #5)
+///
+/// For every `OCREvent` / `PageContentEvent`, the pump:
+///
+/// 1. Decodes the wire payload into `(ts_us, app, title, url, text,
+///    keyframe_blob)`.
+/// 2. Merges extension-supplied page text with pixel-OCR text when a
+///    `PageContentCache` is wired (see [`Self::maybe_merge_page_content`]).
+/// 3. **Prepends the ADR-0010 §1.3 context header** `[app=… | title=…
+///    | url=… | ts=…]\n` via [`compose_context_header`]. The header
+///    co-vectors the app/title/url tokens with the body text so queries
+///    like "the 1Password vault I had open yesterday" project onto the
+///    embedding via the `app=com.1password.app` token, not just the
+///    body — `LongMemEval` arXiv:2410.10813 reports +9.4% recall@5 from
+///    this single move.
+/// 4. **Runs [`Chunker::chunk`]** on the headered text. For OCR-typical
+///    events (one frame's worth of UI text, ≤1500 word-tokens) the
+///    chunker returns a single chunk equal to the headered input. For
+///    long events the chunker splits on paragraph / sentence boundaries
+///    — only the **first chunk** is embedded in this PR (it carries the
+///    header naturally); the full headered text is still persisted in
+///    `events.text` so FTS5 indexes the whole content. Sub-chunk
+///    persistence to the `chunks` table is a follow-on (the chunks
+///    table already exists in `migrations/0001_phase_3_brain_schema.sql`).
+/// 5. Calls `store.put_event(&event)` with `event.text = headered_text`
+///    and `event.embedding = Some(embed(chunks[0]))` (or `None` when
+///    the embedder is absent / text is empty).
+///
+/// The chunker is invoked **once** per ingested event — preserving the
+/// ADR-0016 §4.2 cascade-twice "exactly one `OCREvent` emission site"
+/// invariant from the producer side and now the consumer side too.
 pub struct BrainPump {
     store: Arc<dyn BrainStore>,
     embedder: Option<Arc<dyn Embedder>>,
+    chunker: Arc<dyn Chunker>,
     page_cache: Option<PageContentCache>,
     counter: AtomicU64,
 }
@@ -196,7 +245,7 @@ pub struct BrainPump {
 const VISIBLE_OCR_SEPARATOR: &str = "\n\n[VISIBLE-OCR]\n";
 
 impl BrainPump {
-    /// Construct a brain pump.
+    /// Construct a brain pump with the default production [`EventChunker`].
     ///
     /// `embedder = None` is acceptable for demo / development builds
     /// where the bundled `arctic-embed-s.mlpackage` isn't shipped yet.
@@ -207,6 +256,7 @@ impl BrainPump {
         Self {
             store,
             embedder,
+            chunker: Arc::new(EventChunker::default()),
             page_cache: None,
             counter: AtomicU64::new(0),
         }
@@ -222,7 +272,26 @@ impl BrainPump {
         Self {
             store,
             embedder,
+            chunker: Arc::new(EventChunker::default()),
             page_cache: Some(page_cache),
+            counter: AtomicU64::new(0),
+        }
+    }
+
+    /// Construct a brain pump with a caller-supplied chunker. Test-only
+    /// path; production callers use [`Self::new`] / [`Self::with_page_cache`]
+    /// (which install the default [`EventChunker`]).
+    #[must_use]
+    pub fn with_chunker(
+        store: Arc<dyn BrainStore>,
+        embedder: Option<Arc<dyn Embedder>>,
+        chunker: Arc<dyn Chunker>,
+    ) -> Self {
+        Self {
+            store,
+            embedder,
+            chunker,
+            page_cache: None,
             counter: AtomicU64::new(0),
         }
     }
@@ -298,8 +367,37 @@ impl BrainIngestor for BrainPump {
             _ => return Ok(IngestOutcome::NotOcrEvent),
         };
 
-        let embedding: Option<Vec<f32>> = match &self.embedder {
-            Some(e) if !text.is_empty() => Some(e.embed_one(&text)?),
+        // ADR-0010 §1.3 "key expansion" — prepend the per-event context
+        // header so the embedder sees the app/title/url tokens alongside
+        // the OCR body. The header is also persisted into events.text so
+        // FTS5 indexes those tokens inline (the events.app_bundle_id /
+        // window_title / url columns are also FTS5-indexed via
+        // events_fts, so the header is additive coverage, not new PII).
+        let header = compose_context_header(app.as_deref(), title.as_deref(), u.as_deref(), *ts_us);
+        let headered_text = if text.is_empty() {
+            String::new()
+        } else {
+            let mut s = String::with_capacity(header.len() + text.len());
+            s.push_str(&header);
+            s.push_str(&text);
+            s
+        };
+
+        // ADR-0016 §1.2 — run the chunker on the headered text. For OCR-
+        // typical events (≤1500 word-tokens) the chunker returns a single
+        // chunk equal to the headered input; embedding it is the same
+        // thing as embedding `headered_text`. For long events the chunker
+        // splits on paragraph/sentence boundaries; we embed only the
+        // first chunk in this PR (it naturally carries the header) and
+        // persist the full headered text in `events.text` so FTS5
+        // indexes the whole content. Sub-chunk persistence to the
+        // `chunks` table is a follow-on; the table already exists in
+        // `migrations/0001_phase_3_brain_schema.sql`.
+        let chunks = self.chunker.chunk(&headered_text)?;
+        let embed_input: Option<&str> = chunks.first().map(String::as_str);
+
+        let embedding: Option<Vec<f32>> = match (&self.embedder, embed_input) {
+            (Some(e), Some(t)) if !t.is_empty() => Some(e.embed_one(t)?),
             _ => None,
         };
 
@@ -309,7 +407,7 @@ impl BrainIngestor for BrainPump {
             app_bundle_id: app,
             window_title: title,
             url: u,
-            text,
+            text: headered_text,
             summary: None,
             entities: None,
             episode_id: None,
@@ -330,6 +428,32 @@ impl BrainIngestor for BrainPump {
     fn events_ingested_count(&self) -> u64 {
         self.counter.load(Ordering::Relaxed)
     }
+}
+
+/// Compose the ADR-0010 §1.3 / ADR-0016 §1.2 per-event context header.
+///
+/// Returns `[app=<bundle> | title=<title> | url=<url> | ts=<iso8601>]\n`.
+/// Fields are emitted as `?` when missing — keeps the layout stable so
+/// the embedder always sees the same number of separators (the position
+/// of the `|` characters is itself a token boundary signal).
+///
+/// `ts_us` (microseconds since epoch) is rendered via
+/// [`format_unix_ms`] as ISO-8601 UTC with millisecond precision; same
+/// shape as the `HealthLogRecord::wall_ts` field. No `chrono` / `time`
+/// crate dep is taken (the formatter is hand-rolled in
+/// `wall_clock.rs`).
+#[must_use]
+pub(crate) fn compose_context_header(
+    app: Option<&str>,
+    title: Option<&str>,
+    url: Option<&str>,
+    ts_us: u64,
+) -> String {
+    let app = app.unwrap_or("?");
+    let title = title.unwrap_or("?");
+    let url = url.unwrap_or("?");
+    let ts = format_unix_ms(u128::from(ts_us / 1000));
+    format!("[app={app} | title={title} | url={url} | ts={ts}]\n")
 }
 
 /// Map a `source_browser` string from the extension to a macOS bundle id.
@@ -444,7 +568,15 @@ mod tests {
                 assert!(embedded, "embedder was Some + text non-empty");
                 let ev = store.get_event(id).unwrap().unwrap();
                 assert_eq!(ev.ts_us, 1_000_000);
-                assert_eq!(ev.text, "hello world");
+                // ADR-0010 §1.3 — events.text now carries the prepended
+                // context header. The original OCR body is preserved at
+                // the tail of the column.
+                assert!(
+                    ev.text.starts_with("[app=com.apple.Safari | title=Login — example.com | url=https://example.com/login | ts="),
+                    "expected ADR-0010 §1.3 header prefix, got: {}",
+                    &ev.text[..ev.text.len().min(160)]
+                );
+                assert!(ev.text.ends_with("hello world"), "OCR body preserved");
                 assert_eq!(ev.app_bundle_id.as_deref(), Some("com.apple.Safari"));
                 assert_eq!(ev.embedding.as_ref().map(Vec::len), Some(384));
                 assert_eq!(ev.cascade_reason, 0);
@@ -479,7 +611,12 @@ mod tests {
                 assert!(embedded);
                 let ev = store.get_event(id).unwrap().unwrap();
                 assert_eq!(ev.ts_us, 2_000_000);
-                assert_eq!(ev.text, "Full page text here");
+                assert!(
+                    ev.text.contains("[app=com.google.Chrome"),
+                    "expected ADR-0010 §1.3 header, got: {}",
+                    &ev.text[..ev.text.len().min(160)]
+                );
+                assert!(ev.text.ends_with("Full page text here"));
                 assert_eq!(ev.app_bundle_id.as_deref(), Some("com.google.Chrome"));
                 assert_eq!(ev.url.as_deref(), Some("https://example.com/pricing"));
                 assert_eq!(ev.window_title.as_deref(), Some("Pricing — Example Corp"));
@@ -519,10 +656,19 @@ mod tests {
         match out {
             IngestOutcome::Stored { id, .. } => {
                 let ev = store.get_event(id).unwrap().unwrap();
+                // ADR-0010 §1.3 header is prepended; the extension body
+                // is the primary body content (before the [VISIBLE-OCR]
+                // separator), not necessarily the absolute prefix.
+                assert!(ev.text.starts_with("[app="), "header prefix");
+                let body_start = ev
+                    .text
+                    .find('\n')
+                    .map(|i| i + 1)
+                    .expect("header newline");
                 assert!(
-                    ev.text.starts_with("Full DOM text from extension"),
-                    "extension text must be primary; got: {}",
-                    &ev.text[..ev.text.len().min(80)]
+                    ev.text[body_start..].starts_with("Full DOM text from extension"),
+                    "extension text must be primary body; got: {}",
+                    &ev.text[body_start..ev.text.len().min(body_start + 80)]
                 );
             }
             IngestOutcome::NotOcrEvent => panic!("expected Stored"),
@@ -541,7 +687,8 @@ mod tests {
         match out {
             IngestOutcome::Stored { id, .. } => {
                 let ev = store.get_event(id).unwrap().unwrap();
-                assert_eq!(ev.text, "pure OCR text");
+                assert!(ev.text.ends_with("pure OCR text"));
+                assert!(ev.text.contains("[app=com.apple.Safari"));
             }
             IngestOutcome::NotOcrEvent => panic!("expected Stored"),
         }
@@ -584,6 +731,101 @@ mod tests {
             }
             IngestOutcome::NotOcrEvent => panic!("expected Stored"),
         }
+    }
+
+    // -----------------------------------------------------------
+    // Chunker wire tests (DOGFOOD v1 #5)
+    // -----------------------------------------------------------
+
+    use mci_brain::{Chunker, ChunkerError};
+    use std::sync::Mutex;
+
+    /// Recording chunker that counts calls and snapshots inputs so a
+    /// test can prove the wire crosses the chunker exactly once per
+    /// ingested event and that the input carries the §1.3 header.
+    struct RecordingChunker {
+        inner: EventChunker,
+        calls: AtomicU64,
+        last_input: Mutex<Option<String>>,
+    }
+
+    impl RecordingChunker {
+        fn new() -> Self {
+            Self {
+                inner: EventChunker::default(),
+                calls: AtomicU64::new(0),
+                last_input: Mutex::new(None),
+            }
+        }
+        fn call_count(&self) -> u64 {
+            self.calls.load(Ordering::Relaxed)
+        }
+        fn last(&self) -> Option<String> {
+            self.last_input.lock().unwrap().clone()
+        }
+    }
+
+    impl Chunker for RecordingChunker {
+        fn chunk(&self, event_text: &str) -> Result<Vec<String>, ChunkerError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            *self.last_input.lock().unwrap() = Some(event_text.to_owned());
+            self.inner.chunk(event_text)
+        }
+    }
+
+    #[test]
+    fn pump_invokes_chunker_once_per_ocr_event_with_headered_text() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let chunker = Arc::new(RecordingChunker::new());
+        let pump = BrainPump::with_chunker(
+            store.clone(),
+            None,
+            Arc::clone(&chunker) as Arc<dyn Chunker>,
+        );
+
+        let _ = pump
+            .ingest_ocr_event(&make_ocr_event(7_000_000, "the quick brown fox"))
+            .expect("ingest ok");
+
+        assert_eq!(chunker.call_count(), 1, "chunker called exactly once");
+        let input = chunker.last().expect("chunker saw an input");
+        assert!(
+            input.starts_with("[app=com.apple.Safari | title="),
+            "chunker input must carry ADR-0010 §1.3 header; got: {}",
+            &input[..input.len().min(120)]
+        );
+        assert!(
+            input.ends_with("the quick brown fox"),
+            "chunker input must carry the OCR body at the tail"
+        );
+    }
+
+    #[test]
+    fn pump_embeds_first_chunk_when_text_exceeds_window() {
+        // Force a tiny window so the chunker splits even modest input.
+        // The chunker uses word-count > window as the split trigger.
+        let store = Arc::new(InMemoryBrainStore::new());
+        let embedder: Arc<dyn Embedder> = Arc::new(FixedDimEmbedder::default());
+        let tiny: Arc<dyn Chunker> = Arc::new(mci_brain::EventChunker::new(8));
+        let pump = BrainPump::with_chunker(store.clone(), Some(embedder), tiny);
+
+        // Body forces ≥2 chunks at window=8 — three sentences across two
+        // paragraphs, ~20 words after the header is prepended.
+        let body = "First sentence here. Second sentence here. Third sentence here.\n\nFourth sentence here. Fifth sentence here. Sixth sentence here.";
+        let out = pump
+            .ingest_ocr_event(&make_ocr_event(8_000_000, body))
+            .expect("ingest ok");
+        let IngestOutcome::Stored { id, embedded } = out else {
+            panic!("expected Stored");
+        };
+        assert!(embedded, "embedder runs on the first chunk");
+        let ev = store.get_event(id).unwrap().unwrap();
+        // events.text persists the FULL headered text (FTS5 indexes the
+        // whole content — the embedding-only first-chunk discipline is a
+        // semantic-recall lever, not a storage truncation).
+        assert!(ev.text.contains("Sixth sentence here."));
+        assert!(ev.text.starts_with("[app="));
+        assert_eq!(ev.embedding.as_ref().map(Vec::len), Some(384));
     }
 
     #[test]

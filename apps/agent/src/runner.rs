@@ -503,7 +503,14 @@ mod tests {
 
         let ev = store.last().expect("event recorded");
         assert_eq!(ev.ts_us, 1_234_567);
-        assert_eq!(ev.text, "the quick brown fox");
+        // ADR-0010 §1.3 — events.text now carries the prepended context
+        // header. The OCR body is preserved at the tail.
+        assert!(
+            ev.text.starts_with("[app=com.apple.Safari | title=MyTitle | url=https://example.com/page | ts="),
+            "expected ADR-0010 §1.3 header, got: {}",
+            &ev.text[..ev.text.len().min(160)]
+        );
+        assert!(ev.text.ends_with("the quick brown fox"));
         assert_eq!(ev.app_bundle_id.as_deref(), Some("com.apple.Safari"));
         assert_eq!(ev.window_title.as_deref(), Some("MyTitle"));
         assert_eq!(ev.url.as_deref(), Some("https://example.com/page"));
@@ -717,7 +724,8 @@ mod tests {
 
         assert_eq!(stats.frames_to_brain, 1);
         let ev = store.last().unwrap();
-        assert_eq!(ev.text, "no model bundled");
+        assert!(ev.text.ends_with("no model bundled"));
+        assert!(ev.text.starts_with("[app=com.apple.Safari"));
         assert!(ev.embedding.is_none());
     }
 
