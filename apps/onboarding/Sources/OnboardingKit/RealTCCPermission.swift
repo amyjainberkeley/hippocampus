@@ -35,14 +35,25 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
             status = .granted
             return
         }
+        // DO NOT call CGRequestScreenCaptureAccess() here.
+        //
+        // Per Apple's TCC contract, when the user grants Screen
+        // Recording in response to that call, the OS *terminates*
+        // the calling process so the new permission takes effect at
+        // next launch. The onboarding window vanishes from under
+        // the user — they see "I clicked Grant and the app died."
+        // (CEO-reported, 2026-05-24.)
+        //
+        // Fix: deep-link to System Settings → Privacy & Security →
+        // Screen Recording. The user toggles Hippocampus + the
+        // helper ON there. The onboarding app stays alive. The
+        // PermissionsSlide's poll catches the grant on the next
+        // CGPreflightScreenCaptureAccess check — no app kill, no
+        // process restart needed.
         UserDefaults.standard.set(true, forKey: Self.tccAttemptedKey)
-        let granted = CGRequestScreenCaptureAccess()
-        if granted {
-            status = .granted
-        } else {
-            status = .denied
-            openPrivacySettings()
-        }
+        openPrivacySettings()
+        // Leave status at .notRequested. The slide's polling timer
+        // upgrades it to .granted as soon as preflight returns true.
     }
 
     public func resetAndRetry() async -> Bool {
@@ -59,12 +70,12 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
 
         try? await Task.sleep(for: .milliseconds(500))
 
+        // Same no-kill discipline as `requestOrOpenSettings`. Deep-
+        // link to Settings + poll instead of calling
+        // CGRequestScreenCaptureAccess (which would terminate this
+        // process on grant and leave the user stranded).
         UserDefaults.standard.set(true, forKey: Self.tccAttemptedKey)
-        let granted = CGRequestScreenCaptureAccess()
-        if granted {
-            status = .granted
-            return true
-        }
+        openPrivacySettings()
 
         for _ in 0..<60 {
             try? await Task.sleep(for: .seconds(1))

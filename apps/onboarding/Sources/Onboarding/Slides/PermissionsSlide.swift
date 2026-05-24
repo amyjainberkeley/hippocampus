@@ -6,6 +6,15 @@ struct PermissionsSlide: View {
     @State private var userConfirmedHelper = false
     @State private var isResetting = false
     @State private var showResetFailedFallback = false
+    /// SwiftUI timer polled every 1 s while this slide is on screen.
+    /// Lets the slide auto-detect a Screen Recording / Accessibility
+    /// grant made by the user in System Settings without requiring
+    /// them to leave + re-enter the slide. Combined with the
+    /// `RealTCCPermission.requestOrOpenSettings` change to deep-link
+    /// instead of calling `CGRequestScreenCaptureAccess` (which
+    /// terminates the app on grant), the user never sees the
+    /// onboarding window disappear under them.
+    private let pollTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     private var screenRecording: any TCCPermission {
         flowVM.screenRecordingPermission
@@ -44,6 +53,14 @@ struct PermissionsSlide: View {
             }
         }
         .onAppear {
+            flowVM.refreshPermissions()
+        }
+        .onReceive(pollTimer) { _ in
+            // Cheap CGPreflightScreenCaptureAccess / AXIsProcessTrusted
+            // checks (both ~µs). Only fires while the slide is on
+            // screen; the OnboardingFlowView's `switch flowVM.currentStep`
+            // tears the view down when the user advances, which stops
+            // the timer subscription via .autoconnect's lifecycle.
             flowVM.refreshPermissions()
         }
     }
