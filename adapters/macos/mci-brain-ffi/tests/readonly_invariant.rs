@@ -26,9 +26,10 @@ use std::path::PathBuf;
 
 use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
 use mci_brain_ffi::{
-    mci_brain_ffi_close, mci_brain_ffi_last_error_message, mci_brain_ffi_open,
-    mci_brain_ffi_recent_events, mci_brain_ffi_recent_privacy_moments, mci_brain_ffi_search,
-    mci_brain_ffi_string_free, HitJson, PrivacyMomentJson,
+    mci_brain_ffi_close, mci_brain_ffi_last_error_message, mci_brain_ffi_list_episodes,
+    mci_brain_ffi_list_observed_apps, mci_brain_ffi_open, mci_brain_ffi_recent_events,
+    mci_brain_ffi_recent_privacy_moments, mci_brain_ffi_search, mci_brain_ffi_string_free,
+    HitJson, PrivacyMomentJson,
 };
 use mci_core::crypto::DbKey;
 use mci_core::store::open_readonly as mci_core_open_readonly;
@@ -438,6 +439,9 @@ fn ffi_exports_no_mutating_surface() {
         "mci_brain_ffi_search",
         "mci_brain_ffi_recent_events",
         "mci_brain_ffi_recent_privacy_moments",
+        // Recall-UI dynamic per-app filter + Episodes tab (read-only).
+        "mci_brain_ffi_list_observed_apps",
+        "mci_brain_ffi_list_episodes",
         "mci_brain_ffi_string_free",
         "mci_brain_ffi_last_error_message",
     ];
@@ -450,10 +454,12 @@ fn ffi_exports_no_mutating_surface() {
         mci_brain_ffi_search as *const (),
         mci_brain_ffi_recent_events as *const (),
         mci_brain_ffi_recent_privacy_moments as *const (),
+        mci_brain_ffi_list_observed_apps as *const (),
+        mci_brain_ffi_list_episodes as *const (),
         mci_brain_ffi_string_free as *const (),
         mci_brain_ffi_last_error_message as *const (),
     ];
-    assert_eq!(allowed.len(), 7, "FFI surface size pinned at 7");
+    assert_eq!(allowed.len(), 9, "FFI surface size pinned at 9");
 }
 
 // ---------------------------------------------------------------------------

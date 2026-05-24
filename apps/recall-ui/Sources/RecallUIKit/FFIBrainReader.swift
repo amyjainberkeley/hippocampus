@@ -129,6 +129,40 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         return try Self.decodePrivacyMoments(rawJson)
     }
 
+    public func listObservedApps(
+        limit: Int,
+        timeFromUs: UInt64?
+    ) async throws -> [ObservedApp] {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        let payload = ObservedAppsQueryPayload(limit: limit, timeFromUs: timeFromUs)
+        let queryJsonData = try JSONEncoder().encode(payload)
+        guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
+            throw BrainReaderError.decodeFailed("FFIBrainReader: non-UTF8 query payload")
+        }
+        let rawJson: UnsafeMutablePointer<CChar>? = queryJsonString.withCString { q in
+            mci_brain_ffi_list_observed_apps(h, q)
+        }
+        guard let rawJson else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeObservedApps(rawJson)
+    }
+
+    public func listEpisodes(limit: Int) async throws -> [Episode] {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        let clamped = UInt32(max(0, min(limit, Int(UInt32.max))))
+        guard let rawJson = mci_brain_ffi_list_episodes(h, clamped) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeEpisodes(rawJson)
+    }
+
     // MARK: helpers
 
     /// Read the FFI's thread-local last-error slot and convert it to a
@@ -165,6 +199,36 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         do {
             let wire = try JSONDecoder().decode([PrivacyMomentWire].self, from: data)
             return wire.map { $0.toPrivacyMoment() }
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader: \(error)")
+        }
+    }
+
+    private static func decodeObservedApps(
+        _ raw: UnsafeMutablePointer<CChar>
+    ) throws -> [ObservedApp] {
+        let s = String(cString: raw)
+        guard let data = s.data(using: .utf8) else {
+            throw BrainReaderError.decodeFailed("non-UTF8 JSON from FFI")
+        }
+        do {
+            let wire = try JSONDecoder().decode([ObservedAppWire].self, from: data)
+            return wire.map { $0.toObservedApp() }
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader: \(error)")
+        }
+    }
+
+    private static func decodeEpisodes(
+        _ raw: UnsafeMutablePointer<CChar>
+    ) throws -> [Episode] {
+        let s = String(cString: raw)
+        guard let data = s.data(using: .utf8) else {
+            throw BrainReaderError.decodeFailed("non-UTF8 JSON from FFI")
+        }
+        do {
+            let wire = try JSONDecoder().decode([EpisodeWire].self, from: data)
+            return wire.map { $0.toEpisode() }
         } catch {
             throw BrainReaderError.decodeFailed("FFIBrainReader: \(error)")
         }
@@ -225,5 +289,42 @@ private struct QueryPayload: Encodable {
         case timeFromUs = "time_from_us"
         case timeToUs = "time_to_us"
         case appFilter = "app_filter"
+    }
+}
+
+private struct ObservedAppsQueryPayload: Encodable {
+    let limit: Int
+    let timeFromUs: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case limit
+        case timeFromUs = "time_from_us"
+    }
+}
+
+private struct ObservedAppWire: Decodable {
+    let app_bundle_id: String
+    let count: UInt64
+
+    func toObservedApp() -> ObservedApp {
+        ObservedApp(appBundleId: app_bundle_id, count: count)
+    }
+}
+
+private struct EpisodeWire: Decodable {
+    let id: UInt64
+    let app_bundle_id: String?
+    let ts_start_us: UInt64
+    let ts_end_us: UInt64
+    let event_count: UInt64
+
+    func toEpisode() -> Episode {
+        Episode(
+            episodeId: id,
+            appBundleId: app_bundle_id,
+            tsStartUs: ts_start_us,
+            tsEndUs: ts_end_us,
+            eventCount: event_count
+        )
     }
 }

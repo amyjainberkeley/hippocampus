@@ -744,6 +744,83 @@ impl SqlCipherBrainStore {
         Ok(out)
     }
 
+    /// Return the most-observed `app_bundle_id` values with their event
+    /// counts, optionally bounded by a time window. Sorted by count DESC.
+    /// SELECT-only — no write side. Rows with `app_bundle_id IS NULL` are
+    /// excluded so the recall-UI filter pills never carry an unnamed entry.
+    ///
+    /// Surface for the recall-UI's dynamic per-app filter pills (`Director-
+    /// Brain` audit, dogfood-v1 gap #1). Counts come from the `events` table
+    /// (post-cascade only — suppressed events never reach the store, per
+    /// ADR-0016 §4.3), so the result is content-free aggregate metadata.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn observed_apps(
+        &self,
+        limit: usize,
+        time_from_us: Option<u64>,
+    ) -> Result<Vec<(String, u64)>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let (sql, has_from) = if time_from_us.is_some() {
+            (
+                "SELECT app_bundle_id, COUNT(*) AS n
+                 FROM events
+                 WHERE app_bundle_id IS NOT NULL
+                   AND ts_us >= ?1
+                 GROUP BY app_bundle_id
+                 ORDER BY n DESC, app_bundle_id ASC
+                 LIMIT ?2",
+                true,
+            )
+        } else {
+            (
+                "SELECT app_bundle_id, COUNT(*) AS n
+                 FROM events
+                 WHERE app_bundle_id IS NOT NULL
+                 GROUP BY app_bundle_id
+                 ORDER BY n DESC, app_bundle_id ASC
+                 LIMIT ?1",
+                false,
+            )
+        };
+        let mut stmt = guard
+            .conn()
+            .prepare(sql)
+            .map_err(|e| StoreError::Backend(format!("prepare observed_apps: {e}")))?;
+        let row_mapper = |r: &rusqlite::Row<'_>| -> rusqlite::Result<(String, i64)> {
+            let app: String = r.get(0)?;
+            let n: i64 = r.get(1)?;
+            Ok((app, n))
+        };
+        let mut out: Vec<(String, u64)> = Vec::new();
+        if has_from {
+            let from = i64::try_from(time_from_us.unwrap()).unwrap_or(0);
+            let rows = stmt
+                .query_map(params![from, lim], row_mapper)
+                .map_err(|e| StoreError::Backend(format!("query observed_apps: {e}")))?;
+            for r in rows {
+                let (app, n) =
+                    r.map_err(|e| StoreError::Backend(format!("row observed_apps: {e}")))?;
+                out.push((app, u64::try_from(n).unwrap_or(0)));
+            }
+        } else {
+            let rows = stmt
+                .query_map(params![lim], row_mapper)
+                .map_err(|e| StoreError::Backend(format!("query observed_apps: {e}")))?;
+            for r in rows {
+                let (app, n) =
+                    r.map_err(|e| StoreError::Backend(format!("row observed_apps: {e}")))?;
+                out.push((app, u64::try_from(n).unwrap_or(0)));
+            }
+        }
+        Ok(out)
+    }
+
     /// Copy + defragment the encrypted brain to `dest` via `VACUUM INTO`.
     /// Output inherits this store's `SQLCipher` key.
     ///

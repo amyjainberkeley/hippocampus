@@ -10,13 +10,22 @@ struct SearchView: View {
     var body: some View {
         VStack(spacing: 0) {
             searchBar
-            FilterPillsView(filters: $viewModel.filters) {
-                Task { await viewModel.runSearch() }
+            FilterPillsView(
+                filters: $viewModel.filters,
+                observedApps: viewModel.observedApps
+            ) {
+                Task {
+                    await viewModel.runSearch()
+                    await viewModel.reloadObservedApps()
+                }
             }
             Divider().background(Color.brandCardBorder)
             content
         }
         .background(Color.brandBgPrimary)
+        .task {
+            await viewModel.reloadObservedApps()
+        }
         .onChange(of: focusTrigger) { _, _ in
             isSearchFieldFocused = true
         }
