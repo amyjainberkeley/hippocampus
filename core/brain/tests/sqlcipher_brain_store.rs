@@ -730,3 +730,89 @@ fn paged_events_since_large_page_returns_all() {
     assert_eq!(out.first().unwrap().ts_us, 1);
     assert_eq!(out.last().unwrap().ts_us, 50);
 }
+
+// ---------------------------------------------------------------------------
+// observed_apps — dynamic per-app filter (recall-UI dogfood gap #1)
+// ---------------------------------------------------------------------------
+
+fn app_event(ts_us: u64, app: &str) -> Event {
+    Event {
+        id: EventId(0),
+        ts_us,
+        app_bundle_id: Some(app.into()),
+        window_title: None,
+        url: None,
+        text: format!("e@{ts_us}"),
+        summary: None,
+        entities: None,
+        episode_id: None,
+        cascade_reason: 0,
+        keyframe_blob: None,
+        embedding: None,
+    }
+}
+
+#[test]
+fn observed_apps_sorts_by_count_desc() {
+    let (_dir, path) = tmp("observed_apps.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    // Safari 4, VSCode 2, Slack 1, one nil-app event
+    for ts in 1..=4 {
+        store.put_event(&app_event(ts, "com.apple.Safari")).unwrap();
+    }
+    for ts in 5..=6 {
+        store
+            .put_event(&app_event(ts, "com.microsoft.VSCode"))
+            .unwrap();
+    }
+    store
+        .put_event(&app_event(7, "com.tinyspeck.slackmacgap"))
+        .unwrap();
+    store.put_event(&blank_event(8, "nil-app")).unwrap();
+
+    let out = store.observed_apps(10, None).expect("observed_apps");
+    assert_eq!(out.len(), 3, "nil-app row must be excluded");
+    assert_eq!(out[0], ("com.apple.Safari".into(), 4));
+    assert_eq!(out[1], ("com.microsoft.VSCode".into(), 2));
+    assert_eq!(out[2], ("com.tinyspeck.slackmacgap".into(), 1));
+}
+
+#[test]
+fn observed_apps_respects_limit() {
+    let (_dir, path) = tmp("observed_apps_limit.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in 1..=3 {
+        store.put_event(&app_event(ts, "com.apple.Safari")).unwrap();
+    }
+    store
+        .put_event(&app_event(4, "com.microsoft.VSCode"))
+        .unwrap();
+    let out = store.observed_apps(1, None).expect("observed_apps");
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].0, "com.apple.Safari");
+}
+
+#[test]
+fn observed_apps_applies_time_window() {
+    let (_dir, path) = tmp("observed_apps_window.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    store.put_event(&app_event(10, "com.apple.Safari")).unwrap();
+    store.put_event(&app_event(20, "com.apple.Safari")).unwrap();
+    store
+        .put_event(&app_event(30, "com.microsoft.VSCode"))
+        .unwrap();
+    let out = store.observed_apps(10, Some(20)).expect("observed_apps");
+    // ts >= 20: Safari has 1, VSCode has 1 → both tie, alpha tiebreak puts Safari first.
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0], ("com.apple.Safari".into(), 1));
+    assert_eq!(out[1], ("com.microsoft.VSCode".into(), 1));
+}
+
+#[test]
+fn observed_apps_zero_limit_returns_empty() {
+    let (_dir, path) = tmp("observed_apps_zero.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    store.put_event(&app_event(1, "com.apple.Safari")).unwrap();
+    let out = store.observed_apps(0, None).expect("observed_apps");
+    assert!(out.is_empty());
+}

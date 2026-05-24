@@ -94,6 +94,54 @@ public struct SearchOptions: Sendable, Equatable {
     }
 }
 
+/// One row of the dynamic per-app filter pop-up — a bundle id observed
+/// in the brain together with how many events it has produced (within
+/// the requested time window). Surface for the recall-UI per-app filter
+/// pills (Director-Brain audit, dogfood-v1 gap #1).
+public struct ObservedApp: Sendable, Equatable, Identifiable, Codable {
+    public var id: String { appBundleId }
+    public let appBundleId: String
+    public let count: UInt64
+
+    public init(appBundleId: String, count: UInt64) {
+        self.appBundleId = appBundleId
+        self.count = count
+    }
+}
+
+/// One row in the Episodes tab — a contiguous run of events in the same
+/// app, produced by `core/brain::episode_segmenter` (ADR-0010).
+public struct Episode: Sendable, Equatable, Identifiable, Codable {
+    public var id: UInt64 { episodeId }
+    public let episodeId: UInt64
+    public let appBundleId: String?
+    /// Microseconds since UNIX epoch (matches `episodes.ts_start`).
+    public let tsStartUs: UInt64
+    /// Microseconds since UNIX epoch (matches `episodes.ts_end`).
+    public let tsEndUs: UInt64
+    public let eventCount: UInt64
+
+    public init(
+        episodeId: UInt64,
+        appBundleId: String?,
+        tsStartUs: UInt64,
+        tsEndUs: UInt64,
+        eventCount: UInt64
+    ) {
+        self.episodeId = episodeId
+        self.appBundleId = appBundleId
+        self.tsStartUs = tsStartUs
+        self.tsEndUs = tsEndUs
+        self.eventCount = eventCount
+    }
+
+    /// Convenience: episode duration in seconds (>= 0).
+    public var durationSeconds: Double {
+        let span = tsEndUs >= tsStartUs ? tsEndUs - tsStartUs : 0
+        return Double(span) / 1_000_000.0
+    }
+}
+
 /// Errors the reader may surface to view models.
 public enum BrainReaderError: Error, Equatable {
     case openFailed(String)
@@ -106,6 +154,11 @@ public protocol BrainReader: Sendable {
     func search(_ opts: SearchOptions) async throws -> [Hit]
     func recentEvents(limit: Int) async throws -> [Hit]
     func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment]
+    /// Observed apps within the optional time window, sorted by count DESC.
+    /// Nil-app rows are excluded.
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp]
+    /// Most-recent episodes (sorted by start DESC) from the segmenter.
+    func listEpisodes(limit: Int) async throws -> [Episode]
 }
 
 /// In-memory stub reader. Returns deterministic canned data so the
@@ -146,6 +199,30 @@ public struct StubBrainReader: BrainReader {
             ocrTextSnippet: "shipping P3.9 today — recall UI v1",
             source: "lexical",
             score: 0.62
+        ),
+    ]
+    /// Canned episodes. Two Safari segments around a single VSCode block.
+    public static let demoEpisodes: [Episode] = [
+        Episode(
+            episodeId: 3,
+            appBundleId: "com.tinyspeck.slackmacgap",
+            tsStartUs: 1_736_000_240_000_000,
+            tsEndUs: 1_736_000_290_000_000,
+            eventCount: 1
+        ),
+        Episode(
+            episodeId: 2,
+            appBundleId: "com.microsoft.VSCode",
+            tsStartUs: 1_736_000_120_000_000,
+            tsEndUs: 1_736_000_180_000_000,
+            eventCount: 1
+        ),
+        Episode(
+            episodeId: 1,
+            appBundleId: "com.apple.Safari",
+            tsStartUs: 1_736_000_000_000_000,
+            tsEndUs: 1_736_000_060_000_000,
+            eventCount: 1
         ),
     ]
     /// Canned privacy moments. Reason codes span the ADR-0017 §5.2 table.
@@ -205,6 +282,34 @@ public struct StubBrainReader: BrainReader {
         Array(
             Self.demoPrivacyMoments
                 .sorted { $0.tsUs > $1.tsUs }
+                .prefix(max(0, limit))
+        )
+    }
+
+    public func listObservedApps(
+        limit: Int,
+        timeFromUs: UInt64?
+    ) async throws -> [ObservedApp] {
+        var counts: [String: UInt64] = [:]
+        for hit in Self.demoHits {
+            if let from = timeFromUs, hit.tsUs < from { continue }
+            guard let app = hit.appBundleId else { continue }
+            counts[app, default: 0] += 1
+        }
+        let rows =
+            counts
+            .map { ObservedApp(appBundleId: $0.key, count: $0.value) }
+            .sorted {
+                if $0.count != $1.count { return $0.count > $1.count }
+                return $0.appBundleId < $1.appBundleId
+            }
+        return Array(rows.prefix(max(0, limit)))
+    }
+
+    public func listEpisodes(limit: Int) async throws -> [Episode] {
+        Array(
+            Self.demoEpisodes
+                .sorted { $0.tsStartUs > $1.tsStartUs }
                 .prefix(max(0, limit))
         )
     }

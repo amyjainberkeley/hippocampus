@@ -54,6 +54,21 @@ char *mci_brain_ffi_recent_events(McibrainHandle *h, uint32_t limit);
  * file (`mci-tombstones.bin`) and surfacing it is P3.9c. */
 char *mci_brain_ffi_recent_privacy_moments(McibrainHandle *h, uint32_t limit);
 
+/* List the most-observed app_bundle_id values + their event counts.
+ * `query_json` is a UTF-8 JSON string of shape
+ *   {"limit": N, "time_from_us": <u64?>}
+ * Returns a UTF-8 JSON array of {"app_bundle_id":"...","count":N}.
+ * Sorted by count DESC, then bundle id ASC. Excludes nil-app rows.
+ * Surface for the recall-UI dynamic per-app filter pills. */
+char *mci_brain_ffi_list_observed_apps(McibrainHandle *h, const char *query_json);
+
+/* List the `limit` most-recent episode rows from the episode_segmenter.
+ * Returns a UTF-8 JSON array of
+ *   {"id":N, "app_bundle_id":"...?", "ts_start_us":N, "ts_end_us":N,
+ *    "event_count":N}
+ * sorted by ts_start_us DESC. Surface for the recall-UI Episodes tab. */
+char *mci_brain_ffi_list_episodes(McibrainHandle *h, uint32_t limit);
+
 /* Free a string previously returned by this header's functions.
  * NULL is a no-op. Double-free is undefined. */
 void mci_brain_ffi_string_free(char *s);

@@ -18,6 +18,14 @@ private struct FailingReader: BrainReader {
     func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] {
         throw BrainReaderError.queryFailed("moments boom")
     }
+    func listObservedApps(
+        limit: Int, timeFromUs: UInt64?
+    ) async throws -> [ObservedApp] {
+        throw BrainReaderError.queryFailed("apps boom")
+    }
+    func listEpisodes(limit: Int) async throws -> [Episode] {
+        throw BrainReaderError.queryFailed("episodes boom")
+    }
 }
 
 @MainActor
@@ -179,7 +187,7 @@ final class SearchSelectionTests: XCTestCase {
 
     func testClearResetsFilters() async {
         let vm = SearchViewModel(reader: StubBrainReader())
-        vm.filters.toggle(.appSafari)
+        vm.filters.toggleApp("com.apple.Safari")
         vm.query = "test"
         vm.clear()
         XCTAssertFalse(vm.filters.anyActive)

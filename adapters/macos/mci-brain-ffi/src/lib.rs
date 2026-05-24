@@ -131,6 +131,40 @@ pub struct QueryJson {
     pub app_filter: Option<String>,
 }
 
+/// JSON payload format for [`mci_brain_ffi_list_observed_apps`] input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ObservedAppsQueryJson {
+    /// Maximum apps to return.
+    pub limit: usize,
+    /// Inclusive lower bound on `ts_us`, microseconds. `None` ⇒ no filter.
+    #[serde(default)]
+    pub time_from_us: Option<u64>,
+}
+
+/// One row of [`mci_brain_ffi_list_observed_apps`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ObservedAppJson {
+    /// `events.app_bundle_id`, never null (nil-app rows are excluded).
+    pub app_bundle_id: String,
+    /// Number of events captured under this app bundle id in the window.
+    pub count: u64,
+}
+
+/// One row of [`mci_brain_ffi_list_episodes`]. Mirrors `EpisodeRecord`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EpisodeJson {
+    /// Episode id (maps to `episodes.id` rowid).
+    pub id: u64,
+    /// Primary app bundle id for the episode.
+    pub app_bundle_id: Option<String>,
+    /// Episode start timestamp (microseconds since UNIX epoch).
+    pub ts_start_us: u64,
+    /// Episode end timestamp (microseconds since UNIX epoch).
+    pub ts_end_us: u64,
+    /// Number of events assigned to this episode.
+    pub event_count: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Handle — opaque pointer the Swift side holds across calls
 // ---------------------------------------------------------------------------
@@ -403,6 +437,114 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_privacy_moments(
     let _limit = limit.min(MAX_LIMIT) as usize;
     let empty: Vec<PrivacyMomentJson> = Vec::new();
     json_to_c_string(&empty)
+}
+
+/// List the most-observed `app_bundle_id` values + their event counts.
+///
+/// `query_json` is a UTF-8 JSON string of [`ObservedAppsQueryJson`].
+/// Returns a UTF-8 JSON array of [`ObservedAppJson`] rows. Sorted by
+/// count DESC, then bundle id ASC. Rows where `events.app_bundle_id IS
+/// NULL` are excluded. Surface for the recall-UI dynamic per-app filter
+/// pills (Director-Brain audit, dogfood-v1 gap #1).
+///
+/// Allocator discipline matches the other read entry points: the
+/// returned pointer is owned by Rust and MUST be freed via
+/// [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+///
+/// `h` must be a live handle. `query_json` must be a non-null,
+/// null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_list_observed_apps(
+    h: *mut Handle,
+    query_json: *const c_char,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_list_observed_apps: null handle");
+        return ptr::null_mut();
+    }
+    if query_json.is_null() {
+        set_last_error("mci_brain_ffi_list_observed_apps: null query");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a live handle.
+    let handle = unsafe { &*h };
+    // Safety: caller guarantees a null-terminated UTF-8 C string.
+    let query_c = unsafe { CStr::from_ptr(query_json) };
+    let Ok(query_str) = query_c.to_str() else {
+        set_last_error("mci_brain_ffi_list_observed_apps: non-UTF8 query");
+        return ptr::null_mut();
+    };
+    let query: ObservedAppsQueryJson = match serde_json::from_str(query_str) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!(
+                "mci_brain_ffi_list_observed_apps: bad query JSON: {e}"
+            ));
+            return ptr::null_mut();
+        }
+    };
+    let limit = query.limit.min(MAX_LIMIT as usize).max(1);
+
+    let rows = match handle.store.observed_apps(limit, query.time_from_us) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_list_observed_apps: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    let out: Vec<ObservedAppJson> = rows
+        .into_iter()
+        .map(|(app_bundle_id, count)| ObservedAppJson {
+            app_bundle_id,
+            count,
+        })
+        .collect();
+    json_to_c_string(&out)
+}
+
+/// List the most-recent `episodes` rows produced by the episode
+/// segmenter. Returns a UTF-8 JSON array of [`EpisodeJson`] sorted by
+/// `ts_start_us` DESC. Surface for the recall-UI Episodes tab.
+///
+/// Allocator discipline matches the other read entry points.
+///
+/// # Safety
+///
+/// `h` must be a live handle. `limit` is treated as `u32` and clamped
+/// to [`MAX_LIMIT`] internally.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_list_episodes(
+    h: *mut Handle,
+    limit: u32,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_list_episodes: null handle");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a live handle.
+    let handle = unsafe { &*h };
+    let limit_clamped = limit.min(MAX_LIMIT) as usize;
+
+    let eps = match handle.store.recent_episodes(limit_clamped) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_list_episodes: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    let out: Vec<EpisodeJson> = eps
+        .into_iter()
+        .map(|e| EpisodeJson {
+            id: e.id,
+            app_bundle_id: e.app_bundle_id,
+            ts_start_us: e.ts_start,
+            ts_end_us: e.ts_end,
+            event_count: e.event_count,
+        })
+        .collect();
+    json_to_c_string(&out)
 }
 
 /// Free a `*mut c_char` previously returned by any FFI function that
@@ -777,5 +919,54 @@ mod tests {
     #[test]
     fn limit_clamps_at_max() {
         assert_eq!(MAX_LIMIT, 10_000);
+    }
+
+    #[test]
+    fn observed_apps_query_json_parses_with_and_without_window() {
+        let q: ObservedAppsQueryJson =
+            serde_json::from_str(r#"{"limit":5}"#).expect("parses without window");
+        assert_eq!(q.limit, 5);
+        assert!(q.time_from_us.is_none());
+        let q2: ObservedAppsQueryJson =
+            serde_json::from_str(r#"{"limit":10,"time_from_us":42}"#).expect("parses with window");
+        assert_eq!(q2.time_from_us, Some(42));
+    }
+
+    #[test]
+    fn observed_app_json_serde_round_trip() {
+        let a = ObservedAppJson {
+            app_bundle_id: "com.apple.Safari".into(),
+            count: 17,
+        };
+        let s = serde_json::to_string(&a).unwrap();
+        let back: ObservedAppJson = serde_json::from_str(&s).unwrap();
+        assert_eq!(a, back);
+    }
+
+    #[test]
+    fn episode_json_serde_round_trip() {
+        let e = EpisodeJson {
+            id: 9,
+            app_bundle_id: Some("com.microsoft.VSCode".into()),
+            ts_start_us: 1_000_000,
+            ts_end_us: 2_000_000,
+            event_count: 7,
+        };
+        let s = serde_json::to_string(&e).unwrap();
+        let back: EpisodeJson = serde_json::from_str(&s).unwrap();
+        assert_eq!(e, back);
+    }
+
+    #[test]
+    fn list_observed_apps_with_null_handle_returns_null() {
+        let q = CString::new(r#"{"limit":5}"#).unwrap();
+        let p = unsafe { mci_brain_ffi_list_observed_apps(std::ptr::null_mut(), q.as_ptr()) };
+        assert!(p.is_null());
+    }
+
+    #[test]
+    fn list_episodes_with_null_handle_returns_null() {
+        let p = unsafe { mci_brain_ffi_list_episodes(std::ptr::null_mut(), 5) };
+        assert!(p.is_null());
     }
 }

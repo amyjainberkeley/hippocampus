@@ -47,7 +47,8 @@ struct MCIRecallApp: App {
 enum Tab: Int, Hashable {
     case search = 1
     case timeline = 2
-    case privacy = 3
+    case episodes = 3
+    case privacy = 4
 }
 
 struct RootView: View {
@@ -68,6 +69,10 @@ struct RootView: View {
                 .tag(Tab.timeline)
                 .tabItem { Label("Timeline", systemImage: "clock") }
 
+            EpisodesView(viewModel: EpisodesViewModel(reader: reader))
+                .tag(Tab.episodes)
+                .tabItem { Label("Episodes", systemImage: "rectangle.stack") }
+
             PrivacyMomentsView(
                 viewModel: PrivacyMomentsViewModel(reader: reader)
             )
@@ -77,12 +82,16 @@ struct RootView: View {
         .padding(.top, 6)
         .background(Color.brandBgPrimary)
         .focusable()
-        .onKeyPress(keys: [.init("1"), .init("2"), .init("3")], phases: .down) { press in
+        .onKeyPress(
+            keys: [.init("1"), .init("2"), .init("3"), .init("4")],
+            phases: .down
+        ) { press in
             guard press.modifiers == .command else { return .ignored }
             switch press.key {
             case KeyEquivalent("1"): selectedTab = .search
             case KeyEquivalent("2"): selectedTab = .timeline
-            case KeyEquivalent("3"): selectedTab = .privacy
+            case KeyEquivalent("3"): selectedTab = .episodes
+            case KeyEquivalent("4"): selectedTab = .privacy
             default: return .ignored
             }
             return .handled
