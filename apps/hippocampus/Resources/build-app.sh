@@ -66,6 +66,7 @@ HIPPOCAMPUS_BIN="$PKG_DIR/.build/$PROFILE/Hippocampus"
 HELPER_BIN="$REPO_ROOT/adapters/macos/MCICaptureHelper/.build/$PROFILE/mci-capture-helper"
 AGENT_BIN="$REPO_ROOT/target/$PROFILE/mci-agent"
 RECALL_UI_BIN="$REPO_ROOT/apps/recall-ui/.build/$PROFILE/recall-ui"
+ONBOARDING_BIN="$REPO_ROOT/apps/onboarding/.build/$PROFILE/onboarding"
 KNOWN_SAFE="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml"
 INFO_PLIST="$SCRIPT_DIR/Info.plist"
 
@@ -108,7 +109,7 @@ echo "Output:    $APP"
 echo ""
 
 # Verify binaries exist
-for bin_path in "$HIPPOCAMPUS_BIN" "$HELPER_BIN" "$AGENT_BIN" "$RECALL_UI_BIN"; do
+for bin_path in "$HIPPOCAMPUS_BIN" "$HELPER_BIN" "$AGENT_BIN" "$RECALL_UI_BIN" "$ONBOARDING_BIN"; do
     if [[ ! -f "$bin_path" ]]; then
         echo "ERROR: Missing binary: $bin_path"
         echo "Run the prerequisite builds first. See --help."
@@ -125,6 +126,7 @@ cp "$HIPPOCAMPUS_BIN" "$MACOS/Hippocampus"
 cp "$HELPER_BIN" "$MACOS/MCICaptureHelper"
 cp "$AGENT_BIN" "$MACOS/mci-agent"
 cp "$RECALL_UI_BIN" "$MACOS/recall-ui"
+cp "$ONBOARDING_BIN" "$MACOS/onboarding"
 
 # Copy resources
 cp "$INFO_PLIST" "$CONTENTS/Info.plist"
@@ -259,6 +261,13 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
             "$MACOS/recall-ui"
     fi
 
+    if [[ -f "$MACOS/onboarding" ]]; then
+        codesign --force --options=runtime --timestamp \
+            --sign "$DEVELOPER_ID" \
+            --entitlements "$ENTITLEMENTS" \
+            "$MACOS/onboarding"
+    fi
+
     # Sign Sparkle.framework inside-out (PR #156 pattern).
     # Sparkle 2.x ships ad-hoc-signed inner binaries; codesign on the
     # outer framework does NOT re-sign these — each must be signed
@@ -328,6 +337,7 @@ else
     codesign --force --sign - "$MACOS/MCICaptureHelper"
     codesign --force --sign - "$MACOS/mci-agent"
     [[ -f "$MACOS/recall-ui" ]] && codesign --force --sign - "$MACOS/recall-ui"
+    [[ -f "$MACOS/onboarding" ]] && codesign --force --sign - "$MACOS/onboarding"
     codesign --force --sign - "$MACOS/Hippocampus"
     codesign --force --deep --sign - "$APP"
 fi

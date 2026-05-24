@@ -52,25 +52,58 @@ public final class SearchViewModel: ObservableObject {
         defer { isSearching = false }
         do {
             let window = filters.timeWindowUs()
-            let opts = SearchOptions(
-                text: q.isEmpty ? "*" : q,
-                limit: 50,
-                appFilter: filters.appFilter,
-                timeFromUs: window.fromUs,
-                timeToUs: window.toUs
-            )
-            var results = try await reader.search(opts)
-            if filters.requiresClientSideAppFilter {
-                results = results.filter { filters.matchesApp($0.appBundleId) }
-            }
-            if filters.hasUrl {
-                results = results.filter { $0.url != nil && !$0.url!.isEmpty }
+            let results: [Hit]
+            if q.isEmpty {
+                // Filter-only path. FTS5 rejects empty / `*` queries
+                // (core/brain `fts5_search_empty_query_rejected`), so we
+                // pull a recent-events pool and apply window + app + URL
+                // filters client-side. Pool of 500 is plenty for the
+                // dogfood window (Last 7 days at active capture rates).
+                results = try await applyClientFilters(
+                    to: reader.recentEvents(limit: 500),
+                    window: window
+                )
+            } else {
+                let opts = SearchOptions(
+                    text: q,
+                    limit: 50,
+                    appFilter: filters.appFilter,
+                    timeFromUs: window.fromUs,
+                    timeToUs: window.toUs
+                )
+                results = try await applyClientFilters(
+                    to: reader.search(opts),
+                    window: window
+                )
             }
             hits = results
         } catch {
             hits = []
             errorMessage = "\(error)"
         }
+    }
+
+    /// Apply window + app + URL filters that the FFI does not enforce
+    /// on its own. Centralized so the filter-only path and the
+    /// text+filter path stay in sync.
+    private func applyClientFilters(
+        to results: [Hit],
+        window: (fromUs: UInt64?, toUs: UInt64?)
+    ) -> [Hit] {
+        var out = results
+        if let from = window.fromUs {
+            out = out.filter { $0.tsUs >= from }
+        }
+        if let to = window.toUs {
+            out = out.filter { $0.tsUs <= to }
+        }
+        if filters.requiresClientSideAppFilter || filters.appFilter != nil {
+            out = out.filter { filters.matchesApp($0.appBundleId) }
+        }
+        if filters.hasUrl {
+            out = out.filter { $0.url != nil && !$0.url!.isEmpty }
+        }
+        return Array(out.prefix(50))
     }
 
     public func clear() {

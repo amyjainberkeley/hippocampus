@@ -41,6 +41,8 @@ struct OnboardingFlowView: View {
             RetentionSlide()
         case .prepareBrain:
             PrepareBrainSlide()
+        case .connectClaudeCode:
+            ConnectClaudeCodeSlide()
         case .done:
             DoneSlide()
         }
@@ -60,6 +62,15 @@ struct OnboardingFlowView: View {
             if flowVM.currentStep == .done {
                 Button("Get Started") {
                     UserDefaults.standard.set(true, forKey: "MCIOnboardingCompleted")
+                    // Cross-process sentinel so Hippocampus.app's
+                    // auto-launch-onboarding check at next start
+                    // sees "completed at least once" and skips the
+                    // automatic spawn. See OnboardingSentinel in
+                    // HippocampusKit — we duplicate the file path
+                    // here rather than depending on HippocampusKit
+                    // (per Package.swift's "Zero external
+                    // dependencies" comment).
+                    writeOnboardingCompleteSentinel()
                     #if canImport(AppKit)
                     NSApplication.shared.terminate(nil)
                     #endif
@@ -84,5 +95,24 @@ struct OnboardingFlowView: View {
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 14)
+    }
+
+    /// Touch `~/Library/Application Support/MCI/.onboarding-complete`
+    /// so Hippocampus.app skips its auto-spawn on next launch. Mirror
+    /// of `HippocampusKit.OnboardingSentinel.markComplete()` —
+    /// duplicated to avoid an OnboardingKit→HippocampusKit dep.
+    private func writeOnboardingCompleteSentinel() {
+        let url = FileManager.default
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Application Support/MCI/.onboarding-complete"
+            )
+        let dir = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true
+        )
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let body = "onboarding-completed-at \(stamp)\n"
+        try? body.write(to: url, atomically: true, encoding: .utf8)
     }
 }

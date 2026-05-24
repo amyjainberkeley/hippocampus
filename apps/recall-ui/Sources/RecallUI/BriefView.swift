@@ -60,19 +60,27 @@ struct BriefView: View {
     private var modelMissingView: some View {
         VStack(spacing: 16) {
             ContentUnavailableView(
-                "Daily briefs disabled",
+                "Daily briefs coming soon",
                 systemImage: "doc.text",
                 description: Text(
-                    "Hippocampus uses an on-device AI model to write a one-screen brief each morning. Enable it to start seeing daily briefs."
+                    "Daily briefs are written by an on-device AI model (Qwen3-1.7B, ≈ 1 GB). The model is not bundled in v0.1.0 — it ships in a future update. Nothing leaves your device."
                 )
             )
             .foregroundStyle(Color.brandFgSecondary)
 
-            Button("Enable on-device brief model") {
-                onRequestModelDownload()
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Color.brandMint)
+            // The download flow exists in Hippocampus.app's menu-bar
+            // ("Daily Briefs: Off — Download Model…") but Qwen3 model
+            // conversion + HuggingFace upload (OWNER_TASKS #17–#19) is
+            // not complete in v0.1.0 — the SHA in models.json is the
+            // `PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED` literal, so a
+            // download attempt would fail SHA verification anyway. We
+            // surface the menu-bar entry-point honestly so power users
+            // who fetch the model manually can still wire it up.
+            Text("Power users: click the Hippocampus icon in your menu bar → 'Daily Briefs' once the model ships.")
+                .font(.caption)
+                .foregroundStyle(Color.brandFgMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
         }
         .padding(24)
     }
