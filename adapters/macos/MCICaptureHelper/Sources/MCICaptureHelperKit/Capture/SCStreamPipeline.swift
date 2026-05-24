@@ -168,28 +168,46 @@ public final class SurfaceLease: @unchecked Sendable {
 }
 
 /// The encode seam. Production impl = VideoToolbox HEVC keyframe
-/// encode (cycle 3). Per the PRIORITY REDIRECT this file does NOT
-/// add that encoder — only the call site, unconditionally behind the
-/// cascade. Tests inject a spy.
+/// encode (`VideoToolboxHEVCEncoder.swift`). Tests inject a spy.
+///
+/// The `input: EncoderInput?` argument carries the retained pixel
+/// buffer for one frame. `nil` means "OS-free / headless test path"
+/// — the encoder may record that an allow decision reached its call
+/// site but MUST NOT attempt to encode (there is nothing to encode).
+/// The live `SCStreamCaptureSession` callback constructs an
+/// `EncoderInput` from the borrowed `CVPixelBuffer` and passes it on
+/// every `.allow` frame.
 public protocol FrameEncoder: Sendable {
     /// Encode an allowed frame. Called ONLY after
-    /// `SuppressionCascade.decide(...)` returned `.allow`.
-    func encodeAllowedFrame(seq: UInt64, context: WorkflowContext) async throws
+    /// `SuppressionCascade.decide(...)` returned `.allow`. The pipeline's
+    /// top-level `defer { lease.release() }` (Amendment 1 §3(d)) runs
+    /// AFTER this call returns — including on `throws` — so a throwing
+    /// encoder cannot leak the IOSurface lease.
+    func encodeAllowedFrame(
+        input: EncoderInput?,
+        seq: UInt64,
+        context: WorkflowContext
+    ) async throws
 }
 
-/// Cycle-3 production encoder placeholder.
-///
-/// `// UNVERIFIED — needs live macOS; do not claim working`. It
-/// deliberately does nothing and is NOT wired into a runnable path
-/// that stores a frame — wiring real VideoToolbox here without the
-/// cascade in front would violate the PRIORITY REDIRECT. It exists so
-/// the call site type-checks; cycle 3 replaces the body.
+/// Default-OFF placeholder. Retained because `main.swift` may wire it
+/// when the operator omits `--capture`, and headless tests use it as a
+/// zero-cost stand-in for the production encoder. Replacing it with
+/// `VideoToolboxHEVCEncoder` is itself NOT a default flip — flipping
+/// the §4 default-ON capture gate requires the §7 corpus + CSO
+/// sign-off (`CaptureLaunchOptions.swift`). DOGFOOD #3 wires the real
+/// encoder ONLY inside the `--capture` dev branch in `main.swift`.
 public struct DeferredVideoToolboxEncoder: FrameEncoder {
     public init() {}
-    public func encodeAllowedFrame(seq _: UInt64, context _: WorkflowContext) async throws {
-        // UNVERIFIED — needs live macOS; do not claim working.
-        // Intentionally empty: cycle 3 lands the VideoToolbox HEVC
-        // keyframe encode here, gated by the cascade above this call.
+    public func encodeAllowedFrame(
+        input _: EncoderInput?,
+        seq _: UInt64,
+        context _: WorkflowContext
+    ) async throws {
+        // Intentionally empty: the `.allow` branch is reached but no
+        // frame is encoded or stored. Used by the default (no-flag) path
+        // and by OS-free tests that exercise the pipeline's structural
+        // gate without pulling in VideoToolbox.
     }
 }
 
@@ -348,7 +366,8 @@ public struct SCStreamPipeline: Sendable {
         frame: CandidateFrame,
         context: WorkflowContext,
         nowUs: UInt64,
-        lease: SurfaceLease
+        lease: SurfaceLease,
+        encoderInput: EncoderInput? = nil
     ) async throws -> Outcome {
         // Exactly-once release on EVERY path, including a throwing
         // `sink.write` / `encoder.encodeAllowedFrame`. Must be the
@@ -445,8 +464,17 @@ public struct SCStreamPipeline: Sendable {
             // call site in the helper. If the encoder throws, the
             // top-level `defer` releases the surface and the error
             // propagates — the allow-path lease leak this item fixes.
+            // DOGFOOD #3: `encoderInput` carries the live frame's
+            // retained `CVPixelBuffer`. A `nil` input keeps the
+            // headless / OS-free test path unchanged (the encoder is
+            // expected to no-op on nil); the live `SCStreamCapture`
+            // callback always supplies a non-nil input.
             let seq = await sequence.allocate()
-            try await encoder.encodeAllowedFrame(seq: seq, context: context)
+            try await encoder.encodeAllowedFrame(
+                input: encoderInput,
+                seq: seq,
+                context: context
+            )
             return .encoded(seq: seq, forcedByFloor: forcedByFloor)
         }
     }

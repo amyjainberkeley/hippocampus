@@ -409,6 +409,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // `nil` when the sample carries no pixel buffer; the OCR path
         // is then skipped (no OCREvent ever reaches the wire).
         let ocrInput: OCREngineInput?
+        // DOGFOOD #3 — wrap the same retained `CVPixelBuffer` in an
+        // `EncoderInput` so the cascade's `.allow` branch can hand it
+        // to `VideoToolboxHEVCEncoder`. `@unchecked Sendable` for the
+        // same reason `OCREngineInput` is — single-owner-while-in-
+        // flight; the encoder runs to completion before the pipeline's
+        // `defer { lease.release() }` fires, so the `CVPixelBuffer`
+        // outlives the encoder call without a second retain. `nil`
+        // preserves the pre-DOGFOOD#3 OS-free behaviour (the encoder
+        // no-ops and the pipeline still encodes-or-suppresses).
+        let encoderInput: EncoderInput?
         if let pb = CMSampleBufferGetImageBuffer(sampleBuffer) {
             // UNVERIFIED — needs live macOS; do not claim working.
             releaser = PixelSurfaceReleaser(
@@ -420,9 +430,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 dirtyRects: sample.dirtyRects
             )
             ocrInput = OCREngineInput(pixelBuffer: pb, roi: roi)
+            encoderInput = EncoderInput(pixelBuffer: pb)
         } else {
             releaser = BorrowedNoRetainReleaser()
             ocrInput = nil
+            encoderInput = nil
         }
         let lease = SurfaceLease(releaser: releaser)
 
@@ -431,15 +443,22 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let ocrEmitter = self.ocrPostAllowEmitter
         Task.detached {
             // The single sink for a captured frame is the cascade-gated
-            // pipeline. `DeferredVideoToolboxEncoder` (still in place
-            // this PR) is a no-op, so an `.allow` decision encodes
-            // nothing; a `.suppress` decision emits a tombstone and
-            // never reaches encode. Either way: no stored frame.
+            // pipeline. On `.allow` the pipeline hands `encoderInput`
+            // to whichever `FrameEncoder` is wired:
+            //   - default / no `--capture` build: `DeferredVideoToolboxEncoder`
+            //     (no-op, stores nothing). Amendment 1 §4 binding.
+            //   - `--capture` dev path (DOGFOOD #3): `VideoToolboxHEVCEncoder`
+            //     produces an HEVC IDR and hands it to an in-memory
+            //     `EncodedSampleSink` (not persisted to disk; the next
+            //     PR wires the OCR consumer).
+            // A `.suppress` decision emits a tombstone and never reaches
+            // encode — Amendment 1 §3(a)/(c) preserved by construction.
             let outcome = try? await pipeline.process(
                 frame: frame,
                 context: context,
                 nowUs: nowUs,
-                lease: lease
+                lease: lease,
+                encoderInput: encoderInput
             )
             // ADR-0016 P3.6 — cascade-twice. On `.encoded` (pixel-time
             // cascade returned `.allow`), submit to OCR + run §6

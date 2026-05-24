@@ -44,7 +44,11 @@ private actor RecordingSink: FrameSink {
 
 private actor SpyEncoder: FrameEncoder {
     private(set) var calls = 0
-    func encodeAllowedFrame(seq _: UInt64, context _: WorkflowContext) async throws { calls += 1 }
+    func encodeAllowedFrame(
+        input _: EncoderInput?,
+        seq _: UInt64,
+        context _: WorkflowContext
+    ) async throws { calls += 1 }
     func callCount() -> Int { calls }
 }
 
@@ -52,7 +56,11 @@ private struct EncodeBoom: Error {}
 private struct SinkBoom: Error {}
 
 private struct ThrowingEncoder: FrameEncoder {
-    func encodeAllowedFrame(seq _: UInt64, context _: WorkflowContext) async throws {
+    func encodeAllowedFrame(
+        input _: EncoderInput?,
+        seq _: UInt64,
+        context _: WorkflowContext
+    ) async throws {
         throw EncodeBoom()
     }
 }
