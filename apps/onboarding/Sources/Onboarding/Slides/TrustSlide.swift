@@ -3,6 +3,7 @@ import OnboardingKit
 
 struct TrustSlide: View {
     @EnvironmentObject var trustVM: TrustPanelViewModel
+    @State private var showKeyWrapAudit = false
 
     var body: some View {
         SlideContainer {
@@ -14,8 +15,16 @@ struct TrustSlide: View {
                 VStack(alignment: .leading, spacing: 8) {
                     trustPoint(
                         icon: "key.fill",
-                        text: "256-bit key sealed in the macOS Keychain."
+                        text: "256-bit key sealed on this Mac."
                     )
+                    Button("How is the key sealed?") {
+                        showKeyWrapAudit = true
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12))
+                    .padding(.leading, 30)
+                    .accessibilityIdentifier("TrustSlideInspectKeyWrap")
+
                     trustPoint(
                         icon: "shield.checkered",
                         text: "Seven layers of protection filter what reaches your brain."
@@ -29,6 +38,17 @@ struct TrustSlide: View {
                 cascadePreview
             }
         }
+        .sheet(isPresented: $showKeyWrapAudit) {
+            KeyWrapAuditView(
+                initialReport: currentReport(),
+                reverify: { currentReport() },
+                onClose: { showKeyWrapAudit = false }
+            )
+        }
+    }
+
+    private func currentReport() -> KeyWrapAuditReport {
+        KeyWrapAuditor.inspectFile(at: DefaultKeyWrapLocation.devKeyURL())
     }
 
     private var pipelineView: some View {
