@@ -75,7 +75,11 @@ private enum LifetimeFixtures {
         func hasBlackedRegion() -> Bool { false }
     }
     private struct NoopEncoder: FrameEncoder {
-        func encodeAllowedFrame(seq _: UInt64, context _: WorkflowContext) async throws {}
+        func encodeAllowedFrame(
+            input _: EncoderInput?,
+            seq _: UInt64,
+            context _: WorkflowContext
+        ) async throws {}
     }
     private struct NoopSink: FrameSink {
         func write(_: Data) async throws {}

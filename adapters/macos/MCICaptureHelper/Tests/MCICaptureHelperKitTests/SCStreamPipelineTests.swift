@@ -40,7 +40,11 @@ private actor RecordingSink: FrameSink {
 
 private actor SpyEncoder: FrameEncoder {
     private(set) var calls: [UInt64] = []
-    func encodeAllowedFrame(seq: UInt64, context _: WorkflowContext) async throws {
+    func encodeAllowedFrame(
+        input _: EncoderInput?,
+        seq: UInt64,
+        context _: WorkflowContext
+    ) async throws {
         calls.append(seq)
     }
     func callCount() -> Int { calls.count }
@@ -63,7 +67,11 @@ private struct SinkBoom: Error, Equatable {}
 /// A `FrameEncoder` that always throws — proves the allow path
 /// releases the surface lease even when the encoder fails.
 private struct ThrowingEncoder: FrameEncoder {
-    func encodeAllowedFrame(seq _: UInt64, context _: WorkflowContext) async throws {
+    func encodeAllowedFrame(
+        input _: EncoderInput?,
+        seq _: UInt64,
+        context _: WorkflowContext
+    ) async throws {
         throw EncodeBoom()
     }
 }

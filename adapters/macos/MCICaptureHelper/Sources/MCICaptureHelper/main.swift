@@ -433,6 +433,34 @@ if captureOptions.captureEnabled {
     // binding (process-lifetime, SCSTREAM-LIVE-001 discipline).
     await ocrWorker.start()
 
+    // DOGFOOD #3 — `VideoToolboxHEVCEncoder` wired ONLY inside the
+    // `--capture` dev branch. The encoded `CMSampleBuffer`s flow into
+    // an in-memory `InMemoryEncodedSampleQueue` (NOT persisted to
+    // disk — that wiring is gated by ADR-0013 Amendment 1 §4 + the
+    // §7 corpus). The next PR (DOGFOOD #4) plugs the OCR worker into
+    // this same queue. Outside the `--capture` branch (the default
+    // build path) `DeferredVideoToolboxEncoder` is still the wiring
+    // and no `VTCompressionSession` is ever constructed.
+    //
+    // Amendment 1 §3 audit:
+    //   (a) cascade-before-encode — encoder is reached only from
+    //       `SCStreamPipeline.process(...)`'s `.allow` branch.
+    //   (b) fail-closed preserved — encoder additions widen no
+    //       `.allow` path.
+    //   (c) no stored/emitted suppressed event — `.suppress` returns
+    //       before the encode call site; the encoder is never reached.
+    //   (d) no IOSurface pool-stall — the pipeline's top-level
+    //       `defer { lease.release() }` releases the surface on every
+    //       exit including a throwing encoder; the encoder takes its
+    //       own bounded session-internal retain on the pixel buffer.
+    //
+    // Amendment 1 §4 — `CaptureLaunchOptions.captureEnabled` is the
+    // sole gate; this code path is unreachable until the operator
+    // passes `--capture` explicitly. Flipping the default-OFF gate is
+    // still NOT this PR.
+    let encodedSampleQueue = InMemoryEncodedSampleQueue()
+    let hevcEncoder = VideoToolboxHEVCEncoder(sink: encodedSampleQueue)
+
     // STEP-2-FINDING-005 fix — pass `loop.counters` to the pipeline so
     // pipeline writes (`recordDelivered` / `recordSuppressed` /
     // `recordRedactedByFailsafe` / `recordCascadeForced` /
@@ -448,11 +476,7 @@ if captureOptions.captureEnabled {
     captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
-            // No-op encoder — NO stored frame. PR-3 landed the real
-            // `VideoToolboxHEVCEncoder` SHAPE, but wiring it here is a
-            // CSO-gated default flip behind the green §7 corpus
-            // (ADR-0013 Amendment 1 §4) — deliberately NOT autonomous.
-            encoder: DeferredVideoToolboxEncoder(),
+            encoder: hevcEncoder,
             counters: loop.counters,
             sequence: sharedSequence,
             sink: sharedSink,
@@ -478,10 +502,12 @@ if captureOptions.captureEnabled {
 
 if let captureSession {
     FileHandle.standardError.write("""
-    mci-capture-helper: --capture is a DEV-ONLY, UNVERIFIED path \
+    mci-capture-helper: --capture is a DEV-ONLY path \
     (ADR-0013 Amendment 1 §4). Live SCStream capture is NOT enabled in \
-    default builds and stores no frame in this build (no retain, no \
-    encoder). Starting live session…\n
+    default builds. The `--capture` dev path now runs the live cascade \
+    + the VideoToolbox HEVC encoder (DOGFOOD #3) and buffers encoded \
+    keyframes in memory ONLY — no frame is persisted to disk in this \
+    build. Starting live session…\n
     """.data(using: .utf8) ?? Data())
 
     // ADR-0015 §6 P2.5 — start the 1 Hz context poller BEFORE

@@ -91,7 +91,11 @@ private actor RecordingSink: FrameSink {
 
 private actor SpyEncoder: FrameEncoder {
     private(set) var calls: [UInt64] = []
-    func encodeAllowedFrame(seq: UInt64, context _: WorkflowContext) async throws {
+    func encodeAllowedFrame(
+        input _: EncoderInput?,
+        seq: UInt64,
+        context _: WorkflowContext
+    ) async throws {
         calls.append(seq)
     }
     func callCount() -> Int { calls.count }

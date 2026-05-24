@@ -38,6 +38,8 @@
 //   - `cascade_forced_count` continues to increment from the floor
 //     heartbeat on `.drop*` frames past the floor interval.
 
+import CoreVideo
+import VideoToolbox
 import XCTest
 
 @testable import MCICaptureHelperKit
@@ -78,7 +80,11 @@ private actor RecordingSink: FrameSink {
 
 private actor SpyEncoder: FrameEncoder {
     private(set) var calls: Int = 0
-    func encodeAllowedFrame(seq _: UInt64, context _: WorkflowContext) async throws {
+    func encodeAllowedFrame(
+        input _: EncoderInput?,
+        seq _: UInt64,
+        context _: WorkflowContext
+    ) async throws {
         calls += 1
     }
     func callCount() -> Int { calls }
@@ -88,7 +94,11 @@ private struct EncodeBoom: Error {}
 private struct SinkBoom: Error {}
 
 private struct ThrowingEncoder: FrameEncoder {
-    func encodeAllowedFrame(seq _: UInt64, context _: WorkflowContext) async throws {
+    func encodeAllowedFrame(
+        input _: EncoderInput?,
+        seq _: UInt64,
+        context _: WorkflowContext
+    ) async throws {
         throw EncodeBoom()
     }
 }
@@ -455,5 +465,74 @@ final class RetainedSurfaceLifecycleTests: XCTestCase {
             "every idle frame past the 1 ms floor produces one floor-forced cascade evaluation")
         XCTAssertEqual(snap.cascadeFromFilter &+ snap.cascadeForced, n,
             "every delivered frame produced exactly one cascade evaluation (filter-passed XOR floor-forced)")
+    }
+
+    // MARK: - (e) DOGFOOD #3 — real VideoToolboxHEVCEncoder on .allow
+
+    /// The DOGFOOD #3 encoder lease-discipline pin. Drives a REAL
+    /// `VideoToolboxHEVCEncoder` (no spy) on a `.allow` decision with a
+    /// synthetic `CVPixelBufferCreate` buffer, and asserts:
+    ///   - the encoder produced exactly one `CMSampleBuffer` into the
+    ///     sink (proves the `.allow` → encode → sink path works);
+    ///   - the surface lease released exactly once (proves Amendment 1
+    ///     §3(d) holds with the real encoder, not just a spy).
+    ///
+    /// Skipped when the host cannot construct an HEVC compression
+    /// session (older / headless macOS). The spy-encoder equivalents
+    /// above remain the always-on lease-discipline guards.
+    func test_lease_released_once_with_real_hevc_encoder_on_allow() async throws {
+        var probe: VTCompressionSession?
+        let probeStatus = VTCompressionSessionCreate(
+            allocator: kCFAllocatorDefault, width: 32, height: 32,
+            codecType: kCMVideoCodecType_HEVC, encoderSpecification: nil,
+            imageBufferAttributes: nil, compressedDataAllocator: nil,
+            outputCallback: nil, refcon: nil, compressionSessionOut: &probe
+        )
+        if let probe { VTCompressionSessionInvalidate(probe) }
+        try XCTSkipIf(probeStatus != noErr, "HEVC VTCompressionSession unavailable on this host")
+
+        let spy = SpyReleaser()
+        let sink = InMemoryEncodedSampleQueue()
+        let encoder = VideoToolboxHEVCEncoder(sink: sink)
+        let pipe = makePipeline(
+            ax: AXNonSecure(),
+            knownSafe: ["com.good.app"],
+            encoder: encoder,
+            sink: RecordingSink()
+        )
+
+        var pb: CVPixelBuffer?
+        let createStatus = CVPixelBufferCreate(
+            kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA,
+            [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary] as CFDictionary,
+            &pb
+        )
+        try XCTSkipIf(createStatus != kCVReturnSuccess, "CVPixelBufferCreate failed")
+        let buffer = try XCTUnwrap(pb)
+        CVPixelBufferLockBaseAddress(buffer, [])
+        if let base = CVPixelBufferGetBaseAddress(buffer) {
+            memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * 64)
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+
+        let lease = SurfaceLease(releaser: spy)
+        let outcome = try await pipe.process(
+            frame: forwardingFrame(),
+            context: WorkflowContext(appBundleId: "com.good.app"),
+            nowUs: 1_000,
+            lease: lease,
+            encoderInput: EncoderInput(pixelBuffer: buffer)
+        )
+
+        if case .encoded = outcome {} else {
+            XCTFail("expected .encoded from real encoder, got \(outcome)")
+        }
+        XCTAssertEqual(encoder.emittedSampleCount(), 1,
+            "real VideoToolboxHEVCEncoder must emit one CMSampleBuffer on a .allow")
+        let sinkCount = await sink.count()
+        XCTAssertEqual(sinkCount, 1, "encoded sample handed to the in-memory sink")
+        XCTAssertEqual(spy.releaseCount, 1,
+            "Amendment 1 §3(d): lease released exactly once with the real encoder on the .allow path")
+        XCTAssertTrue(lease.isReleased)
     }
 }
