@@ -53,4 +53,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     func applicationWillTerminate(_ notification: Notification) {
         supervisorRef?.stop()
     }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard url.scheme == "hippocampus", url.host == "recall" else { continue }
+            Task { @MainActor in
+                supervisorRef?.openRecallUI()
+            }
+        }
+    }
 }

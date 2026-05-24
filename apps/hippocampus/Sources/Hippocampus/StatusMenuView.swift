@@ -54,10 +54,10 @@ struct StatusMenuView: View {
 
             Divider()
 
-            Button("Open Recall UI") {
+            Button("Open Recall…") {
                 supervisor.openRecallUI()
             }
-            .disabled(!supervisor.state.isActive)
+            .keyboardShortcut("r")
 
             if supervisor.hasOnboarding {
                 Button("Open Onboarding") {
