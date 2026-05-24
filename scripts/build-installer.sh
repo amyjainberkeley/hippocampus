@@ -174,6 +174,11 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
         --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/mci-agent"
 
+    codesign --force --options=runtime --timestamp \
+        --sign "$DEVELOPER_ID" \
+        --entitlements "$ENTITLEMENTS" \
+        "$APP_PATH/Contents/MacOS/recall-ui"
+
     # Sign Sparkle.framework inside-out.
     #
     # Sparkle 2.x ships with ad-hoc-signed inner binaries (Updater.app,

@@ -14,6 +14,8 @@ struct MCIRecallApp: App {
                 .background(Color.brandBgPrimary)
                 .preferredColorScheme(.dark)
         }
+        .defaultPosition(.center)
+        .defaultSize(width: 900, height: 600)
     }
 
     @MainActor
