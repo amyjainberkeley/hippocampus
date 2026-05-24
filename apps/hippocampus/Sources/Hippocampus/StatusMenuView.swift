@@ -167,9 +167,18 @@ struct StatusMenuView: View {
                     UserDefaults.standard.set(newValue, forKey: "MCIBriefsEnabled")
                 }
         } else {
-            Button("Daily Briefs: Off — Download Model…") {
-                showDownloadDialog = true
-            }
+            // Qwen3 brief-author model is not yet on HuggingFace —
+            // `apps/hippocampus/Resources/models.json` still has the
+            // placeholder SHA-256 ("PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED"),
+            // which means clicking Download successfully fetches the
+            // upstream tarball but fails SHA verification, leaving
+            // the user staring at a sheet with no clear next step
+            // (CEO-reported, 2026-05-24). Surface a disabled
+            // "Coming in v0.2" item until OWNER_TASKS #17-#19 are
+            // done (model converted + uploaded + SHA updated).
+            Button("Daily Briefs · Coming in v0.2") {}
+                .disabled(true)
+                .help("Daily briefs are written by an on-device AI model (Qwen3-1.7B). Model conversion + HuggingFace upload is in progress.")
         }
     }
 

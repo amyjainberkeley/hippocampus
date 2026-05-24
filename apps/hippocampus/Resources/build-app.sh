@@ -177,6 +177,31 @@ else
     echo "             python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage"
 fi
 
+# --- Bundle the Chromium extension as a load-unpacked dir ---
+#
+# The Chrome / Arc / Brave / Edge extension at extensions/chromium/ is
+# not in the Web Store yet (DOGFOOD_V1 #16). For dogfood v1 we ship
+# the unpacked dir inside the .app so onboarding's "Install" button
+# can reveal it in Finder and the user can drag-drop it onto Chrome's
+# chrome://extensions page. When the Web Store / .crx path lands,
+# this block becomes redundant.
+CHROMIUM_EXT_SRC="$REPO_ROOT/extensions/chromium"
+CHROMIUM_EXT_DEST="$RESOURCES/Extensions/Chromium"
+if [[ -d "$CHROMIUM_EXT_SRC" ]]; then
+    echo "Bundling Chromium extension (unpacked, Load-Unpacked flow)"
+    rm -rf "$CHROMIUM_EXT_DEST"
+    mkdir -p "$CHROMIUM_EXT_DEST"
+    # Copy only the files Chrome actually needs — skip __tests__,
+    # node_modules, package.json, hidden files.
+    for entry in manifest.json background.js content.js icons \
+            ai.hippocampus.native_messaging.json; do
+        src="$CHROMIUM_EXT_SRC/$entry"
+        if [[ -e "$src" ]]; then
+            cp -R "$src" "$CHROMIUM_EXT_DEST/"
+        fi
+    done
+fi
+
 # --- Safari Web Extension .appex ---
 
 SAFARI_EXT_DIR="$REPO_ROOT/extensions/safari"

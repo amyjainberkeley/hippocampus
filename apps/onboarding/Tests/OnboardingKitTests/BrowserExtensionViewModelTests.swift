@@ -13,6 +13,26 @@ final class BrowserExtensionViewModelTests: XCTestCase {
         return (vm, detector)
     }
 
+    private final class FakeLauncher: BrowserLauncher, @unchecked Sendable {
+        var openCalls: [(String, String)] = []
+        var revealCalls: [URL] = []
+        var returnSuccess = true
+
+        func openInBrowser(browserName: String, url: String) -> Bool {
+            openCalls.append((browserName, url))
+            return returnSuccess
+        }
+
+        func revealInFinder(_ url: URL) {
+            revealCalls.append(url)
+        }
+    }
+
+    private struct FakeLocator: ChromiumExtensionLocator {
+        let url: URL?
+        func bundledChromiumExtensionURL() -> URL? { url }
+    }
+
     func testRowsPopulatedFromDetector() {
         let (vm, _) = makeVM(browsers: [chrome, safari])
         XCTAssertEqual(vm.rows.count, 2)
@@ -47,5 +67,66 @@ final class BrowserExtensionViewModelTests: XCTestCase {
         vm.checkExtension(for: "com.nonexistent.Browser")
         XCTAssertEqual(detector.checkCallCount, 0)
         XCTAssertEqual(vm.rows[0].extensionStatus, .unknown)
+    }
+
+    // MARK: - Chromium install flow (added 2026-05-24 after CEO
+    // reported the chrome:// URL scheme silently failing).
+
+    func testInstallChromiumSpawnsBrowserAtExtensionsPage() {
+        let launcher = FakeLauncher()
+        let dir = URL(fileURLWithPath: "/Applications/Hippocampus.app/Contents/Resources/Extensions/Chromium")
+        let locator = FakeLocator(url: dir)
+        let detector = StubBrowserDetector(browsers: [chrome])
+        let vm = BrowserExtensionViewModel(
+            detector: detector,
+            extensionLocator: locator,
+            browserLauncher: launcher
+        )
+        vm.installAction(for: chrome)
+        XCTAssertEqual(launcher.openCalls.count, 1)
+        XCTAssertEqual(launcher.openCalls.first?.0, "Chrome")
+        XCTAssertEqual(launcher.openCalls.first?.1, "chrome://extensions")
+        XCTAssertEqual(launcher.revealCalls, [dir])
+        XCTAssertEqual(vm.rows[0].installInstructions?.unpackedDirPath, dir.path)
+        XCTAssertTrue(vm.rows[0].installInstructions?.didOpenBrowser ?? false)
+        XCTAssertEqual(vm.rows[0].installInstructions?.browserName, "Chrome")
+    }
+
+    func testInstallChromiumSurfacesFailureWhenOpenFails() {
+        let launcher = FakeLauncher()
+        launcher.returnSuccess = false
+        let vm = BrowserExtensionViewModel(
+            detector: StubBrowserDetector(browsers: [chrome]),
+            extensionLocator: FakeLocator(url: nil),
+            browserLauncher: launcher
+        )
+        vm.installAction(for: chrome)
+        XCTAssertEqual(vm.rows[0].installInstructions?.didOpenBrowser, false)
+        XCTAssertNil(vm.rows[0].installInstructions?.unpackedDirPath)
+        XCTAssertEqual(launcher.revealCalls, []) // no reveal when no bundled dir
+    }
+
+    func testInstallChromiumWithArcUsesArcAsBrowserName() {
+        let arc = DetectedBrowser(id: "company.thebrowser.Browser", name: "Arc", kind: .chromium)
+        let launcher = FakeLauncher()
+        let vm = BrowserExtensionViewModel(
+            detector: StubBrowserDetector(browsers: [arc]),
+            extensionLocator: FakeLocator(url: URL(fileURLWithPath: "/tmp/x")),
+            browserLauncher: launcher
+        )
+        vm.installAction(for: arc)
+        XCTAssertEqual(launcher.openCalls.first?.0, "Arc")
+        XCTAssertEqual(vm.rows[0].installInstructions?.browserName, "Arc")
+    }
+
+    func testInstallSafariDoesNotSpawnChromium() {
+        let launcher = FakeLauncher()
+        let vm = BrowserExtensionViewModel(
+            detector: StubBrowserDetector(browsers: [safari]),
+            extensionLocator: FakeLocator(url: nil),
+            browserLauncher: launcher
+        )
+        vm.installAction(for: safari)
+        XCTAssertTrue(launcher.openCalls.isEmpty, "Safari install must not invoke chromium launcher")
     }
 }
