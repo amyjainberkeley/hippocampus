@@ -23,9 +23,28 @@ struct HippocampusApp: App {
                 appDelegate.supervisorRef = supervisor
                 supervisor.start()
                 updater.startUpdater()
+                Self.autoLaunchOnboardingIfNeeded(supervisor: supervisor)
             }
         } label: {
             MenuBarIcon(supervisor: supervisor)
+        }
+    }
+
+    /// On first launch (no `~/Library/Application Support/MCI/
+    /// .onboarding-complete` sentinel), spawn the standalone Onboarding
+    /// executable so the user lands in a guided flow instead of staring
+    /// at an empty menu bar. No-op on subsequent launches.
+    ///
+    /// Defers by 1.0 s so the menu-bar icon paints first — otherwise
+    /// the Onboarding window appears before the user has any visual
+    /// confirmation the menu-bar app launched (jarring).
+    @MainActor
+    private static func autoLaunchOnboardingIfNeeded(supervisor: ProcessSupervisor) {
+        guard !OnboardingSentinel.isComplete else { return }
+        guard supervisor.hasOnboarding else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            _ = supervisor.openOnboarding()
         }
     }
 }

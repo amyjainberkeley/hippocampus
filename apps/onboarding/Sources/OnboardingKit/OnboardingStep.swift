@@ -9,7 +9,8 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
     case livePreview = 5
     case retention = 6
     case prepareBrain = 7
-    case done = 8
+    case connectClaudeCode = 8
+    case done = 9
 
     public var id: Int { rawValue }
 
@@ -23,6 +24,7 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
         case .livePreview: "Live Preview"
         case .retention: "Retention & Privacy"
         case .prepareBrain: "Preparing Your Brain"
+        case .connectClaudeCode: "Connect Claude Code"
         case .done: "You're All Set"
         }
     }
