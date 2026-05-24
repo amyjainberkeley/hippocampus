@@ -2,9 +2,29 @@
 # NOT used at runtime or in CI — operator-only, manual conversion.
 # See scripts/convert_embedder.py and scripts/convert_brief_model.py.
 #
-# torch<2.6 is required: coremltools 8.x op registry expects torch <=2.5
-# op signatures. Newer torch versions change traced op names/signatures,
-# causing "unordered_map::at: key not found" during ct.convert.
+# Why these pins:
+#
+#   torch>=2.4,<2.6  — coremltools 8.x op registry expects torch <=2.5
+#     op signatures. Newer torch versions change traced op names AND
+#     emit `torch.export` output in the TRAINING dialect that ct.convert
+#     refuses (only ATEN/EDGE accepted; fix is `.run_decompositions({})`,
+#     applied automatically by convert_brief_model.py as a guard rail).
+#     If you must use newer torch, the script will still try and fall
+#     back to the ONNX path.
+#
+#   numpy<2.0        — coremltools 8.x is not numpy-2 clean.
+#
+#   onnxscript       — required by `torch.onnx.export` dynamo path
+#     (default in torch 2.5+). Path B fallback in convert_brief_model.py
+#     uses opset 17. Without onnxscript the fallback is dead.
+#
+# One-shot setup (fresh venv):
+#
+#   python3.11 -m venv .venv-ml
+#   source .venv-ml/bin/activate
+#   pip install -r scripts/requirements-ml.txt
+#   python scripts/convert_brief_model.py --check-env
+#
 coremltools>=8.0
 torch>=2.4,<2.6
 numpy<2.0
@@ -12,3 +32,4 @@ transformers>=4.40
 optimum>=1.23
 onnx>=1.17
 onnxruntime>=1.20
+onnxscript>=0.1.0
