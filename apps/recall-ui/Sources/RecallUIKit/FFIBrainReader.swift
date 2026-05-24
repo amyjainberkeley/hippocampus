@@ -163,6 +163,53 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         return try Self.decodeEpisodes(rawJson)
     }
 
+    // MARK: BrainReader — Daily Brief surface
+
+    public func briefForDate(_ dateLocal: String) async throws -> Brief? {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        let rawJson: UnsafeMutablePointer<CChar>? = dateLocal.withCString { p in
+            mci_brain_ffi_brief_for_date(h, p)
+        }
+        guard let rawJson else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeOptionalBrief(rawJson)
+    }
+
+    public func latestBrief() async throws -> Brief? {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let rawJson = mci_brain_ffi_latest_brief(h) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeOptionalBrief(rawJson)
+    }
+
+    public func briefDates(limit: Int) async throws -> [String] {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        let clamped = UInt32(max(0, min(limit, Int(UInt32.max))))
+        guard let rawJson = mci_brain_ffi_brief_dates(h, clamped) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        let s = String(cString: rawJson)
+        guard let data = s.data(using: .utf8) else {
+            throw BrainReaderError.decodeFailed("non-UTF8 JSON from FFI (brief_dates)")
+        }
+        do {
+            return try JSONDecoder().decode([String].self, from: data)
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader.briefDates: \(error)")
+        }
+    }
+
     // MARK: helpers
 
     /// Read the FFI's thread-local last-error slot and convert it to a
@@ -233,6 +280,25 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
             throw BrainReaderError.decodeFailed("FFIBrainReader: \(error)")
         }
     }
+
+    /// Decode either a `BriefWire` JSON object or the literal JSON `null`.
+    /// The Rust FFI returns `null` for "no brief on this date" / "store
+    /// has no briefs" — Swift's `Optional<BriefWire>` decoder reads that
+    /// directly.
+    private static func decodeOptionalBrief(
+        _ raw: UnsafeMutablePointer<CChar>
+    ) throws -> Brief? {
+        let s = String(cString: raw)
+        guard let data = s.data(using: .utf8) else {
+            throw BrainReaderError.decodeFailed("non-UTF8 JSON from FFI (brief)")
+        }
+        do {
+            let wire = try JSONDecoder().decode(BriefWire?.self, from: data)
+            return wire?.toBrief()
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader.brief: \(error)")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +339,35 @@ private struct PrivacyMomentWire: Decodable {
 
     func toPrivacyMoment() -> PrivacyMoment {
         PrivacyMoment(tsUs: ts_us, appBundleId: app_bundle_id, reasonCode: reason_code)
+    }
+}
+
+/// Wire shape of `BriefJson` from `mci-brain-ffi` (snake_case fields,
+/// matches the Rust serde derive). Mirror is private so the public
+/// `Brief` surface stays camelCase.
+private struct BriefWire: Decodable {
+    let id: UInt64
+    let date_local: String
+    let generated_ts_us: UInt64
+    let model_id: String
+    let model_version: String
+    let title: String
+    let body: String
+    let word_count: UInt32
+    let source_event_count: UInt32
+
+    func toBrief() -> Brief {
+        Brief(
+            rowId: id,
+            dateLocal: date_local,
+            generatedTsUs: generated_ts_us,
+            modelId: model_id,
+            modelVersion: model_version,
+            title: title,
+            body: body,
+            wordCount: word_count,
+            sourceEventCount: source_event_count
+        )
     }
 }
 

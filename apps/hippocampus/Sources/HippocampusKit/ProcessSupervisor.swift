@@ -99,7 +99,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
-    public func openRecallUI() {
+    public func openRecallUI(initialTab: String? = nil) {
         guard let recallPath = locator.recallUIPath() else {
             logger.warning("supervisor: recall-ui binary not found")
             return
@@ -109,6 +109,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         var env = ProcessInfo.processInfo.environment
         if let keyHex = try? keyStore.readKey() {
             env["MCI_DB_KEY_HEX"] = keyHex
+        }
+        // Deep-link tab hint per the Brief Viewer spec
+        // (`hippocampus://recall?tab=brief`). The recall-ui reads
+        // `MCI_INITIAL_TAB` at launch and selects the matching tab.
+        if let tab = initialTab, !tab.isEmpty {
+            env["MCI_INITIAL_TAB"] = tab
         }
         task.environment = env
         try? task.run()

@@ -433,6 +433,12 @@ fn ffi_exports_no_mutating_surface() {
     // fns landing here without an ADR amend are a §5 protected-set violation.
     // (Compile-time list: any future contributor adding a `mci_brain_ffi_put_*`
     // or `_delete_*` will see this test fail and have to justify it.)
+    //
+    // Brief-viewer addition (docs/design/brief-viewer-spec.md): three new
+    // READ-ONLY brief lookup functions — `_brief_for_date`, `_latest_brief`,
+    // `_brief_dates`. No corresponding `_put_brief` / `_delete_brief` is
+    // exported; writes flow through the agent process via
+    // `SqlCipherBrainStore::put_brief`.
     let allowed: &[&str] = &[
         "mci_brain_ffi_open",
         "mci_brain_ffi_close",
@@ -442,6 +448,10 @@ fn ffi_exports_no_mutating_surface() {
         // Recall-UI dynamic per-app filter + Episodes tab (read-only).
         "mci_brain_ffi_list_observed_apps",
         "mci_brain_ffi_list_episodes",
+        // Brief-viewer read surface (read-only).
+        "mci_brain_ffi_brief_for_date",
+        "mci_brain_ffi_latest_brief",
+        "mci_brain_ffi_brief_dates",
         "mci_brain_ffi_string_free",
         "mci_brain_ffi_last_error_message",
     ];
@@ -456,10 +466,17 @@ fn ffi_exports_no_mutating_surface() {
         mci_brain_ffi_recent_privacy_moments as *const (),
         mci_brain_ffi_list_observed_apps as *const (),
         mci_brain_ffi_list_episodes as *const (),
+        mci_brain_ffi::mci_brain_ffi_brief_for_date as *const (),
+        mci_brain_ffi::mci_brain_ffi_latest_brief as *const (),
+        mci_brain_ffi::mci_brain_ffi_brief_dates as *const (),
         mci_brain_ffi_string_free as *const (),
         mci_brain_ffi_last_error_message as *const (),
     ];
-    assert_eq!(allowed.len(), 9, "FFI surface size pinned at 9");
+    assert_eq!(
+        allowed.len(),
+        12,
+        "FFI surface size pinned at 12 (7 base + 2 #178 list_* + 3 #180 brief_*)"
+    );
 }
 
 // ---------------------------------------------------------------------------

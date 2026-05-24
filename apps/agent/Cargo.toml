@@ -32,6 +32,16 @@ path = "src/bin/mci_seed_brain.rs"
 name = "mci-brain"
 path = "src/bin/mci_brain.rs"
 
+# DEMO / SMOKE-TEST ONLY: synthetic-brief inserter. Used to populate the
+# `briefs` table with a hand-authored row so the Recall UI's Brief tab
+# can be exercised before the Qwen3 brief-author pipeline lands the
+# real generation path (ADR-0028, `docs/design/brief-viewer-spec.md`
+# §"manual smoke"). Refuses to overwrite a date_local that already has
+# a brief unless `--force` is passed.
+[[bin]]
+name = "mci-seed-brief"
+path = "src/bin/mci_seed_brief.rs"
+
 [lints]
 workspace = true
 

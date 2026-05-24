@@ -26,6 +26,15 @@ private struct FailingReader: BrainReader {
     func listEpisodes(limit: Int) async throws -> [Episode] {
         throw BrainReaderError.queryFailed("episodes boom")
     }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? {
+        throw BrainReaderError.queryFailed("brief boom")
+    }
+    func latestBrief() async throws -> Brief? {
+        throw BrainReaderError.queryFailed("latest-brief boom")
+    }
+    func briefDates(limit: Int) async throws -> [String] {
+        throw BrainReaderError.queryFailed("brief-dates boom")
+    }
 }
 
 @MainActor

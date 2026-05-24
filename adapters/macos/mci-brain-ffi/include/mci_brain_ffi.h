@@ -69,6 +69,29 @@ char *mci_brain_ffi_list_observed_apps(McibrainHandle *h, const char *query_json
  * sorted by ts_start_us DESC. Surface for the recall-UI Episodes tab. */
 char *mci_brain_ffi_list_episodes(McibrainHandle *h, uint32_t limit);
 
+/* Daily Brief read surface — `docs/design/brief-viewer-spec.md`.
+ * READ-ONLY by construction (no put_brief / delete_brief). Writes flow
+ * through the agent process via SqlCipherBrainStore::put_brief. */
+
+/* Fetch the brief for an ISO-8601 local date "YYYY-MM-DD".
+ * Returns a UTF-8 JSON object of shape
+ *   {"id":N,"date_local":"YYYY-MM-DD","generated_ts_us":N,
+ *    "model_id":"...","model_version":"...","title":"...",
+ *    "body":"...","word_count":N,"source_event_count":N}
+ * or the literal JSON `null` when no brief exists for the date.
+ * Returns NULL on error; caller must mci_brain_ffi_string_free the
+ * (non-NULL) return value. */
+char *mci_brain_ffi_brief_for_date(McibrainHandle *h, const char *date_local);
+
+/* Fetch the most-recently-generated brief, or JSON `null` when the
+ * store has no briefs. Returns NULL on error. */
+char *mci_brain_ffi_latest_brief(McibrainHandle *h);
+
+/* Fetch up to `limit` brief dates ("YYYY-MM-DD") as a JSON array of
+ * strings, ordered most-recent first. `limit` is clamped at the FFI
+ * boundary so a hostile value cannot allocate unbounded memory. */
+char *mci_brain_ffi_brief_dates(McibrainHandle *h, uint32_t limit);
+
 /* Free a string previously returned by this header's functions.
  * NULL is a no-op. Double-free is undefined. */
 void mci_brain_ffi_string_free(char *s);

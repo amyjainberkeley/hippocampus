@@ -55,6 +55,53 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     }
 }
 
+/// One daily brief — mirrors the Rust `BriefRow` shape backing the
+/// `briefs` table (migration 0002). Surfaced to the Brief tab in the
+/// Recall UI per `docs/design/brief-viewer-spec.md`.
+public struct Brief: Sendable, Equatable, Identifiable, Codable {
+    public var id: UInt64 { rowId }
+    /// Stable `briefs.id` rowid.
+    public let rowId: UInt64
+    /// ISO 8601 local date "YYYY-MM-DD".
+    public let dateLocal: String
+    /// Generation timestamp in microseconds since UNIX epoch.
+    public let generatedTsUs: UInt64
+    /// Author model identifier (e.g. `"qwen3-1.7b-int4"`).
+    public let modelId: String
+    /// Author model version string.
+    public let modelVersion: String
+    /// Header title.
+    public let title: String
+    /// Markdown body.
+    public let body: String
+    /// Word count for the header.
+    public let wordCount: UInt32
+    /// Number of events the author saw when composing.
+    public let sourceEventCount: UInt32
+
+    public init(
+        rowId: UInt64,
+        dateLocal: String,
+        generatedTsUs: UInt64,
+        modelId: String,
+        modelVersion: String,
+        title: String,
+        body: String,
+        wordCount: UInt32,
+        sourceEventCount: UInt32
+    ) {
+        self.rowId = rowId
+        self.dateLocal = dateLocal
+        self.generatedTsUs = generatedTsUs
+        self.modelId = modelId
+        self.modelVersion = modelVersion
+        self.title = title
+        self.body = body
+        self.wordCount = wordCount
+        self.sourceEventCount = sourceEventCount
+    }
+}
+
 /// One privacy-moment card row. Carries ONLY {ts, appBundleId, reasonCode}
 /// — never OCR text, never keyframe, never windowTitle/url
 /// (ADR-0017 §5.1).
@@ -159,6 +206,19 @@ public protocol BrainReader: Sendable {
     func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp]
     /// Most-recent episodes (sorted by start DESC) from the segmenter.
     func listEpisodes(limit: Int) async throws -> [Episode]
+
+    // Daily Brief read surface — backs the Brief tab
+    // (`docs/design/brief-viewer-spec.md`).
+
+    /// Fetch the brief for one ISO local date (`YYYY-MM-DD`). `nil` when
+    /// the store has no brief for that date.
+    func briefForDate(_ dateLocal: String) async throws -> Brief?
+    /// Fetch the most-recently-generated brief, or `nil` when the store
+    /// has no briefs at all.
+    func latestBrief() async throws -> Brief?
+    /// List up to `limit` brief dates (`YYYY-MM-DD`) most-recent first.
+    /// Powers the date selector's `<` / `>` arrows.
+    func briefDates(limit: Int) async throws -> [String]
 }
 
 /// In-memory stub reader. Returns deterministic canned data so the
@@ -201,6 +261,7 @@ public struct StubBrainReader: BrainReader {
             score: 0.62
         ),
     ]
+
     /// Canned episodes. Two Safari segments around a single VSCode block.
     public static let demoEpisodes: [Episode] = [
         Episode(
@@ -225,6 +286,78 @@ public struct StubBrainReader: BrainReader {
             eventCount: 1
         ),
     ]
+
+    /// Canned daily briefs for headless tests / the v1 demo. Stable
+    /// shape so view-model tests can assert on it. Dates are in ISO
+    /// form so they sort lexically.
+    public static let demoBriefs: [Brief] = [
+        Brief(
+            rowId: 1,
+            dateLocal: "2026-05-21",
+            generatedTsUs: 1_716_343_380_000_000,
+            modelId: "qwen3-1.7b-int4",
+            modelVersion: "demo",
+            title: "Thursday, May 21, 2026",
+            body: """
+            ## Highlights
+
+            Spent most of the day shipping the brief viewer UI scaffold.
+
+            ## Deep work
+
+            ~3 uninterrupted hours in VSCode on the SwiftUI Brief tab.
+
+            ## Context switches
+
+            Safari → VSCode → Terminal → Slack, ~14 switches.
+
+            ## Notable URLs
+
+            - apple.com/privacy/
+            - github.com/amyjainberkeley/hippocampus/pull/175
+
+            ## Unfinished threads
+
+            Two open Safari tabs at end of day.
+            """,
+            wordCount: 56,
+            sourceEventCount: 198
+        ),
+        Brief(
+            rowId: 2,
+            dateLocal: "2026-05-22",
+            generatedTsUs: 1_716_429_780_000_000,
+            modelId: "qwen3-1.7b-int4",
+            modelVersion: "demo",
+            title: "Friday, May 22, 2026",
+            body: """
+            ## Highlights
+
+            Closed the Qwen3 conversion env fix and unblocked the brief
+            author pipeline.
+
+            ## Deep work
+
+            ~4 hours in VSCode and Terminal on `scripts/convert_brief_model.py`.
+
+            ## Context switches
+
+            Steady work; ~7 switches across the day.
+
+            ## Notable URLs
+
+            - github.com/QwenLM/Qwen3
+            - github.com/amyjainberkeley/hippocampus/pull/173
+
+            ## Unfinished threads
+
+            One Safari tab pinned for the model card.
+            """,
+            wordCount: 70,
+            sourceEventCount: 142
+        ),
+    ]
+
     /// Canned privacy moments. Reason codes span the ADR-0017 §5.2 table.
     public static let demoPrivacyMoments: [PrivacyMoment] = [
         PrivacyMoment(
@@ -311,6 +444,23 @@ public struct StubBrainReader: BrainReader {
             Self.demoEpisodes
                 .sorted { $0.tsStartUs > $1.tsStartUs }
                 .prefix(max(0, limit))
+        )
+    }
+
+    public func briefForDate(_ dateLocal: String) async throws -> Brief? {
+        Self.demoBriefs.first { $0.dateLocal == dateLocal }
+    }
+
+    public func latestBrief() async throws -> Brief? {
+        Self.demoBriefs.max { $0.generatedTsUs < $1.generatedTsUs }
+    }
+
+    public func briefDates(limit: Int) async throws -> [String] {
+        Array(
+            Self.demoBriefs
+                .sorted { $0.dateLocal > $1.dateLocal }
+                .prefix(max(0, limit))
+                .map(\.dateLocal)
         )
     }
 }

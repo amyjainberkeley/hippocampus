@@ -57,8 +57,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard url.scheme == "hippocampus", url.host == "recall" else { continue }
+            // Parse `?tab=brief` (or other) per the Brief Viewer spec:
+            // `hippocampus://recall?tab=brief` deep-links the Brief tab.
+            // Unknown values fall through to the recall-ui's default tab.
+            let initialTab: String? = URLComponents(
+                url: url, resolvingAgainstBaseURL: false
+            )?
+            .queryItems?
+            .first(where: { $0.name == "tab" })?
+            .value
             Task { @MainActor in
-                supervisorRef?.openRecallUI()
+                supervisorRef?.openRecallUI(initialTab: initialTab)
             }
         }
     }

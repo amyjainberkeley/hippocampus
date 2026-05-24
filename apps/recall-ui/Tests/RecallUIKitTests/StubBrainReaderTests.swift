@@ -69,4 +69,37 @@ final class StubBrainReaderTests: XCTestCase {
         XCTAssertEqual(out.count, 3)
         XCTAssertEqual(out.first?.reasonCode, 7) // nil-app catchall, newest ts
     }
+
+    // -------------------------------------------------------------------
+    // Daily Brief stub surface — Brief Viewer spec
+    // -------------------------------------------------------------------
+
+    func testDemoBriefsAreTwoRows() {
+        XCTAssertEqual(StubBrainReader.demoBriefs.count, 2)
+    }
+
+    func testStubBriefForDateReturnsMatching() async throws {
+        let r = StubBrainReader()
+        let b = try await r.briefForDate("2026-05-22")
+        XCTAssertNotNil(b)
+        XCTAssertEqual(b?.dateLocal, "2026-05-22")
+    }
+
+    func testStubBriefForDateReturnsNilForUnknown() async throws {
+        let r = StubBrainReader()
+        let b = try await r.briefForDate("1999-01-01")
+        XCTAssertNil(b)
+    }
+
+    func testStubLatestBriefIsMostRecentByGeneratedTs() async throws {
+        let r = StubBrainReader()
+        let b = try await r.latestBrief()
+        XCTAssertEqual(b?.dateLocal, "2026-05-22")
+    }
+
+    func testStubBriefDatesAreDescByDate() async throws {
+        let r = StubBrainReader()
+        let dates = try await r.briefDates(limit: 10)
+        XCTAssertEqual(dates, ["2026-05-22", "2026-05-21"])
+    }
 }
