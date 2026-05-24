@@ -152,6 +152,47 @@ pub mod hybrid_retriever;
 pub use episode_segmenter::EpisodeId;
 pub use hybrid_retriever::{FusionWeights, HybridRetriever, RetrievalShape};
 
+/// One daily brief — the row shape stored in the `briefs` table per
+/// migration `0002_briefs.sql`.
+///
+/// Read surface for the Recall UI's Brief tab (`apps/recall-ui/`). One row
+/// per `date_local`; regeneration is an INSERT-OR-REPLACE on that column.
+/// This struct is the OS-free shape the FFI shim and write path both speak.
+///
+/// # Privacy
+///
+/// Briefs are user content. They live inside the SQLCipher store under
+/// the same key-wrap as `events` (ADR-0008) — no new crypto surface. The
+/// retention purger ([`crate::retention_purger::purge_once`]) honors the
+/// user's existing retention window on briefs in the same DELETE pass it
+/// runs on events.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefRow {
+    /// Stable row id (`briefs.id`).
+    pub id: u64,
+    /// ISO 8601 local date `YYYY-MM-DD`. The unique key under which the
+    /// briefs table looks rows up. UNIQUE-constrained in DDL.
+    pub date_local: String,
+    /// Generation wall-clock, microseconds since UNIX epoch (matches
+    /// `events.ts_us` so the retention purger can use one cutoff).
+    pub generated_ts_us: u64,
+    /// Author model identifier — e.g. `"qwen3-1.7b-int4"` per ADR-0028.
+    /// Surfaced in the brief header.
+    pub model_id: String,
+    /// Author model version string — surfaced in the brief header.
+    pub model_version: String,
+    /// Title rendered above the body.
+    pub title: String,
+    /// Markdown body. The reader renders; the author writes.
+    pub body: String,
+    /// Word count for the header. Stored (not derived) so list rendering
+    /// is cheap.
+    pub word_count: u32,
+    /// How many events the author saw when composing — surfaces in the
+    /// footer. 0 is allowed for stub/synthetic briefs.
+    pub source_event_count: u32,
+}
+
 /// Compact view of an `episodes` row for the MCP / recall-UI surface.
 ///
 /// Includes a derived `event_count` (number of events assigned to this

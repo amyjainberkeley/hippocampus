@@ -9,13 +9,43 @@ struct MCIRecallApp: App {
 
     var body: some Scene {
         WindowGroup("Hippocampus Recall") {
-            RootView(reader: MCIRecallApp.reader)
-                .frame(minWidth: 720, minHeight: 480)
-                .background(Color.brandBgPrimary)
-                .preferredColorScheme(.dark)
+            RootView(
+                reader: MCIRecallApp.reader,
+                initialTab: MCIRecallApp.initialTabFromEnv()
+            )
+            .frame(minWidth: 720, minHeight: 480)
+            .background(Color.brandBgPrimary)
+            .preferredColorScheme(.dark)
+            .task {
+                // Per `docs/design/brief-viewer-spec.md` §"When the user
+                // discovers their first brief": on Recall app launch, ask
+                // for notification permission politely (once) and fire
+                // the first-brief notification iff a brief exists and the
+                // fire-once flag is not yet set.
+                let reader = MCIRecallApp.reader
+                let exists = (try? await reader.latestBrief()) != nil
+                let latestDate = try? await reader.latestBrief()?.dateLocal
+                let controller = BriefNotificationController()
+                _ = await controller.checkAndMaybeFireFirstBriefNotification(
+                    briefExists: exists,
+                    latestBriefDate: latestDate
+                )
+            }
         }
         .defaultPosition(.center)
         .defaultSize(width: 900, height: 600)
+    }
+
+    /// Read `MCI_INITIAL_TAB` set by Hippocampus.app when handling a
+    /// `hippocampus://recall?tab=…` deep-link. Defaults to `.search`.
+    @MainActor
+    private static func initialTabFromEnv() -> RecallTab {
+        guard let raw = ProcessInfo.processInfo.environment[RecallTab.initialTabEnvVar],
+              let tab = RecallTab.from(deepLinkValue: raw)
+        else {
+            return .search
+        }
+        return tab
     }
 
     @MainActor
@@ -44,17 +74,15 @@ struct MCIRecallApp: App {
     }
 }
 
-enum Tab: Int, Hashable {
-    case search = 1
-    case timeline = 2
-    case episodes = 3
-    case privacy = 4
-}
-
 struct RootView: View {
     let reader: BrainReader
-    @State private var selectedTab: Tab = .search
+    @State private var selectedTab: RecallTab
     @State private var searchFocusTrigger = false
+
+    init(reader: BrainReader, initialTab: RecallTab = .search) {
+        self.reader = reader
+        self._selectedTab = State(initialValue: initialTab)
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -62,28 +90,46 @@ struct RootView: View {
                 viewModel: SearchViewModel(reader: reader),
                 focusTrigger: searchFocusTrigger
             )
-            .tag(Tab.search)
+            .tag(RecallTab.search)
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
             TimelineView(viewModel: TimelineViewModel(reader: reader))
-                .tag(Tab.timeline)
+                .tag(RecallTab.timeline)
                 .tabItem { Label("Timeline", systemImage: "clock") }
 
             EpisodesView(viewModel: EpisodesViewModel(reader: reader))
-                .tag(Tab.episodes)
+                .tag(RecallTab.episodes)
                 .tabItem { Label("Episodes", systemImage: "rectangle.stack") }
+
+            BriefView(
+                viewModel: BriefViewModel(
+                    reader: reader,
+                    isModelPresent: ModelPresenceProbe.isBriefModelInstalled(),
+                    hasFullDayCapture: true
+                ),
+                onRequestModelDownload: {
+                    // The recall-ui doesn't own the download UI (PR #134
+                    // lives in Hippocampus.app). Surface a hippocampus://
+                    // deep-link so the menu-bar app handles it.
+                    if let url = URL(string: "hippocampus://recall?tab=brief&download=1") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            )
+            .tag(RecallTab.brief)
+            .tabItem { Label("Brief", systemImage: "doc.text") }
 
             PrivacyMomentsView(
                 viewModel: PrivacyMomentsViewModel(reader: reader)
             )
-            .tag(Tab.privacy)
+            .tag(RecallTab.privacy)
             .tabItem { Label("Privacy Moments", systemImage: "eye.slash") }
         }
         .padding(.top, 6)
         .background(Color.brandBgPrimary)
         .focusable()
         .onKeyPress(
-            keys: [.init("1"), .init("2"), .init("3"), .init("4")],
+            keys: [.init("1"), .init("2"), .init("3"), .init("4"), .init("5")],
             phases: .down
         ) { press in
             guard press.modifiers == .command else { return .ignored }
@@ -91,7 +137,8 @@ struct RootView: View {
             case KeyEquivalent("1"): selectedTab = .search
             case KeyEquivalent("2"): selectedTab = .timeline
             case KeyEquivalent("3"): selectedTab = .episodes
-            case KeyEquivalent("4"): selectedTab = .privacy
+            case KeyEquivalent("4"): selectedTab = .brief
+            case KeyEquivalent("5"): selectedTab = .privacy
             default: return .ignored
             }
             return .handled
@@ -102,5 +149,39 @@ struct RootView: View {
             searchFocusTrigger.toggle()
             return .handled
         }
+        .onKeyPress(.init("b"), phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            selectedTab = .brief
+            return .handled
+        }
+    }
+}
+
+/// Best-effort probe for whether the daily-brief author model has been
+/// downloaded. The recall-ui does NOT own model lifecycle (PR #134's
+/// ModelDownloadView in Hippocampus.app does); we just want to know
+/// whether the file exists on disk so the Brief tab can render the
+/// right empty state.
+///
+/// Mirrors `ModelDownloadManager.isModelAvailable(modelID:)` —
+/// checks `~/Library/Application Support/MCI/Models/<modelID>/` exists.
+/// Kept inside the recall-ui rather than via FFI/IPC because (a) it's
+/// a plain filesystem read, (b) the recall-ui already runs under the
+/// user's HOME, and (c) a missing-file false-negative just renders
+/// the "Enable on-device brief model" CTA which is benign.
+enum ModelPresenceProbe {
+    static let qwen3ModelID = "qwen3-1.7b-int4"
+
+    static func isBriefModelInstalled(modelID: String = qwen3ModelID) -> Bool {
+        // Per `docs/decisions/0028-brief-author-model-qwen3-1.7b-coreml.md` §4,
+        // models live in ~/Library/Application Support/MCI/Models/<id>/.
+        let supportDir = NSSearchPathForDirectoriesInDomains(
+            .applicationSupportDirectory,
+            .userDomainMask,
+            true
+        ).first ?? NSTemporaryDirectory()
+        let path = (supportDir as NSString)
+            .appendingPathComponent("MCI/Models/\(modelID)")
+        return FileManager.default.fileExists(atPath: path)
     }
 }

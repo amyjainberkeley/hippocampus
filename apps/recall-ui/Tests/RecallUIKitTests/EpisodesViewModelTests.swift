@@ -22,6 +22,15 @@ private struct FailingReader: BrainReader {
     func listEpisodes(limit: Int) async throws -> [Episode] {
         throw BrainReaderError.queryFailed("episodes boom")
     }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? {
+        throw BrainReaderError.queryFailed("brief boom")
+    }
+    func latestBrief() async throws -> Brief? {
+        throw BrainReaderError.queryFailed("latest-brief boom")
+    }
+    func briefDates(limit: Int) async throws -> [String] {
+        throw BrainReaderError.queryFailed("brief-dates boom")
+    }
 }
 
 /// Fixed-corpus reader so the tests pin the rendered episode order
@@ -41,6 +50,9 @@ private struct FixedEpisodesReader: BrainReader {
     func listEpisodes(limit: Int) async throws -> [Episode] {
         Array(episodes.prefix(max(0, limit)))
     }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
 }
 
 @MainActor
@@ -152,6 +164,9 @@ final class SearchViewModelFilterPropagationTests: XCTestCase {
             limit: Int, timeFromUs: UInt64?
         ) async throws -> [ObservedApp] { [] }
         func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+        func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+        func latestBrief() async throws -> Brief? { nil }
+        func briefDates(limit: Int) async throws -> [String] { [] }
     }
 
     func testSingleAppPassesThroughAsWireFilter() async {

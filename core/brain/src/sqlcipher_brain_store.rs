@@ -842,6 +842,137 @@ impl SqlCipherBrainStore {
         Ok(())
     }
 
+    // -------------------------------------------------------------------
+    // Daily Brief storage (migration 0002, see brief-viewer-spec.md)
+    // -------------------------------------------------------------------
+
+    /// Upsert a daily brief keyed on `date_local`. Returns the row's id.
+    ///
+    /// Semantics: `INSERT OR REPLACE` on the UNIQUE(`date_local`) index.
+    /// Regenerating the brief for the same local day overwrites the row.
+    /// The row id is stable across regenerates because SQLite reuses the
+    /// primary key on REPLACE only when the conflicting row was already
+    /// the primary-key target — here the conflict is on a UNIQUE index,
+    /// not the PK, so SQLite deletes the conflicting row and inserts a
+    /// fresh one. Callers that hold a brief id across a regenerate should
+    /// re-look-up by `date_local` after writing.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any rusqlite failure.
+    pub fn put_brief(&self, brief: &crate::BriefRow) -> Result<u64, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let generated_i64 = i64::try_from(brief.generated_ts_us).unwrap_or(i64::MAX);
+        let word_count_i64 = i64::try_from(brief.word_count).unwrap_or(0);
+        let src_count_i64 = i64::try_from(brief.source_event_count).unwrap_or(0);
+        guard
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO briefs
+                    (date_local, generated_ts_us, model_id, model_version,
+                     title, body, word_count, source_event_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    brief.date_local,
+                    generated_i64,
+                    brief.model_id,
+                    brief.model_version,
+                    brief.title,
+                    brief.body,
+                    word_count_i64,
+                    src_count_i64,
+                ],
+            )
+            .map_err(|e| StoreError::Backend(format!("put_brief: {e}")))?;
+        let id_i64 = guard
+            .conn()
+            .last_insert_rowid();
+        Ok(u64::try_from(id_i64).unwrap_or(0))
+    }
+
+    /// Look up the brief for one local date. `Ok(None)` if absent.
+    pub fn brief_for_date(&self, date_local: &str)
+        -> Result<Option<crate::BriefRow>, StoreError>
+    {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let row_opt = guard
+            .conn()
+            .query_row(
+                "SELECT id, date_local, generated_ts_us, model_id, model_version,
+                        title, body, word_count, source_event_count
+                 FROM briefs
+                 WHERE date_local = ?1",
+                params![date_local],
+                row_to_brief,
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok::<_, StoreError>(None),
+                other => Err(StoreError::Backend(format!("brief_for_date: {other}"))),
+            })?;
+        Ok(row_opt)
+    }
+
+    /// Return the most-recently-generated brief, or `None` if the table is
+    /// empty. Used for the Recall UI's "latest brief" default and for the
+    /// first-brief notification check.
+    pub fn latest_brief(&self) -> Result<Option<crate::BriefRow>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let row_opt = guard
+            .conn()
+            .query_row(
+                "SELECT id, date_local, generated_ts_us, model_id, model_version,
+                        title, body, word_count, source_event_count
+                 FROM briefs
+                 ORDER BY generated_ts_us DESC
+                 LIMIT 1",
+                [],
+                row_to_brief,
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok::<_, StoreError>(None),
+                other => Err(StoreError::Backend(format!("latest_brief: {other}"))),
+            })?;
+        Ok(row_opt)
+    }
+
+    /// List the `date_local` strings of up to `limit` briefs, ordered most
+    /// recent first. Powers the Recall UI's `<` / `>` date selector.
+    pub fn brief_dates(&self, limit: usize) -> Result<Vec<String>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT date_local FROM briefs
+                 ORDER BY date_local DESC
+                 LIMIT ?1",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare brief_dates: {e}")))?;
+        let rows = stmt
+            .query_map(params![lim], |r| r.get::<_, String>(0))
+            .map_err(|e| StoreError::Backend(format!("query brief_dates: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| StoreError::Backend(format!("row brief_dates: {e}")))?);
+        }
+        Ok(out)
+    }
+
+    /// Count of briefs in the store. Content-free aggregate. Used by tests
+    /// + a future "Brain stats" panel.
+    pub fn brief_count(&self) -> Result<u64, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let n: i64 = guard
+            .conn()
+            .query_row("SELECT COUNT(*) FROM briefs", [], |r| r.get(0))
+            .map_err(|e| StoreError::Backend(format!("brief_count: {e}")))?;
+        Ok(u64::try_from(n).unwrap_or(0))
+    }
+
     /// Run `PRAGMA integrity_check` and return result lines.
     /// Healthy DB returns `["ok"]`; any other content indicates corruption.
     pub fn integrity_check(&self) -> Result<Vec<String>, StoreError> {
@@ -866,13 +997,21 @@ impl SqlCipherBrainStore {
 /// one transaction so a partial migration cannot leave the store in a
 /// torn state (`SQLCipher` rolls back DDL on commit failure).
 fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
-    let sql = include_str!("../migrations/0001_phase_3_brain_schema.sql");
+    // Both migrations run inside a single transaction so a partial apply
+    // can never leave the store in a torn state. SQLCipher rolls back DDL
+    // on commit failure; every statement is `CREATE … IF NOT EXISTS` /
+    // `INSERT OR REPLACE` so a re-run on an already-migrated DB is a
+    // no-op.
+    let sql_0001 = include_str!("../migrations/0001_phase_3_brain_schema.sql");
+    let sql_0002 = include_str!("../migrations/0002_briefs.sql");
     let tx = db
         .conn_mut()
         .transaction()
         .map_err(|e| StoreError::Backend(format!("begin migration tx: {e}")))?;
-    tx.execute_batch(sql)
+    tx.execute_batch(sql_0001)
         .map_err(|e| StoreError::Backend(format!("apply migration 0001: {e}")))?;
+    tx.execute_batch(sql_0002)
+        .map_err(|e| StoreError::Backend(format!("apply migration 0002: {e}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
     Ok(())
@@ -909,6 +1048,31 @@ type EventRow = (
     i64,            // cascade_reason
     Option<String>, // keyframe_blob
 );
+
+/// Row mapper for the 9-column `briefs` SELECT used by `brief_for_date` +
+/// `latest_brief`. Pure function so the SELECTs above stay narrow.
+fn row_to_brief(r: &rusqlite::Row<'_>) -> rusqlite::Result<crate::BriefRow> {
+    let id: i64 = r.get(0)?;
+    let date_local: String = r.get(1)?;
+    let generated_ts_us: i64 = r.get(2)?;
+    let model_id: String = r.get(3)?;
+    let model_version: String = r.get(4)?;
+    let title: String = r.get(5)?;
+    let body: String = r.get(6)?;
+    let word_count: i64 = r.get(7)?;
+    let source_event_count: i64 = r.get(8)?;
+    Ok(crate::BriefRow {
+        id: u64::try_from(id).unwrap_or(0),
+        date_local,
+        generated_ts_us: u64::try_from(generated_ts_us).unwrap_or(0),
+        model_id,
+        model_version,
+        title,
+        body,
+        word_count: u32::try_from(word_count).unwrap_or(0),
+        source_event_count: u32::try_from(source_event_count).unwrap_or(0),
+    })
+}
 
 /// Row mapper for the 11-column `events` SELECT used by `recent_events`,
 /// `paged_events_since`, and `unembedded_events`.

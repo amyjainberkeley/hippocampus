@@ -30,7 +30,7 @@ pub enum RetentionConfig {
 }
 
 /// Content-free stats from one purge cycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PurgeStats {
     /// Number of `events` rows deleted.
     pub events_deleted: u64,
@@ -38,6 +38,10 @@ pub struct PurgeStats {
     pub vectors_deleted: u64,
     /// Number of orphaned `episodes` rows cleaned up.
     pub episodes_deleted: u64,
+    /// Number of `briefs` rows deleted (migration 0002). Briefs honor
+    /// the same retention cutoff as events per
+    /// `docs/design/brief-viewer-spec.md` §"Storage + retention".
+    pub briefs_deleted: u64,
 }
 
 /// 1 hour in microseconds — events younger than this are never purged.
@@ -59,11 +63,7 @@ pub fn purge_once(
 ) -> Result<PurgeStats, StoreError> {
     let retention_days = match config {
         RetentionConfig::Forever => {
-            return Ok(PurgeStats {
-                events_deleted: 0,
-                vectors_deleted: 0,
-                episodes_deleted: 0,
-            });
+            return Ok(PurgeStats::default());
         }
         RetentionConfig::Days(d) => *d,
     };
@@ -108,6 +108,18 @@ pub fn purge_once(
         )
         .map_err(|e| StoreError::Backend(format!("DELETE orphaned episodes: {e}")))?;
 
+    // Briefs honor the same retention cutoff per
+    // `docs/design/brief-viewer-spec.md` §"Storage + retention". Independent
+    // DELETE (no FK from events) — briefs that fall outside the retention
+    // window disappear in the same purge pass as events. The 1-hour safety
+    // floor applies (we share `cutoff` with the events DELETE above).
+    let briefs_deleted = tx
+        .execute(
+            "DELETE FROM briefs WHERE generated_ts_us < ?1",
+            params![cutoff_i64],
+        )
+        .map_err(|e| StoreError::Backend(format!("DELETE briefs for purge: {e}")))?;
+
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit purge tx: {e}")))?;
 
@@ -121,6 +133,7 @@ pub fn purge_once(
         events_deleted: events_deleted as u64,
         vectors_deleted: u64::try_from(vectors_count).unwrap_or(0),
         episodes_deleted: episodes_deleted as u64,
+        briefs_deleted: briefs_deleted as u64,
     })
 }
 
@@ -162,6 +175,7 @@ mod tests {
         assert_eq!(stats.events_deleted, 0);
         assert_eq!(stats.vectors_deleted, 0);
         assert_eq!(stats.episodes_deleted, 0);
+        assert_eq!(stats.briefs_deleted, 0);
     }
 
     #[test]
@@ -302,5 +316,79 @@ mod tests {
         assert_eq!(stats.events_deleted, 0);
         assert_eq!(stats.vectors_deleted, 0);
         assert_eq!(stats.episodes_deleted, 0);
+        assert_eq!(stats.briefs_deleted, 0);
+    }
+
+    // -----------------------------------------------------------------
+    // Briefs retention — `docs/design/brief-viewer-spec.md`.
+    // -----------------------------------------------------------------
+
+    fn make_brief(date_local: &str, generated_ts_us: u64) -> crate::BriefRow {
+        crate::BriefRow {
+            id: 0,
+            date_local: date_local.into(),
+            generated_ts_us,
+            model_id: "qwen3-1.7b-int4".into(),
+            model_version: "1.0".into(),
+            title: format!("Brief for {date_local}"),
+            body: "## Highlights\n\nA day.\n".into(),
+            word_count: 4,
+            source_event_count: 0,
+        }
+    }
+
+    #[test]
+    fn purge_deletes_old_briefs_outside_retention() {
+        let (store, _dir) = temp_store();
+        let day_us: u64 = 86_400_000_000;
+        let now = 60 * day_us;
+
+        // 60 briefs, one per day from day 0 to day 59.
+        for i in 0..60u64 {
+            let ts = i * day_us;
+            // Use a synthetic date_local string keyed on the day index so
+            // the unique constraint on date_local doesn't collide.
+            let date = format!("2026-01-{:02}", (i % 28) + 1);
+            // Avoid the date-unique constraint collision by appending i.
+            let mut row = make_brief(&format!("{date}-{i:02}"), ts);
+            row.body = format!("body {i}");
+            store.put_brief(&row).unwrap();
+        }
+        assert_eq!(store.brief_count().unwrap(), 60);
+
+        let stats = purge_once(&store, &RetentionConfig::Days(30), now).unwrap();
+        assert_eq!(stats.briefs_deleted, 30);
+        assert_eq!(store.brief_count().unwrap(), 30);
+    }
+
+    #[test]
+    fn forever_keeps_all_briefs() {
+        let (store, _dir) = temp_store();
+        for i in 0..10u64 {
+            let row = make_brief(&format!("2026-05-{:02}", i + 1), i * 86_400_000_000);
+            store.put_brief(&row).unwrap();
+        }
+        let stats = purge_once(&store, &RetentionConfig::Forever, 200 * 86_400_000_000).unwrap();
+        assert_eq!(stats.briefs_deleted, 0);
+        assert_eq!(store.brief_count().unwrap(), 10);
+    }
+
+    #[test]
+    fn briefs_purge_honors_safety_floor() {
+        let (store, _dir) = temp_store();
+        let now = 10_000_000_000_u64;
+
+        // Brief inside the 1-hour safety floor (must survive).
+        store
+            .put_brief(&make_brief("today", now - 1_800_000_000))
+            .unwrap();
+        // Brief outside the safety floor (eligible for purge).
+        store
+            .put_brief(&make_brief("yesterday", now - 7_200_000_000))
+            .unwrap();
+
+        let stats = purge_once(&store, &RetentionConfig::Days(0), now).unwrap();
+        assert_eq!(stats.briefs_deleted, 1);
+        assert_eq!(store.brief_count().unwrap(), 1);
     }
 }

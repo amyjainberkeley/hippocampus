@@ -547,6 +547,144 @@ pub unsafe extern "C" fn mci_brain_ffi_list_episodes(
     json_to_c_string(&out)
 }
 
+// ---------------------------------------------------------------------------
+// Daily Brief read surface — backs the Recall UI's Brief tab
+// (`docs/design/brief-viewer-spec.md`). READ-ONLY by construction; the FFI
+// has no `put_brief` / `delete_brief` entry point. Writes happen through the
+// agent process via `SqlCipherBrainStore::put_brief` (or, for manual smoke
+// tests, the `mci-brain insert-brief` subcommand).
+// ---------------------------------------------------------------------------
+
+/// JSON value type for one daily brief row. Mirrors [`mci_brain::BriefRow`]
+/// with snake_case keys for Swift `Codable` interop.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BriefJson {
+    /// Stable `briefs.id` rowid.
+    pub id: u64,
+    /// ISO 8601 local date "YYYY-MM-DD" (one row per local day).
+    pub date_local: String,
+    /// Generation wall-clock, microseconds since UNIX epoch.
+    pub generated_ts_us: u64,
+    /// Author model identifier — surfaced in the brief header.
+    pub model_id: String,
+    /// Author model version string — surfaced in the brief header.
+    pub model_version: String,
+    /// Title rendered above the body.
+    pub title: String,
+    /// Markdown body.
+    pub body: String,
+    /// Word count for the header.
+    pub word_count: u32,
+    /// Number of events the author saw when composing.
+    pub source_event_count: u32,
+}
+
+fn brief_to_json(b: mci_brain::BriefRow) -> BriefJson {
+    BriefJson {
+        id: b.id,
+        date_local: b.date_local,
+        generated_ts_us: b.generated_ts_us,
+        model_id: b.model_id,
+        model_version: b.model_version,
+        title: b.title,
+        body: b.body,
+        word_count: b.word_count,
+        source_event_count: b.source_event_count,
+    }
+}
+
+/// Fetch the brief for `date_local` (ISO "YYYY-MM-DD"). Returns a JSON
+/// object on success or the literal JSON `null` if the day has no brief.
+/// Same allocator discipline as the other returners — caller MUST pass
+/// the returned pointer back to [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+///
+/// `h` must be a live handle; `date_local` must be a non-null,
+/// null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_brief_for_date(
+    h: *mut Handle,
+    date_local: *const c_char,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_brief_for_date: null handle");
+        return ptr::null_mut();
+    }
+    if date_local.is_null() {
+        set_last_error("mci_brain_ffi_brief_for_date: null date_local");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a valid live handle that has not been freed.
+    let handle = unsafe { &*h };
+    // Safety: caller guarantees a valid null-terminated UTF-8 string.
+    let date_c = unsafe { CStr::from_ptr(date_local) };
+    let Ok(date_str) = date_c.to_str() else {
+        set_last_error("mci_brain_ffi_brief_for_date: non-UTF8 date_local");
+        return ptr::null_mut();
+    };
+    match handle.store.brief_for_date(date_str) {
+        Ok(Some(b)) => json_to_c_string(&brief_to_json(b)),
+        Ok(None) => json_null_c_string(),
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_brief_for_date: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Fetch the most-recently-generated brief, or JSON `null` if the store
+/// has no briefs. Powers the Recall UI's default Brief tab view.
+///
+/// # Safety
+/// `h` must be a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_latest_brief(h: *mut Handle) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_latest_brief: null handle");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a valid live handle.
+    let handle = unsafe { &*h };
+    match handle.store.latest_brief() {
+        Ok(Some(b)) => json_to_c_string(&brief_to_json(b)),
+        Ok(None) => json_null_c_string(),
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_latest_brief: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Return up to `limit` brief dates ("YYYY-MM-DD") ordered most-recent
+/// first as a JSON array of strings. Powers the Recall UI's `<` / `>`
+/// date selector.
+///
+/// `limit` is clamped to [`MAX_LIMIT`].
+///
+/// # Safety
+/// `h` must be a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_brief_dates(
+    h: *mut Handle,
+    limit: u32,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_brief_dates: null handle");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a valid live handle.
+    let handle = unsafe { &*h };
+    let lim = limit.min(MAX_LIMIT) as usize;
+    match handle.store.brief_dates(lim) {
+        Ok(dates) => json_to_c_string(&dates),
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_brief_dates: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Free a `*mut c_char` previously returned by any FFI function that
 /// returns owned JSON. Calling with null is a no-op.
 ///
@@ -687,6 +825,16 @@ fn passes_filters(
         }
     }
     true
+}
+
+/// Return the literal JSON `null` as an owned C string. The Swift
+/// decoder reads this as `nil` for `Optional<BriefJson>`. Same allocator
+/// discipline as [`json_to_c_string`].
+fn json_null_c_string() -> *mut c_char {
+    match CString::new("null") {
+        Ok(c) => c.into_raw(),
+        Err(_) => ptr::null_mut(),
+    }
 }
 
 /// Serialize `v` as JSON, push it into a `CString`, and hand the raw
