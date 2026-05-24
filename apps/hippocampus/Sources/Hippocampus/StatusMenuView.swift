@@ -13,6 +13,7 @@ struct StatusMenuView: View {
     @State private var showDownloadDialog = false
     @State private var mcpRegistering = false
     @State private var showTCCResetConfirm = false
+    @State private var showKeyWrapAudit = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -142,6 +143,19 @@ struct StatusMenuView: View {
                 }
             )
         }
+        .sheet(isPresented: $showKeyWrapAudit) {
+            KeyWrapAuditView(
+                initialReport: currentKeyWrapReport(),
+                reverify: { currentKeyWrapReport() },
+                onClose: { showKeyWrapAudit = false }
+            )
+        }
+    }
+
+    private func currentKeyWrapReport() -> KeyWrapAuditReport {
+        let keyURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/MCI/dev.key")
+        return KeyWrapAuditor.inspectFile(at: keyURL)
     }
 
     @ViewBuilder
@@ -186,6 +200,10 @@ struct StatusMenuView: View {
                 let logDir = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Library/Logs/MCI")
                 NSWorkspace.shared.open(logDir)
+            }
+
+            Button("Inspect Key Wrap…") {
+                showKeyWrapAudit = true
             }
 
             Button("Reset TCC Permissions…") {
