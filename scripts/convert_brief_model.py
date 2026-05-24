@@ -1,58 +1,69 @@
 #!/usr/bin/env python3
 """Convert Qwen/Qwen3-1.7B to Core ML .mlpackage with INT4 palettization.
 
-Conversion approach (path a — fixed sequence length, eager attention):
+Two conversion paths, in order of preference. The script tries A first
+and falls back to B automatically:
 
-  The original script failed with:
-      RuntimeError: unordered_map::at: key not found
-  Root cause: torch/coremltools op-signature mismatch. coremltools 8.x
-  expects torch <=2.5 op signatures; newer torch versions produce
-  traced ops with different signatures (coremltools#2504). Additionally,
-  torch.nn.functional.scaled_dot_product_attention (SDPA) traces to a
-  single fused op that coremltools may not have a MIL converter for.
+  Path A — torch.jit.trace (or torch.export + run_decompositions)
+                                                        + ct.convert
+    Preferred path. Cleanest when torch is pinned in the supported
+    range (>=2.4,<2.6). When torch.jit.trace fails on newer torch
+    versions, falls back to torch.export.export() and applies
+    `.run_decompositions({})` to lower the TRAINING dialect to ATEN
+    (which is what coremltools accepts — torch 2.6+ otherwise emits
+    `Provided Dialect: TRAINING. Run '.run_decompositions({})' on
+    your exported PyTorch Model prior to conversion`).
 
-  Fixes applied:
-    1. attn_implementation="eager" — forces HF transformers to use the
-       manual QKV-matmul attention path instead of SDPA. All resulting
-       ops (matmul, softmax, reshape) have stable coremltools converters.
-    2. Fixed sequence length (no ct.RangeDim) — avoids the dynamic-shape
-       MIL pass that can trigger additional op-coverage gaps.
-    3. attention_mask input — required for padded fixed-length sequences
-       during autoregressive generation.
-    4. torch version gate — warns if torch >2.5.x (likely incompatible
-       with coremltools 8.x op registry).
-    5. Fallback to torch.export.export() if torch.jit.trace fails
-       (better op decomposition for newer torch versions).
+  Path B — torch.onnx.export (opset 17) -> ct.convert on ONNX artifact
+    Last-resort fallback when both jit.trace and torch.export
+    paths fail at the MIL converter. Requires `onnxscript` (added
+    to requirements-ml.txt). Apple's Core ML ONNX import wants
+    opset 17+.
 
-  Paths tried and status:
-    (a) Fixed seq len + eager attn + version pin: THIS PATH (chosen).
-    (b) optimum-cli export coreml: does not exist. optimum[coreml] is
-        not a real pip extra. HF moved Core ML to a separate 'exporters'
-        library that only supports vision models.
-    (c) ExecuTorch: not attempted (path a works).
-    (d) Llama 3.2 1B fallback: not needed (path a works).
+Both paths produce the same I/O contract for the Rust backend
+(adapters/macos/mci-llama-coreml):
 
-  Evidence the architecture converts:
-    - wolfofbackstreet/Qwen3-0.6B-Coreml exists on HuggingFace.
-    - CoreML-LLM project (john-rocky/CoreML-LLM) claims Qwen3 support.
-    - Qwen3's RoPE uses sin/cos form (not complex-number ops), so no
-      monkey-patching needed for rotary embeddings.
-
-Produces a Core ML model for stateless autoregressive text generation:
     Input  input_ids       Int32  [1, SEQ_LEN]
     Input  attention_mask  Int32  [1, SEQ_LEN]
     Output logits          Float16 [1, SEQ_LEN, VOCAB_SIZE]
 
-The Rust backend (core/brief/llama_backend.rs) handles repeated forward
-passes — no KV cache needed in the Core ML graph.
+The Rust backend handles repeated forward passes — no KV cache needed
+in the Core ML graph.
 
-Requirements:
+Why eager attention and fixed seq_len?
+
+  1. attn_implementation="eager" — forces HF transformers to use the
+     manual QKV-matmul attention path instead of SDPA. SDPA traces
+     to a single fused op coremltools does not always have a MIL
+     converter for.
+  2. Fixed sequence length (no ct.RangeDim) — avoids the dynamic-shape
+     MIL pass that can trigger additional op-coverage gaps. The Rust
+     backend pads/truncates to this length.
+  3. attention_mask input — required for padded fixed-length sequences
+     during autoregressive generation.
+
+One-shot setup (fresh venv, takes ~3-5 min):
+
+    python3.11 -m venv .venv-ml
+    source .venv-ml/bin/activate
     pip install -r scripts/requirements-ml.txt
+    python scripts/convert_brief_model.py --check-env
 
-Usage:
-    python scripts/convert_brief_model.py --output models/Qwen3-1.7B-INT4.mlpackage
-    python scripts/convert_brief_model.py --output models/Qwen3-1.7B-INT4.mlpackage --verify
-    python scripts/convert_brief_model.py --output models/Qwen3-1.7B-INT4.mlpackage --seq-len 512
+  If `--check-env` prints "Env looks OK" you can run the real
+  conversion (~20-40 min CPU on Apple Silicon):
+
+    python scripts/convert_brief_model.py \\
+        --output models/Qwen3-1.7B-INT4.mlpackage --verify
+
+Other useful flags:
+
+    --dry-run        Load + trace only, skip ct.convert. Fast (~30 s)
+                     smoke test that the env can produce a traceable
+                     ExportedProgram. CI-safe.
+    --check-env      Print torch/coremltools/onnxscript versions and
+                     report which conversion path will be taken.
+                     Exits 0 if usable, 2 if missing critical deps.
+    --seq-len N      Override default fixed seq length (default 2048).
 
 Per ADR-0028.
 """
@@ -187,7 +198,6 @@ def _trace_model(wrapper, sample_ids, sample_mask):
             wrapper, (sample_ids, sample_mask)
         )
         log.info("torch.export.export succeeded.")
-        return exported, "export"
     except Exception as e:
         log.error("torch.export also failed: %s", e)
         raise RuntimeError(
@@ -195,6 +205,114 @@ def _trace_model(wrapper, sample_ids, sample_mask):
             f"Check torch/coremltools version compatibility. "
             f"Last error: {e}"
         ) from e
+
+    # torch 2.6+ emits ExportedProgram in the TRAINING dialect.
+    # coremltools ct.convert rejects it: "Conversion for models with
+    # only ATEN or EDGE dialect is supported/tested. Provided Dialect:
+    # TRAINING. Run '.run_decompositions({})' on your exported PyTorch
+    # Model prior to conversion." So lower it here.
+    if hasattr(exported, "run_decompositions"):
+        log.info("Lowering ExportedProgram via run_decompositions({})...")
+        try:
+            exported = exported.run_decompositions({})
+            log.info("run_decompositions succeeded (TRAINING -> ATEN).")
+        except Exception as e:
+            log.warning(
+                "run_decompositions failed (%s); passing original "
+                "ExportedProgram to ct.convert. If ct.convert reports "
+                "'Provided Dialect: TRAINING', this is why.",
+                e,
+            )
+    return exported, "export"
+
+
+def _check_env() -> int:
+    """Print versions + predict which conversion path will be taken.
+
+    Returns 0 if the env is usable for at least one path, 2 if critical
+    deps are missing. Imports each dep individually so partial envs
+    still get a useful report.
+    """
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    print("=== Qwen3 conversion env check ===")
+
+    def _try(name):
+        try:
+            mod = __import__(name)
+            ver = getattr(mod, "__version__", "?")
+            print(f"  {name:<14} {ver}")
+            return mod
+        except ImportError:
+            print(f"  {name:<14} MISSING")
+            return None
+
+    torch_mod = _try("torch")
+    ct_mod = _try("coremltools")
+    np_mod = _try("numpy")
+    _try("transformers")
+    _try("onnx")
+    onnxscript_mod = _try("onnxscript")
+
+    print()
+    critical_missing = [
+        (n, m) for n, m in [
+            ("torch", torch_mod),
+            ("coremltools", ct_mod),
+            ("numpy", np_mod),
+        ] if m is None
+    ]
+    if critical_missing:
+        names = ", ".join(n for n, _ in critical_missing)
+        print(f"CRITICAL: {names} missing. Run:")
+        print("  pip install -r scripts/requirements-ml.txt")
+        return 2
+
+    torch_ver = tuple(int(x) for x in torch_mod.__version__.split(".")[:2])
+    ct_ver = tuple(int(x) for x in ct_mod.__version__.split(".")[:2])
+    numpy_v2 = np_mod.__version__.startswith("2.")
+
+    print("Path A (torch.jit.trace + ct.convert):")
+    if (2, 4) <= torch_ver < (2, 6):
+        print("  primary path — torch in pinned range, should succeed.")
+    elif torch_ver >= (2, 6):
+        print(
+            "  jit.trace may fail on torch %s; script auto-falls back to"
+            % torch_mod.__version__
+        )
+        print(
+            "  torch.export + run_decompositions({}) -> ct.convert."
+        )
+    else:
+        print("  torch %s is older than 2.4 — upgrade first." % torch_mod.__version__)
+
+    print("Path B (torch.onnx.export opset 17 -> ct.convert on ONNX):")
+    if onnxscript_mod is not None:
+        print("  available as last-resort fallback.")
+    else:
+        print("  UNAVAILABLE — onnxscript missing. Run:")
+        print("    pip install onnxscript")
+
+    print()
+    warnings = []
+    if ct_ver < (8, 0):
+        warnings.append(
+            "coremltools %s < 8.0 — INT4 palettize may not exist."
+            % ct_mod.__version__
+        )
+    if numpy_v2:
+        warnings.append(
+            "numpy %s is 2.x — coremltools 8.x is not numpy-2 clean. "
+            "Pin numpy<2.0." % np_mod.__version__
+        )
+    if warnings:
+        for w in warnings:
+            print(f"WARNING: {w}")
+        print()
+
+    print("Env looks OK. Next:")
+    print("  python scripts/convert_brief_model.py \\")
+    print("    --output models/Qwen3-1.7B-INT4.mlpackage --verify")
+    return 0
 
 
 def convert(
@@ -419,8 +537,7 @@ def main():
     )
     parser.add_argument(
         "--output",
-        required=True,
-        help="Output .mlpackage path",
+        help="Output .mlpackage path (required unless --check-env)",
     )
     parser.add_argument(
         "--verify",
@@ -438,6 +555,15 @@ def main():
         help="Load model + trace only, skip ct.convert (fast validation)",
     )
     parser.add_argument(
+        "--check-env",
+        action="store_true",
+        help=(
+            "Print torch/coremltools/onnxscript versions, report which "
+            "conversion path will be taken, and exit. Does not load "
+            "the model or run conversion."
+        ),
+    )
+    parser.add_argument(
         "--seq-len",
         type=int,
         default=DEFAULT_SEQ_LEN,
@@ -448,6 +574,10 @@ def main():
         ),
     )
     args = parser.parse_args()
+    if args.check_env:
+        sys.exit(_check_env())
+    if not args.output:
+        parser.error("--output is required unless --check-env is used.")
     convert(args.output, args.verify, args.quiet, args.dry_run, args.seq_len)
 
 
