@@ -958,6 +958,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci-brief-eval"
+version = "0.0.1"
+dependencies = [
+ "mci-brain",
+ "mci-brief",
+ "mci-llama-coreml",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "mci-core"
 version = "0.0.1"
 dependencies = [

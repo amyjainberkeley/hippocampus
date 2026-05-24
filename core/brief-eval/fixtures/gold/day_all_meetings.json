@@ -1,0 +1,20 @@
+{
+  "notes": "All-meetings day: 5 Zoom sessions, one hiring loop, no IC work. Brief should highlight the meeting decisions and the interview outcome without inventing code activity.",
+  "required_facts": [
+    "standup",
+    "1:1",
+    "design review",
+    "interview",
+    "staff"
+  ],
+  "forbidden_terms": [
+    "PR #",
+    "merged",
+    "cargo",
+    "deploy"
+  ],
+  "min_words": 60,
+  "max_words": 300,
+  "min_citations": 4,
+  "min_section_bullets": 4
+}

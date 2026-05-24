@@ -1,0 +1,20 @@
+{
+  "notes": "Light day: low-volume browsing, two Slack DMs about icon mocks, one Notion edit, one inbox cleanup. No code, no meetings, no PRs. Brief should be short and honest about the low activity.",
+  "required_facts": [
+    "Slack",
+    "icon",
+    "Notion",
+    "inbox"
+  ],
+  "forbidden_terms": [
+    "Xcode",
+    "Zoom",
+    "GitHub",
+    "PR #",
+    "deploy"
+  ],
+  "min_words": 30,
+  "max_words": 220,
+  "min_citations": 3,
+  "min_section_bullets": 3
+}
