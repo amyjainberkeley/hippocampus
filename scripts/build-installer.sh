@@ -262,6 +262,59 @@ else
     codesign --force --deep --sign - "$APP_PATH"
 fi
 
+# --- Step 2.5: Notarize + staple the .app ITSELF (not just the DMG) ---
+#
+# Critical for offline-first-launch (CEO friend, 2026-05-24):
+# stapling only the outer DMG means the .app inside has no embedded
+# notarization ticket. When a user without internet at first launch
+# (captive portal, plane, the friend's exact case) double-clicks the
+# .app, Gatekeeper has no staple to verify against and the online
+# notary check fails — they see "Hippocampus cannot be opened
+# because the developer cannot be verified" with no "Open Anyway"
+# affordance.
+#
+# Fix: stamp the ticket into the .app bundle itself so Gatekeeper
+# can verify entirely offline. We keep the existing DMG-level
+# notarize+staple too (belt + suspenders), but this is the load-
+# bearing step for the end-user-experience.
+
+if [[ "$NOTARIZE" -eq 1 ]]; then
+    echo ""
+    echo "--- Notarizing + stapling Hippocampus.app (offline-first-launch fix) ---"
+
+    APP_ZIP="$DIST_DIR/Hippocampus-${VERSION}-app.zip"
+    mkdir -p "$DIST_DIR"
+    rm -f "$APP_ZIP"
+    /usr/bin/ditto -c -k --keepParent "$APP_PATH" "$APP_ZIP"
+
+    APP_NOTARY_ARGS=()
+    if xcrun notarytool history --keychain-profile "notarytool-profile" \
+        &>/dev/null; then
+        APP_NOTARY_ARGS+=(--keychain-profile "notarytool-profile")
+    else
+        APP_NOTARY_ARGS+=(--apple-id "$NOTARYTOOL_APPLE_ID")
+        APP_NOTARY_ARGS+=(--team-id "$NOTARYTOOL_TEAM_ID")
+        APP_NOTARY_ARGS+=(--password "$NOTARYTOOL_PASSWORD")
+    fi
+
+    if xcrun notarytool submit "$APP_ZIP" "${APP_NOTARY_ARGS[@]}" --wait; then
+        xcrun stapler staple "$APP_PATH"
+        echo "  .app notarized + stapled (ticket embedded in bundle)"
+        # Verify the staple was attached + the .app is Gatekeeper-clean.
+        if ! xcrun stapler validate "$APP_PATH" >/dev/null 2>&1; then
+            echo "ERROR: stapler validate failed on $APP_PATH after staple"
+            exit 1
+        fi
+    else
+        echo ""
+        echo "ERROR: .app notarization failed. App is signed but NOT notarized."
+        echo "  Check: xcrun notarytool log <submission-id> ${APP_NOTARY_ARGS[*]}"
+        exit 1
+    fi
+
+    rm -f "$APP_ZIP"
+fi
+
 # --- Step 3: Prepare DMG staging directory ---
 
 DMG_NAME="Hippocampus-${VERSION}"
