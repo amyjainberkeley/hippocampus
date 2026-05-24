@@ -1,0 +1,20 @@
+{
+  "notes": "Deep-work day in one repo. Long VS Code + Terminal stretch. Wrote a scorer, fixed one test, drafted docs, shipped a PR. Brief should call out the shipped PR and the main code area worked on.",
+  "required_facts": [
+    "scorer",
+    "cargo test",
+    "PR",
+    "brief-quality",
+    "citation"
+  ],
+  "forbidden_terms": [
+    "Zoom",
+    "Slack",
+    "Notion",
+    "Figma"
+  ],
+  "min_words": 60,
+  "max_words": 320,
+  "min_citations": 4,
+  "min_section_bullets": 4
+}

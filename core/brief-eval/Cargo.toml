@@ -1,0 +1,36 @@
+[package]
+name                   = "mci-brief-eval"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI brief-author quality eval framework. Synthetic-day corpus + scorer + CLI driver. ADR-0028 gate. No protected-set touch."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "brief-eval"
+path = "src/bin/brief_eval.rs"
+
+[dependencies]
+mci-brain  = { path = "../brain", features = ["stubs"] }
+mci-brief  = { path = "../brief" }
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror  = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mci-llama-coreml = { path = "../../adapters/macos/mci-llama-coreml", optional = true }
+
+[features]
+default = []
+# Enables the Core ML backend wire-up in the `brief-eval` binary so the
+# CEO can point the eval at the converted `.mlmodelc` after OWNER_TASKS
+# #17 lands. Off by default — CI uses the deterministic scripted backend.
+coreml = ["dep:mci-llama-coreml"]
+
+[dev-dependencies]
+mci-brain = { path = "../brain", features = ["stubs"] }
+mci-brief = { path = "../brief" }

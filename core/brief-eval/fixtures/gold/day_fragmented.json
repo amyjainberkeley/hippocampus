@@ -1,0 +1,19 @@
+{
+  "notes": "Fragmented day: planned to work on fixtures, got pulled into PR #155 entitlements triage, fixed it, returned to fixtures partial. Brief should reflect the interruption pattern.",
+  "required_facts": [
+    "PR #155",
+    "entitlements",
+    "fixtures",
+    "Linear"
+  ],
+  "forbidden_terms": [
+    "Zoom",
+    "Figma",
+    "Xcode",
+    "deploy"
+  ],
+  "min_words": 70,
+  "max_words": 350,
+  "min_citations": 4,
+  "min_section_bullets": 4
+}
