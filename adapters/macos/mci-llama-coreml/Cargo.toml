@@ -22,12 +22,19 @@ workspace = true
 mci-brief = { path = "../../../core/brief" }
 thiserror = "1"
 
-# serde_json: parse vocab.json for the BPE tokenizer. Already on the
-# lockfile via the server crate. No net-new transitive crates — no
-# ADR-0008 dep-addition gate triggered.
+# HuggingFace `tokenizers` crate (Apache-2.0). Loads `tokenizer.json`
+# directly from disk so Qwen3's ByteLevel BPE (which remaps bytes 0-255
+# to printable Unicode chars before BPE-merging — GPT-2 convention) is
+# handled correctly. The cycle 8.10 hand-rolled BPE encoder silently
+# fell back to token 0 (`!`) for every non-ASCII byte (incl. `\n` and
+# space), turning every prompt into garbage and the model output into
+# nonsense — caught by ADR-0028 brief-eval at 0/8 fixtures. Already on
+# the workspace lockfile via `mci-embed-coreml`; no net-new transitive
+# crate (no ADR-0008 dep-addition gate triggered).
 [target.'cfg(target_os = "macos")'.dependencies]
 serde_json        = "1"
 serde             = { version = "1", features = ["derive"] }
+tokenizers        = { version = "0.20", default-features = false, features = ["onig"] }
 objc2             = { version = "0.6", default-features = false, features = ["std"] }
 objc2-foundation  = { version = "0.3", default-features = false, features = [
     "std",

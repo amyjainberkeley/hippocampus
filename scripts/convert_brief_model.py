@@ -321,6 +321,7 @@ def convert(
     quiet: bool = False,
     dry_run: bool = False,
     seq_len: int = DEFAULT_SEQ_LEN,
+    palettize: bool = True,
 ) -> None:
     if quiet:
         logging.basicConfig(level=logging.WARNING)
@@ -426,17 +427,20 @@ def convert(
         log.info("Falling back to ONNX intermediate path...")
         mlmodel = _try_onnx_conversion(wrapper, sample_ids, sample_mask, seq_len)
 
-    # INT4 palettization per ADR-0028 §2
-    log.info("Applying INT4 palettization...")
-    try:
-        op_config = ct.optimize.coreml.OpPalettizerConfig(
-            mode="kmeans", nbits=4
-        )
-        config = ct.optimize.coreml.OptimizationConfig(global_config=op_config)
-        mlmodel = ct.optimize.coreml.palettize_weights(mlmodel, config=config)
-        log.info("INT4 palettization succeeded.")
-    except Exception as e:
-        log.warning("INT4 palettization failed (%s), saving FP16 model.", e)
+    # INT4 palettization per ADR-0028 §2 (opt-out via --no-palettize)
+    if palettize:
+        log.info("Applying INT4 palettization...")
+        try:
+            op_config = ct.optimize.coreml.OpPalettizerConfig(
+                mode="kmeans", nbits=4
+            )
+            config = ct.optimize.coreml.OptimizationConfig(global_config=op_config)
+            mlmodel = ct.optimize.coreml.palettize_weights(mlmodel, config=config)
+            log.info("INT4 palettization succeeded.")
+        except Exception as e:
+            log.warning("INT4 palettization failed (%s), saving FP16 model.", e)
+    else:
+        log.info("--no-palettize: keeping FP16 weights (no quantization).")
 
     log.info("Saving to %s...", output_path)
     mlmodel.save(output_path)
@@ -508,17 +512,27 @@ def _verify(output_path: str, tokenizer, seq_len: int) -> None:
         max_length=seq_len,
     )
     test_ids = encoded["input_ids"].astype(np.int32)
-    test_mask = encoded["attention_mask"].astype(np.int32)
+    real_len = int(encoded["attention_mask"].sum())
+
+    # IMPORTANT: pass attention_mask = ones((1, seq_len)) at inference,
+    # NOT the partial mask the tokenizer produces. The conversion traces
+    # with attn_implementation="eager" + ones mask, so the transformers
+    # mask helper's `if padding_length > 0` branch is never recorded in
+    # the .mlmodelc graph. A partial mask at inference makes the model
+    # predict `<|endoftext|>` as the first generated token on every
+    # prompt (silent failure — the conversion succeeds, the model is
+    # garbage). Surfaced by ADR-0028 brief-eval (cycle 8.10, 0/8 → 8/8
+    # after this fix). The Rust backend `Qwen3CoreMLBackend::forward_pass`
+    # carries the same discipline.
+    inference_mask = np.ones((1, seq_len), dtype=np.int32)
 
     pred = loaded.predict({
         "input_ids": test_ids,
-        "attention_mask": test_mask,
+        "attention_mask": inference_mask,
     })
     logits = pred["logits"]
     log.info("  Logits shape: %s", logits.shape)
 
-    # Find last real token position (before padding)
-    real_len = int(test_mask.sum())
     next_token = int(np.argmax(logits[0, real_len - 1, :]))
     decoded = tokenizer.decode([next_token])
     log.info(
@@ -527,7 +541,14 @@ def _verify(output_path: str, tokenizer, seq_len: int) -> None:
         decoded,
         real_len - 1,
     )
-    log.info("  Verification passed.")
+    if next_token == tokenizer.eos_token_id:
+        log.warning(
+            "  Verification produced EOS as first token — model is likely "
+            "broken at inference time. Check the trace's attention_mask "
+            "shape (must match inference shape) and re-run conversion."
+        )
+    else:
+        log.info("  Verification passed.")
 
 
 def main():
@@ -573,12 +594,30 @@ def main():
             "The Rust backend pads shorter inputs and truncates longer ones."
         ),
     )
+    parser.add_argument(
+        "--no-palettize",
+        action="store_true",
+        help=(
+            "Skip INT4 k-means palettization; keep the model in FP16. "
+            "Produces a ~3.4 GB .mlpackage instead of ~860 MB but preserves "
+            "model quality. Use as a diagnostic when INT4 output is "
+            "incoherent (cycle 8.10: INT4 without calibration data drops "
+            "Qwen3-1.7B below ADR-0028's quality threshold)."
+        ),
+    )
     args = parser.parse_args()
     if args.check_env:
         sys.exit(_check_env())
     if not args.output:
         parser.error("--output is required unless --check-env is used.")
-    convert(args.output, args.verify, args.quiet, args.dry_run, args.seq_len)
+    convert(
+        args.output,
+        args.verify,
+        args.quiet,
+        args.dry_run,
+        args.seq_len,
+        palettize=not args.no_palettize,
+    )
 
 
 if __name__ == "__main__":

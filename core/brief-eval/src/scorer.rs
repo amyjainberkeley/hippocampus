@@ -229,17 +229,33 @@ fn count_bullets(body: &str) -> usize {
 }
 
 fn count_citation_markers(body: &str) -> usize {
-    // Matches "[event:NUMBER]" — the same syntax LlamaBriefAuthor parses.
+    // Matches the same citation surface forms `LlamaBriefAuthor::parse_citations`
+    // accepts: `[event:N]`, `[event_id:N]`, `[eventid:N]`, `[event :N]`
+    // (case-insensitive). The Qwen3 model frequently mirrors the
+    // `EVENT_ID=N` form from the prompt's EVENTS listing in its output;
+    // accepting both forms keeps the scorer aligned with the parser.
+    const MARKERS: &[&str] = &["[event:", "[event_id:", "[eventid:", "[event :"];
+    let lower = body.to_ascii_lowercase();
     let mut count = 0_usize;
-    let mut rest = body;
-    while let Some(start) = rest.find("[event:") {
-        let after = &rest[start + 7..];
+    let mut cursor = 0;
+    while cursor < lower.len() {
+        let slice = &lower[cursor..];
+        let Some((marker, rel_start)) = MARKERS
+            .iter()
+            .filter_map(|m| slice.find(m).map(|i| (*m, i)))
+            .min_by_key(|(_, i)| *i)
+        else {
+            break;
+        };
+        let start = cursor + rel_start;
+        let after_idx = start + marker.len();
+        let after = &body[after_idx..];
         if let Some(end) = after.find(']') {
-            let inner = &after[..end];
-            if inner.chars().all(|c| c.is_ascii_digit()) && !inner.is_empty() {
+            let inner = after[..end].trim();
+            if !inner.is_empty() && inner.chars().all(|c| c.is_ascii_digit()) {
                 count += 1;
             }
-            rest = &after[end + 1..];
+            cursor = after_idx + end + 1;
         } else {
             break;
         }

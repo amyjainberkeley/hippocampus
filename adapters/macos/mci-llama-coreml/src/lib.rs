@@ -16,7 +16,7 @@
 //!
 //! Qwen3-1.7B INT4-palettized via `coremltools` 8.x. ~950 MB on disk,
 //! ~400-500 MB in memory during inference. Downloaded on demand to
-//! `~/Library/Application Support/MCI/Models/Qwen3-1.7B-INT4.mlmodelc`.
+//! `~/Library/Application Support/MCI/Models/Qwen3-1.7B-FP16.mlmodelc`.
 //!
 //! # Tokenizer
 //!
@@ -58,8 +58,24 @@ use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL};
 
 const MAX_OUTPUT_TOKENS: usize = 512;
 const DEFAULT_SEQ_LEN: usize = 2048;
-const DEFAULT_TEMPERATURE: f32 = 0.7;
+/// Temperature for the brief author. 0.3 = much lower variance than
+/// generic-chat 0.7; for structured-output tasks (citation markers,
+/// bullet structure) this keeps the model on-task across fixtures.
+/// Cycle 8.10 brief-eval: 0.7 caused 7/8 fixtures to silently drop
+/// citation markers; 0.3 holds the structure with no quality loss on
+/// the prose itself.
+const DEFAULT_TEMPERATURE: f32 = 0.3;
 const DEFAULT_TOP_P: f32 = 0.9;
+/// HuggingFace `generate()` default. Penalizes tokens that have
+/// recently appeared by dividing their logit (or multiplying if
+/// negative) by this factor. Critical for INT4-palettized 1.7B-class
+/// models whose output otherwise collapses into 4-token repetitive
+/// loops (e.g. "ICKABLE\n" × 50, cycle 8.10 brief-eval).
+const DEFAULT_REPETITION_PENALTY: f32 = 1.15;
+/// How many recent tokens the repetition penalty applies to. Matches
+/// llama.cpp's `--repeat-last-n` default. Bounded by `MAX_OUTPUT_TOKENS`
+/// since a longer window has no effect on short generations.
+const REPETITION_WINDOW: usize = 64;
 
 /// Core ML backend for Qwen3-1.7B INT4.
 pub struct Qwen3CoreMLBackend {
@@ -154,22 +170,48 @@ impl Qwen3CoreMLBackend {
 
     /// Run a single forward pass on the given token IDs.
     ///
-    /// Pads `input_ids` to `self.seq_len` and constructs an attention_mask
-    /// (1 for real tokens, 0 for padding). Returns logits for the last
-    /// real token position.
+    /// Pads `input_ids` to `self.seq_len` and supplies an attention_mask.
+    /// Returns logits for the last real token position.
+    ///
+    /// # Why `attention_mask = [1; seq_len]` (all-ones), not partial
+    ///
+    /// `scripts/convert_brief_model.py` traces the Qwen3 graph with
+    /// `attn_implementation="eager"` and `attention_mask = ones((1,
+    /// seq_len))`. The transformers mask helper branches on
+    /// `if (padding_length := kv_length + kv_offset
+    ///     - attention_mask.shape[-1]) > 0:` — at trace time
+    /// `padding_length == 0`, so `torch.jit.trace` records the False
+    /// branch only and the padding-handling code is absent from the
+    /// .mlmodelc graph. (`TracerWarning: Converting a tensor to a Python
+    /// boolean might cause the trace to be incorrect` in the conversion
+    /// log was the smoking gun.)
+    ///
+    /// At inference, the only mask that respects the traced contract is
+    /// the same one the trace saw: all-ones. The causal mask is still
+    /// applied inside the graph and is independent of `attention_mask`,
+    /// so when we read logits at position `real_len - 1` we see only
+    /// positions `0..real_len` — all real prompt tokens. Predictions at
+    /// padded positions are garbage (the model "attends" to pad tokens
+    /// there) but we never read those.
+    ///
+    /// Passing a partial `[1,...,1,0,...,0]` instead causes the model to
+    /// predict `<|endoftext|>` as its very first generated token on
+    /// every prompt — the broken trace's silent failure mode. Surfaced
+    /// by ADR-0028 brief-eval (0/8 fixtures, cycle 8.10).
     #[allow(deprecated)]
     fn forward_pass(&self, input_ids: &[i32]) -> Result<Vec<f32>, GenerateError> {
         let real_len = input_ids.len().min(self.seq_len);
 
-        // Pad input_ids to fixed seq_len
+        // Pad input_ids to fixed seq_len. The traced graph still attends
+        // to these positions at queries ≥ real_len, but we only read
+        // logits at `real_len - 1`, which is a real prompt token.
         let mut padded_ids = vec![0_i32; self.seq_len];
         padded_ids[..real_len].copy_from_slice(&input_ids[..real_len]);
 
-        // Build attention_mask: 1 for real tokens, 0 for padding
-        let mut mask = vec![0_i32; self.seq_len];
-        for m in mask.iter_mut().take(real_len) {
-            *m = 1;
-        }
+        // attention_mask = all-ones, matching the trace's input shape.
+        // See the doc comment above for why a partial mask breaks
+        // the traced graph.
+        let mask = vec![1_i32; self.seq_len];
 
         let dim0 = NSNumber::new_i64(1);
         let dim1 = NSNumber::new_i64(self.seq_len as i64);
@@ -271,15 +313,42 @@ impl LlamaBackend for Qwen3CoreMLBackend {
             return Err(GenerateError::InvalidPrompt("empty prompt".into()));
         }
 
+        let debug = std::env::var("MCI_QWEN3_DEBUG").as_deref() == Ok("1");
+
         let mut input_ids = self.tokenizer.encode(prompt);
         let prompt_len = input_ids.len();
         let mut output_ids = Vec::with_capacity(MAX_OUTPUT_TOKENS);
 
-        for _ in 0..MAX_OUTPUT_TOKENS {
-            let logits = self.forward_pass(&input_ids)?;
+        if debug {
+            eprintln!(
+                "[qwen3-debug] prompt_len={} prompt_tail_ids={:?}",
+                prompt_len,
+                &input_ids[input_ids.len().saturating_sub(8)..]
+            );
+        }
+
+        for step in 0..MAX_OUTPUT_TOKENS {
+            let mut logits = self.forward_pass(&input_ids)?;
+            apply_repetition_penalty(
+                &mut logits,
+                &output_ids,
+                REPETITION_WINDOW,
+                DEFAULT_REPETITION_PENALTY,
+            );
             let next_token = sample_token(&logits, DEFAULT_TEMPERATURE, DEFAULT_TOP_P);
 
+            if debug && step < 16 {
+                let decoded_one = self.tokenizer.decode(&[next_token]);
+                eprintln!(
+                    "[qwen3-debug] step={} next_token={} decoded={:?}",
+                    step, next_token, decoded_one
+                );
+            }
+
             if self.tokenizer.is_eos(next_token) {
+                if debug {
+                    eprintln!("[qwen3-debug] hit EOS at step {step} token={next_token}");
+                }
                 break;
             }
 
@@ -297,6 +366,14 @@ impl LlamaBackend for Qwen3CoreMLBackend {
         }
 
         let full_output = self.tokenizer.decode(&input_ids[prompt_len..]);
+        if debug {
+            eprintln!(
+                "[qwen3-debug] output_ids={} full_output_len={} full_output_head={:?}",
+                output_ids.len(),
+                full_output.len(),
+                &full_output[..full_output.len().min(200)]
+            );
+        }
         Ok(full_output)
     }
 
@@ -437,6 +514,32 @@ fn sample_token(logits: &[f32], temperature: f32, top_p: f32) -> i32 {
     }
 }
 
+/// HuggingFace-style repetition penalty: for each token id that
+/// appears in the last `window` entries of `recent_tokens`, divide its
+/// logit by `penalty` (positive logits get smaller, negative get more
+/// negative). `penalty = 1.0` is a no-op; the HF default is 1.0–1.3.
+/// Critical for INT4-quantized models that otherwise collapse into
+/// short repetitive loops.
+fn apply_repetition_penalty(
+    logits: &mut [f32],
+    recent_tokens: &[i32],
+    window: usize,
+    penalty: f32,
+) {
+    if penalty <= 1.0 || logits.is_empty() || recent_tokens.is_empty() {
+        return;
+    }
+    let start = recent_tokens.len().saturating_sub(window);
+    for &tok in &recent_tokens[start..] {
+        if let Ok(idx) = usize::try_from(tok) {
+            if idx < logits.len() {
+                let v = logits[idx];
+                logits[idx] = if v > 0.0 { v / penalty } else { v * penalty };
+            }
+        }
+    }
+}
+
 fn argmax(logits: &[f32]) -> i32 {
     let mut best_idx = 0;
     let mut best_val = f32::NEG_INFINITY;
@@ -470,7 +573,7 @@ fn simple_random_f32() -> f32 {
 /// Expected layout:
 /// ```text
 /// ~/Library/Application Support/MCI/Models/
-///   Qwen3-1.7B-INT4.mlmodelc/   ← compiled Core ML model
+///   Qwen3-1.7B-FP16.mlmodelc/   ← compiled Core ML model
 ///   vocab.json                   ← BPE vocabulary
 ///   merges.txt                   ← BPE merge rules
 /// ```

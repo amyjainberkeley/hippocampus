@@ -8,13 +8,13 @@
       "note": "Bundled in app. No download needed."
     },
     {
-      "modelID": "qwen3-1.7b-int4",
+      "modelID": "qwen3-1.7b-fp16",
       "displayName": "Qwen3-1.7B (Daily Briefs)",
       "bundled": false,
-      "downloadURL": "https://huggingface.co/amyjainberkeley/hippocampus-coreml-models/resolve/main/Qwen3-1.7B-INT4.mlmodelc.tar.gz",
-      "sha256": "PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED",
-      "sizeBytes": 995000000,
-      "requiredDiskSpace": 1050000000
+      "downloadURL": "https://huggingface.co/amyjainberkeley/mci-coreml-models/resolve/main/Qwen3-1.7B-FP16.mlmodelc.tar.gz",
+      "sha256": "937697ad750b639217afabb557c2c19c3bd1138259bc68eb2372eebe684ff97e",
+      "sizeBytes": 2656167231,
+      "requiredDiskSpace": 6500000000
     }
   ]
 }

@@ -12,8 +12,8 @@
 //! ```text
 //! cargo run -p mci-brief-eval --bin brief-eval --features coreml -- \
 //!     --all --backend coreml \
-//!     --model-path  "$HOME/Library/Application Support/MCI/Models/Qwen3-1.7B-INT4.mlmodelc" \
-//!     --tokenizer-dir "$HOME/Library/Application Support/MCI/Models/Qwen3-1.7B-INT4-tokenizer" \
+//!     --model-path  "$HOME/Library/Application Support/MCI/Models/Qwen3-1.7B-FP16.mlmodelc" \
+//!     --tokenizer-dir "$HOME/Library/Application Support/MCI/Models" \
 //!     --require-real-model
 //! ```
 
