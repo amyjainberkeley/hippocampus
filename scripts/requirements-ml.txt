@@ -4,6 +4,16 @@
 #
 # Why these pins:
 #
+#   coremltools>=8.0,<9.0  — pinned UPPER-bound to 8.x. coremltools 9.0
+#     introduced a strict input-dtype check on the `fill` op that rejects
+#     Qwen3's empty fp32 conditional-branch tensor:
+#       Op "fill_0" (op_type: fill) Input shape="116" expects tensor or
+#       scalar of dtype from type domain ['int32'] but got tensor[0,fp32]
+#     AND removed the ONNX frontend (`ct.convert(onnx_path,...)` returns
+#     "Unable to determine the type of the model"). Both regressions bit
+#     cycle 8.9; PR #173's `run_decompositions({})` fix is upstream of
+#     them and doesn't help. Path A succeeds on coremltools 8.3.
+#
 #   torch>=2.4,<2.6  — coremltools 8.x op registry expects torch <=2.5
 #     op signatures. Newer torch versions change traced op names AND
 #     emit `torch.export` output in the TRAINING dialect that ct.convert
@@ -14,21 +24,31 @@
 #
 #   numpy<2.0        — coremltools 8.x is not numpy-2 clean.
 #
+#   transformers>=4.51,<4.53  — narrow window that (a) added Qwen3
+#     model_type support (4.51+; 4.45 / 4.50 raise KeyError 'qwen3')
+#     and (b) does NOT yet include the `masking_utils.py` rewrite that
+#     emits `mask = torch.where(mask, torch.tensor(0.0, ...), min_dtype)`
+#     during eager-attention tracing. That fp32 zero-element constant is
+#     what coremltools converts into the fill_0 op-dtype mismatch above.
+#     4.52.0 is the first build with Qwen3 + no masking_utils.py — used
+#     for the cycle-8.9 conversion that produced the shipped tarball.
+#     Bumping past 4.52 reintroduces the trap.
+#
 #   onnxscript       — required by `torch.onnx.export` dynamo path
 #     (default in torch 2.5+). Path B fallback in convert_brief_model.py
 #     uses opset 17. Without onnxscript the fallback is dead.
 #
 # One-shot setup (fresh venv):
 #
-#   python3.11 -m venv .venv-ml
+#   python3.12 -m venv .venv-ml   # or python3.11 — both work
 #   source .venv-ml/bin/activate
 #   pip install -r scripts/requirements-ml.txt
 #   python scripts/convert_brief_model.py --check-env
 #
-coremltools>=8.0
+coremltools>=8.0,<9.0
 torch>=2.4,<2.6
 numpy<2.0
-transformers>=4.40
+transformers>=4.51,<4.53
 optimum>=1.23
 onnx>=1.17
 onnxruntime>=1.20

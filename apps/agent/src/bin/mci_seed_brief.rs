@@ -69,7 +69,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
     let mut date_local: Option<String> = None;
     let mut title: Option<String> = None;
     let mut body: Option<String> = None;
-    let mut model_id: String = "qwen3-1.7b-int4".into();
+    let mut model_id: String = "qwen3-1.7b-fp16".into();
     let mut model_version: String = "demo".into();
     let mut source_event_count: u32 = 0;
     let mut force = false;
@@ -214,7 +214,7 @@ fn print_usage() {
         \x20 --date YYYY-MM-DD          REQUIRED. Local date the brief is for.\n\
         \x20 --title STRING             Header title (default: \"Demo brief for <date>\").\n\
         \x20 --body STRING              Markdown body (default: a synthetic stub).\n\
-        \x20 --model-id STRING          Model id for the header (default: qwen3-1.7b-int4).\n\
+        \x20 --model-id STRING          Model id for the header (default: qwen3-1.7b-fp16).\n\
         \x20 --model-version STRING     Model version string (default: \"demo\").\n\
         \x20 --source-events N          Source-event count for the footer (default: 0).\n\
         \x20 --db-path PATH             default $MCI_DB_PATH or\n\

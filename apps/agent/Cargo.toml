@@ -55,6 +55,10 @@ mci-core    = { path = "../../core" }
 # this dep (production binary path); test-side stub access lives in
 # [dev-dependencies] below.
 mci-brain   = { path = "../../core/brain" }
+# ADR-0028 brief author scaffold — pure-Rust traits + lifecycle
+# state machine. Already on the workspace lockfile via `mci-brief-ffi`,
+# so listing it here adds ZERO net new third-party crates per ADR-0008.
+mci-brief   = { path = "../../core/brief" }
 tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "io-std", "process", "signal", "fs", "net"] }
 tracing     = { version = "0.1", default-features = false, features = ["std"] }
 thiserror   = "1"
@@ -70,6 +74,10 @@ serde_json  = "1"
 # family already on the lockfile from P3.3).
 [target.'cfg(target_os = "macos")'.dependencies]
 mci-embed-coreml = { path = "../../adapters/macos/mci-embed-coreml" }
+# ADR-0028 — Qwen3-1.7B INT4 Core ML backend for the daily-brief author.
+# macOS-only: the crate compiles to an empty lib elsewhere. No net-new
+# third-party crate (objc2 family already on the lockfile from P3.3).
+mci-llama-coreml = { path = "../../adapters/macos/mci-llama-coreml" }
 
 # Deliberately NO `tracing-subscriber`: the typed HealthLogRecord
 # serializer in `health_log.rs` keeps the JSON shape fixed at the

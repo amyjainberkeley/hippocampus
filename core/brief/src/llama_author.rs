@@ -52,6 +52,17 @@ impl LlamaBriefAuthor {
     /// Render the prompt for the given events and topic.
     ///
     /// Public for test pinning.
+    ///
+    /// # EVENT listing format — `id=N` not `EVENT_ID=N`
+    ///
+    /// Cycle 8.10 brief-eval found Qwen3-1.7B FP16 had a strong tendency
+    /// to mirror the most-salient surface form of the prompt's events
+    /// listing in its output — when the listing said `EVENT_ID=N`, the
+    /// model would either echo `[EVENT_ID:N]` (which the parser now
+    /// accepts) OR drop the citation marker entirely. Lowercasing the
+    /// listing key to `id=` reduces its salience and the model
+    /// converges on the canonical `[event:N]` form requested by the
+    /// system prompt.
     #[must_use]
     pub fn render_prompt(retrieval: &[EventRecord], topic: &str) -> String {
         use std::fmt::Write;
@@ -59,7 +70,7 @@ impl LlamaBriefAuthor {
         for r in retrieval {
             let _ = writeln!(
                 event_block,
-                "EVENT_ID={} APP={} WINDOW={} TEXT={}",
+                "id={} app={} window={} text={}",
                 r.event_id.0,
                 r.app_bundle_id.as_deref().unwrap_or("unknown"),
                 r.window_title.as_deref().unwrap_or("unknown"),
@@ -78,7 +89,7 @@ impl LlamaBriefAuthor {
 ///
 /// Placeholders: `{topic}`, `{event_count}`, `{events}`.
 ///
-/// Qwen3 ChatML format per ADR-0028 §3. Direct mode (no thinking
+/// Qwen3 `ChatML` format per ADR-0028 §3. Direct mode (no thinking
 /// tokens) — the system prompt instructs concise structured output.
 ///
 /// The `###CITATIONS:` line doubles as the stop marker in the
@@ -88,12 +99,16 @@ const PROMPT_TEMPLATE: &str = "\
 You are a concise daily brief generator for a knowledge worker. Follow these rules exactly:
 1. First line is the brief title (≤10 words).
 2. Then bullet points summarizing what happened, grouped by activity.
-3. Every bullet MUST cite at least one source event using [event:N] where N is the EVENT_ID.
-4. Do NOT invent or reference any EVENT_ID not listed below.
+3. Every bullet MUST end with at least one citation in the form [event:N] where N is the id of the event that justifies the bullet.
+4. Do NOT invent any id not present in the events listing below.
 5. End with a line: ###CITATIONS: [event:X], [event:Y], ...
+
+Example bullet:
+- Reviewed PR #123 and left two comments [event:42]
+
 /no_think<|im_end|>
 <|im_start|>user
-Summarize the following {event_count} screen events under the topic \"{topic}\".
+Summarize the following {event_count} screen events under the topic \"{topic}\". Every bullet must end with a [event:N] citation.
 
 EVENTS:
 {events}<|im_end|>
@@ -162,26 +177,47 @@ fn parse_title_body(raw: &str) -> (String, String) {
     (title, body)
 }
 
-/// Extract `[event:N]` markers from text, keeping only IDs in `valid_ids`.
+/// Extract event-citation markers from text, keeping only IDs in
+/// `valid_ids`. Accepts both `[event:N]` (the format the prompt
+/// explicitly requests) and `[EVENT_ID:N]` (the format the prompt's
+/// EVENTS listing uses for each row's id — Qwen3 has a strong tendency
+/// to mirror that surface form in its output). `[event_id:N]` and
+/// `[EVENT:N]` are also accepted for the same reason.
 ///
 /// Silently skips malformed markers (non-numeric, missing brackets).
 #[must_use]
 #[allow(clippy::implicit_hasher)]
 pub fn parse_citations(text: &str, valid_ids: &HashSet<u64>) -> Vec<u64> {
+    const MARKERS: &[&str] = &["[event:", "[event_id:", "[eventid:", "[event :"];
+
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
-    let mut remaining = text;
-    while let Some(start) = remaining.find("[event:") {
-        let after_marker = &remaining[start + 7..];
+    // Walk the lowercased text so the markers match case-insensitively;
+    // index into the original `text` via byte offsets (the lowercased
+    // forms preserve ASCII byte alignment for the substrings we search).
+    let lower = text.to_ascii_lowercase();
+    let mut cursor = 0;
+    while cursor < lower.len() {
+        let slice = &lower[cursor..];
+        let Some((marker, rel_start)) = MARKERS
+            .iter()
+            .filter_map(|m| slice.find(m).map(|i| (*m, i)))
+            .min_by_key(|(_, i)| *i)
+        else {
+            break;
+        };
+        let start = cursor + rel_start;
+        let after_marker_idx = start + marker.len();
+        let after_marker = &text[after_marker_idx..];
         if let Some(end) = after_marker.find(']') {
-            let id_str = &after_marker[..end];
+            let id_str = after_marker[..end].trim();
             if let Ok(id) = id_str.parse::<u64>() {
                 if valid_ids.contains(&id) && seen.insert(id) {
                     result.push(id);
                 }
             }
-            remaining = &after_marker[end + 1..];
+            cursor = after_marker_idx + end + 1;
         } else {
             break;
         }
@@ -240,8 +276,9 @@ mod tests {
     fn prompt_rendering_contains_all_event_ids() {
         let records = make_records(&[5, 10]);
         let prompt = LlamaBriefAuthor::render_prompt(&records, "Weekly sync");
-        assert!(prompt.contains("EVENT_ID=5"));
-        assert!(prompt.contains("EVENT_ID=10"));
+        // Lowercase `id=N` since cycle 8.10 — see render_prompt docs.
+        assert!(prompt.contains("id=5"));
+        assert!(prompt.contains("id=10"));
         assert!(prompt.contains("Weekly sync"));
         assert!(prompt.contains("2 screen events"));
     }

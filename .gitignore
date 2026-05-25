@@ -44,8 +44,21 @@ Thumbs.db
 # ML model artifacts (produced by conversion scripts, not committed)
 models/*.mlpackage
 models/*.mlmodelc
+models/*.tar.gz
 *.mlpackage
 *.mlmodelc
+
+# Python ML conversion venv (scripts/convert_brief_model.py)
+.venv-ml/
+
+# Tokenizer artifacts written alongside the Core ML model by
+# convert_brief_model.py — ship via the same HF tarball, not the repo.
+models/tokenizer*.json
+models/vocab.json
+models/merges.txt
+models/special_tokens_map.json
+models/added_tokens.json
+models/chat_template.jinja
 
 # Output redirects from CLI flag-as-filename mistakes (e.g. --skip-sudo)
 /--*

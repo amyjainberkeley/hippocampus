@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
+use mci_agent::brief_worker;
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
@@ -397,6 +398,15 @@ async fn main() -> ExitCode {
                                             }
                                         }
                                     });
+
+                                    // ADR-0028 — daily brief worker. Fires at
+                                    // 06:00 local. Disabled-idle if the Qwen3
+                                    // model is not present OR
+                                    // MCI_BRIEFS_DISABLED=1.
+                                    spawn_brief_worker(
+                                        Arc::clone(&store),
+                                        shutdown_rx.clone(),
+                                    );
 
                                     Some((pump, store))
                                 }
@@ -778,6 +788,107 @@ fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     }
     eprintln!("mci-agent: non-macOS platform — using zero-vector embedder fallback");
     (Arc::new(ZeroEmbedder), false)
+}
+
+/// Spawn the daily-brief worker (ADR-0028). Selects between the
+/// production Qwen3 Core ML backend and the disabled-idle path based on
+/// `MCI_BRIEFS_DISABLED`, the presence of the model, and the host OS.
+#[cfg(target_os = "macos")]
+fn spawn_brief_worker(
+    store: Arc<mci_brain::SqlCipherBrainStore>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    use mci_brief::author::BriefAuthor;
+    use mci_brief::llama_author::LlamaBriefAuthor;
+    use mci_brief::llama_backend::LlamaBackend;
+
+    if brief_worker::briefs_disabled_via_env() {
+        tokio::spawn(async move {
+            let stats = brief_worker::run_disabled_idle(
+                "MCI_BRIEFS_DISABLED=1",
+                shutdown,
+            )
+            .await;
+            eprintln!(
+                "mci-agent: brief worker exited (disabled). generated={} skipped_empty={} errors={}",
+                stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
+            );
+        });
+        return;
+    }
+
+    let model_dir = brief_worker::default_model_dir();
+    if !brief_worker::qwen3_model_present(&model_dir) {
+        tokio::spawn(async move {
+            let stats = brief_worker::run_disabled_idle(
+                "Qwen3 model not installed",
+                shutdown,
+            )
+            .await;
+            eprintln!(
+                "mci-agent: brief worker exited (no model). generated={} skipped_empty={} errors={}",
+                stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
+            );
+        });
+        return;
+    }
+
+    let model_path = model_dir.join("Qwen3-1.7B-FP16.mlmodelc");
+    let tokenizer_dir = model_dir.clone();
+    let factory: brief_worker::AuthorFactory = Arc::new(move || {
+        let backend = mci_llama_coreml::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir)
+            .map_err(|e| brief_worker::BriefWorkerError::Author(format!(
+                "Qwen3CoreMLBackend::open: {e}"
+            )))?;
+        let backend_arc: Arc<dyn LlamaBackend> = Arc::new(backend);
+        let author = LlamaBriefAuthor::new(backend_arc);
+        let boxed: Box<dyn BriefAuthor> = Box::new(author);
+        Ok(boxed)
+    });
+
+    let tz_resolver: Arc<dyn Fn() -> i32 + Send + Sync> =
+        Arc::new(brief_worker::current_tz_offset_secs);
+
+    tokio::spawn(async move {
+        match brief_worker::run_brief_worker(
+            store,
+            factory,
+            brief_worker::DEFAULT_BRIEF_HOUR,
+            tz_resolver,
+            shutdown,
+        )
+        .await
+        {
+            Ok(stats) => {
+                eprintln!(
+                    "mci-agent: brief worker exited. generated={} skipped_empty={} errors={} disabled={}",
+                    stats.briefs_generated,
+                    stats.cycles_skipped_empty,
+                    stats.cycle_errors,
+                    stats.disabled,
+                );
+            }
+            Err(e) => {
+                eprintln!("mci-agent: brief worker fatal: {e}");
+            }
+        }
+    });
+}
+
+/// Non-macOS: there is no Core ML, no Qwen3 backend, so the brief
+/// worker stays in disabled-idle mode.
+#[cfg(not(target_os = "macos"))]
+fn spawn_brief_worker(
+    _store: Arc<mci_brain::SqlCipherBrainStore>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    tokio::spawn(async move {
+        let stats = brief_worker::run_disabled_idle("non-macOS platform", shutdown).await;
+        eprintln!(
+            "mci-agent: brief worker exited (non-macOS). generated={} skipped_empty={} errors={}",
+            stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
+        );
+    });
 }
 
 /// Decode a 64-char hex string into a 32-byte key. Returns `None` on any

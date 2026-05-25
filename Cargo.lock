@@ -914,8 +914,10 @@ name = "mci-agent"
 version = "0.0.1"
 dependencies = [
  "mci-brain",
+ "mci-brief",
  "mci-core",
  "mci-embed-coreml",
+ "mci-llama-coreml",
  "serde",
  "serde_json",
  "tempfile",
@@ -1008,6 +1010,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "tokenizers",
 ]
 
 [[package]]
