@@ -1,0 +1,78 @@
+name: Graphify Drift Check
+
+# Fails the PR if graphify-out/graph.json AST nodes/edges have drifted from
+# current code. AST-only comparison — semantic LLM-inferred edges are NOT
+# required to be refreshed on every PR (those re-fire on explicit
+# `graphify extract .`, which is a separate cost gate).
+#
+# Escape hatch: include "[skip-graphify]" in the PR's most recent commit
+# message. Use sparingly (release-only / cosmetic-only PRs).
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      # Code surfaces that affect the AST graph. Doc-only / config-only PRs
+      # skip the check entirely to keep noise low.
+      - 'core/**'
+      - 'adapters/**'
+      - 'apps/**'
+      - 'server/**'
+      - 'extensions/**'
+      - 'tools/**'
+      - 'scripts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'graphify-out/graph.json'
+      - '.github/workflows/graphify-drift.yml'
+      - 'scripts/check-graphify-drift.sh'
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: graphify-drift-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift-check:
+    name: Graph AST drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv (fast Python tool manager)
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install graphify CLI
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          uv tool install graphifyy
+          graphify --version
+
+      - name: Run AST drift check
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          ./scripts/check-graphify-drift.sh
+
+      - name: Helpful failure annotation
+        if: failure()
+        run: |
+          echo "::error title=Graph AST drift::graphify-out/graph.json is stale relative to current code. Run 'graphify update . --force --no-cluster' locally and commit the refreshed graph.json. See scripts/check-graphify-drift.sh for the exact signature logic. Escape hatch: '[skip-graphify]' in commit message."
