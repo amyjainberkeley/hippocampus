@@ -170,7 +170,7 @@ struct RootView: View {
 /// user's HOME, and (c) a missing-file false-negative just renders
 /// the "Enable on-device brief model" CTA which is benign.
 enum ModelPresenceProbe {
-    static let qwen3ModelID = "qwen3-1.7b-int4"
+    static let qwen3ModelID = "qwen3-1.7b-fp16"
 
     static func isBriefModelInstalled(modelID: String = qwen3ModelID) -> Bool {
         // Per `docs/decisions/0028-brief-author-model-qwen3-1.7b-coreml.md` §4,

@@ -14,7 +14,7 @@ struct ModelDownloadView: View {
 
     private let manager: ModelDownloadManager
 
-    init(modelID: String = "qwen3-1.7b-int4",
+    init(modelID: String = "qwen3-1.7b-fp16",
          manager: ModelDownloadManager? = nil,
          onDismiss: @escaping () -> Void,
          onComplete: @escaping () -> Void) {
@@ -35,7 +35,7 @@ struct ModelDownloadView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 4) {
-                Label("Download size: ~950 MB", systemImage: "arrow.down.circle")
+                Label("Download size: ~2.5 GB", systemImage: "arrow.down.circle")
                 Label("Runs entirely on your Mac", systemImage: "desktopcomputer")
                 Label("No data leaves your device", systemImage: "lock.shield")
             }

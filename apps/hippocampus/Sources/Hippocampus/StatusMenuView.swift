@@ -167,18 +167,17 @@ struct StatusMenuView: View {
                     UserDefaults.standard.set(newValue, forKey: "MCIBriefsEnabled")
                 }
         } else {
-            // Qwen3 brief-author model is not yet on HuggingFace —
-            // `apps/hippocampus/Resources/models.json` still has the
-            // placeholder SHA-256 ("PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED"),
-            // which means clicking Download successfully fetches the
-            // upstream tarball but fails SHA verification, leaving
-            // the user staring at a sheet with no clear next step
-            // (CEO-reported, 2026-05-24). Surface a disabled
-            // "Coming in v0.2" item until OWNER_TASKS #17-#19 are
-            // done (model converted + uploaded + SHA updated).
-            Button("Daily Briefs · Coming in v0.2") {}
-                .disabled(true)
-                .help("Daily briefs are written by an on-device AI model (Qwen3-1.7B). Model conversion + HuggingFace upload is in progress.")
+            // Qwen3-1.7B FP16 Core ML model now live (PR #192). Clicking
+            // surfaces the download sheet → ModelDownloadView pulls the
+            // tarball from HF, SHA-verifies against
+            // `HippocampusKit/Resources/models.json`, unpacks under
+            // `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/`
+            // where brief_worker (apps/agent) picks it up on its next
+            // 06:00 cycle or first-launch fast path.
+            Button("Daily Briefs: Off — Download Model…") {
+                showDownloadDialog = true
+            }
+            .help("Daily briefs summarize your day with Qwen3-1.7B (~2.5 GB download, runs entirely on your Mac).")
         }
     }
 

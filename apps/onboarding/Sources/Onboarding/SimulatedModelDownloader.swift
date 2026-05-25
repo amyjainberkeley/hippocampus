@@ -2,14 +2,14 @@ import Foundation
 import OnboardingKit
 
 actor SimulatedModelDownloader: ModelDownloader {
-    nonisolated let modelID = "qwen3-1.7b-int4"
+    nonisolated let modelID = "qwen3-1.7b-fp16"
     nonisolated let displayName = "Qwen3 1.7B"
-    nonisolated let sizeDescription = "~950 MB"
+    nonisolated let sizeDescription = "~2.5 GB"
     private var cancelled = false
 
     private var modelDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/MCI/Models/qwen3-1.7b-int4")
+            .appendingPathComponent("Library/Application Support/MCI/Models/qwen3-1.7b-fp16")
     }
 
     func isAvailable() -> Bool {

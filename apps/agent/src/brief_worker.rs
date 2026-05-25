@@ -116,10 +116,20 @@ pub fn default_model_dir() -> PathBuf {
 /// stem (without the `.tar.gz`).
 pub const QWEN3_MODEL_BASENAME: &str = "Qwen3-1.7B-FP16.mlmodelc";
 
+/// `modelID` from `apps/hippocampus/Resources/models.json`. The Swift-side
+/// `ModelDownloadManager` unpacks the tarball into a per-`modelID`
+/// subdirectory under [`default_model_dir`], so the on-disk path is
+/// `<model_dir>/<QWEN3_MODEL_ID>/<QWEN3_MODEL_BASENAME>/...`. Keep this
+/// constant in sync with the manifest.
+pub const QWEN3_MODEL_ID: &str = "qwen3-1.7b-fp16";
+
 /// True if the Qwen3 `.mlmodelc` is present under `model_dir`.
+///
+/// Checks `<model_dir>/<QWEN3_MODEL_ID>/<QWEN3_MODEL_BASENAME>` — the
+/// canonical layout written by `ModelDownloadManager`'s unpack step.
 #[must_use]
 pub fn qwen3_model_present(model_dir: &std::path::Path) -> bool {
-    model_dir.join(QWEN3_MODEL_BASENAME).exists()
+    model_dir.join(QWEN3_MODEL_ID).join(QWEN3_MODEL_BASENAME).exists()
 }
 
 /// Run the daily brief loop until the shutdown signal fires.
@@ -643,10 +653,34 @@ mod tests {
     }
 
     #[test]
-    fn qwen3_model_present_true_when_dir_exists() {
+    fn qwen3_model_present_true_when_subdir_exists() {
+        // Mirrors the on-disk layout written by `ModelDownloadManager`:
+        // `<model_dir>/qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc/`.
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("Qwen3-1.7B-FP16.mlmodelc")).unwrap();
+        std::fs::create_dir_all(
+            dir.path().join(QWEN3_MODEL_ID).join(QWEN3_MODEL_BASENAME),
+        )
+        .unwrap();
         assert!(qwen3_model_present(dir.path()));
+    }
+
+    #[test]
+    fn qwen3_model_present_false_when_basename_at_root() {
+        // Regression: pre-`QWEN3_MODEL_ID` layout (no per-model subdir)
+        // must NOT count as present. The unpack always writes a
+        // modelID-prefixed path, so a basename at the root is stale.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(QWEN3_MODEL_BASENAME)).unwrap();
+        assert!(!qwen3_model_present(dir.path()));
+    }
+
+    #[test]
+    fn qwen3_model_present_false_when_only_subdir_exists() {
+        // The modelID subdir exists but the `.mlmodelc` inside doesn't —
+        // an interrupted unpack, for instance. Must NOT count as present.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(QWEN3_MODEL_ID)).unwrap();
+        assert!(!qwen3_model_present(dir.path()));
     }
 
     // ---------------- stats default ----------------

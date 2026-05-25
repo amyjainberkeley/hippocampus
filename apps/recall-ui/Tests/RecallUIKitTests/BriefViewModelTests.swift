@@ -14,7 +14,7 @@ final class BriefViewModelTests: XCTestCase {
             rowId: UInt64.random(in: 1...100_000),
             dateLocal: date,
             generatedTsUs: generated,
-            modelId: "qwen3-1.7b-int4",
+            modelId: "qwen3-1.7b-fp16",
             modelVersion: "test",
             title: "Test for \(date)",
             body: body,

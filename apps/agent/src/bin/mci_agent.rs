@@ -833,8 +833,12 @@ fn spawn_brief_worker(
         return;
     }
 
-    let model_path = model_dir.join("Qwen3-1.7B-FP16.mlmodelc");
-    let tokenizer_dir = model_dir.clone();
+    // Path layout matches `ModelDownloadManager`'s unpack convention:
+    // `<model_dir>/<modelID>/<basename>/...`. Both sides reference the
+    // same constants from `brief_worker` to keep the seam tight.
+    let model_subdir = model_dir.join(brief_worker::QWEN3_MODEL_ID);
+    let model_path = model_subdir.join(brief_worker::QWEN3_MODEL_BASENAME);
+    let tokenizer_dir = model_subdir.clone();
     let factory: brief_worker::AuthorFactory = Arc::new(move || {
         let backend = mci_llama_coreml::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir)
             .map_err(|e| brief_worker::BriefWorkerError::Author(format!(

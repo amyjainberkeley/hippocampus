@@ -178,7 +178,12 @@ public actor ModelDownloadManager {
             try FileManager.default.removeItem(at: dir)
         }
         states[modelID] = .notStarted
-        if modelID == "qwen3-1.7b-int4" {
+        // The brief author currently surfaces a single `qwen3-*` model
+        // to users. Any matching modelID clears the cross-process
+        // "downloaded" flag that StatusMenuView reads. Bundled models
+        // (e.g. arctic-embed-s-int8) never set this flag, so they
+        // can't accidentally clear it either.
+        if modelID.hasPrefix("qwen3-") {
             UserDefaults.standard.set(false, forKey: "MCIBriefModelDownloaded")
         }
         logger.info("model-download: deleted \(modelID)")

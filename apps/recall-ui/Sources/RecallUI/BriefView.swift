@@ -60,23 +60,23 @@ struct BriefView: View {
     private var modelMissingView: some View {
         VStack(spacing: 16) {
             ContentUnavailableView(
-                "Daily briefs coming soon",
+                "Daily briefs aren't enabled yet",
                 systemImage: "doc.text",
                 description: Text(
-                    "Daily briefs are written by an on-device AI model (Qwen3-1.7B, ≈ 1 GB). The model is not bundled in v0.1.0 — it ships in a future update. Nothing leaves your device."
+                    "Daily briefs are written by an on-device AI model (Qwen3-1.7B, ≈ 2.5 GB). One-time download, runs entirely on your Mac — nothing leaves your device."
                 )
             )
             .foregroundStyle(Color.brandFgSecondary)
 
-            // The download flow exists in Hippocampus.app's menu-bar
-            // ("Daily Briefs: Off — Download Model…") but Qwen3 model
-            // conversion + HuggingFace upload (OWNER_TASKS #17–#19) is
-            // not complete in v0.1.0 — the SHA in models.json is the
-            // `PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED` literal, so a
-            // download attempt would fail SHA verification anyway. We
-            // surface the menu-bar entry-point honestly so power users
-            // who fetch the model manually can still wire it up.
-            Text("Power users: click the Hippocampus icon in your menu bar → 'Daily Briefs' once the model ships.")
+            // The download flow lives in Hippocampus.app's menu bar:
+            // clicking "Daily Briefs: Off — Download Model…" opens
+            // ModelDownloadView, fetches the tarball from HuggingFace,
+            // SHA-verifies, and unpacks under
+            // `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/`.
+            // brief_worker picks it up on its next 06:00 cycle or the
+            // first-launch fast path. Once enabled, BriefViewModel
+            // re-evaluates scene and this view is replaced.
+            Text("Click the Hippocampus icon in your menu bar → \"Daily Briefs: Off — Download Model…\" to enable.")
                 .font(.caption)
                 .foregroundStyle(Color.brandFgMuted)
                 .multilineTextAlignment(.center)

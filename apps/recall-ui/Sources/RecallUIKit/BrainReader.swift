@@ -66,7 +66,7 @@ public struct Brief: Sendable, Equatable, Identifiable, Codable {
     public let dateLocal: String
     /// Generation timestamp in microseconds since UNIX epoch.
     public let generatedTsUs: UInt64
-    /// Author model identifier (e.g. `"qwen3-1.7b-int4"`).
+    /// Author model identifier (e.g. `"qwen3-1.7b-fp16"`).
     public let modelId: String
     /// Author model version string.
     public let modelVersion: String
@@ -295,7 +295,7 @@ public struct StubBrainReader: BrainReader {
             rowId: 1,
             dateLocal: "2026-05-21",
             generatedTsUs: 1_716_343_380_000_000,
-            modelId: "qwen3-1.7b-int4",
+            modelId: "qwen3-1.7b-fp16",
             modelVersion: "demo",
             title: "Thursday, May 21, 2026",
             body: """
@@ -327,7 +327,7 @@ public struct StubBrainReader: BrainReader {
             rowId: 2,
             dateLocal: "2026-05-22",
             generatedTsUs: 1_716_429_780_000_000,
-            modelId: "qwen3-1.7b-int4",
+            modelId: "qwen3-1.7b-fp16",
             modelVersion: "demo",
             title: "Friday, May 22, 2026",
             body: """
