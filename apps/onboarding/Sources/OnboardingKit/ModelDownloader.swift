@@ -31,9 +31,9 @@ public protocol ModelDownloader: Sendable {
 }
 
 public actor StubModelDownloader: ModelDownloader {
-    public nonisolated let modelID = "qwen3-1.7b-int4"
+    public nonisolated let modelID = "qwen3-1.7b-fp16"
     public nonisolated let displayName = "Qwen3 1.7B"
-    public nonisolated let sizeDescription = "~950 MB"
+    public nonisolated let sizeDescription = "~2.5 GB"
     private var cancelled = false
     private var available: Bool
 

@@ -97,28 +97,24 @@ struct PrepareBrainSlide: View {
     private var modelStateView: some View {
         switch prepareBrainVM.downloadState {
         case .notStarted:
-            // Qwen3 brief-author model isn't on HuggingFace yet
-            // (apps/hippocampus/Resources/models.json SHA is the
-            // PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED literal — a
-            // Download attempt fetches the upstream tarball and
-            // then fails integrity verification, leaving the user
-            // stuck with no clear next step). Surface honest copy
-            // until OWNER_TASKS #17–#19 are done; user advances
-            // via the bottom Continue button.
+            // Qwen3 model is live (PR #192) but downloading 2.5 GB
+            // mid-onboarding is a worse experience than letting the
+            // user finish setup in <30 s and grab the model on demand
+            // from the menu-bar Daily Briefs item. Pre-skip so the
+            // flow's `canAdvance` stays true and the user is never
+            // blocked here; the StatusMenuView download flow is fully
+            // wired and SHA-verifies against the same manifest.
             VStack(spacing: 8) {
-                Label("Coming in v0.2", systemImage: "clock")
+                Label("Daily briefs are opt-in", systemImage: "doc.text")
                     .foregroundStyle(.secondary)
                     .font(.system(size: 13, weight: .medium))
-                Text("The on-device brief model isn't bundled in this build. Daily briefs will activate automatically once the model ships in a future update.")
+                Text("To keep setup quick, the 2.5 GB Qwen3 brief model is downloaded on demand. Click the Hippocampus icon in your menu bar later → \"Daily Briefs: Off — Download Model…\" to enable.")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
             }
             .onAppear {
-                // Pre-skip so the flow's `canAdvance` stays true
-                // and the slide's Continue button is enabled
-                // without the user having to click anything.
                 prepareBrainVM.skipDownload()
             }
 

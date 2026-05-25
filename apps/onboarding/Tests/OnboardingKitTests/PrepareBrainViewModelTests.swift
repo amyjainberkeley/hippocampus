@@ -60,7 +60,7 @@ final class PrepareBrainViewModelTests: XCTestCase {
 
     func testModelSizeDescription() {
         let vm = makeVM()
-        XCTAssertEqual(vm.modelSizeDescription, "~950 MB")
+        XCTAssertEqual(vm.modelSizeDescription, "~2.5 GB")
     }
 
     func testStartDownloadUpdatesState() async throws {
