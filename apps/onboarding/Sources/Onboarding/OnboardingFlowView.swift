@@ -71,6 +71,11 @@ struct OnboardingFlowView: View {
                     // (per Package.swift's "Zero external
                     // dependencies" comment).
                     writeOnboardingCompleteSentinel()
+                    // Clear the resume-state file so a future
+                    // re-launch (e.g. dev-tool wipe that touches
+                    // the sentinel but not the state file) starts
+                    // at `.welcome` instead of stuck at `.done`.
+                    flowVM.clearResumeState()
                     #if canImport(AppKit)
                     NSApplication.shared.terminate(nil)
                     #endif
