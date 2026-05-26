@@ -160,7 +160,17 @@ struct StatusMenuView: View {
 
     @ViewBuilder
     private var briefsMenuItem: some View {
-        let modelDownloaded = UserDefaults.standard.bool(forKey: "MCIBriefModelDownloaded")
+        // Filesystem is ground truth (CEO dogfood 2026-05-26).
+        // Previously this read `UserDefaults.standard.bool(forKey:
+        // "MCIBriefModelDownloaded")`, but that flag survives across
+        // installs / `cfprefsd` caches even after the model dir is
+        // wiped — so the menu showed "Daily Briefs" toggle while the
+        // model wasn't on disk. `BriefModelPresence.isQwen3Installed()`
+        // checks `~/Library/Application Support/MCI/Models/
+        // qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc/` directly. The
+        // SwiftUI menu re-renders this body on every open, so the
+        // toggle/button state stays in sync with the filesystem.
+        let modelDownloaded = BriefModelPresence.isQwen3Installed()
         if modelDownloaded {
             Toggle("Daily Briefs", isOn: $briefsEnabled)
                 .onChange(of: briefsEnabled) { _, newValue in
