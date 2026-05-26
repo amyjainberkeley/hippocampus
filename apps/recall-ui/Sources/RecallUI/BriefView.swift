@@ -35,6 +35,19 @@ struct BriefView: View {
         .task {
             await viewModel.reload()
         }
+        // While the model is missing (user is actively downloading from
+        // the menu-bar Daily Briefs flow), re-poll every 3 s so the
+        // scene transitions out of `.modelMissing` the moment the
+        // download finishes — without requiring the user to switch tabs
+        // or relaunch the Recall window (CEO dogfood 2026-05-26).
+        .task(id: viewModel.scene == .modelMissing) {
+            guard viewModel.scene == .modelMissing else { return }
+            while !Task.isCancelled, viewModel.scene == .modelMissing {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled, viewModel.scene == .modelMissing else { return }
+                await viewModel.reload()
+            }
+        }
     }
 
     @ViewBuilder

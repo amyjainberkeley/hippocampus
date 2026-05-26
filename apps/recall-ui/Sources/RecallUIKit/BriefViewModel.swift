@@ -58,11 +58,12 @@ public final class BriefViewModel: ObservableObject {
     /// arrows + the date label. Empty until the first reload.
     @Published public private(set) var knownDates: [String] = []
 
-    /// Whether the user has the brief-author model on disk. The view
-    /// supplies this at init time (the model presence check belongs to
-    /// Hippocampus.app, not the recall UI). If `false`, the VM short-
-    /// circuits to `.modelMissing` regardless of brain state.
-    public let isModelPresent: Bool
+    /// Closure that returns whether the brief-author model is on disk.
+    /// Called on EVERY `reload()` so the scene re-evaluates as the
+    /// model appears/disappears (e.g. user downloads while the Recall
+    /// UI is open — CEO dogfood 2026-05-26). If it returns `false`, the
+    /// VM short-circuits to `.modelMissing` regardless of brain state.
+    public let isModelPresentProbe: @Sendable () -> Bool
 
     /// Whether the user has accumulated at least one full day of capture.
     /// The view supplies this at init time. If `false` AND no brief is
@@ -77,14 +78,31 @@ public final class BriefViewModel: ObservableObject {
 
     private let reader: BrainReader
 
-    public init(
+    public convenience init(
         reader: BrainReader,
         isModelPresent: Bool = true,
         hasFullDayCapture: Bool = true,
         captureHoursSoFar: Double? = nil
     ) {
+        self.init(
+            reader: reader,
+            isModelPresentProbe: { isModelPresent },
+            hasFullDayCapture: hasFullDayCapture,
+            captureHoursSoFar: captureHoursSoFar
+        )
+    }
+
+    /// Closure-based initializer — preferred for production where the
+    /// model can appear on disk while the Recall UI is open. The
+    /// fixed-Bool overload above stays for legacy callers and tests.
+    public init(
+        reader: BrainReader,
+        isModelPresentProbe: @escaping @Sendable () -> Bool,
+        hasFullDayCapture: Bool = true,
+        captureHoursSoFar: Double? = nil
+    ) {
         self.reader = reader
-        self.isModelPresent = isModelPresent
+        self.isModelPresentProbe = isModelPresentProbe
         self.hasFullDayCapture = hasFullDayCapture
         self.captureHoursSoFar = captureHoursSoFar
     }
@@ -92,10 +110,12 @@ public final class BriefViewModel: ObservableObject {
     /// Re-query the brain, picking the latest brief (or whatever the
     /// caller asked for via `forceDate`) and updating `knownDates`.
     ///
-    /// Called once on tab appearance, again after a Regenerate, and any
-    /// time the deep-link router lands the user on this tab.
+    /// Called once on tab appearance, again after a Regenerate, every
+    /// 3 s while the scene is `.modelMissing` (`BriefView` drives the
+    /// timer), and any time the deep-link router lands the user on
+    /// this tab.
     public func reload(forceDate: String? = nil) async {
-        if !isModelPresent {
+        if !isModelPresentProbe() {
             scene = .modelMissing
             return
         }

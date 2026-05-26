@@ -104,7 +104,9 @@ struct RootView: View {
             BriefView(
                 viewModel: BriefViewModel(
                     reader: reader,
-                    isModelPresent: ModelPresenceProbe.isBriefModelInstalled(),
+                    isModelPresentProbe: {
+                        ModelPresenceProbe.isBriefModelInstalled()
+                    },
                     hasFullDayCapture: true
                 ),
                 onRequestModelDownload: {
