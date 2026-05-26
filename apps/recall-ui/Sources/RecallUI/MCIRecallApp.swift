@@ -2,8 +2,23 @@ import AppKit
 import RecallUIKit
 import SwiftUI
 
+/// Pulls the Recall window to the foreground the instant it appears.
+///
+/// Without this, opening Recall from the menu-bar "Open Recall…" item
+/// lands the window BEHIND the current foreground app (CEO dogfood
+/// feedback 2026-05-26). Same pattern as the OnboardingAppDelegate
+/// fix from PR #195.
+final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
 @main
 struct MCIRecallApp: App {
+    @NSApplicationDelegateAdaptor(MCIRecallAppDelegate.self) var appDelegate
+
     @MainActor
     private static let reader: BrainReader = Self.makeReader()
 
