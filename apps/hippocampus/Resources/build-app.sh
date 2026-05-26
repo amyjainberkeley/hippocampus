@@ -68,6 +68,7 @@ AGENT_BIN="$REPO_ROOT/target/$PROFILE/mci-agent"
 RECALL_UI_BIN="$REPO_ROOT/apps/recall-ui/.build/$PROFILE/recall-ui"
 ONBOARDING_BIN="$REPO_ROOT/apps/onboarding/.build/$PROFILE/onboarding"
 KNOWN_SAFE="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml"
+APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 INFO_PLIST="$SCRIPT_DIR/Info.plist"
 
 FRAMEWORKS="$CONTENTS/Frameworks"
@@ -132,6 +133,13 @@ cp "$ONBOARDING_BIN" "$MACOS/onboarding"
 cp "$INFO_PLIST" "$CONTENTS/Info.plist"
 if [[ -f "$KNOWN_SAFE" ]]; then
     cp "$KNOWN_SAFE" "$RESOURCES/known-safe-apps.toml"
+fi
+# AppIcon.icns — referenced by Info.plist's CFBundleIconFile key.
+# Without this copy, Finder + Dock render the generic blank app icon.
+if [[ -f "$APP_ICON" ]]; then
+    cp "$APP_ICON" "$RESOURCES/AppIcon.icns"
+else
+    echo "WARNING: AppIcon.icns missing at $APP_ICON — Finder/Dock will show the generic blank icon."
 fi
 
 # Embed Sparkle.framework (ships pre-signed; we re-codesign the outer app)
