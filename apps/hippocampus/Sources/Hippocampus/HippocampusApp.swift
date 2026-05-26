@@ -9,99 +9,59 @@ import AppKit
 @main
 struct HippocampusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var supervisor = ProcessSupervisor(
-        locator: BundleBinaryLocator(),
-        keyStore: FileKeyStore()
-    )
     @StateObject private var loginItemVM = LoginItemViewModel(service: SMLoginItemService())
     private let updater = SparkleUpdaterService()
 
     var body: some Scene {
         MenuBarExtra {
             StatusMenuView(
-                supervisor: supervisor,
+                supervisor: appDelegate.supervisor,
                 loginItemVM: loginItemVM,
                 updater: updater
             )
             .task {
-                appDelegate.supervisorRef = supervisor
+                // Supervisor lifecycle (start / defer-until-onboarded)
+                // is owned by `AppDelegate.applicationDidFinishLaunching`
+                // — see below. Without that, the launch path only ran
+                // when the user OPENED the menu (CEO dogfood 2026-05-26
+                // "onboarding doesn't open unless I touch the icon").
+                // Here we only do menu-open-time chores: Sparkle updater
+                // start + the LoginItem one-time prompt mark.
                 updater.startUpdater()
-                Self.startSupervisorOrDeferUntilOnboarded(
-                    supervisor: supervisor,
-                    appDelegate: appDelegate
-                )
+                if loginItemVM.shouldPrompt {
+                    loginItemVM.markPrompted()
+                }
             }
         } label: {
-            MenuBarIcon(supervisor: supervisor)
+            MenuBarIcon(supervisor: appDelegate.supervisor)
         }
+
+        // Separate Window scene for the Daily Briefs model download.
+        // Previously this was a `.sheet(isPresented:)` attached to the
+        // menu view, but SwiftUI dismisses a MenuBarExtra menu on item
+        // tap BEFORE the sheet can present — the user saw "nothing
+        // happens" when clicking "Daily Briefs: Off — Download Model…"
+        // (CEO dogfood 2026-05-26). A real `Window` scene survives the
+        // menu close. `openWindow(id: "model-download")` from
+        // StatusMenuView triggers it.
+        Window("Download AI Model", id: "model-download") {
+            ModelDownloadView(
+                onDismiss: {
+                    closeModelDownloadWindow()
+                },
+                onComplete: {
+                    closeModelDownloadWindow()
+                }
+            )
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 
-    /// First-launch contract — TCC ordering:
-    ///
-    /// On a fresh install the user hits the menu-bar icon (or just
-    /// double-clicks the .app) BEFORE they've granted Screen Recording
-    /// or Accessibility. Starting the helper at that moment makes the
-    /// system pop the macOS permission sheets *over* whatever else we
-    /// surface, which historically meant the user saw permission
-    /// prompts before any explanatory UI. (CEO-reported, 2026-05-24.)
-    ///
-    /// New behavior:
-    ///   - If the onboarding sentinel is absent, we DO NOT call
-    ///     `supervisor.start()`. We only spawn the standalone
-    ///     Onboarding executable, which owns the permission-request
-    ///     UX inside the Permissions slide.
-    ///   - The AppDelegate then watches the sentinel parent directory
-    ///     with a `DispatchSourceFileSystemObject`. The instant the
-    ///     Onboarding window's "Get Started" button writes the
-    ///     sentinel, the watch fires and the supervisor starts —
-    ///     no relaunch required, no orphan menu-bar state.
-    ///
-    /// Once the sentinel exists, this method is a plain
-    /// `supervisor.start()`.
-    @MainActor
-    private static func startSupervisorOrDeferUntilOnboarded(
-        supervisor: ProcessSupervisor,
-        appDelegate: AppDelegate
-    ) {
-        let logger = Logger(subsystem: "ai.hippocampus", category: "first-launch")
-        if OnboardingSentinel.isComplete {
-            logger.info("first-launch: sentinel present → start supervisor immediately")
-            supervisor.start()
-            return
+    private func closeModelDownloadWindow() {
+        for window in NSApp.windows where window.identifier?.rawValue == "model-download" {
+            window.close()
         }
-
-        guard supervisor.hasOnboarding else {
-            // No bundled Onboarding binary (shouldn't happen for
-            // shipped DMGs after PR #183, but if it does we must NOT
-            // strand the user: fall back to the old start-at-launch
-            // behavior so the app at least works.
-            logger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
-            supervisor.start()
-            return
-        }
-
-        logger.info("first-launch: sentinel absent → defer supervisor.start() until onboarding completes")
-
-        // Spawn the Onboarding window IMMEDIATELY. The earlier 1.0 s
-        // defer was meant to let the menu-bar icon paint first so the
-        // user got visual confirmation, but on cold launch the
-        // Onboarding subprocess itself takes ~1-2 s of dyld + NSApp +
-        // window setup — total perceived dead air was 2-3 s of
-        // "did anything happen?" (CEO-reported, 2026-05-26). The
-        // Onboarding executable is a separate Process (see
-        // `ProcessSupervisor.openOnboarding`), so kicking it now does
-        // not block the menu bar from painting; both happen in
-        // parallel. The Task wrapper still defers to the next
-        // main-loop tick (sub-ms) which keeps us off the synchronous
-        // `.task` callback.
-        Task { @MainActor in
-            _ = supervisor.openOnboarding()
-        }
-
-        // Arm a one-shot file-watcher on the MCI app-support dir. When
-        // the Onboarding executable writes the sentinel, this fires
-        // and starts the supervisor — no user action, no relaunch.
-        appDelegate.armOnboardingSentinelWatcher(supervisor: supervisor)
     }
 }
 
@@ -122,17 +82,52 @@ struct MenuBarIcon: View {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
-    var supervisorRef: ProcessSupervisor?
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Supervisor is owned by AppDelegate (not the SwiftUI App's
+    /// `@StateObject`) so the launch lifecycle hooks below can drive
+    /// it at the right moment — `applicationDidFinishLaunching` fires
+    /// on app launch, whereas a `.task` attached to a menu only fires
+    /// when the menu OPENS. The CEO regression of "onboarding doesn't
+    /// open until I click the menu-bar icon" (2026-05-26) traces
+    /// straight to that older shape — the previous code parked the
+    /// launch logic in `StatusMenuView.task`.
+    let supervisor: ProcessSupervisor
 
-    private let sentinelLogger = Logger(subsystem: "ai.hippocampus", category: "sentinel-watch")
+    private let firstLaunchLogger = Logger(
+        subsystem: "ai.hippocampus", category: "first-launch"
+    )
+    private let sentinelLogger = Logger(
+        subsystem: "ai.hippocampus", category: "sentinel-watch"
+    )
     private var sentinelWatcher: DispatchSourceFileSystemObject?
     private var sentinelWatcherFd: Int32 = -1
     private var sentinelPollTask: Task<Void, Never>?
 
+    override init() {
+        // `ProcessSupervisor.init` is `@MainActor`; this class is too
+        // (declared above) so the call site is in actor context.
+        // `NSApplicationDelegateAdaptor` constructs the delegate on
+        // the main thread during the SwiftUI App init.
+        self.supervisor = ProcessSupervisor(
+            locator: BundleBinaryLocator(),
+            keyStore: FileKeyStore()
+        )
+        super.init()
+    }
+
+    /// Called by AppKit immediately after the app finishes launching —
+    /// strictly BEFORE the user can interact with anything, including
+    /// opening the menu bar.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { @MainActor in
+            self.startSupervisorOrDeferUntilOnboarded()
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         cancelSentinelWatcher()
-        supervisorRef?.stop()
+        supervisor.stop()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -148,9 +143,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             .first(where: { $0.name == "tab" })?
             .value
             Task { @MainActor in
-                supervisorRef?.openRecallUI(initialTab: initialTab)
+                supervisor.openRecallUI(initialTab: initialTab)
             }
         }
+    }
+
+    /// First-launch contract — TCC ordering:
+    ///
+    /// On a fresh install the user double-clicks the .app BEFORE they've
+    /// granted Screen Recording or Accessibility. Starting the helper
+    /// at that moment makes the system pop the macOS permission sheets
+    /// *over* whatever else we surface, which historically meant the
+    /// user saw permission prompts before any explanatory UI.
+    ///
+    /// Behavior:
+    ///   - If the onboarding sentinel is absent, we DO NOT call
+    ///     `supervisor.start()`. We only spawn the standalone
+    ///     Onboarding executable, which owns the permission-request
+    ///     UX inside the Permissions slide.
+    ///   - We watch the sentinel parent directory with a
+    ///     `DispatchSourceFileSystemObject`. The instant the
+    ///     Onboarding window's "Get Started" button writes the
+    ///     sentinel, the watch fires and the supervisor starts —
+    ///     no relaunch required.
+    ///
+    /// Once the sentinel exists, this method is a plain
+    /// `supervisor.start()`.
+    @MainActor
+    private func startSupervisorOrDeferUntilOnboarded() {
+        if OnboardingSentinel.isComplete {
+            firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
+            supervisor.start()
+            return
+        }
+
+        guard supervisor.hasOnboarding else {
+            firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
+            supervisor.start()
+            return
+        }
+
+        firstLaunchLogger.info("first-launch: sentinel absent → spawn onboarding, defer supervisor.start() until it completes")
+
+        // The Onboarding executable is a separate Process (see
+        // `ProcessSupervisor.openOnboarding`) so it does not block
+        // the menu bar from painting; both happen in parallel.
+        _ = supervisor.openOnboarding()
+
+        armOnboardingSentinelWatcher()
     }
 
     /// Arm a Dispatch-source watch on the MCI app-support directory.
@@ -163,11 +203,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// changes (writes / renames), so the parent dir's `.write` event
     /// catches the atomic write of a newly-created child file.
     ///
-    /// We also arm a low-frequency 2 s poll as a belt-and-suspenders
+    /// A low-frequency 2 s poll runs alongside as a belt-and-suspenders
     /// fallback in case the dispatch source misses the event (it has
     /// in the past on network homedirs / FileProvider mounts).
     @MainActor
-    func armOnboardingSentinelWatcher(supervisor: ProcessSupervisor) {
+    func armOnboardingSentinelWatcher() {
         cancelSentinelWatcher()
 
         let dir = OnboardingSentinel.defaultURL.deletingLastPathComponent()
@@ -191,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                     )
                     self.cancelSentinelWatcher()
                     Task { @MainActor in
-                        supervisor.start()
+                        self.supervisor.start()
                     }
                 }
             }
@@ -223,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                         "sentinel-watch: poll caught sentinel → starting supervisor"
                     )
                     self?.cancelSentinelWatcher()
-                    supervisor.start()
+                    self?.supervisor.start()
                     return
                 }
             }

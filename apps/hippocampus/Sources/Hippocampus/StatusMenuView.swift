@@ -10,10 +10,13 @@ struct StatusMenuView: View {
     @State private var showAbout = false
     @State private var crashReportOptedIn: Bool = false
     @State private var briefsEnabled: Bool = UserDefaults.standard.bool(forKey: "MCIBriefsEnabled")
-    @State private var showDownloadDialog = false
     @State private var mcpRegistering = false
     @State private var showTCCResetConfirm = false
     @State private var showKeyWrapAudit = false
+    // `Window` scene (HippocampusApp.body) hosts the model-download UI;
+    // `openWindow(id:)` survives the MenuBarExtra menu close that
+    // dismisses any `.sheet`-attached SwiftUI presentation.
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -134,15 +137,6 @@ struct StatusMenuView: View {
                 loginItemVM.markPrompted()
             }
         }
-        .sheet(isPresented: $showDownloadDialog) {
-            ModelDownloadView(
-                onDismiss: { showDownloadDialog = false },
-                onComplete: {
-                    briefsEnabled = true
-                    showDownloadDialog = false
-                }
-            )
-        }
         .sheet(isPresented: $showKeyWrapAudit) {
             KeyWrapAuditView(
                 initialReport: currentKeyWrapReport(),
@@ -185,7 +179,16 @@ struct StatusMenuView: View {
             // where brief_worker (apps/agent) picks it up on its next
             // 06:00 cycle or first-launch fast path.
             Button("Daily Briefs: Off — Download Model…") {
-                showDownloadDialog = true
+                // Open the dedicated `Window` scene (id: "model-download")
+                // declared in HippocampusApp.body — NOT a SwiftUI `.sheet`,
+                // which SwiftUI dismissed along with the MenuBarExtra
+                // menu before the sheet could present (CEO dogfood
+                // 2026-05-26 "nothing happens when I click Download
+                // Model").
+                openWindow(id: "model-download")
+                #if canImport(AppKit)
+                NSApp.activate(ignoringOtherApps: true)
+                #endif
             }
             .help("Daily briefs summarize your day with Qwen3-1.7B (~2.5 GB download, runs entirely on your Mac).")
         }
