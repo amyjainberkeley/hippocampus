@@ -1,8 +1,33 @@
 import SwiftUI
 import OnboardingKit
+#if canImport(AppKit)
+import AppKit
+#endif
+
+#if canImport(AppKit)
+/// Pulls the Onboarding window to the foreground the instant it appears.
+///
+/// Without this, the Onboarding executable spawned by `HippocampusApp`
+/// (a child `Process`) can sit behind whatever the user was looking at
+/// when they double-clicked the .app — they see the menu-bar icon
+/// appear, then a few seconds of nothing, with the Onboarding window
+/// silently behind their browser/Finder. Calling `NSApp.activate` on
+/// `applicationDidFinishLaunching` makes the window grab focus the
+/// moment it's ready (CEO dogfood feedback, 2026-05-26).
+final class OnboardingAppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+#endif
 
 @main
 struct OnboardingApp: App {
+    #if canImport(AppKit)
+    @NSApplicationDelegateAdaptor(OnboardingAppDelegate.self) var appDelegate
+    #endif
+
     @StateObject private var flowVM: OnboardingFlowViewModel
     @StateObject private var trustVM: TrustPanelViewModel
     @StateObject private var retentionVM: RetentionViewModel
