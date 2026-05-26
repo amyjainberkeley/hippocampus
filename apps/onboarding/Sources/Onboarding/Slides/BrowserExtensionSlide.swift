@@ -44,15 +44,15 @@ struct BrowserExtensionSlide: View {
                             Text(row.browser.name)
                                 .font(.system(size: 14, weight: .medium))
                             if row.browser.kind == .safari {
-                                Text("beta — Developer ID required")
+                                Text("Enable in Safari Settings → Extensions")
                                     .font(.system(size: 11))
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
                         extensionStatusBadge(row.extensionStatus)
 
-                        Button(row.browser.kind == .safari ? "Details" : "Install") {
+                        Button(row.browser.kind == .safari ? "Open Safari Settings" : "Install") {
                             extensionVM.installAction(for: row.browser)
                         }
                         .buttonStyle(.bordered)
