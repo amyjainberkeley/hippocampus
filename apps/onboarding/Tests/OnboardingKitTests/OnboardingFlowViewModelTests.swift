@@ -5,9 +5,14 @@ import XCTest
 final class OnboardingFlowViewModelTests: XCTestCase {
 
     private func makeVM() -> OnboardingFlowViewModel {
+        // Hermetic: use the in-memory store so tests don't read/write
+        // the real `~/Library/Application Support/MCI/.onboarding-state`
+        // file (which would leak state between parallel test runs and
+        // between this suite and a developer's actual machine).
         OnboardingFlowViewModel(
             screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
-            accessibility: StubTCCPermission(kind: .accessibility, status: .granted)
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
+            stateStore: InMemoryOnboardingStateStore()
         )
     }
 
