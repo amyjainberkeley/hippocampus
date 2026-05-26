@@ -7,10 +7,21 @@ Each key, in the order it appears in the plist:
 | Key | Value | Why |
 |---|---|---|
 | `com.apple.security.cs.allow-jit` | `false` | JIT compilation is not used. Stated explicitly for audit clarity (false is the hardened-runtime default). |
-| `com.apple.security.cs.disable-library-validation` | `true` | **REQUIRED for Sparkle 2.x.** Sparkle embeds XPC services and dynamically loads its Autoupdate bundle. Without this entitlement the hardened runtime rejects Sparkle's code signature (Sparkle's bundles are signed under Sparkle's identity, not ours). See <https://sparkle-project.org/documentation/sandboxing/>. |
 | `com.apple.security.cs.allow-unsigned-executable-memory` | `false` | No unsigned executable memory is needed; all code is AOT-compiled. |
 | `com.apple.security.cs.allow-dyld-environment-variables` | `false` | No DYLD env overrides in production. |
 | `com.apple.security.application-groups` | `["group.ai.hippocampus"]` | **REQUIRED for the Safari Web Extension `.appex`** to relay page content events to the container app via a shared App Group container. Mirrors the `.appex`'s own entitlements file at `extensions/safari/appex/HippocampusSafariExtension.entitlements`. |
+
+## Why `com.apple.security.cs.disable-library-validation` was REMOVED
+
+Earlier revisions of this file set `disable-library-validation = true` on the grounds that Sparkle 2.x ships its own pre-signed binaries (XPC services + Updater.app + Autoupdate). The reasoning was: Sparkle's signatures don't match the host app's Team ID, so the hardened runtime's library-validation policy would reject them at load time.
+
+That reasoning is **wrong for our build**. Our `build-app.sh` re-signs every Sparkle binary with our Developer ID ([redacted], [REDACTED-TEAMID]) inside-out before the outer .app is signed. After re-signing, every nested Mach-O / bundle has the SAME Team ID as the host — so library validation passes by default. The exemption was treating a symptom that no longer existed.
+
+Why this matters: Apple's [Disable Library Validation Entitlement reference](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.cs.disable-library-validation) states *"Because library validation is such an important security-hardening feature, Gatekeeper runs extra security checks on programs that have it disabled."* In particular, Apple devforum thread [132908](https://developer.apple.com/forums/thread/132908) and [711769](https://developer.apple.com/forums/thread/711769) document the exact "developer cannot be verified" Gatekeeper dialog firing on apps that carry this entitlement unnecessarily. A friend's test on 2026-05-26 reproduced the dialog despite a fully-stapled, notarized build; removing this entitlement is the highest-leverage fix.
+
+The Sparkle sandboxing doc (<https://sparkle-project.org/documentation/sandboxing/>) prescribes additional entitlements (`mach-lookup`, the `Downloader.xpc` no-network-client preservation, etc.) **only when the host app is sandboxed**. Hippocampus is not sandboxed (we run as a menu-bar agent that supervises a TCC-privileged helper). The full sandboxed-host entitlement set doesn't apply here.
+
+If a future change adds a third-party-Team-ID dylib (e.g., bundling a closed-source SDK), library validation will need to be disabled again — but scope it to that binary only (per-binary entitlements) rather than putting it on the host app.
 
 ## Why comments are stripped from the plist
 
@@ -30,4 +41,5 @@ Failed to parse entitlements: AMFIUnserializeXML: syntax error near line 5
 
 ## Review history
 
-- 2026-05-22 (this commit): stripped 6 in-body XML comments that aborted the first Developer-ID-signed installer build for team `[REDACTED-TEAMID]`. Functional entitlements unchanged. Added `application-groups` (already present pre-strip from PR #148) carried forward intact. No new entitlements granted.
+- 2026-05-22 (PR #155): stripped 6 in-body XML comments that aborted the first Developer-ID-signed installer build. Functional entitlements unchanged. Added `application-groups` (already present pre-strip from PR #148) carried forward intact. No new entitlements granted.
+- 2026-05-26 (this commit): removed `com.apple.security.cs.disable-library-validation`. See section above for rationale. Reproduces the "developer cannot be verified" Gatekeeper dialog on stapled+notarized builds per Apple devforum 132908 / 711769; root cause for friend's tester 2026-05-26.
