@@ -82,11 +82,19 @@ struct HippocampusApp: App {
 
         logger.info("first-launch: sentinel absent → defer supervisor.start() until onboarding completes")
 
-        // 1.0 s defer lets the menu-bar icon paint first so the user
-        // gets visual confirmation the app launched before the
-        // Onboarding window appears.
+        // Spawn the Onboarding window IMMEDIATELY. The earlier 1.0 s
+        // defer was meant to let the menu-bar icon paint first so the
+        // user got visual confirmation, but on cold launch the
+        // Onboarding subprocess itself takes ~1-2 s of dyld + NSApp +
+        // window setup — total perceived dead air was 2-3 s of
+        // "did anything happen?" (CEO-reported, 2026-05-26). The
+        // Onboarding executable is a separate Process (see
+        // `ProcessSupervisor.openOnboarding`), so kicking it now does
+        // not block the menu bar from painting; both happen in
+        // parallel. The Task wrapper still defers to the next
+        // main-loop tick (sub-ms) which keeps us off the synchronous
+        // `.task` callback.
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
             _ = supervisor.openOnboarding()
         }
 
