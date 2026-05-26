@@ -74,33 +74,68 @@ public final class BrowserExtensionViewModel: ObservableObject {
             installChromiumExtension(for: browser)
         case .safari:
             #if canImport(AppKit)
-            // macOS Sequoia/Tahoe broke
-            // `x-apple.systempreferences:com.apple.Safari-Extensions-Preferences`
-            // (CEO dogfood feedback 2026-05-26: "nothing happens when I
-            // click on the safari thing"). Safari Settings can't be
-            // deep-linked from System Settings on current macOS — the
-            // extension panel lives inside Safari itself, not in
-            // System Settings.
-            //
-            // Robust fix: launch / activate Safari directly. The slide
-            // copy ("Enable in Safari Settings → Extensions") tells the
-            // user where to go from there. `openApplication` with
-            // `activates = true` foregrounds Safari even if already
-            // running.
-            if let safariURL = NSWorkspace.shared.urlForApplication(
-                withBundleIdentifier: "com.apple.Safari"
-            ) {
-                let config = NSWorkspace.OpenConfiguration()
-                config.activates = true
-                NSWorkspace.shared.openApplication(
-                    at: safariURL,
-                    configuration: config,
-                    completionHandler: nil
-                )
-            }
+            openSafariThenSendCommandComma()
             #endif
         }
     }
+
+    #if canImport(AppKit)
+    /// Launch / activate Safari, then send ⌘, via AppleScript so
+    /// Safari opens its own Settings window (where the Extensions
+    /// panel lives — Safari doesn't have a URL-scheme deep-link to
+    /// that panel on macOS Sequoia / Tahoe).
+    ///
+    /// First time this runs, macOS prompts the user to grant the
+    /// Hippocampus app permission to control "System Events" (the
+    /// AppleScript automation TCC). Denying it just means the
+    /// keystroke step no-ops — Safari is still in the foreground
+    /// and the slide copy tells the user where to go from there
+    /// ("Settings → Extensions"). So the fallback is still
+    /// useful, just one extra click for the user.
+    ///
+    /// CEO dogfood 2026-05-26: "open safari settings just opens
+    /// safari but not setting and it doesnt do anything" — the
+    /// previous attempt opened Safari but left the user one ⌘,
+    /// short of where they needed to be.
+    private func openSafariThenSendCommandComma() {
+        let safariURL = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.apple.Safari"
+        )
+        guard let safariURL else { return }
+
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(
+            at: safariURL,
+            configuration: config
+        ) { _, _ in
+            // Run the AppleScript on the main thread, after a small
+            // delay to let Safari finish activating. Without the
+            // delay, the keystroke can land on the previous frontmost
+            // app instead of Safari.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                Self.sendCommandCommaToSafari()
+            }
+        }
+    }
+
+    private nonisolated static func sendCommandCommaToSafari() {
+        let script = """
+        tell application "Safari" to activate
+        delay 0.1
+        tell application "System Events"
+            keystroke "," using command down
+        end tell
+        """
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", script]
+        // Swallow errors — if the user denies the AppleScript
+        // automation TCC, Safari is still up and slide copy
+        // tells them what to do (Settings → Extensions).
+        try? task.run()
+    }
+    #endif
 
     /// The Chromium install flow:
     ///

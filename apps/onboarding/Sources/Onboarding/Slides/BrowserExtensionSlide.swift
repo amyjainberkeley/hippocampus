@@ -44,7 +44,7 @@ struct BrowserExtensionSlide: View {
                             Text(row.browser.name)
                                 .font(.system(size: 14, weight: .medium))
                             if row.browser.kind == .safari {
-                                Text("Enable in Safari Settings → Extensions")
+                                Text("Opens Safari → Settings → Extensions. Toggle Hippocampus on.")
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                             }
@@ -52,7 +52,7 @@ struct BrowserExtensionSlide: View {
                         Spacer()
                         extensionStatusBadge(row.extensionStatus)
 
-                        Button(row.browser.kind == .safari ? "Open Safari Settings" : "Install") {
+                        Button(row.browser.kind == .safari ? "Open Safari → Settings" : "Install") {
                             extensionVM.installAction(for: row.browser)
                         }
                         .buttonStyle(.bordered)
