@@ -186,34 +186,42 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
             "$APP_PATH/Contents/MacOS/onboarding"
     fi
 
-    # Sign Sparkle.framework inside-out.
+    # Sign Sparkle.framework inside-out per the Sparkle official
+    # sandboxing/code-signing doc:
+    #   <https://sparkle-project.org/documentation/sandboxing/>
     #
-    # Sparkle 2.x ships with ad-hoc-signed inner binaries (Updater.app,
-    # Autoupdate, XPCServices/Downloader.xpc, XPCServices/Installer.xpc).
-    # `codesign` on the outer framework does NOT re-sign these; Apple's
-    # notary then rejects the whole DMG because each inner Mach-O lacks
-    # a Developer ID + hardened runtime + secure timestamp.
+    # Sparkle 2.x ships ad-hoc-signed; codesign on the outer framework
+    # does NOT re-sign inner bundles. Each must be signed individually
+    # for notarization. Order matters — XPC services first, then
+    # Autoupdate, then Updater.app, then the framework itself. Without
+    # this order each codesign step invalidates the parent it just
+    # signed.
     #
-    # See: https://sparkle-project.org/documentation/sandboxing/
+    # `Downloader.xpc` is signed with `--preserve-metadata=entitlements`:
+    # it ships with a no-network-client entitlement assertion that the
+    # notary expects to find unchanged. Stripping it changes the
+    # entitlement-set the notary ticket claims about that XPC service
+    # and is a documented cause of Gatekeeper failing at first launch
+    # even when stapler validate passes locally (Sparkle GitHub issues
+    # 1550, 1641, 2069; Peter Steinberger, "Sparkle and Tears", 2025).
     SPARKLE="$APP_PATH/Contents/Frameworks/Sparkle.framework"
     if [[ -d "$SPARKLE" ]]; then
-        # Innermost first: each .xpc bundle + its Mach-O.
-        for XPC in Downloader Installer; do
+        for XPC in Installer Downloader; do
             XPC_BUNDLE="$SPARKLE/Versions/B/XPCServices/${XPC}.xpc"
-            XPC_BIN="$XPC_BUNDLE/Contents/MacOS/${XPC}"
-            if [[ -f "$XPC_BIN" ]]; then
-                codesign --force --options=runtime --timestamp \
-                    --sign "$DEVELOPER_ID" \
-                    "$XPC_BIN"
-            fi
             if [[ -d "$XPC_BUNDLE" ]]; then
-                codesign --force --options=runtime --timestamp \
-                    --sign "$DEVELOPER_ID" \
-                    "$XPC_BUNDLE"
+                if [[ "$XPC" == "Downloader" ]]; then
+                    codesign --force --options=runtime --timestamp \
+                        --preserve-metadata=entitlements \
+                        --sign "$DEVELOPER_ID" \
+                        "$XPC_BUNDLE"
+                else
+                    codesign --force --options=runtime --timestamp \
+                        --sign "$DEVELOPER_ID" \
+                        "$XPC_BUNDLE"
+                fi
             fi
         done
 
-        # Autoupdate (standalone executable).
         AUTOUPDATE="$SPARKLE/Versions/B/Autoupdate"
         if [[ -f "$AUTOUPDATE" ]]; then
             codesign --force --options=runtime --timestamp \
@@ -221,22 +229,13 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
                 "$AUTOUPDATE"
         fi
 
-        # Updater.app + its Mach-O.
         UPDATER_APP="$SPARKLE/Versions/B/Updater.app"
-        UPDATER_BIN="$UPDATER_APP/Contents/MacOS/Updater"
-        if [[ -f "$UPDATER_BIN" ]]; then
-            codesign --force --options=runtime --timestamp \
-                --sign "$DEVELOPER_ID" \
-                "$UPDATER_BIN"
-        fi
         if [[ -d "$UPDATER_APP" ]]; then
             codesign --force --options=runtime --timestamp \
                 --sign "$DEVELOPER_ID" \
                 "$UPDATER_APP"
         fi
 
-        # Outer framework seal — must come last so it incorporates the
-        # updated CDHashes of every inner bundle/binary.
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
             "$SPARKLE"
@@ -304,6 +303,24 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
         if ! xcrun stapler validate "$APP_PATH" >/dev/null 2>&1; then
             echo "ERROR: stapler validate failed on $APP_PATH after staple"
             exit 1
+        fi
+        # `syspolicy_check distribution` is the closest CLI mirror of
+        # what Gatekeeper actually runs at first launch. It catches
+        # entitlement / signing / framework-structure issues that
+        # `stapler validate` and `spctl --assess` both miss
+        # (Apple devforum 773271). Skip if the tool isn't installed
+        # (older macOS / Xcode CLT) — we still ship in that case but
+        # log the gap loudly.
+        if command -v syspolicy_check >/dev/null 2>&1; then
+            if ! syspolicy_check distribution "$APP_PATH"; then
+                echo "ERROR: syspolicy_check distribution failed on $APP_PATH"
+                echo "  Gatekeeper WILL reject this build at first launch."
+                exit 1
+            fi
+            echo "  syspolicy_check distribution passed"
+        else
+            echo "WARNING: syspolicy_check not found — Gatekeeper first-launch"
+            echo "  predictor unavailable. Install Xcode 16 CLT to enable."
         fi
     else
         echo ""

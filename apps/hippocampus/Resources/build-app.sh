@@ -142,13 +142,21 @@ else
     echo "WARNING: AppIcon.icns missing at $APP_ICON — Finder/Dock will show the generic blank icon."
 fi
 
-# Embed Sparkle.framework (ships pre-signed; we re-codesign the outer app)
+# Embed Sparkle.framework (ships pre-signed; we re-codesign the outer app).
+#
+# `ditto`, NOT `cp -R` — frameworks contain symlinks
+# (`Sparkle.framework/Versions/Current → B`, `Sparkle.framework/Sparkle →
+# Versions/Current/Sparkle`) that the framework's code-signature seal
+# depends on. `cp -R` on macOS sometimes follows symlinks and duplicates
+# trees, leaving the framework structurally valid on the build host but
+# broken after the DMG round-trip — Gatekeeper rejects with "developer
+# cannot be verified" on the user's Mac even when notary + staple both
+# pass locally. Apple explicitly recommends `ditto` for frameworks
+# (Apple devforum 128166).
 if [[ -n "$SPARKLE_FRAMEWORK" && -d "$SPARKLE_FRAMEWORK" ]]; then
     echo "Embedding Sparkle.framework from: $SPARKLE_FRAMEWORK"
-    cp -R "$SPARKLE_FRAMEWORK" "$FRAMEWORKS/"
-
-    # Sparkle 2.x XPC services need to be inside the framework
-    # The framework ships pre-signed — we only codesign the outer bundle.
+    rm -rf "$FRAMEWORKS/Sparkle.framework"
+    ditto "$SPARKLE_FRAMEWORK" "$FRAMEWORKS/Sparkle.framework"
 else
     echo "WARNING: Sparkle.framework not found. Auto-update will not work."
     echo "  Build with 'swift build -c $PROFILE' first to resolve the SPM dependency."
@@ -301,24 +309,36 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
             "$MACOS/onboarding"
     fi
 
-    # Sign Sparkle.framework inside-out (PR #156 pattern).
-    # Sparkle 2.x ships ad-hoc-signed inner binaries; codesign on the
-    # outer framework does NOT re-sign these — each must be signed
-    # individually for notarization.
+    # Sign Sparkle.framework inside-out per the Sparkle official
+    # sandboxing/code-signing doc:
+    #   <https://sparkle-project.org/documentation/sandboxing/>
+    #
+    # Order matters: XPC services first, then Autoupdate, then
+    # Updater.app, then the framework itself. Without this order each
+    # codesign step invalidates the seal of the parent it just signed.
+    #
+    # `Downloader.xpc` is signed with `--preserve-metadata=entitlements`:
+    # it ships with a no-network-client entitlement assertion that the
+    # notary expects to find unchanged. Stripping it changes the
+    # entitlement-set the notary ticket claims about that XPC service
+    # and is a documented cause of Gatekeeper failing at first launch
+    # even when stapler validate passes locally (Sparkle GitHub issues
+    # 1550, 1641, 2069; Peter Steinberger, "Sparkle and Tears", 2025).
     SPARKLE="$FRAMEWORKS/Sparkle.framework"
     if [[ -d "$SPARKLE" ]]; then
-        for XPC in Downloader Installer; do
+        for XPC in Installer Downloader; do
             XPC_BUNDLE="$SPARKLE/Versions/B/XPCServices/${XPC}.xpc"
-            XPC_BIN="$XPC_BUNDLE/Contents/MacOS/${XPC}"
-            if [[ -f "$XPC_BIN" ]]; then
-                codesign --force --options=runtime --timestamp \
-                    --sign "$DEVELOPER_ID" \
-                    "$XPC_BIN"
-            fi
             if [[ -d "$XPC_BUNDLE" ]]; then
-                codesign --force --options=runtime --timestamp \
-                    --sign "$DEVELOPER_ID" \
-                    "$XPC_BUNDLE"
+                if [[ "$XPC" == "Downloader" ]]; then
+                    codesign --force --options=runtime --timestamp \
+                        --preserve-metadata=entitlements \
+                        --sign "$DEVELOPER_ID" \
+                        "$XPC_BUNDLE"
+                else
+                    codesign --force --options=runtime --timestamp \
+                        --sign "$DEVELOPER_ID" \
+                        "$XPC_BUNDLE"
+                fi
             fi
         done
 
@@ -330,12 +350,6 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
         fi
 
         UPDATER_APP="$SPARKLE/Versions/B/Updater.app"
-        UPDATER_BIN="$UPDATER_APP/Contents/MacOS/Updater"
-        if [[ -f "$UPDATER_BIN" ]]; then
-            codesign --force --options=runtime --timestamp \
-                --sign "$DEVELOPER_ID" \
-                "$UPDATER_BIN"
-        fi
         if [[ -d "$UPDATER_APP" ]]; then
             codesign --force --options=runtime --timestamp \
                 --sign "$DEVELOPER_ID" \
