@@ -97,25 +97,41 @@ struct PrepareBrainSlide: View {
     private var modelStateView: some View {
         switch prepareBrainVM.downloadState {
         case .notStarted:
-            // Qwen3 model is live (PR #192) but downloading 2.5 GB
-            // mid-onboarding is a worse experience than letting the
-            // user finish setup in <30 s and grab the model on demand
-            // from the menu-bar Daily Briefs item. Pre-skip so the
-            // flow's `canAdvance` stays true and the user is never
-            // blocked here; the StatusMenuView download flow is fully
-            // wired and SHA-verifies against the same manifest.
-            VStack(spacing: 8) {
-                Label("Daily briefs are opt-in", systemImage: "doc.text")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 13, weight: .medium))
-                Text("To keep setup quick, the 2.5 GB Qwen3 brief model is downloaded on demand. Click the Hippocampus icon in your menu bar later → \"Daily Briefs: Off — Download Model…\" to enable.")
+            // Qwen3 model is live (PR #192). Surface the install choice
+            // explicitly: primary CTA downloads now, secondary defers to
+            // the menu-bar Daily Briefs item. The Onboarding flow's
+            // `canAdvance` is always true on this step, so the user can
+            // either wait for the download to finish on this slide or
+            // advance and let it continue in the background (the
+            // `PrepareBrainViewModel.downloadTask` survives the slide
+            // swap; `StatusMenuView` reads the same
+            // `MCIBriefModelDownloaded` UserDefaults flag the download
+            // writes on `.ready`).
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    Button {
+                        prepareBrainVM.startDownload()
+                    } label: {
+                        Label(
+                            "Download (\(prepareBrainVM.modelSizeDescription))",
+                            systemImage: "arrow.down.circle"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+
+                    Button("Skip — enable later") {
+                        prepareBrainVM.skipDownload()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                }
+
+                Text("You can also enable Daily Briefs anytime from the menu-bar Hippocampus icon.")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
-            }
-            .onAppear {
-                prepareBrainVM.skipDownload()
             }
 
         case .downloading:
