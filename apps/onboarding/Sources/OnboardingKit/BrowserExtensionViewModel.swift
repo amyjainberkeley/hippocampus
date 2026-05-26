@@ -74,10 +74,29 @@ public final class BrowserExtensionViewModel: ObservableObject {
             installChromiumExtension(for: browser)
         case .safari:
             #if canImport(AppKit)
-            if let url = URL(string:
-                "x-apple.systempreferences:com.apple.Safari-Extensions-Preferences"
+            // macOS Sequoia/Tahoe broke
+            // `x-apple.systempreferences:com.apple.Safari-Extensions-Preferences`
+            // (CEO dogfood feedback 2026-05-26: "nothing happens when I
+            // click on the safari thing"). Safari Settings can't be
+            // deep-linked from System Settings on current macOS — the
+            // extension panel lives inside Safari itself, not in
+            // System Settings.
+            //
+            // Robust fix: launch / activate Safari directly. The slide
+            // copy ("Enable in Safari Settings → Extensions") tells the
+            // user where to go from there. `openApplication` with
+            // `activates = true` foregrounds Safari even if already
+            // running.
+            if let safariURL = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: "com.apple.Safari"
             ) {
-                NSWorkspace.shared.open(url)
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                NSWorkspace.shared.openApplication(
+                    at: safariURL,
+                    configuration: config,
+                    completionHandler: nil
+                )
             }
             #endif
         }
