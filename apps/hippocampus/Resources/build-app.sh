@@ -71,6 +71,13 @@ KNOWN_SAFE="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperK
 APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 INFO_PLIST="$SCRIPT_DIR/Info.plist"
 
+# SwiftPM emits {Package}_{Target}.bundle next to the executable for any
+# target that declares `resources:` in Package.swift. Bundle.module looks
+# for it inside Contents/Resources/ when the app is shipped outside Xcode;
+# omitting it crashes the app at startup with a "could not load resource
+# bundle" fatal error from resource_bundle_accessor.swift.
+HIPPOCAMPUS_KIT_BUNDLE="$PKG_DIR/.build/$PROFILE/Hippocampus_HippocampusKit.bundle"
+
 FRAMEWORKS="$CONTENTS/Frameworks"
 
 # Locate Sparkle.framework from SwiftPM build artifacts
@@ -133,6 +140,17 @@ cp "$ONBOARDING_BIN" "$MACOS/onboarding"
 cp "$INFO_PLIST" "$CONTENTS/Info.plist"
 if [[ -f "$KNOWN_SAFE" ]]; then
     cp "$KNOWN_SAFE" "$RESOURCES/known-safe-apps.toml"
+fi
+
+# Copy SwiftPM-generated resource bundle for HippocampusKit.
+# Fatal because Bundle.module callers (e.g. ModelDownloadManager) crash
+# at startup if it is missing — better to fail at build time.
+if [[ -d "$HIPPOCAMPUS_KIT_BUNDLE" ]]; then
+    ditto "$HIPPOCAMPUS_KIT_BUNDLE" "$RESOURCES/$(basename "$HIPPOCAMPUS_KIT_BUNDLE")"
+else
+    echo "ERROR: HippocampusKit resource bundle not found at $HIPPOCAMPUS_KIT_BUNDLE"
+    echo "Run 'swift build -c $PROFILE' in apps/hippocampus/ first."
+    exit 1
 fi
 # AppIcon.icns — referenced by Info.plist's CFBundleIconFile key.
 # Without this copy, Finder + Dock render the generic blank app icon.
