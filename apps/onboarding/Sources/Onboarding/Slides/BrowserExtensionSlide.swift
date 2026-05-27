@@ -31,6 +31,9 @@ struct BrowserExtensionSlide: View {
                 }
             }
         }
+        .task {
+            extensionVM.refreshAllStatuses()
+        }
     }
 
     private var browserList: some View {
