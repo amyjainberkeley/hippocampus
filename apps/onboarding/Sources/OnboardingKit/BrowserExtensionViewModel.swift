@@ -68,6 +68,18 @@ public final class BrowserExtensionViewModel: ObservableObject {
         rows[idx].extensionStatus = status
     }
 
+    /// Refresh the `extensionStatus` badge for every detected row in one
+    /// pass. Called from `BrowserExtensionSlide.task` so the slide paints
+    /// real per-browser state on first appear instead of leaving every
+    /// row at `.unknown`.
+    public func refreshAllStatuses() {
+        for idx in rows.indices {
+            rows[idx].extensionStatus = detector.checkExtensionInstalled(
+                for: rows[idx].browser
+            )
+        }
+    }
+
     public func installAction(for browser: DetectedBrowser) {
         switch browser.kind {
         case .chromium:

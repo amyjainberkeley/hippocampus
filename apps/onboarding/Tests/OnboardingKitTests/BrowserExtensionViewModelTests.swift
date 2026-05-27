@@ -69,6 +69,16 @@ final class BrowserExtensionViewModelTests: XCTestCase {
         XCTAssertEqual(vm.rows[0].extensionStatus, .unknown)
     }
 
+    func testRefreshAllStatusesUpdatesEveryRowOncePerBrowser() {
+        let (vm, detector) = makeVM(browsers: [chrome, safari])
+        detector.stubbedStatuses["com.google.Chrome"] = .installed
+        detector.stubbedStatuses["com.apple.Safari"] = .notInstalled
+        vm.refreshAllStatuses()
+        XCTAssertEqual(vm.rows[0].extensionStatus, .installed)
+        XCTAssertEqual(vm.rows[1].extensionStatus, .notInstalled)
+        XCTAssertEqual(detector.checkCallCount, 2)
+    }
+
     // MARK: - Chromium install flow (added 2026-05-24 after CEO
     // reported the chrome:// URL scheme silently failing).
 
