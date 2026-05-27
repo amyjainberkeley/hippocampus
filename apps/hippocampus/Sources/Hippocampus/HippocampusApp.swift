@@ -70,16 +70,25 @@ struct MenuBarIcon: View {
 
     var body: some View {
         switch supervisor.state {
-        case .running:
-            Image(systemName: "brain.filled.head.profile")
-        case .paused:
-            Image(systemName: "brain.head.profile")
+        case .running, .paused:
+            Image(nsImage: Self.templateImage)
         case .crashed:
             Image(systemName: "exclamationmark.circle.fill")
         default:
-            Image(systemName: "brain.head.profile")
+            Image(nsImage: Self.templateImage)
         }
     }
+
+    /// Loaded once from `Contents/Resources/statusbar-icon.png` (+ @2x/@3x).
+    /// `isTemplate = true` is the OS contract that makes NSStatusItem tint
+    /// the alpha mask for light/dark menu bars; setting it programmatically
+    /// is more reliable than the "*Template" filename convention or
+    /// SwiftUI's `.renderingMode(.template)` modifier in MenuBarExtra.
+    private static let templateImage: NSImage = {
+        let img = NSImage(named: "statusbar-icon") ?? NSImage(size: NSSize(width: 22, height: 22))
+        img.isTemplate = true
+        return img
+    }()
 }
 
 @MainActor

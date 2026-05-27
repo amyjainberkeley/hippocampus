@@ -160,6 +160,21 @@ else
     echo "WARNING: AppIcon.icns missing at $APP_ICON — Finder/Dock will show the generic blank icon."
 fi
 
+# Status-bar template icons — read at runtime by MenuBarIcon via
+# Image("statusbar-icon").renderingMode(.template). macOS tints the
+# alpha mask for light/dark menu bars; the source PNGs are black-on-
+# transparent (see AppIcon-template.svg). Without these the menu bar
+# shows nothing for the running/paused states.
+STATUSBAR_PNG_DIR="$REPO_ROOT/assets/branding"
+for sb in statusbar-icon.png statusbar-icon@2x.png statusbar-icon@3x.png; do
+    if [[ -f "$STATUSBAR_PNG_DIR/$sb" ]]; then
+        cp "$STATUSBAR_PNG_DIR/$sb" "$RESOURCES/$sb"
+    else
+        echo "ERROR: Missing $STATUSBAR_PNG_DIR/$sb — menu-bar icon will not render."
+        exit 1
+    fi
+done
+
 # Embed Sparkle.framework (ships pre-signed; we re-codesign the outer app).
 #
 # `ditto`, NOT `cp -R` — frameworks contain symlinks
