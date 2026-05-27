@@ -27,15 +27,6 @@ public enum SupervisorState: Sendable, Equatable {
         }
     }
 
-    public var sfSymbolName: String {
-        switch self {
-        case .running: return "brain.filled.head.profile"
-        case .paused: return "brain.head.profile"
-        case .crashed: return "exclamationmark.circle.fill"
-        default: return "brain.head.profile"
-        }
-    }
-
     public var iconColor: String {
         switch self {
         case .running: return "green"

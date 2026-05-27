@@ -12,7 +12,7 @@ External product name: **Hippocampus**. Engineering codename: **MCI**.
 | `AppIcon.icns` | Compiled macOS icon bundle (from `iconutil`). |
 | `hippocampus-wordmark.svg` | Text-only wordmark, brutalist mono weight. SVG source of truth. |
 | `hippocampus-icon.svg` | Stylized hippocampus (seahorse) glyph. Single-color SVG source. Used on the landing page; **not** the AppIcon. |
-| `statusbar-icon.png` / `@2x` / `@3x` | Legacy macOS menu-bar template PNGs (16/32/48 px). **Not wired in the running app** — the menu-bar status item currently renders an Apple SF Symbol; the unify-wire dispatch replaces it with `AppIcon-template.svg`. |
+| `statusbar-icon.png` / `@2x` / `@3x` | macOS menu-bar template PNGs (22/44/66 px) rendered from `AppIcon-template.svg`. **Wired** into `MenuBarIcon` via `NSImage(named: "statusbar-icon")` with `isTemplate = true` — the OS tints the alpha mask for light/dark menu bars. Bundled into the .app by `apps/hippocampus/Resources/build-app.sh`. |
 | `colors.json` | Brand color tokens — backgrounds, foreground, mint accent, semantic colors. |
 
 ## Color palette
