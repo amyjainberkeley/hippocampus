@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Hippocampus AppIcon variant A — anatomical, left-facing">
+  <!-- A — left-facing, anatomical cortex curves, flat brand mint background. Hand-authored from first principles. NOT a derivative of Apple SF Symbol brain.head.profile. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="#7AFFC1"/>
+  <g fill="#0D0D0D">
+    <path d="M 560 140 C 720 140, 880 290, 880 460 C 880 600, 850 690, 820 730 C 780 740, 740 740, 700 730 C 660 770, 580 820, 500 850 C 460 860, 420 860, 380 840 C 360 830, 350 810, 350 780 C 350 740, 340 720, 320 710 C 310 700, 300 680, 305 660 C 310 640, 320 630, 335 625 C 340 620, 340 600, 335 590 C 305 580, 270 575, 235 560 C 200 545, 195 525, 235 510 C 280 502, 305 500, 320 490 L 325 440 C 320 380, 340 320, 400 240 C 440 190, 500 145, 560 140 Z"/>
+  </g>
+  <g fill="none" stroke="#7AFFC1" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 740 310 C 700 340, 660 350, 620 330 C 590 314, 568 336, 562 372 C 554 412, 590 426, 626 410 C 660 394, 692 414, 684 452"/>
+    <path d="M 560 408 C 528 392, 490 408, 478 444 C 466 480, 498 504, 536 494 C 574 484, 604 514, 588 552"/>
+    <path d="M 472 476 C 440 484, 418 514, 432 552 C 446 588, 488 590, 514 568 C 538 548, 572 558, 568 596"/>
+    <path d="M 428 552 C 396 562, 382 596, 402 624 C 422 652, 466 648, 484 624"/>
+  </g>
+</svg>
