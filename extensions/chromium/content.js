@@ -4,11 +4,28 @@
 // CSO INVARIANTS:
 // - NEVER reads input.value / textarea.value / contenteditable
 // - NEVER runs on data: / chrome: / chrome-extension: / about: URLs
-// - Incognito guard in manifest (incognito: "split") + runtime check
+// - Incognito exclusion is defense-in-depth at THREE layers:
+//     1. manifest "incognito": "split" (sibling-context isolation)
+//     2. content.js `chrome.extension.inIncognitoContext` early-return (this file)
+//     3. background.js `sender.tab.incognito` early-return
+//     4. native-host `incognito: true` early-return (Rust side)
+//   Any one layer should be sufficient. All four ship together so a JS
+//   regression cannot reach the brain. Per docs/DESIGN.md, incognito
+//   exclusion is a launch-blocker — it ships WITH capture, not after.
 // - Text capped at 200,000 characters
 // - No local cache — strictly forward-and-forget
 
 "use strict";
+
+// CSO invariant #1: never observe an incognito tab from the content
+// script, even if the user has flipped "Allow in Incognito" on. Manifest
+// is `incognito: "split"`, which runs us in a separate context where
+// this flag is true — bail before extracting or sending.
+function isIncognitoContext() {
+  return typeof chrome !== "undefined" &&
+    chrome.extension &&
+    chrome.extension.inIncognitoContext === true;
+}
 
 const MAX_TEXT_LENGTH = 200000;
 
@@ -32,6 +49,7 @@ function isBlockedURL(url) {
 }
 
 function extractPageContent() {
+  if (isIncognitoContext()) return null;
   if (isBlockedURL(window.location.href)) return null;
 
   const text = (document.body && document.body.innerText) || "";
@@ -53,6 +71,7 @@ function extractPageContent() {
 }
 
 function sendContent() {
+  if (isIncognitoContext()) return;
   const content = extractPageContent();
   if (!content) return;
   if (!content.text && !content.title) return;
@@ -105,5 +124,10 @@ window.addEventListener("popstate", () => {
 debouncedSend();
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { extractPageContent, isBlockedURL, MAX_TEXT_LENGTH };
+  module.exports = {
+    extractPageContent,
+    isBlockedURL,
+    isIncognitoContext,
+    MAX_TEXT_LENGTH,
+  };
 }
