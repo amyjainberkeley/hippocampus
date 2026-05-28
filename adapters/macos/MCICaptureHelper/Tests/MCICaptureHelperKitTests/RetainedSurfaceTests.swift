@@ -194,19 +194,24 @@ final class RetainedSurfaceTests: XCTestCase {
     }
 
     func test_retain_relinquished_once_when_encoder_throws() async throws {
+        // ocr-emit-silence fix (docs/research/ocr-emit-silence-2026-05-28.md)
+        // — an encoder throw on the `.allow` branch is caught + folded
+        // into the content-free `frames_encode_failed` counter; the
+        // pipeline still returns `.encoded(_)` so OCR-emit fires. The
+        // retain-relinquish invariant remains exactly-once.
         let (lease, spy) = leaseSpy()
         let pipe = makePipeline(
             denied: [], ax: AXNonSecure(), knownSafe: ["com.good.app"],
             encoder: ThrowingEncoder(), sink: RecordingSink()
         )
-        do {
-            _ = try await pipe.process(
-                frame: forwardingFrame(),
-                context: WorkflowContext(appBundleId: "com.good.app"),
-                nowUs: 4, lease: lease
-            )
-            XCTFail("encoder threw — must propagate")
-        } catch is EncodeBoom {}
+        let outcome = try await pipe.process(
+            frame: forwardingFrame(),
+            context: WorkflowContext(appBundleId: "com.good.app"),
+            nowUs: 4, lease: lease
+        )
+        if case .encoded = outcome {} else {
+            XCTFail("encoder throw on .allow must still surface as .encoded, got \(outcome)")
+        }
         XCTAssertEqual(spy.relinquishCount, 1, "throwing encoder must not leak the retain (no pool stall)")
     }
 

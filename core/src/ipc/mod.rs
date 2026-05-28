@@ -262,6 +262,16 @@ pub enum Message {
         /// Frames dropped on late ack (core held the surface past the
         /// timing bound — a bug indicator).
         frames_dropped_late_ack: u64,
+        /// Cumulative count of cascade-`.allow` frames on which the
+        /// VideoToolbox HEVC encoder threw on `encodeAllowedFrame(...)`.
+        /// Promoted to the wire by the `0x06 → 0x07` bump (ocr-emit-
+        /// silence fix — `docs/research/ocr-emit-silence-2026-05-28.md`).
+        /// Content-free observability counter — same discipline as
+        /// `frames_redacted_by_failsafe`. Was structurally invisible
+        /// before this bump; a non-zero value here historically
+        /// silently muted the cascade-twice OCR emitter, which is the
+        /// regression this counter trip-wires.
+        frames_encode_failed: u64,
     },
 }
 
@@ -497,6 +507,7 @@ mod tests {
                 cascade_forced_count: 0,
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
+                frames_encode_failed: 0,
             },
             Message::OCREvent {
                 seq: 0,

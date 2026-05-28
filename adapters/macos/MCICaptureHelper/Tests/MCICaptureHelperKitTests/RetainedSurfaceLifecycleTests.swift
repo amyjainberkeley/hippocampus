@@ -250,10 +250,13 @@ final class RetainedSurfaceLifecycleTests: XCTestCase {
         XCTAssertEqual(spy.releaseCount, 1, "floor-forced allow must release the lease exactly once")
     }
 
-    /// Floor-forced `.allow` with a throwing encoder: the encoder
-    /// throws, the error propagates, the top-level `defer` still runs,
-    /// and the lease releases exactly once. No pool-stall under failure
-    /// on the heartbeat path.
+    /// Floor-forced `.allow` with a throwing encoder: per the
+    /// ocr-emit-silence fix (docs/research/ocr-emit-silence-2026-05-28.md),
+    /// the encoder throw is caught + converted to a content-free
+    /// `frames_encode_failed` counter increment. The pipeline still
+    /// returns `.encoded(_, forcedByFloor: true)` so the OCR emitter
+    /// fires, and the top-level `defer` releases the lease exactly
+    /// once. No pool-stall under failure on the heartbeat path.
     func test_lease_released_once_on_floor_forced_allow_when_encoder_throws() async throws {
         let spy = SpyReleaser()
         let pipe = makePipeline(
@@ -265,17 +268,19 @@ final class RetainedSurfaceLifecycleTests: XCTestCase {
         )
 
         let lease = SurfaceLease(releaser: spy)
-        do {
-            _ = try await pipe.process(
-                frame: idleFrame(),
-                context: WorkflowContext(appBundleId: "com.good.app"),
-                nowUs: 100_000,
-                lease: lease
+        let outcome = try await pipe.process(
+            frame: idleFrame(),
+            context: WorkflowContext(appBundleId: "com.good.app"),
+            nowUs: 100_000,
+            lease: lease
+        )
+        guard case .encoded(_, let forced) = outcome else {
+            return XCTFail(
+                "encoder throw on floor-forced .allow must still surface as .encoded "
+                + "(ADR-0016 §4.2 — OCR-emit is not gated on encode-success), got \(outcome)"
             )
-            XCTFail("encoder threw — must propagate")
-        } catch is EncodeBoom {
-            // expected
         }
+        XCTAssertTrue(forced, "the cascade still ran via the floor heartbeat")
         XCTAssertEqual(spy.releaseCount, 1, "throwing encoder on floor path must not leak the retain")
     }
 

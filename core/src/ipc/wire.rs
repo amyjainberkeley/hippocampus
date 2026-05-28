@@ -61,13 +61,39 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// unchanged; bump is a discipline marker so auditors know events
 /// stored by ≥v0x06 agents may carry merged content.
 ///
-/// The decoder rejects any other version: helper and core ship
-/// **version-locked** in the same signed bundle and capture is
-/// default-OFF, so there are no persisted or in-flight `0x01` / `0x02`
-/// / `0x03` / `0x04` / `0x05` frames to remain compatible with — a
-/// hard version break is the correct, auditable choice over a silently
-/// mis-parsed payload.
-pub const FRAME_VERSION: u8 = 0x06;
+/// `0x06 → 0x07` (2026-05-28, ocr-emit-silence fix): `HelperHealth`
+/// gained the `frames_encode_failed` counter
+/// (`docs/research/ocr-emit-silence-2026-05-28.md`). Trip-wire for
+/// VideoToolbox HEVC encode throws on the cascade `.allow` branch so
+/// the prior silent muting of the cascade-twice OCR emitter cannot
+/// regress unnoticed. Content-free counter — same discipline as
+/// `frames_redacted_by_failsafe`. **Decoder dual-accept**: this is the
+/// first bump that softens the strict version-lock — the decoder
+/// accepts both `0x06` and `0x07` so a `0x06`-era helper alive on a
+/// CEO machine across an agent restart cannot mute the brain (the
+/// exact failure mode of the live `b0496130…` DMG that motivated this
+/// fix). When the helper emits a `0x06` frame, the `HelperHealth`
+/// decoder reads seven `u64`s and defaults `frames_encode_failed` to
+/// `0`; on `0x07` it reads the full eight `u64`s. All other message
+/// variants have identical byte layouts between `0x06` and `0x07`, so
+/// dual-accept is byte-equivalent for them.
+///
+/// The decoder rejects any other version: helper and core still ship
+/// version-locked in the same signed bundle, but the dual-accept at
+/// `0x06 / 0x07` covers the rolling-restart window the live regression
+/// exposed. Persisted / in-flight `0x01` / `0x02` / `0x03` / `0x04` /
+/// `0x05` frames are still hard-rejected — capture was default-OFF and
+/// no such frames are persisted, so a hard version break for those is
+/// the correct, auditable choice over a silently mis-parsed payload.
+pub const FRAME_VERSION: u8 = 0x07;
+
+/// The set of wire versions the decoder accepts. The encoder always
+/// emits [`FRAME_VERSION`]; the decoder accepts the current version
+/// AND the prior `0x06` for rolling-restart safety (see the `0x06 →
+/// 0x07` doc on [`FRAME_VERSION`]). Order matters only in that the
+/// current version is the first entry — callers building a tripwire
+/// can `assert_eq!(ACCEPTED_FRAME_VERSIONS[0], FRAME_VERSION)`.
+pub const ACCEPTED_FRAME_VERSIONS: &[u8] = &[FRAME_VERSION, 0x06];
 
 /// Header size in bytes: magic(1) + version(1) + `msg_type(2)` + seq(8) + len(4).
 pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
@@ -343,6 +369,7 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             cascade_forced_count,
             frames_dropped_backpressure,
             frames_dropped_late_ack,
+            frames_encode_failed,
         } => {
             out.extend_from_slice(&uptime_ms.to_le_bytes());
             out.extend_from_slice(&frames_delivered.to_le_bytes());
@@ -355,6 +382,13 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             out.extend_from_slice(&cascade_forced_count.to_le_bytes());
             out.extend_from_slice(&frames_dropped_backpressure.to_le_bytes());
             out.extend_from_slice(&frames_dropped_late_ack.to_le_bytes());
+            // wire 0x07: frames_encode_failed appended last (ocr-emit-
+            // silence fix). Last-position preserves the dual-accept
+            // contract — a 0x06 decoder reading a 0x07 payload would
+            // tail-strict-mismatch (defense-in-depth), and a 0x07
+            // decoder reading a 0x06 payload defaults this field to 0
+            // by consuming only 7 u64s.
+            out.extend_from_slice(&frames_encode_failed.to_le_bytes());
         }
         Message::OCREvent {
             seq,
@@ -480,7 +514,7 @@ pub fn decode(buf: &[u8]) -> Result<(Frame, usize), DecodeError> {
         return Err(DecodeError::BadMagic { got: magic });
     }
     let version = buf[1];
-    if version != FRAME_VERSION {
+    if !ACCEPTED_FRAME_VERSIONS.contains(&version) {
         return Err(DecodeError::UnsupportedVersion { got: version });
     }
     let msg_type_raw = u16::from_le_bytes([buf[2], buf[3]]);
@@ -499,7 +533,7 @@ pub fn decode(buf: &[u8]) -> Result<(Frame, usize), DecodeError> {
     }
     let payload = &buf[MIN_FRAME_HEADER_BYTES..total];
 
-    let (message, used) = decode_payload(msg_type, payload)?;
+    let (message, used) = decode_payload(msg_type, payload, version)?;
     if used != payload.len() {
         return Err(DecodeError::PayloadLengthMismatch {
             msg_type: msg_type_raw,
@@ -511,7 +545,11 @@ pub fn decode(buf: &[u8]) -> Result<(Frame, usize), DecodeError> {
 }
 
 #[allow(clippy::too_many_lines)]
-fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usize), DecodeError> {
+fn decode_payload(
+    msg_type: MessageType,
+    payload: &[u8],
+    version: u8,
+) -> Result<(Message, usize), DecodeError> {
     let mut p = Parser::new(payload);
     let msg = match msg_type {
         MessageType::CaptureStart => {
@@ -575,6 +613,18 @@ fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usi
             let cascade_forced_count = p.u64_le()?;
             let frames_dropped_backpressure = p.u64_le()?;
             let frames_dropped_late_ack = p.u64_le()?;
+            // Dual-accept (ocr-emit-silence fix): a 0x06 payload carries
+            // seven u64s and stops here; a 0x07 payload carries an
+            // eighth `frames_encode_failed` u64. Default to 0 on the
+            // legacy version. Strict payload-length consumption in the
+            // caller catches a malformed 0x07 payload (extra bytes) or
+            // a malformed 0x06 payload (trailing garbage) as
+            // PayloadLengthMismatch.
+            let frames_encode_failed = if version == 0x06 {
+                0
+            } else {
+                p.u64_le()?
+            };
             Message::HelperHealth {
                 uptime_ms,
                 frames_delivered,
@@ -583,6 +633,7 @@ fn decode_payload(msg_type: MessageType, payload: &[u8]) -> Result<(Message, usi
                 cascade_forced_count,
                 frames_dropped_backpressure,
                 frames_dropped_late_ack,
+                frames_encode_failed,
             }
         }
         MessageType::OCREvent => {
@@ -817,6 +868,7 @@ mod tests {
             cascade_forced_count: 5,
             frames_dropped_backpressure: 7,
             frames_dropped_late_ack: 0,
+            frames_encode_failed: 21,
         });
     }
 
@@ -832,25 +884,30 @@ mod tests {
                 cascade_forced_count: 5,
                 frames_dropped_backpressure: 6,
                 frames_dropped_late_ack: 7,
+                frames_encode_failed: 8,
             },
         );
-        let expected: [u8; 72] = [
-            0x4D, 0x06, 0x30, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00,
+        // Wire 0x07: header(16) + 8 × u64(64) = 80 bytes.
+        // Frame-version byte is 0x07; `frames_encode_failed` is the
+        // trailing u64.
+        let expected: [u8; 80] = [
+            0x4D, 0x07, 0x30, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00,
             0x00, 0x00,
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         assert_eq!(
             buf,
             expected.to_vec(),
-            "HelperHealth v0x06 cross-side fixture"
+            "HelperHealth v0x07 cross-side fixture"
         );
 
         // And the round-trip decoder reads exactly back what the
-        // encoder produced — proves the v0x04 layout is self-consistent.
-        let (frame, used) = decode(&buf).expect("decode v0x04 fixture");
+        // encoder produced — proves the v0x07 layout is self-consistent.
+        let (frame, used) = decode(&buf).expect("decode v0x07 fixture");
         assert_eq!(used, buf.len());
         assert_eq!(frame.seq, 42);
         assert_eq!(
@@ -863,15 +920,16 @@ mod tests {
                 cascade_forced_count: 5,
                 frames_dropped_backpressure: 6,
                 frames_dropped_late_ack: 7,
+                frames_encode_failed: 8,
             }
         );
     }
 
     #[test]
-    fn helper_health_v0x03_payload_is_seven_u64s() {
-        // Trip-wire: the wire 0x03 bump added one u64
-        // (`cascade_forced_count`). The frame is now header(16) + 7 ×
-        // u64(56) = 72 bytes. The Swift mirror's `testHelperHealthFixture`
+    fn helper_health_v0x07_payload_is_eight_u64s() {
+        // Trip-wire: the wire 0x07 bump added one u64
+        // (`frames_encode_failed`). The frame is now header(16) + 8 ×
+        // u64(64) = 80 bytes. The Swift mirror's `testHelperHealthFixture`
         // asserts the same length. Drift here = silent IPC break.
         let buf = encode(
             1,
@@ -883,25 +941,85 @@ mod tests {
                 cascade_forced_count: 11,
                 frames_dropped_backpressure: 2,
                 frames_dropped_late_ack: 0,
+                frames_encode_failed: 17,
             },
         );
-        assert_eq!(buf.len(), MIN_FRAME_HEADER_BYTES + 7 * 8);
-        // cascade_forced_count is the 5th u64 of the payload.
-        // Offset = header(16) + 4 × u64(32) = 48.
-        let off = MIN_FRAME_HEADER_BYTES + 4 * 8;
-        let cfc = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap());
-        assert_eq!(cfc, 11);
+        assert_eq!(buf.len(), MIN_FRAME_HEADER_BYTES + 8 * 8);
+        // frames_encode_failed is the 8th (last) u64 of the payload.
+        // Offset = header(16) + 7 × u64(56) = 72.
+        let off = MIN_FRAME_HEADER_BYTES + 7 * 8;
+        let fef = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap());
+        assert_eq!(fef, 17);
     }
 
     #[test]
-    fn frame_version_is_0x06() {
-        assert_eq!(FRAME_VERSION, 0x06);
+    fn frame_version_is_0x07() {
+        assert_eq!(FRAME_VERSION, 0x07);
         let buf = encode(0, &Message::CaptureStop);
-        assert_eq!(buf[1], 0x06, "version byte in the framed header");
+        assert_eq!(buf[1], 0x07, "version byte in the framed header");
     }
 
     #[test]
-    fn decode_rejects_old_0x05_frame_at_v0x06_layout() {
+    fn accepted_frame_versions_includes_current_and_prior() {
+        assert_eq!(
+            ACCEPTED_FRAME_VERSIONS[0], FRAME_VERSION,
+            "current version must lead the accept set"
+        );
+        assert!(
+            ACCEPTED_FRAME_VERSIONS.contains(&0x06),
+            "0x06 must remain accepted for rolling-restart safety per the ocr-emit-silence fix"
+        );
+    }
+
+    #[test]
+    fn decode_accepts_legacy_0x06_helper_health_payload() {
+        // Rolling-restart contract: a 0x06-era helper alive on a CEO
+        // machine across an agent restart can still emit valid
+        // HelperHealth frames; the v0x07 decoder reads them with
+        // `frames_encode_failed` defaulted to 0.
+        let mut buf = encode(
+            42,
+            &Message::HelperHealth {
+                uptime_ms: 1,
+                frames_delivered: 2,
+                frames_suppressed: 3,
+                frames_redacted_by_failsafe: 4,
+                cascade_forced_count: 5,
+                frames_dropped_backpressure: 6,
+                frames_dropped_late_ack: 7,
+                frames_encode_failed: 9_999,
+            },
+        );
+        // Re-shape the buffer as if a 0x06 helper had emitted it:
+        // version byte → 0x06, drop the trailing 8 bytes
+        // (frames_encode_failed), shrink declared payload length.
+        buf[1] = 0x06;
+        let new_payload_len = (buf.len() - MIN_FRAME_HEADER_BYTES - 8) as u32;
+        buf[12..16].copy_from_slice(&new_payload_len.to_le_bytes());
+        buf.truncate(buf.len() - 8);
+
+        let (frame, used) = decode(&buf).expect("decode legacy 0x06 HelperHealth");
+        assert_eq!(used, buf.len());
+        assert_eq!(frame.seq, 42);
+        assert_eq!(
+            frame.message,
+            Message::HelperHealth {
+                uptime_ms: 1,
+                frames_delivered: 2,
+                frames_suppressed: 3,
+                frames_redacted_by_failsafe: 4,
+                cascade_forced_count: 5,
+                frames_dropped_backpressure: 6,
+                frames_dropped_late_ack: 7,
+                // Defaulted on 0x06 — the source field's 9_999 is
+                // dropped because a 0x06 helper never had this counter.
+                frames_encode_failed: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn decode_rejects_old_0x05_frame_at_v0x07_layout() {
         let mut buf = encode(0, &Message::CaptureStop);
         buf[1] = 0x05;
         let err = decode(&buf).unwrap_err();
@@ -943,13 +1061,14 @@ mod tests {
     #[test]
     fn decode_rejects_old_v0x02_helper_health_payload() {
         // A v0x02 HelperHealth payload was 6 × u64 = 48 bytes; the
-        // v0x03 decoder expects 7 × u64 = 56 bytes. Hand-craft a
-        // header that claims v0x03 but carries a v0x02-shaped payload
-        // — strict payload-length consumption (PayloadLengthMismatch)
-        // is what guards against silent cross-version reads after the
-        // version byte alone would not (e.g. a misconfigured proxy).
-        // This is the "payload-strict-consumption tripwire" called out
-        // in the PR body.
+        // current v0x07 decoder expects 8 × u64 = 64 bytes. Hand-craft a
+        // header that claims FRAME_VERSION but carries a v0x02-shaped
+        // payload — strict payload-length consumption is what guards
+        // against silent cross-version reads after the version byte
+        // alone would not (e.g. a misconfigured proxy). This is the
+        // "payload-strict-consumption tripwire" called out in the PR
+        // body. (The 0x06 → 0x07 dual-accept does NOT widen this — only
+        // 0x06 is accepted as the legacy peer; older bytes still fail.)
         let mut payload = Vec::with_capacity(48);
         for v in 0u64..6 {
             payload.extend_from_slice(&v.to_le_bytes());
@@ -967,7 +1086,7 @@ mod tests {
         // 7th u64 — surfaces as a Truncated parser error.
         assert!(
             matches!(err, DecodeError::Truncated { .. }),
-            "expected Truncated on a 48-byte v0x02-shaped payload at v0x03, got {err:?}"
+            "expected Truncated on a 48-byte v0x02-shaped payload at v0x07, got {err:?}"
         );
     }
 
@@ -1160,7 +1279,7 @@ mod tests {
         );
         assert_eq!(buf.len(), 140);
 
-        assert_eq!(&buf[0..4], &[0x4D, 0x06, 0x40, 0x00]);
+        assert_eq!(&buf[0..4], &[0x4D, 0x07, 0x40, 0x00]);
         assert_eq!(&buf[4..12], &42u64.to_le_bytes());
         assert_eq!(&buf[12..16], &124u32.to_le_bytes());
 
@@ -1339,7 +1458,7 @@ mod tests {
         assert_eq!(buf.len(), 55);
 
         // Header check.
-        assert_eq!(&buf[0..4], &[0x4D, 0x06, 0x50, 0x00]);
+        assert_eq!(&buf[0..4], &[0x4D, 0x07, 0x50, 0x00]);
         assert_eq!(&buf[4..12], &7u64.to_le_bytes());
         assert_eq!(&buf[12..16], &39u32.to_le_bytes());
 

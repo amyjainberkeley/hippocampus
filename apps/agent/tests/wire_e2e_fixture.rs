@@ -235,21 +235,25 @@ async fn swift_v06_fixture_decodes_ingests_and_recalls_end_to_end() {
 }
 
 // -----------------------------------------------------------------------
-// (2) Negative: a single-byte version bump is REJECTED, not silently
-// accepted. This is the strict-payload tripwire from PR #44 applied at
-// the version-byte boundary — a misbehaving helper must not be able to
-// smuggle bytes in by claiming a newer wire version the consumer
-// hasn't agreed to.
+// (2) Negative: a single-byte version bump to a version OUTSIDE the
+// dual-accept set is REJECTED, not silently accepted. The strict-payload
+// tripwire from PR #44 applied at the version-byte boundary — a
+// misbehaving helper must not be able to smuggle bytes in by claiming a
+// future wire version the consumer hasn't agreed to. The 0x06 → 0x07
+// ocr-emit-silence fix opens the accept set to {0x06, 0x07} for rolling-
+// restart safety; anything OUTSIDE that set still hard-fails.
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn single_byte_version_flip_is_rejected_no_silent_accept() {
-    // Flip byte 1 (the version byte) from 0x06 to 0x07. Every other byte
-    // is unchanged — proves the decoder fails on the version mismatch
-    // alone, not on some other downstream check.
+async fn single_byte_version_flip_to_future_version_is_rejected_no_silent_accept() {
+    // Flip byte 1 (the version byte) from 0x06 to 0x08 — a NOT-IN-SET
+    // value. The 0x06 → 0x07 dual-accept is intentional (rolling-restart
+    // for 0x06-era helpers); any byte outside that set must still
+    // hard-fail. Every other byte is unchanged — proves the decoder
+    // fails on the version mismatch alone.
     let mut corrupted: Vec<u8> = OCR_EVENT_V06_FIXTURE.to_vec();
-    assert_eq!(corrupted[1], 0x06, "fixture sanity: byte 1 is FRAME_VERSION");
-    corrupted[1] = 0x07;
+    assert_eq!(corrupted[1], 0x06, "fixture sanity: byte 1 is the v0x06 version byte");
+    corrupted[1] = 0x08;
 
     let (dir, _db_path, _key, store) = open_temp_store();
     let log = fresh_log(dir.path());
@@ -264,17 +268,17 @@ async fn single_byte_version_flip_is_rejected_no_silent_accept() {
     let mut cursor = Cursor::new(corrupted);
     let err = drain_to_log_with_brain(&mut cursor, &log, &clock, &id, &pump)
         .await
-        .expect_err("drain MUST reject a frame with a version byte the consumer didn't agree to");
+        .expect_err("drain MUST reject a frame with a version byte outside the dual-accept set");
 
     match err {
         RunError::Read(ReadError::Decode(DecodeError::UnsupportedVersion { got })) => {
             assert_eq!(
-                got, 0x07,
+                got, 0x08,
                 "decoder must surface the actual rejected version byte"
             );
         }
         other => panic!(
-            "expected RunError::Read(Decode(UnsupportedVersion {{ got: 7 }})), got: {other:?}"
+            "expected RunError::Read(Decode(UnsupportedVersion {{ got: 8 }})), got: {other:?}"
         ),
     }
 
@@ -289,4 +293,46 @@ async fn single_byte_version_flip_is_rejected_no_silent_accept() {
         0,
         "the content-free counter must not advance on a rejected frame"
     );
+}
+
+// -----------------------------------------------------------------------
+// (3) Positive: the 0x06 → 0x07 dual-accept window. An OCREvent frame
+// whose layout is byte-identical between 0x06 and 0x07 (i.e. every
+// variant except HelperHealth) decodes successfully whether the version
+// byte is 0x06 or 0x07. This pins the rolling-restart contract: a 0x06
+// helper does not silently mute the brain just because the agent
+// restarted into FRAME_VERSION = 0x07.
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn dual_accept_v06_and_v07_both_decode_ocr_event() {
+    // The exact same fixture, once with the v0x06 byte the wire-fixture
+    // file pins, once with byte 1 flipped to 0x07. Both must ingest.
+    for version in [0x06u8, 0x07u8] {
+        let mut bytes: Vec<u8> = OCR_EVENT_V06_FIXTURE.to_vec();
+        bytes[1] = version;
+
+        let (dir, _db_path, _key, store) = open_temp_store();
+        let log = fresh_log(dir.path());
+        let clock = SystemWallClock;
+        let id = device_id(dir.path()).await;
+        let embedder: Arc<dyn Embedder> = Arc::new(FixedDimEmbedder::default());
+        let pump = BrainPump::new(
+            Arc::clone(&store) as Arc<dyn BrainStore>,
+            Some(embedder),
+        );
+
+        let mut cursor = Cursor::new(bytes);
+        drain_to_log_with_brain(&mut cursor, &log, &clock, &id, &pump)
+            .await
+            .unwrap_or_else(|e| {
+                panic!("drain must accept version 0x{version:02X} (rolling-restart): {e:?}")
+            });
+
+        let s = store.stats().expect("stats");
+        assert_eq!(
+            s.event_count, 1,
+            "version 0x{version:02X} must ingest the OCREvent row exactly once"
+        );
+    }
 }
