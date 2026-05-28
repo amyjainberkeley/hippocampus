@@ -461,20 +461,53 @@ public struct SCStreamPipeline: Sendable {
 
         case .allow:
             // ONLY reachable after `.allow`. This is the single encode
-            // call site in the helper. If the encoder throws, the
-            // top-level `defer` releases the surface and the error
-            // propagates — the allow-path lease leak this item fixes.
+            // call site in the helper. The top-level `defer` releases
+            // the surface on every path including the encoder catch arm.
             // DOGFOOD #3: `encoderInput` carries the live frame's
             // retained `CVPixelBuffer`. A `nil` input keeps the
             // headless / OS-free test path unchanged (the encoder is
             // expected to no-op on nil); the live `SCStreamCapture`
             // callback always supplies a non-nil input.
+            //
+            // ADR-0016 §4.2 — OCR emission is gated on cascade-twice
+            // on pixels (and §6 on text), NOT on encode-success. The
+            // cascade decision above is the structural gate that
+            // protects user content; the encoder's role is to produce
+            // an HEVC blob for the recall timeline (post-§7-corpus /
+            // post-key-plumbing). A VideoToolbox failure on this `.allow`
+            // frame must not silently mute the OCR brain — that was
+            // the ocr-emit-silence regression closed by docs/research/
+            // ocr-emit-silence-2026-05-28.md. Treat encoder errors as
+            // content-free observables: increment the
+            // `framesEncoderFailed` counter (surfaced on the wire by
+            // the 0x06 → 0x07 HelperHealth bump) and still return
+            // `.encoded(seq:_)` so SCStreamCaptureSession dispatches
+            // the cascade-twice OCR emitter.
+            //
+            // ADR-0013 Amendment 1 §3 audit after this change:
+            //   (a) cascade-before-encode — unchanged. The cascade
+            //       still runs before the do/catch even exists.
+            //   (b) fail-closed default — unchanged. The catch arm
+            //       converts a throw into a counter; it cannot widen
+            //       any `.allow` decision (the outer `switch decision`
+            //       above is the only place `.allow` is granted).
+            //   (c) no suppressed event emitted — unchanged. We are
+            //       in the `.allow` arm; cascade said allow, so
+            //       returning `.encoded(...)` is the documented shape.
+            //   (d) no surface-lease leak — unchanged. The top-level
+            //       `defer { lease.release() }` runs on the catch arm
+            //       exactly as it ran on the prior throw-propagation
+            //       arm.
             let seq = await sequence.allocate()
-            try await encoder.encodeAllowedFrame(
-                input: encoderInput,
-                seq: seq,
-                context: context
-            )
+            do {
+                try await encoder.encodeAllowedFrame(
+                    input: encoderInput,
+                    seq: seq,
+                    context: context
+                )
+            } catch {
+                await counters.recordEncodeFailed()
+            }
             return .encoded(seq: seq, forcedByFloor: forcedByFloor)
         }
     }

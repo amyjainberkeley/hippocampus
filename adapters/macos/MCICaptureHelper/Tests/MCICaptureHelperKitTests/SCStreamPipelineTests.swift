@@ -111,7 +111,8 @@ private func makePipeline(
     ax: any AXSecureSubroleProbe,
     knownSafe: Set<String>,
     encoder: any FrameEncoder,
-    sink: any FrameSink
+    sink: any FrameSink,
+    counters: HelperHealthCounters = HelperHealthCounters()
 ) -> SCStreamPipeline {
     let cascade = SuppressionCascade(
         secureEventInput: NoSEI(),
@@ -123,6 +124,7 @@ private func makePipeline(
     return SCStreamPipeline(
         cascade: cascade,
         encoder: encoder,
+        counters: counters,
         sink: sink
     )
 }
@@ -267,10 +269,16 @@ final class SCStreamPipelineTests: XCTestCase {
         XCTAssertTrue(lease.isReleased)
     }
 
-    // ── PRE-LAND CYCLE item 3: a throwing encoder must NOT leak the
-    //    surface lease, and the error must still propagate. ───────────
-    func test_throwing_encoder_releases_lease_and_propagates_error() async throws {
+    // ── ocr-emit-silence fix (`docs/research/ocr-emit-silence-2026-05-28.md`)
+    //    — a throwing VideoToolbox HEVC encoder must NOT silently mute
+    //    the cascade-twice OCR emitter. The pipeline now catches
+    //    encoder throws on the `.allow` branch, increments the
+    //    `framesEncoderFailed` counter, and STILL returns
+    //    `.encoded(seq:_)` so `SCStreamCaptureSession` dispatches the
+    //    OCR emitter. Lease must still release exactly once. ─────────
+    func test_throwing_encoder_returns_encoded_and_increments_counter() async throws {
         let sink = RecordingSink()
+        let counters = HelperHealthCounters()
         // AX positively non-secure + app known-safe ⇒ the `.allow`
         // path ⇒ the encode call site is reached, then it throws.
         let pipe = makePipeline(
@@ -278,27 +286,77 @@ final class SCStreamPipelineTests: XCTestCase {
             ax: AXNonSecure(),
             knownSafe: ["com.good.app"],
             encoder: ThrowingEncoder(),
-            sink: sink
+            sink: sink,
+            counters: counters
         )
         let releaser = SpyReleaser()
         let lease = SurfaceLease(releaser: releaser)
 
-        do {
-            _ = try await pipe.process(
-                frame: forwardingFrame(),
-                context: WorkflowContext(appBundleId: "com.good.app"),
-                nowUs: 9,
-                lease: lease
-            )
-            XCTFail("encoder threw — process(...) must propagate the error")
-        } catch let error as EncodeBoom {
-            XCTAssertEqual(error, EncodeBoom(), "the encoder's error must propagate unchanged")
-        }
+        let outcome = try await pipe.process(
+            frame: forwardingFrame(),
+            context: WorkflowContext(appBundleId: "com.good.app"),
+            nowUs: 9,
+            lease: lease
+        )
 
+        // ADR-0016 §4.2 — OCR emission is gated on cascade-allow on
+        // pixels, NOT on encode-success. A throwing encoder cannot
+        // mute the OCR brain; `.encoded(seq:_)` is what unlocks
+        // `SCStreamCaptureSession`'s downstream emitter dispatch.
+        guard case .encoded = outcome else {
+            return XCTFail("expected .encoded after encoder throw, got \(outcome)")
+        }
+        let snap = await counters.snapshot()
+        XCTAssertEqual(
+            snap.framesEncoderFailed, 1,
+            "encoder throw must surface on the content-free wire counter"
+        )
         XCTAssertEqual(
             releaser.releaseCount, 1,
             "a throwing encoder must still release the surface exactly once (no §4 pool stall)"
         )
+        XCTAssertTrue(lease.isReleased)
+        let writes = await sink.count()
+        XCTAssertEqual(writes, 0, "no tombstone on the cascade-`.allow` arm")
+    }
+
+    /// Companion to the throwing-encoder test: a SUCCESS-path encode
+    /// must NOT increment `framesEncoderFailed`. Pins the counter's
+    /// scope to the catch arm so a future refactor can't bump it on
+    /// every `.allow` frame (which would mute the Telemetry-Gap
+    /// trip-wire). Also re-asserts the documented success shape.
+    func test_successful_encoder_does_not_increment_encode_failed_counter() async throws {
+        let sink = RecordingSink()
+        let counters = HelperHealthCounters()
+        let encoder = SpyEncoder()
+        let pipe = makePipeline(
+            denied: [],
+            ax: AXNonSecure(),
+            knownSafe: ["com.good.app"],
+            encoder: encoder,
+            sink: sink,
+            counters: counters
+        )
+        let releaser = SpyReleaser()
+        let lease = SurfaceLease(releaser: releaser)
+
+        let outcome = try await pipe.process(
+            frame: forwardingFrame(),
+            context: WorkflowContext(appBundleId: "com.good.app"),
+            nowUs: 11,
+            lease: lease
+        )
+        guard case .encoded = outcome else {
+            return XCTFail("expected .encoded on success path, got \(outcome)")
+        }
+        let enc = await encoder.callCount()
+        XCTAssertEqual(enc, 1, "encoder runs exactly once on .allow")
+        let snap = await counters.snapshot()
+        XCTAssertEqual(
+            snap.framesEncoderFailed, 0,
+            "successful encodes must NOT trip the encode-failed counter"
+        )
+        XCTAssertEqual(releaser.releaseCount, 1, "surface released exactly once")
         XCTAssertTrue(lease.isReleased)
     }
 

@@ -39,7 +39,14 @@ public let frameMagic: UInt8 = 0x4D
 /// 0x05→0x06: OCR/PageContent merge — agent merges cached extension text
 /// into brain events when URL matches. Wire byte layout unchanged;
 /// semantic-only bump.
-public let frameVersion: UInt8 = 0x06
+/// 0x06→0x07 (2026-05-28, ocr-emit-silence fix): HelperHealth gained the
+/// `frames_encode_failed` counter (`docs/research/ocr-emit-silence-2026-05-28.md`).
+/// Trip-wire for VideoToolbox HEVC encode throws on the `.allow` branch
+/// so the prior silent muting of the OCR brain cannot regress unnoticed.
+/// Content-free counter — same discipline as
+/// `frames_redacted_by_failsafe`. The core decoder accepts both 0x06 and
+/// 0x07 for rolling-restart safety; the helper-side encoder emits 0x07.
+public let frameVersion: UInt8 = 0x07
 
 /// Minimum frame header size in bytes.
 public let minFrameHeaderBytes = 1 + 1 + 2 + 8 + 4
@@ -316,7 +323,8 @@ public func encodeHelperHealth(
     framesRedactedByFailsafe: UInt64,
     cascadeForcedCount: UInt64,
     framesDroppedBackpressure: UInt64,
-    framesDroppedLateAck: UInt64
+    framesDroppedLateAck: UInt64,
+    framesEncodeFailed: UInt64
 ) -> Data {
     var payload = Data()
     payload.appendUInt64LE(uptimeMs)
@@ -332,6 +340,11 @@ public func encodeHelperHealth(
     payload.appendUInt64LE(cascadeForcedCount)
     payload.appendUInt64LE(framesDroppedBackpressure)
     payload.appendUInt64LE(framesDroppedLateAck)
+    // ocr-emit-silence fix — wire 0x07. Counts VideoToolbox HEVC
+    // encode throws on the cascade `.allow` branch. Appended last so
+    // the core decoder's 0x06-fallback path can default it to 0
+    // (rolling-restart safety). Order matches core::ipc::wire decode.
+    payload.appendUInt64LE(framesEncodeFailed)
     return assembleFrame(msgType: .helperHealth, seq: seq, payload: payload)
 }
 

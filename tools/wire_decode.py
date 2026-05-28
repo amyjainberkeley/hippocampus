@@ -48,13 +48,20 @@ import sys
 from collections import Counter
 
 MAGIC = 0x4D
-VERSION = 0x06  # wire bumped 0x05->0x06 (OCR/PageContent merge; semantic-only)
+# wire bumped 0x06->0x07 (ocr-emit-silence fix —
+# docs/research/ocr-emit-silence-2026-05-28.md). HelperHealth gained the
+# `frames_encode_failed` counter. Decoder dual-accepts 0x06 (legacy
+# helper, `frames_encode_failed` absent) and 0x07.
+VERSION = 0x07
+ACCEPTED_VERSIONS = (VERSION, 0x06)
 HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
-# HelperHealth v0x04 payload = 7 × u64 LE = 56 bytes (unchanged from 0x03):
+# HelperHealth v0x06 payload = 7 × u64 LE = 56 bytes:
 #   uptime_ms · frames_delivered · frames_suppressed ·
 #   frames_redacted_by_failsafe · cascade_forced_count ·
 #   frames_dropped_backpressure · frames_dropped_late_ack
-HELPER_HEALTH_PAYLOAD = 7 * 8
+# v0x07 appends `frames_encode_failed`, totalling 8 × u64 LE = 64 bytes.
+HELPER_HEALTH_PAYLOAD_V06 = 7 * 8
+HELPER_HEALTH_PAYLOAD_V07 = 8 * 8
 # OCREvent v0x04 fixed-header layout (ADR-0016 §1.6):
 #   seq u64 · ts_us u64 · app_bundle_id [u8; 64] ·
 #   window_title_len u16 · url_len u16 · ocr_text_len u32 ·
@@ -163,10 +170,10 @@ def main(path, verbose):
             truncated_tail = n - off
             break
         magic, ver, mtype, seq, plen = struct.unpack_from("<BBHQI", buf, off)
-        if magic != MAGIC or ver != VERSION:
+        if magic != MAGIC or ver not in ACCEPTED_VERSIONS:
             corrupt.append(
                 f"@{off}: bad header magic=0x{magic:02X} ver=0x{ver:02X} "
-                f"(expected 0x4D/0x{VERSION:02X}) — stopping decode here"
+                f"(expected 0x4D and version in {[hex(v) for v in ACCEPTED_VERSIONS]}) — stopping decode here"
             )
             break
         if n - off - HEADER < plen:
@@ -174,33 +181,47 @@ def main(path, verbose):
             truncated_tail = n - off
             break
         payload = buf[off + HEADER: off + HEADER + plen]
-        frames.append((mtype, seq, payload))
+        frames.append((mtype, ver, seq, payload))
         off += HEADER + plen
 
-    by_type = Counter(MSG.get(m, f"unknown(0x{m:04X})") for m, _, _ in frames)
-    tombstones = [(s, p) for (m, s, p) in frames if m == 0x0011]
-    state_events = [(s, p) for (m, s, p) in frames if m == 0x0010]
-    health_frames = [(s, p) for (m, s, p) in frames if m == 0x0030]
-    ocr_events = [(s, p) for (m, s, p) in frames if m == 0x0040]
+    by_type = Counter(MSG.get(m, f"unknown(0x{m:04X})") for m, _, _, _ in frames)
+    tombstones = [(s, p) for (m, _v, s, p) in frames if m == 0x0011]
+    state_events = [(s, p) for (m, _v, s, p) in frames if m == 0x0010]
+    health_frames = [(v, s, p) for (m, v, s, p) in frames if m == 0x0030]
+    ocr_events = [(s, p) for (m, _v, s, p) in frames if m == 0x0040]
 
-    # HelperHealth v0x03 payload: 7 u64s. Parse what we can — a
-    # malformed payload-length-mismatch is reported, not silently
-    # papered over.
+    # HelperHealth: 0x06 payload = 7 u64s, 0x07 payload = 8 u64s
+    # (frames_encode_failed appended — ocr-emit-silence fix). Parse
+    # what we can — a malformed payload-length-mismatch is reported,
+    # not silently papered over.
     health_parsed = []  # list of dicts in chronological seq order
     health_malformed = []
-    for s, p in health_frames:
-        if len(p) != HELPER_HEALTH_PAYLOAD:
-            health_malformed.append((s, len(p)))
+    for v, s, p in health_frames:
+        if v == 0x06 and len(p) == HELPER_HEALTH_PAYLOAD_V06:
+            (
+                uptime_ms,
+                frames_delivered,
+                frames_suppressed,
+                frames_redacted_by_failsafe,
+                cascade_forced_count,
+                frames_dropped_backpressure,
+                frames_dropped_late_ack,
+            ) = struct.unpack_from("<QQQQQQQ", p, 0)
+            frames_encode_failed = 0
+        elif v == 0x07 and len(p) == HELPER_HEALTH_PAYLOAD_V07:
+            (
+                uptime_ms,
+                frames_delivered,
+                frames_suppressed,
+                frames_redacted_by_failsafe,
+                cascade_forced_count,
+                frames_dropped_backpressure,
+                frames_dropped_late_ack,
+                frames_encode_failed,
+            ) = struct.unpack_from("<QQQQQQQQ", p, 0)
+        else:
+            health_malformed.append((s, len(p), v))
             continue
-        (
-            uptime_ms,
-            frames_delivered,
-            frames_suppressed,
-            frames_redacted_by_failsafe,
-            cascade_forced_count,
-            frames_dropped_backpressure,
-            frames_dropped_late_ack,
-        ) = struct.unpack_from("<QQQQQQQ", p, 0)
         health_parsed.append({
             "seq": s,
             "uptime_ms": uptime_ms,
@@ -210,6 +231,7 @@ def main(path, verbose):
             "cascade_forced_count": cascade_forced_count,
             "frames_dropped_backpressure": frames_dropped_backpressure,
             "frames_dropped_late_ack": frames_dropped_late_ack,
+            "frames_encode_failed": frames_encode_failed,
         })
 
     reason_hist = Counter()
@@ -280,13 +302,16 @@ def main(path, verbose):
         print(f"                    title={sample['window_title']!r}  url={sample['url']!r}")
         print(f"                    ocr_text_len={sample['ocr_text_len']}")
 
-    # ---- HelperHealth (wire 0x03) ----
+    # ---- HelperHealth (wire 0x07 — frames_encode_failed added) ----
     print("--- HelperHealth (0x0030) ---")
     print(f"  count           : {len(health_frames)}")
     if health_malformed:
-        print(f"  MALFORMED       : {len(health_malformed)} frame(s) — payload len mismatch (expected {HELPER_HEALTH_PAYLOAD} bytes)")
-        for s, ln in health_malformed[:10]:
-            print(f"    seq={s} len={ln}")
+        print(
+            f"  MALFORMED       : {len(health_malformed)} frame(s) — payload len mismatch "
+            f"(expected {HELPER_HEALTH_PAYLOAD_V06} bytes @ v0x06 or {HELPER_HEALTH_PAYLOAD_V07} @ v0x07)"
+        )
+        for s, ln, vv in health_malformed[:10]:
+            print(f"    seq={s} ver=0x{vv:02X} len={ln}")
     if health_parsed:
         # Per-message: print the last one's snapshot — usually the most
         # interesting at end-of-run.
@@ -298,12 +323,16 @@ def main(path, verbose):
         print(f"                    cascade_forced_count={last['cascade_forced_count']}")
         print(f"                    frames_dropped_backpressure={last['frames_dropped_backpressure']}")
         print(f"                    frames_dropped_late_ack={last['frames_dropped_late_ack']}")
+        print(f"                    frames_encode_failed={last['frames_encode_failed']}")
         # End-of-stream running totals: each counter is monotonic, so
         # the final HelperHealth carries the run totals. We print them
         # explicitly alongside the per-message snapshot for the
         # Telemetry-Gap analyst's static-secure-surface signal.
-        print(f"  running totals  : frames_redacted_by_failsafe={last['frames_redacted_by_failsafe']}  "
-              f"cascade_forced_count={last['cascade_forced_count']}")
+        print(
+            f"  running totals  : frames_redacted_by_failsafe={last['frames_redacted_by_failsafe']}  "
+            f"cascade_forced_count={last['cascade_forced_count']}  "
+            f"frames_encode_failed={last['frames_encode_failed']}"
+        )
 
     if verbose:
         # Per-frame dump for temporal correlation against a paper log
@@ -313,7 +342,7 @@ def main(path, verbose):
         # msg_type + seq + payload size.
         print("--- per-frame (verbose) ---")
         print(f"  {'idx':>5}  {'msg_type':<22}  {'seq':>10}  {'ts_us':>17}  {'reason':<22}  app_bundle")
-        for i, (m, seq, p) in enumerate(frames):
+        for i, (m, _v, seq, p) in enumerate(frames):
             mname = MSG.get(m, f"unknown(0x{m:04X})")
             if m == 0x0011:
                 ts_us, app, r = parse_tombstone_payload(p)

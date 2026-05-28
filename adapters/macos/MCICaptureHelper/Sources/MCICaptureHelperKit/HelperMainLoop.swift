@@ -63,6 +63,17 @@ public actor HelperHealthCounters {
     /// doing what the filter cannot. Surfaced on the wire as
     /// `HelperHealth.cascade_forced_count` after the 0x02 → 0x03 bump.
     private var cascadeForced: UInt64 = 0
+    /// Cascade-allowed frames on which the VideoToolbox HEVC encoder
+    /// threw on `encodeAllowedFrame(...)`. Promoted to the wire by the
+    /// 0x06 → 0x07 bump (ocr-emit-silence regression fix —
+    /// `docs/research/ocr-emit-silence-2026-05-28.md`). Content-free
+    /// counter (same discipline as `framesRedactedByFailsafe`); the
+    /// signal is observability-only and never gates `.allow` /
+    /// `.suppress`. Incremented by `SCStreamPipeline.process(...)` in
+    /// the `.allow` branch's catch arm; OCR emission still fires after
+    /// the catch because the cascade — not encode-success — is what
+    /// gates emission per ADR-0016 §4.2.
+    private var framesEncoderFailed: UInt64 = 0
 
     public init(startedAt: Date = Date()) {
         self.startedAt = startedAt
@@ -89,12 +100,21 @@ public actor HelperHealthCounters {
     /// `cascadeFromFilter` — a single `process()` call increments
     /// exactly one of the two counters whenever the cascade runs.
     public func recordCascadeForced() { cascadeForced &+= 1 }
+    /// Record one VideoToolbox HEVC encode failure on the `.allow`
+    /// branch. Called by `SCStreamPipeline.process(...)` when the
+    /// injected `FrameEncoder.encodeAllowedFrame(...)` throws.
+    /// Observability-only — the cascade decision is what gates OCR
+    /// emission per ADR-0016 §4.2; this counter records the encoder
+    /// outcome on the content-free wire so a regression here cannot
+    /// silently mute the brain again.
+    public func recordEncodeFailed() { framesEncoderFailed &+= 1 }
 
     /// Snapshot in the shape `Wire.encodeHelperHealth` consumes.
     ///
     /// `cascadeForced` is surfaced on the wire by the 0x02 → 0x03 bump
-    /// (STEP-2-FINDING-004). `cascadeFromFilter` stays in-process only
-    /// — see its field docs.
+    /// (STEP-2-FINDING-004). `framesEncoderFailed` is surfaced on the
+    /// wire by the 0x06 → 0x07 bump (ocr-emit-silence fix).
+    /// `cascadeFromFilter` stays in-process only — see its field docs.
     public func snapshot(now: Date = Date()) -> HelperHealthSnapshot {
         let uptimeMs = UInt64(max(0, now.timeIntervalSince(startedAt) * 1000))
         return HelperHealthSnapshot(
@@ -105,7 +125,8 @@ public actor HelperHealthCounters {
             framesDroppedBackpressure: framesDroppedBackpressure,
             framesDroppedLateAck: framesDroppedLateAck,
             cascadeFromFilter: cascadeFromFilter,
-            cascadeForced: cascadeForced
+            cascadeForced: cascadeForced,
+            framesEncoderFailed: framesEncoderFailed
         )
     }
 }
@@ -126,6 +147,12 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
     /// `HelperHealth.cascade_forced_count` after the 0x02 → 0x03 bump
     /// (STEP-2-FINDING-004). See `HelperHealthCounters.cascadeForced`.
     public let cascadeForced: UInt64
+    /// VideoToolbox HEVC encode failures on the `.allow` branch.
+    /// Surfaced on the wire as `HelperHealth.frames_encode_failed` after
+    /// the 0x06 → 0x07 bump (ocr-emit-silence fix —
+    /// `docs/research/ocr-emit-silence-2026-05-28.md`). See
+    /// `HelperHealthCounters.framesEncoderFailed`.
+    public let framesEncoderFailed: UInt64
 
     public init(
         uptimeMs: UInt64,
@@ -135,7 +162,8 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
         framesDroppedBackpressure: UInt64,
         framesDroppedLateAck: UInt64,
         cascadeFromFilter: UInt64 = 0,
-        cascadeForced: UInt64 = 0
+        cascadeForced: UInt64 = 0,
+        framesEncoderFailed: UInt64 = 0
     ) {
         self.uptimeMs = uptimeMs
         self.framesDelivered = framesDelivered
@@ -145,6 +173,7 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
         self.framesDroppedLateAck = framesDroppedLateAck
         self.cascadeFromFilter = cascadeFromFilter
         self.cascadeForced = cascadeForced
+        self.framesEncoderFailed = framesEncoderFailed
     }
 }
 
@@ -256,7 +285,12 @@ public struct HelperMainLoop: Sendable {
             // filter passed). Strictly disjoint from `cascadeFromFilter`.
             cascadeForcedCount: snap.cascadeForced,
             framesDroppedBackpressure: snap.framesDroppedBackpressure,
-            framesDroppedLateAck: snap.framesDroppedLateAck
+            framesDroppedLateAck: snap.framesDroppedLateAck,
+            // ocr-emit-silence fix — wire 0x07. Sourced from the
+            // in-process counter incremented by
+            // `SCStreamPipeline.process(...)` on every VideoToolbox
+            // HEVC encode throw on the `.allow` branch.
+            framesEncodeFailed: snap.framesEncoderFailed
         )
         try await sink.write(bytes)
     }

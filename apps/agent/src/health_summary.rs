@@ -105,6 +105,14 @@ pub struct HealthSummary {
     pub frames_dropped_late_ack_delta: u64,
     /// Absolute `frames_dropped_late_ack` from the latest sample.
     pub frames_dropped_late_ack_latest: u64,
+    /// Sum of per-step positive deltas for `frames_encode_failed`. The
+    /// CRS Telemetry-Gap trip-wire that the ocr-emit-silence fix
+    /// installed: a non-zero delta means VideoToolbox HEVC throws are
+    /// reaching the cascade `.allow` branch, which historically silently
+    /// muted the OCR brain.
+    pub frames_encode_failed_delta: u64,
+    /// Absolute `frames_encode_failed` from the latest sample.
+    pub frames_encode_failed_latest: u64,
     /// JSONL lines that failed to parse (torn writes, future schema
     /// from a newer agent, etc). Counted, never logged.
     pub malformed_lines_skipped: u64,
@@ -136,6 +144,7 @@ impl HealthSummary {
              failsafe=Δ{failsafe_d}/{failsafe_l} \
              backp=Δ{backp_d}/{backp_l} \
              late_ack=Δ{lateack_d}/{lateack_l} \
+             encfail=Δ{encfail_d}/{encfail_l} \
              earliest={earliest} \
              latest={latest} \
              restarts={restarts} \
@@ -152,6 +161,8 @@ impl HealthSummary {
             backp_l = self.frames_dropped_backpressure_latest,
             lateack_d = self.frames_dropped_late_ack_delta,
             lateack_l = self.frames_dropped_late_ack_latest,
+            encfail_d = self.frames_encode_failed_delta,
+            encfail_l = self.frames_encode_failed_latest,
             restarts = self.restarts_detected,
             malformed = self.malformed_lines_skipped,
         )
@@ -195,6 +206,11 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
     let cascade_forced_count = extract_u64_field_or_zero(s, "\"cascade_forced_count\":")?;
     let frames_dropped_backpressure = extract_u64_field(s, "\"frames_dropped_backpressure\":")?;
     let frames_dropped_late_ack = extract_u64_field(s, "\"frames_dropped_late_ack\":")?;
+    // Back-compat: wire-`0x07` (ocr-emit-silence fix) added the
+    // `frames_encode_failed` field. Lines straddling the bump (older
+    // 0x06 helpers / older agents) lack the key — treat absent as 0,
+    // same policy as the cascade-forced and failsafe fields.
+    let frames_encode_failed = extract_u64_field_or_zero(s, "\"frames_encode_failed\":")?;
     Ok(HealthLogRecord {
         wall_ts,
         device_id,
@@ -205,6 +221,7 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
         cascade_forced_count,
         frames_dropped_backpressure,
         frames_dropped_late_ack,
+        frames_encode_failed,
     })
 }
 
@@ -320,6 +337,12 @@ where
                         rec.frames_dropped_late_ack
                             .saturating_sub(p.frames_dropped_late_ack),
                     );
+                summary.frames_encode_failed_delta = summary
+                    .frames_encode_failed_delta
+                    .saturating_add(
+                        rec.frames_encode_failed
+                            .saturating_sub(p.frames_encode_failed),
+                    );
             } else {
                 // Restart: the new record's cumulative counters
                 // started from 0. Treat the full new values as
@@ -340,6 +363,9 @@ where
                 summary.frames_dropped_late_ack_delta = summary
                     .frames_dropped_late_ack_delta
                     .saturating_add(rec.frames_dropped_late_ack);
+                summary.frames_encode_failed_delta = summary
+                    .frames_encode_failed_delta
+                    .saturating_add(rec.frames_encode_failed);
             }
         } else {
             // First in-window sample: no baseline, contributes zero
@@ -352,6 +378,7 @@ where
         summary.frames_redacted_by_failsafe_latest = rec.frames_redacted_by_failsafe;
         summary.frames_dropped_backpressure_latest = rec.frames_dropped_backpressure;
         summary.frames_dropped_late_ack_latest = rec.frames_dropped_late_ack;
+        summary.frames_encode_failed_latest = rec.frames_encode_failed;
         prev = Some(rec);
     }
 
@@ -405,6 +432,7 @@ mod tests {
             cascade_forced_count: 0,
             frames_dropped_backpressure: backpressure,
             frames_dropped_late_ack: late_ack,
+            frames_encode_failed: 0,
         }
     }
 
@@ -573,6 +601,8 @@ mod tests {
             frames_dropped_backpressure_latest: 0,
             frames_dropped_late_ack_delta: 0,
             frames_dropped_late_ack_latest: 0,
+            frames_encode_failed_delta: 0,
+            frames_encode_failed_latest: 0,
             malformed_lines_skipped: 0,
             restarts_detected: 0,
         };
