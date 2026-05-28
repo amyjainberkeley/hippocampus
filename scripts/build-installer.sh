@@ -410,17 +410,48 @@ hdiutil create \
     "$TEMP_DMG"
 
 # --- Step 5: Apply window layout via AppleScript ---
+#
+# The goal here is to persist a `.DS_Store` inside the DMG that pins the
+# Finder window bounds, view style, icon positions, and background image
+# — mirroring what Raycast / Granola / Linear all ship. The pattern that
+# survives the UDRW → UDZO convert step:
+#   1. Mount UDRW.
+#   2. Run AppleScript that sets layout + forces Finder to flush.
+#   3. Stamp .VolumeIcon flag via SetFile.
+#   4. `sync` + a short settle delay so .DS_Store hits the journal.
+#   5. `hdiutil detach -force` so a still-open Finder handle can't block.
+#
+# Empirical evidence (PR #213 §6 P1): prior versions ran osascript then
+# detached immediately, leaving no .DS_Store in the final DMG. Inspecting
+# Raycast's 10244-byte .DS_Store confirmed the layout-persistence target.
 
 APPLESCRIPT="$INSTALLER_ASSETS/dmg-layout.applescript"
 if [[ -f "$APPLESCRIPT" ]] && [[ -f "$BACKGROUND_PNG" ]]; then
     echo ""
     echo "--- Applying DMG window layout ---"
 
+    # Detach any stale Hippocampus volume from a prior failed run. Without
+    # this, the new mount lands on /Volumes/Hippocampus 1 and our
+    # AppleScript (which derives the disk name from the mount path's
+    # basename) would still find it, but a leftover /Volumes/Hippocampus
+    # can leave dangling Finder windows or mask its background lookup.
+    for stale in /Volumes/Hippocampus /Volumes/Hippocampus\ *; do
+        if [[ -d "$stale" ]]; then
+            echo "  Detaching stale volume: $stale"
+            hdiutil detach "$stale" -force -quiet 2>/dev/null || true
+        fi
+    done
+
     MOUNT_DIR=$(hdiutil attach -readwrite -noverify -noautoopen "$TEMP_DMG" | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
     MOUNT_DIR=$(echo "$MOUNT_DIR" | xargs)
 
     if [[ -d "$MOUNT_DIR" ]]; then
-        osascript "$APPLESCRIPT" "$MOUNT_DIR" || echo "WARNING: AppleScript layout failed (non-fatal — Finder layout is cosmetic)"
+        # Give Finder a moment to notice the new volume before scripting it.
+        sleep 2
+
+        if ! osascript "$APPLESCRIPT" "$MOUNT_DIR"; then
+            echo "WARNING: AppleScript layout failed (non-fatal — Finder layout is cosmetic)"
+        fi
 
         # Set volume icon flag
         if [[ -f "$MOUNT_DIR/.VolumeIcon.icns" ]]; then
@@ -428,8 +459,19 @@ if [[ -f "$APPLESCRIPT" ]] && [[ -f "$BACKGROUND_PNG" ]]; then
             SetFile -a C "$MOUNT_DIR" 2>/dev/null || true
         fi
 
+        # Make sure .DS_Store has actually been written before we detach.
         sync
-        hdiutil detach "$MOUNT_DIR" -quiet
+        sleep 2
+
+        if [[ -f "$MOUNT_DIR/.DS_Store" ]]; then
+            DS_SIZE=$(stat -f%z "$MOUNT_DIR/.DS_Store" 2>/dev/null || echo 0)
+            echo "  .DS_Store persisted: ${DS_SIZE} bytes"
+        else
+            echo "WARNING: .DS_Store missing after AppleScript (DMG will open with default layout)"
+        fi
+
+        # -force so a lingering Finder reference can't keep the volume busy.
+        hdiutil detach "$MOUNT_DIR" -force -quiet || hdiutil detach "$MOUNT_DIR" -quiet
     else
         echo "WARNING: Could not mount temp DMG for layout (non-fatal)"
     fi
