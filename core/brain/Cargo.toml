@@ -34,6 +34,23 @@ thiserror = "1"
 # no plaintext `SQLite` fallback path; the store refuses to open an
 # unencrypted DB.
 rusqlite  = { version = "0.39.0", features = ["bundled-sqlcipher-vendored-openssl"] }
+# `regex` is already on the workspace lockfile via the
+# `hippocampus-native-host` crate (same major). Cargo unifies the version
+# across the workspace; listing it here does NOT add a new third-party
+# crate to the lockfile. Used by `redaction::sms_otp` (ADR-0030 §3(a))
+# and `redaction::sensitive_domains` (ADR-0030 §3(b) URL patterns).
+regex     = "1"
+# `toml` parses `docs/research/sensitive-domains.toml` baked in via
+# `include_str!()` at compile time per ADR-0030 §3(b). New workspace dep
+# — pure-Rust, no network, no plugin loading, no `unsafe`. Read-only at
+# crate-init time; the parsed table is materialized into a
+# `std::sync::OnceLock<…>` (MSRV 1.83 — std-only, no extra crate) and
+# never re-read. CSO §5 sign-off in the PR body covers this addition.
+toml      = "0.8"
+# `serde` is already on the workspace lockfile (transitive via several
+# adapters). The `derive` feature is needed for the `RawTable` /
+# `RawBank` / `RawUrlPattern` structs that hold the parsed TOML shape.
+serde     = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 # Tests exercise the stub impls; gate them via the `stubs` feature on this

@@ -55,6 +55,23 @@ use thiserror::Error;
 
 pub mod arctic_embed_s;
 
+/// ADR-0030 §3(a)–(c) OCR-time redaction layer for
+/// `com.apple.MobileSMS` and `com.apple.mail`.
+///
+/// See [`redaction`] for the module-level overview, the app-bundle
+/// gating constants, and the cascade-twice integration notes. The
+/// redaction layer is **app-bundle-gated** at the call site —
+/// callers MUST check [`redaction::bundle_is_in_scope`] before
+/// invoking the redaction functions. The layer is zero-cost on
+/// every other app's frames (the helper's hot path).
+///
+/// Phase-4 onramp wiring (cascade-twice OCR-time arm — the
+/// integration point in the helper) lands in a follow-up PR; this
+/// PR ships the stand-alone module + unit tests + corpus runner +
+/// committed corpus-run artifact (the §1 gate-condition (4) of
+/// ADR-0030).
+pub mod redaction;
+
 #[cfg(any(test, feature = "stubs"))]
 pub mod stubs;
 
