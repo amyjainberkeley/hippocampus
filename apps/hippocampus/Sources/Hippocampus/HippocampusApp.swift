@@ -130,8 +130,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { @MainActor in
+            self.installBrowserHostManifests()
             self.startSupervisorOrDeferUntilOnboarded()
         }
+    }
+
+    /// Idempotent: writes the Chromium native-messaging host JSON into
+    /// each installed Chromium-family browser's `NativeMessagingHosts/`
+    /// dir, pointing at the running `.app`'s bundled binary. Re-runs
+    /// on every launch so the manifest tracks the current install
+    /// location (Applications, ~/Applications, Desktop, etc.).
+    @MainActor
+    private func installBrowserHostManifests() {
+        let installer = BrowserHostInstaller()
+        let outcomes = installer.install()
+        let summary = outcomes
+            .map { "\($0.browser)=\($0.action.rawValue)" }
+            .joined(separator: " ")
+        firstLaunchLogger.info("browser-host install: \(summary, privacy: .public)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -16,6 +16,11 @@
 //! CSO INVARIANTS:
 //! - Denylist applies at the native messaging boundary (before wire).
 //! - Secret-pattern filter runs before any content reaches the socket.
+//! - Incognito exclusion: drop any message with `incognito: true` BEFORE
+//!   denylist / filter / socket write. Belt-and-suspenders with the JS
+//!   guards in `extensions/chromium/content.js` and `background.js` so a
+//!   JS regression cannot reach the brain. Per docs/DESIGN.md, incognito
+//!   exclusion ships WITH capture, not as a later phase.
 //! - No local cache of page content — strictly forward-and-forget.
 //! - Cap at 200 KB; truncated at sentence boundary.
 
@@ -40,6 +45,12 @@ struct BrowserMessage {
     tab_id: u32,
     #[serde(default = "default_browser")]
     source_browser: String,
+    /// Set true by `background.js` when the tab is incognito. Defaults
+    /// to false so the host fails-closed only on an explicit positive
+    /// signal — a missing field (older JS) is treated as non-incognito,
+    /// consistent with how the field was added.
+    #[serde(default)]
+    incognito: bool,
 }
 
 fn default_browser() -> String {
@@ -116,6 +127,15 @@ fn is_denied_url(url: &str) -> bool {
 }
 
 fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<()> {
+    // CSO invariant: incognito tabs never reach the wire. Checked here
+    // BEFORE denylist / secret filter / socket write so a JS regression
+    // (background.js stops forwarding `incognito: true`, content.js
+    // stops bailing) still cannot leak content as long as the host is
+    // up-to-date. Pair with the JS guards in extensions/chromium/.
+    if msg.incognito {
+        return Ok(());
+    }
+
     if is_denied_url(&msg.url) {
         return Ok(());
     }
@@ -260,5 +280,81 @@ mod tests {
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         assert_eq!(msg.source_browser, "chrome");
         assert_eq!(msg.tab_id, 0);
+        // CSO invariant: a missing `incognito` field defaults to false.
+        // An older JS client that does not forward the flag must NOT be
+        // treated as incognito (would suppress everything). The block
+        // arms only on an explicit positive signal.
+        assert!(!msg.incognito);
+    }
+
+    #[test]
+    fn browser_message_parses_incognito_flag() {
+        let json = r#"{
+            "url": "https://example.com",
+            "title": "Ex",
+            "text": "hi",
+            "ts_us": 0,
+            "incognito": true
+        }"#;
+        let msg: BrowserMessage = serde_json::from_str(json).unwrap();
+        assert!(msg.incognito);
+    }
+
+    /// Synthetic incoming message with `incognito: true`. `process_message`
+    /// must early-return BEFORE attempting to write to the socket. We
+    /// pass a closed `UnixStream` pair where the read side is dropped —
+    /// any socket write would surface as `io::Error::BrokenPipe`. A
+    /// successful `Ok(())` proves no socket write happened, satisfying
+    /// the CSO defense-in-depth requirement.
+    #[test]
+    fn process_message_drops_incognito_before_socket_write() {
+        use std::os::unix::net::UnixStream;
+
+        let (mut a, b) = UnixStream::pair().expect("socket pair");
+        drop(b); // close the read side — any write would now error.
+
+        let msg = BrowserMessage {
+            url: "https://example.com".into(),
+            title: "Ex".into(),
+            text: "should never reach the wire".into(),
+            ts_us: 0,
+            tab_id: 0,
+            source_browser: "chrome".into(),
+            incognito: true,
+        };
+
+        let result = process_message(&msg, &mut a);
+        assert!(
+            result.is_ok(),
+            "incognito message must early-return Ok(()) — no socket write attempted"
+        );
+    }
+
+    /// Sibling test for the non-incognito case: the same broken-pipe
+    /// fixture MUST error, proving `process_message` does try the write
+    /// when the message is non-incognito. This guards against a bug
+    /// where the early-return is too broad and suppresses everything.
+    #[test]
+    fn process_message_writes_socket_when_not_incognito() {
+        use std::os::unix::net::UnixStream;
+
+        let (mut a, b) = UnixStream::pair().expect("socket pair");
+        drop(b);
+
+        let msg = BrowserMessage {
+            url: "https://example.com/pricing".into(),
+            title: "Ex".into(),
+            text: "hello world".into(),
+            ts_us: 0,
+            tab_id: 0,
+            source_browser: "chrome".into(),
+            incognito: false,
+        };
+
+        let result = process_message(&msg, &mut a);
+        assert!(
+            result.is_err(),
+            "non-incognito message must attempt the socket write (broken pipe expected)"
+        );
     }
 }

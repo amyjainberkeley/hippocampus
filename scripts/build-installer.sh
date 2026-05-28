@@ -186,6 +186,13 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
             "$APP_PATH/Contents/MacOS/onboarding"
     fi
 
+    if [[ -f "$APP_PATH/Contents/MacOS/hippocampus-native-host" ]]; then
+        codesign --force --options=runtime --timestamp \
+            --sign "$DEVELOPER_ID" \
+            --entitlements "$ENTITLEMENTS" \
+            "$APP_PATH/Contents/MacOS/hippocampus-native-host"
+    fi
+
     # Sign Sparkle.framework inside-out per the Sparkle official
     # sandboxing/code-signing doc:
     #   <https://sparkle-project.org/documentation/sandboxing/>

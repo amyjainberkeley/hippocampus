@@ -3,11 +3,35 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-// Mock chrome.runtime before importing
+// Mock chrome.runtime + chrome.extension before importing.
+// `inIncognitoContext` defaults to false here; individual tests flip it.
 globalThis.chrome = {
   runtime: {
     sendMessage: vi.fn(),
   },
+  extension: {
+    inIncognitoContext: false,
+  },
+};
+
+// Module-eval-time globals: content.js touches `window.location.href`,
+// `document`, and `history` at top level. Stand up minimal stubs here
+// so the `await import` below doesn't throw; tests override these in
+// `setupDOM()`.
+globalThis.window = {
+  location: { href: "https://example.com/page" },
+  addEventListener: () => {},
+};
+globalThis.document = {
+  title: "",
+  body: { innerText: "" },
+  visibilityState: "visible",
+  addEventListener: () => {},
+  querySelector: () => null,
+};
+globalThis.history = {
+  pushState: () => {},
+  replaceState: () => {},
 };
 
 // Mock DOM globals
@@ -56,9 +80,8 @@ function setupDOM(opts = {}) {
 }
 
 // Re-import the module functions for testing
-const { extractPageContent, isBlockedURL, MAX_TEXT_LENGTH } = await import(
-  "../content.js"
-);
+const { extractPageContent, isBlockedURL, isIncognitoContext, MAX_TEXT_LENGTH } =
+  await import("../content.js");
 
 describe("isBlockedURL", () => {
   it("blocks data: URLs", () => {
@@ -145,5 +168,35 @@ describe("extractPageContent", () => {
 describe("MAX_TEXT_LENGTH", () => {
   it("is 200000", () => {
     expect(MAX_TEXT_LENGTH).toBe(200000);
+  });
+});
+
+describe("incognito exclusion (CSO invariant)", () => {
+  beforeEach(() => {
+    setupDOM();
+    // Reset to non-incognito between tests so failures are obvious.
+    globalThis.chrome.extension.inIncognitoContext = false;
+  });
+
+  it("isIncognitoContext returns false in normal context", () => {
+    expect(isIncognitoContext()).toBe(false);
+  });
+
+  it("isIncognitoContext returns true when the chrome flag is set", () => {
+    globalThis.chrome.extension.inIncognitoContext = true;
+    expect(isIncognitoContext()).toBe(true);
+  });
+
+  it("extractPageContent returns null in an incognito context", () => {
+    globalThis.chrome.extension.inIncognitoContext = true;
+    const result = extractPageContent();
+    expect(result).toBeNull();
+  });
+
+  it("extractPageContent works again once the flag clears", () => {
+    globalThis.chrome.extension.inIncognitoContext = true;
+    expect(extractPageContent()).toBeNull();
+    globalThis.chrome.extension.inIncognitoContext = false;
+    expect(extractPageContent()).not.toBeNull();
   });
 });

@@ -29,6 +29,10 @@ chrome.runtime.onMessage.addListener((message, sender, _sendResponse) => {
   if (message.type !== "page_content") return;
   if (!sender.tab) return;
 
+  // CSO invariant: drop the message here, AND forward an `incognito`
+  // flag to the native host so a JS regression cannot silently leak
+  // content. Both layers are defense-in-depth; the early-return is the
+  // primary block, the flag is the belt-and-suspenders fallback.
   if (sender.tab.incognito) return;
 
   const nativePort = connectNativeHost();
@@ -42,6 +46,7 @@ chrome.runtime.onMessage.addListener((message, sender, _sendResponse) => {
       ts_us: message.payload.ts_us,
       tab_id: sender.tab.id || 0,
       source_browser: detectBrowser(),
+      incognito: sender.tab.incognito === true,
     });
   } catch (_e) {
     port = null;

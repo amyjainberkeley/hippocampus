@@ -67,6 +67,7 @@ HELPER_BIN="$REPO_ROOT/adapters/macos/MCICaptureHelper/.build/$PROFILE/mci-captu
 AGENT_BIN="$REPO_ROOT/target/$PROFILE/mci-agent"
 RECALL_UI_BIN="$REPO_ROOT/apps/recall-ui/.build/$PROFILE/recall-ui"
 ONBOARDING_BIN="$REPO_ROOT/apps/onboarding/.build/$PROFILE/onboarding"
+NATIVE_HOST_BIN="$REPO_ROOT/target/$PROFILE/hippocampus-native-host"
 KNOWN_SAFE="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml"
 APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 INFO_PLIST="$SCRIPT_DIR/Info.plist"
@@ -117,7 +118,7 @@ echo "Output:    $APP"
 echo ""
 
 # Verify binaries exist
-for bin_path in "$HIPPOCAMPUS_BIN" "$HELPER_BIN" "$AGENT_BIN" "$RECALL_UI_BIN" "$ONBOARDING_BIN"; do
+for bin_path in "$HIPPOCAMPUS_BIN" "$HELPER_BIN" "$AGENT_BIN" "$RECALL_UI_BIN" "$ONBOARDING_BIN" "$NATIVE_HOST_BIN"; do
     if [[ ! -f "$bin_path" ]]; then
         echo "ERROR: Missing binary: $bin_path"
         echo "Run the prerequisite builds first. See --help."
@@ -135,6 +136,7 @@ cp "$HELPER_BIN" "$MACOS/MCICaptureHelper"
 cp "$AGENT_BIN" "$MACOS/mci-agent"
 cp "$RECALL_UI_BIN" "$MACOS/recall-ui"
 cp "$ONBOARDING_BIN" "$MACOS/onboarding"
+cp "$NATIVE_HOST_BIN" "$MACOS/hippocampus-native-host"
 
 # Copy resources
 cp "$INFO_PLIST" "$CONTENTS/Info.plist"
@@ -242,8 +244,14 @@ if [[ -d "$CHROMIUM_EXT_SRC" ]]; then
     mkdir -p "$CHROMIUM_EXT_DEST"
     # Copy only the files Chrome actually needs — skip __tests__,
     # node_modules, package.json, hidden files.
-    for entry in manifest.json background.js content.js icons \
-            ai.hippocampus.native_messaging.json; do
+    #
+    # The native-messaging host manifest JSON is NOT copied here. It is
+    # NOT part of the loaded extension; Chromium reads it from a
+    # per-browser NativeMessagingHosts/ directory under
+    # ~/Library/Application Support/<browser>/. Hippocampus writes it
+    # from `BrowserHostInstaller` at app launch with the resolved
+    # binary path + deterministic extension ID.
+    for entry in manifest.json background.js content.js icons; do
         src="$CHROMIUM_EXT_SRC/$entry"
         if [[ -e "$src" ]]; then
             cp -R "$src" "$CHROMIUM_EXT_DEST/"
@@ -342,6 +350,13 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
             "$MACOS/onboarding"
     fi
 
+    if [[ -f "$MACOS/hippocampus-native-host" ]]; then
+        codesign --force --options=runtime --timestamp \
+            --sign "$DEVELOPER_ID" \
+            --entitlements "$ENTITLEMENTS" \
+            "$MACOS/hippocampus-native-host"
+    fi
+
     # Sign Sparkle.framework inside-out per the Sparkle official
     # sandboxing/code-signing doc:
     #   <https://sparkle-project.org/documentation/sandboxing/>
@@ -418,6 +433,7 @@ else
     codesign --force --sign - "$MACOS/mci-agent"
     [[ -f "$MACOS/recall-ui" ]] && codesign --force --sign - "$MACOS/recall-ui"
     [[ -f "$MACOS/onboarding" ]] && codesign --force --sign - "$MACOS/onboarding"
+    [[ -f "$MACOS/hippocampus-native-host" ]] && codesign --force --sign - "$MACOS/hippocampus-native-host"
     codesign --force --sign - "$MACOS/Hippocampus"
     codesign --force --deep --sign - "$APP"
 fi
