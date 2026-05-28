@@ -233,11 +233,18 @@ final class AllowlistTOMLLoaderRejectsHostileInputTests: XCTestCase {
 
 // MARK: - Bundled seed contract
 
-/// The 10 CSO-ratified bundle ids that MUST round-trip through the
+/// The CSO-ratified bundle ids that MUST round-trip through the
 /// bundled seed file. Hard-coding them here is deliberate — a silent
 /// drop or rename of any of these in `known-safe-apps.toml` requires
 /// either updating this list (with an ADR amendment) or failing this
 /// test loudly. Both are good outcomes.
+///
+/// Cycle 8.13 cohort (added 2026-05-27): `com.anthropic.claudefordesktop`
+/// and `com.github.GitHubClient`. Rationale + verified-live bundle-id
+/// lookups in `docs/research/recall-coverage-gap-2026-05-26.md` §6 P0.
+/// Both are low-sensitivity surfaces (Electron AI chat / code-review
+/// workflows; no secure-input arms). Messages + Mail are deliberately
+/// excluded pending a separate threat-model ADR — see §6 ⚠️ block.
 private let expectedBundledSeedBundles: Set<String> = [
     "com.apple.Safari",
     "com.apple.Terminal",
@@ -249,6 +256,8 @@ private let expectedBundledSeedBundles: Set<String> = [
     "com.apple.dt.Xcode",
     "company.thebrowser.Browser",
     "com.figma.Desktop",
+    "com.anthropic.claudefordesktop",
+    "com.github.GitHubClient",
 ]
 
 final class AllowlistBundledSeedTests: XCTestCase {

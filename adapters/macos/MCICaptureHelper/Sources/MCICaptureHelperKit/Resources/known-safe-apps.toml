@@ -62,3 +62,15 @@ bundle_id = "com.figma.Desktop"
 rationale = "Figma desktop. Design content."
 cso_ratified_by = "orchestrator-seat"
 ratified_at = "2026-05-20"
+
+[[entries]]
+bundle_id = "com.anthropic.claudefordesktop"
+rationale = "Claude Desktop. Electron AI chat surface; OCR-captured. Cascade §4 + §6 OCR-time regex catch any embedded secrets. No payment surface; no inherent secure-input concerns. Per docs/research/recall-coverage-gap-2026-05-26.md §6 P0."
+cso_ratified_by = "CSO seat (PR review)"
+ratified_at = "2026-05-27"
+
+[[entries]]
+bundle_id = "com.github.GitHubClient"
+rationale = "GitHub Desktop. Code/PR workflows; no secure-input surface. Per docs/research/recall-coverage-gap-2026-05-26.md §6 P0."
+cso_ratified_by = "CSO seat (PR review)"
+ratified_at = "2026-05-27"
