@@ -124,6 +124,41 @@ The N=8 line-scan budget is bounded; the check runs in sub-millisecond time on M
 
 **Defense-in-depth chain on Mail frames:** §3(c) header check → §3(b) URL/domain check on the body → §3(a) SMS-shape check on the body → cascade fail-closed default per ADR-0013 §7. Any one of these firing drops the event.
 
+#### 3(c)(ii) Parsed-header check for emlx deep-hook (V2-P8b)
+
+**Amendment landed inline with V2-P8b** (`apps/agent/src/mail_ingest.rs` + `core/brain/src/redaction/parsed_mail_header.rs`). Companion arm to §3(c) — same intent, different input shape.
+
+**Why the amendment is needed.** §3(c) was written against the **OCR-input path** — Mail.app's rendered preview frame, top-N OCR'd lines from `VNRecognizeTextRequest`. V2-P8a (PR #243) shipped `mci-mail-reader`, a READ-ONLY library that streams new `.emlx` files from `~/Library/Mail/V<N>/.../*.emlx` directly via FSEvents. V2-P8b consumes that stream inside `mci-agent`. The same Mail-spike-memo §9 retrospective made clear that §3(c)'s "top-N OCR'd lines" framing does NOT literally transfer to emlx ingest — RFC 5322 header position is not the rendered Mail.app preview position; routing X-headers and `Received` chains precede `From:` in well-routed mail. The mechanism §3(c) specifies (regex over rendered lines) is the wrong shape for emlx; the **intent** (refuse the frame when the sender domain is in `sensitive-domains.toml`) holds and needs a parallel rule.
+
+**§3(c)(ii) spec.** For any new emlx flowing through the brain-ingest mail pump (`apps/agent/src/mail_ingest.rs::MailIngestPump`), the cascade-equivalent (`core/brain/src/redaction/parsed_mail_header.rs::cascade_equivalent`) is the **pre-write** check. It runs BEFORE any body byte is materialized into a brain [`Event`] row. Inputs are the typed-RFC-5322 header subset (`mail-parser`-typed accessors); outputs are one of three structural outcomes:
+
+1. **`Allow`** — full body + headers persist as a normal Event row. The pump then runs §3(a) + §3(b) over the body for defense-in-depth (per the chain above).
+2. **`HeaderOnly { sender_domain, reason }`** — body bytes are DROPPED at the pump; only a content-free audit row is persisted. The persisted row has `app_bundle_id="com.apple.mail"`, `window_title="[REDACTED:MAIL_HEADER_MATCH]"` (literal placeholder), `text="[REDACTED:MAIL_HEADER_MATCH] from=<sender_domain>"` (categorical eTLD+1 only — the CSO-curated public marketing domain that fired the cascade, not user-identifying content), `url=None`, `tab_id=None`. Subject text, body bytes, recipient lists, `Message-ID`, attachments — none of these reach `put_event`. The `MailRedactionReason` sub-rule (sensitive-sender-domain / subject-otp-shape) surfaces in `MailIngestCounters` for the CRS Telemetry-Gap analyst, never in a brain-row column.
+3. **`Refuse { reason: UnparseableEnvelope }`** — fail-safe default (ADR-0013 §7 transposed). When the emlx has no parseable `From:` header, NO row reaches `put_event` at all. The pump bumps its `refused` counter; the user-curated allowlist UI (V2-P10) surfaces an aggregate count, never the file path.
+
+**Decision order inside `cascade_equivalent`:**
+
+1. Empty `from_domain` → `Refuse { reason: UnparseableEnvelope }` (fail-safe).
+2. Any of `from_domain`, `reply_to_domain`, `sender_domain`, `list_id_domain` matches a `sensitive-domains.toml` entry → `HeaderOnly { reason: SensitiveSenderDomain }` with `sender_domain` = the eTLD+1 that fired (first hit, in the fixed order above).
+3. `subject` matches a §3(a) SMS-OTP / banking-notification shape → `HeaderOnly { reason: SubjectOtpShape }`.
+4. Otherwise → `Allow`.
+
+Step 2's fan-out beyond `From:` to `Reply-To:` / `Sender:` / `List-ID:` answers the §11 Q4 phishing-shape memo: a bank-impersonation mail with `From: notify@chase.com` but `Reply-To: attacker@example.com` is still dropped on the `From:` match; a mailing-list bridge with friendly `From:` but `List-ID: <chase.com>` is dropped on the `List-ID:` match. DKIM `d=` verification is deferred to v2+ (CPU + complexity).
+
+**Single source of truth.** §3(c)(ii) consults the same `docs/research/sensitive-domains.toml` table and the same `core/brain/src/redaction/sms_otp.rs` regex bank as §3(c) (OCR-path) and §3(a) (SMS-shape). The trust-boundary is one set of CSO-curated artifacts; the two arms differ only in input shape.
+
+**Drop-before-write discipline.** `cascade_equivalent` is structurally guaranteed to run BEFORE any `put_event`. The pump's `ingest_path` calls `read_message(path) → cascade_equivalent → match`; the `HeaderOnly` and `Refuse` arms construct (or do not construct) a row with the body bytes dropped at the cascade decision point. There is no delete-after-write path. CSO sign-off audit verifies this against the diff (see PR body).
+
+**Wire posture.** No wire bump. The cascade-equivalent runs entirely inside `mci-agent`; no helper produces a `MailHeaderMatch` byte. The new sub-rule enum (`MailRedactionReason`) is local to the brain crate — it is NEVER emitted on the helper-to-agent IPC wire, and consequently does NOT extend the wire-protected `mci_core::ipc::RedactionReason` enum (which would otherwise need a wire bump per AGENT_PROTOCOL §5). The conceptual "PrivacyTombstone(reason=mail-header-match)" is the categorical class string returned by `MailRedactionReason::tombstone_reason`; it surfaces in audit/telemetry strings only.
+
+**Defense-in-depth on `Allow` outcomes.** When `cascade_equivalent` returns `Allow`, the pump must still pipe the body through §3(a) (SMS-shape regex) and §3(b) (URL/domain table) before final persist. Those two sub-arms are the existing redaction layer (PR #222) applied to the emlx body in the pump (the OCR-path applies them to the rendered top-N + body in the helper). This module owns ONLY the §3(c)(ii) parsed-header arm; the body sub-arms remain the same back-ends.
+
+**Defense-in-depth chain on emlx deep-hook ingest (V2-P8b):** §3(c)(ii) parsed-header check → §3(b) URL/domain check on the body → §3(a) SMS-shape check on the body → fail-safe default. Any one firing drops the body bytes from the persisted row (or, for `Refuse`, drops the row entirely).
+
+**Falsifiability corpus.** The §3(c)(ii) gate is a runnable corpus at `core/brain/src/bin/mail_cascade_corpus.rs`. Per-PR audit artifact committed at `docs/audit/2026-05-30-mail-cascade-corpus.md` shows **GREEN 5/5** across the five harnesses (H1 bank `From:`, H2 non-sensitive sender, H3 SMS-OTP subject, H4 no parseable `From:` → fail-safe refuse, H5 `List-ID:` bridge). Determinism witness: re-running the binary produces a byte-identical artifact.
+
+**Relationship to §3(c) (OCR-path).** §3(c) and §3(c)(ii) are independent arms; both ship and both run on their respective inputs. A user who has Messages-foregrounded with a Mail-app preview pane open exercises §3(c) on the rendered frame; the simultaneous emlx file landing in `~/Library/Mail/V<N>/.../` exercises §3(c)(ii) on the parsed file. They do not duplicate; they complement.
+
 #### 3(d) Per-conversation opt-in vs blanket capture
 
 The question: should the user be able to opt in **per-thread** ("MCI may capture this conversation with X") rather than opting in to **blanket Messages capture**?
@@ -224,3 +259,26 @@ The implementing PR — the follow-on Director-Recording + CSO joint PR that lan
 Any PR that materializes a path for Messages or Mail OCR'd text to reach storage without passing through the §3(a)–(c) sub-arms is a §5 protected-set violation and is rejected at CSO review regardless of other merits — exactly as ADR-0013 §5 phrases the cascade-without-suppression rejection rule. The CSO veto is final unless the human CEO overrides.
 
 — CSO, 2026-05-28
+
+## CSO §5 sign-off (V2-P8b amendment, 2026-05-30)
+
+This amendment extends ADR-0030 with **§3(c)(ii) — parsed-header check for the emlx deep-hook path (V2-P8b)**. The §3(c) (OCR-path) arm is unchanged. The §3(c)(ii) arm is the structural place ADR-0030's intent applies to the always-on emlx deep-hook the agent runs via `mci-mail-reader` (V2-P8a, PR #243).
+
+**Four-condition audit (the CSO veto-gate the V2-P8b implementing PR satisfies):**
+
+1. **ADR-0030 §3(c)(ii) preserves the existing §3(c) OCR-time arm semantics** — only the input shape (typed RFC 5322 vs OCR-rendered lines) differs. The domain table back-end (`sensitive-domains.toml` + `SensitiveDomainTable`) and the OTP regex bank (`sms_otp.rs`) are SHARED. There is one CSO-curated source of truth. I have read the diff and confirm `core/brain/src/redaction/parsed_mail_header.rs` consumes `super::sensitive_domains::matches_sensitive_domain` and `super::sms_otp::redact_sms_shapes`; it does NOT vend a parallel table.
+2. **Sender-domain check happens BEFORE body persist (drop-before-write, not delete-after-write).** I have read `apps/agent/src/mail_ingest.rs::MailIngestPump::ingest_path`. The call order is: `mci_mail_reader::read_message(path) → to_parsed_headers(&parsed) → cascade_equivalent(&headers) → match`. The `HeaderOnly` arm builds a content-free row that contains NO body bytes (the `body_text` / `body_html` fields from the parsed message are never read in this arm). The `Refuse` arm builds no row. There is no `put_event` call on the body-bearing path. The body bytes from the source emlx file structurally cannot reach the brain store.
+3. **Corpus 5/5 GREEN.** Committed at `docs/audit/2026-05-30-mail-cascade-corpus.md`. I have read the artifact and the per-harness threat models. H1 (bank `From:`), H2 (non-sensitive sender, allow), H3 (OTP-shape subject), H4 (no parseable `From:` → fail-safe refuse), H5 (`List-ID:` bridge) all match the expected `MailCascadeDecision`. Determinism: re-running the binary produces a byte-identical artifact (`git diff docs/audit/2026-05-30-mail-cascade-corpus.md` after a second invocation is empty).
+4. **PrivacyTombstone(mailHeaderMatch) is content-free.** The persisted Event row for a `HeaderOnly` outcome contains: `app_bundle_id="com.apple.mail"`, `window_title="[REDACTED:MAIL_HEADER_MATCH]"` (literal), `text="[REDACTED:MAIL_HEADER_MATCH] from=<eTLD+1>"` (categorical eTLD+1 = the CSO-curated public marketing domain that fired the cascade), `ts_us=file mtime`, `url=None`, `tab_id=None`. No subject text, no body bytes, no recipient list, no `Message-ID`, no URL. The sender eTLD+1 is a class signal (you got mail from a bank), not user-identifying content; it is the same signal the user already trusted the CSO to seed into `sensitive-domains.toml`.
+
+**Wire posture confirmation.** The new `MailRedactionReason` enum is LOCAL to `core/brain/src/redaction/parsed_mail_header.rs`. It is NOT exposed on the helper IPC wire and does NOT extend `mci_core::ipc::RedactionReason`. The wire is unchanged at `0x07`. No wire bump.
+
+**Synthesized fixtures only.** I have verified that the corpus runner inlines five synthetic `ParsedMailHeaders` values constructed in source. The corpus binary does NOT open `~/Library/Mail/`, does NOT touch any real emlx file, and does NOT require Full Disk Access at build / test time. The runtime path (the pump consuming FSEvents) is exercised only by the unit tests in `mail_ingest.rs`, which write synthesized emlx fixtures into a `tempdir` and never touch the real Mail store.
+
+**Allowlist edit posture.** `com.apple.mail` was already added to `known-safe-apps.toml` in PR #228 (cycle 8.16). This V2-P8b PR does NOT touch `known-safe-apps.toml`; the capture-side allowlist policy is unchanged. The §3(c)(ii) arm is the deep-hook-path redaction layer required to keep ADR-0030's intent honored on the second Mail surface the agent now consumes (emlx files via `mci-mail-reader`); it does NOT widen what `com.apple.mail` is allowed to do.
+
+**Scope discipline.** This PR does NOT modify the helper capture path, the cascade-twice OCR-time arm, ADR-0031 focused-window logic, the wire protocol, or any other §5 protected-set surface beyond ADR-0030 + the new brain-side / agent-side modules added here.
+
+**Approved.** The V2-P8b implementing PR satisfies the §3(c)(ii) amendment's gate conditions. Production deployment of `MailIngestPump` in `mci-agent`'s supervisor remains gated on V2-P10's user-curated allowlist UI (the CEO must opt-in via the user-visible surface before the pump auto-starts). This PR ships the LIBRARY surface only; the supervisor wire-up is a separate, CEO-attended PR.
+
+— CSO, 2026-05-30

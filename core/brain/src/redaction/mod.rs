@@ -53,6 +53,7 @@
 //! pure-Rust regex + static-table lookup.
 
 pub mod mail_header;
+pub mod parsed_mail_header;
 pub mod sensitive_domains;
 pub mod sms_otp;
 

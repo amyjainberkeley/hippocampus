@@ -998,11 +998,13 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 name = "mci-agent"
 version = "0.0.1"
 dependencies = [
+ "mail-parser",
  "mci-brain",
  "mci-brief",
  "mci-core",
  "mci-embed-coreml",
  "mci-llama-coreml",
+ "mci-mail-reader",
  "serde",
  "serde_json",
  "tempfile",

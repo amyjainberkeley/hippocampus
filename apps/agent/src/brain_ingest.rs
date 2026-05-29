@@ -460,7 +460,7 @@ impl BrainIngestor for BrainPump {
 /// crate dep is taken (the formatter is hand-rolled in
 /// `wall_clock.rs`).
 #[must_use]
-pub(crate) fn compose_context_header(
+pub fn compose_context_header(
     app: Option<&str>,
     title: Option<&str>,
     url: Option<&str>,
