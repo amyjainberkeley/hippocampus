@@ -37,6 +37,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use crate::episode_segmenter::EpisodeId;
+use crate::graph::{Entity, EntityId, EntityMention, EpisodeEdge};
 use mci_core::crypto::DbKey;
 use mci_core::store::{
     open as mci_core_open, open_readonly as mci_core_open_readonly, Db,
@@ -959,6 +960,7 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     let sql_0001 = include_str!("../migrations/0001_phase_3_brain_schema.sql");
     let sql_0002 = include_str!("../migrations/0002_briefs.sql");
     let sql_0003 = include_str!("../migrations/0003_events_tab_id.sql");
+    let sql_0004 = include_str!("../migrations/0004_v2_graph_schema.sql");
     let tx = db
         .conn_mut()
         .transaction()
@@ -978,6 +980,13 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
         tx.execute_batch(sql_0003)
             .map_err(|e| StoreError::Backend(format!("apply migration 0003: {e}")))?;
     }
+    // 0004 — V2-P3 graph foundation. Every CREATE / INSERT in the batch is
+    // `IF NOT EXISTS` / `INSERT OR REPLACE`, so the apply is idempotent on
+    // re-open without a separate probe. The migration ships zero `ALTER
+    // TABLE`s — only fresh tables — so SQLite's natural idempotence rules
+    // apply directly.
+    tx.execute_batch(sql_0004)
+        .map_err(|e| StoreError::Backend(format!("apply migration 0004: {e}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
     Ok(())
@@ -1076,6 +1085,30 @@ fn row_to_event_tuple(r: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
         r.get::<_, Option<String>>(10)?,
         r.get::<_, Option<i64>>(11)?,
     ))
+}
+
+/// Row mapper for the 8-column `entities` SELECT used by
+/// `find_entity_by_alias` (V2-P3 migration 0004).
+fn row_to_entity(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entity> {
+    let id: String = r.get(0)?;
+    let kind: String = r.get(1)?;
+    let canonical_name: String = r.get(2)?;
+    let summary: Option<String> = r.get(3)?;
+    let summary_blob: Option<Vec<u8>> = r.get(4)?;
+    let content_hash: String = r.get(5)?;
+    let created_ts_us: i64 = r.get(6)?;
+    let updated_ts_us: i64 = r.get(7)?;
+    let summary_embedding = summary_blob.and_then(|b| blob_to_embedding(&b));
+    Ok(Entity {
+        id: EntityId(id),
+        kind,
+        canonical_name,
+        summary,
+        summary_embedding,
+        content_hash,
+        created_ts_us: u64::try_from(created_ts_us).unwrap_or(0),
+        updated_ts_us: u64::try_from(updated_ts_us).unwrap_or(0),
+    })
 }
 
 /// Serialize a 384-d L2-normalized f32 vector to a little-endian BLOB.
@@ -1362,6 +1395,221 @@ impl crate::BrainStore for SqlCipherBrainStore {
         hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         hits.truncate(limit);
         Ok(hits)
+    }
+
+    // -----------------------------------------------------------------------
+    // V2-P3 — graph foundation writers + readers
+    //
+    // Each writer is an upsert / insert-or-ignore. Reads are SELECT-only.
+    // FK enforcement on `entity_mentions.entity_id` / `event_id` and on
+    // `episode_edges.{src,dst}_episode_id` is structural per ADR-0008
+    // (mci-core's store open sets `PRAGMA foreign_keys = ON`) — a writer
+    // that cites a non-existent entity / event / episode fails fast at
+    // INSERT time rather than producing an unresolved row.
+    // -----------------------------------------------------------------------
+
+    fn put_entity(&self, entity: &Entity) -> Result<(), StoreError> {
+        if let Some(emb) = &entity.summary_embedding {
+            if emb.len() != EMBEDDING_DIM {
+                return Err(StoreError::InvalidInput(format!(
+                    "summary_embedding dimension must be {} (ADR-0009), got {}",
+                    EMBEDDING_DIM,
+                    emb.len()
+                )));
+            }
+        }
+        let summary_blob: Option<Vec<u8>> = entity
+            .summary_embedding
+            .as_ref()
+            .map(|v| embedding_to_blob(v));
+        let created = i64::try_from(entity.created_ts_us).unwrap_or(i64::MAX);
+        let updated = i64::try_from(entity.updated_ts_us).unwrap_or(i64::MAX);
+
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin put_entity tx: {e}")))?;
+        // Upsert: preserve `created_ts_us` on conflict (the first writer's
+        // wall clock is the canonical creation moment), bump everything
+        // else. Mirrors the convention `briefs` uses for `INSERT OR
+        // REPLACE` on its UNIQUE(date_local) — but here we want to keep
+        // `created_ts_us` so a plain REPLACE won't do.
+        tx.execute(
+            "INSERT INTO entities (
+                id, kind, canonical_name, summary, summary_embedding,
+                content_hash, created_ts_us, updated_ts_us
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+                kind              = excluded.kind,
+                canonical_name    = excluded.canonical_name,
+                summary           = excluded.summary,
+                summary_embedding = excluded.summary_embedding,
+                content_hash      = excluded.content_hash,
+                updated_ts_us     = excluded.updated_ts_us",
+            params![
+                &entity.id.0,
+                &entity.kind,
+                &entity.canonical_name,
+                &entity.summary,
+                &summary_blob,
+                &entity.content_hash,
+                created,
+                updated,
+            ],
+        )
+        .map_err(|e| StoreError::Backend(format!("UPSERT entities: {e}")))?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit put_entity tx: {e}")))?;
+        Ok(())
+    }
+
+    fn put_entity_mention(&self, mention: &EntityMention) -> Result<(), StoreError> {
+        let event_id = i64::try_from(mention.event_id.0).map_err(|e| {
+            StoreError::InvalidInput(format!(
+                "event id {} out of i64 range: {e}",
+                mention.event_id.0
+            ))
+        })?;
+        let ts = i64::try_from(mention.ts_us).unwrap_or(i64::MAX);
+        let confidence = f64::from(mention.confidence);
+
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO entity_mentions (
+                    id, entity_id, event_id, mention_text,
+                    confidence, extractor_kind, ts_us
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    &mention.id.0,
+                    &mention.entity_id.0,
+                    event_id,
+                    &mention.mention_text,
+                    confidence,
+                    &mention.extractor_kind,
+                    ts,
+                ],
+            )
+            .map_err(|e| StoreError::Backend(format!("INSERT entity_mentions: {e}")))?;
+        Ok(())
+    }
+
+    fn put_episode_edge(&self, edge: &EpisodeEdge) -> Result<(), StoreError> {
+        let src = i64::try_from(edge.src_episode_id.0).map_err(|e| {
+            StoreError::InvalidInput(format!(
+                "src episode id {} out of i64 range: {e}",
+                edge.src_episode_id.0
+            ))
+        })?;
+        let dst = i64::try_from(edge.dst_episode_id.0).map_err(|e| {
+            StoreError::InvalidInput(format!(
+                "dst episode id {} out of i64 range: {e}",
+                edge.dst_episode_id.0
+            ))
+        })?;
+        let ts = i64::try_from(edge.ts_us).unwrap_or(i64::MAX);
+
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO episode_edges (
+                    id, src_episode_id, dst_episode_id, edge_kind,
+                    evidence_entity_ids, ts_us
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    &edge.id.0,
+                    src,
+                    dst,
+                    &edge.edge_kind,
+                    &edge.evidence_entity_ids,
+                    ts,
+                ],
+            )
+            .map_err(|e| StoreError::Backend(format!("INSERT episode_edges: {e}")))?;
+        Ok(())
+    }
+
+    fn find_entity_by_alias(
+        &self,
+        kind: &str,
+        alias: &str,
+    ) -> Result<Option<Entity>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let row_opt = guard
+            .conn()
+            .query_row(
+                "SELECT id, kind, canonical_name, summary, summary_embedding,
+                        content_hash, created_ts_us, updated_ts_us
+                 FROM entities
+                 WHERE kind = ?1 AND canonical_name = ?2
+                 LIMIT 1",
+                params![kind, alias],
+                row_to_entity,
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(StoreError::Backend(format!(
+                    "SELECT find_entity_by_alias: {other}"
+                ))),
+            })?;
+        Ok(row_opt)
+    }
+
+    fn events_with_entity(
+        &self,
+        entity_id: &EntityId,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        // DISTINCT defends against the (rare but legal) case where two
+        // extractor passes wrote two mention rows for the same event ×
+        // entity pair (e.g. regex span "John" + qwen mention with text
+        // "John Smith" both pointing at the same entity). Without
+        // DISTINCT the read would surface the parent event twice.
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT DISTINCT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url, e.text
+                 FROM events e
+                 JOIN entity_mentions m ON m.event_id = e.id
+                 WHERE m.entity_id = ?1
+                 ORDER BY e.ts_us DESC
+                 LIMIT ?2",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare events_with_entity: {e}")))?;
+        let rows = stmt
+            .query_map(params![&entity_id.0, lim], |r| {
+                let id: i64 = r.get(0)?;
+                let ts_us: i64 = r.get(1)?;
+                let app: Option<String> = r.get(2)?;
+                let title: Option<String> = r.get(3)?;
+                let url: Option<String> = r.get(4)?;
+                let text: String = r.get(5)?;
+                Ok((id, ts_us, app, title, url, text))
+            })
+            .map_err(|e| StoreError::Backend(format!("query events_with_entity: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, ts_us, app, title, url, text) =
+                r.map_err(|e| StoreError::Backend(format!("row events_with_entity: {e}")))?;
+            out.push(EventRecord {
+                event_id: EventId(u64::try_from(id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text_snippet: EventRecord::truncate_snippet(&text),
+            });
+        }
+        Ok(out)
     }
 }
 

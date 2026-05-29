@@ -77,7 +77,18 @@ pub mod stubs;
 
 pub mod event_chunker;
 
+/// V2-P3 — graph foundation: typed entities + provenance mentions +
+/// cross-app episode edges. The types are the OS-free shape the new
+/// `BrainStore::put_entity` / `put_entity_mention` / `put_episode_edge` /
+/// `find_entity_by_alias` / `events_with_entity` methods exchange. See
+/// the module doc for the **content-stable ULID** discipline that makes
+/// the schema sync-ready ahead of Phase 8 (ADR-0023).
+pub mod graph;
+
 pub use event_chunker::EventChunker;
+pub use graph::{
+    Entity, EntityId, EntityMention, EntityMentionId, EpisodeEdge, EpisodeEdgeId,
+};
 
 mod sqlcipher_brain_store;
 pub mod retention_purger;
@@ -501,6 +512,120 @@ pub trait BrainStore: Send + Sync {
         query_embedding: &[f32],
         limit: usize,
     ) -> Result<Vec<(EventId, f32)>, StoreError>;
+
+    // -----------------------------------------------------------------------
+    // V2-P3 — graph foundation write+read path
+    //
+    // The default impls return [`StoreError::Other`] so the trait extension
+    // does not break the existing in-memory / recording / sanitizing
+    // wrappers that pre-date V2-P3 (`InMemoryBrainStore` in `stubs`,
+    // `FtsSanitizingStore` in `apps/agent/src/mcp/live.rs`, and
+    // `RecordingStore` in `apps/agent/src/runner.rs`'s tests). The
+    // production [`SqlCipherBrainStore`] overrides each one.
+    //
+    // See `core/brain/src/graph.rs` module doc for the sync-ready ULID
+    // discipline every writer above this trait MUST follow.
+    // -----------------------------------------------------------------------
+
+    /// Insert or update an entity row. The row's `id` MUST be derived via
+    /// [`Entity::derive_id`] so two devices that extract the same
+    /// `(kind, canonical_name)` converge on the same PK in Phase 8 sync
+    /// (ADR-0023).
+    ///
+    /// Semantics: upsert keyed on PK. Re-writing an entity with new
+    /// `summary` / `summary_embedding` / `updated_ts_us` overwrites the
+    /// stored row; `created_ts_us` on the existing row is preserved by
+    /// the SQLCipher impl (the writer's `created_ts_us` is honored only
+    /// on first insert).
+    ///
+    /// # Errors
+    /// - [`StoreError::InvalidInput`] if the `summary_embedding` length
+    ///   does not match the schema-pinned dimension (384 per ADR-0009).
+    /// - [`StoreError::Backend`] on SQLite failure.
+    fn put_entity(&self, _entity: &Entity) -> Result<(), StoreError> {
+        Err(StoreError::Other(
+            "put_entity not supported by this BrainStore impl (V2-P3)".into(),
+        ))
+    }
+
+    /// Insert one entity-mention row. The row's `id` MUST be derived via
+    /// [`EntityMention::derive_id`].
+    ///
+    /// Semantics: idempotent on PK collision (`INSERT OR IGNORE`) — a
+    /// re-run of the same extractor on the same event does not duplicate.
+    /// The mention's `entity_id` and `event_id` MUST reference existing
+    /// rows; the SQLCipher impl enforces this via FOREIGN KEY (ADR-0008
+    /// `PRAGMA foreign_keys = ON`).
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure (including FK violation
+    /// if `entity_id` / `event_id` does not exist).
+    fn put_entity_mention(&self, _mention: &EntityMention) -> Result<(), StoreError> {
+        Err(StoreError::Other(
+            "put_entity_mention not supported by this BrainStore impl (V2-P3)".into(),
+        ))
+    }
+
+    /// Insert one episode-edge row. The row's `id` MUST be derived via
+    /// [`EpisodeEdge::derive_id`].
+    ///
+    /// Semantics: idempotent on PK collision (`INSERT OR IGNORE`) — the
+    /// consolidator (V2-P3-after) may re-derive the same edge on every
+    /// pass without producing duplicates. Both endpoints MUST reference
+    /// existing `episodes` rows.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn put_episode_edge(&self, _edge: &EpisodeEdge) -> Result<(), StoreError> {
+        Err(StoreError::Other(
+            "put_episode_edge not supported by this BrainStore impl (V2-P3)".into(),
+        ))
+    }
+
+    /// Look up an entity by `(kind, alias)`. V2-P3 ships the **exact-
+    /// match-on-canonical-name** semantics — `alias` matches the
+    /// canonical name. The alias / handle / phone-overlap clustering
+    /// rides V2-P6 (`AliasResolver`); when it lands it will widen this
+    /// surface (or a peer surface) to fuzzy match.
+    ///
+    /// Returns `Ok(None)` for an unknown pair — not an error, the
+    /// extractor uses the `None` path to mint a fresh entity.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn find_entity_by_alias(
+        &self,
+        _kind: &str,
+        _alias: &str,
+    ) -> Result<Option<Entity>, StoreError> {
+        Err(StoreError::Other(
+            "find_entity_by_alias not supported by this BrainStore impl (V2-P3)".into(),
+        ))
+    }
+
+    /// Return events that have at least one [`EntityMention`] for `entity_id`,
+    /// ordered by `events.ts_us DESC`, capped at `limit`.
+    ///
+    /// First read API the entity surface needs: "show me every event
+    /// that mentions Person(John)" — the V2-P12 chat surface's
+    /// entity-graph traversal step. The returned [`EventRecord`] carries
+    /// only the snippet (truncated per
+    /// [`EventRecord::SNIPPET_MAX_CHARS`]) — callers wanting the full
+    /// text go through [`get_event`](Self::get_event).
+    ///
+    /// `limit == 0` returns `Ok(vec![])` without touching SQLite.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn events_with_entity(
+        &self,
+        _entity_id: &EntityId,
+        _limit: usize,
+    ) -> Result<Vec<EventRecord>, StoreError> {
+        Err(StoreError::Other(
+            "events_with_entity not supported by this BrainStore impl (V2-P3)".into(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
