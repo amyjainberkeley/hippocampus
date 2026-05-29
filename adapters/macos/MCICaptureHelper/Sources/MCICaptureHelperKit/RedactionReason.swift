@@ -31,6 +31,15 @@ public enum RedactionReason: UInt8, Sendable, Equatable, CaseIterable {
     case ocrTimeSecret = 6
     /// Cascade §7 — fail-safe: unknown classification ⇒ redact.
     case failsafeUnknown = 7
+    /// ADR-0031 §5.3 race-consistency gate — focus changed between
+    /// SCStream filter install and frame callback. The captured pixel
+    /// buffer may correspond to a different focused window than the
+    /// frame's attribution metadata; fail closed by emitting this
+    /// tombstone instead of an OCREvent. The pipeline never reaches
+    /// the encoder or the cascade-twice OCR emitter on this path.
+    /// PROTECTED-SET — wire-byte discriminant lock-stepped with
+    /// `core::ipc::RedactionReason::FocusRaceDropped` (= 8).
+    case focusRaceDropped = 8
 
     /// String written to `events.redaction_reason` by the core's store
     /// layer. Must match `RedactionReason::as_db_str()` in
@@ -44,6 +53,7 @@ public enum RedactionReason: UInt8, Sendable, Equatable, CaseIterable {
         case .denylistPostCapture: return "denylist-postcapture"
         case .ocrTimeSecret: return "ocr-time-secret"
         case .failsafeUnknown: return "failsafe-unknown"
+        case .focusRaceDropped: return "focus-race-dropped"
         }
     }
 }

@@ -128,10 +128,10 @@ final class FrameSequenceTests: XCTestCase {
 
 final class HelperMainLoopTests: XCTestCase {
     /// tickHealth emits exactly one HelperHealth frame whose payload
-    /// length matches the wire spec. wire 0x07: 16 header + 8 × u64
-    /// (64) = 80 bytes (was 72 at 0x06, before frames_encode_failed
-    /// was added per the ocr-emit-silence fix —
-    /// docs/research/ocr-emit-silence-2026-05-28.md).
+    /// length matches the wire spec. wire 0x08: 16 header + 9 × u64
+    /// (72) = 88 bytes (was 80 at 0x07, before frames_focus_race_dropped
+    /// was added per ADR-0031 V2-P1 —
+    /// docs/research/capture-scope-window-vs-display-2026-05-29.md §5.3).
     func testTickHealthEmitsOneFrameWithCorrectLength() async throws {
         let sink = RecordingFrameSink()
         let loop = HelperMainLoop(
@@ -141,8 +141,8 @@ final class HelperMainLoopTests: XCTestCase {
         try await loop.tickHealth()
         let frames = await sink.recorded()
         XCTAssertEqual(frames.count, 1)
-        // Header(16) + 8 × u64(64) = 80 bytes.
-        XCTAssertEqual(frames[0].count, 80)
+        // Header(16) + 9 × u64(72) = 88 bytes.
+        XCTAssertEqual(frames[0].count, 88)
         // Wire magic + version.
         XCTAssertEqual(frames[0][0], 0x4D)
         XCTAssertEqual(frames[0][1], frameVersion)

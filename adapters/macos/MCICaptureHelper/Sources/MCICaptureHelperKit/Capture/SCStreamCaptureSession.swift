@@ -139,6 +139,20 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// is wired up.
     private let ocrPostAllowEmitter: (any OCRPostAllowEmitter)?
 
+    /// ADR-0031 §5 V2-P1 — focused-window observation store. When
+    /// non-`nil`, `start()` builds a focused-window `SCContentFilter`
+    /// (Option (a)) instead of the display-scoped filter, and the
+    /// SCStream callback runs the (frame_ts, focus_ts) race-consistency
+    /// gate before reaching the cascade. `nil` preserves pre-V2-P1
+    /// display-scoped behaviour — the legacy / headless test path.
+    private let focusedWindowStore: FocusedWindowStore?
+
+    /// ADR-0031 — companion `FocusTracker`. When supplied, `start()`
+    /// calls its `start()` and `stop()` calls its `stop()`. May be
+    /// `nil` even when `focusedWindowStore` is non-`nil` (tests own
+    /// the store directly and feed it via `FocusTracker.tickOnce(...)`).
+    private let focusTracker: FocusTracker?
+
     /// Test-only accessor: proves the OCR emitter wire is connected.
     /// Not public API — `internal` so `@testable import` can read it.
     internal var ocrPostAllowEmitterForTest: (any OCRPostAllowEmitter)? {
@@ -148,6 +162,24 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private let lock = NSLock()
     private var priorDHash: DHash?
     private var stream: SCStream?
+
+    /// ADR-0031 §5.3 — the focus generation the currently-installed
+    /// SCStream `SCContentFilter` was rebound under. Guarded by `lock`.
+    /// Read at SCStream callback time and compared against the
+    /// `FocusedWindowSnapshot.generation` observed at the same moment;
+    /// a mismatch fires the race-consistency gate.
+    ///
+    /// `0` is the sentinel for "no focused-window filter has been
+    /// installed yet" — for legacy display-filter sessions this stays
+    /// `0` and the race gate is bypassed because `focusedWindowStore`
+    /// is `nil`.
+    private var installedFocusGeneration: UInt64 = 0
+
+    /// ADR-0031 — background rebind task. Observes the focused-window
+    /// store at a faster cadence than the FocusTracker poll so the
+    /// SCStream filter follows focus changes promptly. Guarded by
+    /// `lock`; cancelled on `stop()`.
+    private var rebindTask: Task<Void, Never>?
 
     /// Set to `true` by the first invocation of
     /// `stream(_:didOutputSampleBuffer:of:)` that actually carries a
@@ -167,7 +199,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         blackedRegionProbe: PixelGridBlackedRegionProbe? = nil,
         contextSnapshot: WorkflowContextSnapshot? = nil,
         urlProvider: URLProvider? = nil,
-        ocrPostAllowEmitter: (any OCRPostAllowEmitter)? = nil
+        ocrPostAllowEmitter: (any OCRPostAllowEmitter)? = nil,
+        focusedWindowStore: FocusedWindowStore? = nil,
+        focusTracker: FocusTracker? = nil
     ) {
         self.pipeline = pipeline
         self.denylist = denylist
@@ -176,6 +210,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         self.contextSnapshot = contextSnapshot
         self.urlProvider = urlProvider
         self.ocrPostAllowEmitter = ocrPostAllowEmitter
+        self.focusedWindowStore = focusedWindowStore
+        self.focusTracker = focusTracker
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
     }
@@ -187,17 +223,66 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// `SCStream` construction, `startCapture()` all require a real
     /// screen + Screen-Recording TCC grant. Only reachable via the
     /// non-default `--capture` dev flag (Amendment 1 §4).
+    ///
+    /// ADR-0031 V2-P1: when `focusedWindowStore` was supplied, the
+    /// FocusTracker is started first, an initial focused-window
+    /// snapshot is read, and the SCStream filter is bound to that
+    /// window (Option (a) — the captured pixel surface IS the focused
+    /// window). When no focused window is observable on the initial
+    /// read, the session falls back to the display-scoped filter so
+    /// startup is never blocked by a missing focused window; the
+    /// background rebind task will swap the filter once focus is
+    /// observable. When `focusedWindowStore` is `nil` the session
+    /// preserves pre-V2-P1 display-filter behaviour byte-for-byte.
     public func start() async throws {
         // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         // Force the §2 probe back to its fail-safe initial state so a
         // stale flag from a prior session cannot bleed into this one.
         blackedRegionProbe?.reset()
-        let filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
+
+        // ADR-0031: start the FocusTracker before reading the initial
+        // snapshot. Idempotent on a tracker that's already running.
+        focusTracker?.start()
+
+        let filter: SCContentFilter
+        let initialFocusGeneration: UInt64
+        if let store = focusedWindowStore {
+            let initialSnapshot = store.currentSync()
+            // The initial focused-window read may miss (no frontmost,
+            // login window, fast-user-switch transition). Fall back to
+            // the display filter so capture is never blocked; the
+            // background rebind task will pick up the first focused
+            // window observation and swap to Option (a).
+            if let focused = initialSnapshot.focused,
+               let focusedFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
+                   windowId: focused.windowId,
+                   denylist: denylist
+               )
+            {
+                filter = focusedFilter
+                initialFocusGeneration = initialSnapshot.generation
+            } else {
+                filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
+                // Sentinel `0` — race gate will fire on every frame
+                // until the rebind task installs a real focused filter.
+                // The cascade still runs (the legacy display filter is
+                // active); the race gate path is only consulted when
+                // `focusedWindowStore` is non-nil, which is fail-closed
+                // until rebind: frames go to `focusRaceDropped`
+                // tombstones rather than mis-attributed OCREvents.
+                initialFocusGeneration = 0
+            }
+        } else {
+            filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
+            initialFocusGeneration = 0
+        }
         let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
         let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try scStream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
         try await scStream.startCapture()
         storeStream(scStream)
+        storeInstalledFocusGeneration(initialFocusGeneration)
+        startRebindTaskIfNeeded()
     }
 
     /// Stop the live capture stream (idempotent).
@@ -205,6 +290,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
     public func stop() async throws {
         // UNVERIFIED — needs live macOS; do not claim working.
+        cancelRebindTask()
+        focusTracker?.stop()
         let s = takeStream()
         try await s?.stopCapture()
         // No frames will arrive after `stopCapture()`; clear the §2
@@ -232,6 +319,101 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let prior = priorDHash
         priorDHash = next
         return prior
+    }
+
+    /// Read the currently-installed focus generation. Lock-guarded.
+    private func currentInstalledFocusGeneration() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        return installedFocusGeneration
+    }
+
+    /// Write the currently-installed focus generation. Lock-guarded.
+    private func storeInstalledFocusGeneration(_ gen: UInt64) {
+        lock.lock(); installedFocusGeneration = gen; lock.unlock()
+    }
+
+    /// Start the background rebind task that observes focus changes
+    /// and calls `updateContentFilter` on the live SCStream. Lock-
+    /// guarded; second call while running is a no-op.
+    ///
+    /// Cadence is faster than the FocusTracker's 1 Hz poll so the
+    /// SCStream filter follows focus changes promptly (target: ≤200 ms
+    /// between FocusTracker observation and SCStream rebind). The race
+    /// gate covers the residual window.
+    private func startRebindTaskIfNeeded() {
+        guard focusedWindowStore != nil else { return }
+        lock.lock()
+        guard rebindTask == nil else { lock.unlock(); return }
+        let store = focusedWindowStore!
+        let task = Task { [weak self] in
+            // Poll cadence: 200 ms. The FocusTracker writes at 1 Hz;
+            // this task picks up the change within one poll interval.
+            // The race gate covers the residual window between
+            // observation here and SCStream filter applying on the
+            // sample queue.
+            while !Task.isCancelled {
+                let snap = store.currentSync()
+                let installed = self?.currentInstalledFocusGeneration() ?? 0
+                if snap.generation != installed,
+                   let focused = snap.focused
+                {
+                    try? await self?.rebindFocusedWindow(
+                        focusedWindow: focused,
+                        snapshotGeneration: snap.generation
+                    )
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+        rebindTask = task
+        lock.unlock()
+    }
+
+    /// Cancel the rebind task (idempotent).
+    private func cancelRebindTask() {
+        lock.lock()
+        let t = rebindTask
+        rebindTask = nil
+        lock.unlock()
+        t?.cancel()
+    }
+
+    /// ADR-0031 §5.2 — rebind the live SCStream to the supplied focused
+    /// window's `SCContentFilter`. Updates the installed-focus generation
+    /// AFTER `updateContentFilter` returns so the race gate observes
+    /// the new generation only once the filter is actually in force.
+    ///
+    /// `// UNVERIFIED — needs live macOS; do not claim working`. The
+    /// `updateContentFilter` call requires a running `SCStream`; the
+    /// rebind decision (when to rebind, what filter to build) is
+    /// auditable headlessly via the
+    /// `SCContentFilterFactory.selectFocusedWindow(...)` helper.
+    public func rebindFocusedWindow(
+        focusedWindow: FocusedWindow,
+        snapshotGeneration: UInt64
+    ) async throws {
+        guard let currentStream = currentStream() else { return }
+        guard let newFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
+            windowId: focusedWindow.windowId,
+            denylist: denylist
+        ) else {
+            // Focused window was not in `SCShareableContent` (closed /
+            // off-screen) OR its owning app is denylisted. Do NOT
+            // rebind — the prior filter stays installed and the race
+            // gate continues to fire on every frame until the next
+            // focus change. This is the safe direction: a denylisted
+            // app's window can NEVER become the SCStream's bound
+            // window per ADR-0013 §1.
+            return
+        }
+        try await currentStream.updateContentFilter(newFilter)
+        storeInstalledFocusGeneration(snapshotGeneration)
+    }
+
+    /// Lock-guarded read of the live SCStream pointer.
+    private func currentStream() -> SCStream? {
+        lock.lock(); defer { lock.unlock() }
+        return stream
     }
 
     /// Atomically claim the right to emit the one-shot "first sample
@@ -290,25 +472,41 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     internal static func buildWorkflowContext(
         snapshot: WorkflowContextSnapshot?,
         urlProvider: URLProvider?,
-        fallbackAppBundleId: String?
+        fallbackAppBundleId: String?,
+        focusedSnapshot: FocusedWindowSnapshot? = nil
     ) -> WorkflowContext {
+        // ADR-0031 V2-P1: when a focused-window snapshot is supplied,
+        // its `bundleId` is the SOURCE OF TRUTH for OCREvent
+        // attribution — the captured pixel surface IS the focused
+        // window per Option (a), so the cascade must see the focused
+        // window's bundle, not the polled frontmost-app id. In practice
+        // they match (the focused window's owning app == the
+        // frontmost app), but only the focused-window read composes
+        // correctly with the §5.3 race-consistency gate.
+        let focusedBundleId: String? = focusedSnapshot?.focused?.bundleId
+
         guard let snapshotActor = snapshot else {
+            // No `WorkflowContextSnapshot` wired (legacy / headless
+            // tests). Use the focused-window bundle id when available,
+            // fall back to the in-callback extractor's nil-by-design
+            // bundle id otherwise.
             return WorkflowContext(
-                appBundleId: fallbackAppBundleId,
+                appBundleId: focusedBundleId ?? fallbackAppBundleId,
                 windowTitle: nil,
                 url: nil,
                 pageText: nil
             )
         }
         let snap = snapshotActor.currentSync()
+        let effectiveBundleId: String? = focusedBundleId ?? snap.appBundleId
         let resolvedUrl: String?
-        if let id = snap.appBundleId, !id.isEmpty {
+        if let id = effectiveBundleId, !id.isEmpty {
             resolvedUrl = urlProvider?.activeTabURL(forFrontmost: id)
         } else {
             resolvedUrl = nil
         }
         return WorkflowContext(
-            appBundleId: snap.appBundleId,
+            appBundleId: effectiveBundleId,
             windowTitle: snap.windowTitle,
             url: resolvedUrl,
             pageText: nil
@@ -372,16 +570,65 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             dhash: sample.dhash,
             priorDhash: prior
         )
+
+        // ADR-0031 §5.3 — race-consistency gate. When the session is
+        // wired with a `focusedWindowStore` (Option (a) is active),
+        // compare the generation observed at THIS sample timestamp
+        // against the generation the live SCStream filter was bound
+        // under. A mismatch means focus changed between filter install
+        // and frame delivery — the captured pixels may belong to a
+        // different window than the focused-window snapshot reports.
+        // Fail closed: emit a `focusRaceDropped` tombstone via the
+        // pipeline and skip cascade + encode + OCR for this frame.
+        //
+        // Read the snapshot once into a local so the focused-window
+        // bundle id reaches `buildWorkflowContext(...)` AND the same
+        // generation drives the gate — no torn read between the gate
+        // decision and the attribution decision.
+        let focusedSnapshot: FocusedWindowSnapshot? = focusedWindowStore?.currentSync()
+        if focusedWindowStore != nil {
+            let installedGen = currentInstalledFocusGeneration()
+            if focusedSnapshot?.generation != installedGen {
+                let nowUsForRace = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
+                let raceBundle = focusedSnapshot?.focused?.bundleId ?? ""
+                // Build the surface lease + release the surface in the
+                // pipeline's emit helper. We construct the lease here
+                // (same shape as the normal path) so the IOSurface
+                // retain lifecycle is identical to a `.suppress` exit.
+                let raceReleaser: any SurfaceReleasing
+                if CMSampleBufferGetImageBuffer(sampleBuffer) != nil {
+                    // `// UNVERIFIED — needs live macOS; do not claim working`.
+                    raceReleaser = BorrowedNoRetainReleaser()
+                } else {
+                    raceReleaser = BorrowedNoRetainReleaser()
+                }
+                let raceLease = SurfaceLease(releaser: raceReleaser)
+                let pipeline = self.pipeline
+                Task.detached {
+                    try? await pipeline.emitFocusRaceDropped(
+                        tsUs: nowUsForRace,
+                        appBundle: raceBundle,
+                        lease: raceLease
+                    )
+                }
+                return
+            }
+        }
+
         // ADR-0015 §6 P2.5 — context join. Delegates to the pure
         // `buildWorkflowContext(...)` helper below so the wiring is
         // exercisable from a headless test (`SCStreamCaptureSession`'s
         // SCStream callback itself is `// UNVERIFIED — needs live
         // macOS`; the *decision* about how the snapshot + URL provider
         // assemble into a `WorkflowContext` is pure and IS tested).
+        //
+        // ADR-0031 V2-P1: when `focusedSnapshot` is non-nil its
+        // `bundleId` is the SOURCE OF TRUTH for OCREvent attribution.
         let context = Self.buildWorkflowContext(
             snapshot: contextSnapshot,
             urlProvider: urlProvider,
-            fallbackAppBundleId: sample.appBundleId
+            fallbackAppBundleId: sample.appBundleId,
+            focusedSnapshot: focusedSnapshot
         )
         let nowUs = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
 

@@ -273,6 +273,7 @@ mod tests {
             frames_dropped_backpressure: 0,
             frames_dropped_late_ack: 0,
             frames_encode_failed: 0,
+            frames_focus_race_dropped: 0,
         };
         let bytes = encode(0, &msg);
         let expected_len = bytes.len();

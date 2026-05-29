@@ -48,20 +48,25 @@ import sys
 from collections import Counter
 
 MAGIC = 0x4D
-# wire bumped 0x06->0x07 (ocr-emit-silence fix —
-# docs/research/ocr-emit-silence-2026-05-28.md). HelperHealth gained the
-# `frames_encode_failed` counter. Decoder dual-accepts 0x06 (legacy
-# helper, `frames_encode_failed` absent) and 0x07.
-VERSION = 0x07
-ACCEPTED_VERSIONS = (VERSION, 0x06)
+# wire bumped 0x07->0x08 (ADR-0031 V2-P1 —
+# docs/research/capture-scope-window-vs-display-2026-05-29.md §5.3).
+# HelperHealth gained the `frames_focus_race_dropped` counter. Decoder
+# dual-accepts 0x07 (legacy helper, `frames_focus_race_dropped` absent)
+# and 0x08. 0x06 reaches end-of-support at this bump per the
+# one-cycle rolling-restart window documented on Rust-side
+# `FRAME_VERSION`.
+VERSION = 0x08
+ACCEPTED_VERSIONS = (VERSION, 0x07)
 HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
-# HelperHealth v0x06 payload = 7 × u64 LE = 56 bytes:
+# HelperHealth v0x07 payload = 8 × u64 LE = 64 bytes:
 #   uptime_ms · frames_delivered · frames_suppressed ·
 #   frames_redacted_by_failsafe · cascade_forced_count ·
-#   frames_dropped_backpressure · frames_dropped_late_ack
-# v0x07 appends `frames_encode_failed`, totalling 8 × u64 LE = 64 bytes.
-HELPER_HEALTH_PAYLOAD_V06 = 7 * 8
+#   frames_dropped_backpressure · frames_dropped_late_ack ·
+#   frames_encode_failed
+# v0x08 appends `frames_focus_race_dropped`, totalling 9 × u64 LE = 72
+# bytes.
 HELPER_HEALTH_PAYLOAD_V07 = 8 * 8
+HELPER_HEALTH_PAYLOAD_V08 = 9 * 8
 # OCREvent v0x04 fixed-header layout (ADR-0016 §1.6):
 #   seq u64 · ts_us u64 · app_bundle_id [u8; 64] ·
 #   window_title_len u16 · url_len u16 · ocr_text_len u32 ·
@@ -89,6 +94,7 @@ REASON = {
     5: "denylist-postcapture",
     6: "ocr-time-secret",
     7: "failsafe-unknown",
+    8: "focus-race-dropped",
 }
 
 
@@ -190,25 +196,14 @@ def main(path, verbose):
     health_frames = [(v, s, p) for (m, v, s, p) in frames if m == 0x0030]
     ocr_events = [(s, p) for (m, _v, s, p) in frames if m == 0x0040]
 
-    # HelperHealth: 0x06 payload = 7 u64s, 0x07 payload = 8 u64s
-    # (frames_encode_failed appended — ocr-emit-silence fix). Parse
+    # HelperHealth: 0x07 payload = 8 u64s, 0x08 payload = 9 u64s
+    # (frames_focus_race_dropped appended — ADR-0031 V2-P1). Parse
     # what we can — a malformed payload-length-mismatch is reported,
     # not silently papered over.
     health_parsed = []  # list of dicts in chronological seq order
     health_malformed = []
     for v, s, p in health_frames:
-        if v == 0x06 and len(p) == HELPER_HEALTH_PAYLOAD_V06:
-            (
-                uptime_ms,
-                frames_delivered,
-                frames_suppressed,
-                frames_redacted_by_failsafe,
-                cascade_forced_count,
-                frames_dropped_backpressure,
-                frames_dropped_late_ack,
-            ) = struct.unpack_from("<QQQQQQQ", p, 0)
-            frames_encode_failed = 0
-        elif v == 0x07 and len(p) == HELPER_HEALTH_PAYLOAD_V07:
+        if v == 0x07 and len(p) == HELPER_HEALTH_PAYLOAD_V07:
             (
                 uptime_ms,
                 frames_delivered,
@@ -219,6 +214,19 @@ def main(path, verbose):
                 frames_dropped_late_ack,
                 frames_encode_failed,
             ) = struct.unpack_from("<QQQQQQQQ", p, 0)
+            frames_focus_race_dropped = 0
+        elif v == 0x08 and len(p) == HELPER_HEALTH_PAYLOAD_V08:
+            (
+                uptime_ms,
+                frames_delivered,
+                frames_suppressed,
+                frames_redacted_by_failsafe,
+                cascade_forced_count,
+                frames_dropped_backpressure,
+                frames_dropped_late_ack,
+                frames_encode_failed,
+                frames_focus_race_dropped,
+            ) = struct.unpack_from("<QQQQQQQQQ", p, 0)
         else:
             health_malformed.append((s, len(p), v))
             continue
@@ -232,6 +240,7 @@ def main(path, verbose):
             "frames_dropped_backpressure": frames_dropped_backpressure,
             "frames_dropped_late_ack": frames_dropped_late_ack,
             "frames_encode_failed": frames_encode_failed,
+            "frames_focus_race_dropped": frames_focus_race_dropped,
         })
 
     reason_hist = Counter()
@@ -302,13 +311,13 @@ def main(path, verbose):
         print(f"                    title={sample['window_title']!r}  url={sample['url']!r}")
         print(f"                    ocr_text_len={sample['ocr_text_len']}")
 
-    # ---- HelperHealth (wire 0x07 — frames_encode_failed added) ----
+    # ---- HelperHealth (wire 0x08 — frames_focus_race_dropped added) ----
     print("--- HelperHealth (0x0030) ---")
     print(f"  count           : {len(health_frames)}")
     if health_malformed:
         print(
             f"  MALFORMED       : {len(health_malformed)} frame(s) — payload len mismatch "
-            f"(expected {HELPER_HEALTH_PAYLOAD_V06} bytes @ v0x06 or {HELPER_HEALTH_PAYLOAD_V07} @ v0x07)"
+            f"(expected {HELPER_HEALTH_PAYLOAD_V07} bytes @ v0x07 or {HELPER_HEALTH_PAYLOAD_V08} @ v0x08)"
         )
         for s, ln, vv in health_malformed[:10]:
             print(f"    seq={s} ver=0x{vv:02X} len={ln}")
@@ -324,6 +333,7 @@ def main(path, verbose):
         print(f"                    frames_dropped_backpressure={last['frames_dropped_backpressure']}")
         print(f"                    frames_dropped_late_ack={last['frames_dropped_late_ack']}")
         print(f"                    frames_encode_failed={last['frames_encode_failed']}")
+        print(f"                    frames_focus_race_dropped={last['frames_focus_race_dropped']}")
         # End-of-stream running totals: each counter is monotonic, so
         # the final HelperHealth carries the run totals. We print them
         # explicitly alongside the per-message snapshot for the
@@ -331,7 +341,8 @@ def main(path, verbose):
         print(
             f"  running totals  : frames_redacted_by_failsafe={last['frames_redacted_by_failsafe']}  "
             f"cascade_forced_count={last['cascade_forced_count']}  "
-            f"frames_encode_failed={last['frames_encode_failed']}"
+            f"frames_encode_failed={last['frames_encode_failed']}  "
+            f"frames_focus_race_dropped={last['frames_focus_race_dropped']}"
         )
 
     if verbose:

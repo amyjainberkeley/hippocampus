@@ -63,6 +63,7 @@ pub fn pump_one(
         frames_dropped_backpressure,
         frames_dropped_late_ack,
         frames_encode_failed,
+        frames_focus_race_dropped,
     } = &frame.message
     else {
         // `Routed::Health` is only constructed from `HelperHealth`
@@ -81,6 +82,7 @@ pub fn pump_one(
         frames_dropped_backpressure: *frames_dropped_backpressure,
         frames_dropped_late_ack: *frames_dropped_late_ack,
         frames_encode_failed: *frames_encode_failed,
+        frames_focus_race_dropped: *frames_focus_race_dropped,
     })
 }
 
@@ -107,6 +109,7 @@ mod tests {
                 frames_dropped_backpressure: 1,
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 2,
+                frames_focus_race_dropped: 6,
             },
         }
     }

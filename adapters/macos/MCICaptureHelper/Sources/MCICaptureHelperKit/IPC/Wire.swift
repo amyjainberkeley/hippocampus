@@ -46,7 +46,14 @@ public let frameMagic: UInt8 = 0x4D
 /// Content-free counter — same discipline as
 /// `frames_redacted_by_failsafe`. The core decoder accepts both 0x06 and
 /// 0x07 for rolling-restart safety; the helper-side encoder emits 0x07.
-public let frameVersion: UInt8 = 0x07
+/// 0x07→0x08 (2026-05-29, ADR-0031 V2-P1): HelperHealth gained the
+/// `frames_focus_race_dropped` counter
+/// (`docs/research/capture-scope-window-vs-display-2026-05-29.md` §5.3).
+/// Trip-wire for the focused-window race-consistency gate (Option (a)
+/// captured surface). Content-free observability counter; never widens
+/// `.allow`. Core decoder accepts both 0x07 and 0x08 for rolling-restart
+/// safety; 0x06 reaches end-of-support at this bump.
+public let frameVersion: UInt8 = 0x08
 
 /// Minimum frame header size in bytes.
 public let minFrameHeaderBytes = 1 + 1 + 2 + 8 + 4
@@ -324,7 +331,8 @@ public func encodeHelperHealth(
     cascadeForcedCount: UInt64,
     framesDroppedBackpressure: UInt64,
     framesDroppedLateAck: UInt64,
-    framesEncodeFailed: UInt64
+    framesEncodeFailed: UInt64,
+    framesFocusRaceDropped: UInt64
 ) -> Data {
     var payload = Data()
     payload.appendUInt64LE(uptimeMs)
@@ -341,10 +349,14 @@ public func encodeHelperHealth(
     payload.appendUInt64LE(framesDroppedBackpressure)
     payload.appendUInt64LE(framesDroppedLateAck)
     // ocr-emit-silence fix — wire 0x07. Counts VideoToolbox HEVC
-    // encode throws on the cascade `.allow` branch. Appended last so
-    // the core decoder's 0x06-fallback path can default it to 0
-    // (rolling-restart safety). Order matches core::ipc::wire decode.
+    // encode throws on the cascade `.allow` branch. Order matches
+    // core::ipc::wire decode.
     payload.appendUInt64LE(framesEncodeFailed)
+    // ADR-0031 V2-P1 — wire 0x08. Counts frames dropped by the
+    // (frame_ts, focus_ts) race-consistency gate. Appended last so the
+    // core decoder's 0x07-fallback path can default it to 0 (rolling-
+    // restart safety). Order matches core::ipc::wire decode.
+    payload.appendUInt64LE(framesFocusRaceDropped)
     return assembleFrame(msgType: .helperHealth, seq: seq, payload: payload)
 }
 

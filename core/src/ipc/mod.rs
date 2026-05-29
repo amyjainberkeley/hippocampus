@@ -272,6 +272,20 @@ pub enum Message {
         /// silently muted the cascade-twice OCR emitter, which is the
         /// regression this counter trip-wires.
         frames_encode_failed: u64,
+        /// Cumulative count of frames dropped by the ADR-0031 §5.3
+        /// race-consistency gate — the `FocusedWindowStore.generation`
+        /// observed at SCStream callback time did NOT match the
+        /// `installedFocusGeneration` the live SCStream's filter was
+        /// rebound under. Such frames emit a
+        /// `PrivacyTombstone(reason=FocusRaceDropped)` instead of
+        /// running the cascade-twice OCR emitter — fail-closed per
+        /// ADR-0013 §3 + Amendment 1 §3(b). Promoted to the wire by
+        /// the `0x07 → 0x08` bump (V2-P1 / ADR-0031). Content-free
+        /// observability counter; never widens `.allow`. A spike here
+        /// indicates rapid focus changes (alt-tab cadence faster than
+        /// the rebind task), Electron AX intermittency drifting the
+        /// FocusTracker, or a pathological focus-loop bug.
+        frames_focus_race_dropped: u64,
     },
 }
 
@@ -339,6 +353,14 @@ pub enum RedactionReason {
     /// Cascade §7 — fail-safe default: helper could not positively classify
     /// the focused element with reasonable confidence.
     FailsafeUnknown,
+    /// ADR-0031 §5.3 — focus changed between SCStream filter install and
+    /// frame callback. The captured pixel buffer may correspond to a
+    /// different focused window than the frame's attribution metadata,
+    /// so the helper fails closed and emits this tombstone instead of
+    /// running the cascade-twice OCR emitter. PROTECTED-SET — discriminant
+    /// lock-stepped with `RedactionReason::focusRaceDropped` (= 8) on the
+    /// Swift helper side.
+    FocusRaceDropped,
 }
 
 impl RedactionReason {
@@ -353,6 +375,7 @@ impl RedactionReason {
             Self::DenylistPostCapture => 5,
             Self::OcrTimeSecret => 6,
             Self::FailsafeUnknown => 7,
+            Self::FocusRaceDropped => 8,
         }
     }
 
@@ -369,6 +392,7 @@ impl RedactionReason {
             5 => Self::DenylistPostCapture,
             6 => Self::OcrTimeSecret,
             7 => Self::FailsafeUnknown,
+            8 => Self::FocusRaceDropped,
             other => {
                 return Err(DecodeError::InvalidEnum {
                     field: "RedactionReason",
@@ -390,6 +414,7 @@ impl RedactionReason {
             Self::DenylistPostCapture => "denylist-postcapture",
             Self::OcrTimeSecret => "ocr-time-secret",
             Self::FailsafeUnknown => "failsafe-unknown",
+            Self::FocusRaceDropped => "focus-race-dropped",
         }
     }
 }
@@ -440,6 +465,7 @@ mod tests {
             RedactionReason::DenylistPostCapture,
             RedactionReason::OcrTimeSecret,
             RedactionReason::FailsafeUnknown,
+            RedactionReason::FocusRaceDropped,
         ] {
             let b = r.as_u8();
             let r2 = RedactionReason::from_u8(b).unwrap();
@@ -508,6 +534,7 @@ mod tests {
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
+                frames_focus_race_dropped: 0,
             },
             Message::OCREvent {
                 seq: 0,
