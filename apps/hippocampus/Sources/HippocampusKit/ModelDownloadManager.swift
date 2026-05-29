@@ -53,12 +53,17 @@ public actor ModelDownloadManager {
 
         if let data = manifestData, let m = try? JSONDecoder().decode(ModelManifest.self, from: data) {
             self.manifest = m
-        } else if let bundledURL = Bundle.module.url(forResource: "models", withExtension: "json"),
-                  let data = try? Data(contentsOf: bundledURL),
-                  let m = try? JSONDecoder().decode(ModelManifest.self, from: data) {
-            self.manifest = m
         } else if let mainURL = Bundle.main.url(forResource: "models", withExtension: "json"),
                   let data = try? Data(contentsOf: mainURL),
+                  let m = try? JSONDecoder().decode(ModelManifest.self, from: data) {
+            // Bundle.main lookup MUST come before Bundle.module — the SwiftPM-
+            // generated Bundle.module accessor fatalError's on cold init when
+            // its hardcoded fallback path (a build-host-absolute .build dir)
+            // does not exist on the end-user machine. See scripts/build-app.sh
+            // KIT_BUNDLE comment + cycle 8.17 reship for full context.
+            self.manifest = m
+        } else if let bundledURL = Bundle.module.url(forResource: "models", withExtension: "json"),
+                  let data = try? Data(contentsOf: bundledURL),
                   let m = try? JSONDecoder().decode(ModelManifest.self, from: data) {
             self.manifest = m
         } else {

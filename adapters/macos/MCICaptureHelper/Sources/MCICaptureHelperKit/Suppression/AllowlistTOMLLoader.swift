@@ -345,13 +345,25 @@ extension AllowlistTOMLLoader {
 
     /// Default URL resolver chain. See `loadBundled()` doc for the
     /// rationale behind each path.
+    ///
+    /// Path 1 (Bundle.main / .app `Contents/Resources/`) MUST come before
+    /// Path 2 (SPM's Bundle.module). The SwiftPM-generated Bundle.module
+    /// accessor fatalError's on cold init when its hardcoded fallback
+    /// path (a build-host-absolute .build dir) does not exist on the
+    /// end-user machine — touching Bundle.module on the .app install
+    /// would crash the helper process before any resolver could fail-
+    /// over to Bundle.main. See scripts/build-app.sh KIT_BUNDLE comment
+    /// + cycle 8.17 reship for full context.
     public static func defaultResolvers() -> [() -> URL?] {
         [
-            // Path 1: SPM's Bundle.module (swift test / swift run).
-            { Bundle.module.url(forResource: bundledResourceName, withExtension: "toml") },
-            // Path 2: standard .app bundle (Contents/Resources/).
+            // Path 1: standard .app bundle (Contents/Resources/) —
+            // production install path; tried first so the helper does
+            // not touch Bundle.module's crash-prone static-let init.
             { Bundle.main.url(forResource: bundledResourceName, withExtension: "toml") },
-            // Path 3: SPM resource bundle as sibling of executable.
+            // Path 2: SPM resource bundle as sibling of executable —
+            // covers `.app` installs where build-app.sh copied the
+            // SPM-generated bundle into Contents/MacOS/ rather than
+            // Resources/. Also a no-Bundle.module path.
             {
                 guard let execURL = Bundle.main.executableURL else { return nil }
                 let sibling = execURL
@@ -361,6 +373,10 @@ extension AllowlistTOMLLoader {
                 return FileManager.default.fileExists(atPath: sibling.path)
                     ? sibling : nil
             },
+            // Path 3: SPM's Bundle.module — `swift test` / `swift run`
+            // from the package directory. LAST because accessing it on
+            // an end-user install fatalError's via the SwiftPM accessor.
+            { Bundle.module.url(forResource: bundledResourceName, withExtension: "toml") },
         ]
     }
 }

@@ -145,6 +145,21 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
+# Launch-verify gate — FATAL.
+# Second invocation (build-app.sh runs it once on the just-built bundle).
+# Re-run here so --skip-build paths still trip the gate, and so the gate
+# also fires before notarization + DMG packaging in the canonical flow.
+# Catches the cycle 8.16 class of crash-on-launch regression that the
+# Gatekeeper + notary path does not detect (see scripts/verify-app-launches.sh).
+LAUNCH_VERIFY="$REPO_ROOT/scripts/verify-app-launches.sh"
+if [[ -x "$LAUNCH_VERIFY" ]]; then
+    echo ""
+    echo "--- Launch-verify gate (pre-notarize) ---"
+    "$LAUNCH_VERIFY" "$APP_PATH"
+else
+    echo "WARNING: scripts/verify-app-launches.sh not found — skipping launch gate."
+fi
+
 # --- Step 2: Codesign (Developer ID or ad-hoc) ---
 
 ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements"

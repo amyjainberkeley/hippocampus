@@ -73,10 +73,42 @@ APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 INFO_PLIST="$SCRIPT_DIR/Info.plist"
 
 # SwiftPM emits {Package}_{Target}.bundle next to the executable for any
-# target that declares `resources:` in Package.swift. Bundle.module looks
-# for it inside Contents/Resources/ when the app is shipped outside Xcode;
-# omitting it crashes the app at startup with a "could not load resource
-# bundle" fatal error from resource_bundle_accessor.swift.
+# target that declares `resources:` in Package.swift, plus an auto-
+# generated `resource_bundle_accessor.swift` that exposes `Bundle.module`.
+# The Swift 6.3 accessor checks exactly two paths:
+#
+#   1. Bundle.main.bundleURL.appendingPathComponent(<name>.bundle)
+#      For an .app, Bundle.main.bundleURL IS the .app directory itself,
+#      so this resolves to <.app>/Hippocampus_HippocampusKit.bundle —
+#      the TOP LEVEL of the bundle, NOT Contents/Resources/. codesign
+#      rejects any content (directory OR symlink) at the .app root with
+#      "unsealed contents present in the bundle root", so we cannot
+#      satisfy this lookup on a Developer-ID-signed build.
+#   2. A compile-time absolute fallback to .build/<arch>/release/<name>.bundle
+#      that exists on the build host but not on end-user machines.
+#
+# Cycle 8.16 (DMG 8d4dfc22…) crashed on launch on every end-user machine
+# because both lookups missed. Cycle 8.15 (3fdbc52a…) and earlier appeared
+# to work only because the dev-build fallback path happened to exist on
+# the CEO's primary checkout (`/Users/ao/Documents/GitHub/mci/...`). The
+# /tmp/dmg-reship-cycle-8.16 worktree was deleted post-build, exposing
+# the latent crash.
+#
+# Cycle 8.17 fix has two halves:
+#   (a) ModelDownloadManager + AllowlistTOMLLoader: swap resolver order
+#       so Bundle.main (Contents/Resources/) is queried BEFORE Bundle.module.
+#       Accessing Bundle.module triggers the SwiftPM accessor's static-let
+#       init which fatalError's when both lookups miss — the prior Bundle.main
+#       fallback at line 60 was dead code.
+#   (b) This script copies the real `models.json` and `known-safe-apps.toml`
+#       directly into Contents/Resources/ alongside the SwiftPM resource
+#       bundle. Bundle.main.url(forResource:withExtension:) reads from
+#       Contents/Resources/ for an .app, so the resolver-order swap above
+#       finds the file via the macOS-conventional path and never touches
+#       Bundle.module on a production install. The Contents/Resources/
+#       `Hippocampus_HippocampusKit.bundle` directory is retained as a
+#       defense-in-depth for any future Bundle.module access via the
+#       SwiftPM accessor's (now non-load-bearing) fallback path.
 HIPPOCAMPUS_KIT_BUNDLE="$PKG_DIR/.build/$PROFILE/Hippocampus_HippocampusKit.bundle"
 
 FRAMEWORKS="$CONTENTS/Frameworks"
@@ -144,11 +176,29 @@ if [[ -f "$KNOWN_SAFE" ]]; then
     cp "$KNOWN_SAFE" "$RESOURCES/known-safe-apps.toml"
 fi
 
-# Copy SwiftPM-generated resource bundle for HippocampusKit.
-# Fatal because Bundle.module callers (e.g. ModelDownloadManager) crash
-# at startup if it is missing — better to fail at build time.
+# Copy SwiftPM-generated resource bundle for HippocampusKit into
+# Contents/Resources/ (macOS-conventional location; codesign seals it as
+# part of the .app's signed-resource set). Bundle.module's primary lookup
+# does NOT find it there for an .app wrapper, but Bundle.main can — and
+# the resolver-order swap in ModelDownloadManager + AllowlistTOMLLoader
+# (cycle 8.17) routes through Bundle.main first. We additionally copy
+# `models.json` directly into Contents/Resources/ so
+# Bundle.main.url(forResource: "models", withExtension: "json") returns
+# a valid URL via the .app's standard resource search path.
+KIT_BUNDLE_NAME="$(basename "$HIPPOCAMPUS_KIT_BUNDLE")"
 if [[ -d "$HIPPOCAMPUS_KIT_BUNDLE" ]]; then
-    ditto "$HIPPOCAMPUS_KIT_BUNDLE" "$RESOURCES/$(basename "$HIPPOCAMPUS_KIT_BUNDLE")"
+    ditto "$HIPPOCAMPUS_KIT_BUNDLE" "$RESOURCES/$KIT_BUNDLE_NAME"
+    # Hoist models.json to the .app's standard resource root. The Bundle.main-
+    # first resolver-order swap in ModelDownloadManager.swift reads from here
+    # on production installs, avoiding the SwiftPM Bundle.module accessor's
+    # fatalError path entirely. Fatal because the on-launch decode chain
+    # would silently fall through to an empty manifest otherwise.
+    if [[ -f "$HIPPOCAMPUS_KIT_BUNDLE/models.json" ]]; then
+        cp "$HIPPOCAMPUS_KIT_BUNDLE/models.json" "$RESOURCES/models.json"
+    else
+        echo "ERROR: models.json missing inside $HIPPOCAMPUS_KIT_BUNDLE"
+        exit 1
+    fi
 else
     echo "ERROR: HippocampusKit resource bundle not found at $HIPPOCAMPUS_KIT_BUNDLE"
     echo "Run 'swift build -c $PROFILE' in apps/hippocampus/ first."
@@ -453,6 +503,21 @@ if [[ -x "$VERIFY_SCRIPT" ]]; then
     echo ""
     echo "=== Model validation ==="
     "$VERIFY_SCRIPT" --app "$APP" || true
+fi
+
+# Launch-verify gate — FATAL.
+# Catches the cycle 8.16 class of regression where the .app passes
+# syspolicy_check + Gatekeeper + notarization but crashes on launch
+# because a structural-init invariant (resource bundle path, rpath,
+# missing dyld dep) is wrong. Run after all codesigning so we test the
+# actual on-disk artifact that will be packaged.
+LAUNCH_VERIFY="$REPO_ROOT/scripts/verify-app-launches.sh"
+if [[ -x "$LAUNCH_VERIFY" ]]; then
+    echo ""
+    echo "=== Launch-verify gate ==="
+    "$LAUNCH_VERIFY" "$APP"
+else
+    echo "WARNING: scripts/verify-app-launches.sh not found — skipping launch gate."
 fi
 
 echo ""
