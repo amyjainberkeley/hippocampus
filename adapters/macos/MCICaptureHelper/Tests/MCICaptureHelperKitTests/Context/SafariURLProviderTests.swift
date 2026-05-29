@@ -277,9 +277,113 @@ final class SafariURLProviderTests: XCTestCase {
         XCTAssertEqual(SafariURLProvider.bundleId, "com.apple.Safari")
     }
 
-    /// Cache TTL matches the ADR-0015 §3 snapshot-poll period.
-    func testCacheTTLIsOneSecond() {
-        XCTAssertEqual(SafariURLProvider.cacheTTL, 1.0)
+    /// V2-P2: cache TTL dropped 1.0 s → 100 ms to shrink the
+    /// stale-URL window after intra-browser tab switches (memo
+    /// `docs/research/tab-attribution-mix-2026-05-29.md` §3).
+    func testCacheTTLIs100Milliseconds() {
+        XCTAssertEqual(SafariURLProvider.cacheTTL, 0.100)
+    }
+
+    // MARK: – (V2-P2) focus-key invalidation
+
+    /// Two calls within the 100 ms TTL but with DIFFERENT
+    /// `focusedWindowId` values invoke the runner twice — a focus
+    /// change to a different Safari window (different CGWindowID,
+    /// possibly a different active tab) invalidates the cache even
+    /// inside the TTL.
+    func testFocusedWindowChangeInvalidatesCacheWithinTTL() {
+        let runner = StubAppleScriptRunner(
+            outcomes: [
+                .success("https://window-a.example.com/"),
+                .success("https://window-b.example.com/"),
+            ],
+            fallback: .scriptError
+        )
+        let clock = FakeClock()
+        let p = SafariURLProvider(runner: runner, clock: clock.reader())
+
+        // First call binds (bundle, windowA).
+        let a = p.activeTabURL(
+            forFrontmost: SafariURLProvider.bundleId,
+            focusedWindowId: 100
+        )
+        // Same bundle, DIFFERENT window id — still inside TTL but
+        // the key changed, so the runner must be invoked again.
+        clock.advance(SafariURLProvider.cacheTTL / 2)
+        let b = p.activeTabURL(
+            forFrontmost: SafariURLProvider.bundleId,
+            focusedWindowId: 200
+        )
+
+        XCTAssertEqual(a, "https://window-a.example.com/")
+        XCTAssertEqual(b, "https://window-b.example.com/")
+        XCTAssertEqual(
+            runner.invocationCount, 2,
+            "Focus change to a different windowId must invalidate"
+            + " the cache within the TTL"
+        )
+    }
+
+    /// Two calls within the TTL with the SAME `focusedWindowId`
+    /// hit the cache (single runner invocation). Pins the cache key
+    /// is `(bundleId, focusedWindowId)` not just `bundleId`.
+    func testCachedWithinTTLForSameFocusedWindow() {
+        let runner = StubAppleScriptRunner(
+            outcomes: [
+                .success("https://first.example.com/"),
+                .success("https://second.example.com/"),
+            ],
+            fallback: .scriptError
+        )
+        let clock = FakeClock()
+        let p = SafariURLProvider(runner: runner, clock: clock.reader())
+
+        let a = p.activeTabURL(
+            forFrontmost: SafariURLProvider.bundleId,
+            focusedWindowId: 42
+        )
+        clock.advance(SafariURLProvider.cacheTTL - 0.010)
+        let b = p.activeTabURL(
+            forFrontmost: SafariURLProvider.bundleId,
+            focusedWindowId: 42
+        )
+
+        XCTAssertEqual(a, "https://first.example.com/")
+        XCTAssertEqual(b, "https://first.example.com/")
+        XCTAssertEqual(runner.invocationCount, 1)
+    }
+
+    /// Calling the simple `activeTabURL(forFrontmost:)` overload
+    /// keys the cache under `(bundleId, nil)`. A subsequent call
+    /// with the focus-aware overload using `focusedWindowId: nil`
+    /// MUST hit the same cache slot.
+    func testSimpleAndFocusAwareOverloadsShareTheNilWindowSlot() {
+        let runner = StubAppleScriptRunner(
+            outcomes: [
+                .success("https://shared.example.com/"),
+                .success("https://different.example.com/"),
+            ],
+            fallback: .scriptError
+        )
+        let clock = FakeClock()
+        let p = SafariURLProvider(runner: runner, clock: clock.reader())
+
+        // Simple overload → (bundle, nil) slot.
+        let a = p.activeTabURL(forFrontmost: SafariURLProvider.bundleId)
+        clock.advance(SafariURLProvider.cacheTTL / 2)
+        // Focus-aware overload with nil → SAME slot.
+        let b = p.activeTabURL(
+            forFrontmost: SafariURLProvider.bundleId,
+            focusedWindowId: nil
+        )
+
+        XCTAssertEqual(a, "https://shared.example.com/")
+        XCTAssertEqual(b, "https://shared.example.com/")
+        XCTAssertEqual(
+            runner.invocationCount, 1,
+            "Simple overload and focus-aware overload with nil window"
+            + " id must share the same cache slot"
+        )
     }
 
     /// Timeout bound matches the ADR-0015 P2.3 acceptance brief.

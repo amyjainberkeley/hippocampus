@@ -50,6 +50,7 @@ fn blank_event(ts_us: u64, text: &str) -> Event {
         episode_id: None,
         cascade_reason: 0,
         keyframe_blob: None,
+        tab_id: None,
         embedding: None,
     }
 }
@@ -124,7 +125,11 @@ fn new_creates_encrypted_db_and_runs_migration() {
             |r| r.get(0),
         )
         .expect("brain_schema_version stamp");
-    assert_eq!(v, "1");
+    // V2-P2 migration 0003 stamps brain_schema_version = '3'. The
+    // intermediate '2' was never published (briefs uses a separate
+    // briefs_schema_version key) — the brain main-schema version
+    // jumps 1 → 3 at this PR.
+    assert_eq!(v, "3");
 }
 
 // ---------------------------------------------------------------------------
@@ -748,6 +753,7 @@ fn app_event(ts_us: u64, app: &str) -> Event {
         episode_id: None,
         cascade_reason: 0,
         keyframe_blob: None,
+        tab_id: None,
         embedding: None,
     }
 }
@@ -815,4 +821,88 @@ fn observed_apps_zero_limit_returns_empty() {
     store.put_event(&app_event(1, "com.apple.Safari")).unwrap();
     let out = store.observed_apps(0, None).expect("observed_apps");
     assert!(out.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// V2-P2 — events.tab_id round-trip (migration 0003)
+// ---------------------------------------------------------------------------
+
+/// Two events with the same `url` but distinct `tab_id` values must
+/// round-trip as DISTINCT rows. Pins the V2-P2 fix shape end-to-end
+/// on the brain side: per-tab attribution survives put_event +
+/// get_event without collapsing on the URL key.
+#[test]
+fn put_then_get_round_trips_distinct_tab_ids_under_shared_url() {
+    let (_dir, path) = tmp("tab_id_distinct.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    let url = "https://example.com/page".to_string();
+    let mut a = blank_event(1_000_000, "tab A content");
+    a.url = Some(url.clone());
+    a.tab_id = Some(101);
+    let mut b = blank_event(2_000_000, "tab B content");
+    b.url = Some(url.clone());
+    b.tab_id = Some(202);
+
+    let id_a = store.put_event(&a).expect("put a");
+    let id_b = store.put_event(&b).expect("put b");
+    assert_ne!(id_a, id_b, "distinct row ids");
+
+    let got_a = store.get_event(id_a).unwrap().expect("a");
+    let got_b = store.get_event(id_b).unwrap().expect("b");
+    assert_eq!(got_a.tab_id, Some(101));
+    assert_eq!(got_b.tab_id, Some(202));
+    assert_eq!(got_a.url, Some(url.clone()));
+    assert_eq!(got_b.url, Some(url));
+}
+
+/// Inserting an event with `tab_id = None` (OCREvent path; no tab
+/// signal) round-trips as NULL on disk and `None` in the read model.
+#[test]
+fn put_event_with_null_tab_id_round_trips_as_none() {
+    let (_dir, path) = tmp("tab_id_none.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    let ev = blank_event(3_000_000, "ocr event with no tab signal");
+    assert!(ev.tab_id.is_none(), "fixture default");
+    let id = store.put_event(&ev).expect("put");
+    let got = store.get_event(id).unwrap().expect("get");
+    assert!(got.tab_id.is_none(), "NULL on the wire ⇒ None in the model");
+}
+
+/// `recent_events` surfaces `tab_id` on each returned row. Pins the
+/// full-column SELECT path includes the new column post-migration.
+#[test]
+fn recent_events_returns_tab_id_column() {
+    let (_dir, path) = tmp("tab_id_recent.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    let mut ev = blank_event(4_000_000, "tagged");
+    ev.tab_id = Some(7);
+    store.put_event(&ev).expect("put");
+
+    let rows = store.recent_events(10).expect("recent_events");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].tab_id, Some(7));
+}
+
+/// Migration 0003 is idempotent: opening an already-migrated DB a
+/// second time does not error and the column remains present (the
+/// `tab_id_column_present` probe short-circuits the ALTER batch).
+#[test]
+fn migration_0003_idempotent_on_second_open() {
+    let (_dir, path) = tmp("tab_id_idempotent.sqlite");
+    let key = test_key();
+
+    {
+        let store = SqlCipherBrainStore::new(&path, &key).expect("first open");
+        let mut ev = blank_event(5_000_000, "first");
+        ev.tab_id = Some(42);
+        store.put_event(&ev).expect("put");
+    }
+
+    let store = SqlCipherBrainStore::new(&path, &key).expect("second open");
+    let rows = store.recent_events(1).expect("recent_events");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].tab_id, Some(42));
 }

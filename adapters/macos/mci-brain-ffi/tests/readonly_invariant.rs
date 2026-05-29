@@ -81,6 +81,7 @@ fn seed_event(
         episode_id: None,
         cascade_reason: 0,
         keyframe_blob: None,
+        tab_id: None,
         embedding: None,
     };
     store.put_event(&ev).expect("put_event")

@@ -256,6 +256,7 @@ mod tests {
             episode_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding: None,
         }
     }
@@ -365,6 +366,7 @@ mod tests {
             episode_id: Some(42),
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding: None,
         };
 

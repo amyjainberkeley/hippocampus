@@ -127,7 +127,7 @@ impl SqlCipherBrainStore {
             .prepare(
                 "SELECT id, ts_us, app_bundle_id, window_title, url,
                         text, summary, entities, episode_id,
-                        cascade_reason, keyframe_blob
+                        cascade_reason, keyframe_blob, tab_id
                  FROM events
                  ORDER BY ts_us DESC
                  LIMIT ?1",
@@ -135,21 +135,7 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("prepare recent_events: {e}")))?;
         let lim = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = stmt
-            .query_map(params![lim], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, Option<String>>(6)?,
-                    r.get::<_, Option<String>>(7)?,
-                    r.get::<_, Option<i64>>(8)?,
-                    r.get::<_, i64>(9)?,
-                    r.get::<_, Option<String>>(10)?,
-                ))
-            })
+            .query_map(params![lim], row_to_event_tuple)
             .map_err(|e| StoreError::Backend(format!("query recent_events: {e}")))?;
         let mut out: Vec<Event> = Vec::new();
         for r in rows {
@@ -165,6 +151,7 @@ impl SqlCipherBrainStore {
                 episode_id,
                 cascade_reason,
                 keyframe_blob,
+                tab_id,
             ) = r.map_err(|e| StoreError::Backend(format!("row recent_events: {e}")))?;
             out.push(Event {
                 id: EventId(u64::try_from(ev_id).unwrap_or(0)),
@@ -178,6 +165,7 @@ impl SqlCipherBrainStore {
                 episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
                 cascade_reason,
                 keyframe_blob,
+                tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
                 embedding: None,
             });
         }
@@ -295,7 +283,7 @@ impl SqlCipherBrainStore {
             .prepare(
                 "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url,
                         e.text, e.summary, e.entities, e.episode_id,
-                        e.cascade_reason, e.keyframe_blob
+                        e.cascade_reason, e.keyframe_blob, e.tab_id
                  FROM events e
                  LEFT JOIN event_vectors ev ON ev.event_id = e.id
                  WHERE ev.event_id IS NULL
@@ -305,21 +293,7 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("prepare unembedded_events: {e}")))?;
         let lim = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = stmt
-            .query_map(params![lim], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, Option<String>>(6)?,
-                    r.get::<_, Option<String>>(7)?,
-                    r.get::<_, Option<i64>>(8)?,
-                    r.get::<_, i64>(9)?,
-                    r.get::<_, Option<String>>(10)?,
-                ))
-            })
+            .query_map(params![lim], row_to_event_tuple)
             .map_err(|e| StoreError::Backend(format!("query unembedded_events: {e}")))?;
         let mut out: Vec<Event> = Vec::new();
         for r in rows {
@@ -335,6 +309,7 @@ impl SqlCipherBrainStore {
                 episode_id,
                 cascade_reason,
                 keyframe_blob,
+                tab_id,
             ) = r.map_err(|e| StoreError::Backend(format!("row unembedded_events: {e}")))?;
             out.push(Event {
                 id: EventId(u64::try_from(ev_id).unwrap_or(0)),
@@ -348,6 +323,7 @@ impl SqlCipherBrainStore {
                 episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
                 cascade_reason,
                 keyframe_blob,
+                tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
                 embedding: None,
             });
         }
@@ -388,7 +364,7 @@ impl SqlCipherBrainStore {
             .prepare(if after_id.is_some() {
                 "SELECT id, ts_us, app_bundle_id, window_title, url,
                         text, summary, entities, episode_id,
-                        cascade_reason, keyframe_blob
+                        cascade_reason, keyframe_blob, tab_id
                  FROM events
                  WHERE ts_us > ?1 OR (ts_us = ?1 AND id > ?2)
                  ORDER BY ts_us ASC, id ASC
@@ -396,7 +372,7 @@ impl SqlCipherBrainStore {
             } else {
                 "SELECT id, ts_us, app_bundle_id, window_title, url,
                         text, summary, entities, episode_id,
-                        cascade_reason, keyframe_blob
+                        cascade_reason, keyframe_blob, tab_id
                  FROM events
                  WHERE ts_us > ?1
                  ORDER BY ts_us ASC, id ASC
@@ -426,6 +402,7 @@ impl SqlCipherBrainStore {
                 episode_id,
                 cascade_reason,
                 keyframe_blob,
+                tab_id,
             ) = r.map_err(|e| StoreError::Backend(format!("row paged_events_since: {e}")))?;
             out.push(Event {
                 id: EventId(u64::try_from(ev_id).unwrap_or(0)),
@@ -439,6 +416,7 @@ impl SqlCipherBrainStore {
                 episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
                 cascade_reason,
                 keyframe_blob,
+                tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
                 embedding: None,
             });
         }
@@ -501,7 +479,7 @@ impl SqlCipherBrainStore {
             .prepare(
                 "SELECT id, ts_us, app_bundle_id, window_title, url,
                         text, summary, entities, episode_id,
-                        cascade_reason, keyframe_blob
+                        cascade_reason, keyframe_blob, tab_id
                  FROM events
                  WHERE episode_id IS NULL
                  ORDER BY ts_us ASC
@@ -510,21 +488,7 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("prepare unsegmented_events: {e}")))?;
         let lim = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = stmt
-            .query_map(params![lim], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, Option<String>>(6)?,
-                    r.get::<_, Option<String>>(7)?,
-                    r.get::<_, Option<i64>>(8)?,
-                    r.get::<_, i64>(9)?,
-                    r.get::<_, Option<String>>(10)?,
-                ))
-            })
+            .query_map(params![lim], row_to_event_tuple)
             .map_err(|e| StoreError::Backend(format!("query unsegmented_events: {e}")))?;
         let mut out: Vec<Event> = Vec::new();
         for r in rows {
@@ -540,6 +504,7 @@ impl SqlCipherBrainStore {
                 episode_id,
                 cascade_reason,
                 keyframe_blob,
+                tab_id,
             ) = r.map_err(|e| StoreError::Backend(format!("row unsegmented_events: {e}")))?;
             out.push(Event {
                 id: EventId(u64::try_from(ev_id).unwrap_or(0)),
@@ -553,6 +518,7 @@ impl SqlCipherBrainStore {
                 episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
                 cascade_reason,
                 keyframe_blob,
+                tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
                 embedding: None,
             });
         }
@@ -572,27 +538,13 @@ impl SqlCipherBrainStore {
             .query_row(
                 "SELECT id, ts_us, app_bundle_id, window_title, url,
                         text, summary, entities, episode_id,
-                        cascade_reason, keyframe_blob
+                        cascade_reason, keyframe_blob, tab_id
                  FROM events
                  WHERE episode_id IS NOT NULL
                  ORDER BY ts_us DESC
                  LIMIT 1",
                 [],
-                |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                        r.get(8)?,
-                        r.get(9)?,
-                        r.get(10)?,
-                    ))
-                },
+                row_to_event_tuple,
             )
             .map(Some)
             .or_else(|e| match e {
@@ -614,6 +566,7 @@ impl SqlCipherBrainStore {
             episode_id,
             cascade_reason,
             keyframe_blob,
+            tab_id,
         )) = row
         else {
             return Ok(None);
@@ -631,6 +584,7 @@ impl SqlCipherBrainStore {
             episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
             cascade_reason,
             keyframe_blob,
+            tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
             embedding: None,
         }))
     }
@@ -1004,6 +958,7 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     // no-op.
     let sql_0001 = include_str!("../migrations/0001_phase_3_brain_schema.sql");
     let sql_0002 = include_str!("../migrations/0002_briefs.sql");
+    let sql_0003 = include_str!("../migrations/0003_events_tab_id.sql");
     let tx = db
         .conn_mut()
         .transaction()
@@ -1012,9 +967,36 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
         .map_err(|e| StoreError::Backend(format!("apply migration 0001: {e}")))?;
     tx.execute_batch(sql_0002)
         .map_err(|e| StoreError::Backend(format!("apply migration 0002: {e}")))?;
+    // 0003 — V2-P2 events.tab_id. Forward-only nullable ALTER. Idempotent
+    // re-apply is guarded by the column-exists check below: `ALTER TABLE
+    // ADD COLUMN` is the one DDL SQLite does NOT make idempotent through
+    // `IF NOT EXISTS` syntax, so we skip the batch if the column is
+    // already present.
+    let already_has_tab_id = tab_id_column_present(&tx)
+        .map_err(|e| StoreError::Backend(format!("probe events.tab_id: {e}")))?;
+    if !already_has_tab_id {
+        tx.execute_batch(sql_0003)
+            .map_err(|e| StoreError::Backend(format!("apply migration 0003: {e}")))?;
+    }
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
     Ok(())
+}
+
+/// Returns true if `events.tab_id` is already a column on the live DB
+/// (a previously-migrated store) so the 0003 batch is skipped on
+/// re-open. `PRAGMA table_info` row shape is
+/// `(cid, name, type, notnull, dflt_value, pk)`; we only need `name`.
+fn tab_id_column_present(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<bool> {
+    let mut stmt = tx.prepare("PRAGMA table_info(events)")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == "tab_id" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Map `mci_core::store::StoreError` into the brain's `StoreError`. Wrong
@@ -1034,7 +1016,8 @@ const EMBEDDING_BYTES: usize = EMBEDDING_DIM * std::mem::size_of::<f32>();
 
 /// Tuple type for one `events` row read (column-positional). Pulled out of
 /// `get_event` so the function body keeps its expression-shape (`clippy::
-/// items_after_statements`).
+/// items_after_statements`). V2-P2 (migration 0003) appends `tab_id` as
+/// the trailing column.
 type EventRow = (
     i64,            // id
     i64,            // ts_us
@@ -1047,6 +1030,7 @@ type EventRow = (
     Option<i64>,    // episode_id
     i64,            // cascade_reason
     Option<String>, // keyframe_blob
+    Option<i64>,    // tab_id (V2-P2; INTEGER NULL on the wire)
 );
 
 /// Row mapper for the 9-column `briefs` SELECT used by `brief_for_date` +
@@ -1074,8 +1058,9 @@ fn row_to_brief(r: &rusqlite::Row<'_>) -> rusqlite::Result<crate::BriefRow> {
     })
 }
 
-/// Row mapper for the 11-column `events` SELECT used by `recent_events`,
-/// `paged_events_since`, and `unembedded_events`.
+/// Row mapper for the 12-column `events` SELECT used by `recent_events`,
+/// `paged_events_since`, `unembedded_events`, and `get_event` (V2-P2
+/// added `tab_id` as the trailing column).
 fn row_to_event_tuple(r: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
     Ok((
         r.get::<_, i64>(0)?,
@@ -1089,6 +1074,7 @@ fn row_to_event_tuple(r: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
         r.get::<_, Option<i64>>(8)?,
         r.get::<_, i64>(9)?,
         r.get::<_, Option<String>>(10)?,
+        r.get::<_, Option<i64>>(11)?,
     ))
 }
 
@@ -1150,12 +1136,13 @@ impl crate::BrainStore for SqlCipherBrainStore {
 
         // INSERT events. The `events_ai` trigger syncs `events_fts` inside
         // this same transaction; we never INSERT to events_fts directly.
+        // V2-P2: `tab_id` appended as the trailing column (migration 0003).
         tx.execute(
             "INSERT INTO events (
                 ts_us, app_bundle_id, window_title, url,
                 text, summary, entities, episode_id,
-                cascade_reason, keyframe_blob
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                cascade_reason, keyframe_blob, tab_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 i64::try_from(event.ts_us).unwrap_or(i64::MAX),
                 &event.app_bundle_id,
@@ -1169,6 +1156,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
                     .map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
                 event.cascade_reason,
                 &event.keyframe_blob,
+                event.tab_id.map(i64::from),
             ],
         )
         .map_err(|e| StoreError::Backend(format!("INSERT events: {e}")))?;
@@ -1200,29 +1188,16 @@ impl crate::BrainStore for SqlCipherBrainStore {
 
         // Two-step: pull the events row, then the (optional) embedding.
         // Cheaper than a LEFT JOIN for this column set on a per-id read.
+        // V2-P2: `tab_id` trails the SELECT column list (migration 0003).
         let row: Option<EventRow> = guard
             .conn()
             .query_row(
                 "SELECT id, ts_us, app_bundle_id, window_title, url,
                         text, summary, entities, episode_id,
-                        cascade_reason, keyframe_blob
+                        cascade_reason, keyframe_blob, tab_id
                  FROM events WHERE id = ?1",
                 params![row_id],
-                |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                        r.get(8)?,
-                        r.get(9)?,
-                        r.get(10)?,
-                    ))
-                },
+                row_to_event_tuple,
             )
             .map(Some)
             .or_else(|e| match e {
@@ -1242,6 +1217,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
             episode_id,
             cascade_reason,
             keyframe_blob,
+            tab_id,
         )) = row
         else {
             return Ok(None);
@@ -1274,6 +1250,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
             episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
             cascade_reason,
             keyframe_blob,
+            tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
             embedding,
         }))
     }

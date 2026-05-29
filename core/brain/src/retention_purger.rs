@@ -164,6 +164,7 @@ mod tests {
             episode_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding: None,
         }
     }

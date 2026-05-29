@@ -59,13 +59,23 @@
 //   execution exceeding 250 ms → `nil` (the AppleScript may still
 //   complete on its dispatch queue; its result is discarded). Never
 //   retry within the same call.
-// - Cache the last result (success-string or `nil`) for ≤1 s. The
-//   ADR-0015 §3 snapshot actor polls at 1 Hz; the cache caps
-//   AppleScript invocations to ~1/s per provider in the worst case.
-// - Per-bundle dispatch: the cache key is the bundle id. Two calls
-//   in quick succession for *different* bundle ids (e.g. user app-
-//   switched from Chrome to Brave within the TTL) each invoke the
-//   runner once; one cached value per bundle id.
+// - Cache the last result (success-string or `nil`) for ≤100 ms.
+//   V2-P2 dropped the TTL from 1.0 s → 100 ms per memo
+//   `docs/research/tab-attribution-mix-2026-05-29.md` §3 — the prior
+//   1.0 s window caused the OCREvent stamped with a prior tab's URL
+//   for up to 1 s after an intra-browser tab switch.
+// - Cache is keyed by `(bundleId, focusedWindowId)`. The focus-aware
+//   overload `activeTabURL(forFrontmost:focusedWindowId:)` reads the
+//   FocusTracker snapshot's `CGWindowID` (ADR-0031 / V2-P1) so a
+//   focus change to a different browser window (which may carry a
+//   different active tab) invalidates the cache even within the
+//   100 ms TTL. Intra-window tab switches don't change `windowId`;
+//   the 100 ms TTL bounds the staleness in that case.
+// - Per-(bundle,window) dispatch: the cache key is the
+//   `(bundleId, focusedWindowId)` pair. Two calls in quick succession
+//   for *different* bundle ids (user app-switched from Chrome to
+//   Brave within the TTL) OR *different* focused window ids each
+//   invoke the runner once.
 
 import Foundation
 
@@ -94,10 +104,11 @@ public final class ChromiumURLProvider: URLProvider, @unchecked Sendable {
         Set(scripts.keys)
     }
 
-    /// Cache TTL. ADR-0015 §3 sets the snapshot poll at 1 Hz; this
-    /// TTL caps AppleScript invocations to ~1/s worst case (per
-    /// bundle id).
-    internal static let cacheTTL: TimeInterval = 1.0
+    /// Cache TTL. V2-P2 dropped from 1.0 s → 100 ms to shrink the
+    /// stale-URL window after an intra-browser tab switch (memo
+    /// `docs/research/tab-attribution-mix-2026-05-29.md` §3 +
+    /// `brain-architecture-v2-vision-2026-05-29.md` §7.1 V2-P2).
+    internal static let cacheTTL: TimeInterval = 0.100
 
     /// Bounded AppleScript execution. NSAppleScript blocks the
     /// dispatching thread; a stuck call should not stall the
@@ -107,11 +118,21 @@ public final class ChromiumURLProvider: URLProvider, @unchecked Sendable {
     private let runner: AppleScriptRunner
     private let clock: @Sendable () -> Date
     private let lock = NSLock()
-    /// Per-bundle-id cache. Key is the bundle id; value is the
-    /// (timestamp, resolved URL?) pair from the most recent runner
-    /// call for that bundle. A bundle-id miss in this table means
-    /// "no prior call cached" and forces a fresh runner invocation.
-    private var cache: [String: (at: Date, value: String?)] = [:]
+    /// Per-`(bundleId, focusedWindowId)` cache. The composite key
+    /// invalidates the cached value when EITHER the bundle id OR the
+    /// focused window id changes — handles app-switch (different
+    /// bundle) AND inter-window focus changes (same bundle, different
+    /// CGWindowID, possibly different active tab). `focusedWindowId
+    /// = nil` is its own key; legacy callers via the simple overload
+    /// land here.
+    private var cache: [CacheKey: (at: Date, value: String?)] = [:]
+
+    /// Composite key (`bundleId, focusedWindowId`). `Hashable`
+    /// derives from the field-by-field hash.
+    private struct CacheKey: Hashable {
+        let bundleId: String
+        let windowId: UInt32?
+    }
 
     /// Production initializer. Wires the real `NSAppleScript`-backed
     /// runner + the system clock.
@@ -131,12 +152,20 @@ public final class ChromiumURLProvider: URLProvider, @unchecked Sendable {
     }
 
     public func activeTabURL(forFrontmost bundleId: String) -> String? {
+        activeTabURL(forFrontmost: bundleId, focusedWindowId: nil)
+    }
+
+    public func activeTabURL(
+        forFrontmost bundleId: String,
+        focusedWindowId: UInt32?
+    ) -> String? {
         guard let source = Self.scripts[bundleId] else { return nil }
 
         let now = clock()
+        let key = CacheKey(bundleId: bundleId, windowId: focusedWindowId)
 
         lock.lock()
-        if let entry = cache[bundleId],
+        if let entry = cache[key],
            now.timeIntervalSince(entry.at) <= Self.cacheTTL {
             let cached = entry.value
             lock.unlock()
@@ -154,7 +183,7 @@ public final class ChromiumURLProvider: URLProvider, @unchecked Sendable {
         }
 
         lock.lock()
-        cache[bundleId] = (at: now, value: resolved)
+        cache[key] = (at: now, value: resolved)
         lock.unlock()
         return resolved
     }

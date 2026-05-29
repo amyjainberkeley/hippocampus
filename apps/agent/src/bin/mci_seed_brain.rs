@@ -324,6 +324,7 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
             episode_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding: None,
         });
     }

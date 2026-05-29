@@ -329,7 +329,7 @@ impl BrainPump {
 impl BrainIngestor for BrainPump {
     #[allow(clippy::too_many_lines)]
     fn ingest_ocr_event(&self, msg: &Message) -> Result<IngestOutcome, IngestError> {
-        let (ts_us, app, title, u, text, keyframe_blob) = match msg {
+        let (ts_us, app, title, u, text, keyframe_blob, tab_id) = match msg {
             Message::OCREvent {
                 seq: _,
                 ts_us,
@@ -348,7 +348,9 @@ impl BrainIngestor for BrainPump {
                     Some(hex_lower(keyframe_hash))
                 };
                 let merged = self.maybe_merge_page_content(u.as_deref(), ocr_text);
-                (ts_us, app, title, u, merged, kb)
+                // OCREvent carries no per-tab signal — the helper
+                // does not observe browser-internal tab state.
+                (ts_us, app, title, u, merged, kb, None)
             }
             Message::PageContentEvent {
                 seq: _,
@@ -357,12 +359,20 @@ impl BrainIngestor for BrainPump {
                 title,
                 full_text,
                 source_browser,
-                tab_id: _,
+                tab_id,
             } => {
                 let app = browser_bundle_id(source_browser);
                 let t = if title.is_empty() { None } else { Some(title.clone()) };
                 let u = if url.is_empty() { None } else { Some(url.clone()) };
-                (ts_us, app, t, u, full_text.clone(), None)
+                // V2-P2: plumb tab_id end-to-end. Extension JS in
+                // both extensions/chromium/background.js and
+                // extensions/safari/background.js sends `0` when no
+                // tab id is available (`sender.tab.id || 0`); the
+                // brain store column semantics treat that as NULL
+                // — distinct from a real tab id of 0 (which
+                // browsers do not assign in practice).
+                let resolved_tab = if *tab_id == 0 { None } else { Some(*tab_id) };
+                (ts_us, app, t, u, full_text.clone(), None, resolved_tab)
             }
             _ => return Ok(IngestOutcome::NotOcrEvent),
         };
@@ -416,6 +426,13 @@ impl BrainIngestor for BrainPump {
             // check rejects non-zero with StoreError::InvalidInput.
             cascade_reason: 0,
             keyframe_blob,
+            // V2-P2: per-tab attribution. `tab_id` is populated only
+            // for browser-extension PageContentEvent ingest paths;
+            // OCREvent ingest leaves it None (the helper has no
+            // browser-internal tab signal). Two events with the same
+            // URL but distinct tab_ids now land as DISTINCT rows in
+            // the brain store (migration 0003 events.tab_id column).
+            tab_id,
             embedding: embedding.clone(),
         };
 
@@ -621,9 +638,111 @@ mod tests {
                 assert_eq!(ev.url.as_deref(), Some("https://example.com/pricing"));
                 assert_eq!(ev.window_title.as_deref(), Some("Pricing — Example Corp"));
                 assert_eq!(ev.keyframe_blob, None);
+                // V2-P2: tab_id plumbed end-to-end (wire u32 → store
+                // Option<u32>; 0 collapses to None, non-zero passes
+                // through).
+                assert_eq!(ev.tab_id, Some(42));
             }
             IngestOutcome::NotOcrEvent => panic!("expected Stored"),
         }
+    }
+
+    // -----------------------------------------------------------
+    // V2-P2 tab_id plumb
+    // -----------------------------------------------------------
+
+    /// Round-trip pin: two PageContentEvents with the same URL but
+    /// distinct `tab_id` values land as DISTINCT brain rows that
+    /// each carry their own tab_id back through `get_event`. This
+    /// is the load-bearing V2-P2 fix (memo `docs/research/tab-
+    /// attribution-mix-2026-05-29.md` §3 + §5 secondary).
+    #[test]
+    fn pump_preserves_distinct_tab_ids_for_shared_url() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = BrainPump::new(store.clone(), None);
+
+        let evt_a = Message::PageContentEvent {
+            seq: 1,
+            ts_us: 1_000_000,
+            url: "https://example.com/page".to_string(),
+            title: "Tab A".to_string(),
+            full_text: "content from tab A".to_string(),
+            source_browser: "safari".to_string(),
+            tab_id: 11,
+        };
+        let evt_b = Message::PageContentEvent {
+            seq: 2,
+            ts_us: 2_000_000,
+            url: "https://example.com/page".to_string(),
+            title: "Tab B".to_string(),
+            full_text: "content from tab B".to_string(),
+            source_browser: "safari".to_string(),
+            tab_id: 22,
+        };
+
+        let id_a = match pump.ingest_ocr_event(&evt_a).expect("a") {
+            IngestOutcome::Stored { id, .. } => id,
+            IngestOutcome::NotOcrEvent => panic!("expected Stored a"),
+        };
+        let id_b = match pump.ingest_ocr_event(&evt_b).expect("b") {
+            IngestOutcome::Stored { id, .. } => id,
+            IngestOutcome::NotOcrEvent => panic!("expected Stored b"),
+        };
+        assert_ne!(id_a, id_b, "shared URL but distinct tab ⇒ distinct rows");
+
+        let got_a = store.get_event(id_a).unwrap().expect("get a");
+        let got_b = store.get_event(id_b).unwrap().expect("get b");
+        assert_eq!(got_a.tab_id, Some(11));
+        assert_eq!(got_b.tab_id, Some(22));
+        assert_eq!(
+            got_a.url, got_b.url,
+            "URL truly is shared — tab_id is the distinguisher"
+        );
+    }
+
+    /// Wire-level `tab_id = 0` collapses to `None` on the store
+    /// side. Pins the chromium/safari `sender.tab.id || 0` shape
+    /// at the brain boundary.
+    #[test]
+    fn pump_collapses_wire_tab_id_zero_to_none() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = BrainPump::new(store.clone(), None);
+
+        let evt = Message::PageContentEvent {
+            seq: 1,
+            ts_us: 1_000_000,
+            url: "https://example.com/".to_string(),
+            title: "No Tab".to_string(),
+            full_text: "no tab id available".to_string(),
+            source_browser: "chrome".to_string(),
+            tab_id: 0,
+        };
+        let id = match pump.ingest_ocr_event(&evt).expect("ingest") {
+            IngestOutcome::Stored { id, .. } => id,
+            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        };
+        let got = store.get_event(id).unwrap().expect("get");
+        assert!(
+            got.tab_id.is_none(),
+            "wire tab_id == 0 must collapse to None at the store"
+        );
+    }
+
+    /// OCREvent ingest does NOT populate tab_id — the helper has no
+    /// per-tab signal.
+    #[test]
+    fn pump_leaves_tab_id_none_for_ocr_event_ingest() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = BrainPump::new(store.clone(), None);
+        let id = match pump
+            .ingest_ocr_event(&make_ocr_event(9_000_000, "some pixel text"))
+            .expect("ingest")
+        {
+            IngestOutcome::Stored { id, .. } => id,
+            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        };
+        let got = store.get_event(id).unwrap().expect("get");
+        assert!(got.tab_id.is_none(), "OCREvent path leaves tab_id None");
     }
 
     #[test]
