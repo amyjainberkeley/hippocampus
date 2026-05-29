@@ -1021,6 +1021,7 @@ dependencies = [
  "regex",
  "rusqlite",
  "serde",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "toml",

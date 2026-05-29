@@ -51,6 +51,17 @@ toml      = "0.8"
 # adapters). The `derive` feature is needed for the `RawTable` /
 # `RawBank` / `RawUrlPattern` structs that hold the parsed TOML shape.
 serde     = { version = "1", features = ["derive"] }
+# `sha2` is already on the workspace lockfile (transitive via the
+# `bundled-sqlcipher-vendored-openssl` chain in `mci-core`). Listing
+# it here does NOT add a new third-party crate — Cargo unifies the
+# version across the workspace. Used by `graph::derive_ulid` to mint
+# the content-stable ULIDs that key the V2-P3 graph tables; the choice
+# of SHA-256 (vs. a faster non-cryptographic hash) is deliberate so
+# the Phase 8 sync model (ADR-0023) can rely on cross-device
+# collision resistance without a separate audit. Pure-Rust, no
+# `unsafe`, no network. CSO §5 sign-off block in the PR body covers
+# this addition.
+sha2      = "0.10"
 
 [dev-dependencies]
 # Tests exercise the stub impls; gate them via the `stubs` feature on this
