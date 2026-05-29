@@ -78,6 +78,14 @@ mci-embed-coreml = { path = "../../adapters/macos/mci-embed-coreml" }
 # macOS-only: the crate compiles to an empty lib elsewhere. No net-new
 # third-party crate (objc2 family already on the lockfile from P3.3).
 mci-llama-coreml = { path = "../../adapters/macos/mci-llama-coreml" }
+# V2-P8b — Mail.app emlx read path (PR #243). macOS-only: the crate
+# compiles to an empty lib elsewhere. apps/agent consumes the READ
+# surface (read_message / watch_inbox) inside `mail_ingest.rs`; no
+# new third-party crate is added at the agent boundary (mail-parser
+# / plist / rusqlite / notify / tokio enter only via the
+# mci-mail-reader path, which already shipped them on the workspace
+# lockfile via PR #243).
+mci-mail-reader  = { path = "../../adapters/macos/mci-mail-reader" }
 
 # Deliberately NO `tracing-subscriber`: the typed HealthLogRecord
 # serializer in `health_log.rs` keeps the JSON shape fixed at the
@@ -93,3 +101,12 @@ tokio       = { version = "1", default-features = false, features = ["sync", "rt
 # `mci_brain::stubs`. Production agent never enables this feature; it
 # is dev-only by Cargo's [dev-dependencies] gate.
 mci-brain   = { path = "../../core/brain", features = ["stubs"] }
+
+# V2-P8b — tests in `mail_ingest.rs` exercise the typed-header
+# translator (`to_parsed_headers`) by re-parsing synthesized emlx
+# fixtures via `mail_parser::MessageParser`. Already on the lockfile
+# via the V2-P8a `mci-mail-reader` macOS-target dep; listed in
+# dev-dependencies so non-macOS workspace `cargo test --workspace`
+# does not pick it up.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+mail-parser = "0.11"
