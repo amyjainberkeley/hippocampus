@@ -37,6 +37,15 @@ members = [
     # `SqlCipherBrainStore` + `HybridRetriever`. See
     # `adapters/macos/mci-brain-ffi/Cargo.toml`.
     "adapters/macos/mci-brain-ffi",
+    # macOS-only Rust adapter: Mail.app read path (emlx splitter + Envelope
+    # Index SQLite reader + FSEvents watcher) for V2-P8a. READ-ONLY library
+    # — no event emit, no brain write, no cascade. The cascade-equivalent
+    # + ADR-0030 §3(c)(ii) parsed-header check + corpus + allowlist edit
+    # ship in V2-P8b (CSO-gated). Deps + lib body gated by `cfg(target_os
+    # = "macos")` so a Linux `cargo build --workspace` compiles it empty.
+    # See `adapters/macos/mci-mail-reader/Cargo.toml` and
+    # `docs/research/mail-envelope-schema-2026-05-29.md`.
+    "adapters/macos/mci-mail-reader",
     # Windows adapter: Windows.Graphics.Capture + UIA + Media Foundation.
     # Deps + lib body gated by `cfg(target_os = "windows")` so
     # `cargo build --workspace` on macOS/Linux compiles it as an empty
