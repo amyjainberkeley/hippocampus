@@ -19,6 +19,14 @@ members = [
     "core/brain",
     "core/brief",
     "core/brief-eval",
+    # Pure-Rust MCP-client core + stdio transport. V2-MCP-1 foundation
+    # for the Hippocampus aggregation pipeline (V2-MCP-3) that consumes
+    # third-party MCP servers (gbrain, Slack/Linear/GitHub MCPs, …).
+    # OS-free per ADR-0003. Stdio transport is process-local IPC — NOT
+    # network — so ADR-0001 NG3 zero-network discipline is preserved.
+    # The HTTP/SSE transport (V2-MCP-2) carries the ADR-0001 amendment
+    # in a separate, CSO-gated PR.
+    "core/mcp-client",
     # macOS-only Rust adapter: Core ML / ANE backend for the
     # snowflake-arctic-embed-s embedder. Deps + lib body are gated by
     # `cfg(target_os = "macos")` inside the crate so `cargo build

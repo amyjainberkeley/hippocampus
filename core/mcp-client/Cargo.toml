@@ -1,0 +1,52 @@
+[package]
+name                   = "mci-mcp-client"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI MCP-client core: pure-Rust JSON-RPC 2.0 client + stdio transport for V2-MCP aggregation. See docs/research/v2-mcp-aggregation-scoping-2026-05-29.md §6.1."
+
+[lints]
+workspace = true
+
+[[bin]]
+# Test-only fixture: a minimal MCP-shaped JSON-RPC stdio server. Built
+# by `cargo test` and located via env!("CARGO_BIN_EXE_…") inside the
+# integration tests. Does not ship — it has no behavior beyond echo +
+# tools/list + tools/call against an in-memory map.
+name              = "mci-mcp-echo-fixture"
+path              = "tests/fixtures/echo_server.rs"
+required-features = ["test-fixtures"]
+
+[features]
+# Gates the test-only echo fixture binary so it is not built by
+# `cargo build --workspace`. `cargo test --workspace` enables it
+# automatically per the [dev-dependencies] trick below.
+test-fixtures = []
+
+[dependencies]
+# JSON-RPC 2.0 wire framing — already on the workspace lockfile via
+# `apps/agent` (which ships the producer-side MCP server). Listing
+# them here unifies versions; zero new crates added.
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Error model + tracing — already on the workspace lockfile.
+thiserror  = "1"
+tracing    = { version = "0.1", default-features = false, features = ["std"] }
+# Async runtime — `process` + `io-util` + `sync` + `rt` features are
+# already on the lockfile via `apps/agent`. `process` is what spawns
+# the MCP server subprocess; `io-util` gives `BufReader::read_line`;
+# `sync` gives `oneshot` for request/response correlation; `time` is
+# used for the per-call timeout. Zero new crates.
+tokio      = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "io-util", "process"] }
+# Async-trait so `McpTransport` is dyn-safe. Already on the workspace
+# lockfile via `mci-core`.
+async-trait = "0.1"
+
+[dev-dependencies]
+# Enable the test-fixtures feature for `cargo test`. Cargo unifies the
+# feature set across the integration-test build, so the fixture binary
+# is built and `CARGO_BIN_EXE_mci-mcp-echo-fixture` is populated.
+mci-mcp-client = { path = ".", features = ["test-fixtures"] }
+tokio          = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "process", "test-util"] }
