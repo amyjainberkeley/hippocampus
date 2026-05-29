@@ -1132,6 +1132,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci-messages-reader"
+version = "0.0.1"
+dependencies = [
+ "futures-core",
+ "notify",
+ "rusqlite",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "mci-perf-soak"
 version = "0.0.1"
 dependencies = [

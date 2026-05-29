@@ -54,6 +54,14 @@ members = [
     # See `adapters/macos/mci-mail-reader/Cargo.toml` and
     # `docs/research/mail-envelope-schema-2026-05-29.md`.
     "adapters/macos/mci-mail-reader",
+    # macOS-only Rust adapter: Messages.app read path (chat.db SQLite
+    # reader + FSEvents watcher) for V2-P7. READ-ONLY library — no event
+    # emit, no brain write. Pairs with `core/brain/src/redaction/messages_plugin.rs`
+    # which implements the ADR-0030 §3(f) per-plugin cascade-equivalent on
+    # the brain-ingest path. Deps + lib body gated by `cfg(target_os =
+    # "macos")` so a Linux `cargo build --workspace` compiles it empty.
+    # See `adapters/macos/mci-messages-reader/Cargo.toml` and ADR-0032.
+    "adapters/macos/mci-messages-reader",
     # Windows adapter: Windows.Graphics.Capture + UIA + Media Foundation.
     # Deps + lib body gated by `cfg(target_os = "windows")` so
     # `cargo build --workspace` on macOS/Linux compiles it as an empty
