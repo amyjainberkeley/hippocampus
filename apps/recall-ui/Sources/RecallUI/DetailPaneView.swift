@@ -5,6 +5,13 @@ import SwiftUI
 struct DetailPaneView: View {
     let hit: Hit
 
+    /// `text_snippet` with the FTS-only context header prefix
+    /// (`[app=… | title=… | url=… | ts=…]\n`) stripped for display.
+    /// The stored field is unchanged — see `Formatters.stripContextHeader`.
+    private var displayBody: String {
+        Formatters.stripContextHeader(hit.ocrTextSnippet)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -20,7 +27,7 @@ struct DetailPaneView: View {
         .background(Color.brandBgSecondary)
         .focusable()
         .onCopyCommand {
-            [NSItemProvider(object: hit.ocrTextSnippet as NSString)]
+            [NSItemProvider(object: displayBody as NSString)]
         }
         .onKeyPress(.init("o"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
@@ -69,7 +76,7 @@ struct DetailPaneView: View {
             HStack(spacing: 8) {
                 Button("Copy Text") {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(hit.ocrTextSnippet, forType: .string)
+                    NSPasteboard.general.setString(displayBody, forType: .string)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -111,10 +118,10 @@ struct DetailPaneView: View {
 
     private var ocrSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("OCR Text")
+            Text(Formatters.sourceLabel(url: hit.url, textSnippet: hit.ocrTextSnippet))
                 .font(.system(.caption, design: .default).weight(.semibold))
                 .foregroundStyle(Color.brandFgMuted)
-            if SyntaxHighlighter.looksLikeCode(hit.ocrTextSnippet) {
+            if SyntaxHighlighter.looksLikeCode(displayBody) {
                 highlightedCode
             } else {
                 linkedText
@@ -123,7 +130,7 @@ struct DetailPaneView: View {
     }
 
     private var highlightedCode: some View {
-        let tokens = SyntaxHighlighter.tokenize(hit.ocrTextSnippet)
+        let tokens = SyntaxHighlighter.tokenize(displayBody)
         return tokens.reduce(Text("")) { result, token in
             result + Text(token.text).foregroundColor(Color.syntaxColor(for: token.type))
         }
@@ -138,7 +145,7 @@ struct DetailPaneView: View {
     }
 
     private var linkedText: some View {
-        let text = hit.ocrTextSnippet
+        let text = displayBody
         let links = LinkDetector.detect(in: text)
         let built: Text = {
             guard !links.isEmpty else {
