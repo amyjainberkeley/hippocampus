@@ -154,6 +154,23 @@ final class CascadeSection6RegexTests: XCTestCase {
 // MARK: - CascadeTwiceOCREmitter wire-emission tests
 
 final class CascadeTwiceOCREmitterTests: XCTestCase {
+    /// CSO escalation 2026-05-29 — the cascade-twice §6 mechanics
+    /// (this file's purpose) require `killOcrEmit == false`. The
+    /// kill-switch is `true` in shipping builds; the new
+    /// `testKillSwitchEmitsTombstoneForAllowFrames` test below pins
+    /// the production posture. The three existing tests below scope
+    /// the kill-switch OFF so they continue to exercise the §6
+    /// regex bank + the over-cap fail-closed arm.
+    override func setUp() {
+        super.setUp()
+        CascadeTwiceOCREmitter.killOcrEmit = false
+    }
+
+    override func tearDown() {
+        CascadeTwiceOCREmitter.killOcrEmit = true
+        super.tearDown()
+    }
+
     /// SecretBench-pattern OCR text ⇒ tombstone reason=ocrTimeSecret;
     /// NO OCREvent emitted. ADR-0016 §4.2 invariant.
     func testSecretBenchTextEmitsTombstoneNotOCREvent() async {
@@ -261,6 +278,59 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
         XCTAssertEqual(bytes[2], 0x11, "must be a PrivacyTombstone, not OCREvent")
         XCTAssertEqual(bytes.last, RedactionReason.failsafeUnknown.rawValue,
                        "fail-closed reason on over-cap")
+        await emitter.worker.stop()
+    }
+
+    /// CSO escalation 2026-05-29 — Phase A interim mitigation (option
+    /// M4 in `docs/research/capture-scope-window-vs-display-2026-05-29.md`).
+    /// With the kill-switch ON (production posture), every cleared-
+    /// pixel-time `.allow` frame must emit a `PrivacyTombstone(
+    /// failsafeUnknown)` instead of an OCREvent — proving no OCR
+    /// text bytes from the whole-display SCStream sample can reach
+    /// the wire while the architectural fix bakes.
+    func testKillSwitchEmitsTombstoneForAllowFrames() async {
+        // Production posture — kill-switch ON.
+        CascadeTwiceOCREmitter.killOcrEmit = true
+        defer { CascadeTwiceOCREmitter.killOcrEmit = false }
+        let sink = StubFrameSink()
+        let emitter = CascadeTwiceOCREmitter(
+            worker: VisionOCRWorker(engine: StubOCREngine(mode: .canned(OCRResult(
+                recognizedLines: [
+                    // Text that, absent the kill-switch, would
+                    // successfully emit an OCREvent (no §6 regex hit,
+                    // within the 64 KB cap).
+                    OCRLine(text: "innocuous content", boundingBox: .zero, confidence: 1.0)
+                ],
+                durationMs: 0,
+                timedOut: false
+            )))),
+            cascade: passthroughCascade(),
+            sink: sink,
+            sequence: FrameSequence(),
+            counters: HelperHealthCounters()
+        )
+        await emitter.worker.start()
+        await emitter.processAfterAllow(
+            tsUs: 555,
+            context: WorkflowContext(
+                appBundleId: "com.apple.Safari",
+                windowTitle: "spur",
+                url: nil
+            ),
+            input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: .init(x: 0, y: 0, width: 1, height: 1))
+        )
+        // The kill-switch path is synchronous through emitTombstone
+        // — no Vision worker round-trip — but we await briefly so the
+        // FrameSink actor processes the write.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let frames = await sink.snapshot()
+        XCTAssertEqual(frames.count, 1, "kill-switch must emit exactly one frame per allow")
+        guard let bytes = frames.first else { return XCTFail() }
+        XCTAssertEqual(bytes[2], 0x11,
+                       "kill-switch frame must be a PrivacyTombstone, not an OCREvent")
+        XCTAssertEqual(bytes[3], 0x00)
+        XCTAssertEqual(bytes.last, RedactionReason.failsafeUnknown.rawValue,
+                       "kill-switch tombstone reason must be failsafeUnknown")
         await emitter.worker.stop()
     }
 }

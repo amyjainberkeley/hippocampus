@@ -71,6 +71,38 @@ public protocol OCRPostAllowEmitter: Sendable {
 /// `SuppressionCascade` + `FrameSink` + `FrameSequence` together per
 /// ADR-0016 §1.6 + §4.2.
 public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
+    /// CSO escalation 2026-05-29 — capture-scope cross-window leak
+    /// kill-switch (Phase A interim mitigation, option M4 in
+    /// `docs/research/capture-scope-window-vs-display-2026-05-29.md`).
+    ///
+    /// `true` ⇒ every `processAfterAllow` invocation emits a
+    /// `PrivacyTombstone(failsafeUnknown)` instead of submitting the
+    /// pixel buffer to the Vision OCR worker. While `true`, no OCR
+    /// text bytes from the whole-display `SCStream` sample reach the
+    /// brain — the cross-window leak documented in the memo cannot
+    /// occur because the OCR pipeline is short-circuited at the
+    /// emit-or-suppress fork.
+    ///
+    /// Flips back to `false` in a single-line edit when the §7
+    /// falsifiability corpus in the memo is green and CSO signs off
+    /// on the architectural fix (Option (a) — focused-window
+    /// `SCContentFilter`) landing. ADR-0013 §3 fail-safe-default-
+    /// redact + Amendment 1 §3(b) fail-closed posture preserved
+    /// structurally — the tombstone IS the redact path.
+    ///
+    /// PROTECTED-SET per AGENT_PROTOCOL §5.
+    ///
+    /// Declared `var` (not `let`) only so existing cascade-twice unit
+    /// tests in `CascadeTwiceOCREmitterTests` can scope-override it
+    /// to exercise the OCR-emit path. Production code paths never
+    /// mutate this — flipping the kill-switch off ships as a single-
+    /// line source edit, not a runtime mutation. The
+    /// `nonisolated(unsafe)` annotation is required by Swift 6 strict
+    /// concurrency for a static `var`; safe here because writes are
+    /// confined to test setup/teardown and reads in production are
+    /// pure load.
+    nonisolated(unsafe) internal static var killOcrEmit: Bool = true
+
     private let worker: VisionOCRWorker
     private let cascade: SuppressionCascade
     private let sink: any FrameSink
@@ -108,6 +140,30 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         context: WorkflowContext,
         input: OCREngineInput
     ) async {
+        // CSO escalation 2026-05-29 — capture-scope cross-window leak
+        // (see `Self.killOcrEmit` + `docs/research/capture-scope-
+        // window-vs-display-2026-05-29.md`). Short-circuit the OCR
+        // worker submission and emit a fail-safe tombstone instead.
+        // The tombstone path is identical in shape to the existing
+        // §6 ocrTimeSecret tombstone and the over-cap failsafeUnknown
+        // tombstone — same wire frame, same sequence allocation, same
+        // counters increment. No OCR text bytes reach the wire.
+        //
+        // The .appex socket path (Safari/Chrome URL + page_content →
+        // BrainPump) is structurally independent of this emitter and
+        // remains unaffected.
+        if Self.killOcrEmit {
+            await Self.emitTombstone(
+                tsUs: tsUs,
+                context: context,
+                reason: .failsafeUnknown,
+                sink: sink,
+                sequence: sequence,
+                counters: counters
+            )
+            return
+        }
+
         let cascadeSnapshot = cascade
         let sinkSnapshot = sink
         let sequenceSnapshot = sequence
