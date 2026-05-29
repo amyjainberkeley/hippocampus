@@ -1117,6 +1117,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci-mcp-client"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "mci-mcp-client",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mci-perf-soak"
 version = "0.0.1"
 dependencies = [
