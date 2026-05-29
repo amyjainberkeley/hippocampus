@@ -1,0 +1,65 @@
+[package]
+name                   = "mci-messages-reader"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI macOS adapter: Messages.app read path (chat.db Envelope reader + FSEvents) for V2-P7. READ-ONLY library; no event emit, no brain write. See docs/decisions/0032-deep-hook-plugin-contract.md."
+
+[lints]
+workspace = true
+
+# ---------------------------------------------------------------------------
+# Scope (V2-P7 — read path only)
+# ---------------------------------------------------------------------------
+# This crate ships the Messages.app READ surface only:
+#   - discover_chat_db()        → locate ~/Library/Messages/chat.db
+#   - list_recent_messages()    → chat.db SQLite read (WAL-aware, ro)
+#   - read_thread()             → join chat + chat_handle_join + handle +
+#                                 chat_message_join + message for a thread
+#   - watch_inbox()             → FSEvents-backed stream of NewMessageEvents
+#
+# It does NOT ingest, does NOT touch the brain, does NOT emit wire-level
+# CaptureEvents. The cascade-equivalent + ADR-0030 §3(f) extension live in
+# `core/brain/src/redaction/messages_plugin.rs`. The allowlist edit / wire
+# changes / brain ingest plumbing remain V2-P10/V2-P11 territory.
+#
+# Lib body is gated `#![cfg(target_os = "macos")]`; on non-macOS targets the
+# crate compiles as an empty library so `cargo build --workspace` is clean
+# for Linux contributors. Same shape as `mci-mail-reader` / `mci-embed-coreml`.
+
+[dependencies]
+thiserror = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# WAL-aware read-only opens against ~/Library/Messages/chat.db.
+# We do NOT enable `bundled-sqlcipher-vendored-openssl` — this adapter reads
+# a plaintext SQLite file (Messages.app's; not our SQLCipher store). The
+# `bundled` feature picks the vendored libsqlite3 so the chat.db read path
+# is decoupled from the host's libsqlite3.
+rusqlite    = { version = "0.39.0", features = ["bundled"] }
+
+# FSEvents-backed cross-platform watcher. MIT/Apache-2.0. Default features
+# pick the FSEvents backend on macOS. Used to detect chat.db WAL writes
+# (Messages.app writes the WAL on every received message).
+notify      = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+
+# Async stream surface for watch_inbox.
+tokio        = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time"] }
+futures-core = "0.3"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+tempfile = "3.27.0"
+tokio    = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "test-util"] }
+
+# ---------------------------------------------------------------------------
+# CLI binary for manual verification.
+# ---------------------------------------------------------------------------
+# `messages-reader discover | list | thread | watch`. Surfaces a one-line
+# "Messages access denied — grant Full Disk Access" message on EPERM
+# (the V2-P10 onboarding-UX stub per ADR-0032 §3(d)).
+[[bin]]
+name = "messages-reader"
+path = "src/bin/messages_reader.rs"
+required-features = []

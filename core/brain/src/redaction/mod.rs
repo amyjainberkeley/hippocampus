@@ -13,7 +13,7 @@
 //! before either bundle can be added to
 //! `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml`.
 //!
-//! # Scope of this PR (§3(a)–(c) only — §3(d) deferred, §3(e) doc-stated)
+//! # Scope of this PR (§3(a)–(c) + §3(f); §3(d) deferred, §3(e) doc-stated)
 //!
 //! - [`sms_otp::redact_sms_shapes`] — §3(a) SMS-OTP / banking-notification
 //!   regex set covering Apple ID 2FA, US bank OTPs, generic carrier OTPs,
@@ -25,6 +25,11 @@
 //! - [`mail_header::should_drop_mail_frame`] — §3(c) Mail-header pre-OCR
 //!   check. Refuses any frame whose rendered `From:` header matches a
 //!   sensitive domain, regardless of body content.
+//! - [`messages_plugin::redact_messages_plugin_event`] — §3(f) per-plugin
+//!   cascade-equivalent for the V2-P7 Messages deep-hook plugin. Reuses
+//!   §3(a) + §3(b) on a chat.db row's body and participants. Additive to
+//!   §3(a)–(c); does not relax any existing semantics. See ADR-0032 for
+//!   the deep-hook plugin contract this implements.
 //!
 //! # App-bundle gating (binding, ADR-0030 §3 + ADR-0015 §5)
 //!
@@ -53,6 +58,7 @@
 //! pure-Rust regex + static-table lookup.
 
 pub mod mail_header;
+pub mod messages_plugin;
 pub mod parsed_mail_header;
 pub mod sensitive_domains;
 pub mod sms_otp;
