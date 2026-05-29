@@ -222,6 +222,7 @@ fn writer_loop(
             episode_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding,
         };
         match store.put_event(&event) {

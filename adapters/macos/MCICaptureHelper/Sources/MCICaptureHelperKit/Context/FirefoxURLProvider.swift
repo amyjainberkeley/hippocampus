@@ -50,9 +50,10 @@
 //   `AppleScriptRunner` (production wiring: `RealAppleScriptRunner`
 //   from `SafariURLProvider.swift`). On success non-empty → URL.
 //   On any error / empty / timeout → `nil`.
-// - Cache last result for ≤1 s. One cache slot covers all three
-//   supported bundle ids because all three run the same script
-//   against the same `Firefox` application surface.
+// - Cache last result for ≤100 ms (V2-P2 dropped from 1.0 s per memo
+//   `docs/research/tab-attribution-mix-2026-05-29.md` §3). Cache is
+//   keyed by `focusedWindowId` so an inter-Firefox-window focus
+//   change invalidates within the TTL.
 
 import Foundation
 
@@ -74,9 +75,8 @@ public final class FirefoxURLProvider: URLProvider, @unchecked Sendable {
     internal static let script: String =
         "tell application \"Firefox\" to get URL of front window"
 
-    /// Cache TTL. ADR-0015 §3 sets the snapshot poll at 1 Hz; this
-    /// TTL caps AppleScript invocations to ~1/s worst case.
-    internal static let cacheTTL: TimeInterval = 1.0
+    /// Cache TTL. V2-P2 dropped from 1.0 s → 100 ms (memo §3).
+    internal static let cacheTTL: TimeInterval = 0.100
 
     /// Bounded AppleScript execution. NSAppleScript blocks the
     /// dispatching thread; a stuck call should not stall the
@@ -88,6 +88,10 @@ public final class FirefoxURLProvider: URLProvider, @unchecked Sendable {
     private let lock = NSLock()
     private var cachedAt: Date?
     private var cachedValue: String?
+    /// `CGWindowID` the cached value was resolved under (V2-P2). A
+    /// focus change to a different Firefox window invalidates the
+    /// cache even within the 100 ms TTL.
+    private var cachedWindowId: UInt32?
 
     /// Production initializer. Wires the real `NSAppleScript`-backed
     /// runner + the system clock.
@@ -107,13 +111,21 @@ public final class FirefoxURLProvider: URLProvider, @unchecked Sendable {
     }
 
     public func activeTabURL(forFrontmost bundleId: String) -> String? {
+        activeTabURL(forFrontmost: bundleId, focusedWindowId: nil)
+    }
+
+    public func activeTabURL(
+        forFrontmost bundleId: String,
+        focusedWindowId: UInt32?
+    ) -> String? {
         guard Self.supportedBundleIds.contains(bundleId) else { return nil }
 
         let now = clock()
 
         lock.lock()
         if let at = cachedAt,
-           now.timeIntervalSince(at) <= Self.cacheTTL {
+           now.timeIntervalSince(at) <= Self.cacheTTL,
+           cachedWindowId == focusedWindowId {
             let cached = cachedValue
             lock.unlock()
             return cached
@@ -132,6 +144,7 @@ public final class FirefoxURLProvider: URLProvider, @unchecked Sendable {
         lock.lock()
         cachedAt = now
         cachedValue = resolved
+        cachedWindowId = focusedWindowId
         lock.unlock()
         return resolved
     }

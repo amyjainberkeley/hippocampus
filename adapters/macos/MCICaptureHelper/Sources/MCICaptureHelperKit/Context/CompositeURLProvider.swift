@@ -71,8 +71,22 @@ public final class CompositeURLProvider: URLProvider, @unchecked Sendable {
     }
 
     public func activeTabURL(forFrontmost bundleId: String) -> String? {
+        activeTabURL(forFrontmost: bundleId, focusedWindowId: nil)
+    }
+
+    /// V2-P2 focus-aware overload. Forwards `focusedWindowId` to each
+    /// inner provider so the per-provider `(bundleId, focusedWindowId)`
+    /// cache key invalidates correctly on a focus change to a
+    /// different browser window.
+    public func activeTabURL(
+        forFrontmost bundleId: String,
+        focusedWindowId: UInt32?
+    ) -> String? {
         for p in providers {
-            if let url = p.activeTabURL(forFrontmost: bundleId) {
+            if let url = p.activeTabURL(
+                forFrontmost: bundleId,
+                focusedWindowId: focusedWindowId
+            ) {
                 return url
             }
         }

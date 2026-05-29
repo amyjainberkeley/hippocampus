@@ -339,9 +339,75 @@ final class ChromiumURLProviderTests: XCTestCase {
         )
     }
 
-    /// Cache TTL matches the ADR-0015 §3 snapshot-poll period.
-    func testCacheTTLIsOneSecond() {
-        XCTAssertEqual(ChromiumURLProvider.cacheTTL, 1.0)
+    /// V2-P2: cache TTL dropped 1.0 s → 100 ms to shrink the
+    /// stale-URL window after intra-browser tab switches (memo
+    /// `docs/research/tab-attribution-mix-2026-05-29.md` §3).
+    func testCacheTTLIs100Milliseconds() {
+        XCTAssertEqual(ChromiumURLProvider.cacheTTL, 0.100)
+    }
+
+    // MARK: – (V2-P2) focus-key invalidation
+
+    /// Two calls with the SAME bundle id but DIFFERENT
+    /// `focusedWindowId` values within the 100 ms TTL invoke the
+    /// runner twice. Pins the V2-P2 cache key change:
+    /// `(bundleId, focusedWindowId)` not just `bundleId`.
+    func testFocusedWindowChangeInvalidatesCacheWithinTTL() {
+        let runner = StubAppleScriptRunner(
+            outcomes: [
+                .success("https://window-a.example.com/"),
+                .success("https://window-b.example.com/"),
+            ],
+            fallback: .scriptError
+        )
+        let clock = FakeClock()
+        let p = ChromiumURLProvider(runner: runner, clock: clock.reader())
+
+        let a = p.activeTabURL(
+            forFrontmost: "com.google.Chrome",
+            focusedWindowId: 100
+        )
+        clock.advance(ChromiumURLProvider.cacheTTL / 2)
+        let b = p.activeTabURL(
+            forFrontmost: "com.google.Chrome",
+            focusedWindowId: 200
+        )
+
+        XCTAssertEqual(a, "https://window-a.example.com/")
+        XCTAssertEqual(b, "https://window-b.example.com/")
+        XCTAssertEqual(
+            runner.invocationCount, 2,
+            "Focus change to a different windowId must invalidate the"
+            + " (bundleId, focusedWindowId) cache key within the TTL"
+        )
+    }
+
+    /// Same `(bundleId, focusedWindowId)` within the TTL hits the
+    /// cache. Pins the V2-P2 cache key is correctly composite.
+    func testCachedWithinTTLForSameFocusedWindow() {
+        let runner = StubAppleScriptRunner(
+            outcomes: [
+                .success("https://first.example.com/"),
+                .success("https://second.example.com/"),
+            ],
+            fallback: .scriptError
+        )
+        let clock = FakeClock()
+        let p = ChromiumURLProvider(runner: runner, clock: clock.reader())
+
+        let a = p.activeTabURL(
+            forFrontmost: "com.google.Chrome",
+            focusedWindowId: 42
+        )
+        clock.advance(ChromiumURLProvider.cacheTTL - 0.010)
+        let b = p.activeTabURL(
+            forFrontmost: "com.google.Chrome",
+            focusedWindowId: 42
+        )
+
+        XCTAssertEqual(a, "https://first.example.com/")
+        XCTAssertEqual(b, "https://first.example.com/")
+        XCTAssertEqual(runner.invocationCount, 1)
     }
 
     /// Timeout bound matches the ADR-0015 P2.4 acceptance brief.

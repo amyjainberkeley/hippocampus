@@ -855,6 +855,7 @@ mod tests {
             episode_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding: None,
         };
         let out = brain_cli::format_event_human(&event);
@@ -879,6 +880,7 @@ mod tests {
             episode_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding: None,
         };
         let out = brain_cli::format_event_jsonl(&event);
@@ -998,6 +1000,7 @@ mod tests {
                     episode_id: None,
                     cascade_reason: 0,
                     keyframe_blob: None,
+                    tab_id: None,
                     embedding: None,
                 };
                 writer.put_event(&event).unwrap();

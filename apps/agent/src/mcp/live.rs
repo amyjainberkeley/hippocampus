@@ -391,6 +391,7 @@ mod tests {
             episode_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding: None,
         };
         let result = ro_store.put_event(&event);
@@ -422,6 +423,7 @@ mod tests {
             episode_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
+            tab_id: None,
             embedding: None,
         };
         let _ = wrapper.put_event(&event);

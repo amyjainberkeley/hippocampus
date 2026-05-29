@@ -30,6 +30,7 @@ fn event_at(text: &str, ts_us: u64, app: Option<&str>, embedding: Option<Vec<f32
         episode_id: None,
         cascade_reason: 0,
         keyframe_blob: None,
+        tab_id: None,
         embedding,
     }
 }

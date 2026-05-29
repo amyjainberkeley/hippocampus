@@ -501,7 +501,15 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let effectiveBundleId: String? = focusedBundleId ?? snap.appBundleId
         let resolvedUrl: String?
         if let id = effectiveBundleId, !id.isEmpty {
-            resolvedUrl = urlProvider?.activeTabURL(forFrontmost: id)
+            // V2-P2: pass the focused-window CGWindowID so the URL
+            // provider's `(bundleId, focusedWindowId)` cache key
+            // invalidates on inter-window focus changes (memo
+            // `docs/research/tab-attribution-mix-2026-05-29.md` §3).
+            let focusedWindowId: UInt32? = focusedSnapshot?.focused.map { UInt32($0.windowId) }
+            resolvedUrl = urlProvider?.activeTabURL(
+                forFrontmost: id,
+                focusedWindowId: focusedWindowId
+            )
         } else {
             resolvedUrl = nil
         }

@@ -35,9 +35,18 @@
 //   On execution exceeding 250 ms → `nil` (the AppleScript may still
 //   complete on its dispatch queue; its result is discarded).
 //   Never retry within the same call.
-// - Cache the last result (success-string or `nil`) for ≤1 s. The
-//   ADR-0015 §3 snapshot actor polls at 1 Hz; the cache caps
-//   AppleScript invocations to ~1/s in the worst case.
+// - Cache the last result (success-string or `nil`) for ≤100 ms.
+//   V2-P2 dropped the TTL from 1.0 s → 100 ms per memo
+//   `docs/research/tab-attribution-mix-2026-05-29.md` §3 — the prior
+//   1.0 s window caused the OCREvent stamped with a prior tab's URL
+//   for up to 1 s after an intra-browser tab switch.
+// - Cache is keyed by `(bundleId, focusedWindowId)`. The focus-aware
+//   overload `activeTabURL(forFrontmost:focusedWindowId:)` reads the
+//   FocusTracker snapshot's `CGWindowID` (ADR-0031 / V2-P1) so a
+//   focus change to a different browser window (which may carry a
+//   different active tab) invalidates the cache even within the
+//   100 ms TTL. Intra-window tab switches don't change `windowId`;
+//   the 100 ms TTL bounds the staleness in that case.
 
 import Foundation
 
@@ -138,9 +147,11 @@ public final class SafariURLProvider: URLProvider, @unchecked Sendable {
     internal static let script: String =
         "tell application \"Safari\" to URL of front document"
 
-    /// Cache TTL. ADR-0015 §3 sets the snapshot poll at 1 Hz; this
-    /// TTL caps AppleScript invocations to ~1/s worst case.
-    internal static let cacheTTL: TimeInterval = 1.0
+    /// Cache TTL. V2-P2 dropped from 1.0 s → 100 ms to shrink the
+    /// stale-URL window after an intra-browser tab switch (memo
+    /// `docs/research/tab-attribution-mix-2026-05-29.md` §3 +
+    /// `brain-architecture-v2-vision-2026-05-29.md` §7.1 V2-P2).
+    internal static let cacheTTL: TimeInterval = 0.100
 
     /// Bounded AppleScript execution. NSAppleScript blocks the
     /// dispatching thread; a stuck call should not stall the
@@ -152,6 +163,11 @@ public final class SafariURLProvider: URLProvider, @unchecked Sendable {
     private let lock = NSLock()
     private var cachedAt: Date?
     private var cachedValue: String?
+    /// `CGWindowID` (cast `UInt32`) the cached value was resolved
+    /// under. A focus change to a different browser window (different
+    /// `CGWindowID`, possibly carrying a different active tab)
+    /// invalidates the cache even within the 100 ms TTL.
+    private var cachedWindowId: UInt32?
 
     /// Production initializer. Wires the real `NSAppleScript`-backed
     /// runner + the system clock.
@@ -171,13 +187,21 @@ public final class SafariURLProvider: URLProvider, @unchecked Sendable {
     }
 
     public func activeTabURL(forFrontmost bundleId: String) -> String? {
+        activeTabURL(forFrontmost: bundleId, focusedWindowId: nil)
+    }
+
+    public func activeTabURL(
+        forFrontmost bundleId: String,
+        focusedWindowId: UInt32?
+    ) -> String? {
         guard bundleId == Self.bundleId else { return nil }
 
         let now = clock()
 
         lock.lock()
         if let at = cachedAt,
-           now.timeIntervalSince(at) <= Self.cacheTTL {
+           now.timeIntervalSince(at) <= Self.cacheTTL,
+           cachedWindowId == focusedWindowId {
             let cached = cachedValue
             lock.unlock()
             return cached
@@ -196,6 +220,7 @@ public final class SafariURLProvider: URLProvider, @unchecked Sendable {
         lock.lock()
         cachedAt = now
         cachedValue = resolved
+        cachedWindowId = focusedWindowId
         lock.unlock()
         return resolved
     }

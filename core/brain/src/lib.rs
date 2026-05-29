@@ -311,6 +311,16 @@ pub struct Event {
     /// Content-addressed blob path for the keyframe (`None` for text-only
     /// events). The blob is encrypted separately per ADR-0008 §1.5.
     pub keyframe_blob: Option<String>,
+    /// Browser-assigned tab identifier the event came from. V2-P2 — fills
+    /// the per-tab attribution gap the cycle 8.18 memo
+    /// (`docs/research/tab-attribution-mix-2026-05-29.md` §5) opens.
+    /// `None` for OCREvents (no tab signal from the helper) and for
+    /// pre-V2-P2 browser events; `Some(id)` for V2-P2 `PageContentEvent`
+    /// ingests where the extension shipped a non-zero tab id. The
+    /// brain store column is `INTEGER NULL`; the brain_ingest path
+    /// converts a wire-level `0` (extension default = "no tab id
+    /// available") to `None` before insert.
+    pub tab_id: Option<u32>,
     /// L2-normalized 384-d embedding (ADR-0009 / ADR-0011). `None` when
     /// the event has not yet been embedded — insert is allowed without an
     /// embedding so capture-time inserts don't block on the embedder; the
