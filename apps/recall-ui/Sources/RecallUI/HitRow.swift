@@ -32,7 +32,7 @@ struct HitRow: View {
                         .foregroundStyle(Color.brandFgMuted)
                 }
             }
-            Text(Formatters.snippet(hit.ocrTextSnippet))
+            Text(Formatters.snippet(Formatters.stripContextHeader(hit.ocrTextSnippet)))
                 .font(.system(.body, design: .default))
                 .foregroundStyle(Color.brandFgSecondary)
                 .lineLimit(3)

@@ -149,4 +149,92 @@ final class FormattersTests: XCTestCase {
         let result = Formatters.relativeTime(usSinceEpoch: tsUs, now: now)
         XCTAssertTrue(result.hasSuffix("UTC"))
     }
+
+    // MARK: - stripContextHeader
+
+    func testStripContextHeaderRemovesFullPrefix() {
+        let raw =
+            "[app=com.apple.Safari | title=spur | url=https://spur.example/dashboard | ts=2026-05-29T00:00:00.000Z]\nhello world"
+        XCTAssertEqual(Formatters.stripContextHeader(raw), "hello world")
+    }
+
+    func testStripContextHeaderRemovesPrefixWithQuestionMarkPlaceholders() {
+        // brain_ingest::compose_context_header emits `?` for missing fields.
+        let raw = "[app=? | title=? | url=? | ts=2026-05-29T00:00:00.000Z]\nbody"
+        XCTAssertEqual(Formatters.stripContextHeader(raw), "body")
+    }
+
+    func testStripContextHeaderPreservesEmptyBody() {
+        // Browser-URL events produce a snippet that is just the prefix.
+        let raw = "[app=com.apple.Safari | title=? | url=https://x | ts=2026-05-29T00:00:00.000Z]\n"
+        XCTAssertEqual(Formatters.stripContextHeader(raw), "")
+    }
+
+    func testStripContextHeaderPreservesMultilineBody() {
+        let raw =
+            "[app=com.apple.Safari | title=spur | url=https://x | ts=2026-05-29T00:00:00.000Z]\nline 1\nline 2\nline 3"
+        XCTAssertEqual(
+            Formatters.stripContextHeader(raw),
+            "line 1\nline 2\nline 3"
+        )
+    }
+
+    func testStripContextHeaderLeavesNonPrefixInputUnchanged() {
+        XCTAssertEqual(Formatters.stripContextHeader("hello"), "hello")
+        XCTAssertEqual(Formatters.stripContextHeader(""), "")
+    }
+
+    func testStripContextHeaderLeavesPartialPrefixUnchanged() {
+        // Missing `| url=` token — must not consume.
+        let raw = "[app=com.apple.Safari | title=spur | ts=...]\nbody"
+        XCTAssertEqual(Formatters.stripContextHeader(raw), raw)
+    }
+
+    func testStripContextHeaderDoesNotMatchBodyResemblingPrefix() {
+        // No leading `[app=` — anchored at start, so unchanged.
+        let raw =
+            "preamble\n[app=com.apple.Safari | title=t | url=u | ts=ts]\nbody"
+        XCTAssertEqual(Formatters.stripContextHeader(raw), raw)
+    }
+
+    // MARK: - sourceLabel
+
+    func testSourceLabelPageContentWhenUrlAndTextPresent() {
+        let snippet =
+            "[app=com.apple.Safari | title=spur | url=https://x | ts=2026-05-29T00:00:00.000Z]\nactual body"
+        XCTAssertEqual(
+            Formatters.sourceLabel(url: "https://x", textSnippet: snippet),
+            "Page Content"
+        )
+    }
+
+    func testSourceLabelOCRTextWhenNoUrlButTextPresent() {
+        let snippet =
+            "[app=com.apple.dt.Xcode | title=ViewModel.swift | url=? | ts=2026-05-29T00:00:00.000Z]\nfunc foo()"
+        XCTAssertEqual(
+            Formatters.sourceLabel(url: nil, textSnippet: snippet),
+            "OCR Text"
+        )
+        XCTAssertEqual(
+            Formatters.sourceLabel(url: "", textSnippet: snippet),
+            "OCR Text"
+        )
+    }
+
+    func testSourceLabelBrowserURLWhenUrlPresentButTextEmpty() {
+        let snippet =
+            "[app=com.apple.Safari | title=? | url=https://x | ts=2026-05-29T00:00:00.000Z]\n"
+        XCTAssertEqual(
+            Formatters.sourceLabel(url: "https://x", textSnippet: snippet),
+            "Browser URL"
+        )
+    }
+
+    func testSourceLabelEventWhenAllEmpty() {
+        let snippet = "[app=? | title=? | url=? | ts=2026-05-29T00:00:00.000Z]\n"
+        XCTAssertEqual(
+            Formatters.sourceLabel(url: nil, textSnippet: snippet),
+            "Event"
+        )
+    }
 }

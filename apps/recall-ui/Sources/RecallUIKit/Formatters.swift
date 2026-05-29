@@ -88,4 +88,60 @@ public enum Formatters {
         let clamped = max(0.0, min(1.0, s))
         return String(format: "%.1f%%", clamped * 100.0)
     }
+
+    // MARK: - Context-header strip + source label
+    //
+    // `brain_ingest::compose_context_header` (apps/agent/src/brain_ingest.rs)
+    // prepends `[app=… | title=… | url=… | ts=…]\n` to every event's
+    // `text_snippet` so the FTS5 index can match on the structured
+    // metadata via lexical queries (`url=railway`, `app=Safari`, …). The
+    // prefix is load-bearing for search and MUST stay in the stored
+    // field — we strip it only at display time so the user sees the
+    // body, not the redundant header that the URL chip + app row
+    // already render above it.
+
+    /// Regex matching the leading ADR-0010 §1.3 context header on
+    /// `text_snippet`. Anchored at start, requires the four `|`-
+    /// separated tokens in order (app/title/url/ts), and consumes the
+    /// trailing `]\n`. Each value field forbids `\n` so a malformed or
+    /// body-resembling line cannot eat into the actual content.
+    private static let contextHeaderPattern =
+        #"^\[app=[^\n]*? \| title=[^\n]*? \| url=[^\n]*? \| ts=[^\n]*?\]\n?"#
+
+    private static let contextHeaderRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: contextHeaderPattern)
+
+    /// Strip the leading `[app=… | title=… | url=… | ts=…]\n` header
+    /// from a `text_snippet` for display. The stored field is unchanged
+    /// (FTS5 still indexes the prefix). When the input does not start
+    /// with a fully-formed header, returns the input verbatim.
+    public static func stripContextHeader(_ s: String) -> String {
+        guard let regex = contextHeaderRegex else { return s }
+        let ns = s as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard
+            let match = regex.firstMatch(in: s, range: range),
+            match.range.location == 0
+        else {
+            return s
+        }
+        return ns.substring(from: match.range.length)
+    }
+
+    /// Source-aware label for the event-card body, classified from the
+    /// `(url, text_snippet)` shape after the context header is
+    /// stripped. PageContentEvents (from the Safari `.appex` /
+    /// Chromium native host) carry both a URL and a body; OCREvents
+    /// (from the SCStream Vision path) carry a body but no URL;
+    /// browser-URL-change events carry a URL but no body.
+    public static func sourceLabel(url: String?, textSnippet: String) -> String {
+        let hasUrl = !(url?.isEmpty ?? true)
+        let hasText = !stripContextHeader(textSnippet).isEmpty
+        switch (hasUrl, hasText) {
+        case (true, true): return "Page Content"
+        case (false, true): return "OCR Text"
+        case (true, false): return "Browser URL"
+        case (false, false): return "Event"
+        }
+    }
 }
