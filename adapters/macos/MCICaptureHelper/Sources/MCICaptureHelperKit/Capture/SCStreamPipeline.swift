@@ -89,6 +89,12 @@ public enum SCContentFilterFactory {
     /// running application's windows.
     ///
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
+    ///
+    /// ADR-0031: this factory is preserved as the fallback for sessions
+    /// that have not been wired to a `FocusTracker` yet (legacy /
+    /// headless test paths). The production capture path uses
+    /// `makeFocusedWindowFilter(...)` so the captured pixel surface
+    /// matches the cascade's attribution model.
     public static func makeDisplayFilter(
         denylist: Denylist
     ) async throws -> SCContentFilter {
@@ -107,6 +113,101 @@ public enum SCContentFilterFactory {
             excludingApplications: excludedApps,
             exceptingWindows: []
         )
+    }
+
+    /// ADR-0031 Option (a) — focused-window-scoped capture filter.
+    ///
+    /// PROTECTED-SET per AGENT_PROTOCOL §5. Load-bearing privacy
+    /// invariant per `docs/research/capture-scope-window-vs-display-
+    /// 2026-05-29.md` §5.1: the SCStream's captured pixel surface IS
+    /// the focused window, not the whole display. This is the
+    /// structural fix for the cycle 8.17 cross-window leak — once the
+    /// captured surface is one window's pixels, the cascade's
+    /// bundle-keyed gate is structurally correct, ADR-0030 §3
+    /// Messages+Mail redaction operates on the right bytes, and
+    /// ADR-0017 §3.1 allowlist-as-content-filter holds as designed.
+    ///
+    /// Returns `nil` when:
+    ///   1. The supplied `windowId` is not present in the live
+    ///      `SCShareableContent.current.windows` enumeration (the
+    ///      focused window was closed or moved off-screen between the
+    ///      `FocusTracker` poll and this call).
+    ///   2. The matched `SCWindow`'s owning application is on the
+    ///      ADR-0013 §1 denylist. The caller (`SCStreamCaptureSession`)
+    ///      treats `nil` as "do not rebind the SCStream filter" — the
+    ///      prior filter (or no filter, on first bind) stays active.
+    ///      This preserves §1's source-level exclusion: a denylisted
+    ///      app's window can NEVER become the SCStream's bound window.
+    ///
+    /// `// UNVERIFIED — needs live macOS; do not claim working`.
+    /// The OS-touching `SCShareableContent.current` call requires a
+    /// real screen + Screen-Recording TCC grant; the pure selection
+    /// logic is factored into `selectFocusedWindow(...)` which IS
+    /// unit-tested below.
+    public static func makeFocusedWindowFilter(
+        windowId: CGWindowID,
+        denylist: Denylist
+    ) async throws -> SCContentFilter? {
+        let content = try await SCShareableContent.current
+        // Find the SCWindow whose `windowID` matches. The enumeration
+        // is small (O(visible windows on screen) — tens, not
+        // thousands); a linear scan is fine.
+        guard let scWindow = content.windows.first(where: { $0.windowID == windowId })
+        else {
+            return nil
+        }
+        // ADR-0013 §1 denylist composition: a denylisted app's window
+        // never becomes the SCStream's bound window. The `owningApplication`
+        // is `SCRunningApplication?`; nil collapses to "do not bind"
+        // (the safe direction — we cannot verify the bundle is allowed).
+        guard let owner = scWindow.owningApplication else {
+            return nil
+        }
+        if denylist.appIsDenied(bundleId: owner.bundleIdentifier) {
+            return nil
+        }
+        // `SCContentFilter(desktopIndependentWindow:)` is Apple's
+        // documented API for single-window capture. The captured
+        // surface IS the window's pixels — no display compositing, no
+        // adjacent-window content. This is the load-bearing OS API
+        // boundary the §7 falsifiability corpus rests on.
+        return SCContentFilter(desktopIndependentWindow: scWindow)
+    }
+
+    /// OS-free shape describing one candidate window for the
+    /// focused-window filter selection. Mirrors the subset of
+    /// `SCWindow` fields the pure selection logic needs, so
+    /// `selectFocusedWindow(...)` can be exercised without standing up
+    /// a live `SCShareableContent` enumeration.
+    public struct WindowDescriptor: Sendable, Equatable {
+        public let windowId: CGWindowID
+        public let bundleId: String
+
+        public init(windowId: CGWindowID, bundleId: String) {
+            self.windowId = windowId
+            self.bundleId = bundleId
+        }
+    }
+
+    /// Pure selection helper: of the supplied window descriptors, which
+    /// one (if any) is the focused window AND not denylisted. Returns
+    /// the matched descriptor or `nil` for either failure mode.
+    ///
+    /// Mirrors the decision the live `makeFocusedWindowFilter(...)`
+    /// makes after enumerating `SCShareableContent`; the OS call is
+    /// the difference, the *logic* is identical and is the auditable
+    /// part. Used by the §7 corpus runner + headless unit tests.
+    public static func selectFocusedWindow(
+        from descriptors: [WindowDescriptor],
+        windowId: CGWindowID,
+        denylist: Denylist
+    ) -> WindowDescriptor? {
+        guard let matched = descriptors.first(where: { $0.windowId == windowId })
+        else { return nil }
+        if denylist.appIsDenied(bundleId: matched.bundleId) {
+            return nil
+        }
+        return matched
     }
 }
 
@@ -510,5 +611,56 @@ public struct SCStreamPipeline: Sendable {
             }
             return .encoded(seq: seq, forcedByFloor: forcedByFloor)
         }
+    }
+
+    /// ADR-0031 §5.3 — emit a `focusRaceDropped` tombstone for a frame
+    /// whose attribution cannot be trusted because the focus generation
+    /// observed at SCStream callback time did NOT match the generation
+    /// the live SCStream's `SCContentFilter` was rebound under.
+    ///
+    /// Routed through the pipeline's existing sink + sequence + counters
+    /// so the wire-frame shape is identical to a normal
+    /// `.suppress(reason: ...)` decision — the difference is that this
+    /// path does NOT consult the cascade. The cascade reads
+    /// `(focused.bundleId, ...)`; under a focus-race, no consistent
+    /// `bundleId` exists at the SCStream sample timestamp, so the safe
+    /// direction is to fail closed before the cascade is even asked.
+    ///
+    /// Amendment 1 §3 audit (the §5 protected-set CSO sign-off
+    /// asserts on every commit that touches the pipeline):
+    ///   (a) cascade-before-encode — unchanged. The race gate fires
+    ///       BEFORE this method is called; there is no encode on this
+    ///       path.
+    ///   (b) fail-closed preserved — STRENGTHENED. A frame whose
+    ///       attribution is structurally untrustworthy now emits a
+    ///       distinct tombstone (`focusRaceDropped`) instead of
+    ///       running the cascade under a stale generation; pre-V2-P1
+    ///       behavior would have run the cascade against the
+    ///       (mismatched) focused-window snapshot.
+    ///   (c) no stored/emitted suppressed event — unchanged. A
+    ///       `focusRaceDropped` tombstone IS the documented suppress
+    ///       shape; nothing else is emitted.
+    ///   (d) no surface-lease leak — unchanged. The supplied
+    ///       `SurfaceLease` is released by the top-level `defer`
+    ///       below, exactly once.
+    public func emitFocusRaceDropped(
+        tsUs: UInt64,
+        appBundle: String,
+        lease: SurfaceLease
+    ) async throws {
+        defer { lease.release() }
+        await counters.recordDelivered()
+        await counters.recordSuppressed()
+        await counters.recordFocusRaceDropped()
+        let seq = await sequence.allocate()
+        let bytes = encodePrivacyTombstone(
+            seq: seq,
+            tombstone: PrivacyTombstone(
+                tsUs: tsUs,
+                appBundle: appBundle,
+                reason: .focusRaceDropped
+            )
+        )
+        try await sink.write(bytes)
     }
 }

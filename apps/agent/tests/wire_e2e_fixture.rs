@@ -11,7 +11,7 @@
 //!
 //! ## The cross-side byte-array contract
 //!
-//! `OCR_EVENT_V06_FIXTURE` below is **byte-for-byte identical** to the
+//! `OCR_EVENT_V07_FIXTURE` below is **byte-for-byte identical** to the
 //! `expected` array hand-rolled in:
 //!
 //! - Swift: `adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/WireTests.swift:188-235`
@@ -60,17 +60,23 @@ use mci_core::crypto::DbKey;
 use mci_core::ipc::{DecodeError, ReadError};
 
 // -----------------------------------------------------------------------
-// The byte-exact v0x06 OCREvent frame — pinned across THREE sides.
+// The byte-exact v0x07 OCREvent frame — pinned across THREE sides.
+//
+// V2-P1 / ADR-0031 rename: prior `OCR_EVENT_V07_FIXTURE` reflected the
+// then-current wire version. 0x06 reached end-of-support at the
+// 0x07 → 0x08 bump (one-cycle rolling-restart window per the Rust-side
+// `FRAME_VERSION` docstring). This fixture is now pinned at the legacy
+// peer the 0x08 decoder accepts.
 //
 // Cross-references (any drift in any of the three MUST be a flagged
 // review item — this fixture is the IPC contract for the FIRST
 // message variant carrying USER CONTENT across the seam):
 //   - Swift encoder: adapters/macos/MCICaptureHelper/Tests/
-//                    MCICaptureHelperKitTests/WireTests.swift:188-235
-//   - Rust  decoder: core/src/ipc/wire.rs:1130-1213
+//                    MCICaptureHelperKitTests/WireTests.swift (testOCREventCrossSideFixture)
+//   - Rust  decoder: core/src/ipc/wire.rs (ocr_event_cross_side_fixture)
 //
 // Layout (ADR-0016 §1.6, little-endian throughout):
-//   header (16): magic 0x4D | version 0x06 | msg_type 0x0040 (OCREvent)
+//   header (16): magic 0x4D | version 0x07 | msg_type 0x0040 (OCREvent)
 //                | seq u64 = 42 | len u32 = 124
 //   payload (124):
 //     seq u64 = 42
@@ -85,9 +91,9 @@ use mci_core::ipc::{DecodeError, ReadError};
 //     ocr_text     = "Hi"
 // -----------------------------------------------------------------------
 #[rustfmt::skip]
-const OCR_EVENT_V06_FIXTURE: &[u8] = &[
+const OCR_EVENT_V07_FIXTURE: &[u8] = &[
     // ── Frame header (16 bytes) ─────────────────────────────────────
-    0x4D, 0x06, 0x40, 0x00, // magic 'M', version 0x06, msg_type 0x0040 LE
+    0x4D, 0x07, 0x40, 0x00, // magic 'M', version 0x07, msg_type 0x0040 LE
     0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // seq u64 LE = 42
     0x7C, 0x00, 0x00, 0x00, // len u32 LE = 124
 
@@ -166,12 +172,12 @@ async fn device_id(dir: &std::path::Path) -> DeviceId {
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn swift_v06_fixture_decodes_ingests_and_recalls_end_to_end() {
+async fn swift_v07_fixture_decodes_ingests_and_recalls_end_to_end() {
     // Belt-and-suspenders: pin the literal length so a future edit to the
     // const that doesn't match the Swift `expected` array fails LOUDLY
     // here, not via a confusing decode error downstream.
     assert_eq!(
-        OCR_EVENT_V06_FIXTURE.len(),
+        OCR_EVENT_V07_FIXTURE.len(),
         140,
         "fixture length must match WireTests.swift `frame.count` (140)"
     );
@@ -188,10 +194,10 @@ async fn swift_v06_fixture_decodes_ingests_and_recalls_end_to_end() {
     );
 
     // Feed the Swift-hand-rolled bytes through the production drain.
-    let mut cursor = Cursor::new(OCR_EVENT_V06_FIXTURE.to_vec());
+    let mut cursor = Cursor::new(OCR_EVENT_V07_FIXTURE.to_vec());
     let stats = drain_to_log_with_brain(&mut cursor, &log, &clock, &id, &pump)
         .await
-        .expect("drain must accept the v0x06 fixture");
+        .expect("drain must accept the v0x07 fixture");
 
     // Counters — exactly one frame seen, one routed to brain.
     assert_eq!(stats.frames_seen, 1);
@@ -226,7 +232,7 @@ async fn swift_v06_fixture_decodes_ingests_and_recalls_end_to_end() {
     assert!(
         !hits.is_empty(),
         "mci_recall(\"{FIXTURE_OCR_TOKEN}\") must return at least one hit \
-         for the v0x06 fixture"
+         for the v0x07 fixture"
     );
     assert!(
         hits.iter().any(|h| h.record.ts_us == FIXTURE_TS_US),
@@ -239,21 +245,22 @@ async fn swift_v06_fixture_decodes_ingests_and_recalls_end_to_end() {
 // dual-accept set is REJECTED, not silently accepted. The strict-payload
 // tripwire from PR #44 applied at the version-byte boundary — a
 // misbehaving helper must not be able to smuggle bytes in by claiming a
-// future wire version the consumer hasn't agreed to. The 0x06 → 0x07
-// ocr-emit-silence fix opens the accept set to {0x06, 0x07} for rolling-
-// restart safety; anything OUTSIDE that set still hard-fails.
+// future wire version the consumer hasn't agreed to. The 0x07 → 0x08
+// V2-P1 ADR-0031 bump opens the accept set to {0x07, 0x08} for rolling-
+// restart safety; anything OUTSIDE that set still hard-fails. 0x06
+// reaches end-of-support at this bump.
 // -----------------------------------------------------------------------
 
 #[tokio::test]
 async fn single_byte_version_flip_to_future_version_is_rejected_no_silent_accept() {
-    // Flip byte 1 (the version byte) from 0x06 to 0x08 — a NOT-IN-SET
-    // value. The 0x06 → 0x07 dual-accept is intentional (rolling-restart
-    // for 0x06-era helpers); any byte outside that set must still
+    // Flip byte 1 (the version byte) from 0x07 to 0x09 — a NOT-IN-SET
+    // value. The 0x07 → 0x08 dual-accept is intentional (rolling-restart
+    // for 0x07-era helpers); any byte outside that set must still
     // hard-fail. Every other byte is unchanged — proves the decoder
     // fails on the version mismatch alone.
-    let mut corrupted: Vec<u8> = OCR_EVENT_V06_FIXTURE.to_vec();
-    assert_eq!(corrupted[1], 0x06, "fixture sanity: byte 1 is the v0x06 version byte");
-    corrupted[1] = 0x08;
+    let mut corrupted: Vec<u8> = OCR_EVENT_V07_FIXTURE.to_vec();
+    assert_eq!(corrupted[1], 0x07, "fixture sanity: byte 1 is the v0x07 version byte");
+    corrupted[1] = 0x09;
 
     let (dir, _db_path, _key, store) = open_temp_store();
     let log = fresh_log(dir.path());
@@ -273,12 +280,12 @@ async fn single_byte_version_flip_to_future_version_is_rejected_no_silent_accept
     match err {
         RunError::Read(ReadError::Decode(DecodeError::UnsupportedVersion { got })) => {
             assert_eq!(
-                got, 0x08,
+                got, 0x09,
                 "decoder must surface the actual rejected version byte"
             );
         }
         other => panic!(
-            "expected RunError::Read(Decode(UnsupportedVersion {{ got: 8 }})), got: {other:?}"
+            "expected RunError::Read(Decode(UnsupportedVersion {{ got: 9 }})), got: {other:?}"
         ),
     }
 
@@ -296,20 +303,20 @@ async fn single_byte_version_flip_to_future_version_is_rejected_no_silent_accept
 }
 
 // -----------------------------------------------------------------------
-// (3) Positive: the 0x06 → 0x07 dual-accept window. An OCREvent frame
-// whose layout is byte-identical between 0x06 and 0x07 (i.e. every
+// (3) Positive: the 0x07 → 0x08 dual-accept window. An OCREvent frame
+// whose layout is byte-identical between 0x07 and 0x08 (i.e. every
 // variant except HelperHealth) decodes successfully whether the version
-// byte is 0x06 or 0x07. This pins the rolling-restart contract: a 0x06
+// byte is 0x07 or 0x08. This pins the rolling-restart contract: a 0x07
 // helper does not silently mute the brain just because the agent
-// restarted into FRAME_VERSION = 0x07.
+// restarted into FRAME_VERSION = 0x08.
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn dual_accept_v06_and_v07_both_decode_ocr_event() {
-    // The exact same fixture, once with the v0x06 byte the wire-fixture
-    // file pins, once with byte 1 flipped to 0x07. Both must ingest.
-    for version in [0x06u8, 0x07u8] {
-        let mut bytes: Vec<u8> = OCR_EVENT_V06_FIXTURE.to_vec();
+async fn dual_accept_v07_and_v08_both_decode_ocr_event() {
+    // The exact same fixture, once with the v0x07 byte the wire-fixture
+    // file pins, once with byte 1 flipped to 0x08. Both must ingest.
+    for version in [0x07u8, 0x08u8] {
+        let mut bytes: Vec<u8> = OCR_EVENT_V07_FIXTURE.to_vec();
         bytes[1] = version;
 
         let (dir, _db_path, _key, store) = open_temp_store();

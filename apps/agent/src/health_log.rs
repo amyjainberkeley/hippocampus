@@ -91,6 +91,17 @@ pub struct HealthLogRecord {
     /// a non-zero value historically silently muted the cascade-twice
     /// OCR emitter, so the Telemetry-Gap analyst now has a trip-wire.
     pub frames_encode_failed: u64,
+    /// Cumulative count of frames dropped by the ADR-0031 §5.3 race-
+    /// consistency gate (`FocusedWindowStore.generation` mismatched the
+    /// `installedFocusGeneration` at SCStream callback time). Promoted
+    /// to the wire by the `0x07 → 0x08` bump (V2-P1 / ADR-0031 —
+    /// `docs/research/capture-scope-window-vs-display-2026-05-29.md`).
+    /// Content-free observability counter; the Telemetry-Gap analyst
+    /// uses it to detect rapid focus changes (alt-tab cadence faster
+    /// than the rebind task) or Electron AX intermittency drifting the
+    /// FocusTracker. Cascade-twice OCR emitter is NOT consulted on
+    /// frames counted here — the gate fails closed before reaching it.
+    pub frames_focus_race_dropped: u64,
 }
 
 impl HealthLogRecord {
@@ -106,7 +117,7 @@ impl HealthLogRecord {
         // standard JSON way for the wall_ts (it shouldn't contain
         // quotes; future change might).
         format!(
-            r#"{{"wall_ts":"{}","device_id":"{}","uptime_ms":{},"frames_delivered":{},"frames_suppressed":{},"frames_redacted_by_failsafe":{},"cascade_forced_count":{},"frames_dropped_backpressure":{},"frames_dropped_late_ack":{},"frames_encode_failed":{}}}"#,
+            r#"{{"wall_ts":"{}","device_id":"{}","uptime_ms":{},"frames_delivered":{},"frames_suppressed":{},"frames_redacted_by_failsafe":{},"cascade_forced_count":{},"frames_dropped_backpressure":{},"frames_dropped_late_ack":{},"frames_encode_failed":{},"frames_focus_race_dropped":{}}}"#,
             escape_json_string(&self.wall_ts),
             escape_json_string(&self.device_id),
             self.uptime_ms,
@@ -117,6 +128,7 @@ impl HealthLogRecord {
             self.frames_dropped_backpressure,
             self.frames_dropped_late_ack,
             self.frames_encode_failed,
+            self.frames_focus_race_dropped,
         )
     }
 }
@@ -270,6 +282,7 @@ mod tests {
             frames_dropped_backpressure: 0,
             frames_dropped_late_ack: 0,
             frames_encode_failed: 7,
+            frames_focus_race_dropped: 4,
         }
     }
 
@@ -279,7 +292,7 @@ mod tests {
         let line = r.to_json_line();
         assert_eq!(
             line,
-            r#"{"wall_ts":"2026-05-19T04:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1234,"frames_delivered":10,"frames_suppressed":2,"frames_redacted_by_failsafe":1,"cascade_forced_count":3,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0,"frames_encode_failed":7}"#
+            r#"{"wall_ts":"2026-05-19T04:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1234,"frames_delivered":10,"frames_suppressed":2,"frames_redacted_by_failsafe":1,"cascade_forced_count":3,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0,"frames_encode_failed":7,"frames_focus_race_dropped":4}"#
         );
     }
 
@@ -438,6 +451,7 @@ mod tests {
                         frames_dropped_backpressure: 0,
                         frames_dropped_late_ack: 0,
                         frames_encode_failed: 0,
+                        frames_focus_race_dropped: 0,
                     };
                     log.record(&rec).await.unwrap();
                 }

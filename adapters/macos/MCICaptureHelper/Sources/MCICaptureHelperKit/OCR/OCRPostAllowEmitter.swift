@@ -83,25 +83,41 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     /// occur because the OCR pipeline is short-circuited at the
     /// emit-or-suppress fork.
     ///
-    /// Flips back to `false` in a single-line edit when the §7
-    /// falsifiability corpus in the memo is green and CSO signs off
-    /// on the architectural fix (Option (a) — focused-window
-    /// `SCContentFilter`) landing. ADR-0013 §3 fail-safe-default-
-    /// redact + Amendment 1 §3(b) fail-closed posture preserved
-    /// structurally — the tombstone IS the redact path.
+    /// LIFTED to `false` in V2-P1 (ADR-0031,
+    /// `docs/decisions/0031-focused-window-capture-scope.md`). The
+    /// architectural fix (Option (a) — focused-window
+    /// `SCContentFilter(desktopIndependentWindow:)` per
+    /// `SCContentFilterFactory.makeFocusedWindowFilter(...)`) +
+    /// FocusTracker + `(frame_ts, focus_ts)` race-consistency gate
+    /// landed in V2-P1 Commits 1–3 of this PR; the §7 falsifiability
+    /// corpus (`docs/audit/2026-05-29-focused-window-corpus.md`) is
+    /// committed GREEN (Commit 4); ADR-0031 §6 CSO sign-off block is
+    /// authored (Commit 5). This commit is the lift; the gate is now
+    /// the focused-window-only capture surface itself, not a
+    /// runtime short-circuit. ADR-0013 §3 fail-safe-default-redact +
+    /// Amendment 1 §3(b) fail-closed posture remain preserved
+    /// structurally — under V2-P1 the cascade's bundle-keyed gate is
+    /// structurally correct because the captured pixel surface IS the
+    /// focused window's pixels.
+    ///
+    /// Flips back to `true` only as an emergency revert if the
+    /// post-merge re-ship + CEO live-Mac smoke test surfaces a
+    /// regression on the §11 live-Mac audit. The kill-switch BRANCH
+    /// remains pinned by `testKillSwitchEmitsTombstoneForAllowFrames`
+    /// (scope-overrides this var to `true`) so the emergency-kill
+    /// capability survives the lift.
     ///
     /// PROTECTED-SET per AGENT_PROTOCOL §5.
     ///
     /// Declared `var` (not `let`) only so existing cascade-twice unit
     /// tests in `CascadeTwiceOCREmitterTests` can scope-override it
-    /// to exercise the OCR-emit path. Production code paths never
-    /// mutate this — flipping the kill-switch off ships as a single-
-    /// line source edit, not a runtime mutation. The
-    /// `nonisolated(unsafe)` annotation is required by Swift 6 strict
-    /// concurrency for a static `var`; safe here because writes are
-    /// confined to test setup/teardown and reads in production are
-    /// pure load.
-    nonisolated(unsafe) internal static var killOcrEmit: Bool = true
+    /// to exercise the OCR-emit-suppressed path. Production code paths
+    /// never mutate this — the lift ships as a single-line source
+    /// edit, not a runtime mutation. The `nonisolated(unsafe)`
+    /// annotation is required by Swift 6 strict concurrency for a
+    /// static `var`; safe here because writes are confined to test
+    /// setup/teardown and reads in production are pure load.
+    nonisolated(unsafe) internal static var killOcrEmit: Bool = false
 
     private let worker: VisionOCRWorker
     private let cascade: SuppressionCascade

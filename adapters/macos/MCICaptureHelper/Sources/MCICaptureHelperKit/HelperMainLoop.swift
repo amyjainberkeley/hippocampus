@@ -74,6 +74,17 @@ public actor HelperHealthCounters {
     /// the catch because the cascade — not encode-success — is what
     /// gates emission per ADR-0016 §4.2.
     private var framesEncoderFailed: UInt64 = 0
+    /// ADR-0031 §5.3 race-consistency gate counter — frames where the
+    /// `FocusedWindowStore.generation` observed at callback time did
+    /// NOT match the `installedFocusGeneration` the live SCStream's
+    /// `SCContentFilter` was rebound under. Such frames are dropped
+    /// with a `PrivacyTombstone(reason=focusRaceDropped)` instead of
+    /// running the cascade-twice OCR emitter — fail-closed per
+    /// ADR-0013 §3 + Amendment 1 §3(b). Promoted to the wire by the
+    /// 0x07 → 0x08 bump (V2-P1 / ADR-0031). Content-free counter (same
+    /// discipline as `framesRedactedByFailsafe` /
+    /// `framesEncoderFailed`); never widens `.allow`.
+    private var framesFocusRaceDropped: UInt64 = 0
 
     public init(startedAt: Date = Date()) {
         self.startedAt = startedAt
@@ -108,13 +119,24 @@ public actor HelperHealthCounters {
     /// outcome on the content-free wire so a regression here cannot
     /// silently mute the brain again.
     public func recordEncodeFailed() { framesEncoderFailed &+= 1 }
+    /// Record one ADR-0031 §5.3 race-consistency-gate drop. Called by
+    /// `SCStreamCaptureSession` when the focus generation observed at
+    /// callback time did NOT match the generation the live SCStream's
+    /// filter was rebound under. The frame is dropped with a
+    /// `focusRaceDropped` tombstone instead of running the cascade-
+    /// twice OCR emitter — fail-closed per ADR-0013 §3 + Amendment 1
+    /// §3(b). Observability-only — never widens `.allow`. Surfaced on
+    /// the wire by the 0x07 → 0x08 bump.
+    public func recordFocusRaceDropped() { framesFocusRaceDropped &+= 1 }
 
     /// Snapshot in the shape `Wire.encodeHelperHealth` consumes.
     ///
     /// `cascadeForced` is surfaced on the wire by the 0x02 → 0x03 bump
     /// (STEP-2-FINDING-004). `framesEncoderFailed` is surfaced on the
     /// wire by the 0x06 → 0x07 bump (ocr-emit-silence fix).
-    /// `cascadeFromFilter` stays in-process only — see its field docs.
+    /// `framesFocusRaceDropped` is surfaced on the wire by the
+    /// 0x07 → 0x08 bump (ADR-0031 V2-P1). `cascadeFromFilter` stays
+    /// in-process only — see its field docs.
     public func snapshot(now: Date = Date()) -> HelperHealthSnapshot {
         let uptimeMs = UInt64(max(0, now.timeIntervalSince(startedAt) * 1000))
         return HelperHealthSnapshot(
@@ -126,7 +148,8 @@ public actor HelperHealthCounters {
             framesDroppedLateAck: framesDroppedLateAck,
             cascadeFromFilter: cascadeFromFilter,
             cascadeForced: cascadeForced,
-            framesEncoderFailed: framesEncoderFailed
+            framesEncoderFailed: framesEncoderFailed,
+            framesFocusRaceDropped: framesFocusRaceDropped
         )
     }
 }
@@ -153,6 +176,11 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
     /// `docs/research/ocr-emit-silence-2026-05-28.md`). See
     /// `HelperHealthCounters.framesEncoderFailed`.
     public let framesEncoderFailed: UInt64
+    /// ADR-0031 §5.3 race-consistency-gate drops. Surfaced on the wire
+    /// as `HelperHealth.frames_focus_race_dropped` after the 0x07 → 0x08
+    /// bump (V2-P1 / ADR-0031). See
+    /// `HelperHealthCounters.framesFocusRaceDropped`.
+    public let framesFocusRaceDropped: UInt64
 
     public init(
         uptimeMs: UInt64,
@@ -163,7 +191,8 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
         framesDroppedLateAck: UInt64,
         cascadeFromFilter: UInt64 = 0,
         cascadeForced: UInt64 = 0,
-        framesEncoderFailed: UInt64 = 0
+        framesEncoderFailed: UInt64 = 0,
+        framesFocusRaceDropped: UInt64 = 0
     ) {
         self.uptimeMs = uptimeMs
         self.framesDelivered = framesDelivered
@@ -174,6 +203,7 @@ public struct HelperHealthSnapshot: Sendable, Equatable {
         self.cascadeFromFilter = cascadeFromFilter
         self.cascadeForced = cascadeForced
         self.framesEncoderFailed = framesEncoderFailed
+        self.framesFocusRaceDropped = framesFocusRaceDropped
     }
 }
 
@@ -290,7 +320,13 @@ public struct HelperMainLoop: Sendable {
             // in-process counter incremented by
             // `SCStreamPipeline.process(...)` on every VideoToolbox
             // HEVC encode throw on the `.allow` branch.
-            framesEncodeFailed: snap.framesEncoderFailed
+            framesEncodeFailed: snap.framesEncoderFailed,
+            // ADR-0031 V2-P1 — wire 0x08. Sourced from the in-process
+            // counter incremented by `SCStreamCaptureSession`'s race-
+            // consistency gate when `FocusedWindowStore.generation`
+            // mismatched `installedFocusGeneration` at SCStream callback
+            // time. Content-free observability counter.
+            framesFocusRaceDropped: snap.framesFocusRaceDropped
         )
         try await sink.write(bytes)
     }

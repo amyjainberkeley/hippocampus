@@ -244,6 +244,7 @@ mod tests {
                     frames_dropped_backpressure: 0,
                     frames_dropped_late_ack: 0,
                     frames_encode_failed: 0,
+                    frames_focus_race_dropped: 0,
                 },
             );
             bytes.extend(f);
@@ -295,6 +296,7 @@ mod tests {
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
+                frames_focus_race_dropped: 0,
             },
         ));
         bytes.extend(encode(2, &Message::CaptureStop));
@@ -669,6 +671,7 @@ mod tests {
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
+                frames_focus_race_dropped: 0,
             },
         ));
         bytes.extend(encode(3, &Message::CaptureStop));
@@ -794,6 +797,7 @@ mod tests {
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
+                frames_focus_race_dropped: 0,
             },
         ));
         bytes.extend(make_ocr_frame_bytes(6, 1, "hello"));

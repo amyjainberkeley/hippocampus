@@ -284,6 +284,7 @@ mod tests {
                 frames_dropped_backpressure: 0,
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
+                frames_focus_race_dropped: 0,
             },
         );
         let helper_task = tokio::spawn(async move {

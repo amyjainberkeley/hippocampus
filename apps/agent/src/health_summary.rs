@@ -113,6 +113,13 @@ pub struct HealthSummary {
     pub frames_encode_failed_delta: u64,
     /// Absolute `frames_encode_failed` from the latest sample.
     pub frames_encode_failed_latest: u64,
+    /// Sum of per-step positive deltas for `frames_focus_race_dropped`.
+    /// The ADR-0031 V2-P1 race-consistency gate trip-wire: a non-zero
+    /// delta means the FocusedWindowStore's generation drifted from
+    /// the installed SCStream filter's generation at sample time.
+    pub frames_focus_race_dropped_delta: u64,
+    /// Absolute `frames_focus_race_dropped` from the latest sample.
+    pub frames_focus_race_dropped_latest: u64,
     /// JSONL lines that failed to parse (torn writes, future schema
     /// from a newer agent, etc). Counted, never logged.
     pub malformed_lines_skipped: u64,
@@ -145,6 +152,7 @@ impl HealthSummary {
              backp=Δ{backp_d}/{backp_l} \
              late_ack=Δ{lateack_d}/{lateack_l} \
              encfail=Δ{encfail_d}/{encfail_l} \
+             focusrace=Δ{focusrace_d}/{focusrace_l} \
              earliest={earliest} \
              latest={latest} \
              restarts={restarts} \
@@ -163,6 +171,8 @@ impl HealthSummary {
             lateack_l = self.frames_dropped_late_ack_latest,
             encfail_d = self.frames_encode_failed_delta,
             encfail_l = self.frames_encode_failed_latest,
+            focusrace_d = self.frames_focus_race_dropped_delta,
+            focusrace_l = self.frames_focus_race_dropped_latest,
             restarts = self.restarts_detected,
             malformed = self.malformed_lines_skipped,
         )
@@ -211,6 +221,11 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
     // 0x06 helpers / older agents) lack the key — treat absent as 0,
     // same policy as the cascade-forced and failsafe fields.
     let frames_encode_failed = extract_u64_field_or_zero(s, "\"frames_encode_failed\":")?;
+    // Back-compat: wire-`0x08` (ADR-0031 V2-P1) added the
+    // `frames_focus_race_dropped` field. Lines from older agents lack
+    // the key — same absent-as-zero policy as the prior counters.
+    let frames_focus_race_dropped =
+        extract_u64_field_or_zero(s, "\"frames_focus_race_dropped\":")?;
     Ok(HealthLogRecord {
         wall_ts,
         device_id,
@@ -222,6 +237,7 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
         frames_dropped_backpressure,
         frames_dropped_late_ack,
         frames_encode_failed,
+        frames_focus_race_dropped,
     })
 }
 
@@ -343,6 +359,12 @@ where
                         rec.frames_encode_failed
                             .saturating_sub(p.frames_encode_failed),
                     );
+                summary.frames_focus_race_dropped_delta = summary
+                    .frames_focus_race_dropped_delta
+                    .saturating_add(
+                        rec.frames_focus_race_dropped
+                            .saturating_sub(p.frames_focus_race_dropped),
+                    );
             } else {
                 // Restart: the new record's cumulative counters
                 // started from 0. Treat the full new values as
@@ -366,6 +388,9 @@ where
                 summary.frames_encode_failed_delta = summary
                     .frames_encode_failed_delta
                     .saturating_add(rec.frames_encode_failed);
+                summary.frames_focus_race_dropped_delta = summary
+                    .frames_focus_race_dropped_delta
+                    .saturating_add(rec.frames_focus_race_dropped);
             }
         } else {
             // First in-window sample: no baseline, contributes zero
@@ -379,6 +404,7 @@ where
         summary.frames_dropped_backpressure_latest = rec.frames_dropped_backpressure;
         summary.frames_dropped_late_ack_latest = rec.frames_dropped_late_ack;
         summary.frames_encode_failed_latest = rec.frames_encode_failed;
+        summary.frames_focus_race_dropped_latest = rec.frames_focus_race_dropped;
         prev = Some(rec);
     }
 
@@ -433,6 +459,7 @@ mod tests {
             frames_dropped_backpressure: backpressure,
             frames_dropped_late_ack: late_ack,
             frames_encode_failed: 0,
+            frames_focus_race_dropped: 0,
         }
     }
 
@@ -603,6 +630,8 @@ mod tests {
             frames_dropped_late_ack_latest: 0,
             frames_encode_failed_delta: 0,
             frames_encode_failed_latest: 0,
+            frames_focus_race_dropped_delta: 0,
+            frames_focus_race_dropped_latest: 0,
             malformed_lines_skipped: 0,
             restarts_detected: 0,
         };

@@ -357,10 +357,11 @@ final class SCStreamPipelineCounterWiringTests: XCTestCase {
             cascadeForcedCount: snap.cascadeForced,
             framesDroppedBackpressure: snap.framesDroppedBackpressure,
             framesDroppedLateAck: snap.framesDroppedLateAck,
-            framesEncodeFailed: snap.framesEncoderFailed
+            framesEncodeFailed: snap.framesEncoderFailed,
+            framesFocusRaceDropped: snap.framesFocusRaceDropped
         )
 
-        // Layout (locked by WireTests v0x07): header(16) + 8 × u64.
+        // Layout (locked by WireTests v0x08): header(16) + 9 × u64.
         // cascade_forced_count is the 5th u64 → offset 16 + 4×8 = 48.
         let cfcOffset = minFrameHeaderBytes + 4 * 8
         let onWire = readU64LE(frame, at: cfcOffset)
