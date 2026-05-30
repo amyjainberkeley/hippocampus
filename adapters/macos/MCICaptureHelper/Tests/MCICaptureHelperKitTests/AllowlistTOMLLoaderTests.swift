@@ -243,8 +243,13 @@ final class AllowlistTOMLLoaderRejectsHostileInputTests: XCTestCase {
 /// and `com.github.GitHubClient`. Rationale + verified-live bundle-id
 /// lookups in `docs/research/recall-coverage-gap-2026-05-26.md` §6 P0.
 /// Both are low-sensitivity surfaces (Electron AI chat / code-review
-/// workflows; no secure-input arms). Messages + Mail are deliberately
-/// excluded pending a separate threat-model ADR — see §6 ⚠️ block.
+/// workflows; no secure-input arms).
+///
+/// Cycle 8.16 cohort (added 2026-05-29): `com.apple.MobileSMS` +
+/// `com.apple.mail`. PR #228 lifted ADR-0030 §3(e) default-deny once
+/// PR #222's redaction layer + corpus artifact + PR #224's OCR-emit
+/// decouple all preconditions were satisfied; ADR-0030 §3(a)–(c)
+/// gates every cascade-allowed frame from both bundles.
 private let expectedBundledSeedBundles: Set<String> = [
     "com.apple.Safari",
     "com.apple.Terminal",
@@ -258,6 +263,8 @@ private let expectedBundledSeedBundles: Set<String> = [
     "com.figma.Desktop",
     "com.anthropic.claudefordesktop",
     "com.github.GitHubClient",
+    "com.apple.MobileSMS",
+    "com.apple.mail",
 ]
 
 final class AllowlistBundledSeedTests: XCTestCase {

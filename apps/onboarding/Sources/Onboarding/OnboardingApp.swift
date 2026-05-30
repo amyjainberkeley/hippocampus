@@ -33,6 +33,7 @@ struct OnboardingApp: App {
     @StateObject private var retentionVM: RetentionViewModel
     @StateObject private var extensionVM: BrowserExtensionViewModel
     @StateObject private var prepareBrainVM: PrepareBrainViewModel
+    @StateObject private var allowlistEditorVM: AllowlistEditorViewModel
 
     init() {
         #if canImport(AppKit)
@@ -56,8 +57,12 @@ struct OnboardingApp: App {
 
         #if canImport(AppKit)
         let detector: any BrowserDetector = RealBrowserDetector()
+        let appsDetector: any RunningAppsDetector = RealRunningAppsDetector()
+        let fdaPermission: any FullDiskAccessPermission = RealFullDiskAccessPermission()
         #else
         let detector: any BrowserDetector = StubBrowserDetector()
+        let appsDetector: any RunningAppsDetector = StubRunningAppsDetector()
+        let fdaPermission: any FullDiskAccessPermission = StubFullDiskAccessPermission()
         #endif
         _extensionVM = StateObject(wrappedValue: BrowserExtensionViewModel(
             detector: detector
@@ -66,6 +71,13 @@ struct OnboardingApp: App {
         _prepareBrainVM = StateObject(wrappedValue: PrepareBrainViewModel(
             keyGenerator: LocalKeyGenerator(),
             modelDownloader: RealModelDownloader()
+        ))
+
+        _allowlistEditorVM = StateObject(wrappedValue: AllowlistEditorViewModel(
+            baselineStore: StubAllowlistStore(),
+            userStore: FileUserAllowlistStore(),
+            detector: appsDetector,
+            fdaPermission: fdaPermission
         ))
     }
 
@@ -77,6 +89,7 @@ struct OnboardingApp: App {
                 .environmentObject(retentionVM)
                 .environmentObject(extensionVM)
                 .environmentObject(prepareBrainVM)
+                .environmentObject(allowlistEditorVM)
                 .frame(
                     width: OnboardingTheme.windowWidth,
                     height: OnboardingTheme.windowHeight

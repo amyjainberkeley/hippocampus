@@ -5,12 +5,13 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
     case howItWorks = 1
     case trust = 2
     case permissions = 3
-    case browserExtension = 4
-    case livePreview = 5
-    case retention = 6
-    case prepareBrain = 7
-    case connectClaudeCode = 8
-    case done = 9
+    case allowlist = 4
+    case browserExtension = 5
+    case livePreview = 6
+    case retention = 7
+    case prepareBrain = 8
+    case connectClaudeCode = 9
+    case done = 10
 
     public var id: Int { rawValue }
 
@@ -20,6 +21,7 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
         case .howItWorks: "How It Works"
         case .trust: "Built for Trust"
         case .permissions: "Permissions"
+        case .allowlist: "Which apps should Hippocampus remember?"
         case .browserExtension: "Browser Extension"
         case .livePreview: "Live Preview"
         case .retention: "Retention & Privacy"
