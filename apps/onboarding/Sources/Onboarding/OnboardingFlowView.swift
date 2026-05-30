@@ -33,6 +33,8 @@ struct OnboardingFlowView: View {
             TrustSlide()
         case .permissions:
             PermissionsSlide()
+        case .allowlist:
+            AllowlistSlide()
         case .browserExtension:
             BrowserExtensionSlide()
         case .livePreview:

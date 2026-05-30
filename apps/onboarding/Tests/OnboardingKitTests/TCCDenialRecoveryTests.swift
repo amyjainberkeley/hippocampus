@@ -89,7 +89,7 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
         XCTAssertTrue(vm.canAdvance)
         vm.advance()
-        XCTAssertEqual(vm.currentStep, .browserExtension)
+        XCTAssertEqual(vm.currentStep, .allowlist)
     }
 
     // MARK: - Accessibility denial (separate row, non-blocking)

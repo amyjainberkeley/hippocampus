@@ -189,6 +189,30 @@ do {
     exit(6)
 }
 
+// User-layer allowlist load (ADR-0017 §3.2 / V2-P10). The user-mutable
+// layer at `~/Library/Application Support/MCI/user-allowlist.toml`
+// adds bundle ids the user opted in to via the onboarding UI. The
+// helper unions the user-layer's `captureEnabledBundleIds` with the
+// CSO baseline; the cascade does not distinguish source — every user-
+// layer bundle still flows through the same §2–§7 arms + cascade-twice
+// OCR redaction. Per ADR-0017 §3.2 binding:
+//   - Missing file ⇒ empty layer (fresh install — no opt-ins yet).
+//   - Insecure perms / foreign owner / parse error ⇒ fall back to empty
+//     + log to stderr. The cascade's fail-closed default per §7 is the
+//     safe direction; refusing to start would be more conservative but
+//     would also lock the user out of capture entirely if the file
+//     ever gets corrupted.
+let userAllowlist: UserAllowlist
+do {
+    userAllowlist = try UserAllowlistTOMLLoader.loadFromUserPath()
+} catch {
+    FileHandle.standardError.write(
+        "mci-capture-helper: user-allowlist.toml read error (falling back to empty): \(error)\n"
+            .data(using: .utf8)!
+    )
+    userAllowlist = .empty
+}
+
 // Build cascade with concrete probes.
 //
 // ADR-0013 §2: `BlackedRegionProbe` is now the real
@@ -262,19 +286,22 @@ if args.probeDebug {
     axProbeDebugSink = nil
 }
 
-// CSO-ratified known-safe bundle ids — feeds cascade §1 source-level
-// allow path (per ADR-0013 §3 + ADR-0015 §5 + ADR-0017 §3.1). Missing
-// seed resource ⇒ empty Set ⇒ cascade fail-closes per ADR-0013 §7.
-// The cascade's §2-§7 redaction order is preserved verbatim — the
-// allowlist STRICTLY ADDS `.allow` decisions (only after AX returns a
-// positive non-secure classification) and cannot widen past any
-// redaction signal. See `Allowlist.swift` for the trust contract.
+// Cascade-eligible bundle ids — union of CSO-ratified baseline (§3.1)
+// and the user-mutable layer (§3.2 / V2-P10). Both layers feed the
+// SAME `knownSafeAppBundles` Set; the cascade's §2-§7 arms apply
+// identically to every entry — user-layer entries STRICTLY ADD `.allow`
+// decisions (still gated on AX positive + non-secure-input + non-
+// blacked-region + cascade-twice OCR redaction) and cannot widen past
+// any redaction signal. See `UserAllowlistTOMLLoader.swift` for the
+// §3.2 trust contract.
+let cascadeEligibleBundles = allowlist.bundleIdSet
+    .union(userAllowlist.captureEnabledBundleIds)
 let cascade = SuppressionCascade(
     secureEventInput: CarbonSecureEventInputProbe(),
     axSecureSubrole: AXSubroleProbe(debugLog: axProbeDebugSink),
     denylist: Denylist(entries: denylistEntries),
     blackedRegion: blackedRegionProbe,
-    knownSafeAppBundles: allowlist.bundleIdSet
+    knownSafeAppBundles: cascadeEligibleBundles
 )
 
 let loop = HelperMainLoop(
