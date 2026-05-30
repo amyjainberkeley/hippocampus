@@ -48,10 +48,28 @@ public final class PrepareBrainViewModel: ObservableObject {
         }
     }
 
+    /// Re-probe the on-disk truth of "is the model installed?". Called
+    /// on slide-appear (`.task` in PrepareBrainSlide) so the slide
+    /// reflects the filesystem, not stale in-memory state. Mirrors the
+    /// RealBrowserDetector pattern used by the browser-extension slide.
+    ///
+    /// Only mutates state from the "no in-flight user intent" buckets
+    /// (`.notStarted` and `.ready`). An active download, a user skip,
+    /// or a surfaced failure all reflect intent the user gave on THIS
+    /// session — we don't overwrite that just because the FS probe
+    /// disagrees right now.
     public func checkModelAvailability() async {
         let available = await modelDownloader.isAvailable()
-        if available {
-            downloadState = .ready
+        switch downloadState {
+        case .notStarted:
+            if available { downloadState = .ready }
+        case .ready:
+            // Catch: model directory was deleted between slide appears
+            // (e.g. user wiped Models/ via the menu-bar Delete action).
+            // Without this branch a stale `.ready` would lie forever.
+            if !available { downloadState = .notStarted }
+        case .downloading, .verifying, .failed, .skipped:
+            break
         }
     }
 
