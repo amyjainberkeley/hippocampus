@@ -12,8 +12,8 @@
       "displayName": "Qwen3-1.7B (Daily Briefs)",
       "bundled": false,
       "downloadURL": "https://huggingface.co/amyjainberkeley/mci-coreml-models/resolve/main/Qwen3-1.7B-FP16.mlmodelc.tar.gz",
-      "sha256": "937697ad750b639217afabb557c2c19c3bd1138259bc68eb2372eebe684ff97e",
-      "sizeBytes": 2656167231,
+      "sha256": "eb3e931ca74238bb7efb4432971da1a7887d89227936c0129ca8753879673d8f",
+      "sizeBytes": 2658309463,
       "requiredDiskSpace": 6500000000
     }
   ]

@@ -3,9 +3,24 @@ set -euo pipefail
 
 # verify-models.sh — Validate model bundling in Hippocampus.app.
 #
-# Reads apps/hippocampus/Resources/models.json and checks:
+# Reads the BUNDLED manifest (apps/hippocampus/Sources/HippocampusKit/
+# Resources/models.json — the file SwiftPM processes into
+# Hippocampus_HippocampusKit.bundle and that build-app.sh hoists into
+# the .app's Contents/Resources/) and checks:
 #   - Bundled models exist in the .app bundle's Resources/Models/
 #   - Downloadable models have a real (non-placeholder) sha256
+#   - For each downloadable model, the HF tarball's `x-linked-etag`
+#     (HF's content-addressed sha) matches the manifest sha256.
+#     Requires network; if curl fails (offline build), the check is
+#     skipped with a WARN instead of failing.
+#
+# Reading the bundled copy (not a sibling duplicate) was forced by the
+# cycle 8.14 → 8.24 incident: PR #220 updated a non-bundled duplicate
+# at apps/hippocampus/Resources/models.json without updating the SwiftPM-
+# processed source, so verify-models.sh reported OK while the DMG carried
+# the wrong SHA and every Qwen install failed with "Download integrity
+# check failed". The duplicate is gone (see docs/research/onboarding-
+# wiring-audit-2026-05-30.md §3). Single source of truth from here on.
 #
 # Usage:
 #   scripts/verify-models.sh                              # auto-detect app
@@ -14,7 +29,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-MODELS_JSON="$REPO_ROOT/apps/hippocampus/Resources/models.json"
+MODELS_JSON="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
 APP_PATH=""
 
 while [[ $# -gt 0 ]]; do
@@ -39,23 +54,10 @@ echo "Checking models.json: $MODELS_JSON"
 echo "App bundle: $APP_PATH"
 echo ""
 
-# Parse models.json with python (available on macOS, no extra deps)
-python3 -c "
-import json, sys
-
-with open('$MODELS_JSON') as f:
-    manifest = json.load(f)
-
-for m in manifest.get('models', []):
-    mid = m.get('modelID', '???')
-    bundled = m.get('bundled', False)
-    sha = m.get('sha256', '')
-
-    if bundled:
-        print(f'BUNDLED:{mid}')
-    else:
-        print(f'DOWNLOAD:{mid}:{sha}')
-" | while IFS= read -r line; do
+# Parse models.json with python (available on macOS, no extra deps).
+# Use process substitution (not a pipe) so $ERRORS updates inside the
+# loop propagate to the parent shell.
+while IFS= read -r line; do
     kind="${line%%:*}"
     rest="${line#*:}"
 
@@ -76,8 +78,10 @@ for m in manifest.get('models', []):
             # Not a hard error — build works without bundled models
         fi
     elif [[ "$kind" == "DOWNLOAD" ]]; then
-        model_id="${rest%%:*}"
-        sha="${rest#*:}"
+        # Format: DOWNLOAD:<id>:<sha>:<url>
+        model_id=$(printf '%s\n' "$rest" | cut -d: -f1)
+        sha=$(printf '%s\n' "$rest" | cut -d: -f2)
+        url=$(printf '%s\n' "$rest" | cut -d: -f3-)
         if [[ "$sha" == "PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED" || -z "$sha" ]]; then
             echo "  WARN: downloadable model '$model_id' has placeholder sha256"
             echo "        Run convert_brief_model.py and update models.json."
@@ -85,26 +89,49 @@ for m in manifest.get('models', []):
         else
             echo "  OK: downloadable model '$model_id' has sha256: ${sha:0:16}..."
         fi
-    fi
-done
 
-# Propagate error count from subshell via a second pass
-DOWNLOAD_ERRORS=$(python3 -c "
-import json
+        # HF drift gate. Fetches the redirect target's `x-linked-etag`
+        # (HF's content-addressed sha) and compares to the manifest
+        # sha. Mismatch = the bundled DMG will fail SHA verification at
+        # install time on every user machine (the cycle 8.14 incident).
+        # Network failure (offline build, CI without egress) is a WARN,
+        # not a hard fail.
+        if [[ -n "$url" && "$url" == https://huggingface.co/* ]]; then
+            etag=$(curl -sI "$url" 2>/dev/null | awk '/^x-linked-etag:/ {print $2}' | tr -d '"\r\n' || true)
+            if [[ -z "$etag" ]]; then
+                echo "  WARN: could not HEAD '$url' (offline build?) — skipping HF drift check"
+            elif [[ "$etag" == "$sha" ]]; then
+                echo "  OK: HF artifact for '$model_id' matches manifest sha256"
+            else
+                echo "  ERROR: HF artifact for '$model_id' has sha $etag"
+                echo "         but manifest says $sha"
+                echo "         → users will see 'Download integrity check failed'."
+                echo "         Update apps/hippocampus/Sources/HippocampusKit/Resources/models.json."
+                ERRORS=$((ERRORS + 1))
+            fi
+        fi
+    fi
+done < <(python3 -c "
+import json, sys
+
 with open('$MODELS_JSON') as f:
     manifest = json.load(f)
-errors = 0
+
 for m in manifest.get('models', []):
-    if not m.get('bundled', False):
-        sha = m.get('sha256', '')
-        if sha == 'PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED' or not sha:
-            errors += 1
-print(errors)
+    mid = m.get('modelID', '???')
+    bundled = m.get('bundled', False)
+    sha = m.get('sha256', '')
+    url = m.get('downloadURL', '')
+
+    if bundled:
+        print(f'BUNDLED:{mid}')
+    else:
+        print(f'DOWNLOAD:{mid}:{sha}:{url}')
 ")
 
-if [[ "$DOWNLOAD_ERRORS" -gt 0 ]]; then
+if [[ "$ERRORS" -gt 0 ]]; then
     echo ""
-    echo "RESULT: $DOWNLOAD_ERRORS downloadable model(s) have placeholder sha256."
+    echo "RESULT: $ERRORS check(s) failed."
     exit 1
 fi
 
