@@ -132,6 +132,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // FIRST thing on launch, before any pipe / socket / Process /
+        // xattr work: mask SIGPIPE.
+        //
+        // CEO-reported (cycle 8.23, 2026-05-29): even after PR #254 shipped
+        // the `applicationShouldTerminateAfterLastWindowClosed = false`
+        // override, the main `Hippocampus` GUI process STILL exited cleanly
+        // within minutes of launch on a fresh install of `9fbfe352…`. The
+        // helper + agent stayed alive (re-parented to launchd via the
+        // supervisor's child re-spawn path), but the menu-bar status item
+        // — owned by SwiftUI's `MenuBarExtra` scene inside the main
+        // process — disappeared again. CEO accumulated 5 helper+agent
+        // orphan pairs from 5 successive main-GUI deaths. No
+        // `DiagnosticReports/*.ips` was generated, confirming the exit
+        // was NOT a crash and NOT a signal that the kernel reports as
+        // a crash (SIGSEGV/SIGABRT/SIGBUS would all produce `.ips`).
+        //
+        // Root cause: `SafariInboxReader.writeToSocket` (the bridge from
+        // the Safari App Group inbox to `mci-agent`'s
+        // `page_content.sock` Unix-domain socket) uses raw
+        // `Darwin.write(fd, ...)` on a `SOCK_STREAM` socket with NO
+        // `SO_NOSIGPIPE` socket option, NO `MSG_NOSIGNAL` send flag,
+        // AND no process-wide `signal(SIGPIPE, SIG_IGN)` mask anywhere
+        // in the binary. The `ProcessSupervisor` retry loop unbinds
+        // and rebinds `page_content.sock` every time the helper or
+        // agent exits (helper-exit cascades to `stop()` which kills the
+        // agent → its listener socket is `close()`d → `unlink()`-on-next-
+        // `bind()` of a new agent). During that brief window any
+        // SafariInboxReader drain that has already `connect()`ed and is
+        // mid-`write()` receives `EPIPE` AND `SIGPIPE`. The default
+        // disposition of `SIGPIPE` is process termination with a clean
+        // exit (no `.ips` report) — exactly the observed signature.
+        //
+        // PR #254 (F1) closed the window-close termination path but
+        // left this signal path open. This `signal(SIGPIPE, SIG_IGN)`
+        // is the process-wide defense; `SafariInboxReader` also sets
+        // `SO_NOSIGPIPE` on its socket fd as the surgical defense at
+        // the offending call site (belt + suspenders).
+        //
+        // §5 audit: `SIG_IGN` on `SIGPIPE` is the standard POSIX-server
+        // hardening; it does NOT touch capture / OCR cascade /
+        // redaction / sensitive-app denylist / wire framing / known-
+        // safe-apps / entitlements / notarization / Gatekeeper /
+        // QuarantineUnlocker / mci.sqlite / blob store. Mirror of PR
+        // #252 + PR #254's no-CSO-sign-off-required pattern. Standard
+        // library convention: Rust's `std` masks `SIGPIPE` by default
+        // for the same reason.
+        signal(SIGPIPE, SIG_IGN)
+
         // FIRST thing on launch: strip `com.apple.quarantine` from the
         // running .app bundle.
         //
