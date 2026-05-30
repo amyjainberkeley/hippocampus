@@ -187,6 +187,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         supervisor.stop()
     }
 
+    /// Defensive override against AppKit's default "terminate after
+    /// last window closed" behavior — the load-bearing reason the
+    /// menu-bar `NSStatusItem` survives transient window closes.
+    ///
+    /// CEO-reported (cycle 8.22, 2026-05-29): on a fresh install of
+    /// the cycle 8.22 DMG (`f634b5dc…`), after onboarding completed
+    /// and recording started (helper-health.jsonl confirmed 128
+    /// frames over 31 s, brain captured 102 events), the main
+    /// `Hippocampus` GUI process exited cleanly with no
+    /// `DiagnosticReports/*.ips`. `MCICaptureHelper` + `mci-agent`
+    /// stayed alive (re-parented to launchd via the supervisor's
+    /// child re-spawn path), but the menu-bar icon — owned by the
+    /// `NSStatusItem` that SwiftUI's `MenuBarExtra` scene creates
+    /// inside the main process — disappeared with the process. The
+    /// app was effectively invisible until `open
+    /// /Applications/Hippocampus.app` was run manually, which brought
+    /// the GUI back without re-installing or re-onboarding.
+    ///
+    /// Root cause: `NSApplication.applicationShouldTerminateAfterLastWindowClosed`
+    /// returns `true` by default. `LSUIElement=true` in Info.plist
+    /// makes the app dockless on launch but does NOT change this
+    /// AppKit predicate; once a window has been created and then
+    /// closed, AppKit checks "any windows left?" and quits if not.
+    /// The Hippocampus main process has multiple window-creating
+    /// surfaces:
+    ///
+    ///   - The `Window("Download AI Model", id: "model-download")`
+    ///     SwiftUI Scene declared in `HippocampusApp.body`, opened by
+    ///     `openWindow(id:)` from the "Daily Briefs: Off — Download
+    ///     Model…" menu item and closed by
+    ///     `closeModelDownloadWindow()`.
+    ///   - `NSAlert.runModal()` panels in `StatusMenuView`: About
+    ///     (`openAboutWindow`), Reset TCC confirmation, error
+    ///     alerts via `showAlert`, `KeyWrapAuditView` sheet.
+    ///   - Any future SwiftUI window or sheet attached to the menu.
+    ///
+    /// Returning `false` here makes the app's lifecycle explicit:
+    /// the app only quits via the "Quit Hippocampus" menu item
+    /// (`supervisor.stop()` + `NSApp.terminate(nil)`) or
+    /// `applicationWillTerminate` from the OS. The menu-bar status
+    /// item is the entire product surface on the user's machine —
+    /// losing the main process means losing the product, even though
+    /// the helper + agent keep recording.
+    ///
+    /// §5 audit: pure UX-flow override. Does not touch capture / OCR
+    /// cascade / redaction / sensitive-app denylist / wire / known-
+    /// safe-apps / entitlements / notarization / Gatekeeper rules.
+    /// Mirror of PR #252's no-CSO-sign-off-required pattern.
+    func applicationShouldTerminateAfterLastWindowClosed(
+        _ sender: NSApplication
+    ) -> Bool {
+        return false
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard url.scheme == "hippocampus", url.host == "recall" else { continue }
