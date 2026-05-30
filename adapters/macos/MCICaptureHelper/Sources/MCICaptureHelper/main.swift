@@ -500,6 +500,27 @@ if captureOptions.captureEnabled {
     // ONE actor instance, written by the pipeline, read by the
     // heartbeat. No new wire field; no `.allow` widening; strictly
     // more observability.
+    //
+    // ADR-0031 V2-P1 wiring (production hot-fix per
+    // `docs/research/v2-p1-production-leak-2026-05-30.md` §5.1). PR #239
+    // shipped the focused-window machinery (FocusedWindowStore,
+    // FocusTracker, makeFocusedWindowFilter, race gate, ADR-0031, §7
+    // corpus, M4 lift) but never modified this file to construct + pass
+    // them into `SCStreamCaptureSession`. Without these lines the
+    // session falls through to `makeDisplayFilter(...)` in
+    // `SCStreamCaptureSession.start()`, the rebind task short-circuits
+    // on `focusedWindowStore == nil`, and the race gate is bypassed
+    // entirely — the cycle 8.17 misattribution channel.
+    //
+    // Shared-actor identity discipline: the store is constructed once
+    // and passed BOTH to `FocusTracker` (which writes to it on its
+    // 1 Hz poll) AND to the SCStream session (which reads from it on
+    // every callback). Same instance — the wire-up assertion test in
+    // `MainSwiftWiringTests` reads the source of this file and pins
+    // the construction so a future refactor cannot silently drop it.
+    let focusedWindowStore = FocusedWindowStore()
+    let focusTracker = FocusTracker(store: focusedWindowStore)
+
     captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
@@ -521,7 +542,14 @@ if captureOptions.captureEnabled {
         // the snapshot's frontmost bundle id.
         contextSnapshot: contextSnapshot,
         urlProvider: urlProvider,
-        ocrPostAllowEmitter: ocrEmitter
+        ocrPostAllowEmitter: ocrEmitter,
+        // ADR-0031 V2-P1 — focused-window observation store + the
+        // companion FocusTracker. `start()` calls `focusTracker.start()`
+        // before reading the initial snapshot; the rebind task auto-
+        // engages because `focusedWindowStore != nil`; the (frame_ts,
+        // focus_ts) race gate auto-engages for the same reason.
+        focusedWindowStore: focusedWindowStore,
+        focusTracker: focusTracker
     )
 } else {
     captureSession = nil

@@ -1,6 +1,6 @@
 # ADR-0031 — Focused-window capture scope (Option (a)) as a load-bearing privacy invariant
 
-- Status: **Accepted** (2026-05-29 V2-P1 merge; **AMENDED 2026-05-30 emergency re-flip — see §"Status — M4 kill-switch is RE-ENGAGED" below**)
+- Status: **Accepted** (2026-05-29 V2-P1 merge; **AMENDED 2026-05-30 emergency re-flip — see §"Status — M4 kill-switch is RE-ENGAGED" below**; **AMENDED 2026-05-30 M4 SECOND LIFT — see §"2026-05-30 — M4 SECOND LIFT" below**)
 - Owners: **Director-Recording** (SCStream lifecycle + `SCContentFilter` factory + focus-race gate) + **CSO** (binding sign-off authority on the OCR-input-scope invariant)
 - Reviewers: CEO (ratification on V2-P1 PR); Director-Brain (consumer of the OCREvent attribution; ADR-0030 redaction layer becomes load-bearing in production under this ADR); Director-Context (focused-window observation primitive; `FocusTracker` is a peer of the existing context providers); CRS Telemetry-Gap analyst (`frames_focus_race_dropped` wire counter consumer).
 - Phase: 3.x (capture-spine hardening). Lands as the first commit set in the V2 graph phase plan (brain-architecture v2 vision memo §7.1 — V2-P1).
@@ -174,6 +174,31 @@ This RE-FLIP is the second exercise of the same emergency-mitigation discipline 
 
 — CSO + Director-Recording (joint), 2026-05-30
 
+### 2026-05-30 — M4 SECOND LIFT (V2-P1 production wiring + sentinel fail-close)
+
+PR #261 memo (`docs/research/v2-p1-production-leak-2026-05-30.md`) identified that PR #239 V2-P1 added the focused-window machinery (FocusTracker, FocusedWindowStore, `SCContentFilterFactory.makeFocusedWindowFilter`, race gate, this ADR, §7 corpus) but never wired `FocusedWindowStore` + `FocusTracker` into `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift`'s `SCStreamCaptureSession(...)` construction. Both parameters defaulted to `nil` in production; V2-P1 was present in source but inactive in shipped builds. The §7 corpus passed 5/5 GREEN because its scope is the attribution-logic decision matrix, not the construction graph — a unit-tests-pass-but-the-integration-is-missing failure mode.
+
+This PR (#TBD) lands the §5.1 wiring (10 LOC `main.swift` edit constructing the store + tracker and passing them into the session) and the §5.2 race-gate sentinel hardening (~3 LOC at `SCStreamCaptureSession.swift:597` failing closed when `installedFocusGeneration == 0`). The latter closes a residual leak window the §5.1 fix exposes: at boot / login / fast-user-switch the displayFilter fallback is active and both `installedGen` and `focusedSnapshot.generation` are 0; the pre-§5.2 `observedGen != installedGen` predicate trivially passed and let display-composite pixels reach the cascade with `WorkflowContextSnapshot.appBundleId` attribution.
+
+A new `MainSwiftWiringTests.swift` test reads the production `main.swift` source at test time and asserts the construction graph contains the two kwargs that activate V2-P1 (H6 wire-up assertion per memo §4.1). Five additional logic tests pin the §5.2 race-gate sentinel fail-close decision matrix. A future refactor that drops the wiring fails CI before merge.
+
+M4 lifts again (`killOcrEmit = false`) as the LAST commit of this PR — gated on the cycle 8.27 reship + the CEO-attended live-Mac audit (memo §11) confirming H6′/H7′/H8′ harnesses (vibrancy / NotificationCenter banners / multi-window-per-app focus) pass on a real Mac with `HelperHealth.frames_focus_race_dropped` non-zero (proof the race gate is actually running — currently zero in production for the structural reason the memo §3.1 measurement #4 identifies). CRS Telemetry-Gap is tracking the missing `frames_focus_race_dropped` non-zero condition flagged in memo §8.
+
+This second lift supersedes the original 2026-05-29 V2-P1 lift in spirit: ADR-0031 §6.6 ("M4 lifts as the final commit of V2-P1") underestimated the audit gap and is amended by reference to memo §6. The new lift condition is binding from this entry forward.
+
+### CSO sign-off block (2026-05-30 M4 SECOND LIFT)
+
+The CSO seat hereby re-attests ADR-0031 §6.1–§6.6, joint with Director-Recording, against the now-wired construction graph:
+
+1. **OCR-input scope is focused-window-only IN PRODUCTION.** The factory at `SCContentFilterFactory.makeFocusedWindowFilter(...)` is now reachable from the production `SCStreamCaptureSession.start()` path because `focusedWindowStore != nil` in shipped builds. Pinned by `MainSwiftWiringTests.test_main_passes_focusedWindowStore_to_SCStreamCaptureSession`.
+2. **Race-consistency gate fails closed AT THE BOOT EDGE.** §5.2's `installedGen == 0` sentinel closes the previously-trivially-passing `0 == 0` predicate. Pinned by `MainSwiftWiringTests.test_race_gate_fails_closed_on_installed_generation_zero_with_observed_*` (3 cases).
+3. **ADR-0013 §1 denylist composition preserved.** Unchanged from V2-P1; this PR adds NO denylist path. `SelectFocusedWindowTests::test_returns_nil_when_owning_app_is_denylisted` continues to pin the composition.
+4. **Amendment 1 §3(a)–(d) preserved.** (a) cascade-before-encode unchanged; (b) fail-closed STRENGTHENED on the §5.2 sentinel; (c) no stored/emitted suppressed event unchanged; (d) surface-lease exactly-once preserved via `defer { lease.release() }` in `emitFocusRaceDropped(...)` unchanged.
+5. **Construction-graph wiring at main.swift:503 verified.** `git grep -n "FocusedWindowStore()" adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift` returns a line; `git grep -n "FocusTracker(store:" adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift` returns a line; both non-empty post-PR. The H6 wire-up assertion test pins this as a structural CI gate going forward; mandatory on every future §5 protected-set PR per the new `project-v2p1-unit-tests-passed-but-never-wired` discipline.
+6. **M4 second lift conditioned on the live-Mac audit.** The single-line edit at `OCRPostAllowEmitter.swift:135` (`killOcrEmit = true → false`) is the LAST commit; it is gated on the cycle 8.27 reship's CEO-attended live-Mac audit per memo §6. `testKillSwitchEmitsTombstoneForAllowFrames` continues to scope-override `killOcrEmit = true` for the kill-switch branch test so the emergency-kill capability remains.
+
+— CSO + Director-Recording (joint), 2026-05-30
+
 ## Cross-references
 
 - **Memo:** `docs/research/capture-scope-window-vs-display-2026-05-29.md` (merged PR #233). §3 ADR audit, §5 recommendation, §7 falsifiability corpus spec, §9 CSO sign-off scaffolding.
@@ -187,3 +212,8 @@ This RE-FLIP is the second exercise of the same emergency-mitigation discipline 
   - Commit 4: §7 corpus runner + committed GREEN artifact.
   - Commit 5: this ADR.
   - Commit 6: M4 kill-switch lift (`killOcrEmit = false`).
+- **V2-P1 PRODUCTION LEAK MEMO:** `docs/research/v2-p1-production-leak-2026-05-30.md` (PR #261). Diagnoses the missing `main.swift` wiring as sole root cause for the cycle 8.25 production evidence; specifies §5.1 + §5.2 fix + §6 new M4 lift condition.
+- **M4 second-lift commits:** PR #TBD (this PR).
+  - Commit 1: §5.1 main.swift wiring (FocusedWindowStore + FocusTracker into `SCStreamCaptureSession(...)`) + §5.2 race-gate sentinel fail-close at `installedGen == 0` + `MainSwiftWiringTests` (H6 wire-up assertion + §5.2 decision matrix).
+  - Commit 2: this ADR amendment.
+  - Commit 3: M4 kill-switch lift (`killOcrEmit = false`) — gated on cycle 8.27 reship + CEO-attended live-Mac audit (memo §11).
