@@ -145,6 +145,42 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
+# --- Completeness gate: refuse to ship a DMG missing the bundled embedder ---
+#
+# Cycle 8.24 (`bc5af6af…`) shipped a 14 MB DMG instead of the expected ~73 MB
+# because the COO reship worktree did NOT `cp -R /Users/ao/Documents/GitHub/mci/models .`
+# before running this script. build-app.sh logged
+# `WARNING: ArcticEmbedS .mlpackage not found at $REPO_ROOT/models/...` and
+# continued anyway, producing a .app with no embedder under
+# Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc. The DMG built + signed
+# + notarized + stapled cleanly because nothing in the signing or notary path
+# inspects resource completeness — but first-launch semantic search silently
+# falls back to a zero-vector stub. By the time CEO mounted the DMG, the bug
+# was live in production.
+#
+# This gate trips BEFORE codesign / launch-verify / notarize so the operator
+# fixes the worktree and re-runs from scratch instead of shipping broken.
+EMBEDDER_PATH="$APP_PATH/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
+if [[ ! -d "$EMBEDDER_PATH" ]]; then
+    echo "FATAL: ArcticEmbedS_INT8.mlmodelc missing at:"
+    echo "         $EMBEDDER_PATH"
+    echo ""
+    echo "Refusing to ship a DMG with broken semantic search."
+    echo ""
+    echo "Root cause is almost always: the build worktree does not have the"
+    echo "models/ directory. The embedder lives at"
+    echo "  <repo>/models/ArcticEmbedS_INT8.{mlpackage,mlmodelc}"
+    echo "and is .gitignored (~64 MB). For worktree builds, copy it in from"
+    echo "the primary checkout before re-running:"
+    echo ""
+    echo "  cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/"
+    echo ""
+    echo "Then re-run: ./scripts/build-installer.sh"
+    echo ""
+    echo "(Codified after cycle 8.24 reship shipped a 14 MB DMG with no embedder.)"
+    exit 1
+fi
+
 # Launch-verify gate — FATAL.
 # Second invocation (build-app.sh runs it once on the just-built bundle).
 # Re-run here so --skip-build paths still trip the gate, and so the gate
