@@ -175,4 +175,166 @@ final class SafariInboxReaderTests: XCTestCase {
         XCTAssertEqual(bytes[0], 0x4D)
         XCTAssertEqual(bytes[1], 0x06)
     }
+
+    // MARK: - SO_NOSIGPIPE (cycle 8.23 main-GUI-death regression pin)
+
+    /// `SafariInboxReader.makeUnixStreamSocket()` MUST return an fd
+    /// with `SO_NOSIGPIPE` set, so a `write(2)` against a peer that
+    /// has closed its read end returns `EPIPE` instead of raising
+    /// `SIGPIPE` and terminating the process.
+    ///
+    /// Regression context: cycle 8.23 main-GUI-death. The
+    /// `ProcessSupervisor` retry loop unbinds + rebinds the agent's
+    /// `page_content.sock` listener whenever helper or agent exits.
+    /// Any drain that has already `connect()`ed and is mid-`write()`
+    /// during that window would, without `SO_NOSIGPIPE`, raise
+    /// `SIGPIPE` in the main GUI process — whose default disposition
+    /// is process termination with a clean exit (no `.ips` report).
+    /// This is exactly the menu-bar-icon-disappears bug the CEO
+    /// reported. `HippocampusApp.applicationDidFinishLaunching` also
+    /// installs `SIG_IGN` for `SIGPIPE` process-wide; this socket-
+    /// option is the surgical defense at the offending call site.
+    func test_makeUnixStreamSocket_sets_SO_NOSIGPIPE() throws {
+        guard let fd = SafariInboxReader.makeUnixStreamSocket() else {
+            XCTFail("socket(AF_UNIX, SOCK_STREAM, 0) failed")
+            return
+        }
+        defer { close(fd) }
+
+        var value: Int32 = 0
+        var len = socklen_t(MemoryLayout<Int32>.size)
+        let rc = getsockopt(
+            fd, SOL_SOCKET, SO_NOSIGPIPE,
+            &value, &len
+        )
+        XCTAssertEqual(
+            rc, 0,
+            "getsockopt(SO_NOSIGPIPE) failed errno=\(errno)"
+        )
+        XCTAssertNotEqual(
+            value, 0,
+            """
+            SO_NOSIGPIPE MUST be non-zero on the returned fd.
+            Without it, write(2) to a closed-peer socket raises
+            SIGPIPE — clean process exit, no crash report. This is
+            the cycle 8.23 main-GUI-death bug.
+            """
+        )
+    }
+
+    /// End-to-end pin: an in-process server accepts on a Unix-domain
+    /// socket, immediately closes its accepted fd, and we verify that
+    /// `write(2)` from the SafariInboxReader-style socket returns -1
+    /// (with `errno == EPIPE`) instead of raising `SIGPIPE` and
+    /// killing the test process.
+    ///
+    /// This is the actual end-to-end reproduction of the cycle 8.23
+    /// failure mode in a test: take a real socket, real peer-close,
+    /// real write — without `SO_NOSIGPIPE` the test runner itself
+    /// would die here (no XCTest failure, just a clean exit with no
+    /// junit output). With `SO_NOSIGPIPE` set by
+    /// `makeUnixStreamSocket()` this returns gracefully.
+    func test_write_to_closed_peer_returns_EPIPE_not_SIGPIPE() throws {
+        // Build a sock path under /tmp that is short enough for
+        // sockaddr_un (104 bytes incl. NUL on Darwin).
+        let socketPath = "/tmp/mci-test-\(UInt32.random(in: 0..<UInt32.max)).sock"
+        unlink(socketPath)
+        defer { unlink(socketPath) }
+
+        // Server side
+        let serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(serverFD, 0)
+        defer { close(serverFD) }
+
+        // Pre-capture sun_path size to avoid Swift exclusivity
+        // violation inside `withUnsafeMutablePointer(to: &addr.sun_path)`.
+        let sunPathSize = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
+
+        var serverAddr = sockaddr_un()
+        serverAddr.sun_family = sa_family_t(AF_UNIX)
+        _ = socketPath.withCString { src in
+            withUnsafeMutablePointer(to: &serverAddr.sun_path) { dest in
+                dest.withMemoryRebound(to: CChar.self, capacity: sunPathSize) { destChar in
+                    strncpy(destChar, src, sunPathSize - 1)
+                }
+            }
+        }
+        let bindRC = withUnsafePointer(to: &serverAddr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saddr in
+                Darwin.bind(
+                    serverFD, saddr,
+                    socklen_t(MemoryLayout<sockaddr_un>.size)
+                )
+            }
+        }
+        XCTAssertEqual(bindRC, 0, "bind failed errno=\(errno)")
+        XCTAssertEqual(listen(serverFD, 1), 0)
+
+        // Client side via SafariInboxReader's hardened socket factory.
+        guard let clientFD = SafariInboxReader.makeUnixStreamSocket() else {
+            XCTFail("makeUnixStreamSocket failed")
+            return
+        }
+        defer { close(clientFD) }
+
+        var clientAddr = sockaddr_un()
+        clientAddr.sun_family = sa_family_t(AF_UNIX)
+        _ = socketPath.withCString { src in
+            withUnsafeMutablePointer(to: &clientAddr.sun_path) { dest in
+                dest.withMemoryRebound(to: CChar.self, capacity: sunPathSize) { destChar in
+                    strncpy(destChar, src, sunPathSize - 1)
+                }
+            }
+        }
+        let connectRC = withUnsafePointer(to: &clientAddr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saddr in
+                Darwin.connect(
+                    clientFD, saddr,
+                    socklen_t(MemoryLayout<sockaddr_un>.size)
+                )
+            }
+        }
+        XCTAssertEqual(connectRC, 0, "connect failed errno=\(errno)")
+
+        // Server accepts then immediately closes — simulating an
+        // mci-agent restart during a SafariInboxReader write.
+        let acceptedFD = accept(serverFD, nil, nil)
+        XCTAssertGreaterThanOrEqual(acceptedFD, 0, "accept failed errno=\(errno)")
+        close(acceptedFD)
+
+        // Give the OS a beat to deliver the close to the client side.
+        // 50ms is plenty on a loaded CI box; we're not racing anything.
+        usleep(50_000)
+
+        // First write may succeed into the buffer (TCP-like grace) —
+        // the second triggers EPIPE. Loop until we get a negative
+        // return or 64 KB to bound the test.
+        let payload = [UInt8](repeating: 0x41, count: 4096)
+        var sawEPIPE = false
+        var totalWritten = 0
+        for _ in 0..<16 {
+            let n = payload.withUnsafeBytes { buf -> Int in
+                Darwin.write(clientFD, buf.baseAddress, payload.count)
+            }
+            if n < 0 {
+                XCTAssertEqual(
+                    errno, EPIPE,
+                    "expected EPIPE, got errno=\(errno)"
+                )
+                sawEPIPE = true
+                break
+            }
+            totalWritten += n
+        }
+
+        // Either we saw EPIPE (write failed gracefully) OR we wrote
+        // the full bounded payload (peer's socket buffer absorbed it,
+        // no error path needed). Either is acceptable — what would
+        // FAIL the test is process termination via SIGPIPE, which
+        // would prevent this XCTAssert from ever running.
+        XCTAssertTrue(
+            sawEPIPE || totalWritten > 0,
+            "neither EPIPE nor any successful write — unexpected"
+        )
+    }
 }

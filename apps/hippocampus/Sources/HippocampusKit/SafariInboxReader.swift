@@ -199,9 +199,46 @@ public final class SafariInboxReader: Sendable {
 
     // MARK: - Socket write
 
-    private func writeToSocket(_ data: Data) -> Bool {
+    /// Create a `SOCK_STREAM` AF_UNIX socket with `SO_NOSIGPIPE` set,
+    /// so a `write(2)` against a peer that has closed its read end
+    /// returns `EPIPE` instead of raising `SIGPIPE` and killing the
+    /// process.
+    ///
+    /// The `mci-agent` `page_content.sock` listener is rebound every
+    /// time the `ProcessSupervisor` retry loop restarts the agent
+    /// (helper-exit cascades to `stop()` → agent's listener is
+    /// `close()`d → next `bind()` after backoff). Any drain that has
+    /// already `connect()`ed and is mid-`write()` during that window
+    /// receives `EPIPE` + `SIGPIPE`. Without this option AND without a
+    /// process-wide `signal(SIGPIPE, SIG_IGN)` mask, the SIGPIPE's
+    /// default disposition is process termination with a clean exit
+    /// (no `.ips` crash report) — which is exactly the menu-bar-icon-
+    /// disappears bug the CEO reported across cycles 8.22 and 8.23.
+    /// `HippocampusApp.applicationDidFinishLaunching` also installs
+    /// `SIG_IGN` for `SIGPIPE` process-wide; this socket-option is the
+    /// surgical defense at the offending call site (belt + suspenders).
+    ///
+    /// Returns `nil` on `socket(2)` failure. The caller owns the fd
+    /// and is responsible for `close()`ing it.
+    ///
+    /// `nonisolated` because this is a pure POSIX-syscall wrapper —
+    /// it does not touch instance state, so the actor isolation of
+    /// the enclosing `@MainActor` `SafariInboxReader` is irrelevant.
+    /// `nonisolated` also makes the helper callable from XCTest
+    /// methods (which are not on `MainActor`) without `await`.
+    nonisolated static func makeUnixStreamSocket() -> Int32? {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
+        guard fd >= 0 else { return nil }
+        var on: Int32 = 1
+        _ = setsockopt(
+            fd, SOL_SOCKET, SO_NOSIGPIPE,
+            &on, socklen_t(MemoryLayout<Int32>.size)
+        )
+        return fd
+    }
+
+    private func writeToSocket(_ data: Data) -> Bool {
+        guard let fd = Self.makeUnixStreamSocket() else { return false }
         defer { Darwin.close(fd) }
 
         var addr = sockaddr_un()
