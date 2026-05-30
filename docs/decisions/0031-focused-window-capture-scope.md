@@ -1,6 +1,6 @@
 # ADR-0031 — Focused-window capture scope (Option (a)) as a load-bearing privacy invariant
 
-- Status: **Proposed** (2026-05-29; CSO seat + Director-Recording joint draft; CEO ratification on V2-P1 PR merge)
+- Status: **Accepted** (2026-05-29 V2-P1 merge; **AMENDED 2026-05-30 emergency re-flip — see §"Status — M4 kill-switch is RE-ENGAGED" below**)
 - Owners: **Director-Recording** (SCStream lifecycle + `SCContentFilter` factory + focus-race gate) + **CSO** (binding sign-off authority on the OCR-input-scope invariant)
 - Reviewers: CEO (ratification on V2-P1 PR); Director-Brain (consumer of the OCREvent attribution; ADR-0030 redaction layer becomes load-bearing in production under this ADR); Director-Context (focused-window observation primitive; `FocusTracker` is a peer of the existing context providers); CRS Telemetry-Gap analyst (`frames_focus_race_dropped` wire counter consumer).
 - Phase: 3.x (capture-spine hardening). Lands as the first commit set in the V2 graph phase plan (brain-architecture v2 vision memo §7.1 — V2-P1).
@@ -128,16 +128,51 @@ The cycle 8.17 footprint envelope (≤ ~1–2% of one CPU core / ≤ ~250 MB RAM
 - **AGENT_PROTOCOL §5 protected-set**: this ADR + each commit in the implementing PR carry CSO sign-off blocks.
 - **AGENT_PROTOCOL §9 unattended-autonomous mode**: the M4-lift commit is autonomously executable per CEO ratification — the corpus is a Rust binary producing a deterministic artifact, not a live-Mac harness. The §11 live-Mac audit is the post-merge CEO-attended verification.
 
-## Status — lift the M4 kill-switch when this ADR ships
+## Status — M4 kill-switch is RE-ENGAGED (2026-05-30 emergency re-flip)
 
-The V2-P1 implementing PR (`claude/director-recording/v2-p1-focused-window`) lands the focused-window filter + FocusTracker + race gate + wire bump + this ADR + the §7 corpus artifact, then lifts the M4 kill-switch as its final commit. Once the PR merges:
+### Original lift posture (2026-05-29 V2-P1)
 
-1. M4 is OFF (`killOcrEmit = false` in shipped source).
-2. The OCR-emit pipeline operates on the focused-window-only capture surface.
-3. ADR-0030 §3(a)–(c) Messages/Mail redaction becomes load-bearing in production.
-4. The 14-bundle cascade allowlist's coverage becomes operationally meaningful for the first time.
+The V2-P1 implementing PR (`claude/director-recording/v2-p1-focused-window`, PR #239) landed the focused-window filter + FocusTracker + race gate + wire bump + this ADR + the §7 corpus artifact, then lifted the M4 kill-switch as its final commit. The V2-P1 lift moved `killOcrEmit` from `true` to `false`; the §7 corpus passed 5/5 GREEN; the brain v2 phase plan moved forward on the premise that:
 
-The post-merge re-ship + CEO live-Mac smoke test (Messages, Mail, Xcode, VSCode all surfacing OCR text with structurally correct attribution and no cross-app leak) is the §11 live-Mac audit. A regression there reverts via the M4 kill-switch flip back to `true` (the same single-line edit, in reverse).
+1. M4 was OFF (`killOcrEmit = false` in shipped source).
+2. The OCR-emit pipeline operated on the focused-window-only capture surface.
+3. ADR-0030 §3(a)–(c) Messages/Mail redaction was load-bearing in production.
+4. The 14-bundle cascade allowlist's coverage was operationally meaningful for the first time.
+
+### 2026-05-30 EMERGENCY RE-FLIP — V2-P1 focused-window leak surfaced in production
+
+**The premise above no longer holds.** Production probe of the cycle 8.25 DMG (live SHA `abd06f540c52d4e2924b6e6a54ebe7fd0abef3a44ab390c2a59d9dd392230303`, V2-P1 in shipped source) surfaced an OCREvent tagged `app_bundle_id=com.apple.systempreferences, title=Full Disk Access` whose `text_snippet` contained:
+
+- A `+1 (201) 508` phone number, AND
+- The prefix of a personal message (`From my side:`).
+
+Both signals are Messages.app content. The event's `app_bundle_id` is `com.apple.systempreferences`. Messages content landed inside a System Preferences event despite V2-P1's focused-window `SCContentFilter`. This is the same class of cross-window pixel-attribution leak that ADR-0031 + the §7 corpus were authored to close.
+
+The mechanism is the §5 escalation pattern from PR #233's memo, §1 verbatim: pixels from a non-frontmost bundle's window enter the brain as frontmost-attributed content. PR #222's per-app redaction layer (`bundle_is_in_scope` at `core/brain/src/redaction/mod.rs`) gates on the event's `app_bundle_id` and is BYPASSED when the leaked content lands inside another app's event — exactly what happened here. `bundle_is_in_scope("com.apple.systempreferences") == false` → the SMS/Mail/Messages regex bank never ran on the OCR'd Messages text.
+
+The §7 corpus passed 5/5 GREEN in dev (`docs/audit/2026-05-29-focused-window-corpus.md`) but the GREEN result does NOT generalize to production behavior. The corpus was authored against a synthetic harness that does not exercise overlapping-window scenarios under the live focus-rebind race conditions exposed in the wild. Either:
+
+- The focused-window `SCContentFilter` is not as window-tight as ADR-0031 §1 asserts under some real workload state we have not reproduced; or
+- The race-consistency gate (`(frame_ts, focus_ts)`) is letting in-flight pre-rebind frames through under conditions the corpus did not exercise; or
+- A third structural gap exists in the SCStream-to-Vision path that the audit did not surface.
+
+The root-cause diagnostic is a separate Director-Recording + CSO joint dispatch (`v2-p1-production-leak-diag`) — out of scope for this emergency re-flip PR.
+
+### Lift condition (the second time)
+
+M4 lifts the second time when ALL of the following hold:
+
+1. The `v2-p1-production-leak-diag` diagnostic finds the structural gap that the cycle 8.25 production probe surfaced, and an implementing PR closes it (CSO sign-off on the protected-set surface).
+2. A **production-realistic** §7-equivalent corpus runs 5/5 GREEN with **explicit coverage** of: (a) overlapping non-frontmost-window scenarios on the same display, (b) focus-rebind race under realistic system load, (c) the same Messages-behind-System-Preferences shape that the production probe surfaced.
+3. CEO ratifies the second lift on a re-ship + live-Mac smoke test that includes the production-probe replay shape (Messages window open and visible while System Preferences is frontmost; assert no Messages tokens land in any System Preferences OCREvent).
+
+While `killOcrEmit == true`, V2-P1's focused-window `SCContentFilter` stays installed (defense in depth — the OCR-emit arm is a no-op, but the filter still narrows the captured surface). All other V2 work products on the brain v2 phase plan continue to land; only the OCR-emit gate is closed.
+
+### CSO sign-off block (2026-05-30 emergency re-flip)
+
+This RE-FLIP is the second exercise of the same emergency-mitigation discipline that PR #232 established and PR #239 lifted from. It is exactly what the M4 kill-switch was designed for: a single-line revert that closes the OCR-emit cross-window leak class while the architectural fix's gap is diagnosed and re-closed. CSO authority cited: ADR-0031 §"Status" lift condition (this clause); AGENT_PROTOCOL §4 R5 (sensitive-capture launch-blocker); §5 (CSO veto-gate on protected-set); §7 (escalation discipline). The PR amending this section also flips the single-line source default at `OCRPostAllowEmitter.swift:120` from `false` to `true`. ADR-0013 §3 fail-safe-default-redact + Amendment 1 §3(b) fail-closed posture are PRESERVED — the re-flip strengthens fail-closed, not weakens it.
+
+— CSO + Director-Recording (joint), 2026-05-30
 
 ## Cross-references
 

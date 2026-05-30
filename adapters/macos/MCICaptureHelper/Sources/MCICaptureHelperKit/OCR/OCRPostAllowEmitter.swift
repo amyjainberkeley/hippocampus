@@ -78,46 +78,61 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     /// `true` ⇒ every `processAfterAllow` invocation emits a
     /// `PrivacyTombstone(failsafeUnknown)` instead of submitting the
     /// pixel buffer to the Vision OCR worker. While `true`, no OCR
-    /// text bytes from the whole-display `SCStream` sample reach the
-    /// brain — the cross-window leak documented in the memo cannot
-    /// occur because the OCR pipeline is short-circuited at the
-    /// emit-or-suppress fork.
+    /// text bytes from the SCStream sample reach the brain — the
+    /// cross-window leak documented in the memo cannot occur because
+    /// the OCR pipeline is short-circuited at the emit-or-suppress
+    /// fork.
     ///
-    /// LIFTED to `false` in V2-P1 (ADR-0031,
-    /// `docs/decisions/0031-focused-window-capture-scope.md`). The
-    /// architectural fix (Option (a) — focused-window
-    /// `SCContentFilter(desktopIndependentWindow:)` per
-    /// `SCContentFilterFactory.makeFocusedWindowFilter(...)`) +
-    /// FocusTracker + `(frame_ts, focus_ts)` race-consistency gate
-    /// landed in V2-P1 Commits 1–3 of this PR; the §7 falsifiability
-    /// corpus (`docs/audit/2026-05-29-focused-window-corpus.md`) is
-    /// committed GREEN (Commit 4); ADR-0031 §6 CSO sign-off block is
-    /// authored (Commit 5). This commit is the lift; the gate is now
-    /// the focused-window-only capture surface itself, not a
-    /// runtime short-circuit. ADR-0013 §3 fail-safe-default-redact +
-    /// Amendment 1 §3(b) fail-closed posture remain preserved
-    /// structurally — under V2-P1 the cascade's bundle-keyed gate is
-    /// structurally correct because the captured pixel surface IS the
-    /// focused window's pixels.
-    ///
-    /// Flips back to `true` only as an emergency revert if the
-    /// post-merge re-ship + CEO live-Mac smoke test surfaces a
-    /// regression on the §11 live-Mac audit. The kill-switch BRANCH
-    /// remains pinned by `testKillSwitchEmitsTombstoneForAllowFrames`
-    /// (scope-overrides this var to `true`) so the emergency-kill
-    /// capability survives the lift.
+    /// History:
+    ///   - 2026-05-29 PR #232: shipped with `true` (Phase A mitigation).
+    ///   - 2026-05-29 V2-P1 PR #239: lifted to `false`. The
+    ///     architectural fix (Option (a) — focused-window
+    ///     `SCContentFilter(desktopIndependentWindow:)` via
+    ///     `SCContentFilterFactory.makeFocusedWindowFilter(...)`) +
+    ///     FocusTracker + `(frame_ts, focus_ts)` race-consistency gate
+    ///     shipped in Commits 1–3; the §7 falsifiability corpus
+    ///     (`docs/audit/2026-05-29-focused-window-corpus.md`) passed
+    ///     5/5 GREEN (Commit 4); ADR-0031 §6 CSO sign-off was authored
+    ///     (Commit 5); the lift was Commit 6.
+    ///   - **2026-05-30 EMERGENCY RE-FLIP back to `true`.** Production
+    ///     probe of the cycle 8.25 DMG (live SHA
+    ///     `abd06f540c52d4e2924b6e6a54ebe7fd0abef3a44ab390c2a59d9dd392230303`)
+    ///     surfaced an OCREvent tagged
+    ///     `app_bundle_id=com.apple.systempreferences, title=Full Disk
+    ///     Access` whose `text_snippet` contained a `+1 (201) 508`
+    ///     phone number plus the prefix of a personal message
+    ///     (`From my side:`) — i.e. Messages.app content leaking into a
+    ///     System Preferences event despite V2-P1's focused-window
+    ///     `SCContentFilter`. PR #222's `bundle_is_in_scope` per-app
+    ///     redaction gates on the EVENT-level `app_bundle_id` and is
+    ///     bypassed when leaked content lands inside another app's
+    ///     event. The §7 corpus passed 5/5 GREEN in dev but the result
+    ///     does NOT generalize to production — the leak is alive in
+    ///     shipped builds. Same §5 escalation pattern as PR #233 → PR
+    ///     #232. M4 re-engaged pending diagnostic of the production-leak
+    ///     root cause (separate dispatch
+    ///     `v2-p1-production-leak-diag`). The second lift condition is:
+    ///     that diagnostic's fix + a production-realistic corpus that
+    ///     includes overlapping-window scenarios passes 5/5. The V2-P1
+    ///     focused-window `SCContentFilter` stays installed — under
+    ///     `killOcrEmit == true` the cascade-twice OCR-emit arm is a
+    ///     no-op, but the filter still applies as defense in depth.
+    ///     ADR-0031 §Status amended in lockstep with this RE-FLIP.
     ///
     /// PROTECTED-SET per AGENT_PROTOCOL §5.
     ///
     /// Declared `var` (not `let`) only so existing cascade-twice unit
     /// tests in `CascadeTwiceOCREmitterTests` can scope-override it
-    /// to exercise the OCR-emit-suppressed path. Production code paths
-    /// never mutate this — the lift ships as a single-line source
-    /// edit, not a runtime mutation. The `nonisolated(unsafe)`
-    /// annotation is required by Swift 6 strict concurrency for a
-    /// static `var`; safe here because writes are confined to test
-    /// setup/teardown and reads in production are pure load.
-    nonisolated(unsafe) internal static var killOcrEmit: Bool = false
+    /// to exercise the OCR-emit path (setUp forces `false` for the
+    /// cascade-twice mechanics tests; the kill-switch BRANCH test
+    /// `testKillSwitchEmitsTombstoneForAllowFrames` explicitly forces
+    /// `true`). Production code paths never mutate this — both the
+    /// V2-P1 lift and this re-flip ship as single-line source edits,
+    /// not runtime mutations. The `nonisolated(unsafe)` annotation is
+    /// required by Swift 6 strict concurrency for a static `var`;
+    /// safe here because writes are confined to test setup/teardown
+    /// and reads in production are pure load.
+    nonisolated(unsafe) internal static var killOcrEmit: Bool = true
 
     private let worker: VisionOCRWorker
     private let cascade: SuppressionCascade
