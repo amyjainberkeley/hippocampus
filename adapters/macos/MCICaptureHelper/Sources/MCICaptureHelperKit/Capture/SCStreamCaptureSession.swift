@@ -593,10 +593,32 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // bundle id reaches `buildWorkflowContext(...)` AND the same
         // generation drives the gate — no torn read between the gate
         // decision and the attribution decision.
+        //
+        // V2-P1 PRODUCTION HARDENING (per
+        // `docs/research/v2-p1-production-leak-2026-05-30.md` §5.2):
+        // `installedFocusGeneration == 0` is the sentinel for "no
+        // focused-window filter is currently bound" — either `start()`'s
+        // inner-else fallback to `makeDisplayFilter(...)` ran (the
+        // initial focused-window read missed: login window /
+        // fast-user-switch / no observable focused window) or rebind
+        // has not yet succeeded. In that state the captured pixel
+        // surface is the display composite, NOT the focused window;
+        // the bundle-keyed attribution gate is structurally unsafe
+        // regardless of whether `focusedSnapshot.generation` happens
+        // to also be 0. Without this check, the gate trivially passes
+        // on the `0 == 0` boot edge and lets display-composite pixels
+        // through with `WorkflowContextSnapshot.appBundleId`
+        // attribution — exactly the cycle 8.17 misattribution channel.
+        // Fail closed.
+        //
+        // `FocusedWindowStore.store(_:)` only bumps the generation
+        // when `focused != nil`, so `generation == 0` ↔ "no focused-
+        // window state has ever been observed." The sentinel is
+        // unambiguous.
         let focusedSnapshot: FocusedWindowSnapshot? = focusedWindowStore?.currentSync()
         if focusedWindowStore != nil {
             let installedGen = currentInstalledFocusGeneration()
-            if focusedSnapshot?.generation != installedGen {
+            if installedGen == 0 || focusedSnapshot?.generation != installedGen {
                 let nowUsForRace = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
                 let raceBundle = focusedSnapshot?.focused?.bundleId ?? ""
                 // Build the surface lease + release the surface in the
