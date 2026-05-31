@@ -128,7 +128,7 @@ The cycle 8.17 footprint envelope (≤ ~1–2% of one CPU core / ≤ ~250 MB RAM
 - **AGENT_PROTOCOL §5 protected-set**: this ADR + each commit in the implementing PR carry CSO sign-off blocks.
 - **AGENT_PROTOCOL §9 unattended-autonomous mode**: the M4-lift commit is autonomously executable per CEO ratification — the corpus is a Rust binary producing a deterministic artifact, not a live-Mac harness. The §11 live-Mac audit is the post-merge CEO-attended verification.
 
-## Status — M4 kill-switch is RE-ENGAGED (2026-05-30 emergency re-flip)
+## Status — M4 kill-switch is RE-ENGAGED (2026-05-30 cycle 8.27 emergency revert of PR #264)
 
 ### Original lift posture (2026-05-29 V2-P1)
 
@@ -199,6 +199,67 @@ The CSO seat hereby re-attests ADR-0031 §6.1–§6.6, joint with Director-Recor
 
 — CSO + Director-Recording (joint), 2026-05-30
 
+### 2026-05-30 — M4 SECOND LIFT REVERTED (V2-P1 `exceptingWindows` API misuse breaks SCStream)
+
+PR #264 wired `FocusedWindowStore` + `FocusTracker` into `main.swift` (§5.1) and lifted M4 a second time. The cycle 8.27 DMG built off PR #264 (not merged) was installed to `/Applications` and a CEO production probe ran. Helper.stderr showed, on a ~30s restart loop:
+
+```
+SCStream callback alive: first sample received.
+SCStream stopped with error: Code=-3815
+"Failed to find any displays or windows to capture"
+```
+
+Concurrently `HelperHealth` wire frames reported `frames_focus_race_dropped: 155 / 211 delivered` — 73% of delivered frames gated by the race gate before reaching the cascade. The helper restarted itself immediately after each `-3815` error; recording was effectively non-functional.
+
+**Root cause (memo `docs/research/v2-p1-production-leak-2026-05-30.md` §3 H1, now confirmed):**
+
+The V2-P1 implementation built the focused-window `SCContentFilter` via:
+
+```swift
+SCContentFilter(display: display, exceptingWindows: [focusedWindow])
+```
+
+The Apple semantic for this initializer is **EXCLUDE these windows from capture**, not **INCLUDE ONLY these windows**. Passing the single focused window as the `exceptingWindows` list excludes the only window we want to capture — SCStream has nothing left to sample and emits `-3815 "Failed to find any displays or windows to capture"`. The right initializer is `SCContentFilter(desktopIndependentWindow:)` for a single window (already used elsewhere in the codebase) or `SCContentFilter(display:including:exceptingWindows:)` with a non-empty include list.
+
+The §7 corpus (`docs/audit/2026-05-29-focused-window-corpus.md`) passed 5/5 GREEN in dev because the synthetic harness mocked the `SCContentFilter` constructor's attribution decision rather than exercising the real Apple API — the harness never observed `-3815`. PR #239's `MainSwiftWiringTests` was a construction-graph integration test (it asserted the wiring exists) and did not exercise the runtime SCStream behavior either.
+
+**The revert:**
+
+PR #265 reverts the `main.swift` §5.1 wiring to nil defaults so `SCStreamCaptureSession.start()` falls back to `makeDisplayFilter(...)` (the cycle 8.17 full-display capture path that has worked in production for 11+ cycles). M4 stays re-engaged (`killOcrEmit = true` in `OCRPostAllowEmitter.swift`) so OCR-text emit is structurally closed at the cascade-twice emit gate; the OCR-text leak class that ADR-0031 was authored to close is mitigated at the emit-or-suppress fork while a correct V2-P1 design is produced.
+
+The §5.2 race-gate sentinel fail-close at `SCStreamCaptureSession.swift` (`if installedGen == 0 || ...`) is KEPT. It is a defensive hardening that's correct regardless of whether the focused-window machinery is wired in production — under the revert the outer `if focusedWindowStore != nil` guard around the gate is false in shipped builds so the sentinel branch is unreachable in practice, but the predicate is the structurally-correct decision for any future V2-P1 redesign that does wire focused-window state.
+
+**The new lift condition (third time):**
+
+Any future M4 lift requires ALL of the following:
+
+1. A V2-P1 redesign that uses `SCContentFilter(desktopIndependentWindow:)` (single-window form) or `SCContentFilter(display:including:exceptingWindows:)` (display + non-empty include list) — i.e. an `includingWindows`-correct API. The implementing PR must include a unit test that constructs the filter against a real-Apple-API stand-in and verifies it does NOT trigger `-3815` semantics. Tracked: follow-on memo `v2-p1-redesign-includingwindows`.
+2. A production-realistic §7-equivalent corpus that exercises the real Apple SCStream API end-to-end on a live macOS host (not a mock), with explicit coverage of: (a) the cycle 8.27 `-3815` shape that PR #264 surfaced, (b) overlapping non-frontmost-window scenarios on the same display, (c) focus-rebind race under realistic system load, (d) the Messages-behind-System-Preferences attribution shape that the cycle 8.25 production probe surfaced.
+3. CEO ratification on a cycle DMG live-Mac smoke test that includes a 5+ minute interactive use exercise. `helper.stderr` MUST contain no `-3815` errors across the exercise; `frames_focus_race_dropped` MUST be a small fraction of `frames_delivered` (e.g. <5%, not the 73% PR #264's wiring produced).
+4. CSO sign-off on the protected-set surface (`SCContentFilter` factory, `SCStreamCaptureSession`, the rebind task, the race gate, the wire-up at `main.swift`).
+
+ADR-0031 §6.6 ("M4 lifts as the final commit of V2-P1") is amended in spirit by reference to this revert: that clause underestimated the operational risk of lifting M4 on the same PR that lands the wiring change. Future lifts ship as standalone PRs, after the live-Mac evidence required by (1)–(3) above is in hand, and never compounded with a wiring or capture-API change in the same PR.
+
+### CSO sign-off block (2026-05-30 cycle 8.27 emergency revert — DRIVER-CSO)
+
+Authored by Director-Recording acting as driver-CSO per CEO-INFRA-001 (the `cso` sub-agent dispatch was previously observed to hallucinate audit tables — memory entry `feedback-cso-subagent-hallucinates`; driver-CSO authorship is the corrective discipline).
+
+| Assertion | Verdict | Evidence |
+|---|---|---|
+| Restored cycle 8.17 display-filter fallback (working in production for 11+ cycles) | PASS | `main.swift` no longer constructs `FocusedWindowStore` / `FocusTracker`; the `SCStreamCaptureSession(...)` call omits both kwargs so they default to `nil`; `start()` falls through to `makeDisplayFilter(...)`. `git log -S "FocusTracker(" -- adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift` returns the PR #264 commit AND this revert commit; symbol absent at HEAD. |
+| M4 (`killOcrEmit = true`) preserved — cross-window OCR-text leak structurally closed at the emit gate | PASS | `OCRPostAllowEmitter.swift` `nonisolated(unsafe) internal static var killOcrEmit: Bool = true`. `CascadeTwiceOCREmitterTests.testKillSwitchEmitsTombstoneForAllowFrames` continues to pin the kill-switch branch as the live shipping path. |
+| PageContent wire dual-accept restores browser context capture | PASS | `ACCEPTED_FRAME_VERSIONS: &[u8] = &[FRAME_VERSION, 0x07, 0x06]`. `HelperHealth` decode defaults `frames_encode_failed` AND `frames_focus_race_dropped` to 0 on `0x06`. New test `decode_accepts_legacy_0x06_page_content_payload` round-trips a `PageContentEvent` re-shaped to wire version `0x06`. `agent.stderr` `unsupported wire version: got 0x06` loop on the cycle 8.27 production probe is closed. |
+| Race-gate fail-close hardening kept as defensive guard | PASS | The §5.2 sentinel branch `if installedGen == 0 \|\| focusedSnapshot?.generation != installedGen` remains in `SCStreamCaptureSession.swift`. Under the revert the outer `if focusedWindowStore != nil` guard is false in shipped builds, so the branch is unreachable in practice but correct in shape for any future V2-P1 redesign. The §5.2 decision-matrix tests in `MainSwiftWiringTests` are preserved (pure-logic tests; no construction-graph dependency). |
+| No new cascade widening; no new redaction bypass; no new permission / IPC surface / wire field; no new network surface | PASS | This revert REMOVES code (the `main.swift` wiring); it does not add capture paths. The wire-version dual-accept WIDENS the read side (accepts more legacy versions on read) but does not introduce new message types or new fields. No Info.plist / entitlements / TCC / usage-description changes. The encoder still emits exclusively at `FRAME_VERSION = 0x08`. |
+| ADR-0013 §1 source-level denylist composition preserved | PASS | `Denylist` composition at the SCStream session construction site is unchanged. `makeDisplayFilter(...)`'s denylist behavior is the same fallback the helper has been running with for 11+ cycles. |
+| ADR-0013 §3 fail-safe-default-redact preserved | PASS | The revert strengthens the default by re-engaging M4 — every `.allow` frame fail-closes to `PrivacyTombstone(failsafeUnknown)` at the cascade-twice emit gate. |
+| ADR-0030 §3(a)–(c) Messages/Mail per-app redaction posture | DEGRADED-AS-DESIGNED | With M4 RE-ENGAGED, the per-app redaction at `core/brain/src/redaction/mod.rs` `bundle_is_in_scope` does not need to be load-bearing because OCR-text emit is structurally closed on `.allow` frames. The redaction layer regains load-bearing status when M4 lifts (third time) under the new lift conditions above. |
+| Construction-graph wiring discipline (per `project-v2p1-unit-tests-passed-but-never-wired`) is preserved | PASS | The `project-v2p1-unit-tests-passed-but-never-wired` memory entry's discipline — "construction-graph wiring at integration sites must be in CSO sign-off audit table going forward" — is honored here. This audit table explicitly cites the `main.swift` wiring state (now reverted to nil defaults). |
+
+**Verdict: APPROVED for emergency merge.** The revert is a strict narrowing of the production surface: it removes a wiring change that broke SCStream end-to-end, preserves the M4 mitigation, and re-extends the wire dual-accept to close the browser context capture regression. No new attack surface; no new redaction bypass; no new permission. ADR-0013, ADR-0015 §4, ADR-0016 §1.6/§4.2, ADR-0030 §3, ADR-0031 §6.1–§6.5 invariants are preserved or strengthened. CSO authority cited: AGENT_PROTOCOL §4 R5 (sensitive-capture launch-blocker — production was capture-down on PR #264), §5 (CSO veto-gate on protected-set), §7 (escalation discipline). The third-lift condition above is binding from this entry forward.
+
+— Director-Recording (driver-CSO per CEO-INFRA-001), 2026-05-30
+
 ## Cross-references
 
 - **Memo:** `docs/research/capture-scope-window-vs-display-2026-05-29.md` (merged PR #233). §3 ADR audit, §5 recommendation, §7 falsifiability corpus spec, §9 CSO sign-off scaffolding.
@@ -213,7 +274,14 @@ The CSO seat hereby re-attests ADR-0031 §6.1–§6.6, joint with Director-Recor
   - Commit 5: this ADR.
   - Commit 6: M4 kill-switch lift (`killOcrEmit = false`).
 - **V2-P1 PRODUCTION LEAK MEMO:** `docs/research/v2-p1-production-leak-2026-05-30.md` (PR #261). Diagnoses the missing `main.swift` wiring as sole root cause for the cycle 8.25 production evidence; specifies §5.1 + §5.2 fix + §6 new M4 lift condition.
-- **M4 second-lift commits:** PR #TBD (this PR).
+- **M4 second-lift commits (PR #264, MERGED to main, then REVERTED by PR #265):**
   - Commit 1: §5.1 main.swift wiring (FocusedWindowStore + FocusTracker into `SCStreamCaptureSession(...)`) + §5.2 race-gate sentinel fail-close at `installedGen == 0` + `MainSwiftWiringTests` (H6 wire-up assertion + §5.2 decision matrix).
-  - Commit 2: this ADR amendment.
-  - Commit 3: M4 kill-switch lift (`killOcrEmit = false`) — gated on cycle 8.27 reship + CEO-attended live-Mac audit (memo §11).
+  - Commit 2: ADR-0031 amendment (the M4 SECOND LIFT entry above — superseded by the M4 SECOND LIFT REVERTED entry below it).
+  - Commit 3: M4 kill-switch lift (`killOcrEmit = false`).
+- **M4 second-lift REVERT commits (PR #265, this PR):**
+  - Reverts §5.1 main.swift wiring to nil defaults so `start()` falls back to `makeDisplayFilter(...)` (cycle 8.17 shape).
+  - Keeps §5.2 race-gate sentinel fail-close (defensive guard; unreachable in practice under the revert).
+  - Replaces `MainSwiftWiringTests` H6 wiring assertions with the §5.2 decision-matrix tests only (pure logic).
+  - Re-flips M4 (`killOcrEmit = true`).
+  - Adds `ACCEPTED_FRAME_VERSIONS` `0x06` re-extension + new `decode_accepts_legacy_0x06_page_content_payload` test to fix the cycle 8.27 `unsupported wire version: got 0x06` browser-context-capture regression on `page_content.sock`.
+  - Amends this ADR §"Status" with the M4 SECOND LIFT REVERTED entry + driver-CSO sign-off block.

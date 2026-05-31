@@ -99,22 +99,43 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// byte layouts between `0x07` and `0x08`, so dual-accept is
 /// byte-equivalent for them.
 ///
+/// `0x06` RE-EXTENDED (2026-05-30, cycle 8.27 emergency revert): the
+/// Safari extension's native messaging host writes `PageContentEvent`
+/// frames to `page_content.sock` at wire `0x06`; the `0x07 → 0x08`
+/// bumps inside the helper binary moved `ACCEPTED_FRAME_VERSIONS` past
+/// `0x06`, so cycle 8.27 production showed
+/// `page-content-listener: read error: ipc-read decode: unsupported
+/// wire version: got 0x06` on a loop and browser context capture went
+/// dark. The browser-extension boundary cannot be updated atomically
+/// with helper releases (extensions ship through their respective
+/// browser app stores), so the dual-accept window is re-extended to
+/// include `0x06` for PageContentEvent. Layout discipline (per the
+/// `0x05 → 0x06`, `0x06 → 0x07`, `0x07 → 0x08` notes above):
+/// `PageContentEvent` byte layout is identical across `0x06`, `0x07`,
+/// `0x08` — the bumps only added trailing `u64`s to `HelperHealth`.
+/// `HelperHealth` decode therefore defaults `frames_encode_failed` AND
+/// `frames_focus_race_dropped` to `0` on `0x06` (seven `u64`s read).
+/// `OCREvent` byte layout is also identical across all three accepted
+/// versions, so dual-accept is byte-equivalent for it.
+///
 /// The decoder rejects any other version: helper and core still ship
 /// version-locked in the same signed bundle, but the dual-accept at
-/// `0x07 / 0x08` covers the rolling-restart window. Persisted /
-/// in-flight `0x01` / `0x02` / `0x03` / `0x04` / `0x05` / `0x06`
-/// frames are still hard-rejected — `0x06` reached end-of-support
-/// with this bump (one cycle is the documented rolling-restart
-/// window).
+/// `0x06 / 0x07 / 0x08` covers (a) the rolling-restart window for
+/// helper, and (b) the asynchronous-update window for the browser
+/// extension. Persisted / in-flight `0x01` / `0x02` / `0x03` / `0x04`
+/// / `0x05` frames are still hard-rejected.
 pub const FRAME_VERSION: u8 = 0x08;
 
 /// The set of wire versions the decoder accepts. The encoder always
 /// emits [`FRAME_VERSION`]; the decoder accepts the current version
-/// AND the prior `0x07` for rolling-restart safety (see the `0x07 →
-/// 0x08` doc on [`FRAME_VERSION`]). Order matters only in that the
-/// current version is the first entry — callers building a tripwire
-/// can `assert_eq!(ACCEPTED_FRAME_VERSIONS[0], FRAME_VERSION)`.
-pub const ACCEPTED_FRAME_VERSIONS: &[u8] = &[FRAME_VERSION, 0x07];
+/// AND `0x07` (rolling-restart safety, see the `0x07 → 0x08` doc on
+/// [`FRAME_VERSION`]) AND `0x06` (asynchronous-update window for the
+/// Safari extension native messaging host that emits
+/// `PageContentEvent` frames at `0x06`, see the `0x06` RE-EXTENDED
+/// note on [`FRAME_VERSION`]). Order matters only in that the current
+/// version is the first entry — callers building a tripwire can
+/// `assert_eq!(ACCEPTED_FRAME_VERSIONS[0], FRAME_VERSION)`.
+pub const ACCEPTED_FRAME_VERSIONS: &[u8] = &[FRAME_VERSION, 0x07, 0x06];
 
 /// Header size in bytes: magic(1) + version(1) + `msg_type(2)` + seq(8) + len(4).
 pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
@@ -641,24 +662,32 @@ fn decode_payload(
             let cascade_forced_count = p.u64_le()?;
             let frames_dropped_backpressure = p.u64_le()?;
             let frames_dropped_late_ack = p.u64_le()?;
-            // Dual-accept (ADR-0031 V2-P1, wire 0x07 → 0x08): a 0x07
-            // payload carries eight u64s and stops here; a 0x08 payload
-            // carries a ninth `frames_focus_race_dropped` u64. Default
-            // to 0 on the legacy version. Strict payload-length
-            // consumption in the caller catches a malformed 0x08
-            // payload (extra bytes) or a malformed 0x07 payload
-            // (trailing garbage) as PayloadLengthMismatch.
+            // Triple-version dual-accept (cycle 8.27 revert re-extends
+            // to include 0x06; 0x07 / 0x08 already accepted per the
+            // ADR-0031 V2-P1 bump):
+            //   - 0x06: seven u64s (uptime, delivered, suppressed,
+            //     redacted_by_failsafe, cascade_forced, dropped_bp,
+            //     dropped_late_ack). Defaults frames_encode_failed AND
+            //     frames_focus_race_dropped to 0.
+            //   - 0x07: eight u64s (adds frames_encode_failed). Defaults
+            //     frames_focus_race_dropped to 0.
+            //   - 0x08: nine u64s (adds frames_focus_race_dropped).
             //
-            // Note: the prior 0x06 wire is dropped at this bump per the
-            // FRAME_VERSION docstring's one-cycle rolling-restart
-            // window. ACCEPTED_FRAME_VERSIONS contains only {0x08,
-            // 0x07}; the `frames_encode_failed` field is always present
-            // on every accepted version.
-            let frames_encode_failed = p.u64_le()?;
-            let frames_focus_race_dropped = if version == 0x07 {
+            // Strict payload-length consumption in the caller catches a
+            // malformed payload (extra bytes or trailing garbage) as
+            // PayloadLengthMismatch. PageContentEvent / OCREvent byte
+            // layouts are identical across all three accepted versions
+            // (see FRAME_VERSION doc), so dual-accept is byte-equivalent
+            // for them.
+            let frames_encode_failed = if version == 0x06 {
                 0
             } else {
                 p.u64_le()?
+            };
+            let frames_focus_race_dropped = if version == 0x08 {
+                p.u64_le()?
+            } else {
+                0
             };
             Message::HelperHealth {
                 uptime_ms,
@@ -1012,8 +1041,16 @@ mod tests {
             "0x07 must remain accepted for rolling-restart safety per the ADR-0031 V2-P1 bump"
         );
         assert!(
-            !ACCEPTED_FRAME_VERSIONS.contains(&0x06),
-            "0x06 reaches end-of-support at the 0x07 → 0x08 bump (one-cycle rolling-restart window)"
+            ACCEPTED_FRAME_VERSIONS.contains(&0x06),
+            "0x06 must remain accepted: the Safari extension native messaging host \
+             emits PageContentEvent frames at 0x06 and the extension cannot be updated \
+             atomically with helper releases (cycle 8.27 emergency revert)"
+        );
+        // Hard-rejected: anything older than 0x06 is out of the
+        // documented asynchronous-update + rolling-restart window.
+        assert!(
+            !ACCEPTED_FRAME_VERSIONS.contains(&0x05),
+            "0x05 reaches end-of-support"
         );
     }
 
@@ -1067,13 +1104,33 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_old_0x06_frame() {
-        // 0x06 reaches end-of-support at the 0x07 → 0x08 bump per the
-        // FRAME_VERSION docstring's one-cycle rolling-restart window.
-        let mut buf = encode(0, &Message::CaptureStop);
+    fn decode_accepts_legacy_0x06_page_content_payload() {
+        // Cycle 8.27 emergency revert: the Safari extension's native
+        // messaging host emits PageContentEvent frames at wire 0x06.
+        // Cycle 8.27 production showed `unsupported wire version: got
+        // 0x06` on a loop when the helper bumped to 0x08 without
+        // dual-accepting 0x06. PageContentEvent byte layout is
+        // identical across 0x06 / 0x07 / 0x08 per the FRAME_VERSION
+        // doc, so re-shaping a 0x08-encoded frame to 0x06 must decode
+        // round-trip identical.
+        let original = Message::PageContentEvent {
+            seq: 7,
+            ts_us: 1_700_000_000_000_000,
+            url: "https://example.com/article".into(),
+            title: "Example Article".into(),
+            full_text: "page body text".into(),
+            source_browser: "safari".into(),
+            tab_id: 42,
+        };
+        let mut buf = encode(123, &original);
+        // Re-shape the frame header as if a 0x06-era Safari extension
+        // had emitted it. PageContentEvent payload bytes are unchanged.
         buf[1] = 0x06;
-        let err = decode(&buf).unwrap_err();
-        assert!(matches!(err, DecodeError::UnsupportedVersion { got: 0x06 }));
+
+        let (frame, used) = decode(&buf).expect("decode legacy 0x06 PageContentEvent");
+        assert_eq!(used, buf.len());
+        assert_eq!(frame.seq, 123);
+        assert_eq!(frame.message, original);
     }
 
     #[test]

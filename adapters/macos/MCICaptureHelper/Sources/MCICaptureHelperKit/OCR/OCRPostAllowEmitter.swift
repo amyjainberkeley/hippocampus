@@ -118,35 +118,35 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     ///     `killOcrEmit == true` the cascade-twice OCR-emit arm is a
     ///     no-op, but the filter still applies as defense in depth.
     ///     ADR-0031 §Status amended in lockstep with this RE-FLIP.
-    ///   - **2026-05-30 M4 SECOND LIFT back to `false`.** PR #261 memo
-    ///     `docs/research/v2-p1-production-leak-2026-05-30.md` §3.1
-    ///     identified the sole root cause: PR #239 V2-P1 added the
-    ///     focused-window machinery (FocusedWindowStore, FocusTracker,
-    ///     `makeFocusedWindowFilter`, race gate, ADR-0031, §7 corpus)
-    ///     but never wired `FocusedWindowStore` + `FocusTracker` into
-    ///     `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift`'s
-    ///     `SCStreamCaptureSession(...)` construction. Both parameters
-    ///     defaulted to `nil`; V2-P1 was present in source but inactive
-    ///     in shipped builds. The previous re-flip's "defense in depth"
-    ///     claim was structurally false because the focused-window
-    ///     filter was never installed. This PR (#TBD) lands the §5.1
-    ///     wiring + the §5.2 race-gate sentinel fail-close at
-    ///     `installedFocusGeneration == 0` + the H6 wire-up assertion
-    ///     test (`MainSwiftWiringTests`) that reads main.swift at test
-    ///     time and pins the construction graph against future
-    ///     regressions. With §5.1 + §5.2 + the H6 test in place, the
-    ///     architectural fix is reachable in production for the first
-    ///     time and the unit-tests-pass-but-the-integration-is-missing
-    ///     failure mode is structurally caught. M4 lifts again as the
-    ///     LAST commit of this PR — operational lift on the cycle 8.27
-    ///     reship requires the CEO-attended live-Mac audit (memo §11)
-    ///     confirming H6′/H7′/H8′ harnesses pass with
-    ///     `HelperHealth.frames_focus_race_dropped` non-zero on the
-    ///     audit run. If a future cycle observes regression (non-zero
-    ///     cross-window leak signal), this default flips back to
-    ///     `true` (the same single-line edit, in reverse) and a new
-    ///     memo iteration runs. ADR-0031 §Status amended in lockstep
-    ///     with this SECOND LIFT.
+    ///   - **2026-05-30 M4 SECOND LIFT REVERTED — back to `true`.**
+    ///     PR #264 wired `FocusedWindowStore` + `FocusTracker` into
+    ///     `main.swift` and lifted M4 a second time. The cycle 8.27
+    ///     production probe (cycle 8.27 DMG, not merged) showed
+    ///     `SCStream stopped with error: Code=-3815 "Failed to find
+    ///     any displays or windows to capture"` on a ~30s restart loop
+    ///     with 73% `frames_focus_race_dropped` (155 / 211 delivered).
+    ///     Root cause (memo
+    ///     `docs/research/v2-p1-production-leak-2026-05-30.md` §3 H1,
+    ///     confirmed):
+    ///     `SCContentFilter(display:exceptingWindows:[focusedWindow])`
+    ///     is an EXCLUDE filter, not an INCLUDE-ONLY filter — passing
+    ///     the single focused window as the `exceptingWindows` list
+    ///     excludes the only window we want to capture, so SCStream
+    ///     has nothing left and emits -3815. The §7 corpus's 5/5 GREEN
+    ///     did not catch this because the synthetic harness mocked the
+    ///     `SCContentFilter` constructor rather than exercising the
+    ///     real Apple API. The V2-P1 production wiring is reverted to
+    ///     nil defaults so `SCStreamCaptureSession.start()` falls back
+    ///     to `makeDisplayFilter(...)` — the cycle 8.17 full-display
+    ///     capture path that has worked in production for 11+ cycles.
+    ///     M4 stays re-engaged (`killOcrEmit = true`) so OCR-text
+    ///     emit is structurally closed at the cascade-twice emit gate.
+    ///     V2-P1 will need a redesign with an
+    ///     `includingWindows`-correct API + a production-realistic
+    ///     corpus that exercises the real Apple API before the second
+    ///     lift can succeed; tracked: follow-on memo
+    ///     `v2-p1-redesign-includingwindows`. ADR-0031 §Status amended
+    ///     in lockstep with this REVERT.
     ///
     /// PROTECTED-SET per AGENT_PROTOCOL §5.
     ///
@@ -161,7 +161,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     /// required by Swift 6 strict concurrency for a static `var`;
     /// safe here because writes are confined to test setup/teardown
     /// and reads in production are pure load.
-    nonisolated(unsafe) internal static var killOcrEmit: Bool = false
+    nonisolated(unsafe) internal static var killOcrEmit: Bool = true
 
     private let worker: VisionOCRWorker
     private let cascade: SuppressionCascade

@@ -501,26 +501,28 @@ if captureOptions.captureEnabled {
     // heartbeat. No new wire field; no `.allow` widening; strictly
     // more observability.
     //
-    // ADR-0031 V2-P1 wiring (production hot-fix per
-    // `docs/research/v2-p1-production-leak-2026-05-30.md` §5.1). PR #239
-    // shipped the focused-window machinery (FocusedWindowStore,
-    // FocusTracker, makeFocusedWindowFilter, race gate, ADR-0031, §7
-    // corpus, M4 lift) but never modified this file to construct + pass
-    // them into `SCStreamCaptureSession`. Without these lines the
-    // session falls through to `makeDisplayFilter(...)` in
-    // `SCStreamCaptureSession.start()`, the rebind task short-circuits
-    // on `focusedWindowStore == nil`, and the race gate is bypassed
-    // entirely — the cycle 8.17 misattribution channel.
-    //
-    // Shared-actor identity discipline: the store is constructed once
-    // and passed BOTH to `FocusTracker` (which writes to it on its
-    // 1 Hz poll) AND to the SCStream session (which reads from it on
-    // every callback). Same instance — the wire-up assertion test in
-    // `MainSwiftWiringTests` reads the source of this file and pins
-    // the construction so a future refactor cannot silently drop it.
-    let focusedWindowStore = FocusedWindowStore()
-    let focusTracker = FocusTracker(store: focusedWindowStore)
-
+    // ADR-0031 V2-P1 wiring REVERTED 2026-05-30 (cycle 8.27 emergency,
+    // per `docs/research/v2-p1-production-leak-2026-05-30.md` §3 H1).
+    // PR #264 wired `FocusedWindowStore` + `FocusTracker` into the
+    // SCStream session and lifted M4 — but the cycle 8.27 production
+    // probe (helper.stderr) showed `SCStream stopped with error:
+    // Code=-3815 "Failed to find any displays or windows to capture"`
+    // on a ~30s restart loop with 73% `frames_focus_race_dropped`.
+    // Root cause:
+    // `SCContentFilter(display:exceptingWindows:[focusedWindow])` is an
+    // EXCLUDE filter, not an INCLUDE-ONLY filter, so passing the single
+    // focused window as the `exceptingWindows` list excludes the only
+    // window we want to capture — SCStream has nothing left and
+    // emits -3815. Wiring reverted to nil defaults so `start()` falls
+    // through to `makeDisplayFilter(...)` (cycle 8.17 full-display
+    // shape, working in production for 11+ cycles). M4 stays
+    // re-engaged (`OCRPostAllowEmitter.killOcrEmit = true`) as the
+    // structural mitigation that closes the OCR-text leak at the
+    // emit gate. V2-P1 needs a redesign with the
+    // `includingWindows`-correct API + a production-realistic corpus
+    // that exercises the real Apple API before the second lift can
+    // succeed (tracked: follow-on memo
+    // `v2-p1-redesign-includingwindows`).
     captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
@@ -542,14 +544,10 @@ if captureOptions.captureEnabled {
         // the snapshot's frontmost bundle id.
         contextSnapshot: contextSnapshot,
         urlProvider: urlProvider,
-        ocrPostAllowEmitter: ocrEmitter,
-        // ADR-0031 V2-P1 — focused-window observation store + the
-        // companion FocusTracker. `start()` calls `focusTracker.start()`
-        // before reading the initial snapshot; the rebind task auto-
-        // engages because `focusedWindowStore != nil`; the (frame_ts,
-        // focus_ts) race gate auto-engages for the same reason.
-        focusedWindowStore: focusedWindowStore,
-        focusTracker: focusTracker
+        ocrPostAllowEmitter: ocrEmitter
+        // ADR-0031 V2-P1 wiring intentionally OMITTED — see comment
+        // block above. `focusedWindowStore` + `focusTracker` default
+        // to `nil` so `start()` falls back to `makeDisplayFilter(...)`.
     )
 } else {
     captureSession = nil
