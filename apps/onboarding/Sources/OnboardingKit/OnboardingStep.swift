@@ -11,7 +11,14 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
     case retention = 7
     case prepareBrain = 8
     case connectClaudeCode = 9
-    case done = 10
+    // V2-MCP-2 — optional registration of locally-running MCP servers
+    // (gchat, Slack, Linear, etc.) for the Hippocampus aggregator.
+    // Loopback-only per ADR-0001 amendment 2026-05-31. Placed after
+    // Claude Code because both surfaces are "connect an MCP-speaking
+    // tool"; users familiar with one understand the other. Optional
+    // by design — the slide ships with a Skip path.
+    case mcpServers = 10
+    case done = 11
 
     public var id: Int { rawValue }
 
@@ -27,6 +34,7 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
         case .retention: "Retention & Privacy"
         case .prepareBrain: "Preparing Your Brain"
         case .connectClaudeCode: "Connect Claude Code"
+        case .mcpServers: "Connect MCP Servers (optional)"
         case .done: "You're All Set"
         }
     }

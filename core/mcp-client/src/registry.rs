@@ -9,12 +9,12 @@
 //! > connection per server. Connection lifecycle: register → connect
 //! > → call → close.
 //!
-//! v1 V2-MCP-1 keeps this in-memory only — the on-disk
+//! V2-MCP-1 shipped stdio-only registrations. V2-MCP-2 adds the
+//! [`ServerSpec::Http`] variant carrying `{url, auth_header}` and the
 //! `~/Library/Application Support/MCI/mcp-servers.toml` persistence
-//! lands in V2-MCP-2 with the registration UI + per-server consent
-//! UX. The shape of [`ServerRegistration`] here is the canonical
-//! on-disk schema for V2-MCP-2; aligning now lets V2-MCP-2 land as
-//! a thin (de)serialization + `ConsentRecord` overlay.
+//! shape (see [`crate::config`]). The lazy-connect / lazy-reconnect
+//! lifecycle stays unchanged; only the transport selected by
+//! `connect()` differs.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -25,53 +25,59 @@ use tokio::sync::RwLock;
 use crate::client::McpClient;
 use crate::error::{McpError, McpResult};
 use crate::stdio::StdioTransport;
+use crate::transport::http_sse::HttpSseTransport;
+use crate::transport::loopback::LoopbackHost;
+use crate::transport::McpTransport;
+
+/// One registered MCP server. The two variants mirror the two
+/// transports the client core supports.
+///
+/// `stdio` describes a local subprocess (process-local IPC, not
+/// network); `http` describes a loopback HTTP+SSE peer admitted by the
+/// ADR-0001 amendment dated 2026-05-31.
+#[derive(Debug, Clone)]
+pub enum ServerSpec {
+    /// Spawn the named binary and pipe JSON-RPC over its stdin/stdout.
+    /// Mirrors the canonical Anthropic `mcpServers` JSON shape used by
+    /// `claude_desktop_config.json` and Claude Code's `.mcp.json`.
+    Stdio {
+        /// Path to the server's executable.
+        command: PathBuf,
+        /// CLI arguments. Empty Vec is fine.
+        args: Vec<String>,
+        /// Environment for the spawned child. v1 is `env_clear()`-based
+        /// — only this map's pairs reach the child; the parent
+        /// process env is NOT inherited (no accidental secret leak).
+        env: HashMap<String, String>,
+    },
+    /// Open a loopback HTTP+SSE connection to the given URL. The URL
+    /// must have already passed [`LoopbackHost::parse`] — the
+    /// registration path stores the validated [`LoopbackHost`] here,
+    /// not the raw string.
+    Http {
+        /// Loopback-validated SSE URL.
+        sse_url: LoopbackHost,
+        /// Optional `Authorization` header value. NEVER logged
+        /// (Audit row #7).
+        auth_header: Option<String>,
+    },
+}
 
 /// Registered MCP server spec. Mirrors the canonical Anthropic
 /// `mcpServers` JSON shape used in `claude_desktop_config.json` and
-/// Claude Code's `.mcp.json`:
+/// Claude Code's `.mcp.json`, plus the V2-MCP-2 HTTP variant.
 ///
-/// ```json
-/// { "command": "/path/to/binary", "args": ["arg"], "env": {"K":"V"} }
-/// ```
-///
-/// `name` is the registry key (e.g. `"gbrain"`, `"slack"`); the
-/// consumer-side configs use the surrounding JSON object's key for
-/// the same purpose.
-///
-/// `transport_kind` is fixed to stdio for V2-MCP-1 (only stdio
-/// transport ships). V2-MCP-2 adds `Http` and an `auth: AuthSpec`
-/// field; we keep the enum here so callers can pattern-match without
-/// breaking when V2-MCP-2 lands.
+/// `name` is the registry key (e.g. `"gbrain"`, `"gchat"`, `"slack"`).
+/// The on-disk `mcp-servers.toml` schema is the canonical V2-MCP-2
+/// persistence shape and is enforced by [`crate::config`].
 #[derive(Debug, Clone)]
 pub struct ServerRegistration {
     /// Stable id (e.g. `"gbrain"`). Used as the registry key and as
     /// the `events.source_kind = "mcp:<id>"` discriminator that the
     /// V2-MCP-3 aggregator writes to the brain store.
     pub name: String,
-    /// Path to the server's executable.
-    pub command: PathBuf,
-    /// CLI arguments. Empty Vec is fine.
-    pub args: Vec<String>,
-    /// Environment for the spawned child. Empty Vec is fine. v1 is
-    /// `env_clear()`-based — only this map's pairs reach the child;
-    /// the parent process env is NOT inherited (avoids accidentally
-    /// passing user secrets through).
-    pub env: HashMap<String, String>,
-    /// Discriminator for which transport [`ServerRegistry::connect`]
-    /// uses. Stdio-only in V2-MCP-1.
-    pub transport_kind: TransportKind,
-}
-
-/// Which transport flavor a registration uses. V2-MCP-1 ships stdio
-/// only; V2-MCP-2 adds [`Self::Http`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransportKind {
-    /// Local subprocess + stdio pipes. Not network.
-    Stdio,
-    /// HTTP + SSE remote. **Not implemented in V2-MCP-1** — attempts
-    /// to connect a registration with `transport_kind = Http` return
-    /// [`McpError::SchemaMismatch`] until V2-MCP-2 lands.
-    Http,
+    /// Which transport this registration uses.
+    pub spec: ServerSpec,
 }
 
 impl ServerRegistration {
@@ -84,10 +90,41 @@ impl ServerRegistration {
     ) -> Self {
         Self {
             name: name.into(),
-            command: command.into(),
-            args: args.into_iter().map(Into::into).collect(),
-            env: HashMap::new(),
-            transport_kind: TransportKind::Stdio,
+            spec: ServerSpec::Stdio {
+                command: command.into(),
+                args: args.into_iter().map(Into::into).collect(),
+                env: HashMap::new(),
+            },
+        }
+    }
+
+    /// Convenience constructor for an HTTP registration.
+    ///
+    /// The caller is responsible for having already validated `sse_url`
+    /// through [`LoopbackHost::parse`]. The type system enforces that:
+    /// the constructor takes a [`LoopbackHost`], not a raw string.
+    #[must_use]
+    pub fn http(
+        name: impl Into<String>,
+        sse_url: LoopbackHost,
+        auth_header: Option<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            spec: ServerSpec::Http {
+                sse_url,
+                auth_header,
+            },
+        }
+    }
+
+    /// Stable discriminator for telemetry / health logs. Renders
+    /// `"stdio"` or `"http"` — never includes the path or URL.
+    #[must_use]
+    pub fn transport_kind(&self) -> &'static str {
+        match &self.spec {
+            ServerSpec::Stdio { .. } => "stdio",
+            ServerSpec::Http { .. } => "http",
         }
     }
 }
@@ -116,7 +153,7 @@ pub struct ServerHandle {
 
 enum ServerHandleState {
     NotConnected,
-    Connected(Arc<McpClient<StdioTransport>>),
+    Connected(Arc<McpClient<dyn McpTransport>>),
     Closed,
 }
 
@@ -142,7 +179,7 @@ impl ServerHandle {
     /// Idempotent: a second call returns the same `Arc<McpClient>`.
     /// Concurrent first-time callers race on the write lock; the
     /// loser sees the winner's client.
-    pub async fn connect(&self) -> McpResult<Arc<McpClient<StdioTransport>>> {
+    pub async fn connect(&self) -> McpResult<Arc<McpClient<dyn McpTransport>>> {
         // Fast path — already connected.
         if let ServerHandleState::Connected(client) = &*self.state.read().await {
             return Ok(Arc::clone(client));
@@ -152,28 +189,34 @@ impl ServerHandle {
             ServerHandleState::Connected(client) => Ok(Arc::clone(client)),
             ServerHandleState::Closed => Err(McpError::Closed),
             ServerHandleState::NotConnected => {
-                match self.registration.transport_kind {
-                    TransportKind::Stdio => {
-                        let env: Vec<(String, String)> = self
-                            .registration
-                            .env
+                let transport: Arc<dyn McpTransport> = match &self.registration.spec {
+                    ServerSpec::Stdio {
+                        command,
+                        args,
+                        env,
+                    } => {
+                        let env: Vec<(String, String)> = env
                             .iter()
                             .map(|(k, v)| (k.clone(), v.clone()))
                             .collect();
-                        let transport = StdioTransport::spawn(
-                            &self.registration.command,
-                            &self.registration.args,
-                            &env,
+                        let t = StdioTransport::spawn(command, args, &env).await?;
+                        Arc::new(t)
+                    }
+                    ServerSpec::Http {
+                        sse_url,
+                        auth_header,
+                    } => {
+                        let t = HttpSseTransport::connect(
+                            sse_url.clone(),
+                            auth_header.clone(),
                         )
                         .await?;
-                        let client = Arc::new(McpClient::new(Arc::new(transport)));
-                        *guard = ServerHandleState::Connected(Arc::clone(&client));
-                        Ok(client)
+                        Arc::new(t)
                     }
-                    TransportKind::Http => Err(McpError::SchemaMismatch(
-                        "HTTP transport is V2-MCP-2; not implemented in V2-MCP-1".into(),
-                    )),
-                }
+                };
+                let client = Arc::new(McpClient::<dyn McpTransport>::from_dyn(transport));
+                *guard = ServerHandleState::Connected(Arc::clone(&client));
+                Ok(client)
             }
         }
     }
@@ -205,7 +248,7 @@ impl ServerRegistry {
 
     /// Register a server. If a registration with the same name
     /// exists, this replaces it (closing the existing connection
-    /// first — the new spec might point at a different binary).
+    /// first — the new spec might point at a different binary or URL).
     pub async fn register(&self, registration: ServerRegistration) -> Arc<ServerHandle> {
         let name = registration.name.clone();
         let new_handle = Arc::new(ServerHandle::new(registration));
@@ -251,7 +294,7 @@ impl ServerRegistry {
     ///   (modeled as "the implicit handle is closed"). Callers that
     ///   need to distinguish unknown-name from closed should
     ///   [`Self::get`] first.
-    pub async fn connect(&self, name: &str) -> McpResult<Arc<McpClient<StdioTransport>>> {
+    pub async fn connect(&self, name: &str) -> McpResult<Arc<McpClient<dyn McpTransport>>> {
         let handle = self
             .handles
             .read()
@@ -312,16 +355,7 @@ mod tests {
         let list = reg.list().await;
         assert_eq!(list[0].name, "alpha");
         assert_eq!(h.state().await, ConnectionState::Registered);
-    }
-
-    #[tokio::test]
-    async fn http_transport_is_unsupported_in_v1() {
-        let reg = ServerRegistry::new();
-        let mut spec = ServerRegistration::stdio("h", "/bin/true", Vec::<String>::new());
-        spec.transport_kind = TransportKind::Http;
-        let h = reg.register(spec).await;
-        let err = h.connect().await.expect_err("HTTP not in V1");
-        assert!(matches!(err, McpError::SchemaMismatch(_)));
+        assert_eq!(h.registration.transport_kind(), "stdio");
     }
 
     #[tokio::test]
@@ -347,7 +381,31 @@ mod tests {
                 Vec::<String>::new(),
             ))
             .await;
-        assert_eq!(h2.registration.command, PathBuf::from("/bin/cat"));
+        match &h2.registration.spec {
+            ServerSpec::Stdio { command, .. } => {
+                assert_eq!(command, &PathBuf::from("/bin/cat"));
+            }
+            ServerSpec::Http { .. } => panic!("expected stdio spec"),
+        }
         assert_eq!(reg.len().await, 1);
+    }
+
+    #[tokio::test]
+    async fn http_registration_carries_loopback_host() {
+        let host = LoopbackHost::parse("http://127.0.0.1:7890/sse")
+            .await
+            .unwrap();
+        let reg = ServerRegistration::http("h", host, Some("Bearer x".into()));
+        assert_eq!(reg.transport_kind(), "http");
+        match &reg.spec {
+            ServerSpec::Http {
+                sse_url,
+                auth_header,
+            } => {
+                assert_eq!(sse_url.host, "127.0.0.1");
+                assert_eq!(auth_header.as_deref(), Some("Bearer x"));
+            }
+            ServerSpec::Stdio { .. } => panic!("expected http"),
+        }
     }
 }

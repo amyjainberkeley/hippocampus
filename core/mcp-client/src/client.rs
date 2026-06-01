@@ -26,12 +26,12 @@ use crate::{CLIENT_NAME, CLIENT_VERSION, MCP_PROTOCOL_VERSION};
 /// Generic over the transport so a stdio test, a stdio production
 /// connection, and (V2-MCP-2) an HTTP+SSE connection share the same
 /// protocol code. Hold in an `Arc` for cross-task sharing.
-pub struct McpClient<T: McpTransport> {
+pub struct McpClient<T: McpTransport + ?Sized> {
     transport: Arc<T>,
     ids: Arc<RequestIdAllocator>,
 }
 
-impl<T: McpTransport> std::fmt::Debug for McpClient<T> {
+impl<T: McpTransport + ?Sized> std::fmt::Debug for McpClient<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("McpClient").finish_non_exhaustive()
     }
@@ -39,6 +39,10 @@ impl<T: McpTransport> std::fmt::Debug for McpClient<T> {
 
 impl<T: McpTransport> McpClient<T> {
     /// Build a client over the given transport.
+    ///
+    /// Constrained to `T: Sized` so the typed constructor stays
+    /// ergonomic; the registry holds `Arc<McpClient<dyn McpTransport>>`
+    /// and uses [`McpClient::from_dyn`] below.
     #[must_use]
     pub fn new(transport: Arc<T>) -> Self {
         Self {
@@ -46,10 +50,32 @@ impl<T: McpTransport> McpClient<T> {
             ids: Arc::new(RequestIdAllocator::new()),
         }
     }
+}
 
-    /// Borrow the transport (for tests and the `ServerRegistry`).
+impl McpClient<dyn McpTransport> {
+    /// Build a client from an already-erased transport. V2-MCP-2's
+    /// registry uses this to hold either a `StdioTransport` or an
+    /// `HttpSseTransport` behind one `Arc<McpClient<dyn ...>>` without
+    /// leaking the concrete type.
     #[must_use]
-    pub fn transport(&self) -> Arc<T> {
+    pub fn from_dyn(transport: Arc<dyn McpTransport>) -> Self {
+        Self {
+            transport,
+            ids: Arc::new(RequestIdAllocator::new()),
+        }
+    }
+}
+
+impl<T: McpTransport + ?Sized> McpClient<T> {
+    /// Borrow the transport (for tests and the `ServerRegistry`).
+    ///
+    /// Constrained to `T: Sized` because the caller is the typed
+    /// path; the registry doesn't expose its `dyn` transport.
+    #[must_use]
+    pub fn transport(&self) -> Arc<T>
+    where
+        T: Sized,
+    {
         Arc::clone(&self.transport)
     }
 
@@ -191,7 +217,7 @@ impl<T: McpTransport> McpClient<T> {
     }
 }
 
-impl<T: McpTransport> Clone for McpClient<T> {
+impl<T: McpTransport + ?Sized> Clone for McpClient<T> {
     fn clone(&self) -> Self {
         Self {
             transport: Arc::clone(&self.transport),

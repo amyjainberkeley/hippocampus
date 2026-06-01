@@ -784,12 +784,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
  "bytes",
+ "futures-channel",
+ "futures-util",
  "http",
  "http-body",
  "hyper",
+ "libc",
  "pin-project-lite",
+ "socket2",
  "tokio",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -1005,6 +1010,7 @@ dependencies = [
  "mci-embed-coreml",
  "mci-llama-coreml",
  "mci-mail-reader",
+ "mci-mcp-client",
  "mci-messages-reader",
  "rusqlite",
  "rustix",
@@ -1126,11 +1132,19 @@ name = "mci-mcp-client"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
  "mci-mcp-client",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "toml",
+ "tower-service",
  "tracing",
 ]
 

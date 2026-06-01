@@ -59,6 +59,14 @@ mci-brain   = { path = "../../core/brain" }
 # state machine. Already on the workspace lockfile via `mci-brief-ffi`,
 # so listing it here adds ZERO net new third-party crates per ADR-0008.
 mci-brief   = { path = "../../core/brief" }
+# V2-MCP-2 — HTTP+SSE MCP-client core, loopback-only per ADR-0001
+# amendment 2026-05-31. The agent reads `~/Library/Application
+# Support/MCI/mcp-servers.toml` on start, builds a `ServerRegistry`,
+# and holds it for the rest of the process so V2-MCP-3 aggregation
+# (cycle 8.30, Director-Brain) can consume it without a re-init. Zero
+# net-new third-party crates: hyper / tokio / serde / toml are
+# already on the workspace lockfile via this package.
+mci-mcp-client = { path = "../../core/mcp-client" }
 tokio       = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "io-std", "process", "signal", "fs", "net"] }
 tracing     = { version = "0.1", default-features = false, features = ["std"] }
 thiserror   = "1"

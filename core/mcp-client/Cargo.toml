@@ -39,14 +39,42 @@ tracing    = { version = "0.1", default-features = false, features = ["std"] }
 # the MCP server subprocess; `io-util` gives `BufReader::read_line`;
 # `sync` gives `oneshot` for request/response correlation; `time` is
 # used for the per-call timeout. Zero new crates.
-tokio      = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "io-util", "process"] }
+tokio      = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time", "io-util", "process", "net", "fs"] }
 # Async-trait so `McpTransport` is dyn-safe. Already on the workspace
 # lockfile via `mci-core`.
 async-trait = "0.1"
+
+# V2-MCP-2 HTTP+SSE transport — first network surface in MCI history.
+# Loopback-only per the ADR-0001 amendment dated 2026-05-31. All
+# crates below are already on the workspace lockfile via
+# `mci-server`'s axum / hyper dependency chain, so this adds ZERO net
+# new third-party crates per ADR-0008's dependency-addition gate. The
+# loopback gate + the `LoopbackOnlyConnector` keep the network
+# surface narrow even when hyper is in-tree.
+hyper          = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util     = { version = "0.1", default-features = false, features = ["client", "client-legacy", "http1", "tokio"] }
+http           = "1"
+http-body-util = "0.1"
+bytes          = "1"
+tower-service  = "0.3"
+# TOML parser for the `mcp-servers.toml` registration config. Already
+# on the lockfile via the workspace.
+toml           = { version = "0.8", default-features = false, features = ["parse"] }
+
+# `geteuid()` for the mcp-servers.toml uid-match check (Audit row #5).
+# Already on the workspace lockfile via tokio + objc2; zero net new
+# third-party crates.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 # Enable the test-fixtures feature for `cargo test`. Cargo unifies the
 # feature set across the integration-test build, so the fixture binary
 # is built and `CARGO_BIN_EXE_mci-mcp-echo-fixture` is populated.
 mci-mcp-client = { path = ".", features = ["test-fixtures"] }
-tokio          = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "process", "test-util"] }
+tokio          = { version = "1", default-features = false, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "io-util", "process", "net", "fs", "test-util"] }
+# Stub HTTP+SSE server used by V2-MCP-2 integration tests. Mirrors
+# the production hyper version; `hyper` server feature is gated to
+# tests so the production crate stays "client" only.
+hyper          = { version = "1", default-features = false, features = ["server", "http1"] }
+http-body-util = "0.1"

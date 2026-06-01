@@ -1,10 +1,13 @@
 //! [`McpTransport`] — the abstract wire over which the client speaks
 //! JSON-RPC 2.0 to one MCP server.
 //!
-//! V2-MCP-1 ships **one** impl: [`crate::stdio::StdioTransport`]. The
-//! HTTP+SSE impl lands in V2-MCP-2 with its ADR-0001 amendment +
-//! CSO sign-off; defining the trait now means V2-MCP-2 is a drop-in
-//! second impl rather than a refactor.
+//! V2-MCP-1 ships one impl: [`crate::stdio::StdioTransport`] (process-
+//! local IPC, not network). V2-MCP-2 adds the HTTP+SSE impl at
+//! [`http_sse::HttpSseTransport`] — first network-shaped surface in MCI
+//! history. The HTTP+SSE impl is bound to a loopback-only constraint
+//! enforced both at registration time and per-call connect time; see
+//! [`loopback::LoopbackHost`] for the URL gate and the ADR-0001
+//! amendment dated 2026-05-31 for the policy framing.
 //!
 //! # Sync vs async
 //!
@@ -21,6 +24,12 @@ use async_trait::async_trait;
 
 use crate::error::McpResult;
 use crate::jsonrpc::{JsonRpcRequest, JsonRpcResponse};
+
+pub mod http_sse;
+pub mod loopback;
+
+pub use http_sse::HttpSseTransport;
+pub use loopback::{LoopbackError, LoopbackHost};
 
 /// Abstract bidirectional JSON-RPC 2.0 transport.
 ///
