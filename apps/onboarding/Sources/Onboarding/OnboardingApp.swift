@@ -34,6 +34,7 @@ struct OnboardingApp: App {
     @StateObject private var extensionVM: BrowserExtensionViewModel
     @StateObject private var prepareBrainVM: PrepareBrainViewModel
     @StateObject private var allowlistEditorVM: AllowlistEditorViewModel
+    @StateObject private var mcpServersVM: McpServersViewModel
 
     init() {
         #if canImport(AppKit)
@@ -79,6 +80,10 @@ struct OnboardingApp: App {
             detector: appsDetector,
             fdaPermission: fdaPermission
         ))
+
+        _mcpServersVM = StateObject(wrappedValue: McpServersViewModel(
+            store: FileMcpServersStore()
+        ))
     }
 
     var body: some Scene {
@@ -90,6 +95,7 @@ struct OnboardingApp: App {
                 .environmentObject(extensionVM)
                 .environmentObject(prepareBrainVM)
                 .environmentObject(allowlistEditorVM)
+                .environmentObject(mcpServersVM)
                 .frame(
                     width: OnboardingTheme.windowWidth,
                     height: OnboardingTheme.windowHeight

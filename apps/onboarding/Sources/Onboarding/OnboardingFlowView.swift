@@ -45,6 +45,8 @@ struct OnboardingFlowView: View {
             PrepareBrainSlide()
         case .connectClaudeCode:
             ConnectClaudeCodeSlide()
+        case .mcpServers:
+            McpServersSlide()
         case .done:
             DoneSlide()
         }

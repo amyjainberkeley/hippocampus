@@ -30,6 +30,12 @@ pub mod idle_batch;
 #[cfg(target_os = "macos")]
 pub mod mail_ingest;
 pub mod mcp;
+/// V2-MCP-2 — boot-time MCP-client registry builder. Reads
+/// `~/Library/Application Support/MCI/mcp-servers.toml`, constructs a
+/// `ServerRegistry`, and surfaces a log-friendly status struct. Held
+/// by the agent for the process lifetime; V2-MCP-3 aggregator (cycle
+/// 8.30, Director-Brain) consumes the registry without a re-init.
+pub mod mcp_client_supervisor;
 #[cfg(target_os = "macos")]
 pub mod messages_ingest;
 pub mod page_content;

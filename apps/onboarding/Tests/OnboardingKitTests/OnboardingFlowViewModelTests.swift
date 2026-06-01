@@ -23,10 +23,12 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testAdvanceThroughAllSteps() {
         let vm = makeVM()
+        // V2-MCP-2 inserted `.mcpServers` between `.connectClaudeCode`
+        // and `.done`; the step count is now 12.
         let expected: [OnboardingStep] = [
             .welcome, .howItWorks, .trust, .permissions, .allowlist,
             .browserExtension, .livePreview, .retention,
-            .prepareBrain, .connectClaudeCode, .done,
+            .prepareBrain, .connectClaudeCode, .mcpServers, .done,
         ]
         for (i, step) in expected.enumerated() {
             XCTAssertEqual(vm.currentStep, step, "Step \(i)")
@@ -36,7 +38,8 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testAdvancePastDoneIsNoop() {
         let vm = makeVM()
-        for _ in 0..<10 { vm.advance() }
+        // 12 steps total ⇒ advance 11 times reaches `.done`.
+        for _ in 0..<11 { vm.advance() }
         XCTAssertEqual(vm.currentStep, .done)
         vm.advance()
         XCTAssertEqual(vm.currentStep, .done)
@@ -64,7 +67,7 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testCanAdvanceIsFalseAtDone() {
         let vm = makeVM()
-        for _ in 0..<10 { vm.advance() }
+        for _ in 0..<11 { vm.advance() }
         XCTAssertFalse(vm.canAdvance)
     }
 
@@ -74,7 +77,8 @@ final class OnboardingFlowViewModelTests: XCTestCase {
     }
 
     func testStepCountMatchesOnboardingStepEnum() {
-        XCTAssertEqual(OnboardingStep.allCases.count, 11)
+        // V2-MCP-2 added `.mcpServers` ⇒ 12 cases.
+        XCTAssertEqual(OnboardingStep.allCases.count, 12)
     }
 
     func testStepLabelsAreNonEmpty() {
@@ -91,13 +95,13 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testProgressAtDoneIsOne() {
         let vm = makeVM()
-        for _ in 0..<10 { vm.advance() }
+        for _ in 0..<11 { vm.advance() }
         XCTAssertEqual(vm.progress, 1.0, accuracy: 0.001)
     }
 
     func testProgressAtMidpoint() {
         let vm = makeVM()
-        vm.goTo(.browserExtension) // raw 5 out of allCases.count - 1 = 10
-        XCTAssertEqual(vm.progress, 5.0 / 10.0, accuracy: 0.001)
+        vm.goTo(.browserExtension) // raw 5 out of allCases.count - 1 = 11
+        XCTAssertEqual(vm.progress, 5.0 / 11.0, accuracy: 0.001)
     }
 }

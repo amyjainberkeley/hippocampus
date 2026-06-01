@@ -329,6 +329,23 @@ async fn main() -> ExitCode {
             let clock = SystemWallClock;
             let mut stdin = tokio::io::stdin();
 
+            // V2-MCP-2 — boot the MCP-client registry from
+            // `~/Library/Application Support/MCI/mcp-servers.toml`.
+            // ADR-0001 §amendment 2026-05-31. Construction-graph
+            // wiring per audit rows #8 + #9: the boot helper builds
+            // the registry, the agent holds it for the rest of the
+            // process lifetime, and V2-MCP-3 (cycle 8.30, Director-
+            // Brain) picks it up. A missing config file is the
+            // expected fresh-install state; failures are logged and
+            // never abort startup. Runs BEFORE the brain-key check
+            // so the registry status appears even if the brain is
+            // not yet keyed.
+            let _mcp_client_boot = {
+                let boot = mci_agent::mcp_client_supervisor::boot_default().await;
+                eprintln!("{}", boot.log_line());
+                boot
+            };
+
             // P3.10c + P3.8 — open the brain store IFF `MCI_DB_KEY_HEX`
             // is set. The store is shared between:
             //   1. BrainPump (ingest: OCREvent → events table)
