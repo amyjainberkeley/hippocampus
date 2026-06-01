@@ -386,10 +386,45 @@ let policy = StreamPolicy.default
 // `appBundleId` + reason — see `SCStreamPipeline.swift:411-441`).
 let contextSnapshot = WorkflowContextSnapshot()
 let urlProvider: URLProvider = CompositeURLProvider()
+
+// Phase 6 PR 5 — SH Fork D1 attribution providers (EventKit +
+// Contacts + MPNowPlayingInfoCenter). These are PER-EVENT
+// attribution enrichers, NOT full deep-hook plugins:
+//   - CalendarAttribution → reads only events whose start <= now <=
+//     end via EKEventStore. NSCalendarsUsageDescription gates the
+//     TCC prompt.
+//   - NowPlayingAttribution → reads
+//     MPNowPlayingInfoCenter.default().nowPlayingInfo for title +
+//     artist. NSAppleMusicUsageDescription gates the system prompt.
+//   - ContactsAttribution → resolves a participant string to a
+//     CNContact.identifier (opaque). NSContactsUsageDescription
+//     gates the TCC prompt; minimal-key CNContactFetchRequest.
+//
+// All three return `nil` on TCC denial — the per-event capture path
+// degrades gracefully (no crash, no event drop, just the
+// corresponding attribution field stays nil). One stderr warn fires
+// per state-change per provider (V2-P10 pump-supervisor pattern).
+//
+// Construction-graph wiring (CSO sign-off row 8): the three
+// providers are constructed HERE at process top level — never inside
+// a Task closure, never inside an `if` branch that the cascade
+// hot-path would not enter. Top-level binding → process-lifetime
+// retention (SCSTREAM-LIVE-001 discipline).
+let calendarAttribution = CalendarAttribution()
+let nowPlayingAttribution = NowPlayingAttribution()
+let contactsAttribution = ContactsAttribution()
+
 let nsWorkspaceContextProvider = NSWorkspaceContextProvider(
     snapshotStore: contextSnapshot,
     source: NSWorkspaceFrontmostAppSource(),
-    windowTitleProvider: AXWindowTitleProvider()
+    windowTitleProvider: AXWindowTitleProvider(),
+    // Phase 6 PR 5 — SH Fork D1: per-tick consumption of the three
+    // attribution sources. Each tick reads the source at most once
+    // (provider-internal cache amortizes EventKit / CNContactStore /
+    // MPNowPlayingInfoCenter calls — see provider docs).
+    calendarSource: calendarAttribution,
+    nowPlayingSource: nowPlayingAttribution,
+    contactsSource: contactsAttribution
 )
 
 let captureSession: SCStreamCaptureSession?
@@ -566,6 +601,17 @@ if let captureSession {
     // ADR-0015 §6 P2.5 — start the 1 Hz context poller BEFORE
     // SCStream so the snapshot has a chance to leave the all-nil
     // initial state on the first cascade evaluation. Idempotent.
+    //
+    // Phase 6 PR 5 — SH Fork D1: kick off the three attribution
+    // providers in parallel BEFORE the poller starts. Each provider's
+    // `start()` triggers the TCC prompt (Calendar + Contacts) or
+    // sets up the read path (MPNowPlayingInfoCenter — no prompt).
+    // All three are idempotent + non-blocking; the auth callback
+    // resolves asynchronously, until which point the providers
+    // return `nil` (graceful absence). See CSO sign-off rows 1-2.
+    calendarAttribution.start()
+    nowPlayingAttribution.start()
+    contactsAttribution.start()
     nsWorkspaceContextProvider.start()
 
     // Synchronous `start()` inline — no `Task.detached`. The session
@@ -611,3 +657,12 @@ _ = captureSession
 _ = contextSnapshot
 _ = urlProvider
 _ = nsWorkspaceContextProvider
+// Phase 6 PR 5 — SH Fork D1 attribution providers MUST stay alive
+// for the SCStream's lifetime. Each holds internal cache state +
+// (for Calendar / Contacts) a TCC auth callback that may still
+// fire after `start()` returned. Top-level binding → process-
+// lifetime retention. CSO sign-off row 8 (construction-graph
+// wiring) cites these lines.
+_ = calendarAttribution
+_ = nowPlayingAttribution
+_ = contactsAttribution

@@ -57,6 +57,7 @@
 //! a file outside the compile-time-baked TOML. The redaction layer is
 //! pure-Rust regex + static-table lookup.
 
+pub mod calendar_attribution;
 pub mod mail_header;
 pub mod messages_plugin;
 pub mod parsed_mail_header;

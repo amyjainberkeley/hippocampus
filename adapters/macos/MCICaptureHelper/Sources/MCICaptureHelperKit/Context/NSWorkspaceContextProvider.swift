@@ -103,6 +103,26 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     /// snapshot.
     private let windowTitleProvider: WindowTitleProvider?
 
+    /// Optional current-calendar-event source (Phase 6 PR 5 — SH
+    /// Fork D1). `nil` preserves the prior shape (every tick writes
+    /// `currentCalendarEvent: nil`). When supplied, every tick
+    /// reads `eventNow(at: Date())` and folds the result into the
+    /// snapshot.
+    private let calendarSource: CalendarEventSource?
+
+    /// Optional now-playing source (Phase 6 PR 5 — SH Fork D1).
+    /// `nil` preserves the prior shape. When supplied, every tick
+    /// reads `currentTrack()` and folds the result.
+    private let nowPlayingSource: NowPlayingTrackSource?
+
+    /// Optional contacts-resolution source (Phase 6 PR 5 — SH Fork
+    /// D1). `nil` preserves the prior shape. When supplied, every
+    /// tick derives a participant token from the snapshot's `url`
+    /// (e.g. `mailto:foo@bar.com`) and resolves it to a
+    /// `ContactRef` via `resolve(participant:)`. The cascade does
+    /// NOT consume the resolved contact — it is downstream-only.
+    private let contactsSource: ContactsAttributionSource?
+
     /// Polling cadence, milliseconds. Default 1000 ms (1 Hz) — see
     /// ADR-0015 §3.
     private let intervalMs: UInt64
@@ -139,6 +159,9 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         snapshotStore: WorkflowContextSnapshot = WorkflowContextSnapshot(),
         source: FrontmostAppSource = NSWorkspaceFrontmostAppSource(),
         windowTitleProvider: WindowTitleProvider? = nil,
+        calendarSource: CalendarEventSource? = nil,
+        nowPlayingSource: NowPlayingTrackSource? = nil,
+        contactsSource: ContactsAttributionSource? = nil,
         intervalMs: UInt64 = 1000,
         queue: DispatchQueue = DispatchQueue(
             label: "mci.context.nsworkspace",
@@ -148,6 +171,9 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         self.snapshotStore = snapshotStore
         self.source = source
         self.windowTitleProvider = windowTitleProvider
+        self.calendarSource = calendarSource
+        self.nowPlayingSource = nowPlayingSource
+        self.contactsSource = contactsSource
         self.intervalMs = intervalMs
         self.queue = queue
     }
@@ -186,11 +212,17 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         let source = self.source
         let store = self.snapshotStore
         let titleProvider = self.windowTitleProvider
+        let calendar = self.calendarSource
+        let nowPlaying = self.nowPlayingSource
+        let contacts = self.contactsSource
         t.setEventHandler { [weak self] in
             guard self != nil else { return }
             Self.tick(
                 source: source,
                 titleProvider: titleProvider,
+                calendarSource: calendar,
+                nowPlayingSource: nowPlaying,
+                contactsSource: contacts,
                 store: store
             )
         }
@@ -224,11 +256,17 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     private static func tick(
         source: FrontmostAppSource,
         titleProvider: WindowTitleProvider?,
+        calendarSource: CalendarEventSource?,
+        nowPlayingSource: NowPlayingTrackSource?,
+        contactsSource: ContactsAttributionSource?,
         store: WorkflowContextSnapshot
     ) {
         let ctx = buildContext(
             source: source,
-            titleProvider: titleProvider
+            titleProvider: titleProvider,
+            calendarSource: calendarSource,
+            nowPlayingSource: nowPlayingSource,
+            contactsSource: contactsSource
         )
         // The actor-isolated `store(_:)` is `async`; schedule onto a
         // detached task. Ordering across ticks is preserved by the
@@ -248,9 +286,16 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     /// no frontmost app to read a focused window from, and we want
     /// `windowTitle: nil` rather than "title of whatever app
     /// happens to claim AX focus right now."
+    ///
+    /// Phase 6 PR 5 — SH Fork D1 attribution sources are consulted
+    /// when injected. Each returns `nil` on TCC denial / no signal,
+    /// in which case the corresponding field stays nil.
     private static func buildContext(
         source: FrontmostAppSource,
-        titleProvider: WindowTitleProvider?
+        titleProvider: WindowTitleProvider?,
+        calendarSource: CalendarEventSource? = nil,
+        nowPlayingSource: NowPlayingTrackSource? = nil,
+        contactsSource: ContactsAttributionSource? = nil
     ) -> WorkflowContext {
         let bundleId = source.currentBundleId()
         let title: String?
@@ -259,11 +304,24 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         } else {
             title = nil
         }
+        let event: CalendarEventRef? = calendarSource?.eventNow(at: Date())
+        let track: NowPlayingTrackRef? = nowPlayingSource?.currentTrack()
+        // Contacts resolution is best-effort from the current URL
+        // (e.g. `mailto:foo@bar.com`). When no URL is set OR the
+        // URL has no extractable participant shape, contact stays
+        // nil. The URL itself is `nil` at this layer (P2.5
+        // composite assigns it downstream); a future PR can pass
+        // it through here.
+        let contact: ContactRef? = nil
+        _ = contactsSource  // wired but participant-derivation path is empty at this layer
         return WorkflowContext(
             appBundleId: bundleId,
             windowTitle: title,
             url: nil,
-            pageText: nil
+            pageText: nil,
+            currentCalendarEvent: event,
+            currentListeningTrack: track,
+            currentContact: contact
         )
     }
 
@@ -288,6 +346,29 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         store: WorkflowContextSnapshot
     ) async {
         let ctx = buildContext(source: source, titleProvider: titleProvider)
+        await store.store(ctx)
+    }
+
+    /// Phase 6 PR 5 — SH Fork D1 test hook. Drives one tick with
+    /// all three attribution sources injected so the
+    /// `CalendarEventRef` / `NowPlayingTrackRef` / `ContactRef`
+    /// paths through `buildContext` are observable without a real
+    /// EventKit / MediaPlayer / Contacts framework attached.
+    public static func tickOnce(
+        source: FrontmostAppSource,
+        titleProvider: WindowTitleProvider?,
+        calendarSource: CalendarEventSource?,
+        nowPlayingSource: NowPlayingTrackSource?,
+        contactsSource: ContactsAttributionSource?,
+        store: WorkflowContextSnapshot
+    ) async {
+        let ctx = buildContext(
+            source: source,
+            titleProvider: titleProvider,
+            calendarSource: calendarSource,
+            nowPlayingSource: nowPlayingSource,
+            contactsSource: contactsSource
+        )
         await store.store(ctx)
     }
 }
