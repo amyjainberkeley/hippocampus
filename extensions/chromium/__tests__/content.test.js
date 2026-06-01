@@ -80,8 +80,13 @@ function setupDOM(opts = {}) {
 }
 
 // Re-import the module functions for testing
-const { extractPageContent, isBlockedURL, isIncognitoContext, MAX_TEXT_LENGTH } =
-  await import("../content.js");
+const {
+  extractPageContent,
+  isBlockedURL,
+  isIncognitoContext,
+  isTopFrame,
+  MAX_TEXT_LENGTH,
+} = await import("../content.js");
 
 describe("isBlockedURL", () => {
   it("blocks data: URLs", () => {
@@ -168,6 +173,108 @@ describe("extractPageContent", () => {
 describe("MAX_TEXT_LENGTH", () => {
   it("is 200000", () => {
     expect(MAX_TEXT_LENGTH).toBe(200000);
+  });
+});
+
+describe("isTopFrame (SH Fork E1 — all_frames:true)", () => {
+  // The content script runs once per frame with `all_frames: true`.
+  // `window === window.top` discriminates the top-level frame from any
+  // sub-frame. Tests stub `window.top` directly (sync iframes can't be
+  // set up under happy-dom in vitest without spawning a real iframe).
+
+  beforeEach(() => {
+    setupDOM();
+  });
+
+  it("returns true when window === window.top (top frame)", () => {
+    // setupDOM() created globalThis.window without a `.top` field —
+    // assign it to itself to mimic Chromium's top-frame invariant
+    // (window.top points to the same Window object).
+    globalThis.window.top = globalThis.window;
+    expect(isTopFrame()).toBe(true);
+  });
+
+  it("returns false when window !== window.top (sub-frame)", () => {
+    // Mimic a sub-frame: window.top is a DIFFERENT object (the parent
+    // tab's top-level Window). The strict-equality check fails →
+    // isTopFrame returns false → background.js treats this as a
+    // sub-frame and the native host applies the iframe title prefix.
+    globalThis.window.top = { id: "different-window-object" };
+    expect(isTopFrame()).toBe(false);
+  });
+
+  it("fails closed (returns false) if window.top access throws", () => {
+    // Older Chromium builds raise SecurityError on cross-origin
+    // window.top property access. The content script must treat that
+    // as a sub-frame (fail-closed) so no iframe content escapes the
+    // attribution prefix.
+    Object.defineProperty(globalThis.window, "top", {
+      get() {
+        throw new Error("SecurityError: cross-origin access");
+      },
+      configurable: true,
+    });
+    expect(isTopFrame()).toBe(false);
+  });
+});
+
+describe("extractPageContent — per-frame attribution (SH Fork E1)", () => {
+  beforeEach(() => {
+    setupDOM();
+  });
+
+  it("payload carries is_top_frame:true for the top frame", () => {
+    globalThis.window.top = globalThis.window;
+    const result = extractPageContent();
+    expect(result.is_top_frame).toBe(true);
+  });
+
+  it("payload carries is_top_frame:false for a sub-frame", () => {
+    globalThis.window.top = { id: "parent-window" };
+    const result = extractPageContent();
+    expect(result.is_top_frame).toBe(false);
+  });
+
+  it("sub-frame extracts its own DOM (cross-origin iframe parity)", () => {
+    // Mimic a sub-frame whose URL + title + body are all different
+    // from the parent. SH Fork E1's whole point is to get this content
+    // — without all_frames:true, the iframe's `document.body.innerText`
+    // never reaches the brain.
+    setupDOM({
+      href: "https://js.stripe.com/v3/elements-inner-payment.html",
+      bodyText: "Card number: ****  $42.00 USD",
+      title: "Stripe Elements — Payment",
+    });
+    globalThis.window.top = { id: "parent-window" };
+    const result = extractPageContent();
+    expect(result).not.toBeNull();
+    expect(result.is_top_frame).toBe(false);
+    expect(result.url).toBe(
+      "https://js.stripe.com/v3/elements-inner-payment.html",
+    );
+    expect(result.title).toBe("Stripe Elements — Payment");
+    expect(result.text).toBe("Card number: ****  $42.00 USD");
+  });
+
+  it("sub-frame in incognito still returns null (CSO defense-in-depth)", () => {
+    // The CSO invariant is FOUR layers — the iframe should bail at
+    // layer 2 (`inIncognitoContext`) regardless of frame depth.
+    globalThis.chrome.extension.inIncognitoContext = true;
+    globalThis.window.top = { id: "parent-window" };
+    const result = extractPageContent();
+    expect(result).toBeNull();
+    // Reset for sibling tests.
+    globalThis.chrome.extension.inIncognitoContext = false;
+  });
+
+  it("sub-frame on a blocked protocol still returns null", () => {
+    // The BLOCKED_PROTOCOLS check runs per-frame. A `data:` iframe
+    // self-terminates and never sendMessage()s, so no event escapes
+    // the content-script boundary.
+    setupDOM({ href: "data:text/html,<h1>hi</h1>" });
+    globalThis.window.top = { id: "parent-window" };
+    const result = extractPageContent();
+    expect(result).toBeNull();
   });
 });
 

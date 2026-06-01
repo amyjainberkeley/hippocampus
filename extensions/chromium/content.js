@@ -1,18 +1,31 @@
 // Hippocampus content script — extracts page content and forwards to
 // the background service worker for native messaging relay.
 //
+// With `all_frames: true` in manifest.json (SH Fork E1, ratified
+// 2026-05-31), this script runs once PER FRAME — top-level page AND
+// every cross-origin iframe whose top-level page matches `<all_urls>`.
+// Each frame extracts its own DOM independently. The `is_top_frame`
+// flag (computed below) lets background.js + the native host
+// distinguish a sub-frame so the brain can attribute the iframe
+// content to its parent page without a binary-wire schema bump.
+//
 // CSO INVARIANTS:
 // - NEVER reads input.value / textarea.value / contenteditable
 // - NEVER runs on data: / chrome: / chrome-extension: / about: URLs
-// - Incognito exclusion is defense-in-depth at THREE layers:
+//   (re-checked PER FRAME in `isBlockedURL` — a blocked iframe URL
+//   bails before the message ever leaves the content script)
+// - Incognito exclusion is defense-in-depth at FOUR layers:
 //     1. manifest "incognito": "split" (sibling-context isolation)
 //     2. content.js `chrome.extension.inIncognitoContext` early-return (this file)
 //     3. background.js `sender.tab.incognito` early-return
 //     4. native-host `incognito: true` early-return (Rust side)
 //   Any one layer should be sufficient. All four ship together so a JS
-//   regression cannot reach the brain. Per docs/DESIGN.md, incognito
-//   exclusion is a launch-blocker — it ships WITH capture, not after.
-// - Text capped at 200,000 characters
+//   regression cannot reach the brain. The incognito check fires
+//   independently in every iframe — `chrome.extension.inIncognitoContext`
+//   is true in every frame of a split-incognito tab. Per docs/DESIGN.md,
+//   incognito exclusion is a launch-blocker — it ships WITH capture.
+// - Text capped at 200,000 characters PER FRAME — a runaway iframe DOM
+//   cannot blow the tab's budget.
 // - No local cache — strictly forward-and-forget
 
 "use strict";
@@ -48,6 +61,20 @@ function isBlockedURL(url) {
   return false;
 }
 
+// True when this content-script instance is running in the top-level
+// frame of the tab. With `all_frames: true`, every iframe ALSO runs
+// content.js — `window.top` is the outermost window; `window === window.top`
+// only in the top frame. Wrapped in try/catch because cross-origin
+// iframe contexts can throw a SecurityError on `window.top` access in
+// older Chromium builds; fail-closed (treat as sub-frame) on error.
+function isTopFrame() {
+  try {
+    return window === window.top;
+  } catch (_e) {
+    return false;
+  }
+}
+
 function extractPageContent() {
   if (isIncognitoContext()) return null;
   if (isBlockedURL(window.location.href)) return null;
@@ -67,6 +94,7 @@ function extractPageContent() {
     meta_description: metaDesc ? metaDesc.content : "",
     og_title: ogTitle ? ogTitle.content : "",
     ts_us: Math.floor(Date.now() * 1000),
+    is_top_frame: isTopFrame(),
   };
 }
 
@@ -128,6 +156,7 @@ if (typeof module !== "undefined" && module.exports) {
     extractPageContent,
     isBlockedURL,
     isIncognitoContext,
+    isTopFrame,
     MAX_TEXT_LENGTH,
   };
 }
