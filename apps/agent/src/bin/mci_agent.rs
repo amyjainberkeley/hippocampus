@@ -79,6 +79,23 @@ enum Mode {
     },
     /// Register Hippocampus as an MCP server in Claude Code's settings.
     RegisterMcp,
+    /// Cycle 8.29 P0 #3 — empirical "is content reaching the brain
+    /// from `source`?" probe. Used by
+    /// `OnboardingKit.RealBrowserDetector.checkExtensionInstalled` to
+    /// replace the pre-cycle-8.29 manifest-file-presence probe (which
+    /// reported `.installed` even when no event ever reached the
+    /// brain).
+    ///
+    /// Opens the SQLCipher brain read-only, counts events whose
+    /// `app_bundle_id` belongs to `source`'s bundle set and whose
+    /// `ts_us > now - since_seconds`, prints the integer count to
+    /// stdout, exits 0. Stderr carries diagnostics. Exit 0 with
+    /// count=0 is the "no traffic" signal.
+    Stats {
+        source: String,
+        since_seconds: u64,
+        db_path: PathBuf,
+    },
 }
 
 fn default_device_id_path() -> PathBuf {
@@ -107,6 +124,8 @@ fn default_retention_json_path() -> PathBuf {
     home.join("Library/Application Support/MCI/retention.json")
 }
 
+const DEFAULT_STATS_WINDOW_SECONDS: u64 = 30;
+
 fn parse_args(argv: &[String]) -> Args {
     // Two-pass: first scan resolves the mode flag, second scan binds
     // mode-specific options. Keeps `--window-seconds 600
@@ -117,6 +136,8 @@ fn parse_args(argv: &[String]) -> Args {
     let mut window_seconds = DEFAULT_HEALTH_SUMMARY_WINDOW_SECONDS;
     let mut db_path: Option<PathBuf> = None;
     let mut strict = false;
+    let mut stats_source = String::new();
+    let mut stats_since_seconds = DEFAULT_STATS_WINDOW_SECONDS;
 
     let mut i = 1;
     while i < argv.len() {
@@ -138,6 +159,19 @@ fn parse_args(argv: &[String]) -> Args {
             "--health-summary" => mode_kind = ModeKind::HealthSummary,
             "mcp-serve" => mode_kind = ModeKind::McpServe,
             "register-mcp" => mode_kind = ModeKind::RegisterMcp,
+            "stats" => mode_kind = ModeKind::Stats,
+            "--source" if i + 1 < argv.len() => {
+                stats_source = argv[i + 1].clone();
+                i += 1;
+            }
+            "--since-seconds" if i + 1 < argv.len() => {
+                if let Ok(n) = argv[i + 1].parse::<u64>() {
+                    if n > 0 {
+                        stats_since_seconds = n;
+                    }
+                }
+                i += 1;
+            }
             "--window-seconds" if i + 1 < argv.len() => {
                 if let Ok(n) = argv[i + 1].parse::<u64>() {
                     if n > 0 {
@@ -168,9 +202,14 @@ fn parse_args(argv: &[String]) -> Args {
         },
         ModeKind::HealthSummary => Mode::HealthSummary { window_seconds },
         ModeKind::McpServe => Mode::McpServe {
-            db_path: resolved_db_path,
+            db_path: resolved_db_path.clone(),
         },
         ModeKind::RegisterMcp => Mode::RegisterMcp,
+        ModeKind::Stats => Mode::Stats {
+            source: stats_source,
+            since_seconds: stats_since_seconds,
+            db_path: resolved_db_path,
+        },
     };
     Args {
         device_id_path,
@@ -187,6 +226,7 @@ enum ModeKind {
     HealthSummary,
     McpServe,
     RegisterMcp,
+    Stats,
 }
 
 fn print_usage() {
@@ -200,6 +240,9 @@ fn print_usage() {
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 stats --source SRC         count PageContentEvents from SRC in the last window\n\
+        \x20                            (SRC = safari | chromium-native-host). Cycle 8.29\n\
+        \x20                            P0 #3 — empirical onboarding probe.\n\
         \x20 --version                  print version and exit\n\
         \x20 -h, --help                 print this and exit\n\
         \n\
@@ -209,6 +252,7 @@ fn print_usage() {
         \x20 --db-path PATH             default $MCI_DB_PATH or\n\
         \x20                            ~/Library/Application Support/MCI/mci.sqlite\n\
         \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n\
+        \x20 --since-seconds N          (with stats) lookback window. Default 30.\n\
         \x20 --strict                   (with --drain-stdin) exit non-zero if brain cannot\n\
         \x20                            be opened, instead of falling back to health-only.\n\
         \n\
@@ -555,6 +599,11 @@ async fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
+        Mode::Stats {
+            source,
+            since_seconds,
+            db_path,
+        } => run_stats(&source, since_seconds, &db_path),
         Mode::HealthSummary { window_seconds } => {
             // Compute the cutoff RFC-3339 string once. The summary
             // comparator does a lexicographic compare against each
@@ -579,6 +628,102 @@ async fn main() -> ExitCode {
             }
         }
     }
+}
+
+/// Bundle ids that count toward each `--source` value of `mci-agent
+/// stats`. Source of truth for the `RealBrowserDetector` probe.
+///
+/// `chromium-native-host` covers every Chromium-family browser the
+/// onboarding's `BrowserExtensionViewModel` can write a host manifest
+/// for. `firefox` is included because `browser_bundle_id` (in
+/// `brain_ingest.rs`) maps the Firefox `source_browser` to
+/// `org.mozilla.firefox`; if a Gecko-family extension ever ships, the
+/// same probe row continues to function.
+fn bundle_ids_for_source(source: &str) -> Option<Vec<&'static str>> {
+    match source {
+        "safari" => Some(vec!["com.apple.Safari"]),
+        "chromium-native-host" => Some(vec![
+            "com.google.Chrome",
+            "company.thebrowser.Browser",
+            "com.brave.Browser",
+            "com.microsoft.edgemac",
+            "org.mozilla.firefox",
+        ]),
+        _ => None,
+    }
+}
+
+/// Cycle 8.29 P0 #3 — empirical delivery probe.
+///
+/// Opens the brain SQLCipher store **read-only** (per
+/// `SqlCipherBrainStore::open_readonly`, ADR-0017 §5), aggregates events
+/// inserted since `now - since_seconds` whose `app_bundle_id` belongs to
+/// the bundle set associated with `source`, prints the integer total to
+/// stdout, exits 0.
+///
+/// Exit codes:
+///   0 — query ran (count is on stdout; may be zero)
+///   2 — `source` unknown
+///   3 — brain key missing (`MCI_DB_KEY_HEX` unset AND no dev.key file)
+///   4 — brain open / query failure (the probe surface from the
+///       onboarding's `RealBrowserDetector` falls back to `.unknown`
+///       on any non-zero exit)
+fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> ExitCode {
+    let Some(bundles) = bundle_ids_for_source(source) else {
+        eprintln!(
+            "mci-agent stats: unknown source '{source}'. Expected: safari | chromium-native-host"
+        );
+        return ExitCode::from(2);
+    };
+
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!(
+            "mci-agent stats: brain key unavailable (set MCI_DB_KEY_HEX or write\n\
+             ~/Library/Application Support/MCI/dev.key with a 64-char hex key)"
+        );
+        return ExitCode::from(3);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent stats: brain key is not a 32-byte hex string");
+        return ExitCode::from(3);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let store = match SqlCipherBrainStore::open_readonly(db_path, &key) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("mci-agent stats: open_readonly {}: {e}", db_path.display());
+            return ExitCode::from(4);
+        }
+    };
+
+    let now_us: u64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
+    let window_us = since_seconds.saturating_mul(1_000_000);
+    let since_us = now_us.saturating_sub(window_us);
+
+    // Reuse `observed_apps` — returns counts grouped by `app_bundle_id`
+    // for events with `ts_us >= since_us`. We sum the rows whose bundle
+    // is in our `bundles` set. The 4096 limit is a safety cap; in
+    // practice the brain has < 100 distinct bundles even on a fully-
+    // populated install.
+    let rows = match store.observed_apps(4096, Some(since_us)) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("mci-agent stats: observed_apps: {e}");
+            return ExitCode::from(4);
+        }
+    };
+    let total: u64 = rows
+        .into_iter()
+        .filter(|(app, _)| bundles.iter().any(|b| *b == app))
+        .map(|(_, n)| n)
+        .sum();
+
+    println!("{total}");
+    ExitCode::SUCCESS
 }
 
 /// Read the dev.key file (64-char hex) from

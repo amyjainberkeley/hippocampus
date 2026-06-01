@@ -4,44 +4,49 @@ import AppKit
 
 /// Per-browser truth source for "is the Hippocampus extension installed?"
 ///
-/// Pre-PR #206 audit, both rows probed the same hard-coded path
-/// (`/usr/local/bin/hippocampus-native-host`), which nothing in the build
-/// pipeline ever populates — so the onboarding badge had zero causal
-/// relationship with reality. This implementation reports per-browser
-/// truth:
+/// Evolution of the probe — three generations:
 ///
-///   - Safari: presence of `HippocampusSafariExtension.appex` inside the
-///     shipped `.app` (`/Applications/Hippocampus.app/Contents/PlugIns/`).
-///     Detecting whether Safari has *enabled* the extension requires
-///     `SFSafariExtensionManager.getStateOfSafariExtension(withIdentifier:)`,
-///     which is async + only works from the host app bundle that ships
-///     the appex. Treated as out-of-scope here per the dispatch fallback:
-///     "appex bundled = capable; show Open Safari Settings as the verify
-///     step." The slide CTA "Open Safari → Settings" is that verify step.
+/// 1. **Pre-PR #206 (the lie).** Both Safari + Chromium rows probed
+///    `fileExists("/usr/local/bin/hippocampus-native-host")`. Nothing
+///    in the build pipeline ever populates that path. The badge had
+///    zero causal relationship with reality.
 ///
-///   - Chromium (Chrome / Arc / Brave / Edge): presence of the native-
-///     messaging host manifest JSON inside the per-browser
-///     `NativeMessagingHosts/` directory (paths matrix in
-///     `docs/research/browser-extension-audit.md` §K). Presence is the
-///     canonical signal for "the user can `chrome.runtime.connectNative`
-///     into our host" — see audit §F and §Q3.
+/// 2. **Post-PR #206 (the manifest-presence probe).** Safari probed for
+///    the bundled `.appex`; Chromium probed for the per-browser
+///    `NativeMessagingHosts/ai.hippocampus.native_messaging.json`. A
+///    real improvement — both check for an artifact this codebase
+///    actually writes — but the probe is still structural. The manifest
+///    can be present while the user has never Loaded-Unpacked the
+///    extension, has rejected it, or has not navigated any page.
+///
+/// 3. **Cycle 8.29 P0 #3 (this implementation, the empirical probe).**
+///    The detector runs `mci-agent stats --source <X> --since-seconds N`
+///    against the brain and reports `.installed` iff the count is
+///    positive. That is the only signal that empirically proves content
+///    is reaching the brain — exactly what the user sees as "the
+///    extension is working." Source: `docs/research/browser-extension-
+///    audit.md` §Q8.
+///
+/// Coarse aggregation: every Chromium-family browser shares one probe
+/// (`source=chromium-native-host`). The pre-cycle-8.29 per-browser
+/// independence semantic (installing Chrome did not flip Arc's badge)
+/// is intentionally dropped here — the audit memo recommends 2-source
+/// aggregation, and a single empirical signal is more honest than four
+/// independent file-existence proxies. When ANY Chromium browser
+/// delivers content, every Chromium row in the slide turns green; the
+/// slide CTA continues to show per-browser install instructions until
+/// the user accepts.
 @MainActor
 public final class RealBrowserDetector: BrowserDetector, @unchecked Sendable {
-    private let fileChecker: any FileChecker
-    private let safariAppexPath: String
-    private let chromiumHostManifestDirs: [String: String]
-    private let chromiumHostManifestFilename: String
+    private let deliveryProbe: any NativeHostDeliveryProbe
+    private let probeWindowSeconds: Int
 
     public init(
-        fileChecker: any FileChecker = FoundationFileChecker(),
-        safariAppexPath: String = RealBrowserDetector.defaultSafariAppexPath,
-        chromiumHostManifestDirs: [String: String] = RealBrowserDetector.defaultChromiumHostManifestDirs(),
-        chromiumHostManifestFilename: String = "ai.hippocampus.native_messaging.json"
+        deliveryProbe: any NativeHostDeliveryProbe = DefaultNativeHostDeliveryProbe(),
+        probeWindowSeconds: Int = 30
     ) {
-        self.fileChecker = fileChecker
-        self.safariAppexPath = safariAppexPath
-        self.chromiumHostManifestDirs = chromiumHostManifestDirs
-        self.chromiumHostManifestFilename = chromiumHostManifestFilename
+        self.deliveryProbe = deliveryProbe
+        self.probeWindowSeconds = probeWindowSeconds
     }
 
     public func installedBrowsers() -> [DetectedBrowser] {
@@ -60,42 +65,25 @@ public final class RealBrowserDetector: BrowserDetector, @unchecked Sendable {
     }
 
     public func checkExtensionInstalled(for browser: DetectedBrowser) -> ExtensionStatus {
-        switch browser.kind {
-        case .safari:
-            return fileChecker.fileExists(atPath: safariAppexPath)
-                ? .installed
-                : .notInstalled
-        case .chromium:
-            guard let dir = chromiumHostManifestDirs[browser.id] else {
-                return .unknown
-            }
-            let manifestPath = "\(dir)/\(chromiumHostManifestFilename)"
-            return fileChecker.fileExists(atPath: manifestPath)
-                ? .installed
-                : .notInstalled
+        let source = Self.probeSource(for: browser.kind)
+        guard let count = deliveryProbe.recentEventCount(
+            source: source,
+            withinSeconds: probeWindowSeconds
+        ) else {
+            return .unknown
         }
+        return count > 0 ? .installed : .notInstalled
     }
 
-    // MARK: - Default paths
-
-    public static let defaultSafariAppexPath =
-        "/Applications/Hippocampus.app/Contents/PlugIns/HippocampusSafariExtension.appex"
-
-    /// Per-Chromium-family `NativeMessagingHosts/` directory under the
-    /// current user's `~/Library/Application Support`. Source of truth:
-    /// audit memo §K (`docs/research/browser-extension-audit.md:138-145`).
-    public static func defaultChromiumHostManifestDirs(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> [String: String] {
-        let appSupport = homeDirectory
-            .appendingPathComponent("Library/Application Support")
-            .path
-        return [
-            "com.google.Chrome":          "\(appSupport)/Google/Chrome/NativeMessagingHosts",
-            "company.thebrowser.Browser": "\(appSupport)/Arc/User Data/NativeMessagingHosts",
-            "com.brave.Browser":          "\(appSupport)/BraveSoftware/Brave-Browser/NativeMessagingHosts",
-            "com.microsoft.edgemac":      "\(appSupport)/Microsoft Edge/NativeMessagingHosts",
-        ]
+    /// `--source` value for each browser kind:
+    ///
+    ///   - `.safari`   → `"safari"`
+    ///   - `.chromium` → `"chromium-native-host"`
+    public static func probeSource(for kind: BrowserKind) -> String {
+        switch kind {
+        case .safari:   return "safari"
+        case .chromium: return "chromium-native-host"
+        }
     }
 }
 #endif

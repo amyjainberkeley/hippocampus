@@ -2,44 +2,11 @@
 import XCTest
 @testable import OnboardingKit
 
-/// Per-browser truth source for `checkExtensionInstalled` — drives every
-/// branch via `StubFileChecker` (no live filesystem touched). The matrix
-/// matches `docs/research/browser-extension-audit.md` §K.
+/// Empirical delivery-probe semantics for `RealBrowserDetector` per
+/// cycle 8.29 P0 #3. Drives the probe via a stub so no live subprocess
+/// or brain access is touched.
 @MainActor
 final class RealBrowserDetectorTests: XCTestCase {
-
-    // MARK: - Fixture paths (must match RealBrowserDetector defaults)
-
-    private let safariAppex =
-        "/Applications/Hippocampus.app/Contents/PlugIns/HippocampusSafariExtension.appex"
-
-    private static let fixtureAppSupport =
-        "/Users/fixture/Library/Application Support"
-
-    private static let chromiumDirs: [String: String] = [
-        "com.google.Chrome":          "\(fixtureAppSupport)/Google/Chrome/NativeMessagingHosts",
-        "company.thebrowser.Browser": "\(fixtureAppSupport)/Arc/User Data/NativeMessagingHosts",
-        "com.brave.Browser":          "\(fixtureAppSupport)/BraveSoftware/Brave-Browser/NativeMessagingHosts",
-        "com.microsoft.edgemac":      "\(fixtureAppSupport)/Microsoft Edge/NativeMessagingHosts",
-    ]
-
-    private let hostManifestFilename = "ai.hippocampus.native_messaging.json"
-
-    private func chromiumManifest(_ bundleId: String) -> String {
-        "\(Self.chromiumDirs[bundleId]!)/\(hostManifestFilename)"
-    }
-
-    // MARK: - Builders
-
-    private func makeDetector(existing: Set<String>) -> RealBrowserDetector {
-        let stub = StubFileChecker(existingPaths: existing)
-        return RealBrowserDetector(
-            fileChecker: stub,
-            safariAppexPath: safariAppex,
-            chromiumHostManifestDirs: Self.chromiumDirs,
-            chromiumHostManifestFilename: hostManifestFilename
-        )
-    }
 
     private let safari   = DetectedBrowser(id: "com.apple.Safari", name: "Safari", kind: .safari)
     private let chrome   = DetectedBrowser(id: "com.google.Chrome", name: "Chrome", kind: .chromium)
@@ -47,159 +14,120 @@ final class RealBrowserDetectorTests: XCTestCase {
     private let brave    = DetectedBrowser(id: "com.brave.Browser", name: "Brave", kind: .chromium)
     private let edge     = DetectedBrowser(id: "com.microsoft.edgemac", name: "Edge", kind: .chromium)
 
+    private func makeDetector(probe: StubNativeHostDeliveryProbe) -> RealBrowserDetector {
+        RealBrowserDetector(deliveryProbe: probe, probeWindowSeconds: 30)
+    }
+
+    // MARK: - source mapping
+
+    func testProbeSourceForSafariIsSafari() {
+        XCTAssertEqual(RealBrowserDetector.probeSource(for: .safari), "safari")
+    }
+
+    func testProbeSourceForChromiumIsChromiumNativeHost() {
+        XCTAssertEqual(RealBrowserDetector.probeSource(for: .chromium), "chromium-native-host")
+    }
+
     // MARK: - Safari
 
-    /// Per dispatch fallback: appex bundled = capable; the slide CTA
-    /// "Open Safari → Settings" is the user-side verify step. We treat
-    /// "capable" as `.installed` for the badge.
-    func testSafariAppexPresentReportsInstalled() {
-        let detector = makeDetector(existing: [safariAppex])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: safari), .installed)
+    func testSafariEventsPresentReportsInstalled() {
+        let probe = StubNativeHostDeliveryProbe(counts: ["safari": 1])
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: safari), .installed)
     }
 
-    /// The "disabled in Safari" case is not directly detectable here (it
-    /// requires `SFSafariExtensionManager.getStateOfSafariExtension`,
-    /// async + bundle-coupled). With the appex still present on disk,
-    /// the detector reports `.installed` and lets the slide CTA carry
-    /// the verify step. This test pins that mapping so a future regress
-    /// to "always notInstalled" would fail loudly.
-    func testSafariAppexPresentButDisabledInSafariStillReportsInstalled() {
-        // Simulated state: the appex IS bundled into Hippocampus.app,
-        // but the user has *not* toggled Hippocampus on in Safari →
-        // Extensions. With the present probe, that distinction is not
-        // observable; we surface `.installed` and rely on the slide
-        // CTA to make the user verify.
-        let detector = makeDetector(existing: [safariAppex])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: safari), .installed)
+    func testSafariZeroEventsReportsNotInstalled() {
+        let probe = StubNativeHostDeliveryProbe(counts: ["safari": 0])
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: safari), .notInstalled)
     }
 
-    func testSafariAppexAbsentReportsNotInstalled() {
-        let detector = makeDetector(existing: [])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: safari), .notInstalled)
+    func testSafariProbeFailureReportsUnknown() {
+        let probe = StubNativeHostDeliveryProbe(counts: [:])  // any source → nil
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: safari), .unknown)
     }
 
-    /// Safari truth source MUST NOT consult any of the Chromium host-
-    /// manifest paths — pre-audit, both rows shared one probe; this
-    /// test pins the separation.
-    func testSafariProbeIgnoresChromiumHostManifests() {
-        // Every Chromium host manifest exists; the Safari appex does
-        // not. Safari must still report `.notInstalled`.
-        let allChromiumManifests = Set(
-            Self.chromiumDirs.keys.map { chromiumManifest($0) }
-        )
-        let detector = makeDetector(existing: allChromiumManifests)
-        XCTAssertEqual(detector.checkExtensionInstalled(for: safari), .notInstalled)
+    /// Pin the source separation: the Safari row must NOT consult the
+    /// chromium-native-host bucket. Pre-cycle-8.29 (post-PR #206) the
+    /// detector used file-existence under per-browser dirs, so this
+    /// regression is structurally impossible; we keep the test so
+    /// future surface changes cannot quietly merge the buckets.
+    func testSafariRowIgnoresChromiumNativeHostBucket() {
+        let probe = StubNativeHostDeliveryProbe(counts: [
+            "chromium-native-host": 1000,
+            "safari": 0,
+        ])
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: safari), .notInstalled)
     }
 
-    // MARK: - Chromium (per-browser independence)
+    // MARK: - Chromium (coarse aggregation, audit memo §Q8)
 
-    func testChromeManifestPresentReportsInstalled() {
-        let detector = makeDetector(existing: [chromiumManifest(chrome.id)])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: chrome), .installed)
-    }
-
-    func testChromeManifestAbsentReportsNotInstalled() {
-        let detector = makeDetector(existing: [])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: chrome), .notInstalled)
-    }
-
-    func testArcManifestPresentReportsInstalled() {
-        let detector = makeDetector(existing: [chromiumManifest(arc.id)])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: arc), .installed)
-    }
-
-    func testArcManifestAbsentReportsNotInstalled() {
-        let detector = makeDetector(existing: [])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: arc), .notInstalled)
-    }
-
-    func testBraveManifestPresentReportsInstalled() {
-        let detector = makeDetector(existing: [chromiumManifest(brave.id)])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: brave), .installed)
-    }
-
-    func testBraveManifestAbsentReportsNotInstalled() {
-        let detector = makeDetector(existing: [])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: brave), .notInstalled)
-    }
-
-    func testEdgeManifestPresentReportsInstalled() {
-        let detector = makeDetector(existing: [chromiumManifest(edge.id)])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: edge), .installed)
-    }
-
-    func testEdgeManifestAbsentReportsNotInstalled() {
-        let detector = makeDetector(existing: [])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: edge), .notInstalled)
-    }
-
-    /// Installing one Chromium-family extension must not flip the status
-    /// of a *different* browser's row. Pre-audit, both rows shared a
-    /// single probe so installing Chrome would have flipped Safari too.
-    func testChromiumBrowsersAreIndependent() {
-        let detector = makeDetector(existing: [chromiumManifest(chrome.id)])
-        XCTAssertEqual(detector.checkExtensionInstalled(for: chrome), .installed)
-        XCTAssertEqual(detector.checkExtensionInstalled(for: arc), .notInstalled)
-        XCTAssertEqual(detector.checkExtensionInstalled(for: brave), .notInstalled)
-        XCTAssertEqual(detector.checkExtensionInstalled(for: edge), .notInstalled)
-    }
-
-    func testAllFourChromiumBrowsersInstalledIndependently() {
-        let detector = makeDetector(existing: Set(
-            [chrome.id, arc.id, brave.id, edge.id].map { chromiumManifest($0) }
-        ))
+    /// Any Chromium-family event flips every Chromium row to
+    /// `.installed`. The audit memo recommends the 2-source aggregation
+    /// (safari, chromium-native-host) rather than per-bundle granularity.
+    func testChromiumEventsFromAnyBrowserFlipEveryChromiumRow() {
+        let probe = StubNativeHostDeliveryProbe(counts: [
+            "chromium-native-host": 1,  // could be from Chrome, Arc, Brave, Edge
+        ])
+        let detector = makeDetector(probe: probe)
         XCTAssertEqual(detector.checkExtensionInstalled(for: chrome), .installed)
         XCTAssertEqual(detector.checkExtensionInstalled(for: arc), .installed)
         XCTAssertEqual(detector.checkExtensionInstalled(for: brave), .installed)
         XCTAssertEqual(detector.checkExtensionInstalled(for: edge), .installed)
     }
 
-    /// A browser kind=.chromium with a bundle id we don't have a path
-    /// mapping for should report `.unknown` (not crash, not lie). Future
-    /// Chromium-family browsers (Vivaldi, Opera, etc.) fall here until
-    /// the path matrix is extended.
-    func testUnknownChromiumBundleIdReportsUnknown() {
-        let detector = makeDetector(existing: [])
-        let unknown = DetectedBrowser(
-            id: "com.vivaldi.Vivaldi",
-            name: "Vivaldi",
-            kind: .chromium
-        )
-        XCTAssertEqual(detector.checkExtensionInstalled(for: unknown), .unknown)
+    func testChromiumZeroEventsReportsNotInstalled() {
+        let probe = StubNativeHostDeliveryProbe(counts: ["chromium-native-host": 0])
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: chrome), .notInstalled)
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: arc), .notInstalled)
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: brave), .notInstalled)
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: edge), .notInstalled)
     }
 
-    // MARK: - Default path resolution
-
-    /// Pins the per-browser path matrix to the audit memo §K table.
-    /// If a directory name moves under macOS, this test fails and the
-    /// audit memo must be re-checked.
-    func testDefaultChromiumHostManifestDirsMatchAuditMemoMatrix() {
-        let dirs = RealBrowserDetector.defaultChromiumHostManifestDirs(
-            homeDirectory: URL(fileURLWithPath: "/Users/fixture")
-        )
-        XCTAssertEqual(
-            dirs["com.google.Chrome"],
-            "/Users/fixture/Library/Application Support/Google/Chrome/NativeMessagingHosts"
-        )
-        XCTAssertEqual(
-            dirs["company.thebrowser.Browser"],
-            "/Users/fixture/Library/Application Support/Arc/User Data/NativeMessagingHosts"
-        )
-        XCTAssertEqual(
-            dirs["com.brave.Browser"],
-            "/Users/fixture/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
-        )
-        XCTAssertEqual(
-            dirs["com.microsoft.edgemac"],
-            "/Users/fixture/Library/Application Support/Microsoft Edge/NativeMessagingHosts"
-        )
+    func testChromiumProbeFailureReportsUnknown() {
+        let probe = StubNativeHostDeliveryProbe(counts: [:])
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: chrome), .unknown)
     }
 
-    func testDefaultSafariAppexPathPointsAtShippedBundlePlugIns() {
-        XCTAssertEqual(
-            RealBrowserDetector.defaultSafariAppexPath,
-            "/Applications/Hippocampus.app/Contents/PlugIns/HippocampusSafariExtension.appex"
+    func testChromiumRowIgnoresSafariBucket() {
+        let probe = StubNativeHostDeliveryProbe(counts: [
+            "safari": 100,
+            "chromium-native-host": 0,
+        ])
+        XCTAssertEqual(makeDetector(probe: probe).checkExtensionInstalled(for: chrome), .notInstalled)
+    }
+
+    // MARK: - Probe call shape
+
+    func testDetectorPassesProbeWindowSecondsToProbe() {
+        let probe = StubNativeHostDeliveryProbe(counts: ["safari": 1])
+        let detector = RealBrowserDetector(
+            deliveryProbe: probe,
+            probeWindowSeconds: 90
         )
+        _ = detector.checkExtensionInstalled(for: safari)
+        XCTAssertEqual(probe.calls.last?.source, "safari")
+        XCTAssertEqual(probe.calls.last?.withinSeconds, 90)
+    }
+}
+
+/// Test seam — records each `recentEventCount` call and returns
+/// pre-canned counts keyed by source. A missing key returns `nil` to
+/// exercise the detector's `.unknown` fallback.
+final class StubNativeHostDeliveryProbe: NativeHostDeliveryProbe, @unchecked Sendable {
+    struct Call: Equatable {
+        let source: String
+        let withinSeconds: Int
+    }
+
+    let counts: [String: Int]
+    private(set) var calls: [Call] = []
+
+    init(counts: [String: Int]) {
+        self.counts = counts
+    }
+
+    func recentEventCount(source: String, withinSeconds: Int) -> Int? {
+        calls.append(Call(source: source, withinSeconds: withinSeconds))
+        return counts[source]
     }
 }
 #endif
