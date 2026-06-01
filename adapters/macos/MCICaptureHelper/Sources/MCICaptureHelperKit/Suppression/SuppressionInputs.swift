@@ -127,6 +127,29 @@ public protocol BlackedRegionProbe: Sendable {
 /// Mirrors `core::capture::WorkflowContext` but is owned by the Swift
 /// side because it lives inside the cascade — never crosses IPC for a
 /// suppressed event (per ADR-0013 §2 redaction-before-store guarantee).
+///
+/// # Per-event attribution fields (Phase 6 PR 5 — SH Fork D1)
+///
+/// `currentCalendarEvent`, `currentListeningTrack`, `currentContact`
+/// are zero-entitlement-cost enrichers populated by the EventKit /
+/// Contacts / `MPNowPlayingInfoCenter` providers (see
+/// `Context/CalendarAttribution.swift`,
+/// `Context/ContactsAttribution.swift`,
+/// `Context/NowPlayingAttribution.swift`). They attach "what meeting
+/// / what track / which person" metadata to every captured moment so
+/// the brain can answer those questions at recall time. They do NOT
+/// influence the cascade decision — the cascade reads only
+/// `appBundleId` / `windowTitle` / `url` / `pageText` for suppress /
+/// allow. Providers return `nil` on TCC denial; absence is graceful.
+///
+/// Privacy posture (CSO sign-off rows 3-7 in PR body):
+///   - Calendar: subject + start/end only. NO body, NO attendee
+///     lists, NO location (Phase 7 full-deep-hook scope per
+///     ADR-0032).
+///   - Now-playing: title + artist only. NO album art, NO library.
+///   - Contact: opaque `CNContact.identifier` only. NO names, NO
+///     phone numbers, NO emails on the snapshot — recall-time
+///     resolution re-fetches by id from the user's local store.
 public struct WorkflowContext: Sendable, Equatable {
     public let appBundleId: String?
     public let windowTitle: String?
@@ -135,16 +158,96 @@ public struct WorkflowContext: Sendable, Equatable {
     /// NOT inspect this — `SecretBench`-style regex matching is the
     /// core's responsibility (cascade §6), not the helper's.
     public let pageText: String?
+    /// Calendar event whose time window covers right now, if any.
+    /// Phase 6 PR 5 — SH Fork D1. Calendar TCC denied OR no event
+    /// covers right now → `nil` (graceful absence).
+    public let currentCalendarEvent: CalendarEventRef?
+    /// Track currently playing on this Mac, if any. Phase 6 PR 5.
+    /// `MPNowPlayingInfoCenter` empty OR no player active → `nil`.
+    public let currentListeningTrack: NowPlayingTrackRef?
+    /// Opaque `CNContact.identifier` for the person currently
+    /// associated with the workflow. Phase 6 PR 5. Contacts TCC
+    /// denied OR no match → `nil`.
+    public let currentContact: ContactRef?
 
     public init(
         appBundleId: String? = nil,
         windowTitle: String? = nil,
         url: String? = nil,
-        pageText: String? = nil
+        pageText: String? = nil,
+        currentCalendarEvent: CalendarEventRef? = nil,
+        currentListeningTrack: NowPlayingTrackRef? = nil,
+        currentContact: ContactRef? = nil
     ) {
         self.appBundleId = appBundleId
         self.windowTitle = windowTitle
         self.url = url
         self.pageText = pageText
+        self.currentCalendarEvent = currentCalendarEvent
+        self.currentListeningTrack = currentListeningTrack
+        self.currentContact = currentContact
+    }
+}
+
+/// Minimal calendar-event attribution payload. Phase 6 PR 5 — SH
+/// Fork D1. The `CalendarAttribution` provider reads only events
+/// whose `startDate <= now <= endDate`, so past events outside that
+/// window are never observed at this layer. Phase 7 full deep-hook
+/// plugins will broaden the window; this attribution surface stays
+/// tight by construction.
+///
+/// NO body, NO attendees, NO location. The cascade-equivalent in
+/// `core/brain/src/redaction/calendar_attribution.rs` runs the
+/// ADR-0030 §3(a) SMS-OTP regex bank on `subject` before brain
+/// persistence (calendar invites can carry "Your verification code
+/// is 123456" in the subject line).
+public struct CalendarEventRef: Sendable, Equatable {
+    /// Event subject (title). MAY contain user content; runs through
+    /// the cascade-equivalent regex bank before brain persistence.
+    public let subject: String
+    /// Unix seconds — event start time. Time-only, no content.
+    public let startUnixSeconds: Int64
+    /// Unix seconds — event end time. Time-only, no content.
+    public let endUnixSeconds: Int64
+
+    public init(subject: String, startUnixSeconds: Int64, endUnixSeconds: Int64) {
+        self.subject = subject
+        self.startUnixSeconds = startUnixSeconds
+        self.endUnixSeconds = endUnixSeconds
+    }
+}
+
+/// Minimal now-playing attribution payload. Phase 6 PR 5 — SH Fork
+/// D1. NO album art bytes; NO library scan; NO playback history.
+/// The cascade-equivalent runs the §3(a) regex bank on `title` and
+/// `artist` (podcast episodes can carry phone numbers / OTPs in
+/// their titles — rare but possible, so cascade-equivalent runs).
+public struct NowPlayingTrackRef: Sendable, Equatable {
+    /// Track title (e.g. song / podcast episode title). MAY contain
+    /// user content; runs through the cascade-equivalent regex bank.
+    public let title: String
+    /// Artist / show name. MAY contain user content; runs through
+    /// the cascade-equivalent regex bank.
+    public let artist: String
+
+    public init(title: String, artist: String) {
+        self.title = title
+        self.artist = artist
+    }
+}
+
+/// Opaque contact reference. Phase 6 PR 5 — SH Fork D1.
+///
+/// CARRIES `identifier` ONLY — the `CNContact.identifier`. NO name,
+/// NO phone, NO email, NO photo. Recall-time resolution re-fetches
+/// by id from the user's local `CNContactStore`; cascade-equivalent
+/// on this field is a documented no-op (no content to redact).
+public struct ContactRef: Sendable, Equatable {
+    /// Opaque `CNContact.identifier`. Never re-mapped to a name on
+    /// this snapshot.
+    public let identifier: String
+
+    public init(identifier: String) {
+        self.identifier = identifier
     }
 }

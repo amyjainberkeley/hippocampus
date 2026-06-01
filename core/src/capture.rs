@@ -286,6 +286,19 @@ pub struct StateTransition {
 ///
 /// Populated by the adapter's context probe (`NSWorkspace` + Accessibility +
 /// `AppleScript` on macOS; UIA on Windows). See DESIGN.md §6.
+///
+/// # Per-event attribution fields (Phase 6 PR 5 — SH Fork D1)
+///
+/// `current_calendar_event` / `current_listening_track` / `current_contact`
+/// mirror the Swift-side `CalendarEventRef` / `NowPlayingTrackRef` /
+/// `ContactRef` enrichers carried on `MCICaptureHelperKit.WorkflowContext`.
+/// They are populated by the EventKit / `MPNowPlayingInfoCenter` / Contacts
+/// providers (Swift adapter side) and arrive in the Rust core via IPC.
+/// `None` means absence (TCC denial, no current event / track, no contact
+/// resolved); never a crash. The cascade-equivalent in
+/// `core::brain::redaction::calendar_attribution` runs the ADR-0030 §3(a)
+/// regex bank on any populated `subject` / `title` / `artist` before brain
+/// persistence.
 #[derive(Debug, Clone, Default)]
 pub struct WorkflowContext {
     /// Frontmost app bundle identifier (e.g. `"com.apple.Safari"`).
@@ -298,6 +311,56 @@ pub struct WorkflowContext {
     /// Extracted page text — extension-provided when available, OCR fallback
     /// otherwise. None means "not probed yet."
     pub page_text: Option<String>,
+    /// Calendar event covering "right now," if any. Phase 6 PR 5.
+    pub current_calendar_event: Option<CalendarEventRef>,
+    /// Track currently playing on this Mac, if any. Phase 6 PR 5.
+    pub current_listening_track: Option<NowPlayingTrackRef>,
+    /// Opaque `CNContact.identifier` resolved from a participant string,
+    /// if any. Phase 6 PR 5.
+    pub current_contact: Option<ContactRef>,
+}
+
+/// Minimal calendar-event attribution payload — Rust mirror of the
+/// Swift `CalendarEventRef`. Phase 6 PR 5 — SH Fork D1.
+///
+/// `subject` MAY carry user content; the cascade-equivalent in
+/// `core::brain::redaction::calendar_attribution` runs the ADR-0030 §3(a)
+/// regex bank on it before brain persistence.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CalendarEventRef {
+    /// Event subject (title). MAY contain user content.
+    pub subject: String,
+    /// Unix seconds — event start time.
+    pub start_unix_seconds: i64,
+    /// Unix seconds — event end time.
+    pub end_unix_seconds: i64,
+}
+
+/// Minimal now-playing attribution payload — Rust mirror of the Swift
+/// `NowPlayingTrackRef`. Phase 6 PR 5 — SH Fork D1.
+///
+/// `title` and `artist` MAY carry user content; the cascade-equivalent
+/// runs ADR-0030 §3(a) regex bank on both before brain persistence.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NowPlayingTrackRef {
+    /// Track title (song / podcast episode). MAY contain user content.
+    pub title: String,
+    /// Artist / show name. MAY contain user content.
+    pub artist: String,
+}
+
+/// Opaque contact reference — Rust mirror of the Swift `ContactRef`.
+/// Phase 6 PR 5 — SH Fork D1.
+///
+/// CARRIES `identifier` ONLY. NO name, NO phone, NO email, NO photo —
+/// recall-time UI re-fetches by id from the user's local
+/// `CNContactStore`. The cascade-equivalent on this field is a documented
+/// no-op (no content to redact).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ContactRef {
+    /// Opaque `CNContact.identifier`. Never re-mapped to a name on
+    /// this snapshot.
+    pub identifier: String,
 }
 
 /// Status of the OS-level permissions the adapter needs to operate.
