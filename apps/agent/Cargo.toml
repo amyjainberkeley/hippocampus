@@ -86,6 +86,25 @@ mci-llama-coreml = { path = "../../adapters/macos/mci-llama-coreml" }
 # mci-mail-reader path, which already shipped them on the workspace
 # lockfile via PR #243).
 mci-mail-reader  = { path = "../../adapters/macos/mci-mail-reader" }
+# V2-P10 — Messages.app chat.db read path (PR #248). macOS-only: the
+# crate compiles to an empty lib elsewhere. apps/agent consumes the
+# READ surface (list_recent_messages / read_thread / watch_inbox)
+# inside `messages_ingest.rs`; no new third-party crate is added at
+# the agent boundary (rusqlite / notify / tokio already on the
+# workspace lockfile via PRs #82 + #243).
+mci-messages-reader = { path = "../../adapters/macos/mci-messages-reader" }
+
+# V2-P10 — `rustix::process::getuid()` for the user-allowlist file-
+# permission gate (the `mode & 0o077` + `owner uid` check that mirrors
+# the Swift helper's `UserAllowlistTOMLLoader.validatePermissions`).
+# `rustix` is already a `mci-core` dep + on the workspace lockfile;
+# this listing adds the `process` feature (uid query) without a
+# net-new third-party crate per ADR-0008. The `#![forbid(unsafe_code)]`
+# crate-level lint in `apps/agent/src/lib.rs` forbids a raw
+# `unsafe { libc::getuid() }` — rustix provides a safe wrapper.
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.4", default-features = false, features = ["process", "std"] }
 
 # Deliberately NO `tracing-subscriber`: the typed HealthLogRecord
 # serializer in `health_log.rs` keeps the JSON shape fixed at the
@@ -108,5 +127,14 @@ mci-brain   = { path = "../../core/brain", features = ["stubs"] }
 # via the V2-P8a `mci-mail-reader` macOS-target dep; listed in
 # dev-dependencies so non-macOS workspace `cargo test --workspace`
 # does not pick it up.
+#
+# V2-P10 — `messages_ingest.rs` tests synthesize a fixture chat.db
+# via `rusqlite::Connection::open` + `execute_batch`. Already on the
+# workspace lockfile via `mci-core` / `mci-brain`; listed here so
+# `cargo test -p mci-agent` picks it up without re-vendoring SQLCipher.
+# Tests use the bundled-vanilla `bundled` feature (NOT
+# `bundled-sqlcipher-vendored-openssl`) — the fixture chat.db is
+# plaintext SQLite mirroring Apple's on-disk shape.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 mail-parser = "0.11"
+rusqlite = { version = "0.39.0", features = ["bundled"] }

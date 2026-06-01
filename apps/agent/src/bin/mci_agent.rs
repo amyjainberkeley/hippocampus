@@ -36,9 +36,13 @@ use mci_agent::episode_worker;
 use mci_agent::idle_batch;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
 use mci_agent::page_content::PageContentListener;
+#[cfg(target_os = "macos")]
+use mci_agent::pump_supervisor::PumpSupervisor;
 use mci_agent::retention_worker;
 use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
 use mci_agent::panic_uploader::{self, PanicUploader};
+#[cfg(unix)]
+use mci_agent::user_allowlist::default_user_allowlist_path;
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
 use mci_brain::SqlCipherBrainStore;
 use mci_core::crypto::DbKey;
@@ -320,6 +324,12 @@ async fn main() -> ExitCode {
                                     );
 
                                     let worker_store = Arc::clone(&store);
+                                    // Clone the embedder Arc BEFORE moving
+                                    // it into the idle-batch task — the
+                                    // V2-P10 pump supervisor shares the
+                                    // same embedder for the deep-hook
+                                    // Allow path.
+                                    let supervisor_embedder = Arc::clone(&embedder.0);
                                     let worker_embedder = embedder.0;
                                     let worker_shutdown = shutdown_rx.clone();
                                     tokio::spawn(async move {
@@ -405,6 +415,25 @@ async fn main() -> ExitCode {
                                     // MCI_BRIEFS_DISABLED=1.
                                     spawn_brief_worker(
                                         Arc::clone(&store),
+                                        shutdown_rx.clone(),
+                                    );
+
+                                    // V2-P10 — deep-hook pump supervisor.
+                                    // Reads ~/Library/Application Support/MCI/
+                                    // user-allowlist.toml, probes FDA per
+                                    // bundle, starts MessagesPluginPump +
+                                    // MailIngestPump for any allowlist row
+                                    // with capture_enabled=true AND
+                                    // deep_hook_enabled=true. Driver-CSO
+                                    // audit row 7: construction-graph wiring
+                                    // at integration site. Per
+                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                    // this is the load-bearing wire — without
+                                    // it the V2-P7 + V2-P8 cascade-equivalents
+                                    // never see production input.
+                                    spawn_pump_supervisor(
+                                        Arc::clone(&store),
+                                        supervisor_embedder,
                                         shutdown_rx.clone(),
                                     );
 
@@ -893,6 +922,44 @@ fn spawn_brief_worker(
             stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
         );
     });
+}
+
+/// V2-P10 — spawn the deep-hook pump supervisor.
+///
+/// Constructs a [`PumpSupervisor`] over the same `SqlCipherBrainStore`
+/// + embedder the wire-frame brain pump uses, points it at the
+/// canonical user-allowlist path, and runs the reconcile loop until
+/// shutdown.
+#[cfg(target_os = "macos")]
+fn spawn_pump_supervisor(
+    store: Arc<mci_brain::SqlCipherBrainStore>,
+    embedder: Arc<dyn mci_brain::Embedder>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    let supervisor = Arc::new(PumpSupervisor::new(
+        store as Arc<dyn mci_brain::BrainStore>,
+        Some(embedder),
+        default_user_allowlist_path(),
+    ));
+    eprintln!(
+        "mci-agent: deep-hook pump supervisor started. allowlist={}",
+        default_user_allowlist_path().display(),
+    );
+    tokio::spawn(async move {
+        supervisor.run(shutdown).await;
+        eprintln!("mci-agent: pump supervisor exited cleanly");
+    });
+}
+
+/// Non-macOS: deep-hook pumps are macOS-only (chat.db + emlx are
+/// macOS surfaces). No-op on Linux / Windows so the workspace
+/// compiles uniformly.
+#[cfg(not(target_os = "macos"))]
+fn spawn_pump_supervisor(
+    _store: Arc<mci_brain::SqlCipherBrainStore>,
+    _embedder: Arc<dyn mci_brain::Embedder>,
+    _shutdown: tokio::sync::watch::Receiver<bool>,
+) {
 }
 
 /// Decode a 64-char hex string into a 32-byte key. Returns `None` on any

@@ -30,12 +30,18 @@ pub mod idle_batch;
 #[cfg(target_os = "macos")]
 pub mod mail_ingest;
 pub mod mcp;
+#[cfg(target_os = "macos")]
+pub mod messages_ingest;
 pub mod page_content;
 pub mod panic_hook;
 pub mod panic_uploader;
+#[cfg(target_os = "macos")]
+pub mod pump_supervisor;
 pub mod retention_worker;
 pub mod runner;
 pub mod supervisor;
+#[cfg(unix)]
+pub mod user_allowlist;
 pub mod wall_clock;
 
 pub use brain_ingest::{BrainIngestor, BrainPump, IngestError, IngestOutcome, NoopBrainIngestor};
