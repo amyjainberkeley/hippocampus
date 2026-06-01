@@ -285,3 +285,35 @@ Authored by Director-Recording acting as driver-CSO per CEO-INFRA-001 (the `cso`
   - Re-flips M4 (`killOcrEmit = true`).
   - Adds `ACCEPTED_FRAME_VERSIONS` `0x06` re-extension + new `decode_accepts_legacy_0x06_page_content_payload` test to fix the cycle 8.27 `unsupported wire version: got 0x06` browser-context-capture regression on `page_content.sock`.
   - Amends this ADR §"Status" with the M4 SECOND LIFT REVERTED entry + driver-CSO sign-off block.
+
+### 2026-05-31 — V2-P1 redesign discipline + CEO ratifications (PR #271 + Track 1 doc-PR)
+
+CEO ratified the fully-working-product roadmap across PRs #269 + #270 + #272 in a single orchestrator session 2026-05-31. The persisted state is `docs/research/orchestrator-ratification-state-2026-05-31.md` (PR #271). The decisions that bind future V2-P1 redesign work:
+
+1. **FORK 3 (original CTO §5 fork) = B multi-window form.** The V2-P1 redesign MUST use `SCContentFilter(display:including:exceptingWindows:)` with a non-empty `including:` list, NOT `SCContentFilter(desktopIndependentWindow:)` (the single-window form CRS/CTO originally recommended). CEO override preserves the "2 windows side-by-side" workflow in PR #236 §0 vision quote verbatim. This narrows the redesign space: the single-window form is rejected; the multi-window form is binding.
+
+2. **SH Fork A1 (source-hierarchy memo PR #272 §6) = V2-P1 stays on the v1.0 critical path.** CEO override of CRS rec A3 (hybrid OnboardingTier.Fidelity opt-in). The "every app on the user's computer" CEO vision quote is treated as a hard guarantee for v1.0; the V2-P1 third-lift is launch-blocker even though structurally it carries only the value-dense 15–22% residual per CRS PR #272 §4.3. The third-lift discipline below stays binding.
+
+3. **SH Fork F1 (source-hierarchy memo PR #272 §6) = parallel sequencing.** V2-P1 redesign is sequenced LAST in the v1.0 cycle queue per CRS §5.2 priority order (Chromium P0 → V2-MCP-2/3 → V2-P10 → EventKit/Contacts/MPNowPlayingInfoCenter → App Intents → Spotlight → Cocoa-AX → **V2-P1 third-lift**). Director-Recording owns; runs in parallel with Director-Brain (MCP track) + Director-Context (cascade additions).
+
+4. **The third-lift conditions in this section ABOVE stay binding** (live-Mac corpus; CEO-attended smoke; CSO sign-off; standalone PR with no compounded wiring per the cycle 8.27 incident pattern), EXTENDED by:
+   - The API form is constrained to `SCContentFilter(display:including:exceptingWindows:)` with a non-empty include list (FORK 3 ratification above). Future V2-P1 redesign memo (Phase 6 PR 12 in the CTO roadmap) MUST spec this form and the live-Mac corpus MUST exercise the real Apple API (not a mock).
+   - The redesign memo lands BEFORE the implementing PR; implementing PR lands BEFORE the M4 lift PR; M4 lift is a SEPARATE standalone PR (Phase 7 PR 14 in the CTO roadmap). No compounding under any circumstance.
+   - The construction-graph wiring at integration site is a MANDATORY row in the CSO sign-off audit table per [[project-v2p1-unit-tests-passed-but-never-wired]] + [[project-v2p1-exceptingwindows-misuse]] discipline.
+
+5. **The Footprint SLO has been raised** to ≤10–15% CPU / ≤2 GB RAM default per ratified G2 (see CLAUDE.md `## Hard Rules` + AGENT_PROTOCOL.md §4 amendments, this Track 1 doc-PR). The V2-P1 third-lift footprint check is against the raised bar; the prior tight bar is the opt-in Performance tier.
+
+### Driver-CSO sign-off (2026-05-31 — Track 1 amendment)
+
+Orchestrator (role-play as driver-CSO per CEO-INFRA-001; the `cso` sub-agent has hallucinated audit tables before — `feedback-cso-subagent-hallucinates` generalized; 4+ sub-agent kinds have stalled/sandbox-failed in the last 48h) attests against the canonical ratifications in PR #271 §1:
+
+| # | Surface | Evidence |
+|---|---|---|
+| 1 | FORK 3 = B multi-window form ratified; no V2-P1 work may use `desktopIndependentWindow:` form | PR #271 `docs/research/orchestrator-ratification-state-2026-05-31.md` §1 FORK 3 row |
+| 2 | SH Fork A1 V2-P1-on-v1.0-critical-path ratified; M4 lift IS required for v1.0 launch | PR #271 §1 SH Fork A row |
+| 3 | SH Fork F1 parallel sequencing ratified; V2-P1 redesign is LAST in cycle queue | PR #271 §1 SH Fork F row + CRS PR #272 §5.2 priority order |
+| 4 | Third-lift conditions §"Lift condition (the second time)" remain binding + extended by the API-form constraint above | this section text + PR #271 §1 FORK 3 |
+| 5 | Footprint SLO raised to ≤10–15% / ≤2 GB; SLO check is against the raised default tier | this Track 1 PR's CLAUDE.md + AGENT_PROTOCOL.md edits + PR #271 §2 |
+| 6 | Construction-graph wiring row is MANDATORY in any future V2-P1 §5 sign-off | [[project-v2p1-unit-tests-passed-but-never-wired]] + [[project-v2p1-exceptingwindows-misuse]] |
+
+— Orchestrator (driver-CSO per CEO-INFRA-001), 2026-05-31
