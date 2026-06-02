@@ -36,6 +36,14 @@ pub mod mcp;
 /// by the agent for the process lifetime; V2-MCP-3 aggregator (cycle
 /// 8.30, Director-Brain) consumes the registry without a re-init.
 pub mod mcp_client_supervisor;
+/// V2-MCP-3 — MCP aggregator: consumes the registry built by
+/// [`mcp_client_supervisor`], connects to each registered server,
+/// catalogs `tools/list`, and runs a hybrid materialize-or-catalog
+/// policy on `resources/list` results. Persists Events with
+/// `app_bundle_id = "mcp:<server-name>"` so V2-P12 (Phase 7 chat
+/// surface) can structurally apply prompt-injection mitigation per
+/// CRS Fork-6 = A.
+pub mod mcp_aggregator;
 #[cfg(target_os = "macos")]
 pub mod messages_ingest;
 pub mod page_content;

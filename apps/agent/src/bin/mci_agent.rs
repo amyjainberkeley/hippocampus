@@ -340,11 +340,17 @@ async fn main() -> ExitCode {
             // never abort startup. Runs BEFORE the brain-key check
             // so the registry status appears even if the brain is
             // not yet keyed.
-            let _mcp_client_boot = {
+            let mcp_client_boot = {
                 let boot = mci_agent::mcp_client_supervisor::boot_default().await;
                 eprintln!("{}", boot.log_line());
                 boot
             };
+            // V2-MCP-3 — handle to the registry so the aggregator can
+            // be constructed inside the brain-store-OK arm below
+            // alongside the deep-hook pump supervisor. Held here so
+            // the registry survives if any later branch drops the
+            // `mcp_client_boot` value.
+            let mcp_registry = Arc::clone(&mcp_client_boot.registry);
 
             // P3.10c + P3.8 — open the brain store IFF `MCI_DB_KEY_HEX`
             // is set. The store is shared between:
@@ -495,6 +501,32 @@ async fn main() -> ExitCode {
                                     spawn_pump_supervisor(
                                         Arc::clone(&store),
                                         supervisor_embedder,
+                                        shutdown_rx.clone(),
+                                    );
+
+                                    // V2-MCP-3 — MCP aggregator.
+                                    // Consumes the registry built by
+                                    // `mcp_client_supervisor::boot_default()`
+                                    // above; runs the hybrid materialize-
+                                    // or-catalog policy against each
+                                    // registered server's resources.
+                                    // Persists Events with
+                                    // `app_bundle_id = "mcp:<name>"` so
+                                    // V2-P12 (Phase 7 chat surface) can
+                                    // structurally apply prompt-injection
+                                    // mitigation per CRS Fork-6 = A.
+                                    // Driver-CSO audit row 7
+                                    // (construction-graph wiring at
+                                    // integration site) — per
+                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                    // this is the load-bearing wire for
+                                    // V2-MCP-3: without it the
+                                    // aggregator module would never run
+                                    // against production input.
+                                    spawn_mcp_aggregator(
+                                        Arc::clone(&mcp_registry),
+                                        Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
+                                        None,
                                         shutdown_rx.clone(),
                                     );
 
@@ -1122,6 +1154,38 @@ fn spawn_pump_supervisor(
     _embedder: Arc<dyn mci_brain::Embedder>,
     _shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
+}
+
+/// V2-MCP-3 wiring point. Constructs the
+/// [`mci_agent::mcp_aggregator::McpAggregator`] over the V2-MCP-2
+/// `ServerRegistry` + the shared brain store, then spawns its
+/// reconcile loop on the tokio runtime with the shared shutdown
+/// channel.
+///
+/// Cross-platform — unlike `spawn_pump_supervisor` above, the MCP
+/// aggregator runs anywhere the agent runs (its inputs are MCP
+/// servers the user registered; no OS-specific source).
+///
+/// Driver-CSO audit row 7: `git log -S "McpAggregator::new" --
+/// apps/agent/src/bin/mci_agent.rs` returns this PR's commit per
+/// [[project-v2p1-unit-tests-passed-but-never-wired]] discipline.
+fn spawn_mcp_aggregator(
+    registry: Arc<mci_mcp_client::ServerRegistry>,
+    store: Arc<dyn mci_brain::BrainStore>,
+    embedder: Option<Arc<dyn mci_brain::Embedder>>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    let aggregator =
+        mci_agent::mcp_aggregator::McpAggregator::new(registry, store, embedder);
+    eprintln!(
+        "mci-agent: MCP aggregator started (reconcile every {}s; materialize cap {} bytes)",
+        mci_agent::mcp_aggregator::DEFAULT_RECONCILE_INTERVAL.as_secs(),
+        mci_agent::mcp_aggregator::DEFAULT_MATERIALIZE_MAX_BYTES,
+    );
+    tokio::spawn(async move {
+        aggregator.run(shutdown).await;
+        eprintln!("mci-agent: MCP aggregator exited cleanly");
+    });
 }
 
 /// Decode a 64-char hex string into a 32-byte key. Returns `None` on any
