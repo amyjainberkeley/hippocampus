@@ -1,0 +1,8 @@
+Hippocampus.app builds via the Resources/build-app.sh script.
+Claude Code 4.7 ships fast mode for Opus 4.6 and Opus 4.7.
+Tested the recall flow on iPhone 15 Pro and iPad Pro M4.
+The Arctic Embed S Core ML model is bundled in the .app.
+Qwen3-1.7B is the brief-author default for cycle 8.29 onwards.
+The mci-capture-helper binary lives under adapters/macos/MCICaptureHelper.
+ScreenCaptureKit and VideoToolbox underpin the recording spine.
+sqlite-vec powers the entity_summary semantic mirror.

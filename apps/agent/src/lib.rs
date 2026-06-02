@@ -54,6 +54,20 @@ pub mod pump_supervisor;
 pub mod retention_worker;
 pub mod runner;
 pub mod supervisor;
+/// V2-P5 — Qwen-backed `NerBackend` for Tier 2 entity extraction.
+/// Wraps `mci_brief::LlamaBackend` (production: `Qwen3CoreMLBackend`)
+/// with a structured-output prompt + JSON parser. Held by the
+/// `tier2_worker` for the lifetime of the agent.
+#[cfg(target_os = "macos")]
+pub mod tier2_qwen_backend;
+/// V2-P5 — async idle-batch worker. Polls
+/// `SqlCipherBrainStore::events_pending_tier2` for events lacking the
+/// `(extractor_status, qwen_tier2_processed)` sentinel mention, runs
+/// each through a `Tier2Extractor`, writes Tier 2 entity mentions +
+/// the sentinel marker, then sleeps. Mirrors `idle_batch.rs` /
+/// `brief_worker.rs` patterns; single-flight by design so the ~500 MB
+/// Qwen working set stays predictable.
+pub mod tier2_worker;
 #[cfg(unix)]
 pub mod user_allowlist;
 pub mod wall_clock;
