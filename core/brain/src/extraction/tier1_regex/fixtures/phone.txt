@@ -1,0 +1,6 @@
+Call (415) 555-1234 to reach the SF office.
+US E.164: +1-415-555-1234 routes the same way.
+Dotted: 415.555.1234 also.
+UK: +44 20 7946 0123 for London.
+NEGATIVE: 12345 too short.
+NEGATIVE: order #4155551234 in non-phone context — false positive accepted (Tier2 reclassifies).

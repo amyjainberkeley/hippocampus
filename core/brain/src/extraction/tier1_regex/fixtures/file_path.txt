@@ -1,0 +1,4 @@
+Open /Users/ao/Documents/GitHub/mci/CLAUDE.md to read the project brief.
+The lockfile lives at /var/log/system.log under macOS.
+NEGATIVE: /tmp — single segment, no slash after.
+NEGATIVE: foo/bar — no leading slash.

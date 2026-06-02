@@ -1,0 +1,5 @@
+gh auth login --with-token ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AB
+OAuth callback: gho_1234567890abcdef1234567890abcdef12345678
+server token: ghs_aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStT
+NEGATIVE: ghp_short is too short for a PAT.
+NEGATIVE: ghx_abc not a recognised prefix.

@@ -1,0 +1,6 @@
+Visit https://github.com/amyjainberkeley/hippocampus/pulls?state=open today.
+See http://internal.example/runbook for the playbook.
+Mixed-case host: https://Example.COM/Path — canonical lowercases scheme+host.
+Trailing punct: https://example.com/page. should drop the trailing dot.
+NEGATIVE: example.com without scheme.
+NEGATIVE: ftp://server is not http(s).
