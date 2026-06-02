@@ -1,0 +1,4 @@
+request_id=550e8400-e29b-41d4-a716-446655440000 routed via gateway.
+Upper-case: 550E8400-E29B-41D4-A716-446655440000 canonicalises to lower.
+NEGATIVE: 550e8400-e29b-41d4-a716 truncated.
+NEGATIVE: 550e8400e29b41d4a716446655440000 — no dashes.

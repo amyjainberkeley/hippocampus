@@ -1,0 +1,5 @@
+env STRIPE_SECRET_KEY=sk_test_FIXTUREREMOVED
+publishable: pk_live_FIXTUREREMOVED
+restricted: rk_test_AaBbCcDdEeFfGgHhIiJjKkLlMm0123
+NEGATIVE: sk_dev_ is not a recognised mode.
+NEGATIVE: sk_test_short too short.

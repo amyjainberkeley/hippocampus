@@ -85,7 +85,19 @@ pub mod event_chunker;
 /// the schema sync-ready ahead of Phase 8 (ADR-0023).
 pub mod graph;
 
+/// V2-P4 — entity-extraction layer. First writer to the V2-P3 graph
+/// foundation. Tier 1 regex bank lives in [`extraction::tier1`];
+/// Tier 2 Qwen NER (V2-P5) and the V2-P6 AliasResolver chain off the
+/// same `BrainStore` trait surface in follow-on PRs.
+///
+/// See the module doc for the cascade-discipline invariant (Tier 1
+/// runs POST-cascade so suppressed bytes never reach the regex bank)
+/// and the token-shape REDACT discipline (JWT / API-key bytes never
+/// land in `entities` or `entity_mentions`).
+pub mod extraction;
+
 pub use event_chunker::EventChunker;
+pub use extraction::{persist_tier1_matches, Tier1Extractor, Tier1Match};
 pub use graph::{
     Entity, EntityId, EntityMention, EntityMentionId, EpisodeEdge, EpisodeEdgeId,
 };

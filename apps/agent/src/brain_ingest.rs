@@ -52,7 +52,9 @@ use std::sync::Arc;
 
 use mci_brain::{
     BrainStore, ChunkerError, EmbedError, Embedder, Event, EventChunker, EventId, StoreError,
+    Tier1Extractor,
 };
+use mci_brain::extraction::tier1::persist_tier1_matches;
 use mci_brain::Chunker;
 use mci_core::ipc::Message;
 
@@ -236,6 +238,18 @@ pub struct BrainPump {
     chunker: Arc<dyn Chunker>,
     page_cache: Option<PageContentCache>,
     counter: AtomicU64,
+    /// V2-P4 Tier 1 regex entity extractor. Zero-sized — the regex
+    /// bank lives in module-level `LazyLock` statics — so holding it
+    /// by value adds no runtime cost. Invoked synchronously on the
+    /// Allow arm of `ingest_ocr_event` after `put_event` returns.
+    /// See [`mci_brain::extraction`] for the cascade-discipline
+    /// invariant and token-shape REDACT discipline.
+    tier1: Tier1Extractor,
+    /// Cumulative `entity_mentions` rows the Tier 1 extractor has
+    /// attempted to write. Content-free counter (`u64`) — identical
+    /// discipline to `counter` above, surfaces as a CRS Telemetry-Gap
+    /// signal so a regression in Tier 1 yield is visible.
+    tier1_mentions_persisted: AtomicU64,
 }
 
 /// Separator injected between extension-sourced page text and the
@@ -259,6 +273,8 @@ impl BrainPump {
             chunker: Arc::new(EventChunker::default()),
             page_cache: None,
             counter: AtomicU64::new(0),
+            tier1: Tier1Extractor::new(),
+            tier1_mentions_persisted: AtomicU64::new(0),
         }
     }
 
@@ -275,6 +291,8 @@ impl BrainPump {
             chunker: Arc::new(EventChunker::default()),
             page_cache: Some(page_cache),
             counter: AtomicU64::new(0),
+            tier1: Tier1Extractor::new(),
+            tier1_mentions_persisted: AtomicU64::new(0),
         }
     }
 
@@ -293,7 +311,18 @@ impl BrainPump {
             chunker,
             page_cache: None,
             counter: AtomicU64::new(0),
+            tier1: Tier1Extractor::new(),
+            tier1_mentions_persisted: AtomicU64::new(0),
         }
+    }
+
+    /// Cumulative number of `entity_mentions` writes the V2-P4 Tier 1
+    /// extractor has attempted on the Allow arm of `ingest_ocr_event`.
+    /// Content-free counter — useful for the CRS Telemetry-Gap
+    /// analyst to spot a Tier 1 yield regression.
+    #[must_use]
+    pub fn tier1_mentions_persisted_count(&self) -> u64 {
+        self.tier1_mentions_persisted.load(Ordering::Relaxed)
     }
 }
 
@@ -439,6 +468,42 @@ impl BrainIngestor for BrainPump {
         let embedded = embedding.is_some();
         let id = self.store.put_event(&event)?;
         self.counter.fetch_add(1, Ordering::Relaxed);
+
+        // V2-P4 — synchronous Allow-arm dispatch.
+        //
+        // Trade-off chosen vs. post-persistence idle batch:
+        //
+        // - In-line keeps `entity_mentions` consistent with `events` —
+        //   the V2-P5 Qwen NER batch (next cycle) sees a brain where
+        //   the Tier 1 regex pass has already run, so its output is
+        //   strictly additive (`extractor_kind = "qwen"` alongside
+        //   `"regex"`). A batch dispatch here would force the Tier 2
+        //   pass to either re-derive Tier 1 mentions or coordinate
+        //   ordering — neither is worth the cost.
+        // - The regex bank is bounded (one `Regex::find_iter` per
+        //   kind; ~14 kinds; DFA-bounded constants). On 4 KB OCR-
+        //   typical events the scan completes in <1 ms on M1 — well
+        //   inside the Footprint SLO §2 G2 per-event burst budget.
+        // - Extraction failure must NOT fail the ingest: the event
+        //   is already in `events`, so a `StoreError` from the
+        //   extractor's `put_entity` / `put_entity_mention` calls is
+        //   logged-and-continued, not returned. A subsequent ingest
+        //   pass (or the V2-P5 batch) can backfill missing rows
+        //   because the writer is idempotent on PK by construction.
+        let matches = self.tier1.extract(&event.text);
+        if !matches.is_empty() {
+            match persist_tier1_matches(&*self.store, id, event.ts_us, &matches) {
+                Ok(stats) => {
+                    self.tier1_mentions_persisted
+                        .fetch_add(stats.mentions_inserted as u64, Ordering::Relaxed);
+                }
+                Err(_e) => {
+                    // Best-effort: keep going. The event lives;
+                    // mentions can be backfilled.
+                }
+            }
+        }
+
         Ok(IngestOutcome::Stored { id, embedded })
     }
 
