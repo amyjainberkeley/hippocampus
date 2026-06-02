@@ -128,10 +128,14 @@ final class FrameSequenceTests: XCTestCase {
 
 final class HelperMainLoopTests: XCTestCase {
     /// tickHealth emits exactly one HelperHealth frame whose payload
-    /// length matches the wire spec. wire 0x08: 16 header + 9 × u64
-    /// (72) = 88 bytes (was 80 at 0x07, before frames_focus_race_dropped
-    /// was added per ADR-0031 V2-P1 —
-    /// docs/research/capture-scope-window-vs-display-2026-05-29.md §5.3).
+    /// length matches the wire spec. wire 0x09 (Phase 6 PR 6):
+    /// header(16) + 9 × u64(72) + u8 entry_count(1) + u32
+    /// cpu_pct_micro(4) + u64 rss_bytes(8) + u64 tracker_alive_at_us(8)
+    /// = 109 bytes when failsafe_by_app is empty (no FootprintSampler
+    /// installed → CPU/RSS default 0; no per-app failsafes recorded).
+    /// 0x08 → 0x09 added failsafe_by_app + cpu_pct_micro + rss_bytes
+    /// + tracker_alive_at_us — see core/src/ipc/wire.rs FRAME_VERSION
+    /// doc.
     func testTickHealthEmitsOneFrameWithCorrectLength() async throws {
         let sink = RecordingFrameSink()
         let loop = HelperMainLoop(
@@ -141,8 +145,8 @@ final class HelperMainLoopTests: XCTestCase {
         try await loop.tickHealth()
         let frames = await sink.recorded()
         XCTAssertEqual(frames.count, 1)
-        // Header(16) + 9 × u64(72) = 88 bytes.
-        XCTAssertEqual(frames[0].count, 88)
+        // header(16) + 9×u64(72) + u8(1) + u32(4) + u64(8) + u64(8) = 109
+        XCTAssertEqual(frames[0].count, 109)
         // Wire magic + version.
         XCTAssertEqual(frames[0][0], 0x4D)
         XCTAssertEqual(frames[0][1], frameVersion)

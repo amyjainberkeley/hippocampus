@@ -34,6 +34,16 @@ import Foundation
 public enum SuppressionDecision: Sendable, Equatable {
     case allow
     case suppress(reason: RedactionReason)
+
+    /// Short label for the MCI_OCR_TRACE stderr surface
+    /// (`SuppressionCascade.decide` → `OCRTrace.emit`). Content-free —
+    /// fixed enum-name strings only.
+    public var traceLabel: String {
+        switch self {
+        case .allow: return "allow"
+        case .suppress(let r): return "suppress.\(r.dbString)"
+        }
+    }
 }
 
 /// Cascade orchestrator.
@@ -94,6 +104,24 @@ public struct SuppressionCascade: Sendable {
     ///   (§6 OCR-time regex runs in `core/`, NOT here.)
     ///   §7 — fail-safe default: unknown classification ⇒ redact.
     public func decide(context: WorkflowContext) -> SuppressionDecision {
+        let decision = decideInternal(context: context)
+        // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 env-gated trace.
+        // Content-free: bundle id (already cascade-attributed) +
+        // decision enum + AX outcome enum. No window title / URL / OCR
+        // text. Zero steady-state cost when off (single static-let
+        // load via `OCRTrace.isEnabled`; the autoclosure prevents
+        // line-construction overhead).
+        OCRTrace.emit(
+            "cascade-decide",
+            "bundle=\(context.appBundleId ?? "nil") decision=\(decision.traceLabel)"
+        )
+        return decision
+    }
+
+    /// Inner cascade — pulled out of `decide(context:)` so the
+    /// MCI_OCR_TRACE emit can wrap exactly one decision per call
+    /// without duplicating the trace at every early-return arm.
+    private func decideInternal(context: WorkflowContext) -> SuppressionDecision {
         // §1 — source-level denylist (the load-bearing primitive).
         if let bundle = context.appBundleId, denylist.appIsDenied(bundleId: bundle) {
             return .suppress(reason: .denylistSource)

@@ -110,11 +110,12 @@ final class WireFixturesTests: XCTestCase {
             framesEncodeFailed: 17,
             framesFocusRaceDropped: 23
         )
-        // wire 0x08: Header(16) + 9 × u64(8) = 88 bytes (was 80 at 0x07
-        // = 8 × u64; frames_focus_race_dropped added the 9th —
-        // ADR-0031 V2-P1, content-free observability for the
-        // focused-window race-consistency gate).
-        XCTAssertEqual(frame.count, minFrameHeaderBytes + 72)
+        // wire 0x09 (Phase 6 PR 6 — PR #226 §5.1 + CTO §4 Phase 6 PR
+        // 6): with default-zero new fields the payload is
+        // 9 × u64(72) + u8(1) entry_count(0) + u32(4) cpu_pct_micro
+        // + u64(8) rss_bytes + u64(8) tracker_alive_at_us = 93.
+        // Total frame = header(16) + 93 = 109.
+        XCTAssertEqual(frame.count, minFrameHeaderBytes + 93)
         XCTAssertEqual(frame[0], 0x4D)
         XCTAssertEqual(frame[1], frameVersion)
         XCTAssertEqual(frame[2], 0x30)  // msg_type 0x0030
@@ -138,29 +139,39 @@ final class WireFixturesTests: XCTestCase {
         XCTAssertEqual(frame[fefOffset], 17)
         for i in 1..<8 { XCTAssertEqual(frame[fefOffset + i], 0) }
 
-        // The 9th (last) u64 of the payload is frames_focus_race_dropped
+        // The 9th u64 of the payload is frames_focus_race_dropped
         // (= 23 here). Offset = header(16) + 8×u64(64) = 80.
         let frdOffset = minFrameHeaderBytes + 64
         XCTAssertEqual(frame[frdOffset], 23)
         for i in 1..<8 { XCTAssertEqual(frame[frdOffset + i], 0) }
+
+        // Wire 0x09 trailing fields: u8(entry_count = 0), u32(cpu_pct_micro = 0),
+        // u64(rss_bytes = 0), u64(tracker_alive_at_us = 0). All zero
+        // because the caller passed no explicit values (defaults).
+        let entryCountOffset = minFrameHeaderBytes + 72
+        XCTAssertEqual(frame[entryCountOffset], 0, "empty failsafe_by_app map")
+        // 4 bytes of cpu_pct_micro starting at +1 byte.
+        for i in 0..<4 { XCTAssertEqual(frame[entryCountOffset + 1 + i], 0) }
+        // 8 bytes of rss_bytes.
+        for i in 0..<8 { XCTAssertEqual(frame[entryCountOffset + 5 + i], 0) }
+        // 8 bytes of tracker_alive_at_us.
+        for i in 0..<8 { XCTAssertEqual(frame[entryCountOffset + 13 + i], 0) }
     }
 
     /// Cross-side version lock — mirrors the Rust
-    /// `wire::tests::frame_version_is_0x08` trip-wire. If the two
+    /// `wire::tests::frame_version_is_0x09` trip-wire. If the two
     /// sides ever disagree the IPC contract is silently broken.
-    func testFrameVersionIs0x08() {
-        XCTAssertEqual(frameVersion, 0x08)
+    func testFrameVersionIs0x09() {
+        XCTAssertEqual(frameVersion, 0x09)
     }
 
     /// Byte-exact cross-side fixture — pin the full HelperHealth frame
-    /// at wire 0x08. The Rust-side
+    /// at wire 0x09. The Rust-side
     /// `wire::tests::helper_health_cross_side_fixture` asserts the
-    /// SAME 88-byte vector for the SAME input tuple, and
-    /// `tools/wire_decode.py` parses the same layout. If any of those
-    /// three drifts, the IPC contract is broken — this is the
-    /// observable trip-wire. Wire 0x08 (ADR-0031 V2-P1) appends
-    /// frames_focus_race_dropped; earlier message variants' payload
-    /// layouts are unchanged.
+    /// SAME 109-byte vector for the SAME input tuple. Wire 0x09 (Phase
+    /// 6 PR 6) appends failsafe_by_app (cap 8 LRU) + cpu_pct_micro +
+    /// rss_bytes + tracker_alive_at_us; earlier message variants'
+    /// payload layouts are unchanged.
     func testHelperHealthCrossSideFixture() {
         let frame = encodeHelperHealth(
             seq: 42,
@@ -173,14 +184,17 @@ final class WireFixturesTests: XCTestCase {
             framesDroppedLateAck: 7,
             framesEncodeFailed: 8,
             framesFocusRaceDropped: 9
+            // failsafeByApp/cpuPctMicro/rssBytes/trackerAliveAtUs
+            // default to empty / 0 / 0 / 0 — same shape the Rust
+            // cross-side fixture pins.
         )
-        // Header(16): magic(4D) ver(08) msg_type(30 00 LE = 0x0030)
-        //             seq(2A 00 ... LE = 42) len(48 00 00 00 = 72)
-        // Payload(72): 9 u64 LE = 1, 2, 3, 4, 5, 6, 7, 8, 9 (little-endian)
+        // Header(16): magic(4D) ver(09) msg_type(30 00 LE = 0x0030)
+        //             seq(2A 00 ... LE = 42) len(5D 00 00 00 = 93)
+        // Payload(93): 9 u64 LE = 1..=9 + u8(0) + u32(0) + u64(0) + u64(0)
         let expected: [UInt8] = [
-            0x4D, 0x08, 0x30, 0x00,
+            0x4D, 0x09, 0x30, 0x00,
             0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x48, 0x00, 0x00, 0x00,
+            0x5D, 0x00, 0x00, 0x00,
             // u64 LE × 9
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -191,9 +205,17 @@ final class WireFixturesTests: XCTestCase {
             0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // failsafe_by_app entry_count = 0
+            0x00,
+            // cpu_pct_micro u32 LE = 0
+            0x00, 0x00, 0x00, 0x00,
+            // rss_bytes u64 LE = 0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // tracker_alive_at_us u64 LE = 0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]
-        XCTAssertEqual(frame.count, 88)
-        XCTAssertEqual(Array(frame), expected, "HelperHealth v0x08 byte-exact cross-side fixture")
+        XCTAssertEqual(frame.count, 109)
+        XCTAssertEqual(Array(frame), expected, "HelperHealth v0x09 byte-exact cross-side fixture")
     }
 
     /// Byte-exact cross-side fixture — pin the full OCREvent frame at
@@ -227,8 +249,8 @@ final class WireFixturesTests: XCTestCase {
         XCTAssertEqual(frame.count, 140)
 
         var expected = [UInt8]()
-        // Header: magic 4D, version 08, msg_type 0040 LE.
-        expected += [0x4D, 0x08, 0x40, 0x00]
+        // Header: magic 4D, version 09, msg_type 0040 LE.
+        expected += [0x4D, 0x09, 0x40, 0x00]
         // seq u64 LE = 42.
         expected += [0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         // len u32 LE = 124.
@@ -251,7 +273,7 @@ final class WireFixturesTests: XCTestCase {
         // window_title "T", url "U", ocr_text "Hi".
         expected += Array("T".utf8) + Array("U".utf8) + Array("Hi".utf8)
 
-        XCTAssertEqual(Array(frame), expected, "OCREvent v0x08 byte-exact cross-side fixture")
+        XCTAssertEqual(Array(frame), expected, "OCREvent v0x09 byte-exact cross-side fixture")
     }
 
     /// OCR text over the 64 KB cap fails closed at encode time
@@ -339,7 +361,7 @@ final class WireFixturesTests: XCTestCase {
         XCTAssertEqual(frame.count, 55)
 
         var expected = [UInt8]()
-        expected += [0x4D, 0x08, 0x50, 0x00]
+        expected += [0x4D, 0x09, 0x50, 0x00]
         expected += [0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] // seq
         expected += [0x27, 0x00, 0x00, 0x00] // len = 39
         // Payload
@@ -355,7 +377,7 @@ final class WireFixturesTests: XCTestCase {
         expected += Array("Hi".utf8)
         expected += Array("chrome".utf8)
 
-        XCTAssertEqual(Array(frame), expected, "PageContentEvent v0x08 byte-exact cross-side fixture")
+        XCTAssertEqual(Array(frame), expected, "PageContentEvent v0x09 byte-exact cross-side fixture")
     }
 
     func testPageContentEventOverCapFailsClosed() {

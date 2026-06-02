@@ -48,15 +48,17 @@ import sys
 from collections import Counter
 
 MAGIC = 0x4D
-# wire bumped 0x07->0x08 (ADR-0031 V2-P1 —
-# docs/research/capture-scope-window-vs-display-2026-05-29.md §5.3).
-# HelperHealth gained the `frames_focus_race_dropped` counter. Decoder
-# dual-accepts 0x07 (legacy helper, `frames_focus_race_dropped` absent)
-# and 0x08. 0x06 reaches end-of-support at this bump per the
-# one-cycle rolling-restart window documented on Rust-side
-# `FRAME_VERSION`.
-VERSION = 0x08
-ACCEPTED_VERSIONS = (VERSION, 0x07)
+# wire bumped 0x08->0x09 (Phase 6 PR 6 — PR #226 §5.1 + CTO §4 Phase 6
+# PR 6 + S13 acceptance gate). HelperHealth gained four trailing
+# content-free fields: failsafe_by_app (cap 8 LRU), cpu_pct_micro
+# (u32), rss_bytes (u64), tracker_alive_at_us (u64 — V2-P1 PR 13
+# reserved slot per the §6.2 = A + §8 coordination contract). Decoder
+# dual-accepts {0x09, 0x08, 0x07, 0x06} per the Rust-side
+# ACCEPTED_FRAME_VERSIONS — see core/src/ipc/wire.rs FRAME_VERSION
+# doc for the full bump sequence. 0x06 is retained for the Safari
+# extension async-update window (cycle 8.27 lesson).
+VERSION = 0x09
+ACCEPTED_VERSIONS = (VERSION, 0x08, 0x07, 0x06)
 HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
 # HelperHealth v0x07 payload = 8 × u64 LE = 64 bytes:
 #   uptime_ms · frames_delivered · frames_suppressed ·
@@ -65,8 +67,16 @@ HEADER = 1 + 1 + 2 + 8 + 4  # 16 bytes
 #   frames_encode_failed
 # v0x08 appends `frames_focus_race_dropped`, totalling 9 × u64 LE = 72
 # bytes.
+# v0x09 appends failsafe_by_app (u8 entry_count + N × (u8 bundle_id_len
+# + bundle_id bytes + u64 counter)) + cpu_pct_micro (u32 LE) + rss_bytes
+# (u64 LE) + tracker_alive_at_us (u64 LE). Minimum at v0x09 with empty
+# failsafe_by_app: 9 × u64 (72) + u8(1) + u32(4) + u64(8) + u64(8) = 93
+# bytes; cap-8 with max bundle ids would be 93 + 8 × (1 + 255 + 8) =
+# 2205 bytes.
 HELPER_HEALTH_PAYLOAD_V07 = 8 * 8
 HELPER_HEALTH_PAYLOAD_V08 = 9 * 8
+HELPER_HEALTH_PAYLOAD_V09_MIN_WITH_EMPTY_MAP = 9 * 8 + 1 + 4 + 8 + 8  # = 93
+MAX_FAILSAFE_BY_APP_ENTRIES = 8  # cap per PR #226 §5.1 + Rust wire.rs
 # OCREvent v0x04 fixed-header layout (ADR-0016 §1.6):
 #   seq u64 · ts_us u64 · app_bundle_id [u8; 64] ·
 #   window_title_len u16 · url_len u16 · ocr_text_len u32 ·
@@ -197,12 +207,18 @@ def main(path, verbose):
     ocr_events = [(s, p) for (m, _v, s, p) in frames if m == 0x0040]
 
     # HelperHealth: 0x07 payload = 8 u64s, 0x08 payload = 9 u64s
-    # (frames_focus_race_dropped appended — ADR-0031 V2-P1). Parse
-    # what we can — a malformed payload-length-mismatch is reported,
-    # not silently papered over.
+    # (frames_focus_race_dropped appended — ADR-0031 V2-P1),
+    # 0x09 payload = 9 u64s + failsafe_by_app map + cpu_pct_micro (u32)
+    # + rss_bytes (u64) + tracker_alive_at_us (u64) — Phase 6 PR 6.
+    # Parse what we can; a malformed payload-length-mismatch is
+    # reported, not silently papered over.
     health_parsed = []  # list of dicts in chronological seq order
     health_malformed = []
     for v, s, p in health_frames:
+        failsafe_by_app = []  # default for non-0x09 frames
+        cpu_pct_micro = 0
+        rss_bytes = 0
+        tracker_alive_at_us = 0
         if v == 0x07 and len(p) == HELPER_HEALTH_PAYLOAD_V07:
             (
                 uptime_ms,
@@ -227,6 +243,51 @@ def main(path, verbose):
                 frames_encode_failed,
                 frames_focus_race_dropped,
             ) = struct.unpack_from("<QQQQQQQQQ", p, 0)
+        elif v == 0x09 and len(p) >= HELPER_HEALTH_PAYLOAD_V09_MIN_WITH_EMPTY_MAP:
+            # 9 u64s leading, then the variable-length failsafe_by_app
+            # map, then fixed-length cpu/rss/tracker trailing.
+            (
+                uptime_ms,
+                frames_delivered,
+                frames_suppressed,
+                frames_redacted_by_failsafe,
+                cascade_forced_count,
+                frames_dropped_backpressure,
+                frames_dropped_late_ack,
+                frames_encode_failed,
+                frames_focus_race_dropped,
+            ) = struct.unpack_from("<QQQQQQQQQ", p, 0)
+            off = 9 * 8
+            entry_count = p[off]
+            if entry_count > MAX_FAILSAFE_BY_APP_ENTRIES:
+                # Trust-boundary check — over-cap entry_count is the
+                # same fail-closed posture as the Rust decoder.
+                health_malformed.append((s, len(p), v))
+                continue
+            off += 1
+            cap_failed = False
+            for _ in range(entry_count):
+                if off + 1 > len(p):
+                    cap_failed = True
+                    break
+                id_len = p[off]
+                off += 1
+                if off + id_len + 8 > len(p):
+                    cap_failed = True
+                    break
+                bundle = p[off:off + id_len].decode("utf-8", errors="replace")
+                off += id_len
+                (counter,) = struct.unpack_from("<Q", p, off)
+                off += 8
+                failsafe_by_app.append((bundle, counter))
+            if cap_failed or off + 4 + 8 + 8 != len(p):
+                health_malformed.append((s, len(p), v))
+                continue
+            (cpu_pct_micro,) = struct.unpack_from("<I", p, off)
+            off += 4
+            (rss_bytes,) = struct.unpack_from("<Q", p, off)
+            off += 8
+            (tracker_alive_at_us,) = struct.unpack_from("<Q", p, off)
         else:
             health_malformed.append((s, len(p), v))
             continue
@@ -241,6 +302,10 @@ def main(path, verbose):
             "frames_dropped_late_ack": frames_dropped_late_ack,
             "frames_encode_failed": frames_encode_failed,
             "frames_focus_race_dropped": frames_focus_race_dropped,
+            "failsafe_by_app": failsafe_by_app,
+            "cpu_pct_micro": cpu_pct_micro,
+            "rss_bytes": rss_bytes,
+            "tracker_alive_at_us": tracker_alive_at_us,
         })
 
     reason_hist = Counter()
@@ -311,13 +376,14 @@ def main(path, verbose):
         print(f"                    title={sample['window_title']!r}  url={sample['url']!r}")
         print(f"                    ocr_text_len={sample['ocr_text_len']}")
 
-    # ---- HelperHealth (wire 0x08 — frames_focus_race_dropped added) ----
+    # ---- HelperHealth (wire 0x09 — failsafe_by_app + cpu/rss/tracker added) ----
     print("--- HelperHealth (0x0030) ---")
     print(f"  count           : {len(health_frames)}")
     if health_malformed:
         print(
             f"  MALFORMED       : {len(health_malformed)} frame(s) — payload len mismatch "
-            f"(expected {HELPER_HEALTH_PAYLOAD_V07} bytes @ v0x07 or {HELPER_HEALTH_PAYLOAD_V08} @ v0x08)"
+            f"(expected {HELPER_HEALTH_PAYLOAD_V07} bytes @ v0x07, "
+            f"{HELPER_HEALTH_PAYLOAD_V08} @ v0x08, or ≥{HELPER_HEALTH_PAYLOAD_V09_MIN_WITH_EMPTY_MAP} @ v0x09)"
         )
         for s, ln, vv in health_malformed[:10]:
             print(f"    seq={s} ver=0x{vv:02X} len={ln}")
@@ -334,6 +400,20 @@ def main(path, verbose):
         print(f"                    frames_dropped_late_ack={last['frames_dropped_late_ack']}")
         print(f"                    frames_encode_failed={last['frames_encode_failed']}")
         print(f"                    frames_focus_race_dropped={last['frames_focus_race_dropped']}")
+        # PR #226 §5.1 (1) surface — `failsafe-by-app: bundle=N, ...`
+        # mci-agent --health-summary mirrors this same shape from the
+        # JSONL log; the wire_decode.py output here is the per-frame
+        # view (vs aggregate).
+        if last["failsafe_by_app"]:
+            pairs = ", ".join(f"{b}={c}" for b, c in last["failsafe_by_app"])
+            print(f"                    failsafe-by-app: {pairs}")
+        else:
+            print(f"                    failsafe-by-app: none")
+        # Wire-0x09 footprint sample pair.
+        cpu_pct = last["cpu_pct_micro"] / 10_000.0
+        rss_mib = last["rss_bytes"] / (1024.0 * 1024.0)
+        print(f"                    cpu={cpu_pct:.3f}%  rss={rss_mib:.1f}MiB")
+        print(f"                    tracker_alive_at_us={last['tracker_alive_at_us']}")
         # End-of-stream running totals: each counter is monotonic, so
         # the final HelperHealth carries the run totals. We print them
         # explicitly alongside the per-message snapshot for the

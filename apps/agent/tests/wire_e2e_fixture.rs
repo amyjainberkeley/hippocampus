@@ -245,22 +245,24 @@ async fn swift_v07_fixture_decodes_ingests_and_recalls_end_to_end() {
 // dual-accept set is REJECTED, not silently accepted. The strict-payload
 // tripwire from PR #44 applied at the version-byte boundary — a
 // misbehaving helper must not be able to smuggle bytes in by claiming a
-// future wire version the consumer hasn't agreed to. The 0x07 → 0x08
-// V2-P1 ADR-0031 bump opens the accept set to {0x07, 0x08} for rolling-
-// restart safety; anything OUTSIDE that set still hard-fails. 0x06
-// reaches end-of-support at this bump.
+// future wire version the consumer hasn't agreed to. The Phase 6 PR 6
+// bump opens the accept set to {0x09, 0x08, 0x07, 0x06}; anything
+// OUTSIDE that set still hard-fails (including future versions like
+// 0x10 that the consumer has not agreed to).
 // -----------------------------------------------------------------------
 
 #[tokio::test]
 async fn single_byte_version_flip_to_future_version_is_rejected_no_silent_accept() {
-    // Flip byte 1 (the version byte) from 0x07 to 0x09 — a NOT-IN-SET
-    // value. The 0x07 → 0x08 dual-accept is intentional (rolling-restart
-    // for 0x07-era helpers); any byte outside that set must still
-    // hard-fail. Every other byte is unchanged — proves the decoder
-    // fails on the version mismatch alone.
+    // Flip byte 1 (the version byte) from 0x07 to 0x10 — a NOT-IN-SET
+    // future value that no version of the decoder has ever accepted.
+    // The {0x09, 0x08, 0x07, 0x06} dual-accept is intentional (rolling-
+    // restart safety + Safari extension async-update window); any byte
+    // outside that set must still hard-fail. Every other byte is
+    // unchanged — proves the decoder fails on the version mismatch
+    // alone.
     let mut corrupted: Vec<u8> = OCR_EVENT_V07_FIXTURE.to_vec();
     assert_eq!(corrupted[1], 0x07, "fixture sanity: byte 1 is the v0x07 version byte");
-    corrupted[1] = 0x09;
+    corrupted[1] = 0x10;
 
     let (dir, _db_path, _key, store) = open_temp_store();
     let log = fresh_log(dir.path());
@@ -280,12 +282,12 @@ async fn single_byte_version_flip_to_future_version_is_rejected_no_silent_accept
     match err {
         RunError::Read(ReadError::Decode(DecodeError::UnsupportedVersion { got })) => {
             assert_eq!(
-                got, 0x09,
+                got, 0x10,
                 "decoder must surface the actual rejected version byte"
             );
         }
         other => panic!(
-            "expected RunError::Read(Decode(UnsupportedVersion {{ got: 9 }})), got: {other:?}"
+            "expected RunError::Read(Decode(UnsupportedVersion {{ got: 16 }})), got: {other:?}"
         ),
     }
 

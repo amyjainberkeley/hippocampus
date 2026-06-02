@@ -200,6 +200,15 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         context: WorkflowContext,
         input: OCREngineInput
     ) async {
+        // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 env-gated trace at the
+        // post-allow entry. Logs bundle id + kill-switch state so the
+        // operator can attribute the M4 short-circuit fork live.
+        // Content-free: bundle id + boolean. NO OCR text — there is
+        // no OCR text at this entry point anyway (OCR has not run).
+        OCRTrace.emit(
+            "ocr-post-allow-entry",
+            "bundle=\(context.appBundleId ?? "nil") kill_ocr_emit=\(Self.killOcrEmit)"
+        )
         // CSO escalation 2026-05-29 — capture-scope cross-window leak
         // (see `Self.killOcrEmit` + `docs/research/capture-scope-
         // window-vs-display-2026-05-29.md`). Short-circuit the OCR
@@ -283,6 +292,20 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     ) async {
         let text = result.recognizedLines.map(\.text).joined(separator: "\n")
         let decision = cascade.decideOcr(text: text, context: context)
+        // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 trace at the post-allow
+        // OCR completion. Logs bundle id + cascade-twice §6 decision
+        // + OCR text LENGTH (the spec explicitly permits the length
+        // count as a non-content signal; recognized lines counted as
+        // a coarse signal of how much text the OCR produced — useful
+        // for diagnosing "OCR ran but produced nothing" silences
+        // without leaking the actual content). NEVER the text itself.
+        OCRTrace.emit(
+            "ocr-post-allow-result",
+            "bundle=\(context.appBundleId ?? "nil") "
+                + "decision=\(decision.traceLabel) "
+                + "ocr_len=\(text.utf8.count) "
+                + "ocr_lines=\(result.recognizedLines.count)"
+        )
         switch decision {
         case .suppress(let reason):
             // §6 fired — never emit OCREvent on this path. Tombstone
@@ -370,6 +393,11 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         await counters.recordSuppressed()
         if reason == .failsafeUnknown {
             await counters.recordRedactedByFailsafe()
+            // Phase 6 PR 6 — per-app cascade-silence attribution
+            // (PR #226 §5.1 (1)). The cap-8 LRU is enforced inside
+            // `recordFailsafeByApp`. Bundle id is content-free under
+            // the cap-8 discipline — see HelperHealthCounters docs.
+            await counters.recordFailsafeByApp(bundleId: context.appBundleId ?? "")
         }
     }
 }

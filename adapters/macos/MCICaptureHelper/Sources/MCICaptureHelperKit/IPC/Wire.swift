@@ -53,7 +53,35 @@ public let frameMagic: UInt8 = 0x4D
 /// captured surface). Content-free observability counter; never widens
 /// `.allow`. Core decoder accepts both 0x07 and 0x08 for rolling-restart
 /// safety; 0x06 reaches end-of-support at this bump.
-public let frameVersion: UInt8 = 0x08
+/// 0x08→0x09 (2026-06-01, Phase 6 PR 6): HelperHealth gained four
+/// trailing content-free fields:
+///   1. `failsafe_by_app: [(bundleId, counter)]` — per-app
+///      `.failsafeUnknown` tombstone counter map, cap 8 entries with
+///      least-recent-bump eviction (PR #226 §5.1 (1) — load-bearing
+///      live per-app cascade-silence attribution).
+///   2. `cpu_pct_micro: UInt32` — instantaneous helper CPU %
+///      × 1_000_000 sampled at HelperHealth flush.
+///   3. `rss_bytes: UInt64` — Mach `task_info` RSS sample.
+///   4. `tracker_alive_at_us: UInt64` — RESERVED SLOT for V2-P1
+///      PR 13 (`docs/research/v2-p1-redesign-architecture-2026-06-01.md`
+///      §6.2 = A + §8 coordination — reuses this bump per the
+///      coordination contract so PR 13 does not need a 0x09→0x0A
+///      bump). 0 sentinel until PR 13 populates.
+/// Core decoder accepts [0x09, 0x08, 0x07, 0x06]; the 0x06 acceptance
+/// stays because the Safari extension native messaging host emits
+/// PageContentEvent at 0x06 (cycle 8.27 emergency lesson — NEVER drop
+/// 0x06).
+public let frameVersion: UInt8 = 0x09
+
+/// Cap on the wire-0x09 `failsafe_by_app` map. Structural defence
+/// against information-theoretic PII leak via cardinality; enforced
+/// on writes by `HelperHealthCounters` actor (least-recent-bump
+/// eviction) and on the wire by the encoder (debug-asserts overflow).
+public let maxFailsafeByAppEntries: Int = 8
+
+/// Cap on a single bundle-id length in `failsafe_by_app`. 255 bytes
+/// is loose enough to cover any production reverse-DNS bundle id.
+public let maxFailsafeByAppBundleIdLen: Int = 255
 
 /// Minimum frame header size in bytes.
 public let minFrameHeaderBytes = 1 + 1 + 2 + 8 + 4
@@ -322,6 +350,11 @@ public func encodePageContentEvent(
 }
 
 /// Encode a periodic helper-health counter frame.
+///
+/// Wire 0x09 (Phase 6 PR 6) adds four trailing fields:
+/// `failsafeByApp` (cap 8), `cpuPctMicro`, `rssBytes`,
+/// `trackerAliveAtUs`. See `frameVersion` docs for the full bump
+/// rationale. All four are content-free observability fields.
 public func encodeHelperHealth(
     seq: UInt64,
     uptimeMs: UInt64,
@@ -332,7 +365,11 @@ public func encodeHelperHealth(
     framesDroppedBackpressure: UInt64,
     framesDroppedLateAck: UInt64,
     framesEncodeFailed: UInt64,
-    framesFocusRaceDropped: UInt64
+    framesFocusRaceDropped: UInt64,
+    failsafeByApp: [FailsafeAppCounter] = [],
+    cpuPctMicro: UInt32 = 0,
+    rssBytes: UInt64 = 0,
+    trackerAliveAtUs: UInt64 = 0
 ) -> Data {
     var payload = Data()
     payload.appendUInt64LE(uptimeMs)
@@ -357,6 +394,33 @@ public func encodeHelperHealth(
     // core decoder's 0x07-fallback path can default it to 0 (rolling-
     // restart safety). Order matches core::ipc::wire decode.
     payload.appendUInt64LE(framesFocusRaceDropped)
+    // Phase 6 PR 6 — wire 0x09. Four trailing content-free fields:
+    //   1. failsafe_by_app map — u8 entry count + N × (u8 bundle_id_len
+    //      + bundle_id bytes + u64 counter). Cap [maxFailsafeByAppEntries].
+    //   2. cpu_pct_micro (u32 LE)
+    //   3. rss_bytes (u64 LE)
+    //   4. tracker_alive_at_us (u64 LE)
+    precondition(
+        failsafeByApp.count <= maxFailsafeByAppEntries,
+        "failsafeByApp exceeds maxFailsafeByAppEntries — "
+            + "HelperHealthCounters LRU cap was bypassed"
+    )
+    let entryCount = min(failsafeByApp.count, maxFailsafeByAppEntries)
+    payload.append(UInt8(entryCount))
+    for entry in failsafeByApp.prefix(entryCount) {
+        let bundleBytes = Array(entry.bundleId.utf8)
+        precondition(
+            bundleBytes.count <= maxFailsafeByAppBundleIdLen,
+            "failsafeByApp bundleId exceeds maxFailsafeByAppBundleIdLen"
+        )
+        let idLen = min(bundleBytes.count, maxFailsafeByAppBundleIdLen)
+        payload.append(UInt8(idLen))
+        payload.append(contentsOf: bundleBytes.prefix(idLen))
+        payload.appendUInt64LE(entry.counter)
+    }
+    payload.appendUInt32LE(cpuPctMicro)
+    payload.appendUInt64LE(rssBytes)
+    payload.appendUInt64LE(trackerAliveAtUs)
     return assembleFrame(msgType: .helperHealth, seq: seq, payload: payload)
 }
 

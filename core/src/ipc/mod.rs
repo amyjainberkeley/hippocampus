@@ -286,6 +286,61 @@ pub enum Message {
         /// the rebind task), Electron AX intermittency drifting the
         /// FocusTracker, or a pathological focus-loop bug.
         frames_focus_race_dropped: u64,
+        /// Per-app failsafe counter map — bundle id → cumulative count
+        /// of `.failsafeUnknown` tombstones emitted with that
+        /// `appBundleId`. Fixed-cardinality (cap
+        /// [`crate::ipc::wire::MAX_FAILSAFE_BY_APP_ENTRIES`] = 8 entries,
+        /// least-recent-bump eviction enforced by the helper-side
+        /// `HelperHealthCounters` actor). Promoted to the wire by the
+        /// `0x08 → 0x09` bump (PR #226 §5.1 (1); CTO Phase 6 PR 6).
+        /// Content-free: bundle ids (already cascade-eligible —
+        /// `.failsafeUnknown` is the §7 outcome, NEVER OCR text) and
+        /// a `u64` counter per entry. The load-bearing addition:
+        /// converts the cascade's per-app silence from a structural
+        /// unknown into a one-command live measurement
+        /// (`mci-agent --health-summary` shape:
+        /// `failsafe-by-app: com.example.app=124, …`). Bounded
+        /// cardinality prevents information-theoretic PII leak via
+        /// the bundle-id stream length. Resets on helper restart
+        /// (cumulative-within-process).
+        failsafe_by_app: Vec<(String, u64)>,
+        /// Instantaneous helper CPU % at HelperHealth flush, multiplied
+        /// by 1_000_000 (microfraction). `1_000_000` = 100% of one
+        /// core; `15_000` = 1.5% of one core. `0` = sampler did not
+        /// take a sample this tick (first flush in a process — no
+        /// prior `getrusage` snapshot to compute a delta against, or
+        /// `getrusage` syscall failure). Promoted to the wire by the
+        /// `0x08 → 0x09` bump (CTO Phase 6 PR 6, S4 acceptance gate:
+        /// steady-state ≤10–15% of one CPU core / ≤2 GB RAM per
+        /// G2 ratification 2026-05-31). Content-free. Pairs with the
+        /// MetricKit non-content footprint telemetry pipeline (also
+        /// in this PR) for finer-than-daily-aggregate CPU
+        /// observability — MetricKit aggregates daily, this counter
+        /// samples per HelperHealth flush (default 30s cadence).
+        cpu_pct_micro: u32,
+        /// Instantaneous helper resident set size at HelperHealth flush,
+        /// in bytes. Sampled via Mach
+        /// `task_info(MACH_TASK_BASIC_INFO)`. `0` = sampler failed
+        /// (extremely rare; would indicate a Mach kernel error).
+        /// Promoted to the wire by the `0x08 → 0x09` bump (CTO Phase
+        /// 6 PR 6, S4 acceptance gate ≤2 GB RAM). Content-free.
+        /// Pairs with MetricKit (MetricKit aggregates daily; this
+        /// counter samples per HelperHealth flush).
+        rss_bytes: u64,
+        /// RESERVED SLOT for V2-P1 PR 13 (§6.2 = A focused-window
+        /// race-gate timeout). Reused under the §8 coordination
+        /// contract: "If §6.2 = A and the §5 observability bump is
+        /// in flight, V2-P1 reuses the bumped wire version + a new
+        /// slot." This PR is that §5 bump; V2-P1 PR 13 populates this
+        /// field with the AX-focus-tracker heartbeat timestamp at
+        /// snapshot time. `0` = sentinel ("AX focus tracker not yet
+        /// implemented" — Phase 6 PR 6 ships the slot at 0 and
+        /// V2-P1 PR 13 owns assigning real timestamps). Reused-slot
+        /// trade-off vs deferring: deferring would force PR 13 to
+        /// bump to 0x0A, expanding the dual-accept window unnecessarily.
+        /// Content-free (timestamp microseconds since epoch, no
+        /// content metadata).
+        tracker_alive_at_us: u64,
     },
 }
 
@@ -535,6 +590,10 @@ mod tests {
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
                 frames_focus_race_dropped: 0,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
             },
             Message::OCREvent {
                 seq: 0,
