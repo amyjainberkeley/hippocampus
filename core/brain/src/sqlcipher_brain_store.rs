@@ -331,6 +331,93 @@ impl SqlCipherBrainStore {
         Ok(out)
     }
 
+    /// Return events that have not yet been scanned by the V2-P5 Tier 2
+    /// Qwen NER pass, ordered by `events.id ASC`, capped at `limit`.
+    ///
+    /// Inverse of the sentinel `(extractor_status, qwen_tier2_processed)`
+    /// mention written by
+    /// [`mark_event_tier2_processed`](crate::mark_event_tier2_processed).
+    /// Same LEFT-JOIN anti-pattern as [`Self::unembedded_events`] for
+    /// SQLite query-planner friendliness on large `entity_mentions`
+    /// tables.
+    ///
+    /// The idle-batch worker (`apps/agent/src/tier2_worker.rs`) polls
+    /// this to find work. Sentinel mention guarantees an event whose
+    /// NER output is empty is still marked "done" and not re-scanned
+    /// every cycle.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn events_pending_tier2(&self, limit: usize) -> Result<Vec<Event>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        // The sentinel entity has a deterministic content-stable ULID
+        // derived from `("extractor_status", "qwen_tier2_processed")`.
+        // We materialise it via the `extraction::tier2` module's
+        // `Entity::derive_id` to keep the value in lock-step with the
+        // writer (no risk of a typo in the SQL literal here drifting
+        // from the constant in `tier2.rs`).
+        let sentinel_id = crate::graph::Entity::derive_id(
+            crate::extraction::tier2::SENTINEL_KIND,
+            crate::extraction::tier2::SENTINEL_NAME,
+        );
+        let sentinel_id_str = sentinel_id.0;
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url,
+                        e.text, e.summary, e.entities, e.episode_id,
+                        e.cascade_reason, e.keyframe_blob, e.tab_id
+                 FROM events e
+                 LEFT JOIN entity_mentions m
+                   ON m.event_id = e.id
+                   AND m.entity_id = ?1
+                 WHERE m.event_id IS NULL
+                 ORDER BY e.id ASC
+                 LIMIT ?2",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare events_pending_tier2: {e}")))?;
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![sentinel_id_str, lim], row_to_event_tuple)
+            .map_err(|e| StoreError::Backend(format!("query events_pending_tier2: {e}")))?;
+        let mut out: Vec<Event> = Vec::new();
+        for r in rows {
+            let (
+                ev_id,
+                ts_us,
+                app,
+                title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id,
+                cascade_reason,
+                keyframe_blob,
+                tab_id,
+            ) = r.map_err(|e| StoreError::Backend(format!("row events_pending_tier2: {e}")))?;
+            out.push(Event {
+                id: EventId(u64::try_from(ev_id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text,
+                summary,
+                entities,
+                episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
+                cascade_reason,
+                keyframe_blob,
+                tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
+                embedding: None,
+            });
+        }
+        Ok(out)
+    }
+
     /// Paginated full-column cursor: events strictly AFTER `(ts_us, after_id)`
     /// ordered by `(ts_us ASC, id ASC)`, capped at `limit`.
     ///

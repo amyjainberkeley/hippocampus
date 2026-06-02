@@ -485,6 +485,35 @@ async fn main() -> ExitCode {
                                         shutdown_rx.clone(),
                                     );
 
+                                    // V2-P5 — Tier 2 Qwen NER idle-batch
+                                    // worker (FORK 8 = A; CTO Phase 6 PR 9).
+                                    // Reuses the brief author's Qwen3-1.7B
+                                    // Core ML model when present on disk.
+                                    // Polls
+                                    // `SqlCipherBrainStore::events_pending_tier2`
+                                    // for events lacking the
+                                    // (extractor_status,
+                                    // qwen_tier2_processed) sentinel
+                                    // mention, runs each through a
+                                    // `Tier2Extractor` (cascade-marker SKIP
+                                    // + V2-P4 token-REDACT downstream SKIP
+                                    // filters applied above the Qwen
+                                    // backend), writes
+                                    // (extractor_kind = "qwen") mentions to
+                                    // `entity_mentions`. Disabled-idle when
+                                    // the Qwen .mlmodelc is not downloaded
+                                    // (same UX as brief worker); V2-P4
+                                    // Tier 1 regex mentions continue on the
+                                    // hot path regardless. Construction-
+                                    // graph wiring at integration site —
+                                    // per
+                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                    // this is the load-bearing wire.
+                                    spawn_tier2_worker(
+                                        Arc::clone(&store),
+                                        shutdown_rx.clone(),
+                                    );
+
                                     // V2-P10 — deep-hook pump supervisor.
                                     // Reads ~/Library/Application Support/MCI/
                                     // user-allowlist.toml, probes FDA per
@@ -1114,6 +1143,130 @@ fn spawn_brief_worker(
         eprintln!(
             "mci-agent: brief worker exited (non-macOS). generated={} skipped_empty={} errors={}",
             stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
+        );
+    });
+}
+
+/// V2-P5 — spawn the Tier 2 Qwen NER idle-batch worker (FORK 8 = A;
+/// Phase 6 PR 9). Reuses the brief author's Qwen3-1.7B Core ML
+/// `LlamaBackend`; selects between the production Qwen-backed path
+/// and disabled-idle based on the `.mlmodelc` presence + the host OS.
+/// Construction-graph wiring at integration site — this is the
+/// load-bearing call site that turns the V2-P5 module + worker into
+/// production behaviour. Per
+/// [[project-v2p1-unit-tests-passed-but-never-wired]] the wire is
+/// the lift; without this call the Tier 2 worker would never run.
+#[cfg(target_os = "macos")]
+fn spawn_tier2_worker(
+    store: Arc<mci_brain::SqlCipherBrainStore>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    use mci_agent::tier2_qwen_backend::QwenTier2Backend;
+    use mci_agent::tier2_worker::{run_disabled_idle, run_tier2_worker};
+    use mci_brain::{NerBackend, Tier2Extractor};
+    use mci_brief::llama_backend::LlamaBackend;
+    use std::time::Duration;
+
+    /// How many events to scan per batch. Bounded to keep one
+    /// cycle's worth of work tractable on the single-flight Qwen
+    /// call site; events accumulate across cycles.
+    const TIER2_BATCH_SIZE: usize = 8;
+    /// Sleep between idle-batch cycles when the queue is drained.
+    /// 30 s is the same cadence as the embedder idle-batch loop;
+    /// it bounds the steady-state cost while keeping catch-up
+    /// reasonable after a long-running session.
+    const TIER2_IDLE_INTERVAL: Duration = Duration::from_secs(30);
+
+    let model_dir = brief_worker::default_model_dir();
+    if !brief_worker::qwen3_model_present(&model_dir) {
+        tokio::spawn(async move {
+            let stats =
+                run_disabled_idle("Qwen3 model not installed", shutdown).await;
+            eprintln!(
+                "mci-agent: tier2 NER worker exited (no model). scanned={} mentions={} ner_errors={} disabled={}",
+                stats.events_scanned,
+                stats.mentions_inserted,
+                stats.ner_errors,
+                stats.disabled,
+            );
+        });
+        return;
+    }
+
+    // Path layout matches `ModelDownloadManager`'s unpack convention.
+    // Same constants as `spawn_brief_worker` — both workers reuse the
+    // SAME `.mlmodelc` on disk. The model is loaded twice (once per
+    // worker) which is acceptable: each worker is single-flight, so
+    // peak RAM is bounded by one Qwen working set per workflow, not
+    // two at once.
+    let model_subdir = model_dir.join(brief_worker::QWEN3_MODEL_ID);
+    let model_path = model_subdir.join(brief_worker::QWEN3_MODEL_BASENAME);
+    let tokenizer_dir = model_subdir;
+
+    let backend_result =
+        mci_llama_coreml::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir);
+    let backend = match backend_result {
+        Ok(b) => b,
+        Err(e) => {
+            tokio::spawn(async move {
+                let reason = format!("Qwen3CoreMLBackend::open failed: {e}");
+                let stats = run_disabled_idle(&reason, shutdown).await;
+                eprintln!(
+                    "mci-agent: tier2 NER worker exited (open failed). disabled={}",
+                    stats.disabled,
+                );
+            });
+            return;
+        }
+    };
+
+    let llama: Arc<dyn LlamaBackend> = Arc::new(backend);
+    let ner_backend: Arc<dyn NerBackend> = Arc::new(QwenTier2Backend::new(llama));
+    let extractor = Tier2Extractor::new(ner_backend);
+
+    tokio::spawn(async move {
+        match run_tier2_worker(
+            store,
+            extractor,
+            TIER2_BATCH_SIZE,
+            TIER2_IDLE_INTERVAL,
+            shutdown,
+        )
+        .await
+        {
+            Ok(stats) => {
+                eprintln!(
+                    "mci-agent: tier2 NER worker exited. scanned={} mentions={} batches={} ner_errors={} store_errors={} disabled={}",
+                    stats.events_scanned,
+                    stats.mentions_inserted,
+                    stats.batches_run,
+                    stats.ner_errors,
+                    stats.store_errors,
+                    stats.disabled,
+                );
+            }
+            Err(e) => {
+                eprintln!("mci-agent: tier2 NER worker fatal: {e}");
+            }
+        }
+    });
+}
+
+/// Non-macOS: no Core ML, no Qwen3 backend, so the Tier 2 worker
+/// stays in disabled-idle mode. The mci-brain V2-P4 Tier 1 regex
+/// extractor still runs on the hot path so structural entities
+/// continue to land.
+#[cfg(not(target_os = "macos"))]
+fn spawn_tier2_worker(
+    _store: Arc<mci_brain::SqlCipherBrainStore>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    use mci_agent::tier2_worker::run_disabled_idle;
+    tokio::spawn(async move {
+        let stats = run_disabled_idle("non-macOS platform", shutdown).await;
+        eprintln!(
+            "mci-agent: tier2 NER worker exited (non-macOS). disabled={}",
+            stats.disabled,
         );
     });
 }
