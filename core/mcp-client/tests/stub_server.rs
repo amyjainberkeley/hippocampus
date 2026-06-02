@@ -33,10 +33,48 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
+/// One stub resource the server advertises. V2-MCP-3 integration
+/// tests register a set of these so a single stub can drive both the
+/// "small body → materialize" and "large body → catalog" branches.
+#[derive(Debug, Clone)]
+pub struct StubResource {
+    /// `resources/list` URI.
+    pub uri: String,
+    /// `resources/list` name (becomes `Event.window_title`).
+    pub name: String,
+    /// `resources/list` mime type.
+    pub mime: String,
+    /// `resources/read` body. Length drives the materialize-or-catalog
+    /// branch in V2-MCP-3.
+    pub body: String,
+}
+
+impl StubResource {
+    /// Convenience: build a minimal text resource.
+    #[must_use]
+    pub fn new(uri: &str, name: &str, body: &str) -> Self {
+        Self {
+            uri: uri.to_owned(),
+            name: name.to_owned(),
+            mime: "text/plain".to_owned(),
+            body: body.to_owned(),
+        }
+    }
+}
+
+/// Server-wide stub configuration. Mutable across the server's
+/// lifetime via [`StubMcpServer::set_resources`] / [`StubMcpServer::set_tools`].
+#[derive(Debug, Default, Clone)]
+struct StubConfig {
+    resources: Vec<StubResource>,
+    tools: Vec<(String, Option<String>)>,
+}
+
 /// One running stub server bound to a 127.0.0.1 ephemeral port.
 pub struct StubMcpServer {
     port: u16,
     auth_headers: Arc<Mutex<Vec<String>>>,
+    config: Arc<Mutex<StubConfig>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
     task: Option<JoinHandle<()>>,
 }
@@ -62,9 +100,11 @@ impl StubMcpServer {
         // long-lived GET /sse and the per-call POST /messages — both
         // need to find the same senders list.
         let sse_senders = Arc::new(Mutex::new(Vec::<mpsc::Sender<String>>::new()));
+        let config = Arc::new(Mutex::new(StubConfig::default()));
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         let auth_clone = Arc::clone(&auth_headers);
         let sse_clone = Arc::clone(&sse_senders);
+        let cfg_clone = Arc::clone(&config);
 
         let task = tokio::spawn(async move {
             loop {
@@ -77,9 +117,10 @@ impl StubMcpServer {
                         };
                         let auth = Arc::clone(&auth_clone);
                         let senders = Arc::clone(&sse_clone);
+                        let cfg = Arc::clone(&cfg_clone);
                         let conn_delay = delay;
                         tokio::spawn(async move {
-                            let svc = StubService::new(senders, auth, conn_delay);
+                            let svc = StubService::new(senders, auth, cfg, conn_delay);
                             let _ = hyper::server::conn::http1::Builder::new()
                                 .keep_alive(true)
                                 .serve_connection(TokioIo::new(sock), svc)
@@ -93,6 +134,7 @@ impl StubMcpServer {
         Self {
             port,
             auth_headers,
+            config,
             shutdown_tx: Some(shutdown_tx),
             task: Some(task),
         }
@@ -100,6 +142,22 @@ impl StubMcpServer {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Register the resource set advertised by `resources/list` +
+    /// served by `resources/read`. Overrides any prior set.
+    pub async fn set_resources(&self, resources: Vec<StubResource>) {
+        let mut c = self.config.lock().await;
+        c.resources = resources;
+    }
+
+    /// Register the tool catalog advertised by `tools/list`. Each
+    /// pair is `(name, optional_description)`. Overrides any prior
+    /// set; default is two tools (`echo` + `ping`) so the V2-MCP-2
+    /// integration tests keep passing without explicit setup.
+    pub async fn set_tools(&self, tools: Vec<(String, Option<String>)>) {
+        let mut c = self.config.lock().await;
+        c.tools = tools;
     }
 
     /// Snapshot the Authorization header values the stub recorded
@@ -126,6 +184,7 @@ impl StubMcpServer {
 struct StubService {
     sse_senders: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
     auth_headers: Arc<Mutex<Vec<String>>>,
+    config: Arc<Mutex<StubConfig>>,
     delay: Option<Duration>,
 }
 
@@ -133,11 +192,13 @@ impl StubService {
     fn new(
         sse_senders: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
         auth_headers: Arc<Mutex<Vec<String>>>,
+        config: Arc<Mutex<StubConfig>>,
         delay: Option<Duration>,
     ) -> Self {
         Self {
             sse_senders,
             auth_headers,
+            config,
             delay,
         }
     }
@@ -202,7 +263,8 @@ impl StubService {
             Ok(v) => v,
             Err(_) => return Self::bad_request(),
         };
-        let response = build_response(&req_json);
+        let cfg = self.config.lock().await.clone();
+        let response = build_response(&req_json, &cfg);
         // Notifications (no id) get no response.
         if let Some(resp) = response {
             let frame = format!("event: message\ndata: {resp}\n\n");
@@ -237,7 +299,7 @@ impl StubService {
     }
 }
 
-fn build_response(req: &serde_json::Value) -> Option<String> {
+fn build_response(req: &serde_json::Value, cfg: &StubConfig) -> Option<String> {
     let method = req.get("method")?.as_str()?;
     let id = req.get("id").cloned();
     if id.is_none() {
@@ -247,15 +309,29 @@ fn build_response(req: &serde_json::Value) -> Option<String> {
     let result = match method {
         "initialize" => serde_json::json!({
             "protocolVersion": "2024-11-05",
-            "capabilities": {"tools": {}},
+            "capabilities": {"tools": {}, "resources": {}},
             "serverInfo": {"name": "stub-mcp", "version": "0.0.1"}
         }),
-        "tools/list" => serde_json::json!({
-            "tools": [
-                {"name": "echo", "description": "echoes back"},
-                {"name": "ping"}
-            ]
-        }),
+        "tools/list" => {
+            // Default catalog preserves the V2-MCP-2 integration test
+            // expectations (echo + ping) for any call site that did
+            // not invoke `set_tools`.
+            let tools: Vec<serde_json::Value> = if cfg.tools.is_empty() {
+                vec![
+                    serde_json::json!({"name": "echo", "description": "echoes back"}),
+                    serde_json::json!({"name": "ping"}),
+                ]
+            } else {
+                cfg.tools
+                    .iter()
+                    .map(|(name, desc)| match desc {
+                        Some(d) => serde_json::json!({"name": name, "description": d}),
+                        None => serde_json::json!({"name": name}),
+                    })
+                    .collect()
+            };
+            serde_json::json!({ "tools": tools })
+        }
         "tools/call" => {
             let params = req.get("params").cloned().unwrap_or_default();
             let args = params
@@ -270,6 +346,42 @@ fn build_response(req: &serde_json::Value) -> Option<String> {
             serde_json::json!({
                 "content": [{"type": "text", "text": msg}],
                 "isError": false
+            })
+        }
+        "resources/list" => {
+            // V2-MCP-3 surface: serve the configured resource list.
+            let resources: Vec<serde_json::Value> = cfg
+                .resources
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "uri": r.uri,
+                        "name": r.name,
+                        "mimeType": r.mime,
+                    })
+                })
+                .collect();
+            serde_json::json!({ "resources": resources })
+        }
+        "resources/read" => {
+            let params = req.get("params").cloned().unwrap_or_default();
+            let uri = params
+                .get("uri")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let body = cfg.resources.iter().find(|r| r.uri == uri).map_or_else(
+                || (String::new(), "text/plain".to_owned()),
+                |r| (r.body.clone(), r.mime.clone()),
+            );
+            serde_json::json!({
+                "contents": [
+                    {
+                        "uri": uri,
+                        "text": body.0,
+                        "mimeType": body.1,
+                    }
+                ]
             })
         }
         _ => serde_json::json!({}),

@@ -129,6 +129,20 @@ tokio       = { version = "1", default-features = false, features = ["sync", "rt
 # is dev-only by Cargo's [dev-dependencies] gate.
 mci-brain   = { path = "../../core/brain", features = ["stubs"] }
 
+# V2-MCP-3 — `mcp_aggregator_wiring.rs` integration test spins up a
+# loopback HTTP+SSE stub MCP server (shared via `#[path]` from
+# `core/mcp-client/tests/stub_server.rs`) to drive the aggregator
+# end-to-end. The server-side hyper/http stack is dev-only — the
+# production agent never opens a listening socket. Every crate below
+# is ALREADY on the workspace lockfile via `mci-mcp-client` (client
+# side) + `mci-server` (axum server), so this adds ZERO net new
+# third-party crates per ADR-0008.
+hyper          = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util     = { version = "0.1", default-features = false, features = ["tokio"] }
+http           = "1"
+http-body-util = "0.1"
+bytes          = "1"
+
 # V2-P8b — tests in `mail_ingest.rs` exercise the typed-header
 # translator (`to_parsed_headers`) by re-parsing synthesized emlx
 # fixtures via `mail_parser::MessageParser`. Already on the lockfile
