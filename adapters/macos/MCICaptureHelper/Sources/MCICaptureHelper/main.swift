@@ -310,6 +310,25 @@ let loop = HelperMainLoop(
     heartbeatInterval: .seconds(args.heartbeatSeconds)
 )
 
+// Phase 6 PR 6 — wire-0x09 footprint sampler. The production sampler
+// reads RSS via Mach `task_info(MACH_TASK_BASIC_INFO)` + CPU% via
+// `getrusage(RUSAGE_SELF)` deltas. Each `loop.tickHealth()` flush
+// asks the sampler for the current reading; the reading lands on the
+// wire as `HelperHealth.cpu_pct_micro` + `HelperHealth.rss_bytes`.
+// Pair with the MetricKit pipeline below for finer-than-daily
+// observability against the G2-ratified ≤10-15% / ≤2 GB SLOs.
+let footprintSampler = MachFootprintSampler()
+await loop.counters.installFootprintSampler(footprintSampler)
+
+// Phase 6 PR 6 — MetricKit non-content footprint telemetry pipeline.
+// Apple aggregates daily; each payload lands at
+// `~/Library/Application Support/MCI/metrickit/<uuid>.json` (mode 0600).
+// Content-free by Apple construction — see MetricKitSubscriber.swift
+// CSO sign-off block. Installed unconditionally (no --capture gate);
+// MetricKit's per-process posture is "always on, lightweight".
+let metricKitSink = MetricKitFileSink()
+_ = MetricKitSubscriber.install(sink: metricKitSink)
+
 if args.oneShot {
     // CI smoke: emit one frame, exit clean.
     do {

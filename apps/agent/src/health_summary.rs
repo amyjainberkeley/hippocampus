@@ -126,6 +126,28 @@ pub struct HealthSummary {
     /// Number of in-window helper restarts detected via `uptime_ms`
     /// going backward across consecutive samples.
     pub restarts_detected: u64,
+    /// Per-app `.failsafeUnknown` tombstone counter map from the
+    /// latest in-window sample (cap 8 entries, least-recent-bump
+    /// eviction enforced by the helper-side actor). Promoted to the
+    /// wire by the `0x08 → 0x09` bump (PR #226 §5.1 + CTO Phase 6
+    /// PR 6). Surfaced by `to_human_line` as the
+    /// `failsafe-by-app: com.example.app=124, …` segment per the
+    /// canonical spec — the load-bearing live measurement that turns
+    /// cascade silence into per-app attribution. Empty on an `0x08`-
+    /// or earlier-era helper (back-compat: absent key → empty Vec).
+    pub failsafe_by_app_latest: Vec<(String, u64)>,
+    /// Instantaneous helper CPU sample (microfraction; 1_000_000 =
+    /// 100% of one core) from the latest in-window sample. Promoted
+    /// by the `0x08 → 0x09` bump. `0` on legacy lines.
+    pub cpu_pct_micro_latest: u32,
+    /// Instantaneous helper RSS sample (bytes) from the latest in-
+    /// window sample. Promoted by the `0x08 → 0x09` bump. `0` on
+    /// legacy lines.
+    pub rss_bytes_latest: u64,
+    /// Reserved-slot value (V2-P1 PR 13 AX-focus-tracker heartbeat
+    /// timestamp) from the latest in-window sample. `0` until
+    /// V2-P1 PR 13 wires real values into it.
+    pub tracker_alive_at_us_latest: u64,
 }
 
 impl HealthSummary {
@@ -141,6 +163,27 @@ impl HealthSummary {
         let earliest = self.earliest_ts.as_deref().unwrap_or("-");
         let latest = self.latest_ts.as_deref().unwrap_or("-");
         let device = self.device_id.as_deref().unwrap_or("-");
+        // PR #226 §5.1 (1) canonical surface shape:
+        //   `failsafe-by-app: com.anthropic.claudefordesktop=124,
+        //    com.microsoft.VSCode=87, com.googlecode.iterm2=63, …`
+        // Empty map → `failsafe-by-app=none` so the segment is always
+        // present (one-grep stability for the dashboard ingester).
+        let failsafe_by_app_segment = if self.failsafe_by_app_latest.is_empty() {
+            "failsafe-by-app=none".to_string()
+        } else {
+            let pairs: Vec<String> = self
+                .failsafe_by_app_latest
+                .iter()
+                .map(|(bundle, count)| format!("{bundle}={count}"))
+                .collect();
+            format!("failsafe-by-app={}", pairs.join(","))
+        };
+        // CPU rendered as fixed-precision percent (3 decimals) for the
+        // human reader; 1_500_000 micro = 1.5%, 25_000 micro = 0.025%.
+        // RSS rendered in MiB at 1-decimal precision.
+        let cpu_pct = f64::from(self.cpu_pct_micro_latest) / 10_000.0;
+        #[allow(clippy::cast_precision_loss)]
+        let rss_mib = (self.rss_bytes_latest as f64) / (1024.0 * 1024.0);
         format!(
             "mci-agent health-summary \
              window_start={window_start} \
@@ -153,6 +196,10 @@ impl HealthSummary {
              late_ack=Δ{lateack_d}/{lateack_l} \
              encfail=Δ{encfail_d}/{encfail_l} \
              focusrace=Δ{focusrace_d}/{focusrace_l} \
+             {failsafe_by_app_segment} \
+             cpu={cpu_pct:.3}% \
+             rss={rss_mib:.1}MiB \
+             tracker_alive_at_us={tracker_alive} \
              earliest={earliest} \
              latest={latest} \
              restarts={restarts} \
@@ -173,6 +220,7 @@ impl HealthSummary {
             encfail_l = self.frames_encode_failed_latest,
             focusrace_d = self.frames_focus_race_dropped_delta,
             focusrace_l = self.frames_focus_race_dropped_latest,
+            tracker_alive = self.tracker_alive_at_us_latest,
             restarts = self.restarts_detected,
             malformed = self.malformed_lines_skipped,
         )
@@ -226,6 +274,13 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
     // the key — same absent-as-zero policy as the prior counters.
     let frames_focus_race_dropped =
         extract_u64_field_or_zero(s, "\"frames_focus_race_dropped\":")?;
+    // Back-compat: wire-`0x09` (Phase 6 PR 6) added four trailing
+    // fields. Lines from older agents lack them — absent-as-empty
+    // for the map, absent-as-zero for the three scalars.
+    let failsafe_by_app = extract_failsafe_by_app_or_empty(s)?;
+    let cpu_pct_micro = extract_u32_field_or_zero(s, "\"cpu_pct_micro\":")?;
+    let rss_bytes = extract_u64_field_or_zero(s, "\"rss_bytes\":")?;
+    let tracker_alive_at_us = extract_u64_field_or_zero(s, "\"tracker_alive_at_us\":")?;
     Ok(HealthLogRecord {
         wall_ts,
         device_id,
@@ -238,6 +293,67 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
         frames_dropped_late_ack,
         frames_encode_failed,
         frames_focus_race_dropped,
+        failsafe_by_app,
+        cpu_pct_micro,
+        rss_bytes,
+        tracker_alive_at_us,
+    })
+}
+
+/// Parse the `"failsafe_by_app":{...}` object literal — the wire-0x09
+/// per-app failsafe counter map. Absent key resolves to empty Vec
+/// (back-compat with `0x08`-era log lines). Malformed body errors
+/// strict. Object literal shape matches the writer's
+/// `render_failsafe_by_app`: `{"bundle.id":counter,…}`. Entry count
+/// is structurally bounded by the writer (cap 8), but the parser
+/// does not re-enforce — a torn log line could carry more and we
+/// surface it as-parsed; the cap is the writer's responsibility.
+fn extract_failsafe_by_app_or_empty(s: &str) -> Result<Vec<(String, u64)>, ParseError> {
+    let key = "\"failsafe_by_app\":{";
+    let Some(start) = s.find(key) else {
+        return Ok(Vec::new());
+    };
+    let body_start = start + key.len();
+    let rest = &s[body_start..];
+    let body_end = rest
+        .find('}')
+        .ok_or_else(|| ParseError::Field("unterminated failsafe_by_app object".to_string()))?;
+    let body = &rest[..body_end];
+    if body.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in body.split(',') {
+        // Each entry is `"bundle.id":counter` — find the colon
+        // OUTSIDE the quoted bundle id.
+        let entry = entry.trim();
+        let Some(closing_quote) = entry[1..].find('"') else {
+            return Err(ParseError::Field(format!(
+                "failsafe_by_app entry missing closing key quote: {entry}"
+            )));
+        };
+        // entry[0] is the opening `"`; closing quote is at index
+        // closing_quote+1 within entry.
+        let bundle_id = &entry[1..=closing_quote];
+        // After the closing quote should be `:` then the digits.
+        let after_quote = &entry[closing_quote + 2..];
+        let after_colon = after_quote.strip_prefix(':').ok_or_else(|| {
+            ParseError::Field(format!("failsafe_by_app entry missing colon: {entry}"))
+        })?;
+        let counter: u64 = after_colon
+            .parse()
+            .map_err(|e| ParseError::Field(format!("failsafe_by_app entry counter {entry}: {e}")))?;
+        out.push((bundle_id.to_string(), counter));
+    }
+    Ok(out)
+}
+
+/// Like [`extract_u32_field_or_zero`] but a *missing* key resolves
+/// to `0`. Used for fields added by a later wire/log-schema bump.
+fn extract_u32_field_or_zero(s: &str, key_with_colon: &str) -> Result<u32, ParseError> {
+    let v = extract_u64_field_or_zero(s, key_with_colon)?;
+    u32::try_from(v).map_err(|_| {
+        ParseError::Field(format!("{key_with_colon} value exceeds u32 max"))
     })
 }
 
@@ -405,6 +521,10 @@ where
         summary.frames_dropped_late_ack_latest = rec.frames_dropped_late_ack;
         summary.frames_encode_failed_latest = rec.frames_encode_failed;
         summary.frames_focus_race_dropped_latest = rec.frames_focus_race_dropped;
+        summary.failsafe_by_app_latest = rec.failsafe_by_app.clone();
+        summary.cpu_pct_micro_latest = rec.cpu_pct_micro;
+        summary.rss_bytes_latest = rec.rss_bytes;
+        summary.tracker_alive_at_us_latest = rec.tracker_alive_at_us;
         prev = Some(rec);
     }
 
@@ -460,6 +580,10 @@ mod tests {
             frames_dropped_late_ack: late_ack,
             frames_encode_failed: 0,
             frames_focus_race_dropped: 0,
+            failsafe_by_app: vec![],
+            cpu_pct_micro: 0,
+            rss_bytes: 0,
+            tracker_alive_at_us: 0,
         }
     }
 
@@ -634,6 +758,10 @@ mod tests {
             frames_focus_race_dropped_latest: 0,
             malformed_lines_skipped: 0,
             restarts_detected: 0,
+            failsafe_by_app_latest: vec![],
+            cpu_pct_micro_latest: 0,
+            rss_bytes_latest: 0,
+            tracker_alive_at_us_latest: 0,
         };
         let line = s.to_human_line();
         for forbidden in [
@@ -656,6 +784,12 @@ mod tests {
         assert!(line.contains("samples=3"));
         assert!(line.contains("device_id=0123456789abcdef0123456789abcdef"));
         assert!(line.contains("window_start=2026-05-19T03:00:00.000Z"));
+        // Wire-0x09 additions are present even when empty (one-grep
+        // stability for the dashboard ingester).
+        assert!(line.contains("failsafe-by-app=none"));
+        assert!(line.contains("cpu=0.000%"));
+        assert!(line.contains("rss=0.0MiB"));
+        assert!(line.contains("tracker_alive_at_us=0"));
     }
 
     #[tokio::test]

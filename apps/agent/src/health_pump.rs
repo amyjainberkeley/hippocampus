@@ -64,6 +64,10 @@ pub fn pump_one(
         frames_dropped_late_ack,
         frames_encode_failed,
         frames_focus_race_dropped,
+        failsafe_by_app,
+        cpu_pct_micro,
+        rss_bytes,
+        tracker_alive_at_us,
     } = &frame.message
     else {
         // `Routed::Health` is only constructed from `HelperHealth`
@@ -83,6 +87,10 @@ pub fn pump_one(
         frames_dropped_late_ack: *frames_dropped_late_ack,
         frames_encode_failed: *frames_encode_failed,
         frames_focus_race_dropped: *frames_focus_race_dropped,
+        failsafe_by_app: failsafe_by_app.clone(),
+        cpu_pct_micro: *cpu_pct_micro,
+        rss_bytes: *rss_bytes,
+        tracker_alive_at_us: *tracker_alive_at_us,
     })
 }
 
@@ -110,6 +118,13 @@ mod tests {
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 2,
                 frames_focus_race_dropped: 6,
+                failsafe_by_app: vec![
+                    ("com.anthropic.claudefordesktop".to_string(), 5),
+                    ("com.microsoft.VSCode".to_string(), 3),
+                ],
+                cpu_pct_micro: 8_500, // 0.85%
+                rss_bytes: 120 * 1024 * 1024,
+                tracker_alive_at_us: 1_700_000_000_000_000,
             },
         }
     }

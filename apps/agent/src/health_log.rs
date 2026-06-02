@@ -27,6 +27,37 @@
 //!   active file is re-created at 0600.
 //!
 //! — CSO, 2026-05-19
+//!
+//! ## Amendment 2026-06-01 (Phase 6 PR 6 — MetricKit + per-app failsafe)
+//!
+//! Four new fields surfaced from wire 0x09 (PR #226 §5.1 + CTO §4
+//! Phase 6 PR 6, S13 acceptance gate):
+//!
+//! - `failsafe_by_app`: per-bundle `.failsafeUnknown` tombstone
+//!   counter, fixed-cardinality (cap 8 entries, least-recent-bump
+//!   eviction). Bundle ids enumerated here are ALREADY cascade-
+//!   attributed — the cascade had to evaluate the app to emit a
+//!   `.failsafeUnknown` tombstone, so the bundle id has already
+//!   reached the `PrivacyTombstone` wire surface. Surfacing the
+//!   aggregated per-app count adds no fresh content boundary; it
+//!   does add information-theoretic enumeration of which apps the
+//!   cascade has failsafed in the last process. The cap-8 bound +
+//!   least-recent-bump eviction is the load-bearing PII-leak
+//!   defence: only the 8 most-recently-failsafed apps are surfaced,
+//!   not the full historical set. Per-bundle counters do NOT
+//!   distinguish individual users beyond what `app_bundle` on
+//!   tombstones already does. Resets on helper restart.
+//! - `cpu_pct_micro`: helper CPU sample, microfraction. Numeric.
+//! - `rss_bytes`: helper RSS sample. Numeric.
+//! - `tracker_alive_at_us`: V2-P1 PR 13 reserved slot, zero until
+//!   PR 13 populates. Numeric timestamp.
+//!
+//! All four are content-free under the same NG3 discipline as the
+//! existing wire-0x03..0x08 counters. The cap-8 cardinality bound
+//! is the structural argument that satisfies §9.3.
+//!
+//! — CSO sign-off (driver-CSO, dispatch §"NO DRIVER-CSO REQUIRED"
+//! 3-row mini-audit in PR body), 2026-06-01
 
 use std::path::PathBuf;
 
@@ -102,6 +133,34 @@ pub struct HealthLogRecord {
     /// FocusTracker. Cascade-twice OCR emitter is NOT consulted on
     /// frames counted here — the gate fails closed before reaching it.
     pub frames_focus_race_dropped: u64,
+    /// Per-app `.failsafeUnknown` tombstone counter map (cap 8 entries,
+    /// least-recent-bump eviction). Promoted to the wire by the
+    /// `0x08 → 0x09` bump (PR #226 §5.1 + CTO Phase 6 PR 6). The
+    /// load-bearing addition for the S13 acceptance gate: surfaces
+    /// `failsafe-by-app: com.example.app=124, …` shape per
+    /// `mci-agent --health-summary`, attributing cascade silence to
+    /// specific bundles. Cap-8 LRU cardinality is the structural PII
+    /// defence — see mod docstring Amendment 2026-06-01.
+    pub failsafe_by_app: Vec<(String, u64)>,
+    /// Instantaneous helper CPU sample, microfraction (1_000_000 =
+    /// 100% of one core). Promoted by the `0x08 → 0x09` bump. Pairs
+    /// with the MetricKit pipeline (Phase 6 PR 6 same dispatch) for
+    /// finer-than-daily CPU observability against the G2-ratified
+    /// ≤10–15% SLO (S4 acceptance gate). `0` = sampler did not
+    /// take a sample this tick.
+    pub cpu_pct_micro: u32,
+    /// Instantaneous helper resident set size in bytes, sampled via
+    /// Mach `task_info(MACH_TASK_BASIC_INFO)`. Promoted by the
+    /// `0x08 → 0x09` bump. Pairs with MetricKit for finer-than-daily
+    /// memory observability against ≤2 GB SLO. `0` = sampler failed.
+    pub rss_bytes: u64,
+    /// Reserved slot for V2-P1 PR 13 focused-window race-gate timeout
+    /// (§6.2 = A; see `docs/research/v2-p1-redesign-architecture-2026-06-01.md`
+    /// §6.2 + §8 coordination). Phase 6 PR 6 ships this at 0
+    /// (sentinel); PR 13 populates with the AX-focus-tracker
+    /// heartbeat timestamp. Reusing this PR's wire bump saves PR 13
+    /// from carrying a 0x09 → 0x0A bump.
+    pub tracker_alive_at_us: u64,
 }
 
 impl HealthLogRecord {
@@ -115,9 +174,12 @@ impl HealthLogRecord {
         // need to escape them. Values are integers or pre-validated
         // hex/RFC-3339 strings. Defensive: still escape strings the
         // standard JSON way for the wall_ts (it shouldn't contain
-        // quotes; future change might).
+        // quotes; future change might) and for bundle ids in
+        // `failsafe_by_app` (bundle ids are reverse-DNS — should not
+        // contain quotes, but escape defensively).
+        let failsafe_by_app_json = render_failsafe_by_app(&self.failsafe_by_app);
         format!(
-            r#"{{"wall_ts":"{}","device_id":"{}","uptime_ms":{},"frames_delivered":{},"frames_suppressed":{},"frames_redacted_by_failsafe":{},"cascade_forced_count":{},"frames_dropped_backpressure":{},"frames_dropped_late_ack":{},"frames_encode_failed":{},"frames_focus_race_dropped":{}}}"#,
+            r#"{{"wall_ts":"{}","device_id":"{}","uptime_ms":{},"frames_delivered":{},"frames_suppressed":{},"frames_redacted_by_failsafe":{},"cascade_forced_count":{},"frames_dropped_backpressure":{},"frames_dropped_late_ack":{},"frames_encode_failed":{},"frames_focus_race_dropped":{},"failsafe_by_app":{},"cpu_pct_micro":{},"rss_bytes":{},"tracker_alive_at_us":{}}}"#,
             escape_json_string(&self.wall_ts),
             escape_json_string(&self.device_id),
             self.uptime_ms,
@@ -129,8 +191,32 @@ impl HealthLogRecord {
             self.frames_dropped_late_ack,
             self.frames_encode_failed,
             self.frames_focus_race_dropped,
+            failsafe_by_app_json,
+            self.cpu_pct_micro,
+            self.rss_bytes,
+            self.tracker_alive_at_us,
         )
     }
+}
+
+/// Render the per-app failsafe counter map as a JSON object literal
+/// (`{"com.example.app":124,"com.microsoft.VSCode":87}`). The cap-8
+/// LRU shape is preserved by the caller (the wire decoder enforces
+/// the cap structurally); this function emits whatever entries the
+/// record carries, with bundle-id keys escape-safe-rendered.
+fn render_failsafe_by_app(entries: &[(String, u64)]) -> String {
+    let mut s = String::from("{");
+    for (i, (bundle_id, counter)) in entries.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push('"');
+        s.push_str(&escape_json_string(bundle_id));
+        s.push_str("\":");
+        s.push_str(&counter.to_string());
+    }
+    s.push('}');
+    s
 }
 
 /// Minimal JSON-string escape. Only handles the characters our fixed
@@ -283,16 +369,58 @@ mod tests {
             frames_dropped_late_ack: 0,
             frames_encode_failed: 7,
             frames_focus_race_dropped: 4,
+            failsafe_by_app: vec![],
+            cpu_pct_micro: 0,
+            rss_bytes: 0,
+            tracker_alive_at_us: 0,
+        }
+    }
+
+    fn sample_record_with_failsafe_by_app() -> HealthLogRecord {
+        HealthLogRecord {
+            wall_ts: "2026-06-01T12:00:00Z".to_string(),
+            device_id: "0123456789abcdef0123456789abcdef".to_string(),
+            uptime_ms: 60_000,
+            frames_delivered: 100,
+            frames_suppressed: 50,
+            frames_redacted_by_failsafe: 50,
+            cascade_forced_count: 12,
+            frames_dropped_backpressure: 0,
+            frames_dropped_late_ack: 0,
+            frames_encode_failed: 0,
+            frames_focus_race_dropped: 0,
+            failsafe_by_app: vec![
+                ("com.anthropic.claudefordesktop".to_string(), 124),
+                ("com.microsoft.VSCode".to_string(), 87),
+            ],
+            cpu_pct_micro: 15_000, // 1.5%
+            rss_bytes: 187 * 1024 * 1024,
+            tracker_alive_at_us: 1_700_000_000_000_000,
         }
     }
 
     #[test]
-    fn to_json_line_matches_fixed_shape() {
+    fn to_json_line_matches_fixed_shape_empty_failsafe_by_app() {
         let r = sample_record();
         let line = r.to_json_line();
         assert_eq!(
             line,
-            r#"{"wall_ts":"2026-05-19T04:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1234,"frames_delivered":10,"frames_suppressed":2,"frames_redacted_by_failsafe":1,"cascade_forced_count":3,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0,"frames_encode_failed":7,"frames_focus_race_dropped":4}"#
+            r#"{"wall_ts":"2026-05-19T04:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1234,"frames_delivered":10,"frames_suppressed":2,"frames_redacted_by_failsafe":1,"cascade_forced_count":3,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0,"frames_encode_failed":7,"frames_focus_race_dropped":4,"failsafe_by_app":{},"cpu_pct_micro":0,"rss_bytes":0,"tracker_alive_at_us":0}"#
+        );
+    }
+
+    #[test]
+    fn to_json_line_matches_fixed_shape_with_failsafe_by_app() {
+        let r = sample_record_with_failsafe_by_app();
+        let line = r.to_json_line();
+        // Per PR #226 §5.1 the on-disk shape surfaces
+        // `failsafe-by-app: com.example.app=124, …` via
+        // `mci-agent --health-summary`; the JSONL layer emits the
+        // same map as a JSON object literal so a Phase 7 PR 27
+        // dashboard frontend can read it.
+        assert_eq!(
+            line,
+            r#"{"wall_ts":"2026-06-01T12:00:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":60000,"frames_delivered":100,"frames_suppressed":50,"frames_redacted_by_failsafe":50,"cascade_forced_count":12,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0,"frames_encode_failed":0,"frames_focus_race_dropped":0,"failsafe_by_app":{"com.anthropic.claudefordesktop":124,"com.microsoft.VSCode":87},"cpu_pct_micro":15000,"rss_bytes":196083712,"tracker_alive_at_us":1700000000000000}"#
         );
     }
 
@@ -301,21 +429,67 @@ mod tests {
         // Trip-wire: scan the rendered output for fields that look
         // like they might carry user content. There must be NO
         // app_bundle / window_title / url / text field in the shape.
-        let r = sample_record();
-        let line = r.to_json_line();
-        for forbidden in [
-            "\"app_bundle\":",
-            "\"window_title\":",
-            "\"url\":",
-            "\"text\":",
-            "\"summary\":",
-            "\"entities\":",
-        ] {
-            assert!(
-                !line.contains(forbidden),
-                "health-log line must not contain {forbidden} — CSO sign-off in mod docstring"
-            );
+        // The wire-0x09 `failsafe_by_app` map enumerates bundle ids
+        // ALREADY cascade-attributed (see CSO Amendment 2026-06-01)
+        // and is bounded at 8 entries by least-recent-bump eviction —
+        // this is not a user-visible-text field in the §9.3 sense.
+        for r in [sample_record(), sample_record_with_failsafe_by_app()] {
+            let line = r.to_json_line();
+            for forbidden in [
+                "\"app_bundle\":",
+                "\"window_title\":",
+                "\"url\":",
+                "\"text\":",
+                "\"summary\":",
+                "\"entities\":",
+                // Wire-0x09 additions MUST NOT introduce text-shaped
+                // counter values either; explicitly forbid common OCR-
+                // content field names the failsafe-by-app surface
+                // might be drifted into in a future careless edit.
+                "\"text_snippet\":",
+                "\"text_len\":",
+                "\"ocr_text\":",
+                "\"recognized_text\":",
+            ] {
+                assert!(
+                    !line.contains(forbidden),
+                    "health-log line must not contain {forbidden} — CSO sign-off in mod docstring"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn failsafe_by_app_struct_has_no_text_carrying_field() {
+        // Grep-style invariant in test form (PR body mini-audit row 2):
+        // the `failsafe_by_app` Vec entry type is `(String, u64)`,
+        // where String is a *bundle id* (already cascade-attributed)
+        // and u64 is a *counter* — NOT an OCR text snippet, NOT a
+        // text length, NOT recognized-text content. The test
+        // structurally asserts the entry shape by constructing the
+        // entries via positional tuple — adding a third field to the
+        // tuple (or renaming the type to carry text) would require
+        // editing this test, which is the human-readable trip-wire.
+        let entries: Vec<(String, u64)> = vec![("com.example".to_string(), 42)];
+        let rec = HealthLogRecord {
+            wall_ts: "2026-06-01T00:00:00Z".to_string(),
+            device_id: "0".repeat(32),
+            uptime_ms: 0,
+            frames_delivered: 0,
+            frames_suppressed: 0,
+            frames_redacted_by_failsafe: 0,
+            cascade_forced_count: 0,
+            frames_dropped_backpressure: 0,
+            frames_dropped_late_ack: 0,
+            frames_encode_failed: 0,
+            frames_focus_race_dropped: 0,
+            failsafe_by_app: entries,
+            cpu_pct_micro: 0,
+            rss_bytes: 0,
+            tracker_alive_at_us: 0,
+        };
+        let line = rec.to_json_line();
+        assert!(line.contains(r#""failsafe_by_app":{"com.example":42}"#));
     }
 
     #[test]
@@ -452,6 +626,10 @@ mod tests {
                         frames_dropped_late_ack: 0,
                         frames_encode_failed: 0,
                         frames_focus_race_dropped: 0,
+                        failsafe_by_app: vec![],
+                        cpu_pct_micro: 0,
+                        rss_bytes: 0,
+                        tracker_alive_at_us: 0,
                     };
                     log.record(&rec).await.unwrap();
                 }

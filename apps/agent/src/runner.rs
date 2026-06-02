@@ -245,6 +245,10 @@ mod tests {
                     frames_dropped_late_ack: 0,
                     frames_encode_failed: 0,
                     frames_focus_race_dropped: 0,
+                    failsafe_by_app: vec![],
+                    cpu_pct_micro: 0,
+                    rss_bytes: 0,
+                    tracker_alive_at_us: 0,
                 },
             );
             bytes.extend(f);
@@ -297,6 +301,10 @@ mod tests {
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
                 frames_focus_race_dropped: 0,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
             },
         ));
         bytes.extend(encode(2, &Message::CaptureStop));
@@ -672,6 +680,10 @@ mod tests {
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
                 frames_focus_race_dropped: 0,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
             },
         ));
         bytes.extend(encode(3, &Message::CaptureStop));
@@ -798,6 +810,10 @@ mod tests {
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 0,
                 frames_focus_race_dropped: 0,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
             },
         ));
         bytes.extend(make_ocr_frame_bytes(6, 1, "hello"));

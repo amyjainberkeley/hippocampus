@@ -99,6 +99,50 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// byte layouts between `0x07` and `0x08`, so dual-accept is
 /// byte-equivalent for them.
 ///
+/// `0x08 → 0x09` (2026-06-01, Phase 6 PR 6 — MetricKit non-content
+/// footprint telemetry pipeline + per-app failsafe counter map;
+/// `docs/research/ocr-emit-silence-v2-2026-05-29.md` §5.1 + CTO
+/// fully-working-product plan §4 Phase 6 PR 6 + S13 acceptance gate).
+/// `HelperHealth` gained FOUR trailing fields, all content-free:
+///   1. `failsafe_by_app: Vec<(bundle_id, u64 counter)>` — fixed-
+///      cardinality per-app failsafe counter map (cap 8 entries,
+///      least-recent-bump eviction). Bundle ids the cascade has
+///      already seen and emitted `.failsafeUnknown` tombstones for.
+///      The wire field is bytes-only; no OCR text bytes leak.
+///      This is the load-bearing PR #226 §5.1 (1) addition —
+///      converts the cascade's per-app silence from a structural
+///      unknown into a one-command live measurement that surfaces
+///      via `mci-agent --health-summary` as
+///      `failsafe-by-app: com.example.app=124, …`.
+///   2. `cpu_pct_micro: u32` — instantaneous helper CPU % × 1_000_000
+///      (microfraction; 1_000_000 = 100% of one core), sampled via
+///      `getrusage(RUSAGE_SELF)` delta at HelperHealth flush. 0 =
+///      not yet sampled (first tick) or sampling unavailable. Pairs
+///      with the MetricKit pipeline for finer-than-daily-aggregate
+///      CPU observability against the G2-ratified ≤10–15% SLO.
+///   3. `rss_bytes: u64` — instantaneous resident set size in bytes,
+///      sampled via Mach `task_info(MACH_TASK_BASIC_INFO)`. 0 =
+///      sampling unavailable. Pairs with MetricKit for finer-than-
+///      daily-aggregate memory observability against the ≤2 GB SLO.
+///   4. `tracker_alive_at_us: u64` — RESERVED SLOT for V2-P1 PR 13.
+///      Per `docs/research/v2-p1-redesign-architecture-2026-06-01.md`
+///      §6.2 = A ratified, §8 coordination: "If §6.2 = A and the
+///      §5 observability bump is in flight, V2-P1 reuses the bumped
+///      wire version + a new slot." This PR is that §5 bump; the
+///      slot is included here so PR 13 reuses 0x09 instead of
+///      bumping to 0x0A. 0 = sentinel ("AX focus tracker not yet
+///      implemented"); PR 13 populates with the AX-focus-tracker
+///      heartbeat timestamp. Allows the §6.2 = A 2000ms race-gate
+///      timeout to fire on a sustained AX tracker hang without
+///      adding a wire bump.
+/// All four fields are content-free observability counters —
+/// bundle ids + numeric sample only; no OCR text, no window content.
+/// Decoder dual-accept extends to `[0x09, 0x08, 0x07, 0x06]`. On
+/// `0x08` frames the four new fields default (empty Vec, 0, 0, 0);
+/// on `0x09` they are read in order. All other message variants have
+/// identical byte layouts across `0x06 / 0x07 / 0x08 / 0x09`, so
+/// dual-accept is byte-equivalent for them.
+///
 /// `0x06` RE-EXTENDED (2026-05-30, cycle 8.27 emergency revert): the
 /// Safari extension's native messaging host writes `PageContentEvent`
 /// frames to `page_content.sock` at wire `0x06`; the `0x07 → 0x08`
@@ -124,18 +168,37 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// helper, and (b) the asynchronous-update window for the browser
 /// extension. Persisted / in-flight `0x01` / `0x02` / `0x03` / `0x04`
 /// / `0x05` frames are still hard-rejected.
-pub const FRAME_VERSION: u8 = 0x08;
+pub const FRAME_VERSION: u8 = 0x09;
 
 /// The set of wire versions the decoder accepts. The encoder always
 /// emits [`FRAME_VERSION`]; the decoder accepts the current version
-/// AND `0x07` (rolling-restart safety, see the `0x07 → 0x08` doc on
-/// [`FRAME_VERSION`]) AND `0x06` (asynchronous-update window for the
+/// AND `0x08` (rolling-restart safety against an `0x08`-era helper
+/// alive across an agent restart) AND `0x07` (one earlier window —
+/// kept conservative until the `0x07`-era rolling-restart risk has
+/// fully aged out) AND `0x06` (asynchronous-update window for the
 /// Safari extension native messaging host that emits
 /// `PageContentEvent` frames at `0x06`, see the `0x06` RE-EXTENDED
-/// note on [`FRAME_VERSION`]). Order matters only in that the current
+/// note on [`FRAME_VERSION`] — NEVER drop `0x06` per the cycle 8.27
+/// emergency lesson). Order matters only in that the current
 /// version is the first entry — callers building a tripwire can
 /// `assert_eq!(ACCEPTED_FRAME_VERSIONS[0], FRAME_VERSION)`.
-pub const ACCEPTED_FRAME_VERSIONS: &[u8] = &[FRAME_VERSION, 0x07, 0x06];
+pub const ACCEPTED_FRAME_VERSIONS: &[u8] = &[FRAME_VERSION, 0x08, 0x07, 0x06];
+
+/// Maximum number of per-app entries in the wire-0x09 `failsafe_by_app`
+/// counter map. Cap is structural (defensive against a fuzzed helper
+/// claiming `count > 8`) AND policy (PR #226 §5.1 fixed-cardinality
+/// content-free discipline — bounded cardinality means no
+/// information-theoretic PII leak via the bundle-id stream length).
+/// The helper's `HelperHealthCounters` actor enforces the same cap
+/// on the write side via least-recent-bump eviction.
+pub const MAX_FAILSAFE_BY_APP_ENTRIES: u8 = 8;
+
+/// Maximum byte length of a single `bundle_id` string in the wire-0x09
+/// `failsafe_by_app` map. Bundle ids are typically ≤64 bytes
+/// (`com.example.app.subcomponent.binary` shape); the cap is loose
+/// enough not to truncate any production bundle id and tight enough
+/// that the per-entry wire cost is bounded.
+pub const MAX_FAILSAFE_BY_APP_BUNDLE_ID_LEN: u8 = 255;
 
 /// Header size in bytes: magic(1) + version(1) + `msg_type(2)` + seq(8) + len(4).
 pub const MIN_FRAME_HEADER_BYTES: usize = 1 + 1 + 2 + 8 + 4;
@@ -413,6 +476,10 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             frames_dropped_late_ack,
             frames_encode_failed,
             frames_focus_race_dropped,
+            failsafe_by_app,
+            cpu_pct_micro,
+            rss_bytes,
+            tracker_alive_at_us,
         } => {
             out.extend_from_slice(&uptime_ms.to_le_bytes());
             out.extend_from_slice(&frames_delivered.to_le_bytes());
@@ -438,6 +505,46 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             // mismatch, a 0x08 decoder reading a 0x07 payload defaults
             // this field to 0 by consuming only 8 u64s.
             out.extend_from_slice(&frames_focus_race_dropped.to_le_bytes());
+            // wire 0x09 (Phase 6 PR 6 — PR #226 §5.1 + CTO §4 Phase 6
+            // PR 6): four new content-free fields appended in this
+            // order: failsafe_by_app map (cap 8) → cpu_pct_micro →
+            // rss_bytes → tracker_alive_at_us. The map is encoded as
+            // a u8 entry count followed by N × (u8 bundle_id_len +
+            // bundle_id bytes + u64 counter); the encoder caps at
+            // [`MAX_FAILSAFE_BY_APP_ENTRIES`] entries (defense in
+            // depth — the helper's `HelperHealthCounters` actor
+            // already enforces the cap on writes, but a malformed
+            // caller cannot bypass it here). Each bundle_id is capped
+            // at [`MAX_FAILSAFE_BY_APP_BUNDLE_ID_LEN`] bytes.
+            debug_assert!(
+                failsafe_by_app.len() <= MAX_FAILSAFE_BY_APP_ENTRIES as usize,
+                "failsafe_by_app exceeds MAX_FAILSAFE_BY_APP_ENTRIES — \
+                 HelperHealthCounters cap-8 LRU was bypassed"
+            );
+            let entry_count = failsafe_by_app
+                .len()
+                .min(MAX_FAILSAFE_BY_APP_ENTRIES as usize);
+            #[allow(clippy::cast_possible_truncation)]
+            let entry_count_u8 = entry_count as u8;
+            out.push(entry_count_u8);
+            for (bundle_id, counter) in failsafe_by_app.iter().take(entry_count) {
+                let bundle_bytes = bundle_id.as_bytes();
+                debug_assert!(
+                    bundle_bytes.len() <= MAX_FAILSAFE_BY_APP_BUNDLE_ID_LEN as usize,
+                    "failsafe_by_app bundle_id exceeds MAX_FAILSAFE_BY_APP_BUNDLE_ID_LEN"
+                );
+                let id_len = bundle_bytes
+                    .len()
+                    .min(MAX_FAILSAFE_BY_APP_BUNDLE_ID_LEN as usize);
+                #[allow(clippy::cast_possible_truncation)]
+                let id_len_u8 = id_len as u8;
+                out.push(id_len_u8);
+                out.extend_from_slice(&bundle_bytes[..id_len]);
+                out.extend_from_slice(&counter.to_le_bytes());
+            }
+            out.extend_from_slice(&cpu_pct_micro.to_le_bytes());
+            out.extend_from_slice(&rss_bytes.to_le_bytes());
+            out.extend_from_slice(&tracker_alive_at_us.to_le_bytes());
         }
         Message::OCREvent {
             seq,
@@ -662,21 +769,25 @@ fn decode_payload(
             let cascade_forced_count = p.u64_le()?;
             let frames_dropped_backpressure = p.u64_le()?;
             let frames_dropped_late_ack = p.u64_le()?;
-            // Triple-version dual-accept (cycle 8.27 revert re-extends
-            // to include 0x06; 0x07 / 0x08 already accepted per the
-            // ADR-0031 V2-P1 bump):
+            // Quadruple-version dual-accept (cycle 8.27 revert
+            // re-extends to include 0x06; 0x07 / 0x08 / 0x09 accepted
+            // per the ADR-0031 V2-P1 + Phase 6 PR 6 bumps):
             //   - 0x06: seven u64s (uptime, delivered, suppressed,
             //     redacted_by_failsafe, cascade_forced, dropped_bp,
-            //     dropped_late_ack). Defaults frames_encode_failed AND
-            //     frames_focus_race_dropped to 0.
-            //   - 0x07: eight u64s (adds frames_encode_failed). Defaults
-            //     frames_focus_race_dropped to 0.
+            //     dropped_late_ack). Defaults frames_encode_failed,
+            //     frames_focus_race_dropped, failsafe_by_app,
+            //     cpu_pct_micro, rss_bytes, tracker_alive_at_us.
+            //   - 0x07: eight u64s (adds frames_encode_failed).
             //   - 0x08: nine u64s (adds frames_focus_race_dropped).
+            //   - 0x09: nine u64s + failsafe_by_app map (u8 count + N
+            //     × (u8 bundle_id_len + bytes + u64 counter)) +
+            //     cpu_pct_micro (u32) + rss_bytes (u64) +
+            //     tracker_alive_at_us (u64).
             //
             // Strict payload-length consumption in the caller catches a
             // malformed payload (extra bytes or trailing garbage) as
             // PayloadLengthMismatch. PageContentEvent / OCREvent byte
-            // layouts are identical across all three accepted versions
+            // layouts are identical across all four accepted versions
             // (see FRAME_VERSION doc), so dual-accept is byte-equivalent
             // for them.
             let frames_encode_failed = if version == 0x06 {
@@ -684,11 +795,38 @@ fn decode_payload(
             } else {
                 p.u64_le()?
             };
-            let frames_focus_race_dropped = if version == 0x08 {
-                p.u64_le()?
-            } else {
+            let frames_focus_race_dropped = if version == 0x07 || version == 0x06 {
                 0
+            } else {
+                p.u64_le()?
             };
+            let (failsafe_by_app, cpu_pct_micro, rss_bytes, tracker_alive_at_us) =
+                if version == 0x09 {
+                    let entry_count = p.u8_le()?;
+                    if entry_count > MAX_FAILSAFE_BY_APP_ENTRIES {
+                        // Trust-boundary check: a fuzzed / malicious
+                        // helper cannot claim more entries than the
+                        // documented cap. The helper-side write path
+                        // also enforces the cap (HelperHealthCounters
+                        // actor); this is defense in depth.
+                        return Err(DecodeError::OversizedPayload {
+                            len: u32::from(entry_count),
+                        });
+                    }
+                    let mut map = Vec::with_capacity(entry_count as usize);
+                    for _ in 0..entry_count {
+                        let id_len = p.u8_le()? as usize;
+                        let bundle_id = p.string_bytes(id_len)?;
+                        let counter = p.u64_le()?;
+                        map.push((bundle_id, counter));
+                    }
+                    let cpu = p.u32_le()?;
+                    let rss = p.u64_le()?;
+                    let tracker = p.u64_le()?;
+                    (map, cpu, rss, tracker)
+                } else {
+                    (Vec::new(), 0, 0, 0)
+                };
             Message::HelperHealth {
                 uptime_ms,
                 frames_delivered,
@@ -699,6 +837,10 @@ fn decode_payload(
                 frames_dropped_late_ack,
                 frames_encode_failed,
                 frames_focus_race_dropped,
+                failsafe_by_app,
+                cpu_pct_micro,
+                rss_bytes,
+                tracker_alive_at_us,
             }
         }
         MessageType::OCREvent => {
@@ -935,6 +1077,63 @@ mod tests {
             frames_dropped_late_ack: 0,
             frames_encode_failed: 21,
             frames_focus_race_dropped: 31,
+            failsafe_by_app: vec![
+                ("com.anthropic.claudefordesktop".to_string(), 124),
+                ("com.microsoft.VSCode".to_string(), 87),
+                ("com.googlecode.iterm2".to_string(), 63),
+            ],
+            cpu_pct_micro: 15_000,         // 1.5%
+            rss_bytes: 187 * 1024 * 1024,  // 187 MiB
+            tracker_alive_at_us: 1_700_000_000_000_000,
+        });
+    }
+
+    #[test]
+    fn roundtrip_helper_health_empty_failsafe_by_app() {
+        // Most flushes won't have any per-app entries (the cascade
+        // hasn't fail-safed anything in this window). Empty map must
+        // round-trip — `u8 count = 0` consumes 1 byte and no entries.
+        roundtrip(&Message::HelperHealth {
+            uptime_ms: 30_000,
+            frames_delivered: 150,
+            frames_suppressed: 0,
+            frames_redacted_by_failsafe: 0,
+            cascade_forced_count: 0,
+            frames_dropped_backpressure: 0,
+            frames_dropped_late_ack: 0,
+            frames_encode_failed: 0,
+            frames_focus_race_dropped: 0,
+            failsafe_by_app: vec![],
+            cpu_pct_micro: 0,
+            rss_bytes: 0,
+            tracker_alive_at_us: 0,
+        });
+    }
+
+    #[test]
+    fn roundtrip_helper_health_full_failsafe_by_app() {
+        // Boundary: a flush with the cap-8 map fully populated must
+        // round-trip. This is the upper-bound payload size for
+        // failsafe_by_app — 1 byte count + 8 × (1 byte id_len + N
+        // bundle id bytes + 8 byte counter).
+        let entries: Vec<(String, u64)> = (0..MAX_FAILSAFE_BY_APP_ENTRIES)
+            .map(|i| (format!("com.example.app{i}"), u64::from(i) * 100))
+            .collect();
+        assert_eq!(entries.len(), MAX_FAILSAFE_BY_APP_ENTRIES as usize);
+        roundtrip(&Message::HelperHealth {
+            uptime_ms: 60_000,
+            frames_delivered: 300,
+            frames_suppressed: 50,
+            frames_redacted_by_failsafe: 50,
+            cascade_forced_count: 12,
+            frames_dropped_backpressure: 0,
+            frames_dropped_late_ack: 0,
+            frames_encode_failed: 0,
+            frames_focus_race_dropped: 0,
+            failsafe_by_app: entries,
+            cpu_pct_micro: 100_000, // 10%
+            rss_bytes: 1_500_000_000,
+            tracker_alive_at_us: 0,
         });
     }
 
@@ -952,30 +1151,54 @@ mod tests {
                 frames_dropped_late_ack: 7,
                 frames_encode_failed: 8,
                 frames_focus_race_dropped: 9,
+                // Empty failsafe_by_app + zero footprint sample +
+                // tracker sentinel — the simplest 0x09 shape so the
+                // Swift mirror's `testHelperHealthCrossSideFixture`
+                // pins the same bytes.
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
             },
         );
-        // Wire 0x08: header(16) + 9 × u64(72) = 88 bytes.
-        // Frame-version byte is 0x08; `frames_focus_race_dropped` is
-        // the trailing u64 (ADR-0031 V2-P1).
-        let expected: [u8; 88] = [
-            0x4D, 0x08, 0x30, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x00,
-            0x00, 0x00,
-            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00,
+        // Wire 0x09 with empty failsafe_by_app + zero footprint:
+        //   header(16) + 9 × u64(72) + u8 entry_count(1)
+        //   + u32 cpu_pct_micro(4) + u64 rss_bytes(8)
+        //   + u64 tracker_alive_at_us(8)
+        // = 16 + 72 + 1 + 4 + 8 + 8 = 109 bytes.
+        // Payload length = 109 - 16 = 93 = 0x5D.
+        let expected: [u8; 109] = [
+            0x4D, 0x09, 0x30, 0x00, // magic + ver + msg_type LE
+            0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // seq = 42
+            0x5D, 0x00, 0x00, 0x00, // payload len = 93
+            // 9 × u64 LE (1..=9):
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // failsafe_by_app: entry_count = 0 (1 byte), no entries.
+            0x00,
+            // cpu_pct_micro = 0 (u32 LE)
+            0x00, 0x00, 0x00, 0x00,
+            // rss_bytes = 0 (u64 LE)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // tracker_alive_at_us = 0 (u64 LE)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         assert_eq!(
             buf,
             expected.to_vec(),
-            "HelperHealth v0x08 cross-side fixture"
+            "HelperHealth v0x09 empty-map cross-side fixture"
         );
 
         // And the round-trip decoder reads exactly back what the
-        // encoder produced — proves the v0x08 layout is self-consistent.
-        let (frame, used) = decode(&buf).expect("decode v0x08 fixture");
+        // encoder produced — proves the v0x09 layout is self-consistent.
+        let (frame, used) = decode(&buf).expect("decode v0x09 fixture");
         assert_eq!(used, buf.len());
         assert_eq!(frame.seq, 42);
         assert_eq!(
@@ -990,17 +1213,22 @@ mod tests {
                 frames_dropped_late_ack: 7,
                 frames_encode_failed: 8,
                 frames_focus_race_dropped: 9,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
             }
         );
     }
 
     #[test]
-    fn helper_health_v0x08_payload_is_nine_u64s() {
-        // Trip-wire: the wire 0x08 bump added one u64
-        // (`frames_focus_race_dropped` — ADR-0031 V2-P1). The frame is
-        // now header(16) + 9 × u64(72) = 88 bytes. The Swift mirror's
-        // `testHelperHealthFixture` asserts the same length. Drift
-        // here = silent IPC break.
+    fn helper_health_v0x09_layout_offsets() {
+        // Trip-wire: the wire 0x09 bump adds four trailing fields
+        // (failsafe_by_app, cpu_pct_micro, rss_bytes,
+        // tracker_alive_at_us). With an empty failsafe_by_app the
+        // payload is 9 × u64 + u8(0) + u32 + u64 + u64 = 72 + 1 + 4
+        // + 8 + 8 = 93 bytes. The Swift mirror's
+        // `testHelperHealthFixture` asserts the same length.
         let buf = encode(
             1,
             &Message::HelperHealth {
@@ -1013,21 +1241,35 @@ mod tests {
                 frames_dropped_late_ack: 0,
                 frames_encode_failed: 17,
                 frames_focus_race_dropped: 23,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 5_500, // 0.55%
+                rss_bytes: 90 * 1024 * 1024,
+                tracker_alive_at_us: 0,
             },
         );
-        assert_eq!(buf.len(), MIN_FRAME_HEADER_BYTES + 9 * 8);
-        // frames_focus_race_dropped is the 9th (last) u64 of the
-        // payload. Offset = header(16) + 8 × u64(64) = 80.
-        let off = MIN_FRAME_HEADER_BYTES + 8 * 8;
-        let frd = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap());
-        assert_eq!(frd, 23);
+        assert_eq!(buf.len(), MIN_FRAME_HEADER_BYTES + 93);
+
+        // failsafe_by_app entry_count is the byte after the 9th u64.
+        // Offset = header(16) + 9 × u64(72) = 88.
+        let entry_count_off = MIN_FRAME_HEADER_BYTES + 9 * 8;
+        assert_eq!(buf[entry_count_off], 0);
+
+        // cpu_pct_micro starts 1 byte later.
+        let cpu_off = entry_count_off + 1;
+        let cpu = u32::from_le_bytes(buf[cpu_off..cpu_off + 4].try_into().unwrap());
+        assert_eq!(cpu, 5_500);
+
+        // rss_bytes starts 4 bytes after cpu_pct_micro.
+        let rss_off = cpu_off + 4;
+        let rss = u64::from_le_bytes(buf[rss_off..rss_off + 8].try_into().unwrap());
+        assert_eq!(rss, 90 * 1024 * 1024);
     }
 
     #[test]
-    fn frame_version_is_0x08() {
-        assert_eq!(FRAME_VERSION, 0x08);
+    fn frame_version_is_0x09() {
+        assert_eq!(FRAME_VERSION, 0x09);
         let buf = encode(0, &Message::CaptureStop);
-        assert_eq!(buf[1], 0x08, "version byte in the framed header");
+        assert_eq!(buf[1], 0x09, "version byte in the framed header");
     }
 
     #[test]
@@ -1037,14 +1279,22 @@ mod tests {
             "current version must lead the accept set"
         );
         assert!(
+            ACCEPTED_FRAME_VERSIONS.contains(&0x08),
+            "0x08 must remain accepted for rolling-restart safety per the \
+             Phase 6 PR 6 bump (an 0x08-era helper alive across an agent \
+             restart must still be readable)"
+        );
+        assert!(
             ACCEPTED_FRAME_VERSIONS.contains(&0x07),
-            "0x07 must remain accepted for rolling-restart safety per the ADR-0031 V2-P1 bump"
+            "0x07 retained as a conservative one-extra-window cushion until \
+             the 0x07-era rolling-restart risk has fully aged out"
         );
         assert!(
             ACCEPTED_FRAME_VERSIONS.contains(&0x06),
             "0x06 must remain accepted: the Safari extension native messaging host \
              emits PageContentEvent frames at 0x06 and the extension cannot be updated \
-             atomically with helper releases (cycle 8.27 emergency revert)"
+             atomically with helper releases (cycle 8.27 emergency revert lesson — \
+             PR #266 discipline: NEVER drop 0x06)"
         );
         // Hard-rejected: anything older than 0x06 is out of the
         // documented asynchronous-update + rolling-restart window.
@@ -1052,14 +1302,81 @@ mod tests {
             !ACCEPTED_FRAME_VERSIONS.contains(&0x05),
             "0x05 reaches end-of-support"
         );
+        assert_eq!(
+            ACCEPTED_FRAME_VERSIONS.len(),
+            4,
+            "the accept window is [0x09, 0x08, 0x07, 0x06]; growing it \
+             further widens trust-boundary surface area"
+        );
+    }
+
+    #[test]
+    fn decode_accepts_legacy_0x08_helper_health_payload() {
+        // Rolling-restart contract: an 0x08-era helper alive on a CEO
+        // machine across an agent restart can still emit valid
+        // HelperHealth frames; the v0x09 decoder reads them with the
+        // four trailing fields defaulted (empty Vec, 0, 0, 0).
+        let mut buf = encode(
+            42,
+            &Message::HelperHealth {
+                uptime_ms: 1,
+                frames_delivered: 2,
+                frames_suppressed: 3,
+                frames_redacted_by_failsafe: 4,
+                cascade_forced_count: 5,
+                frames_dropped_backpressure: 6,
+                frames_dropped_late_ack: 7,
+                frames_encode_failed: 8,
+                frames_focus_race_dropped: 9,
+                // These source values get dropped on the re-shape because
+                // an 0x08 helper never emitted them.
+                failsafe_by_app: vec![("com.example".to_string(), 7)],
+                cpu_pct_micro: 12_345,
+                rss_bytes: 67_890,
+                tracker_alive_at_us: 11_111,
+            },
+        );
+        // Re-shape the buffer as if an 0x08 helper had emitted it:
+        // version byte → 0x08, drop the 0x09-only trailing bytes
+        // (failsafe_by_app + cpu + rss + tracker), shrink declared
+        // payload length to 9 × u64 = 72.
+        buf[1] = 0x08;
+        // Trailing payload bytes to strip = total - header - 72.
+        let payload_strip = buf.len() - MIN_FRAME_HEADER_BYTES - 72;
+        let new_payload_len = 72_u32;
+        buf[12..16].copy_from_slice(&new_payload_len.to_le_bytes());
+        buf.truncate(buf.len() - payload_strip);
+        assert_eq!(buf.len(), MIN_FRAME_HEADER_BYTES + 72);
+
+        let (frame, used) = decode(&buf).expect("decode legacy 0x08 HelperHealth");
+        assert_eq!(used, buf.len());
+        assert_eq!(frame.seq, 42);
+        assert_eq!(
+            frame.message,
+            Message::HelperHealth {
+                uptime_ms: 1,
+                frames_delivered: 2,
+                frames_suppressed: 3,
+                frames_redacted_by_failsafe: 4,
+                cascade_forced_count: 5,
+                frames_dropped_backpressure: 6,
+                frames_dropped_late_ack: 7,
+                frames_encode_failed: 8,
+                frames_focus_race_dropped: 9,
+                // Defaulted on 0x08 — the source values are stripped.
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
+            }
+        );
     }
 
     #[test]
     fn decode_accepts_legacy_0x07_helper_health_payload() {
-        // Rolling-restart contract: a 0x07-era helper alive on a CEO
-        // machine across an agent restart can still emit valid
-        // HelperHealth frames; the v0x08 decoder reads them with
-        // `frames_focus_race_dropped` defaulted to 0.
+        // 0x07-era helper alive across an agent restart: the v0x09
+        // decoder reads them with `frames_focus_race_dropped` +
+        // four 0x09-only fields defaulted.
         let mut buf = encode(
             42,
             &Message::HelperHealth {
@@ -1072,15 +1389,18 @@ mod tests {
                 frames_dropped_late_ack: 7,
                 frames_encode_failed: 8,
                 frames_focus_race_dropped: 9_999,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
             },
         );
-        // Re-shape the buffer as if a 0x07 helper had emitted it:
-        // version byte → 0x07, drop the trailing 8 bytes
-        // (frames_focus_race_dropped), shrink declared payload length.
+        // Re-shape as 0x07: 8 × u64 = 64 byte payload.
         buf[1] = 0x07;
-        let new_payload_len = (buf.len() - MIN_FRAME_HEADER_BYTES - 8) as u32;
+        let strip = buf.len() - MIN_FRAME_HEADER_BYTES - 64;
+        let new_payload_len = 64_u32;
         buf[12..16].copy_from_slice(&new_payload_len.to_le_bytes());
-        buf.truncate(buf.len() - 8);
+        buf.truncate(buf.len() - strip);
 
         let (frame, used) = decode(&buf).expect("decode legacy 0x07 HelperHealth");
         assert_eq!(used, buf.len());
@@ -1096,10 +1416,95 @@ mod tests {
                 frames_dropped_backpressure: 6,
                 frames_dropped_late_ack: 7,
                 frames_encode_failed: 8,
-                // Defaulted on 0x07 — the source field's 9_999 is
-                // dropped because a 0x07 helper never had this counter.
                 frames_focus_race_dropped: 0,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
             }
+        );
+    }
+
+    #[test]
+    fn decode_accepts_legacy_0x06_helper_health_payload() {
+        // 0x06-era PageContentEvent helper is the documented async-
+        // update case for the Safari native messaging host. The same
+        // 0x06 acceptance also covers HelperHealth at 7-u64 shape
+        // (the original wire 0x06 helper carried only seven counters).
+        let mut buf = encode(
+            42,
+            &Message::HelperHealth {
+                uptime_ms: 1,
+                frames_delivered: 2,
+                frames_suppressed: 3,
+                frames_redacted_by_failsafe: 4,
+                cascade_forced_count: 5,
+                frames_dropped_backpressure: 6,
+                frames_dropped_late_ack: 7,
+                frames_encode_failed: 0,
+                frames_focus_race_dropped: 0,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
+            },
+        );
+        // Re-shape as 0x06: 7 × u64 = 56 byte payload.
+        buf[1] = 0x06;
+        let strip = buf.len() - MIN_FRAME_HEADER_BYTES - 56;
+        let new_payload_len = 56_u32;
+        buf[12..16].copy_from_slice(&new_payload_len.to_le_bytes());
+        buf.truncate(buf.len() - strip);
+
+        let (frame, used) = decode(&buf).expect("decode legacy 0x06 HelperHealth");
+        assert_eq!(used, buf.len());
+        assert_eq!(frame.seq, 42);
+        assert_eq!(
+            frame.message,
+            Message::HelperHealth {
+                uptime_ms: 1,
+                frames_delivered: 2,
+                frames_suppressed: 3,
+                frames_redacted_by_failsafe: 4,
+                cascade_forced_count: 5,
+                frames_dropped_backpressure: 6,
+                frames_dropped_late_ack: 7,
+                frames_encode_failed: 0,
+                frames_focus_race_dropped: 0,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn decode_rejects_failsafe_by_app_over_cap() {
+        // Trust-boundary check: a fuzzed / malicious helper claiming
+        // more than MAX_FAILSAFE_BY_APP_ENTRIES (8) entries must be
+        // rejected before the decoder allocates the Vec. Hand-craft a
+        // payload that declares entry_count = 9.
+        let mut payload = Vec::new();
+        for v in 0u64..9 {
+            // 9 u64 counters as the pre-map portion.
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+        payload.push(MAX_FAILSAFE_BY_APP_ENTRIES + 1); // entry_count = 9
+        // No entries follow — decoder rejects on the count alone.
+
+        let mut buf = vec![FRAME_MAGIC, FRAME_VERSION];
+        buf.extend_from_slice(&(MessageType::HelperHealth as u16).to_le_bytes());
+        buf.extend_from_slice(&0_u64.to_le_bytes());
+        #[allow(clippy::cast_possible_truncation)]
+        let payload_len = payload.len() as u32;
+        buf.extend_from_slice(&payload_len.to_le_bytes());
+        buf.extend_from_slice(&payload);
+
+        let err = decode(&buf).unwrap_err();
+        assert!(
+            matches!(err, DecodeError::OversizedPayload { len: 9 }),
+            "expected OversizedPayload on over-cap failsafe_by_app entry_count, got {err:?}"
         );
     }
 
@@ -1176,14 +1581,16 @@ mod tests {
     #[test]
     fn decode_rejects_old_v0x02_helper_health_payload() {
         // A v0x02 HelperHealth payload was 6 × u64 = 48 bytes; the
-        // current v0x08 decoder expects 9 × u64 = 72 bytes. Hand-craft
-        // a header that claims FRAME_VERSION but carries a v0x02-shaped
-        // payload — strict payload-length consumption is what guards
-        // against silent cross-version reads after the version byte
-        // alone would not (e.g. a misconfigured proxy). This is the
-        // "payload-strict-consumption tripwire" called out in the PR
-        // body. (The 0x07 → 0x08 dual-accept does NOT widen this — only
-        // 0x07 is accepted as the legacy peer; older bytes still fail.)
+        // current v0x09 decoder expects at minimum 7 × u64 (the
+        // always-read prefix) before any version-conditional reads.
+        // Hand-craft a header that claims FRAME_VERSION but carries a
+        // v0x02-shaped payload — strict payload-length consumption is
+        // what guards against silent cross-version reads after the
+        // version byte alone would not (e.g. a misconfigured proxy).
+        // This is the "payload-strict-consumption tripwire" called
+        // out in the PR body. (The dual-accept window
+        // [0x09, 0x08, 0x07, 0x06] does NOT widen this — older bytes
+        // still fail-closed at the truncated-payload tripwire.)
         let mut payload = Vec::with_capacity(48);
         for v in 0u64..6 {
             payload.extend_from_slice(&v.to_le_bytes());
@@ -1198,10 +1605,11 @@ mod tests {
 
         let err = decode(&buf).unwrap_err();
         // The decoder runs out of payload bytes trying to read the
-        // 7th u64 — surfaces as a Truncated parser error.
+        // 7th u64 (frames_dropped_late_ack) — surfaces as a Truncated
+        // parser error.
         assert!(
             matches!(err, DecodeError::Truncated { .. }),
-            "expected Truncated on a 48-byte v0x02-shaped payload at v0x07, got {err:?}"
+            "expected Truncated on a 48-byte v0x02-shaped payload at v0x09, got {err:?}"
         );
     }
 
@@ -1394,7 +1802,7 @@ mod tests {
         );
         assert_eq!(buf.len(), 140);
 
-        assert_eq!(&buf[0..4], &[0x4D, 0x08, 0x40, 0x00]);
+        assert_eq!(&buf[0..4], &[0x4D, 0x09, 0x40, 0x00]);
         assert_eq!(&buf[4..12], &42u64.to_le_bytes());
         assert_eq!(&buf[12..16], &124u32.to_le_bytes());
 
@@ -1573,7 +1981,7 @@ mod tests {
         assert_eq!(buf.len(), 55);
 
         // Header check.
-        assert_eq!(&buf[0..4], &[0x4D, 0x08, 0x50, 0x00]);
+        assert_eq!(&buf[0..4], &[0x4D, 0x09, 0x50, 0x00]);
         assert_eq!(&buf[4..12], &7u64.to_le_bytes());
         assert_eq!(&buf[12..16], &39u32.to_le_bytes());
 
