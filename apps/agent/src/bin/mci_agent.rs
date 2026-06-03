@@ -1092,7 +1092,7 @@ fn spawn_brief_worker(
     let model_path = model_subdir.join(brief_worker::QWEN3_MODEL_BASENAME);
     let tokenizer_dir = model_subdir.clone();
     let factory: brief_worker::AuthorFactory = Arc::new(move || {
-        let backend = mci_llama_coreml::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir)
+        let backend = mci_coreml_bridge::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir)
             .map_err(|e| brief_worker::BriefWorkerError::Author(format!(
                 "Qwen3CoreMLBackend::open: {e}"
             )))?;
@@ -1204,7 +1204,7 @@ fn spawn_tier2_worker(
     let tokenizer_dir = model_subdir;
 
     let backend_result =
-        mci_llama_coreml::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir);
+        mci_coreml_bridge::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir);
     let backend = match backend_result {
         Ok(b) => b,
         Err(e) => {

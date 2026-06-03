@@ -22,14 +22,14 @@ serde_json = "1"
 thiserror  = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-mci-llama-coreml = { path = "../../adapters/macos/mci-llama-coreml", optional = true }
+mci-coreml-bridge = { path = "../../adapters/macos/mci-coreml-bridge", optional = true }
 
 [features]
 default = []
 # Enables the Core ML backend wire-up in the `brief-eval` binary so the
 # CEO can point the eval at the converted `.mlmodelc` after OWNER_TASKS
 # #17 lands. Off by default — CI uses the deterministic scripted backend.
-coreml = ["dep:mci-llama-coreml"]
+coreml = ["dep:mci-coreml-bridge"]
 
 [dev-dependencies]
 mci-brain = { path = "../brain", features = ["stubs"] }

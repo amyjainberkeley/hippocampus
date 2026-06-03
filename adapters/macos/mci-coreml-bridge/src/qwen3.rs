@@ -1,60 +1,34 @@
-// Gate the entire crate body on macOS — the objc2 deps are gated to the
-// same target in `Cargo.toml`, so on Linux this crate compiles to an
-// empty library. Same pattern as `mci-embed-coreml`.
-#![cfg(target_os = "macos")]
-
-//! macOS Core ML backend for Qwen3-1.7B INT4 brief generation.
+//! Qwen3-1.7B brief-author shim over the generic [`crate::model`] core.
 //!
-//! Implements [`mci_brief::llama_backend::LlamaBackend`] using Apple's
-//! Core ML framework via `objc2-core-ml`. The wrapper
-//! ([`mci_brief::llama_author::LlamaBriefAuthor`]) handles prompt
-//! rendering, citation parsing, and the hallucination tripwire above
-//! this crate. This crate: load the model, tokenize, run autoregressive
-//! decode, detokenize, return raw text.
+//! Implements [`mci_brief::llama_backend::LlamaBackend`] using a
+//! [`CoreMLModel`]. The wrapper (`mci_brief::llama_author::LlamaBriefAuthor`)
+//! handles prompt rendering, citation parsing, and the hallucination
+//! tripwire above this crate. This shim: tokenize, run the
+//! autoregressive decode through Core ML, detokenize, return raw text.
 //!
 //! # Model (ADR-0028)
 //!
-//! Qwen3-1.7B INT4-palettized via `coremltools` 8.x. ~950 MB on disk,
-//! ~400-500 MB in memory during inference. Downloaded on demand to
-//! `~/Library/Application Support/MCI/Models/Qwen3-1.7B-FP16.mlmodelc`.
+//! Qwen3-1.7B FP16 via `coremltools` 8.x. ~950 MB on disk, ~400-500 MB
+//! in memory during inference. Downloaded on demand to
+//! `~/Library/Application Support/MCI/Models/`.
 //!
-//! # Tokenizer
-//!
-//! Qwen3 uses byte-level BPE. `vocab.json` + `merges.txt` ship alongside
-//! the model. The [`tokenizer`] module implements encode/decode.
-//!
-//! # Generation
-//!
-//! Autoregressive token-by-token decode with temperature sampling.
-//! The model is exported as a single model with the full context window;
-//! KV cache optimization is handled at the Core ML graph level by the
-//! conversion script (stateful model via `coremltools` 8.x).
-//!
-//! # Expected `.mlmodelc` schema (convert_brief_model.py, path a)
+//! # Expected `.mlmodelc` schema (`scripts/convert_brief_model.py`)
 //!
 //! - **Input:** `"input_ids"`, `MultiArray` `Int32` `[1, SEQ_LEN]`
 //! - **Input:** `"attention_mask"`, `MultiArray` `Int32` `[1, SEQ_LEN]`
-//! - **Output:** `"logits"`, `MultiArray` `Float16` `[1, SEQ_LEN, VOCAB_SIZE]`
+//! - **Output:** `"logits"`, `MultiArray` `Float16` `[1, SEQ_LEN, VOCAB]`
 //!
 //! SEQ_LEN is fixed at conversion time (default 2048). The model is
-//! stateless — no KV cache. The Rust code pads shorter sequences and
-//! constructs an attention_mask (1 = real token, 0 = padding).
-
-pub mod tokenizer;
+//! stateless; the Rust side pads shorter sequences and constructs an
+//! attention_mask (1 = real token, 0 = padding).
 
 use std::path::Path;
 
 use mci_brief::llama_backend::{GenerateError, LlamaBackend};
-use tokenizer::BpeTokenizer;
+use objc2_core_ml::MLMultiArray;
 
-use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
-use objc2::AllocAnyThread;
-use objc2_core_ml::{
-    MLDictionaryFeatureProvider, MLFeatureProvider, MLFeatureType, MLFeatureValue, MLModel,
-    MLModelConfiguration, MLMultiArray, MLMultiArrayDataType,
-};
-use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL};
+use crate::model::{self, CoreMLError, CoreMLModel};
+use crate::tokenizer::BpeTokenizer;
 
 const MAX_OUTPUT_TOKENS: usize = 512;
 const DEFAULT_SEQ_LEN: usize = 2048;
@@ -77,9 +51,15 @@ const DEFAULT_REPETITION_PENALTY: f32 = 1.15;
 /// since a longer window has no effect on short generations.
 const REPETITION_WINDOW: usize = 64;
 
-/// Core ML backend for Qwen3-1.7B INT4.
+/// Map a generic [`CoreMLError`] into the brief-author error surface,
+/// preserving the human-readable message.
+fn map_coreml(err: CoreMLError) -> GenerateError {
+    GenerateError::Backend(err.to_string())
+}
+
+/// Core ML backend for Qwen3-1.7B brief generation.
 pub struct Qwen3CoreMLBackend {
-    model: Retained<MLModel>,
+    model: CoreMLModel,
     tokenizer: BpeTokenizer,
     seq_len: usize,
 }
@@ -92,43 +72,19 @@ impl std::fmt::Debug for Qwen3CoreMLBackend {
     }
 }
 
-// MLModel is documented thread-safe for predictionFromFeatures:
-// (Apple — Core ML Performance & Architecture WWDC 2019). Same assertion
-// as mci-embed-coreml.
-unsafe impl Send for Qwen3CoreMLBackend {}
-unsafe impl Sync for Qwen3CoreMLBackend {}
-
 impl Qwen3CoreMLBackend {
     /// Load the `.mlmodelc` at `model_path` and the tokenizer from
-    /// `tokenizer_dir` (containing `vocab.json` + `merges.txt`).
+    /// `tokenizer_dir` (containing `tokenizer.json`).
     pub fn open(model_path: &Path, tokenizer_dir: &Path) -> Result<Self, GenerateError> {
-        let path_str = model_path
-            .to_str()
-            .ok_or_else(|| GenerateError::Backend("model path is not valid UTF-8".into()))?;
-        if path_str.is_empty() {
-            return Err(GenerateError::Backend("model path is empty".into()));
-        }
-        if !model_path.exists() {
-            return Err(GenerateError::Backend(format!(
-                "model not found at: {path_str}"
-            )));
-        }
-
-        let tok = BpeTokenizer::load(tokenizer_dir)?;
-
-        let url = NSURL::fileURLWithPath(&NSString::from_str(path_str));
-        let config = unsafe { MLModelConfiguration::new() };
-        let model = unsafe {
-            MLModel::modelWithContentsOfURL_configuration_error(&url, &config).map_err(|err| {
-                let desc = err.localizedDescription();
-                let code = err.code();
-                GenerateError::Backend(format!("MLModel load failed: code={code} {desc}"))
-            })?
-        };
+        // The generic core validates the path (empty / not-found) and
+        // loads the model first, matching the original ordering so the
+        // "model not found" message still wins over a tokenizer error.
+        let model = CoreMLModel::load(model_path).map_err(map_coreml)?;
+        let tokenizer = BpeTokenizer::load(tokenizer_dir)?;
 
         let me = Self {
             model,
-            tokenizer: tok,
+            tokenizer,
             seq_len: DEFAULT_SEQ_LEN,
         };
         me.verify_schema()?;
@@ -136,36 +92,25 @@ impl Qwen3CoreMLBackend {
     }
 
     fn verify_schema(&self) -> Result<(), GenerateError> {
-        let desc = unsafe { self.model.modelDescription() };
-        let inputs = unsafe { desc.inputDescriptionsByName() };
-        let outputs = unsafe { desc.outputDescriptionsByName() };
-
-        let in_key = NSString::from_str("input_ids");
-        let mask_key = NSString::from_str("attention_mask");
-        let out_key = NSString::from_str("logits");
-
-        inputs.objectForKey(&in_key).ok_or_else(|| {
-            GenerateError::Backend("model missing required input feature \"input_ids\"".into())
-        })?;
-
-        inputs.objectForKey(&mask_key).ok_or_else(|| {
-            GenerateError::Backend(
-                "model missing required input feature \"attention_mask\"".into(),
-            )
-        })?;
-
-        let out_desc = outputs.objectForKey(&out_key).ok_or_else(|| {
-            GenerateError::Backend("model missing required output feature \"logits\"".into())
-        })?;
-
-        let out_type = unsafe { out_desc.r#type() };
-        if out_type != MLFeatureType::MultiArray {
-            return Err(GenerateError::Backend(format!(
-                "output \"logits\" has feature type {:?}, expected MultiArray",
-                out_type.0
-            )));
+        if !self.model.has_input("input_ids") {
+            return Err(GenerateError::Backend(
+                "model missing required input feature \"input_ids\"".into(),
+            ));
         }
-        Ok(())
+        if !self.model.has_input("attention_mask") {
+            return Err(GenerateError::Backend(
+                "model missing required input feature \"attention_mask\"".into(),
+            ));
+        }
+        match self.model.output_is_multi_array("logits") {
+            None => Err(GenerateError::Backend(
+                "model missing required output feature \"logits\"".into(),
+            )),
+            Some(false) => Err(GenerateError::Backend(
+                "output \"logits\" has unexpected feature type, expected MultiArray".into(),
+            )),
+            Some(true) => Ok(()),
+        }
     }
 
     /// Run a single forward pass on the given token IDs.
@@ -198,7 +143,6 @@ impl Qwen3CoreMLBackend {
     /// predict `<|endoftext|>` as its very first generated token on
     /// every prompt — the broken trace's silent failure mode. Surfaced
     /// by ADR-0028 brief-eval (0/8 fixtures, cycle 8.10).
-    #[allow(deprecated)]
     fn forward_pass(&self, input_ids: &[i32]) -> Result<Vec<f32>, GenerateError> {
         let real_len = input_ids.len().min(self.seq_len);
 
@@ -209,99 +153,19 @@ impl Qwen3CoreMLBackend {
         padded_ids[..real_len].copy_from_slice(&input_ids[..real_len]);
 
         // attention_mask = all-ones, matching the trace's input shape.
-        // See the doc comment above for why a partial mask breaks
-        // the traced graph.
+        // See the doc comment above for why a partial mask breaks the
+        // traced graph.
         let mask = vec![1_i32; self.seq_len];
 
-        let dim0 = NSNumber::new_i64(1);
-        let dim1 = NSNumber::new_i64(self.seq_len as i64);
-        let shape = NSArray::from_slice(&[&*dim0, &*dim1]);
+        let input_arr =
+            model::multi_array_i32(&[1, self.seq_len], &padded_ids).map_err(map_coreml)?;
+        let mask_arr = model::multi_array_i32(&[1, self.seq_len], &mask).map_err(map_coreml)?;
 
-        // Build input_ids MLMultiArray [1, seq_len]
-        let input_arr = unsafe {
-            MLMultiArray::initWithShape_dataType_error(
-                MLMultiArray::alloc(),
-                &shape,
-                MLMultiArrayDataType::Int32,
-            )
-            .map_err(|e| {
-                GenerateError::Backend(format!(
-                    "MLMultiArray alloc (input_ids): {}",
-                    e.localizedDescription()
-                ))
-            })?
-        };
-        unsafe {
-            let dst = input_arr.dataPointer().as_ptr().cast::<i32>();
-            std::ptr::copy_nonoverlapping(padded_ids.as_ptr(), dst, self.seq_len);
-        }
-
-        // Build attention_mask MLMultiArray [1, seq_len]
-        let mask_arr = unsafe {
-            MLMultiArray::initWithShape_dataType_error(
-                MLMultiArray::alloc(),
-                &shape,
-                MLMultiArrayDataType::Int32,
-            )
-            .map_err(|e| {
-                GenerateError::Backend(format!(
-                    "MLMultiArray alloc (attention_mask): {}",
-                    e.localizedDescription()
-                ))
-            })?
-        };
-        unsafe {
-            let dst = mask_arr.dataPointer().as_ptr().cast::<i32>();
-            std::ptr::copy_nonoverlapping(mask.as_ptr(), dst, self.seq_len);
-        }
-
-        // Build feature provider with both inputs
-        let id_key = NSString::from_str("input_ids");
-        let mask_key = NSString::from_str("attention_mask");
-        let id_val: Retained<MLFeatureValue> =
-            unsafe { MLFeatureValue::featureValueWithMultiArray(&input_arr) };
-        let mask_val: Retained<MLFeatureValue> =
-            unsafe { MLFeatureValue::featureValueWithMultiArray(&mask_arr) };
-        let id_obj: &AnyObject = &id_val;
-        let mask_obj: &AnyObject = &mask_val;
-        let dict: Retained<NSDictionary<NSString, AnyObject>> = NSDictionary::from_slices(
-            &[&*id_key, &*mask_key],
-            &[id_obj, mask_obj],
-        );
-
-        let provider = unsafe {
-            MLDictionaryFeatureProvider::initWithDictionary_error(
-                MLDictionaryFeatureProvider::alloc(),
-                &dict,
-            )
-            .map_err(|err| {
-                GenerateError::Backend(format!(
-                    "feature-provider init failed: {}",
-                    err.localizedDescription()
-                ))
-            })?
-        };
-
-        // Run prediction
-        let output = unsafe {
-            self.model
-                .predictionFromFeatures_error(objc2::runtime::ProtocolObject::from_ref(&*provider))
-                .map_err(|err| {
-                    GenerateError::Backend(format!(
-                        "prediction failed: {}",
-                        err.localizedDescription()
-                    ))
-                })?
-        };
-
-        // Extract logits at last real token position
-        let out_name = NSString::from_str("logits");
-        let out_value = unsafe { output.featureValueForName(&out_name) }.ok_or_else(|| {
-            GenerateError::Backend("prediction missing output feature \"logits\"".into())
-        })?;
-
-        let logits_arr: Retained<MLMultiArray> = unsafe { out_value.multiArrayValue() }
-            .ok_or_else(|| GenerateError::Backend("logits output is not an MLMultiArray".into()))?;
+        let prediction = self
+            .model
+            .predict(&[("input_ids", &input_arr), ("attention_mask", &mask_arr)])
+            .map_err(map_coreml)?;
+        let logits_arr = prediction.multi_array("logits").map_err(map_coreml)?;
 
         extract_last_position_logits(&logits_arr, real_len)
     }
@@ -340,8 +204,7 @@ impl LlamaBackend for Qwen3CoreMLBackend {
             if debug && step < 16 {
                 let decoded_one = self.tokenizer.decode(&[next_token]);
                 eprintln!(
-                    "[qwen3-debug] step={} next_token={} decoded={:?}",
-                    step, next_token, decoded_one
+                    "[qwen3-debug] step={step} next_token={next_token} decoded={decoded_one:?}"
                 );
             }
 
@@ -382,9 +245,10 @@ impl LlamaBackend for Qwen3CoreMLBackend {
     }
 }
 
-/// Extract logits from the last sequence position of an MLMultiArray.
-/// Expected shapes: [1, seq_len, vocab_size] or [seq_len, vocab_size].
-#[allow(deprecated)]
+/// Extract logits from the last sequence position of an `MLMultiArray`.
+/// Expected shapes: `[1, seq_len, vocab_size]` or `[seq_len, vocab_size]`.
+#[allow(deprecated)] // shape()/objectAtIndex(): Apple-deprecated; no stable objc2 replacement.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 fn extract_last_position_logits(
     arr: &MLMultiArray,
     seq_len: usize,
@@ -399,68 +263,11 @@ fn extract_last_position_logits(
 
     let vocab_size = shape.objectAtIndex(ndim - 1).intValue() as usize;
     let last_pos = seq_len.saturating_sub(1);
+    // [1, seq_len, vocab_size] and [seq_len, vocab_size] both place the
+    // last real token's logits at the same row-major offset.
+    let offset = last_pos * vocab_size;
 
-    let offset = if ndim == 3 {
-        // [1, seq_len, vocab_size]
-        last_pos * vocab_size
-    } else {
-        // [seq_len, vocab_size]
-        last_pos * vocab_size
-    };
-
-    let mut logits = vec![0.0_f32; vocab_size];
-
-    let dtype = unsafe { arr.dataType() };
-    if dtype == MLMultiArrayDataType::Float32 {
-        unsafe {
-            let src = arr.dataPointer().as_ptr().cast::<f32>();
-            std::ptr::copy_nonoverlapping(src.add(offset), logits.as_mut_ptr(), vocab_size);
-        }
-    } else if dtype == MLMultiArrayDataType::Float16 {
-        unsafe {
-            let src = arr.dataPointer().as_ptr().cast::<u16>();
-            for i in 0..vocab_size {
-                logits[i] = f16_to_f32(*src.add(offset + i));
-            }
-        }
-    } else {
-        return Err(GenerateError::Backend(format!(
-            "logits dtype is {:?}, expected Float32 or Float16",
-            dtype.0
-        )));
-    }
-
-    Ok(logits)
-}
-
-/// IEEE 754 half-precision → single-precision conversion.
-fn f16_to_f32(bits: u16) -> f32 {
-    let sign = ((bits >> 15) & 1) as u32;
-    let exp = ((bits >> 10) & 0x1F) as u32;
-    let mantissa = (bits & 0x3FF) as u32;
-
-    if exp == 0 {
-        if mantissa == 0 {
-            return f32::from_bits(sign << 31);
-        }
-        // Subnormal
-        let mut m = mantissa;
-        let mut e: i32 = -14;
-        while m & 0x400 == 0 {
-            m <<= 1;
-            e -= 1;
-        }
-        m &= 0x3FF;
-        #[allow(clippy::cast_sign_loss)]
-        let f32_exp = (e + 127) as u32;
-        return f32::from_bits((sign << 31) | (f32_exp << 23) | (m << 13));
-    }
-    if exp == 31 {
-        return f32::from_bits((sign << 31) | (255_u32 << 23) | (mantissa << 13));
-    }
-
-    let f32_exp = exp + 112; // (exp - 15 + 127)
-    f32::from_bits((sign << 31) | (f32_exp << 23) | (mantissa << 13))
+    model::read_f32_slice(arr, offset, vocab_size).map_err(map_coreml)
 }
 
 /// Temperature-based sampling with top-p (nucleus) filtering.
@@ -565,17 +372,19 @@ fn simple_random_f32() -> f32 {
     s ^= s >> 7;
     s ^= s << 17;
     STATE.store(s, Ordering::Relaxed);
-    (s & 0xFFFF_FFFF) as f32 / 4_294_967_296.0
+    #[allow(clippy::cast_precision_loss)]
+    {
+        (s & 0xFFFF_FFFF) as f32 / 4_294_967_296.0
+    }
 }
 
 /// Try loading the Qwen3 Core ML backend from model + tokenizer paths.
 ///
 /// Expected layout:
 /// ```text
-/// ~/Library/Application Support/MCI/Models/
+/// ~/Library/Application Support/MCI/Models/<model-id>/<basename>/
 ///   Qwen3-1.7B-FP16.mlmodelc/   ← compiled Core ML model
-///   vocab.json                   ← BPE vocabulary
-///   merges.txt                   ← BPE merge rules
+///   tokenizer.json              ← HF tokenizer state
 /// ```
 pub fn try_load_qwen3_backend(
     model_path: &Path,
@@ -651,14 +460,6 @@ mod tests {
         let logits = vec![1.0; 100];
         let token = sample_token(&logits, 1.0, 0.9);
         assert!(token >= 0 && token < 100);
-    }
-
-    #[test]
-    fn f16_to_f32_converts_common_values() {
-        assert_eq!(f16_to_f32(0x0000), 0.0);
-        assert!((f16_to_f32(0x3C00) - 1.0).abs() < 1e-6);
-        assert!((f16_to_f32(0xBC00) - (-1.0)).abs() < 1e-6);
-        assert!((f16_to_f32(0x3800) - 0.5).abs() < 1e-6);
     }
 
     #[test]

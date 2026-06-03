@@ -1012,8 +1012,8 @@ dependencies = [
  "mci-brain",
  "mci-brief",
  "mci-core",
+ "mci-coreml-bridge",
  "mci-embed-coreml",
- "mci-llama-coreml",
  "mci-mail-reader",
  "mci-mcp-client",
  "mci-messages-reader",
@@ -1070,7 +1070,7 @@ version = "0.0.1"
 dependencies = [
  "mci-brain",
  "mci-brief",
- "mci-llama-coreml",
+ "mci-coreml-bridge",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1092,19 +1092,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mci-embed-coreml"
-version = "0.0.1"
-dependencies = [
- "mci-brain",
- "objc2",
- "objc2-core-ml",
- "objc2-foundation",
- "thiserror 1.0.69",
- "tokenizers",
-]
-
-[[package]]
-name = "mci-llama-coreml"
+name = "mci-coreml-bridge"
 version = "0.0.1"
 dependencies = [
  "mci-brief",
@@ -1114,6 +1102,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 1.0.69",
+ "tokenizers",
+]
+
+[[package]]
+name = "mci-embed-coreml"
+version = "0.0.1"
+dependencies = [
+ "mci-brain",
+ "objc2",
+ "objc2-core-ml",
+ "objc2-foundation",
  "thiserror 1.0.69",
  "tokenizers",
 ]

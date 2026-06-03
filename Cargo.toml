@@ -34,10 +34,11 @@ members = [
     # library (no dep download, no link). See
     # `adapters/macos/mci-embed-coreml/Cargo.toml`.
     "adapters/macos/mci-embed-coreml",
-    # macOS-only Rust adapter: Core ML backend for Llama-3.2-1B int4 brief
-    # generation. Implements mci_brief::llama_backend::LlamaBackend. Deps +
-    # lib body gated by `cfg(target_os = "macos")`. See ADR-0018 §1.2.
-    "adapters/macos/mci-llama-coreml",
+    # macOS-only Rust Core ML bridge: a generic CoreMLModel wrapper plus
+    # per-model shims (Qwen3-1.7B brief generation; GLiNER NER, V2-P5+).
+    # Renamed from mci-llama-coreml in ADR-0033 (Path A). Deps + lib body
+    # gated by `cfg(target_os = "macos")`. See ADR-0018 §1.2 / ADR-0033.
+    "adapters/macos/mci-coreml-bridge",
     # macOS-only Rust adapter: C-ABI FFI shim that exposes a READ-ONLY
     # view of the Phase-3 brain to the SwiftUI recall-ui app at
     # `apps/recall-ui/`. Skeleton lands at P3.9a (extern "C" surface +
