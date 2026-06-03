@@ -1,0 +1,14 @@
+[
+  {
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "reason": "stray sentinel '⟦' in clean text",
+    "marked_text": "⟦person_name⊳greta hol1ms⟧ on ⟦date⊳Tue⟧:\nrescheduledfor ⟦time⊳3:15 PM⟧ does that w0rk\n…still waiting on ⟦person_name⊳pe"
+  },
+  {
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "reason": "stray sentinel '⟦' in clean text",
+    "marked_text": "@channel headsup ⟦organization⊳Greyhi11⟧ demo got pushed\nnew slot ⟦date⊳2026-06-09⟧ ⟦time⊳14:30⟧\n⟦person_name⊳Frank⟧ saidhe'll cover if ⟦person_name⊳nessa torq"
+  }
+]

@@ -1,0 +1,6941 @@
+[
+  {
+    "id": "browser_page-adversarial_negatives-0002",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "COOKIE CONSENT\nWe and our partners use cookies. Click ACCEPT ALL or MANAGE PREFERENCES.\nNecessary · Analytics · Marketing\nBy continuing you AGREE to our Terms. CANCEL · OK",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-adversarial_negatives-0003",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "Phoenix Vela on the road again\n\nSinger Phoenix Vela played a sold-out set, then flew to Phoenix for the next leg with Northwind Aviation.\nNew dates announced next Friday.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 39,
+        "span_end": 51,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "location",
+        "span_start": 88,
+        "span_end": 95,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "organization",
+        "span_start": 118,
+        "span_end": 136,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "date",
+        "span_start": 158,
+        "span_end": 169,
+        "mention_text": "next Friday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "browser_page-adversarial_negatives-0004",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "Sign In | Create Account | Help Center\n\nMy Orders › Order #44812\nShipped Tuesday · Arrives Reading depot\nTrack Package  ·  Return Item  ·  Leave Review",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 75,
+        "span_end": 82,
+        "mention_text": "Tuesday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "browser_page-adversarial_negatives-0007",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "URGENT: SYSTEM MAINTENANCE\n\nThe ACCOUNT portal will be DOWN for scheduled work. Please SAVE YOUR PROGRESS.\nStatus: ERROR 503 · RETRY · DISMISS\nContact SUPPORT if this PERSISTS.",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-adversarial_negatives-0008",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "City Health Dept Bulletin\n\nClinic hours move to 8:30 starting Monday. Walk-ins welcome at the north office, 412 Dunmore Rd.\nDr. Imara Kells leads the new Q3 outreach.",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 0,
+        "span_end": 16,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "time",
+        "span_start": 48,
+        "span_end": 52,
+        "mention_text": "8:30"
+      },
+      {
+        "kind": "date",
+        "span_start": 62,
+        "span_end": 68,
+        "mention_text": "Monday"
+      },
+      {
+        "kind": "location",
+        "span_start": 94,
+        "span_end": 106,
+        "mention_text": "north office"
+      },
+      {
+        "kind": "location",
+        "span_start": 108,
+        "span_end": 122,
+        "mention_text": "412 Dunmore Rd"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 128,
+        "span_end": 139,
+        "mention_text": "Imara Kells"
+      },
+      {
+        "kind": "date",
+        "span_start": 154,
+        "span_end": 156,
+        "mention_text": "Q3"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "browser_page-adversarial_negatives-0009",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "Page Not Found (404)\n\nThe page you requested has Moved or been Removed.\nGo Back · Home · Search\nTry New Search or browse our Help articles.",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-adversarial_negatives-0012",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "Jobs Board\n\nMarketing Lead — Remote\nProject Manager — On-site\nWill train · Must Start ASAP · Apply Now\nFilter by: Date Posted · Salary · Location",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-adversarial_negatives-0013",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "Liv3 Updat3s — Greyhill Stadium\n\nBrooklyn Maddox scores in the 88th! Crowd of 40,000.\nMatch ends 9:l5 PM · Repcrt by J. Carrow · Sat",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 17,
+        "span_end": 25,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 35,
+        "span_end": 50,
+        "mention_text": "Brooklyn Maddox"
+      },
+      {
+        "kind": "time",
+        "span_start": 99,
+        "span_end": 106,
+        "mention_text": "9:l5 PM"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 120,
+        "span_end": 129,
+        "mention_text": "J. Carrow"
+      },
+      {
+        "kind": "date",
+        "span_start": 133,
+        "span_end": 136,
+        "mention_text": "Sat"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "browser_page-adversarial_negatives-0014",
+    "genre": "browser_page",
+    "variant": "adversarial_negatives",
+    "text": "Real Estate Listing\n\nCharming 3BR near Madison Park ........ $610,000\nListed by Charlotte Devane, Dunmore Realty\nOpen House Sunday noon–3 PM · 28 Madison Ave",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 39,
+        "span_end": 51,
+        "mention_text": "Madison Park"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 80,
+        "span_end": 96,
+        "mention_text": "Charlotte Devane"
+      },
+      {
+        "kind": "organization",
+        "span_start": 98,
+        "span_end": 112,
+        "mention_text": "Dunmore Realty"
+      },
+      {
+        "kind": "date",
+        "span_start": 124,
+        "span_end": 130,
+        "mention_text": "Sunday"
+      },
+      {
+        "kind": "time",
+        "span_start": 131,
+        "span_end": 135,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "time",
+        "span_start": 138,
+        "span_end": 142,
+        "mention_text": "3 PM"
+      },
+      {
+        "kind": "location",
+        "span_start": 146,
+        "span_end": 160,
+        "mention_text": "28 Madison Ave"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0002",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "We use cookies to improve your experience. By continuing to browse this site you agree to our Privacy Policy and Terms of Service.\nAccept All    Manage Preferences",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0003",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "Sign in to your account\nForgot password? Create New Account\nDon't have a Greyhill ID yet?",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 73,
+        "span_end": 81,
+        "mention_text": "Greyhill"
+      }
+    ],
+    "hardness_tags": [
+      "hard_negative",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0004",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "Dr. Imani Faro will present \"Tidal Sediment Mapping\" at the Coastal Research Forum on next Friday at 10:30 AM in Building 4.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 0,
+        "span_end": 14,
+        "mention_text": "Dr. Imani Faro"
+      },
+      {
+        "kind": "organization",
+        "span_start": 60,
+        "span_end": 82,
+        "mention_text": "Coastal Research Forum"
+      },
+      {
+        "kind": "date",
+        "span_start": 86,
+        "span_end": 97,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "time",
+        "span_start": 101,
+        "span_end": 109,
+        "mention_text": "10:30 AM"
+      },
+      {
+        "kind": "location",
+        "span_start": 113,
+        "span_end": 123,
+        "mention_text": "Building 4"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0007",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "an apple a day keeps the doctor away, the old sign above the counter still read, faded now after thirty summers in the back room",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0008",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "Opinion: Why Washington Keeps Getting the Water Bill Wrong\nGrant Mireles argues the City Health Dept has stalled since Q3.",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 13,
+        "span_end": 23,
+        "mention_text": "Washington"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 59,
+        "span_end": 72,
+        "mention_text": "Grant Mireles"
+      },
+      {
+        "kind": "organization",
+        "span_start": 84,
+        "span_end": 100,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "date",
+        "span_start": 119,
+        "span_end": 121,
+        "mention_text": "Q3"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0009",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "Posted by @maravelez · 4 hours ago\nFinally got the Brain team to merge it. Phoenix Vela caught the bug at midnight, legend.",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 52,
+        "span_end": 62,
+        "mention_text": "Brain team"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 76,
+        "span_end": 88,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "time",
+        "span_start": 107,
+        "span_end": 115,
+        "mention_text": "midnight"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0012",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "Northwind Aviation Q2 Earnings Call — July 14 at 9:00 AM ET\nDial-in details emailed to registered shareholders the day prior.",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 0,
+        "span_end": 18,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "date",
+        "span_start": 40,
+        "span_end": 47,
+        "mention_text": "July 14"
+      },
+      {
+        "kind": "time",
+        "span_start": 51,
+        "span_end": 58,
+        "mention_text": "9:00 AM"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0013",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "Page Not Found\nThe page you requested may have been moved or deleted. Return to Home or try the search bar above.",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0014",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "Review: The new Dunmore Pier seafood hall, written by Rosalind Hatcher, May 28 — go before the noon rush hits.",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 16,
+        "span_end": 28,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 54,
+        "span_end": 70,
+        "mention_text": "Rosalind Hatcher"
+      },
+      {
+        "kind": "date",
+        "span_start": 72,
+        "span_end": 78,
+        "mention_text": "May 28"
+      },
+      {
+        "kind": "time",
+        "span_start": 97,
+        "span_end": 101,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "browser_page-natural_mixed-0017",
+    "genre": "browser_page",
+    "variant": "natural_mixed",
+    "text": "Event registration is now OPEN. Limited seats. The Summit on Open Water runs from Tuesday through Thursday at Room 3F, hosted by Dr. Chen.",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 82,
+        "span_end": 89,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "date",
+        "span_start": 98,
+        "span_end": 106,
+        "mention_text": "Thursday"
+      },
+      {
+        "kind": "location",
+        "span_start": 110,
+        "span_end": 117,
+        "mention_text": "Room 3F"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 129,
+        "span_end": 137,
+        "mention_text": "Dr. Chen"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0002",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "We use co0kies. By clicking ACCEPT ALL you agree to our policy. Manage Preferences | Reject | Sign In\nThis site is operated by Northwind Aviation",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 127,
+        "span_end": 145,
+        "mention_text": "Northwind Aviation"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0003",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "byl ine: Dr. Chen and Phoenix Vela\nUpdated Tuesday, noon — story still developing",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 9,
+        "span_end": 17,
+        "mention_text": "Dr. Chen"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 22,
+        "span_end": 34,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "date",
+        "span_start": 43,
+        "span_end": 50,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 52,
+        "span_end": 56,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0004",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "I'll mark it as read later. Save As New Folder URGENT — please review the draft before you Sign In",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0007",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "an apple a day keeps the doctor away — but Apple stock dipped, says the City Health Dept blog",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 45,
+        "span_end": 50,
+        "mention_text": "Apple"
+      },
+      {
+        "kind": "organization",
+        "span_start": 74,
+        "span_end": 90,
+        "mention_text": "City Health Dept"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0008",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "Page t1tle: Brain team ships Carrowmere—no wait, the team meets in Building 4, Room 3F nextmeeting next Friday",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 12,
+        "span_end": 22,
+        "mention_text": "Brain team"
+      },
+      {
+        "kind": "organization",
+        "span_start": 29,
+        "span_end": 39,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "location",
+        "span_start": 69,
+        "span_end": 79,
+        "mention_text": "Building 4"
+      },
+      {
+        "kind": "location",
+        "span_start": 81,
+        "span_end": 88,
+        "mention_text": "Room 3F"
+      },
+      {
+        "kind": "date",
+        "span_start": 101,
+        "span_end": 112,
+        "mention_text": "next Friday"
+      }
+    ],
+    "hardness_tags": [
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0009",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "BREAKING: Mark shipped it — the Greyhill board confirmed at 15:00, full repor t to follow on 3/3/2026",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 10,
+        "span_end": 14,
+        "mention_text": "Mark"
+      },
+      {
+        "kind": "organization",
+        "span_start": 34,
+        "span_end": 42,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "time",
+        "span_start": 62,
+        "span_end": 67,
+        "mention_text": "15:00"
+      },
+      {
+        "kind": "date",
+        "span_start": 95,
+        "span_end": 103,
+        "mention_text": "3/3/2026"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0012",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "Sign in to continue. Forgot password? New here? Create account.\nWARNING: your sessi0n will expire at midn1ght",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ocr_noise",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0013",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "Sponsored · Northwind Aviation hiring in Carrowmere and Dunmore Pier — apply by the 14th",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 13,
+        "span_end": 31,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "location",
+        "span_start": 42,
+        "span_end": 52,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "location",
+        "span_start": 57,
+        "span_end": 69,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "date",
+        "span_start": 83,
+        "span_end": 91,
+        "mention_text": "the 14th"
+      }
+    ],
+    "hardness_tags": [
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0014",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "Top story: will Sterling Roe run again? the Greyhill Capital memo, leaked Q3, suggests yes\n— Reading time: 6 min",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 16,
+        "span_end": 28,
+        "mention_text": "Sterling Roe"
+      },
+      {
+        "kind": "organization",
+        "span_start": 44,
+        "span_end": 60,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "date",
+        "span_start": 74,
+        "span_end": 76,
+        "mention_text": "Q3"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "browser_page-ocr_noisy-0017",
+    "genre": "browser_page",
+    "variant": "ocr_noisy",
+    "text": "Listing: 2bed flat near Greyhill — viewing tomorrow 9am with agent M. Carrowmere callortext theofficeb4 5:00 PM",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 24,
+        "span_end": 32,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "date",
+        "span_start": 45,
+        "span_end": 53,
+        "mention_text": "tomorrow"
+      },
+      {
+        "kind": "time",
+        "span_start": 54,
+        "span_end": 57,
+        "mention_text": "9am"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 69,
+        "span_end": 82,
+        "mention_text": "M. Carrowmere"
+      },
+      {
+        "kind": "time",
+        "span_start": 106,
+        "span_end": 113,
+        "mention_text": "5:00 PM"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0002",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "Organizer: Mark Tornquist\nNote: I'll mark this tentative until the room frees up.\nGrant said he might join; will confirm later.\nRSVP: Maybe",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 11,
+        "span_end": 25,
+        "mention_text": "Mark Tornquist"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 82,
+        "span_end": 87,
+        "mention_text": "Grant"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0003",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "Greyhill Capital Q3 Planning\nInvitees: Dr. Chen, Phoenix Vela, @miravelez\nLocation: 412 Alder St, Carrowmere\nQ3 kickoff — all-day event on August 4",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 0,
+        "span_end": 16,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 39,
+        "span_end": 47,
+        "mention_text": "Dr. Chen"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 49,
+        "span_end": 61,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 63,
+        "span_end": 73,
+        "mention_text": "@miravelez"
+      },
+      {
+        "kind": "location",
+        "span_start": 84,
+        "span_end": 96,
+        "mention_text": "412 Alder St"
+      },
+      {
+        "kind": "location",
+        "span_start": 98,
+        "span_end": 108,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "date",
+        "span_start": 109,
+        "span_end": 111,
+        "mention_text": "Q3"
+      },
+      {
+        "kind": "date",
+        "span_start": 141,
+        "span_end": 149,
+        "mention_text": "August 4"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0004",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "Apple stock review moved. The Orange room is taken so we Summit in Reading instead.\nWASHINGTON memo is due — flag it OK.\nMobile alerts ON.",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0007",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "Standup w/ the Brain team\nRose Carrowmere presenting\nWhere: the north office\nnext Friday at noon\nNote: bring a rose for the desk, it's nice in here",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 15,
+        "span_end": 25,
+        "mention_text": "Brain team"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 26,
+        "span_end": 41,
+        "mention_text": "Rose Carrowmere"
+      },
+      {
+        "kind": "location",
+        "span_start": 60,
+        "span_end": 76,
+        "mention_text": "the north office"
+      },
+      {
+        "kind": "date",
+        "span_start": 77,
+        "span_end": 88,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "time",
+        "span_start": 92,
+        "span_end": 96,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0008",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "Even1: Mara Ve1ez 1:1\nLocat10n: Dunmore Pier\nW hen: Tue 07:45—O8:3O\nJ0in w1th Zoom",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 7,
+        "span_end": 17,
+        "mention_text": "Mara Ve1ez"
+      },
+      {
+        "kind": "location",
+        "span_start": 32,
+        "span_end": 44,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "date",
+        "span_start": 52,
+        "span_end": 55,
+        "mention_text": "Tue"
+      },
+      {
+        "kind": "time",
+        "span_start": 56,
+        "span_end": 61,
+        "mention_text": "07:45"
+      },
+      {
+        "kind": "time",
+        "span_start": 64,
+        "span_end": 69,
+        "mention_text": "O8:3O"
+      }
+    ],
+    "hardness_tags": [
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0009",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "CANCEL   DELETE EVENT   TODO   WARNING\nMadison meeting? No — the field says Madison Ave is the cross-street, not a person.\nReading list due Friday but that's a verb here, kinda.",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 78,
+        "span_end": 89,
+        "mention_text": "Madison Ave"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0012",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "Recurrence: Weekly on Tuesday\nNext Up   Today   This Week   Month\nJune is the busy month; April already booked.\nNo invitees. No location. ERROR: time not set.",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 22,
+        "span_end": 29,
+        "mention_text": "Tuesday"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0013",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "Invite from Dr. A. Sterling\nCity Health Dept briefing\nRoom 12, Greyhill Annex\nyesterday midnight run was the deploy, not this\nWhen: the 14th at 9:30",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 12,
+        "span_end": 27,
+        "mention_text": "Dr. A. Sterling"
+      },
+      {
+        "kind": "organization",
+        "span_start": 28,
+        "span_end": 44,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "location",
+        "span_start": 54,
+        "span_end": 61,
+        "mention_text": "Room 12"
+      },
+      {
+        "kind": "location",
+        "span_start": 63,
+        "span_end": 77,
+        "mention_text": "Greyhill Annex"
+      },
+      {
+        "kind": "date",
+        "span_start": 78,
+        "span_end": 87,
+        "mention_text": "yesterday"
+      },
+      {
+        "kind": "time",
+        "span_start": 88,
+        "span_end": 96,
+        "mention_text": "midnight"
+      },
+      {
+        "kind": "date",
+        "span_start": 132,
+        "span_end": 140,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "time",
+        "span_start": 144,
+        "span_end": 148,
+        "mention_text": "9:30"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "calendar_event-adversarial_negatives-0014",
+    "genre": "calendar_event",
+    "variant": "adversarial_negatives",
+    "text": "Title: Cleveland Houston Sync\nNote: Cleveland and Houston are the two server clusters, not people or cities here.\nMark it resolved when the migration finishes. OK.",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0002",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "Onsite with Tornquist Labs\nMarch 3 · all-day\nLocation: Carrowmere",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 12,
+        "span_end": 26,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "date",
+        "span_start": 27,
+        "span_end": 34,
+        "mention_text": "March 3"
+      },
+      {
+        "kind": "location",
+        "span_start": 56,
+        "span_end": 66,
+        "mention_text": "Carrowmere"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0003",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "Reminder: lunch with Jordan Sefton tomorrow at noon — Dunmore Pier",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 21,
+        "span_end": 34,
+        "mention_text": "Jordan Sefton"
+      },
+      {
+        "kind": "date",
+        "span_start": 35,
+        "span_end": 43,
+        "mention_text": "tomorrow"
+      },
+      {
+        "kind": "time",
+        "span_start": 47,
+        "span_end": 51,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "location",
+        "span_start": 56,
+        "span_end": 68,
+        "mention_text": "Dunmore Pier"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0004",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "Board review · Greyhill Capital\nnext Friday 9:30 – 11:00\nJoin with Zoom",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 16,
+        "span_end": 32,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "date",
+        "span_start": 33,
+        "span_end": 44,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "time",
+        "span_start": 45,
+        "span_end": 49,
+        "mention_text": "9:30"
+      },
+      {
+        "kind": "time",
+        "span_start": 54,
+        "span_end": 59,
+        "mention_text": "11:00"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0007",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "Flight to Phoenix\nDeparts Aug 14 07:45\nGate info TBD",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 10,
+        "span_end": 17,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "date",
+        "span_start": 26,
+        "span_end": 32,
+        "mention_text": "Aug 14"
+      },
+      {
+        "kind": "time",
+        "span_start": 33,
+        "span_end": 38,
+        "mention_text": "07:45"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0008",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "Save the date — Phoenix Vela retirement\nthe 14th at 6 PM, 412 Alder St",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 18,
+        "span_end": 30,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "date",
+        "span_start": 42,
+        "span_end": 50,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "time",
+        "span_start": 54,
+        "span_end": 58,
+        "mention_text": "6 PM"
+      },
+      {
+        "kind": "location",
+        "span_start": 60,
+        "span_end": 72,
+        "mention_text": "412 Alder St"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0009",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "Standup\nRecurs daily 9am\nNew Event   Edit   Delete",
+    "entities": [
+      {
+        "kind": "time",
+        "span_start": 21,
+        "span_end": 24,
+        "mention_text": "9am"
+      }
+    ],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0012",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "Dinner: Mark and Rose Halloran\nSat 7:30, Sterling Room at the Aldworth Club",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 8,
+        "span_end": 12,
+        "mention_text": "Mark"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 17,
+        "span_end": 30,
+        "mention_text": "Rose Halloran"
+      },
+      {
+        "kind": "date",
+        "span_start": 31,
+        "span_end": 34,
+        "mention_text": "Sat"
+      },
+      {
+        "kind": "time",
+        "span_start": 35,
+        "span_end": 39,
+        "mention_text": "7:30"
+      },
+      {
+        "kind": "location",
+        "span_start": 41,
+        "span_end": 54,
+        "mention_text": "Sterling Room"
+      },
+      {
+        "kind": "organization",
+        "span_start": 62,
+        "span_end": 75,
+        "mention_text": "Aldworth Club"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0013",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "I'll mark this slot tentative — still confirming with the venue.\nNo new invitees added.",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0014",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "Offsite kickoff\nCarrowmere Lodge, Greyhill\nJun 14 – Jun 16\nOrganizer: @miravelez",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 16,
+        "span_end": 32,
+        "mention_text": "Carrowmere Lodge"
+      },
+      {
+        "kind": "location",
+        "span_start": 34,
+        "span_end": 42,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "date",
+        "span_start": 43,
+        "span_end": 49,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "date",
+        "span_start": 54,
+        "span_end": 60,
+        "mention_text": "Jun 16"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 72,
+        "span_end": 82,
+        "mention_text": "@miravelez"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "calendar_event-natural_mixed-0017",
+    "genre": "calendar_event",
+    "variant": "natural_mixed",
+    "text": "URGENT: All-Hands moved\nNow next Tuesday 10:00 AM\nVenue: Dunmore Atrium, hosted by the Platform team",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 28,
+        "span_end": 40,
+        "mention_text": "next Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 41,
+        "span_end": 49,
+        "mention_text": "10:00 AM"
+      },
+      {
+        "kind": "location",
+        "span_start": 57,
+        "span_end": 71,
+        "mention_text": "Dunmore Atrium"
+      },
+      {
+        "kind": "organization",
+        "span_start": 83,
+        "span_end": 100,
+        "mention_text": "the Platform team"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0002",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "All-day · Jun 14\nHoliday — office cl0sed\nNo location  ·  No invitees  ·  REMINDER off",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 11,
+        "span_end": 17,
+        "mention_text": "Jun 14"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "mixed_case",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0003",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "Tornquist Labs onboardirig\ntomorrow at 9am — Dunmore Pier confereoce rrn\nset by b. carrowmere",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 0,
+        "span_end": 14,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "date",
+        "span_start": 27,
+        "span_end": 35,
+        "mention_text": "tomorrow"
+      },
+      {
+        "kind": "time",
+        "span_start": 39,
+        "span_end": 42,
+        "mention_text": "9am"
+      },
+      {
+        "kind": "location",
+        "span_start": 47,
+        "span_end": 74,
+        "mention_text": "Dunmore Pier confereoce rrn"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 82,
+        "span_end": 95,
+        "mention_text": "b. carrowmere"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0004",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "…nextmeeting overlaps w th lunch\nMove t0 noon?  Save As  ·  CANCEL  ·  OK\nNew Folder",
+    "entities": [
+      {
+        "kind": "time",
+        "span_start": 43,
+        "span_end": 47,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "no_boundary",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0007",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "Quarterly revievv with Greyhill Capital\nnext Friday, 15:00–16:30\nat 412 Alder St, Carrowmere\nhost Phoenix Vela",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 23,
+        "span_end": 39,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "date",
+        "span_start": 40,
+        "span_end": 51,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "time",
+        "span_start": 53,
+        "span_end": 58,
+        "mention_text": "15:00"
+      },
+      {
+        "kind": "time",
+        "span_start": 61,
+        "span_end": 66,
+        "mention_text": "16:30"
+      },
+      {
+        "kind": "location",
+        "span_start": 70,
+        "span_end": 82,
+        "mention_text": "412 Alder St"
+      },
+      {
+        "kind": "location",
+        "span_start": 84,
+        "span_end": 94,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 100,
+        "span_end": 112,
+        "mention_text": "Phoenix Vela"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0008",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "flew to Phoenix — resd1edule standup\nold: Tue 9:30   new: Thu 9:30",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 8,
+        "span_end": 15,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "date",
+        "span_start": 44,
+        "span_end": 47,
+        "mention_text": "Tue"
+      },
+      {
+        "kind": "time",
+        "span_start": 48,
+        "span_end": 52,
+        "mention_text": "9:30"
+      },
+      {
+        "kind": "date",
+        "span_start": 60,
+        "span_end": 63,
+        "mention_text": "Thu"
+      },
+      {
+        "kind": "time",
+        "span_start": 64,
+        "span_end": 68,
+        "mention_text": "9:30"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0009",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "EVENT TITLE: c o n f i r m budget w Frank Madison\n2026-06-09 14:30\nGuests: Rose Tanaka (organizer)",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 36,
+        "span_end": 49,
+        "mention_text": "Frank Madison"
+      },
+      {
+        "kind": "date",
+        "span_start": 50,
+        "span_end": 60,
+        "mention_text": "2026-06-09"
+      },
+      {
+        "kind": "time",
+        "span_start": 61,
+        "span_end": 66,
+        "mention_text": "14:30"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 75,
+        "span_end": 86,
+        "mention_text": "Rose Tanaka"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0012",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "RSVP requested by the 3rd\nDinner @ Greenway Tavern w th Madison Orr & Grant Liu\n7:30pm",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 18,
+        "span_end": 25,
+        "mention_text": "the 3rd"
+      },
+      {
+        "kind": "location",
+        "span_start": 35,
+        "span_end": 50,
+        "mention_text": "Greenway Tavern"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 56,
+        "span_end": 67,
+        "mention_text": "Madison Orr"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 70,
+        "span_end": 79,
+        "mention_text": "Grant Liu"
+      },
+      {
+        "kind": "time",
+        "span_start": 80,
+        "span_end": 86,
+        "mention_text": "7:30pm"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0013",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "URGENT: rebook Room 211\nERROR — conflict w th existing hold 11:00–12:00\nTODO: ping M. Velez",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 15,
+        "span_end": 23,
+        "mention_text": "Room 211"
+      },
+      {
+        "kind": "time",
+        "span_start": 62,
+        "span_end": 67,
+        "mention_text": "11:00"
+      },
+      {
+        "kind": "time",
+        "span_start": 70,
+        "span_end": 75,
+        "mention_text": "12:00"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 87,
+        "span_end": 95,
+        "mention_text": "M. Velez"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "calendar_event-ocr_noisy-0014",
+    "genre": "calendar_event",
+    "variant": "ocr_noisy",
+    "text": "Recurr1ng: Weekly on Wednesday\nGym block — no guests, no place\nmark complete after sessl0n",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 21,
+        "span_end": 30,
+        "mention_text": "Wednesday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0002",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "Save As didn't work, hit New Folder by accident\ntried Sign In again, still ERROR\ngonna File > Export instead",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0003",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "Dr. Chen wants the bloods by Tuesday\nclinic opens 9am, get there early\nRead 8:14 AM",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 0,
+        "span_end": 8,
+        "mention_text": "Dr. Chen"
+      },
+      {
+        "kind": "date",
+        "span_start": 29,
+        "span_end": 36,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 50,
+        "span_end": 53,
+        "mention_text": "9am"
+      },
+      {
+        "kind": "time",
+        "span_start": 76,
+        "span_end": 83,
+        "mention_text": "8:14 AM"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0004",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "the Apple stock thing — Jordan said sell\nme: an apple a day keeps Jordan away 😂\nJordan: not funny",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 26,
+        "span_end": 32,
+        "mention_text": "Jordan"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0007",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "Summit was great\nthe Summit hotel less so lol\nSummit Greyhill crashed at mine after",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 46,
+        "span_end": 61,
+        "mention_text": "Summit Greyhill"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0008",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "OK CANCEL the order pls\nWARNING it ships tomorrow if u don't\nTODO: call Northwind Aviation b4 noon",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 41,
+        "span_end": 49,
+        "mention_text": "tomorrow"
+      },
+      {
+        "kind": "organization",
+        "span_start": 72,
+        "span_end": 90,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "time",
+        "span_start": 94,
+        "span_end": 98,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0009",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "she said Nice was nice\nbut Nice in August is packed\nrose smell everywhere, Rose loved it",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 27,
+        "span_end": 31,
+        "mention_text": "Nice"
+      },
+      {
+        "kind": "date",
+        "span_start": 35,
+        "span_end": 41,
+        "mention_text": "August"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 75,
+        "span_end": 79,
+        "mention_text": "Rose"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0012",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "Orange you glad it's friday\nthe orange folder, not the Orange one\nframk frm acctng wants it EOD",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "ocr_noise",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0013",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "May said maybe in May\nbut May never confirms anything ugh\nApril prob knows, ask her",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 26,
+        "span_end": 29,
+        "mention_text": "May"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "chat_imessage-adversarial_negatives-0014",
+    "genre": "chat_imessage",
+    "variant": "adversarial_negatives",
+    "text": "Reply to Mara: ❤️\nmeet Dunmore Pier 9:30?\nGreyhill said yes but Greyhill always flakes\nGreyhill Capital ofc not the guy",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 9,
+        "span_end": 13,
+        "mention_text": "Mara"
+      },
+      {
+        "kind": "location",
+        "span_start": 27,
+        "span_end": 39,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "time",
+        "span_start": 40,
+        "span_end": 44,
+        "mention_text": "9:30"
+      },
+      {
+        "kind": "organization",
+        "span_start": 91,
+        "span_end": 107,
+        "mention_text": "Greyhill Capital"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0002",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "wait i'll mark that resolved once QA signs off, don't close it yet\ntyping…",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0003",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "Tomas: landing in Carrowmere 6:30pm, can someone grab me from the airport?\nLena: Will has the car, ping him\nDelivered",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 18,
+        "span_end": 28,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "time",
+        "span_start": 29,
+        "span_end": 35,
+        "mention_text": "6:30pm"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 81,
+        "span_end": 85,
+        "mention_text": "Will"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0004",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "ok so the offsite is at Dunmore Pier on Jun 14, Dr. Halvorsen is keynoting at noon and then Northwind Aviation does the panel after",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 24,
+        "span_end": 36,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "date",
+        "span_start": 40,
+        "span_end": 46,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 48,
+        "span_end": 61,
+        "mention_text": "Dr. Halvorsen"
+      },
+      {
+        "kind": "time",
+        "span_start": 78,
+        "span_end": 82,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "organization",
+        "span_start": 92,
+        "span_end": 110,
+        "mention_text": "Northwind Aviation"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0007",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "Sasha: @miravelez can you push the Friday release to next Monday? Reuben wants more bake time\nMira: works for me",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 35,
+        "span_end": 41,
+        "mention_text": "Friday"
+      },
+      {
+        "kind": "date",
+        "span_start": 53,
+        "span_end": 64,
+        "mention_text": "next Monday"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 66,
+        "span_end": 72,
+        "mention_text": "Reuben"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0008",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "URGENT: server in Room 3F is throwing ERROR 500 again, paging Anil now",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 18,
+        "span_end": 25,
+        "mention_text": "Room 3F"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 62,
+        "span_end": 66,
+        "mention_text": "Anil"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0009",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "Jordan said she'd cover the demo but Jordan from sales already booked the room, so it's two Jordans now lol",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 0,
+        "span_end": 6,
+        "mention_text": "Jordan"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 37,
+        "span_end": 43,
+        "mention_text": "Jordan"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0012",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "flew into Phoenix last night, dead tired. Phoenix Vela texted asking if i want to grab coffee tomorrow 9am",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 10,
+        "span_end": 17,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 42,
+        "span_end": 54,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "date",
+        "span_start": 94,
+        "span_end": 102,
+        "mention_text": "tomorrow"
+      },
+      {
+        "kind": "time",
+        "span_start": 103,
+        "span_end": 106,
+        "mention_text": "9am"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0013",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "can you Save As a copy before editing? don't overwrite the master\nsure, one sec",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0014",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "Beck: Coach Drummond moved practice to the north office gym, Tue at 6:00 PM\nBeck: bring your own water",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 6,
+        "span_end": 20,
+        "mention_text": "Coach Drummond"
+      },
+      {
+        "kind": "location",
+        "span_start": 39,
+        "span_end": 55,
+        "mention_text": "the north office"
+      },
+      {
+        "kind": "date",
+        "span_start": 61,
+        "span_end": 64,
+        "mention_text": "Tue"
+      },
+      {
+        "kind": "time",
+        "span_start": 68,
+        "span_end": 75,
+        "mention_text": "6:00 PM"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-natural_mixed-0017",
+    "genre": "chat_imessage",
+    "variant": "natural_mixed",
+    "text": "Mom: happy birthday sweetie ❤️ call me when you wake up\nyou: thanks mom, will do\nDelivered",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0002",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "@here URGENT — Tornquist Labs wantsthe deck by Fri EOD pls dont drop the ball\ntyping…",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 17,
+        "span_end": 31,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "date",
+        "span_start": 49,
+        "span_end": 52,
+        "mention_text": "Fri"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0003",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "ill mark it as d0ne when i get a sec\nno rush its fine\nOK cool 🙏",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "ocr_noise",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0004",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "@miravelez flewto Pho3nix lastnight\nshe lands Sunday around noon i think\nReacted ❤️ to your message",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 0,
+        "span_end": 10,
+        "mention_text": "@miravelez"
+      },
+      {
+        "kind": "location",
+        "span_start": 18,
+        "span_end": 25,
+        "mention_text": "Pho3nix"
+      },
+      {
+        "kind": "date",
+        "span_start": 46,
+        "span_end": 52,
+        "mention_text": "Sunday"
+      },
+      {
+        "kind": "time",
+        "span_start": 60,
+        "span_end": 64,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0007",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "carl 11:08 AM\nbro the Northwind Aviati0n contract closes Jun 14\nmeet me at Dunm0re Pier 7am sharp",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 0,
+        "span_end": 4,
+        "mention_text": "carl"
+      },
+      {
+        "kind": "time",
+        "span_start": 5,
+        "span_end": 13,
+        "mention_text": "11:08 AM"
+      },
+      {
+        "kind": "organization",
+        "span_start": 22,
+        "span_end": 40,
+        "mention_text": "Northwind Aviati0n"
+      },
+      {
+        "kind": "date",
+        "span_start": 57,
+        "span_end": 63,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "location",
+        "span_start": 75,
+        "span_end": 87,
+        "mention_text": "Dunm0re Pier"
+      },
+      {
+        "kind": "time",
+        "span_start": 88,
+        "span_end": 91,
+        "mention_text": "7am"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0008",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "ugh i flew thru Sydney on the way\nsydney from accounting txted me too lol confusing\nshe wants the report next Friday",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 16,
+        "span_end": 22,
+        "mention_text": "Sydney"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 34,
+        "span_end": 40,
+        "mention_text": "sydney"
+      },
+      {
+        "kind": "date",
+        "span_start": 105,
+        "span_end": 116,
+        "mention_text": "next Friday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0009",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "vve1la: did the brain team approve\ndane: yea the Brain team signed 0ff yesterday ~15:00\nDelivered",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 0,
+        "span_end": 6,
+        "mention_text": "vve1la"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 35,
+        "span_end": 39,
+        "mention_text": "dane"
+      },
+      {
+        "kind": "organization",
+        "span_start": 45,
+        "span_end": 59,
+        "mention_text": "the Brain team"
+      },
+      {
+        "kind": "date",
+        "span_start": 71,
+        "span_end": 80,
+        "mention_text": "yesterday"
+      },
+      {
+        "kind": "time",
+        "span_start": 82,
+        "span_end": 87,
+        "mention_text": "15:00"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0012",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "Sign In keeps failing on my end\nCANCEL just bounces me back\nanyone else seeing this OK nvm fixed it",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0013",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "lio: City Health Dept emai1ed re the permit\ndeadline is Q3 apparently\nfwd it to @theoq pls\nRead",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 0,
+        "span_end": 3,
+        "mention_text": "lio"
+      },
+      {
+        "kind": "organization",
+        "span_start": 5,
+        "span_end": 21,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "date",
+        "span_start": 56,
+        "span_end": 58,
+        "mention_text": "Q3"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 80,
+        "span_end": 86,
+        "mention_text": "@theoq"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "chat_imessage-ocr_noisy-0014",
+    "genre": "chat_imessage",
+    "variant": "ocr_noisy",
+    "text": "ok so heres the plan\nlandin Brookl1n the 14th then drive to the north office\ncall Will when ur close he'll buzzu in",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 28,
+        "span_end": 36,
+        "mention_text": "Brookl1n"
+      },
+      {
+        "kind": "date",
+        "span_start": 37,
+        "span_end": 45,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "location",
+        "span_start": 60,
+        "span_end": 76,
+        "mention_text": "the north office"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 82,
+        "span_end": 86,
+        "mention_text": "Will"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0002",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Meeting notes — Brain team\nWASHINGTON wants the demo recorded. We met Washington from Northwind Aviation who flew in from Phoenix.\nSeparately, Phoenix Vela will rise from the ashes and own the rollout.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 72,
+        "span_end": 82,
+        "mention_text": "Washington"
+      },
+      {
+        "kind": "organization",
+        "span_start": 88,
+        "span_end": 106,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "location",
+        "span_start": 124,
+        "span_end": 131,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 145,
+        "span_end": 157,
+        "mention_text": "Phoenix Vela"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0003",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Standup\n- ERROR rate down, WARNING banner removed\n- CANCEL and OK strings localized\n- New Folder dialog still says TODO\n- Nothing else to report",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0004",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Doc title: Apple Supplier Review\nApple stock dipped, so Apple pushed the date. Reminder: bring an apple a day, the office fruit bowl is empty.\nReading the deck is due tomorrow.",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 56,
+        "span_end": 61,
+        "mention_text": "Apple"
+      },
+      {
+        "kind": "date",
+        "span_start": 167,
+        "span_end": 175,
+        "mention_text": "tomorrow"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0007",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Project Charter\nOwner: TBD\nStatus: DRAFT\nNext review: TBD\nApprovals pending\nNo blockers listed",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0008",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Pasted table:\nName     | Team            | Joined\nSterling Vane | Greyhill Capital | 3/3/2026\nFrank Osei    | City Health Dept | 2026-06-03\nNote: sterling work this quarter, be frank in the review",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 50,
+        "span_end": 63,
+        "mention_text": "Sterling Vane"
+      },
+      {
+        "kind": "organization",
+        "span_start": 66,
+        "span_end": 82,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "date",
+        "span_start": 85,
+        "span_end": 93,
+        "mention_text": "3/3/2026"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 94,
+        "span_end": 104,
+        "mention_text": "Frank Osei"
+      },
+      {
+        "kind": "organization",
+        "span_start": 110,
+        "span_end": 126,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "date",
+        "span_start": 129,
+        "span_end": 139,
+        "mention_text": "2026-06-03"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0009",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Reminders\n- Will will confirm if Will Cardoza can join\n- Jordan crossed the Jordan with Jordan Pike on the call\n- Nice to meet the Nice office team",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 33,
+        "span_end": 45,
+        "mention_text": "Will Cardoza"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 88,
+        "span_end": 99,
+        "mention_text": "Jordan Pike"
+      },
+      {
+        "kind": "location",
+        "span_start": 131,
+        "span_end": 135,
+        "mention_text": "Nice"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0012",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Inbox triage\nOpen Settings\nDelete Draft\nArchive All\nReport Spam\nNothing flagged today",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0013",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Mtg notes 2026-06-03 14:30\nMar a Velez (OCR garbled) joined late from Carrowm ere.\nMark it resolved — Mark already shipped the fix at noon.\nWe will mark the rest by next Friday.",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 10,
+        "span_end": 20,
+        "mention_text": "2026-06-03"
+      },
+      {
+        "kind": "time",
+        "span_start": 21,
+        "span_end": 26,
+        "mention_text": "14:30"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 27,
+        "span_end": 38,
+        "mention_text": "Mar a Velez"
+      },
+      {
+        "kind": "location",
+        "span_start": 70,
+        "span_end": 81,
+        "mention_text": "Carrowm ere"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 104,
+        "span_end": 108,
+        "mention_text": "Mark"
+      },
+      {
+        "kind": "time",
+        "span_start": 136,
+        "span_end": 140,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "date",
+        "span_start": 167,
+        "span_end": 178,
+        "mention_text": "next Friday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "doc_notes-adversarial_negatives-0014",
+    "genre": "doc_notes",
+    "variant": "adversarial_negatives",
+    "text": "Brooklyn pilot\nThe Brooklyn store opens Q3. Brooklyn Adeyemi runs it.\nOrange juice stocked; the Orange county route is set.\nGrant: the orange crates ship Jun 14 at 07:45.",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 19,
+        "span_end": 27,
+        "mention_text": "Brooklyn"
+      },
+      {
+        "kind": "date",
+        "span_start": 40,
+        "span_end": 42,
+        "mention_text": "Q3"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 44,
+        "span_end": 60,
+        "mention_text": "Brooklyn Adeyemi"
+      },
+      {
+        "kind": "location",
+        "span_start": 96,
+        "span_end": 102,
+        "mention_text": "Orange"
+      },
+      {
+        "kind": "date",
+        "span_start": 154,
+        "span_end": 160,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "time",
+        "span_start": 164,
+        "span_end": 169,
+        "mention_text": "07:45"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0002",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "## Trip planning\nFlight lands in Carrowmere on Jun 14 around noon. Cab to 412 Alder St, then dinner with Phoenix Vela at 7:45.",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 33,
+        "span_end": 43,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "date",
+        "span_start": 47,
+        "span_end": 53,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "time",
+        "span_start": 61,
+        "span_end": 65,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "location",
+        "span_start": 74,
+        "span_end": 86,
+        "mention_text": "412 Alder St"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 105,
+        "span_end": 117,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "time",
+        "span_start": 121,
+        "span_end": 125,
+        "mention_text": "7:45"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0003",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "Reminder to self: mark the invoice resolved and grant access to the shared drive. Will review the summit agenda later — nothing urgent here.",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0004",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "Standup — Tuesday\n• Mark shipped the dedupe patch\n• Bill blocked on the OCR queue\n• the Brain team demo moved to 3:00 PM",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 12,
+        "span_end": 19,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 24,
+        "span_end": 28,
+        "mention_text": "Mark"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 58,
+        "span_end": 62,
+        "mention_text": "Bill"
+      },
+      {
+        "kind": "organization",
+        "span_start": 92,
+        "span_end": 106,
+        "mention_text": "the Brain team"
+      },
+      {
+        "kind": "time",
+        "span_start": 121,
+        "span_end": 128,
+        "mention_text": "3:00 PM"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0007",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "Notes from the call with Dr. Chen\nShe recommends we pilot in Dunmore first, then expand to Greyhill and the east valley by Q4.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 25,
+        "span_end": 33,
+        "mention_text": "Dr. Chen"
+      },
+      {
+        "kind": "location",
+        "span_start": 61,
+        "span_end": 68,
+        "mention_text": "Dunmore"
+      },
+      {
+        "kind": "location",
+        "span_start": 91,
+        "span_end": 99,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "location",
+        "span_start": 104,
+        "span_end": 119,
+        "mention_text": "the east valley"
+      },
+      {
+        "kind": "date",
+        "span_start": 123,
+        "span_end": 125,
+        "mention_text": "Q4"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0008",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "Checklist — launch prep\n[x] Confirm venue at Dunmore Pier\n[ ] Email Selka Roone the run-of-show\n[ ] Lock the keynote for next Friday, 9:30 AM",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 47,
+        "span_end": 59,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 70,
+        "span_end": 81,
+        "mention_text": "Selka Roone"
+      },
+      {
+        "kind": "date",
+        "span_start": 123,
+        "span_end": 134,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "time",
+        "span_start": 136,
+        "span_end": 143,
+        "mention_text": "9:30 AM"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0009",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "Quick note: the May report is late again. April's was fine. Summit prep can wait until June — focus on the Reading numbers first.",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0012",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "Interview debrief\nCandidate: Sterling Vance\nRole: backend\nRecommended by Rose Adell at Northwind Aviation\nNext round the 14th, 11am",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 29,
+        "span_end": 43,
+        "mention_text": "Sterling Vance"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 73,
+        "span_end": 83,
+        "mention_text": "Rose Adell"
+      },
+      {
+        "kind": "organization",
+        "span_start": 87,
+        "span_end": 105,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "date",
+        "span_start": 117,
+        "span_end": 125,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "time",
+        "span_start": 127,
+        "span_end": 131,
+        "mention_text": "11am"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0013",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "Reminder: New Folder for the archived contracts. Save As a PDF, not a doc. OK to delete the old drafts after backup.",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0014",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "1:1 with Jordan Mehta — 3/3/2026\nDiscussed the move to the Sydney office. He prefers Building 7 over the annex. Loop in Will before Thursday.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 9,
+        "span_end": 21,
+        "mention_text": "Jordan Mehta"
+      },
+      {
+        "kind": "date",
+        "span_start": 26,
+        "span_end": 34,
+        "mention_text": "3/3/2026"
+      },
+      {
+        "kind": "location",
+        "span_start": 57,
+        "span_end": 74,
+        "mention_text": "the Sydney office"
+      },
+      {
+        "kind": "location",
+        "span_start": 87,
+        "span_end": 97,
+        "mention_text": "Building 7"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 122,
+        "span_end": 126,
+        "mention_text": "Will"
+      },
+      {
+        "kind": "date",
+        "span_start": 134,
+        "span_end": 142,
+        "mention_text": "Thursday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-natural_mixed-0017",
+    "genre": "doc_notes",
+    "variant": "natural_mixed",
+    "text": "Brainstorm: name for the new band. \"Sterling Orange\" sounds too much like a paint color. Frank thinks we should just call it Summit. Decide LATER.",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0002",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "Notes from sync — the Brain team pushed the buildtonight and Will said he'll review tomonow we should still meet Wednesday at noon in Bullding 4",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 24,
+        "span_end": 34,
+        "mention_text": "Brain team"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 63,
+        "span_end": 67,
+        "mention_text": "Will"
+      },
+      {
+        "kind": "date",
+        "span_start": 115,
+        "span_end": 124,
+        "mention_text": "Wednesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 128,
+        "span_end": 132,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "location",
+        "span_start": 136,
+        "span_end": 146,
+        "mention_text": "Bullding 4"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0003",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "Pasted table (raw)\nName        Team          Due\nA. Calderwood   Northwind Aviation   3/3/2026\nLena Forsht    City Health Dept     the 14th",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 49,
+        "span_end": 62,
+        "mention_text": "A. Calderwood"
+      },
+      {
+        "kind": "organization",
+        "span_start": 65,
+        "span_end": 83,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "date",
+        "span_start": 86,
+        "span_end": 94,
+        "mention_text": "3/3/2026"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 95,
+        "span_end": 106,
+        "mention_text": "Lena Forsht"
+      },
+      {
+        "kind": "organization",
+        "span_start": 110,
+        "span_end": 126,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "date",
+        "span_start": 131,
+        "span_end": 139,
+        "mention_text": "the 14th"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0004",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "TODO: rename folder, click Save As, then Sign In again\nremember WARNING about the cache — leave it ON\nnothing here is a real org dont mark New Folder as anything",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0007",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "## Standup 2026-06-03 14:30\n- Mira Sondheim blocked on the OCR pass\n- @miravelez to repro by 3:00 PM\n- mark resolved once green",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 11,
+        "span_end": 21,
+        "mention_text": "2026-06-03"
+      },
+      {
+        "kind": "time",
+        "span_start": 22,
+        "span_end": 27,
+        "mention_text": "14:30"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 30,
+        "span_end": 43,
+        "mention_text": "Mira Sondheim"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 70,
+        "span_end": 80,
+        "mention_text": "@miravelez"
+      },
+      {
+        "kind": "time",
+        "span_start": 93,
+        "span_end": 100,
+        "mention_text": "3:00 PM"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0008",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "an apple a day, sure, but the OK button is broken\nERROR on Save, CANCEL did nothing\nthis whole sectlon has no names just shouty caps DONE",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ocr_noise",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0009",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "AI: Frank Delune to dr1ve the Greyhill migration\nnote — Frank is OOO next Friday so push to Q3\nvenue: Dunrnore Pier club house",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 4,
+        "span_end": 16,
+        "mention_text": "Frank Delune"
+      },
+      {
+        "kind": "organization",
+        "span_start": 30,
+        "span_end": 38,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 58,
+        "span_end": 63,
+        "mention_text": "Frank"
+      },
+      {
+        "kind": "date",
+        "span_start": 71,
+        "span_end": 82,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "date",
+        "span_start": 94,
+        "span_end": 96,
+        "mention_text": "Q3"
+      },
+      {
+        "kind": "location",
+        "span_start": 104,
+        "span_end": 117,
+        "mention_text": "Dunrnore Pier"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0012",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "Reading the spec was painful. May is on PTO so ask someone else.\nthe Summit label in the UI is just a tab name not a place\nApple stock note: Apple filing due August",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 141,
+        "span_end": 146,
+        "mention_text": "Apple"
+      },
+      {
+        "kind": "date",
+        "span_start": 158,
+        "span_end": 164,
+        "mention_text": "August"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0013",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "Notion doc — Roadmap Q3\nowner: Hadley Kruse // backup: M. Tann\nlaunch window Jun 14–Jun 28, ship gate 15:00 Carrowmere HQ",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 23,
+        "span_end": 25,
+        "mention_text": "Q3"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 33,
+        "span_end": 45,
+        "mention_text": "Hadley Kruse"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 57,
+        "span_end": 64,
+        "mention_text": "M. Tann"
+      },
+      {
+        "kind": "date",
+        "span_start": 79,
+        "span_end": 85,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "date",
+        "span_start": 88,
+        "span_end": 94,
+        "mention_text": "Jun 28"
+      },
+      {
+        "kind": "time",
+        "span_start": 106,
+        "span_end": 111,
+        "mention_text": "15:00"
+      },
+      {
+        "kind": "location",
+        "span_start": 112,
+        "span_end": 122,
+        "mention_text": "Carrowmere"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "doc_notes-ocr_noisy-0014",
+    "genre": "doc_notes",
+    "variant": "ocr_noisy",
+    "text": "handwritten-ish ocr: grant olu wale wlll grant access yesterday's ticket still open ping Northwlnd desk b4 9:30 they close earl",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 21,
+        "span_end": 35,
+        "mention_text": "grant olu wale"
+      },
+      {
+        "kind": "date",
+        "span_start": 54,
+        "span_end": 63,
+        "mention_text": "yesterday"
+      },
+      {
+        "kind": "organization",
+        "span_start": 89,
+        "span_end": 98,
+        "mention_text": "Northwlnd"
+      },
+      {
+        "kind": "time",
+        "span_start": 107,
+        "span_end": 111,
+        "mention_text": "9:30"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise",
+      "truncated"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0002",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "Subject: Lunch Tue?\nFrom: Bill Harrow\n\nHey — can you forward me the invoice? Don't send the bill to accounting yet, I'll bill the client direct. Free Tue around noon?",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 26,
+        "span_end": 37,
+        "mention_text": "Bill Harrow"
+      },
+      {
+        "kind": "date",
+        "span_start": 152,
+        "span_end": 155,
+        "mention_text": "Tue"
+      },
+      {
+        "kind": "time",
+        "span_start": 163,
+        "span_end": 167,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0003",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "---------- Forwarded message ----------\nFrom: Dr. Chen <chen@northwind-aviation.example>\nDate: Jun 14 at 9:30 AM\nSubject: Site visit — Building 4\n\nWe'll meet at Dunmore Pier then walk to Building 4, Room 3F.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 46,
+        "span_end": 54,
+        "mention_text": "Dr. Chen"
+      },
+      {
+        "kind": "date",
+        "span_start": 95,
+        "span_end": 101,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "time",
+        "span_start": 105,
+        "span_end": 112,
+        "mention_text": "9:30 AM"
+      },
+      {
+        "kind": "location",
+        "span_start": 137,
+        "span_end": 147,
+        "mention_text": "Building 4"
+      },
+      {
+        "kind": "location",
+        "span_start": 163,
+        "span_end": 175,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "location",
+        "span_start": 189,
+        "span_end": 199,
+        "mention_text": "Building 4"
+      },
+      {
+        "kind": "location",
+        "span_start": 201,
+        "span_end": 208,
+        "mention_text": "Room 3F"
+      }
+    ],
+    "hardness_tags": [
+      "multi_entity",
+      "no_boundary",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0004",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "SAVE AS DRAFT — DO NOT SEND\n\nReminder labels: URGENT, TODO, WARNING, OK to archive. The Summit review and the New Folder button both need testing. Click Sign In, then Save As.",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0007",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "Subject: NICE work team\nFrom: Jordan Mbeki\n\nThat was NICE work. The Jordan account closed. We open the Nice office in Q3 — flight lands 07:45. Will confirm hotel later.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 30,
+        "span_end": 42,
+        "mention_text": "Jordan Mbeki"
+      },
+      {
+        "kind": "location",
+        "span_start": 103,
+        "span_end": 107,
+        "mention_text": "Nice"
+      },
+      {
+        "kind": "date",
+        "span_start": 118,
+        "span_end": 120,
+        "mention_text": "Q3"
+      },
+      {
+        "kind": "time",
+        "span_start": 138,
+        "span_end": 143,
+        "mention_text": "07:45"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0008",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "Mailing list footer:\nYou are subscribed as you@example.com. To unsubscribe, click Manage Preferences. Powered by ListMaster. UPDATE SETTINGS · VIEW IN BROWSER · REPORT SPAM.",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0009",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "From: Tornquist Labs Billing\nTo: Mark Devane\n\nHi Mark, please mark the May invoice paid. Payment due May 3 by 5:00 PM. May we also confirm your address at 412 Alder St?",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 6,
+        "span_end": 20,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 33,
+        "span_end": 44,
+        "mention_text": "Mark Devane"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 49,
+        "span_end": 53,
+        "mention_text": "Mark"
+      },
+      {
+        "kind": "date",
+        "span_start": 101,
+        "span_end": 106,
+        "mention_text": "May 3"
+      },
+      {
+        "kind": "time",
+        "span_start": 110,
+        "span_end": 117,
+        "mention_text": "5:00 PM"
+      },
+      {
+        "kind": "location",
+        "span_start": 155,
+        "span_end": 167,
+        "mention_text": "412 Alder St"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0012",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "Fr0m: C1ara M0ench\nT0: the Brain team\nSubject: 0CR test — pls revi3w\n\nMet Dr. Halvorsen at Carrowmere on 2026-06-03 at 14:30. N0tes attach3d.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 6,
+        "span_end": 18,
+        "mention_text": "C1ara M0ench"
+      },
+      {
+        "kind": "organization",
+        "span_start": 27,
+        "span_end": 37,
+        "mention_text": "Brain team"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 76,
+        "span_end": 89,
+        "mention_text": "Dr. Halvorsen"
+      },
+      {
+        "kind": "location",
+        "span_start": 93,
+        "span_end": 103,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "date",
+        "span_start": 107,
+        "span_end": 117,
+        "mention_text": "2026-06-03"
+      },
+      {
+        "kind": "time",
+        "span_start": 121,
+        "span_end": 126,
+        "mention_text": "14:30"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0013",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "From: Madison Cleve\nTo: Houston Pryce\n\nWe have Houston covered — Madison flies to Houston Monday, then Cleveland on Wed. Charlotte the intern joins; the city of Charlotte is the next stop.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 6,
+        "span_end": 19,
+        "mention_text": "Madison Cleve"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 24,
+        "span_end": 37,
+        "mention_text": "Houston Pryce"
+      },
+      {
+        "kind": "location",
+        "span_start": 84,
+        "span_end": 91,
+        "mention_text": "Houston"
+      },
+      {
+        "kind": "date",
+        "span_start": 92,
+        "span_end": 98,
+        "mention_text": "Monday"
+      },
+      {
+        "kind": "location",
+        "span_start": 105,
+        "span_end": 114,
+        "mention_text": "Cleveland"
+      },
+      {
+        "kind": "date",
+        "span_start": 118,
+        "span_end": 121,
+        "mention_text": "Wed"
+      },
+      {
+        "kind": "location",
+        "span_start": 163,
+        "span_end": 172,
+        "mention_text": "Charlotte"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "email-adversarial_negatives-0014",
+    "genre": "email",
+    "variant": "adversarial_negatives",
+    "text": "Signature block:\n--\nSterling Quaye\nHead of Ops, Northwind Aviation\nthe north office · Greyhill\nSent from Mobile. CONFIDENTIAL — do not forward.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 20,
+        "span_end": 34,
+        "mention_text": "Sterling Quaye"
+      },
+      {
+        "kind": "organization",
+        "span_start": 48,
+        "span_end": 66,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "location",
+        "span_start": 67,
+        "span_end": 83,
+        "mention_text": "the north office"
+      },
+      {
+        "kind": "location",
+        "span_start": 87,
+        "span_end": 95,
+        "mention_text": "Greyhill"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0002",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "Subject: URGENT — invoice past due\n\nPlease mark this CANCELLED if payment already cleared. Our records show the balance from March 3 is still open. Sign In to the portal to confirm.",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 127,
+        "span_end": 134,
+        "mention_text": "March 3"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0003",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "---------- Forwarded message ----------\nFrom: Sterling Frye <s.frye@carrowmere.org>\nDate: Mon, Jun 9 at 7:45 AM\nSubject: Permits for Dunmore Pier\nTo: Hollis\n\nThe City Health Dept signed off.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 46,
+        "span_end": 59,
+        "mention_text": "Sterling Frye"
+      },
+      {
+        "kind": "date",
+        "span_start": 90,
+        "span_end": 100,
+        "mention_text": "Mon, Jun 9"
+      },
+      {
+        "kind": "time",
+        "span_start": 104,
+        "span_end": 111,
+        "mention_text": "7:45 AM"
+      },
+      {
+        "kind": "location",
+        "span_start": 133,
+        "span_end": 145,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 150,
+        "span_end": 156,
+        "mention_text": "Hollis"
+      },
+      {
+        "kind": "organization",
+        "span_start": 162,
+        "span_end": 178,
+        "mention_text": "City Health Dept"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0004",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "Good morning,\n\nI flew to Phoenix last week to close the Sable Ridge deal. Phoenix Vela texted that the contract is ready — let's call noon tomorrow.\n\n— Mark",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 25,
+        "span_end": 32,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "organization",
+        "span_start": 56,
+        "span_end": 67,
+        "mention_text": "Sable Ridge"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 74,
+        "span_end": 86,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "time",
+        "span_start": 136,
+        "span_end": 140,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "date",
+        "span_start": 141,
+        "span_end": 149,
+        "mention_text": "tomorrow"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 156,
+        "span_end": 160,
+        "mention_text": "Mark"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0007",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "From: Carrowmere Rowing Club <list@carrowmere-row.net>\nSubject: Regatta moved\n\nThe Saturday regatta at Carrowmere now starts at 6:00 AM.\n\nYou are receiving this because you subscribed. Unsubscribe | Manage Preferences",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 6,
+        "span_end": 28,
+        "mention_text": "Carrowmere Rowing Club"
+      },
+      {
+        "kind": "date",
+        "span_start": 83,
+        "span_end": 91,
+        "mention_text": "Saturday"
+      },
+      {
+        "kind": "location",
+        "span_start": 103,
+        "span_end": 113,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "time",
+        "span_start": 128,
+        "span_end": 135,
+        "mention_text": "6:00 AM"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0008",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "Hi all,\n\nReminder: Dr. Imani Brooks presents at Room 3F, Building 4 on the 14th at 15:00. Will will record it.\n\nBest,\nT. Alvarez",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 19,
+        "span_end": 35,
+        "mention_text": "Dr. Imani Brooks"
+      },
+      {
+        "kind": "location",
+        "span_start": 48,
+        "span_end": 55,
+        "mention_text": "Room 3F"
+      },
+      {
+        "kind": "location",
+        "span_start": 57,
+        "span_end": 67,
+        "mention_text": "Building 4"
+      },
+      {
+        "kind": "date",
+        "span_start": 71,
+        "span_end": 79,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "time",
+        "span_start": 83,
+        "span_end": 88,
+        "mention_text": "15:00"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 90,
+        "span_end": 94,
+        "mention_text": "Will"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 118,
+        "span_end": 128,
+        "mention_text": "T. Alvarez"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0009",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "Subject: Reading group notes\n\nWe finished Reading the draft. Madison raised a point about the Madison branch closure. Let's pick it up Wednesday.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 61,
+        "span_end": 68,
+        "mention_text": "Madison"
+      },
+      {
+        "kind": "location",
+        "span_start": 94,
+        "span_end": 101,
+        "mention_text": "Madison"
+      },
+      {
+        "kind": "date",
+        "span_start": 135,
+        "span_end": 144,
+        "mention_text": "Wednesday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0012",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "Subject: Welcome aboard\n\nWelcome to Tornquist Labs! Your start date is 2026-06-15. Orientation runs 9:00 to noon in the east wing. Reach Coralie Mensah in HR with questions.",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 36,
+        "span_end": 50,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "date",
+        "span_start": 71,
+        "span_end": 81,
+        "mention_text": "2026-06-15"
+      },
+      {
+        "kind": "time",
+        "span_start": 100,
+        "span_end": 104,
+        "mention_text": "9:00"
+      },
+      {
+        "kind": "location",
+        "span_start": 116,
+        "span_end": 129,
+        "mention_text": "the east wing"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 137,
+        "span_end": 151,
+        "mention_text": "Coralie Mensah"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0013",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "Hey Jordan,\n\nThe Jordan account is overdue. Bill said he'd bill them Friday. Can you confirm the Sydney shipment landed?\n\n— Frank",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 4,
+        "span_end": 10,
+        "mention_text": "Jordan"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 44,
+        "span_end": 48,
+        "mention_text": "Bill"
+      },
+      {
+        "kind": "date",
+        "span_start": 69,
+        "span_end": 75,
+        "mention_text": "Friday"
+      },
+      {
+        "kind": "location",
+        "span_start": 97,
+        "span_end": 103,
+        "mention_text": "Sydney"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 126,
+        "span_end": 131,
+        "mention_text": "Frank"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0014",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "From: Niamh Carrow\nSubject: Summit recap\n\nGreat Summit Logistics meeting. We summit the new tower next month. Rose from Greyhill Capital will fund it.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 6,
+        "span_end": 18,
+        "mention_text": "Niamh Carrow"
+      },
+      {
+        "kind": "organization",
+        "span_start": 48,
+        "span_end": 64,
+        "mention_text": "Summit Logistics"
+      },
+      {
+        "kind": "date",
+        "span_start": 98,
+        "span_end": 108,
+        "mention_text": "next month"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 110,
+        "span_end": 114,
+        "mention_text": "Rose"
+      },
+      {
+        "kind": "organization",
+        "span_start": 120,
+        "span_end": 136,
+        "mention_text": "Greyhill Capital"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "email-natural_mixed-0017",
+    "genre": "email",
+    "variant": "natural_mixed",
+    "text": "Subject: Save As reminder\n\nThanks for joining Tuesday. The recording is uploading now. ERROR cleared — try again. Dr. Okafor will share slides Jun 14 from the Greyhill annex.",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 46,
+        "span_end": 53,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 116,
+        "span_end": 126,
+        "mention_text": "Dr. Okafor"
+      },
+      {
+        "kind": "date",
+        "span_start": 145,
+        "span_end": 151,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "location",
+        "span_start": 157,
+        "span_end": 175,
+        "mention_text": "the Greyhill annex"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0002",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "Hi all — quick rerninder the offsite is next Friday not the 14th. We meet at Dunmore Pier noon sharp. URGENT: bring your badge or you wont get past Sign In at Building 4.",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 42,
+        "span_end": 53,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "date",
+        "span_start": 58,
+        "span_end": 66,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "location",
+        "span_start": 79,
+        "span_end": 91,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "time",
+        "span_start": 92,
+        "span_end": 96,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "location",
+        "span_start": 161,
+        "span_end": 171,
+        "mention_text": "Building 4"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0003",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "> on Wed Dr. Chen wr0te:\n> > l think we shouId loop in Phoenix Vela before the call\n> agreed, she covers the north office accounts now\n>\nok will add her to the invlte for 3:OO PM",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 5,
+        "span_end": 8,
+        "mention_text": "Wed"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 9,
+        "span_end": 17,
+        "mention_text": "Dr. Chen"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 55,
+        "span_end": 67,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "location",
+        "span_start": 109,
+        "span_end": 121,
+        "mention_text": "north office"
+      },
+      {
+        "kind": "time",
+        "span_start": 171,
+        "span_end": 178,
+        "mention_text": "3:OO PM"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0004",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "TO: staff@nor thwindaviation.com\nFROM: Saoirse Tann\nSUBJ: HOL1DAY SCHEDULE\n\nNorthwind Aviation offices close Dec 24 thru Jan 2. emergency desk staffed til midnight tomorrow only.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 39,
+        "span_end": 51,
+        "mention_text": "Saoirse Tann"
+      },
+      {
+        "kind": "organization",
+        "span_start": 76,
+        "span_end": 94,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "date",
+        "span_start": 109,
+        "span_end": 115,
+        "mention_text": "Dec 24"
+      },
+      {
+        "kind": "date",
+        "span_start": 121,
+        "span_end": 126,
+        "mention_text": "Jan 2"
+      },
+      {
+        "kind": "time",
+        "span_start": 155,
+        "span_end": 163,
+        "mention_text": "midnight"
+      },
+      {
+        "kind": "date",
+        "span_start": 164,
+        "span_end": 172,
+        "mention_text": "tomorrow"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0007",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "Cc: Imogen Hale, T. Okafor\nSubject: site visit Greyhill\nDate: 3/3/2026\n\nteam, the walkthrough at Room 3F starts O8:OO. We'll review the Dunmore blueprints after.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 4,
+        "span_end": 15,
+        "mention_text": "Imogen Hale"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 17,
+        "span_end": 26,
+        "mention_text": "T. Okafor"
+      },
+      {
+        "kind": "location",
+        "span_start": 47,
+        "span_end": 55,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "date",
+        "span_start": 62,
+        "span_end": 70,
+        "mention_text": "3/3/2026"
+      },
+      {
+        "kind": "location",
+        "span_start": 97,
+        "span_end": 104,
+        "mention_text": "Room 3F"
+      },
+      {
+        "kind": "time",
+        "span_start": 112,
+        "span_end": 117,
+        "mention_text": "O8:OO"
+      },
+      {
+        "kind": "location",
+        "span_start": 136,
+        "span_end": 143,
+        "mention_text": "Dunmore"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0008",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "WARNING this mailbox is unmonit0red. For support contact the City Health Dept helpdesk during business hours. Do not reply. CANCEL any pending ti ckets via the portal.",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 61,
+        "span_end": 77,
+        "mention_text": "City Health Dept"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0009",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "From the desk of Cormac Beale\nTornquist Labs · Carrowmere\n\np.s. the Brain team demo slipped to next Tuesday 2pm, sorry f0r the churn …quarterly revi",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 17,
+        "span_end": 29,
+        "mention_text": "Cormac Beale"
+      },
+      {
+        "kind": "organization",
+        "span_start": 30,
+        "span_end": 44,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "location",
+        "span_start": 48,
+        "span_end": 58,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "organization",
+        "span_start": 69,
+        "span_end": 79,
+        "mention_text": "Brain team"
+      },
+      {
+        "kind": "date",
+        "span_start": 96,
+        "span_end": 108,
+        "mention_text": "next Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 109,
+        "span_end": 112,
+        "mention_text": "2pm"
+      }
+    ],
+    "hardness_tags": [
+      "multi_entity",
+      "ocr_noise",
+      "truncated",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0012",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "Subject: c o n f i r m your seat\nDate: Jun 14\n\nDear member, Greyhill Capital confirrns your registration for the Summit pavilion event. Doors 7:45. The summit of the season!",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 39,
+        "span_end": 45,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "organization",
+        "span_start": 60,
+        "span_end": 76,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "location",
+        "span_start": 113,
+        "span_end": 119,
+        "mention_text": "Summit"
+      },
+      {
+        "kind": "time",
+        "span_start": 142,
+        "span_end": 146,
+        "mention_text": "7:45"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0013",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "OK so heres the deaI — TODO before yesterday's deadline slips further. Bill owes the invoice, May owns QA, and l'11 chase City Health Dept myself. nobody bill anyone twice pls",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 37,
+        "span_end": 46,
+        "mention_text": "yesterday"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 73,
+        "span_end": 77,
+        "mention_text": "Bill"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 96,
+        "span_end": 99,
+        "mention_text": "May"
+      },
+      {
+        "kind": "organization",
+        "span_start": 124,
+        "span_end": 140,
+        "mention_text": "City Health Dept"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "email-ocr_noisy-0014",
+    "genre": "email",
+    "variant": "ocr_noisy",
+    "text": "Frorn: noreply@list.carrowrnere-club.org\nTo: members\n\nYou are subscribed to the Carrowmere Rowing Club digest. Niamh Dorsett rows Sat 6am at Dunmore Pier. To unsubscribe reply ST0P.",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 80,
+        "span_end": 102,
+        "mention_text": "Carrowmere Rowing Club"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 111,
+        "span_end": 124,
+        "mention_text": "Niamh Dorsett"
+      },
+      {
+        "kind": "date",
+        "span_start": 130,
+        "span_end": 133,
+        "mention_text": "Sat"
+      },
+      {
+        "kind": "time",
+        "span_start": 134,
+        "span_end": 137,
+        "mention_text": "6am"
+      },
+      {
+        "kind": "location",
+        "span_start": 141,
+        "span_end": 153,
+        "mention_text": "Dunmore Pier"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0002",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "Stocks\nApple closed up 2%. Rose 4 points after hours.\n5m ago",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 7,
+        "span_end": 12,
+        "mention_text": "Apple"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0003",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "Messages\nPhoenix Vela flew to Phoenix on Tuesday\n2m ago",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 9,
+        "span_end": 21,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "location",
+        "span_start": 30,
+        "span_end": 37,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "date",
+        "span_start": 41,
+        "span_end": 48,
+        "mention_text": "Tuesday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0004",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "System Update\nNew Folder created. Sign In to continue. Save As ready.\nWARNING: ERROR pending — OK",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0007",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "Reminders\nSummit prep — TODO before the summit. URGENT.\nDue today",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 62,
+        "span_end": 67,
+        "mention_text": "today"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0008",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "CI / build\nBuild #4821 FAILED on Tornquist Labs/recall-ui\n15:02",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 33,
+        "span_end": 47,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "time",
+        "span_start": 58,
+        "span_end": 63,
+        "mention_text": "15:02"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0009",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "Messages\nSydney landed in Sydney — texting Dr. Chen now\njust now",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 9,
+        "span_end": 15,
+        "mention_text": "Sydney"
+      },
+      {
+        "kind": "location",
+        "span_start": 26,
+        "span_end": 32,
+        "mention_text": "Sydney"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 45,
+        "span_end": 53,
+        "mention_text": "Dr. Chen"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0012",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "App Update\nUpdate Available. Restart Required. Download Now.\nCANCEL or OK",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0013",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "Messages\nBill: pay the bill by the 14th, meet at Dunmore Pier\n3:00 PM",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 9,
+        "span_end": 13,
+        "mention_text": "Bill"
+      },
+      {
+        "kind": "date",
+        "span_start": 31,
+        "span_end": 39,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "location",
+        "span_start": 49,
+        "span_end": 61,
+        "mention_text": "Dunmore Pier"
+      },
+      {
+        "kind": "time",
+        "span_start": 62,
+        "span_end": 69,
+        "mention_text": "3:00 PM"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "notification_banner-adversarial_negatives-0014",
+    "genre": "notification_banner",
+    "variant": "adversarial_negatives",
+    "text": "Calendar\nQ3 review — Room 3F, City Health Dept\n2026-06-03 14:30",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 23,
+        "span_end": 30,
+        "mention_text": "Room 3F"
+      },
+      {
+        "kind": "organization",
+        "span_start": 32,
+        "span_end": 48,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "date",
+        "span_start": 49,
+        "span_end": 59,
+        "mention_text": "2026-06-03"
+      },
+      {
+        "kind": "time",
+        "span_start": 60,
+        "span_end": 65,
+        "mention_text": "14:30"
+      }
+    ],
+    "hardness_tags": [
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0002",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Slack · now\nGreyhill Capital #deals\nMara Velez closed the Northwind Aviation round",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 13,
+        "span_end": 29,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 37,
+        "span_end": 47,
+        "mention_text": "Mara Velez"
+      },
+      {
+        "kind": "organization",
+        "span_start": 59,
+        "span_end": 77,
+        "mention_text": "Northwind Aviation"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0003",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Reminders · 7:45 AM\nRenew passport before Friday",
+    "entities": [
+      {
+        "kind": "time",
+        "span_start": 13,
+        "span_end": 20,
+        "mention_text": "7:45 AM"
+      },
+      {
+        "kind": "date",
+        "span_start": 43,
+        "span_end": 49,
+        "mention_text": "Friday"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0004",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Wallet · now\nCard ending 4417: $62.10 at Dunmore Pier Coffee in Greyhill",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 42,
+        "span_end": 61,
+        "mention_text": "Dunmore Pier Coffee"
+      },
+      {
+        "kind": "location",
+        "span_start": 65,
+        "span_end": 73,
+        "mention_text": "Greyhill"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0007",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Calendar · in 15 min\nQuarterly review with the Brain team\nTuesday 2:00 PM, Building 4",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 44,
+        "span_end": 58,
+        "mention_text": "the Brain team"
+      },
+      {
+        "kind": "date",
+        "span_start": 59,
+        "span_end": 66,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 67,
+        "span_end": 74,
+        "mention_text": "2:00 PM"
+      },
+      {
+        "kind": "location",
+        "span_start": 76,
+        "span_end": 86,
+        "mention_text": "Building 4"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0008",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Messages · now\nWill: I'll mark it resolved once Grant signs off",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 16,
+        "span_end": 20,
+        "mention_text": "Will"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 49,
+        "span_end": 54,
+        "mention_text": "Grant"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0009",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "App Store · 3h ago\nUpdate available: New Folder and Sign In flows improved. Restart to apply.",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0012",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Slack · 5m ago\nDr. Chen booked the north office for next Friday 9am",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 16,
+        "span_end": 24,
+        "mention_text": "Dr. Chen"
+      },
+      {
+        "kind": "location",
+        "span_start": 32,
+        "span_end": 48,
+        "mention_text": "the north office"
+      },
+      {
+        "kind": "date",
+        "span_start": 53,
+        "span_end": 64,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "time",
+        "span_start": 65,
+        "span_end": 68,
+        "mention_text": "9am"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0013",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Notifications\nURGENT: server ERROR logged. On-call is Esme Tornquist until 07:00.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 54,
+        "span_end": 68,
+        "mention_text": "Esme Tornquist"
+      },
+      {
+        "kind": "time",
+        "span_start": 75,
+        "span_end": 80,
+        "mention_text": "07:00"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0014",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Messages · now\nRose planted the rose bushes by 412 Alder St yesterday",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 16,
+        "span_end": 20,
+        "mention_text": "Rose"
+      },
+      {
+        "kind": "location",
+        "span_start": 48,
+        "span_end": 60,
+        "mention_text": "412 Alder St"
+      },
+      {
+        "kind": "date",
+        "span_start": 61,
+        "span_end": 70,
+        "mention_text": "yesterday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-natural_mixed-0017",
+    "genre": "notification_banner",
+    "variant": "natural_mixed",
+    "text": "Mail · now\nTornquist Labs offsite moved to Greyhill Lodge, Carrowmere — 2026-06-09, check-in 14:30",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 12,
+        "span_end": 26,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "location",
+        "span_start": 44,
+        "span_end": 58,
+        "mention_text": "Greyhill Lodge"
+      },
+      {
+        "kind": "location",
+        "span_start": 60,
+        "span_end": 70,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "date",
+        "span_start": 75,
+        "span_end": 85,
+        "mention_text": "2026-06-09"
+      },
+      {
+        "kind": "time",
+        "span_start": 96,
+        "span_end": 101,
+        "mention_text": "14:30"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0002",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "URGENT — BUILD FAILED\nNorthwind Aviation ci pipeline #4471 broke on Tue at 07:45 TODO retry",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 24,
+        "span_end": 42,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "date",
+        "span_start": 70,
+        "span_end": 73,
+        "mention_text": "Tue"
+      },
+      {
+        "kind": "time",
+        "span_start": 77,
+        "span_end": 82,
+        "mention_text": "07:45"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0003",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "Bank alert: card ending 0l92 charged $84.1O at Dunmore Grocers near 412 Alder St yesterda",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 47,
+        "span_end": 62,
+        "mention_text": "Dunmore Grocers"
+      },
+      {
+        "kind": "location",
+        "span_start": 68,
+        "span_end": 80,
+        "mention_text": "412 Alder St"
+      }
+    ],
+    "hardness_tags": [
+      "ocr_noise",
+      "truncated"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0004",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "Reminder\nflight to Phoenix departs tomorrow 6am — confirm with Dr. Chen",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 19,
+        "span_end": 26,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "date",
+        "span_start": 35,
+        "span_end": 43,
+        "mention_text": "tomorrow"
+      },
+      {
+        "kind": "time",
+        "span_start": 44,
+        "span_end": 47,
+        "mention_text": "6am"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 65,
+        "span_end": 73,
+        "mention_text": "Dr. Chen"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0007",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "Mail\nFrorn: Bill Carrow\nSubj: Jun 14 site visit to Building 4, Carrowmere — arrive by 15:00",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 12,
+        "span_end": 23,
+        "mention_text": "Bill Carrow"
+      },
+      {
+        "kind": "date",
+        "span_start": 30,
+        "span_end": 36,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "location",
+        "span_start": 51,
+        "span_end": 61,
+        "mention_text": "Building 4"
+      },
+      {
+        "kind": "location",
+        "span_start": 63,
+        "span_end": 73,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "time",
+        "span_start": 88,
+        "span_end": 93,
+        "mention_text": "15:00"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0008",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "an apple a day they say lol. ill mark it resolved later. Reading the docs now, back in a bit",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0009",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "Calendar Alert\nthe Brain team sync\nTuesday 3:15 PM @ the north office w Grant Sterling",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 15,
+        "span_end": 29,
+        "mention_text": "the Brain team"
+      },
+      {
+        "kind": "date",
+        "span_start": 35,
+        "span_end": 42,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 43,
+        "span_end": 50,
+        "mention_text": "3:15 PM"
+      },
+      {
+        "kind": "location",
+        "span_start": 53,
+        "span_end": 69,
+        "mention_text": "the north office"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 72,
+        "span_end": 86,
+        "mention_text": "Grant Sterling"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0012",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "Cal\nMark shipped the patch · review due the 14th · standup movedto 9am shar…",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 4,
+        "span_end": 8,
+        "mention_text": "Mark"
+      },
+      {
+        "kind": "date",
+        "span_start": 41,
+        "span_end": 49,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "time",
+        "span_start": 69,
+        "span_end": 72,
+        "mention_text": "9am"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise",
+      "truncated"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0013",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "Reminder: pick up keys frorn Tornquist Labs front desk, Greyhill campus, before noon",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 29,
+        "span_end": 43,
+        "mention_text": "Tornquist Labs"
+      },
+      {
+        "kind": "location",
+        "span_start": 56,
+        "span_end": 64,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "time",
+        "span_start": 80,
+        "span_end": 84,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "notification_banner-ocr_noisy-0014",
+    "genre": "notification_banner",
+    "variant": "ocr_noisy",
+    "text": "Save As dialog: New Folder? OK / CANCEL — ERROR could not write. WARNING disk almost full",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0002",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "$ export DEPLOY_REGION=us-east\n$ export OWNER=Frank\nWARNING: Frank Aldous left no PagerDuty rotation\nNOTE: be frank about the rollback risk",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 61,
+        "span_end": 73,
+        "mention_text": "Frank Aldous"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0003",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "Traceback (most recent call last):\n  File \"payments/sterling.py\", line 88, in charge\n    raise ValueError(\"amount in sterling exceeds cap\")\nValueError: amount in sterling exceeds cap",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0004",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "[CI] BUILD PASSED\n[CI] Stage: Lint  OK\n[CI] Stage: Test  OK\n[CI] Artifact uploaded: app-bundle.tar.gz\n[CI] Runner: north-runner-04 IDLE",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0007",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "# Phoenix service crashed twice overnight\nrestart phoenix.service  # OK\nphoenix Vela paged on-call at 02:13, see Phoenix Vela for postmortem",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 72,
+        "span_end": 84,
+        "mention_text": "phoenix Vela"
+      },
+      {
+        "kind": "time",
+        "span_start": 102,
+        "span_end": 107,
+        "mention_text": "02:13"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 113,
+        "span_end": 125,
+        "mention_text": "Phoenix Vela"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0008",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "$ npm run build\n> Building...\n> Save As dialog suppressed in headless mode\n> New Folder created at /tmp/out\n> Sign In skipped (CI token)\nBuild OK",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0009",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "// reviewer: Dr. Okai  team: the Brain team\n// rebased onto main by T. Bracken, Tue\nfn apple_count() -> u32 { 12 }  // not the company, just fruit",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 13,
+        "span_end": 21,
+        "mention_text": "Dr. Okai"
+      },
+      {
+        "kind": "organization",
+        "span_start": 29,
+        "span_end": 43,
+        "mention_text": "the Brain team"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 68,
+        "span_end": 78,
+        "mention_text": "T. Bracken"
+      },
+      {
+        "kind": "date",
+        "span_start": 80,
+        "span_end": 83,
+        "mention_text": "Tue"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0012",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "$ cat changelog.txt\nv2.3 — Summit feature flag removed\nv2.4 — shipped at the Dunmore Summit offsite, owner Lio Brandt, Jun 14",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 81,
+        "span_end": 95,
+        "mention_text": "Dunmore Summit"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 111,
+        "span_end": 121,
+        "mention_text": "Lio Brandt"
+      },
+      {
+        "kind": "date",
+        "span_start": 123,
+        "span_end": 129,
+        "mention_text": "Jun 14"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0013",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "FATAL: segfault in nice() syscall\nrenice failed; process was too nice\nthen Bex Holloway flew to Nice for the on-site next Friday",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 75,
+        "span_end": 87,
+        "mention_text": "Bex Holloway"
+      },
+      {
+        "kind": "location",
+        "span_start": 96,
+        "span_end": 100,
+        "mention_text": "Nice"
+      },
+      {
+        "kind": "date",
+        "span_start": 117,
+        "span_end": 128,
+        "mention_text": "next Friday"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-adversarial_negatives-0014",
+    "genre": "terminal_code",
+    "variant": "adversarial_negatives",
+    "text": "$ git log --author\nReading list updated; Reading branch merged.\nbuilt at Carrowmere Aero HQ, signed May Dolan, dated May 3",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 73,
+        "span_end": 88,
+        "mention_text": "Carrowmere Aero"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 100,
+        "span_end": 109,
+        "mention_text": "May Dolan"
+      },
+      {
+        "kind": "date",
+        "span_start": 117,
+        "span_end": 122,
+        "mention_text": "May 3"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "no_boundary"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0002",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "# TODO(@kessler): pin the tokenizer before Friday — Rowan from the Brain team needs it for the bake-off",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 7,
+        "span_end": 15,
+        "mention_text": "@kessler"
+      },
+      {
+        "kind": "date",
+        "span_start": 43,
+        "span_end": 49,
+        "mention_text": "Friday"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 54,
+        "span_end": 59,
+        "mention_text": "Rowan"
+      },
+      {
+        "kind": "organization",
+        "span_start": 69,
+        "span_end": 79,
+        "mention_text": "Brain team"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0003",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "[2026-06-03T09:15:07Z] INFO  worker started\n[2026-06-03T09:15:08Z] WARN  retrying upload to Building 4 relay\n[2026-06-03T09:15:11Z] ERROR no route to host",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 92,
+        "span_end": 102,
+        "mention_text": "Building 4"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0004",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "Traceback (most recent call last):\n  File \"pipeline/dedupe.py\", line 212, in flush\n    raise QueueFull(\"backpressure\")\nQueueFull: backpressure\n# reported by Lena Ostrowski, escalated to Northwind Aviation on May 14",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 157,
+        "span_end": 171,
+        "mention_text": "Lena Ostrowski"
+      },
+      {
+        "kind": "organization",
+        "span_start": 186,
+        "span_end": 204,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "date",
+        "span_start": 208,
+        "span_end": 214,
+        "mention_text": "May 14"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0007",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "CI run #4821 on runner-east-3 — triggered by Cole Hartmann\n  ✓ unit          00:42\n  ✓ integration   passed\n  ✗ notarize      failed at 11:58 on Jun 3",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 16,
+        "span_end": 29,
+        "mention_text": "runner-east-3"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 47,
+        "span_end": 60,
+        "mention_text": "Cole Hartmann"
+      },
+      {
+        "kind": "time",
+        "span_start": 81,
+        "span_end": 86,
+        "mention_text": "00:42"
+      },
+      {
+        "kind": "time",
+        "span_start": 144,
+        "span_end": 149,
+        "mention_text": "11:58"
+      },
+      {
+        "kind": "date",
+        "span_start": 153,
+        "span_end": 158,
+        "mention_text": "Jun 3"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0008",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "// Reviewed by Dr. Soren Aldridge and the City Health Dept liaison.\n// Ship target moved to next Tuesday; standup at 9:30 AM in Room 3F.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 15,
+        "span_end": 33,
+        "mention_text": "Dr. Soren Aldridge"
+      },
+      {
+        "kind": "organization",
+        "span_start": 42,
+        "span_end": 58,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "date",
+        "span_start": 92,
+        "span_end": 104,
+        "mention_text": "next Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 117,
+        "span_end": 124,
+        "mention_text": "9:30 AM"
+      },
+      {
+        "kind": "location",
+        "span_start": 128,
+        "span_end": 135,
+        "mention_text": "Room 3F"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0009",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "$ whoami\nframe\n$ cat /etc/hostname\ngreyhill-laptop\n$ uptime\n 22:04  up 3 days, load avg 0.41",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0012",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "$ npm run release -- --tag rc.2\n> bundling for Sterling Robotics\n> uploaded artifact at noon\n> changelog cut for Q3",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 47,
+        "span_end": 64,
+        "mention_text": "Sterling Robotics"
+      },
+      {
+        "kind": "time",
+        "span_start": 88,
+        "span_end": 92,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "date",
+        "span_start": 113,
+        "span_end": 115,
+        "mention_text": "Q3"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0013",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "# stack trace from 412 Alder St field unit\npanic: index out of range\n  at recall::index::seek (line 88)\n  filed by Imani Caldwell yesterday",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 19,
+        "span_end": 31,
+        "mention_text": "412 Alder St"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 115,
+        "span_end": 129,
+        "mention_text": "Imani Caldwell"
+      },
+      {
+        "kind": "date",
+        "span_start": 130,
+        "span_end": 139,
+        "mention_text": "yesterday"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0014",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "PR #312 merged: \"Save As dialog now respects the New Folder default\"\nApproved by Bishop Tran — merged Mon 17:45",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 81,
+        "span_end": 92,
+        "mention_text": "Bishop Tran"
+      },
+      {
+        "kind": "date",
+        "span_start": 104,
+        "span_end": 107,
+        "mention_text": "Mon"
+      },
+      {
+        "kind": "time",
+        "span_start": 108,
+        "span_end": 113,
+        "mention_text": "17:45"
+      }
+    ],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-natural_mixed-0017",
+    "genre": "terminal_code",
+    "variant": "natural_mixed",
+    "text": "// FIXME: the apple cache key collides under load.\n// raised in retro by the team; reading the spec again before April.\n// owner unassigned — grab it if you can.",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0002",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "// TODO(mira velez): hand off to Greyhi1l Capital befor e next Friday\n// NOTE: don't mark this resolved until QA signs off — URGENT",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 8,
+        "span_end": 18,
+        "mention_text": "mira velez"
+      },
+      {
+        "kind": "organization",
+        "span_start": 33,
+        "span_end": 49,
+        "mention_text": "Greyhi1l Capital"
+      },
+      {
+        "kind": "date",
+        "span_start": 58,
+        "span_end": 69,
+        "mention_text": "next Friday"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0003",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "Traceback (most recent call last):\n  Fi1e \"/home/jcleary/svc/pipe.py\", line 88\n    raise TimeoutError(host)\nConnectionError: Northwind Aviation gateway dovvn",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 49,
+        "span_end": 56,
+        "mention_text": "jcleary"
+      },
+      {
+        "kind": "organization",
+        "span_start": 125,
+        "span_end": 143,
+        "mention_text": "Northwind Aviation"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0004",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "export DEPLOY_REGION=carrovvmere-1\nexport OWNER=p.dunmore\nexport BUILD_DATE=2026-06-O1\n# pushed from Building 4 vpn — OK to merge",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 21,
+        "span_end": 34,
+        "mention_text": "carrovvmere-1"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 48,
+        "span_end": 57,
+        "mention_text": "p.dunmore"
+      },
+      {
+        "kind": "date",
+        "span_start": 76,
+        "span_end": 86,
+        "mention_text": "2026-06-O1"
+      },
+      {
+        "kind": "location",
+        "span_start": 101,
+        "span_end": 111,
+        "mention_text": "Building 4"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0007",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "commit auth0r: mará velez <mv@example>\nDate:   Wed O7:45\n    chore: bump Phoenix to v2 — flew to Phoenix for the rollout",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 15,
+        "span_end": 26,
+        "mention_text": "mará velez"
+      },
+      {
+        "kind": "date",
+        "span_start": 48,
+        "span_end": 51,
+        "mention_text": "Wed"
+      },
+      {
+        "kind": "time",
+        "span_start": 52,
+        "span_end": 57,
+        "mention_text": "O7:45"
+      },
+      {
+        "kind": "location",
+        "span_start": 100,
+        "span_end": 107,
+        "mention_text": "Phoenix"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0008",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "$ kubectl get pods -n greyhil1\nNAME              STATUS    AGE\napi-7f c        Running   11:20\n# owned by the Brain team, paged @miravelez at …quarterly revi",
+    "entities": [
+      {
+        "kind": "time",
+        "span_start": 89,
+        "span_end": 94,
+        "mention_text": "11:20"
+      },
+      {
+        "kind": "organization",
+        "span_start": 106,
+        "span_end": 120,
+        "mention_text": "the Brain team"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 128,
+        "span_end": 138,
+        "mention_text": "@miravelez"
+      }
+    ],
+    "hardness_tags": [
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise",
+      "truncated",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0009",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "Save As   New Folder   Sign In\nERROR: file not found  WARNING  retrying\nOK  CANCEL  please mark all as read",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0012",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "panic: nil deref at 0x4f\n  goroutine 17 [running]:\n  /opt/city health dept/svc.go:212 +0xff\n  reported by Carrowmere J. on the 14th",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 58,
+        "span_end": 74,
+        "mention_text": "city health dept"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 106,
+        "span_end": 119,
+        "mention_text": "Carrowmere J."
+      },
+      {
+        "kind": "date",
+        "span_start": 123,
+        "span_end": 131,
+        "mention_text": "the 14th"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity",
+      "no_boundary",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0013",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "$ cat /etc/motd\nVVelcome to Room 3F — Northwind Aviation build host\nmaintenance window next Friday noon to 3pm — do NOT reboot",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 28,
+        "span_end": 35,
+        "mention_text": "Room 3F"
+      },
+      {
+        "kind": "organization",
+        "span_start": 40,
+        "span_end": 58,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "date",
+        "span_start": 89,
+        "span_end": 100,
+        "mention_text": "next Friday"
+      },
+      {
+        "kind": "time",
+        "span_start": 101,
+        "span_end": 105,
+        "mention_text": "noon"
+      },
+      {
+        "kind": "time",
+        "span_start": 109,
+        "span_end": 112,
+        "mention_text": "3pm"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "terminal_code-ocr_noisy-0014",
+    "genre": "terminal_code",
+    "variant": "ocr_noisy",
+    "text": "git stash list\nstash@{0}: WIP on main: 8f2 reading config // reading is a verb here\nstash@{1}: pushed by Madison Roe near 412 Alder St on Q3",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 105,
+        "span_end": 116,
+        "mention_text": "Madison Roe"
+      },
+      {
+        "kind": "location",
+        "span_start": 122,
+        "span_end": 134,
+        "mention_text": "412 Alder St"
+      },
+      {
+        "kind": "date",
+        "span_start": 138,
+        "span_end": 140,
+        "mention_text": "Q3"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity",
+      "ocr_noise"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0002",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "Settings ▸ General ▸ Phoenix Theme\n  Auto-Save    Restore Tabs    Reset    Apply\n  Mobile Layout: ON",
+    "entities": [],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0003",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "Account ▸ Greyhill Capital\n  Billed to Mara Velez · renews Jun 14\n  Sign Out    Manage Plan    Upgrade",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 12,
+        "span_end": 28,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 41,
+        "span_end": 51,
+        "mention_text": "Mara Velez"
+      },
+      {
+        "kind": "date",
+        "span_start": 62,
+        "span_end": 68,
+        "mention_text": "Jun 14"
+      }
+    ],
+    "hardness_tags": [
+      "hard_negative",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0004",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "Calendar  ›  Tuesday  ›  9:30 AM\n  Standup — Room 3F\n  Add Guest    Edit    Delete    Mark Busy",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 15,
+        "span_end": 22,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 29,
+        "span_end": 36,
+        "mention_text": "9:30 AM"
+      },
+      {
+        "kind": "location",
+        "span_start": 51,
+        "span_end": 58,
+        "mention_text": "Room 3F"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0007",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "From Bill Carrowmere  ·  to: All\n  Subject: Reading List\n  Reply    Reply All    Forward    Archive",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 5,
+        "span_end": 20,
+        "mention_text": "Bill Carrowmere"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "no_boundary",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0008",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "Tab:  Northwind Aviation — Dashboard\n  Overview   Billing   Mark Resolved   Apple Pay   Sign In",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 6,
+        "span_end": 24,
+        "mention_text": "Northwind Aviation"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0009",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "Breadcrumb:  Home › Building 4 › Dunmore Pier\n  Save Map    Center    May View    Print",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 22,
+        "span_end": 32,
+        "mention_text": "Building 4"
+      },
+      {
+        "kind": "location",
+        "span_start": 37,
+        "span_end": 49,
+        "mention_text": "Dunmore Pier"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0012",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "Filter: Open  Closed  Grant  Will  Summit  Orange\n  Apply Filters    Clear    Save Search",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0013",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "Notification\n  Phoenix Vela commented on Carrowmere map\n  Frank shared a file · Dismiss · Snooze",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 15,
+        "span_end": 27,
+        "mention_text": "Phoenix Vela"
+      },
+      {
+        "kind": "location",
+        "span_start": 41,
+        "span_end": 51,
+        "mention_text": "Carrowmere"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 58,
+        "span_end": 63,
+        "mention_text": "Frank"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "multi_entity",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-adversarial_negatives-0014",
+    "genre": "ui_chrome",
+    "variant": "adversarial_negatives",
+    "text": "Export Options\n  Format: PDF  PNG  CSV\n  Range: Q3\n  Destination: the north office\n  Export    Cancel    Mark for Review",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 48,
+        "span_end": 50,
+        "mention_text": "Q3"
+      },
+      {
+        "kind": "location",
+        "span_start": 66,
+        "span_end": 82,
+        "mention_text": "the north office"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "ambiguous_token",
+      "hard_negative",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0002",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "I'll mark that ticket resolved once Mark Telfer confirms the deploy. He said it'd be done by noon.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 36,
+        "span_end": 47,
+        "mention_text": "Mark Telfer"
+      },
+      {
+        "kind": "time",
+        "span_start": 93,
+        "span_end": 97,
+        "mention_text": "noon"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0003",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "We flew into Phoenix late, so the Greyhill Capital pitch slid to the 14th. Phoenix Vela texted to say she'd cover the morning slot.",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 13,
+        "span_end": 20,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "organization",
+        "span_start": 34,
+        "span_end": 50,
+        "mention_text": "Greyhill Capital"
+      },
+      {
+        "kind": "date",
+        "span_start": 65,
+        "span_end": 73,
+        "mention_text": "the 14th"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 75,
+        "span_end": 87,
+        "mention_text": "Phoenix Vela"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0004",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "Please review the draft and Save As a new copy before sending. The Sign In page still throws an error for some users.",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0007",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "The lease at 412 Alder St renews March 3. Sterling from accounting flagged that the new rate kicks in next month.",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 13,
+        "span_end": 25,
+        "mention_text": "412 Alder St"
+      },
+      {
+        "kind": "date",
+        "span_start": 33,
+        "span_end": 40,
+        "mention_text": "March 3"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 42,
+        "span_end": 50,
+        "mention_text": "Sterling"
+      },
+      {
+        "kind": "date",
+        "span_start": 102,
+        "span_end": 112,
+        "mention_text": "next month"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0008",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "Met Dr. Chen and Aoife Brennan at the City Health Dept workshop in Greyhill. We start tomorrow at 8:45 sharp.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 4,
+        "span_end": 12,
+        "mention_text": "Dr. Chen"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 17,
+        "span_end": 30,
+        "mention_text": "Aoife Brennan"
+      },
+      {
+        "kind": "organization",
+        "span_start": 38,
+        "span_end": 54,
+        "mention_text": "City Health Dept"
+      },
+      {
+        "kind": "location",
+        "span_start": 67,
+        "span_end": 75,
+        "mention_text": "Greyhill"
+      },
+      {
+        "kind": "date",
+        "span_start": 86,
+        "span_end": 94,
+        "mention_text": "tomorrow"
+      },
+      {
+        "kind": "time",
+        "span_start": 98,
+        "span_end": 102,
+        "mention_text": "8:45"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0009",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "Honestly the reading was dense, but Will summarized it well. We'll grant access once Tornquist Labs signs the NDA.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 36,
+        "span_end": 40,
+        "mention_text": "Will"
+      },
+      {
+        "kind": "organization",
+        "span_start": 85,
+        "span_end": 99,
+        "mention_text": "Tornquist Labs"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "mixed_case"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0012",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "@miravelez replied in the thread: she's pushing the Brackwell Aero demo to Jun 14 because Building 4 has no power that day.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 0,
+        "span_end": 10,
+        "mention_text": "@miravelez"
+      },
+      {
+        "kind": "organization",
+        "span_start": 52,
+        "span_end": 66,
+        "mention_text": "Brackwell Aero"
+      },
+      {
+        "kind": "date",
+        "span_start": 75,
+        "span_end": 81,
+        "mention_text": "Jun 14"
+      },
+      {
+        "kind": "location",
+        "span_start": 90,
+        "span_end": 100,
+        "mention_text": "Building 4"
+      }
+    ],
+    "hardness_tags": [
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0013",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "I summited the budget review with Grant Holloway — he wants the final numbers from Velin & Roe by 5:00 PM.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 34,
+        "span_end": 48,
+        "mention_text": "Grant Holloway"
+      },
+      {
+        "kind": "organization",
+        "span_start": 85,
+        "span_end": 96,
+        "mention_text": "Velin & Roe"
+      },
+      {
+        "kind": "time",
+        "span_start": 100,
+        "span_end": 107,
+        "mention_text": "5:00 PM"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0014",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "New Folder created. Rename it, then drag the files in. The Settings pane lets you change the default save location later.",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-natural_mixed-0017",
+    "genre": "ui_chrome",
+    "variant": "natural_mixed",
+    "text": "Will you confirm the Madison account? Madison Kerr is the new lead at Northwind Aviation, taking over from Frank as of Monday.",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 38,
+        "span_end": 50,
+        "mention_text": "Madison Kerr"
+      },
+      {
+        "kind": "organization",
+        "span_start": 70,
+        "span_end": 88,
+        "mention_text": "Northwind Aviation"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 107,
+        "span_end": 112,
+        "mention_text": "Frank"
+      },
+      {
+        "kind": "date",
+        "span_start": 119,
+        "span_end": 125,
+        "mention_text": "Monday"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "mixed_case",
+      "multi_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0002",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Tooltip: Last synced Tuesday at 3:15 PM — c1ick to refresh\nWARNING  ERROR  RETRY  CANCEL",
+    "entities": [
+      {
+        "kind": "date",
+        "span_start": 21,
+        "span_end": 28,
+        "mention_text": "Tuesday"
+      },
+      {
+        "kind": "time",
+        "span_start": 32,
+        "span_end": 39,
+        "mention_text": "3:15 PM"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0003",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Recent › Greyhi11 Capita1 › Q3 Deck › …quarterly revi",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 11,
+        "span_end": 27,
+        "mention_text": "Greyhi11 Capita1"
+      },
+      {
+        "kind": "date",
+        "span_start": 32,
+        "span_end": 34,
+        "mention_text": "Q3"
+      }
+    ],
+    "hardness_tags": [
+      "no_boundary",
+      "ocr_noise",
+      "truncated",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0004",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Save   Cancel   Apply\nMove to: New Fo1der\nSign In to continue",
+    "entities": [],
+    "hardness_tags": [
+      "hard_negative",
+      "mixed_case",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0007",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Right-click ▸ Rename\nRight-click ▸ Mark as Read\nl'll mark it reso1ved later",
+    "entities": [],
+    "hardness_tags": [
+      "ambiguous_token",
+      "hard_negative",
+      "ocr_noise",
+      "ui_chrome_interleaved",
+      "zero_entity"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0008",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Breadcrumb: Home / Dunrnore Pier / Photos / 2026-0",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 19,
+        "span_end": 32,
+        "mention_text": "Dunrnore Pier"
+      }
+    ],
+    "hardness_tags": [
+      "no_boundary",
+      "ocr_noise",
+      "truncated",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0009",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Notif: @m1ravelez shared a fi1e\nO p e n   D i s m i s s   M U T E",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 7,
+        "span_end": 17,
+        "mention_text": "@m1ravelez"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "mixed_case",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0012",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Filter: From Frank Sterl1ng  ·  Before 3/3/2026\nApply Fi1ter   Reset   C1ose",
+    "entities": [
+      {
+        "kind": "person_name",
+        "span_start": 13,
+        "span_end": 27,
+        "mention_text": "Frank Sterl1ng"
+      },
+      {
+        "kind": "date",
+        "span_start": 40,
+        "span_end": 48,
+        "mention_text": "3/3/2026"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0013",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Status bar: connected to City Hea1th Dept vpn\nUPLOAD1NG…  DO NOT CLOSE  URGENT",
+    "entities": [
+      {
+        "kind": "organization",
+        "span_start": 25,
+        "span_end": 41,
+        "mention_text": "City Hea1th Dept"
+      }
+    ],
+    "hardness_tags": [
+      "all_caps",
+      "hard_negative",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  },
+  {
+    "id": "ui_chrome-ocr_noisy-0014",
+    "genre": "ui_chrome",
+    "variant": "ocr_noisy",
+    "text": "Menu: flevv to Phoenix on Tue\nReply from Phoenix Ve1a pending",
+    "entities": [
+      {
+        "kind": "location",
+        "span_start": 15,
+        "span_end": 22,
+        "mention_text": "Phoenix"
+      },
+      {
+        "kind": "date",
+        "span_start": 26,
+        "span_end": 29,
+        "mention_text": "Tue"
+      },
+      {
+        "kind": "person_name",
+        "span_start": 41,
+        "span_end": 53,
+        "mention_text": "Phoenix Ve1a"
+      }
+    ],
+    "hardness_tags": [
+      "ambiguous_token",
+      "multi_entity",
+      "ocr_noise",
+      "ui_chrome_interleaved"
+    ]
+  }
+]
