@@ -60,5 +60,11 @@ models/special_tokens_map.json
 models/added_tokens.json
 models/chat_template.jinja
 
+# Per-model sidecars written by convert_ner.py (V2-P5+ P1') — these live in
+# SUBDIRS / use a <model>_ prefix that the rules above don't reach, so the
+# small JSON/vocab files would otherwise be committable. Ship via HF (P6).
+models/*_tokenizer/
+models/*_labels.json
+
 # Output redirects from CLI flag-as-filename mistakes (e.g. --skip-sudo)
 /--*
