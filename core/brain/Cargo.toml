@@ -62,8 +62,31 @@ serde     = { version = "1", features = ["derive"] }
 # `unsafe`, no network. CSO §5 sign-off block in the PR body covers
 # this addition.
 sha2      = "0.10"
+# `tokenizers` is already on the workspace lockfile (v0.20.4) via the
+# macOS adapters `mci-embed-coreml` and `mci-coreml-bridge`, pinned with
+# the SAME `{ default-features = false, features = ["onig"] }` shape.
+# Listing it here does NOT add a new third-party crate to the lockfile —
+# Cargo unifies the version + features across the workspace. Used by
+# `extraction::tier2_ner::tokenizer` as the Rust-side WordPiece tokenizer
+# (with offset mapping) for the V2-P5+ supervised NER model
+# (`dslim/distilbert-NER`, bert-base-cased). Pure-Rust at our call sites
+# (no Core ML, no `unsafe`); the `onig` feature pulls Oniguruma (C) but
+# the BERT WordPiece path does not exercise it — onig is already in the
+# tree via the adapters regardless. ADR-0008 dep-gate satisfied (reuse,
+# not new). CSO §5 sign-off note in the PR body covers this addition:
+# post-capture, pure-Rust text tokenization, no sensitive-capture surface.
+tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
 
 [dev-dependencies]
+# `serde_json` is already on the workspace lockfile (v1.0.149, transitive
+# via several adapters + `toml`'s sibling). Dev-only here: the
+# `extraction::tier2_ner` golden tests parse the committed
+# `fixtures/distilbert_ner_golden.json` reference dump and the bundled
+# `resources/config.json` (to pin the decoder's `id2label` ordering
+# against the real model config). No runtime JSON parsing on any hot
+# path — the production decoder uses a compile-time `id2label` constant
+# that the test asserts equals the model config.
+serde_json = "1"
 # Tests exercise the stub impls; gate them via the `stubs` feature on this
 # crate so the public surface is identical to the prod build path.
 mci-brain = { path = ".", features = ["stubs"] }
