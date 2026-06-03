@@ -38,6 +38,10 @@
 
 pub mod tier1;
 pub mod tier2;
+/// V2-P5+ supervised-NER machinery (pure-Rust WordPiece tokenizer with
+/// offset mapping + BIO span-merge decoder for `dslim/distilbert-NER`).
+/// No Core ML — the future NER backend glues these around the model.
+pub mod tier2_ner;
 
 pub use tier1::{persist_tier1_matches, PersistStats, Tier1Extractor, Tier1Match};
 pub use tier2::{
