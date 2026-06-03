@@ -340,7 +340,7 @@ fn build_coreml_author(args: &Args) -> Result<Box<dyn BriefAuthor>, String> {
         .tokenizer_dir
         .as_ref()
         .ok_or_else(|| "--backend coreml requires --tokenizer-dir".to_owned())?;
-    let backend = mci_llama_coreml::Qwen3CoreMLBackend::open(model_path, tokenizer_dir)
+    let backend = mci_coreml_bridge::Qwen3CoreMLBackend::open(model_path, tokenizer_dir)
         .map_err(|e| format!("open Qwen3CoreMLBackend: {e}"))?;
     let arc: Arc<dyn LlamaBackend> = Arc::new(backend);
     Ok(Box::new(LlamaBriefAuthor::new(arc)))

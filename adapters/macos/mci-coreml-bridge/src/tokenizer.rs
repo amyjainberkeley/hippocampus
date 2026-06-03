@@ -127,11 +127,11 @@ mod tests {
     /// Path to the real Qwen3 tokenizer artifacts produced by
     /// `scripts/convert_brief_model.py`. Tests are `#[ignore]` so CI
     /// (which doesn't carry the converted model) stays green; run with
-    /// `cargo test -p mci-llama-coreml -- --ignored` on a workstation
+    /// `cargo test -p mci-coreml-bridge -- --ignored` on a workstation
     /// that has the converted model.
     fn qwen3_tokenizer_dir() -> std::path::PathBuf {
         // Worktree root: repo/.claude/worktrees/<slug>/
-        // This file:   adapters/macos/mci-llama-coreml/src/tokenizer.rs
+        // This file:   adapters/macos/mci-coreml-bridge/src/tokenizer.rs
         // Model dir:   models/
         let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         p.push("../../../models");

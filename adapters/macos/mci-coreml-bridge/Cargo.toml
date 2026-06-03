@@ -1,11 +1,11 @@
 [package]
-name                   = "mci-llama-coreml"
+name                   = "mci-coreml-bridge"
 version                = "0.0.1"
 edition.workspace      = true
 rust-version.workspace = true
 publish.workspace      = true
 license.workspace      = true
-description            = "MCI macOS adapter: Core ML backend for Qwen3-1.7B INT4 brief generation. Implements mci_brief::llama_backend::LlamaBackend. See docs/decisions/0028-brief-author-model-qwen3-1.7b-coreml.md."
+description            = "MCI macOS Core ML bridge: a generic CoreMLModel wrapper plus per-model shims (Qwen3-1.7B brief generation; GLiNER NER, V2-P5+). Renamed from mci-llama-coreml. See docs/decisions/0033-mci-coreml-bridge-rename.md and 0028-brief-author-model-qwen3-1.7b-coreml.md."
 
 [lints]
 workspace = true

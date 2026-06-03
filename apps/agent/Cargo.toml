@@ -82,10 +82,12 @@ serde_json  = "1"
 # family already on the lockfile from P3.3).
 [target.'cfg(target_os = "macos")'.dependencies]
 mci-embed-coreml = { path = "../../adapters/macos/mci-embed-coreml" }
-# ADR-0028 — Qwen3-1.7B INT4 Core ML backend for the daily-brief author.
-# macOS-only: the crate compiles to an empty lib elsewhere. No net-new
-# third-party crate (objc2 family already on the lockfile from P3.3).
-mci-llama-coreml = { path = "../../adapters/macos/mci-llama-coreml" }
+# ADR-0033 (Path A) / ADR-0028 — macOS Core ML bridge: generic
+# CoreMLModel wrapper + the Qwen3-1.7B brief-author shim (and, V2-P5+,
+# the GLiNER NER shim). macOS-only: the crate compiles to an empty lib
+# elsewhere. No net-new third-party crate (objc2 family already on the
+# lockfile from P3.3). Renamed from mci-llama-coreml.
+mci-coreml-bridge = { path = "../../adapters/macos/mci-coreml-bridge" }
 # V2-P8b — Mail.app emlx read path (PR #243). macOS-only: the crate
 # compiles to an empty lib elsewhere. apps/agent consumes the READ
 # surface (read_message / watch_inbox) inside `mail_ingest.rs`; no
