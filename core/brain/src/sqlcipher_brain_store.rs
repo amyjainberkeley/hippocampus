@@ -38,7 +38,10 @@ use std::sync::Mutex;
 
 use crate::alias_resolver::{ResolverEntity, RESOLVABLE_KINDS};
 use crate::episode_segmenter::EpisodeId;
-use crate::graph::{Entity, EntityId, EntityIdentity, EntityIdentityId, EntityMention, EpisodeEdge, IdentityId};
+use crate::graph::{
+    Entity, EntityId, EntityIdentity, EntityIdentityId, EntityMention, EpisodeEdge, EpisodeEdgeId,
+    IdentityId,
+};
 use mci_core::crypto::DbKey;
 use mci_core::store::{
     open as mci_core_open, open_readonly as mci_core_open_readonly, Db,
@@ -46,7 +49,10 @@ use mci_core::store::{
 };
 use rusqlite::{params, params_from_iter};
 
-use crate::{BrainStats, Event, EventId, EventRecord, ResolutionWatermark, StoreError};
+use crate::{
+    BrainStats, ConsolidationWatermark, Event, EventId, EventRecord, IdentityMentionSite,
+    ResolutionWatermark, StoreError,
+};
 
 /// Phase 3 production `BrainStore`.
 ///
@@ -1937,11 +1943,348 @@ impl crate::BrainStore for SqlCipherBrainStore {
             max_mention_ts_us,
         })
     }
+
+    // -----------------------------------------------------------------------
+    // V2-P6 — Episode-edge Consolidator read+write path
+    // -----------------------------------------------------------------------
+
+    fn consolidation_candidates(&self) -> Result<Vec<IdentityMentionSite>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        // Join identities → their member entities' mentions → the
+        // mentioning events. Restricted to SEGMENTED (episode_id NOT NULL)
+        // and POST-cascade (cascade_reason = 0) events. `redacted_token`
+        // never appears: `entity_identities` only ever holds the resolver's
+        // alias allowlist. Ordered for the consolidator's single-pass group.
+        //
+        // FORWARD NOTE (CSO): the `episodes` table has no per-episode
+        // privacy flag today. When V2-P7+ adds one (incognito / excluded
+        // episodes), this WHERE clause MUST gain `AND ep.is_private = 0`
+        // (joining `episodes`) so a private episode is never linked. Until
+        // that column exists there is nothing to filter on; the existing
+        // event-level cascade wall + the identity-allowlist join are the
+        // current containment.
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT ei.identity_id, m.entity_id, e.episode_id, e.ts_us
+                 FROM entity_identities ei
+                 JOIN entity_mentions m ON m.entity_id = ei.entity_id
+                 JOIN events e ON e.id = m.event_id
+                 WHERE e.episode_id IS NOT NULL AND e.cascade_reason = 0
+                 ORDER BY ei.identity_id, e.ts_us",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare consolidation_candidates: {e}")))?;
+        let rows = stmt
+            .query_map([], |r| {
+                let identity_id: String = r.get(0)?;
+                let entity_id: String = r.get(1)?;
+                let episode_id: i64 = r.get(2)?;
+                let ts_us: i64 = r.get(3)?;
+                Ok(IdentityMentionSite {
+                    identity_id: IdentityId(identity_id),
+                    entity_id: EntityId(entity_id),
+                    episode_id: EpisodeId(u64::try_from(episode_id).unwrap_or(0)),
+                    ts_us: u64::try_from(ts_us).unwrap_or(0),
+                })
+            })
+            .map_err(|e| StoreError::Backend(format!("query consolidation_candidates: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| StoreError::Backend(format!("row candidate: {e}")))?);
+        }
+        Ok(out)
+    }
+
+    fn put_episode_edges(&self, edges: &[EpisodeEdge]) -> Result<u64, StoreError> {
+        if edges.is_empty() {
+            return Ok(0);
+        }
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin put_episode_edges tx: {e}")))?;
+        let mut inserted = 0u64;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR IGNORE INTO episode_edges (
+                        id, src_episode_id, dst_episode_id, edge_kind,
+                        evidence_entity_ids, ts_us
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                )
+                .map_err(|e| StoreError::Backend(format!("prepare put_episode_edges: {e}")))?;
+            for edge in edges {
+                let src = i64::try_from(edge.src_episode_id.0).map_err(|e| {
+                    StoreError::InvalidInput(format!(
+                        "src episode id {} out of i64 range: {e}",
+                        edge.src_episode_id.0
+                    ))
+                })?;
+                let dst = i64::try_from(edge.dst_episode_id.0).map_err(|e| {
+                    StoreError::InvalidInput(format!(
+                        "dst episode id {} out of i64 range: {e}",
+                        edge.dst_episode_id.0
+                    ))
+                })?;
+                let ts = i64::try_from(edge.ts_us).unwrap_or(i64::MAX);
+                let changed = stmt
+                    .execute(params![
+                        &edge.id.0,
+                        src,
+                        dst,
+                        &edge.edge_kind,
+                        &edge.evidence_entity_ids,
+                        ts,
+                    ])
+                    .map_err(|e| StoreError::Backend(format!("INSERT episode_edges: {e}")))?;
+                inserted += u64::try_from(changed).unwrap_or(0);
+            }
+        }
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit put_episode_edges tx: {e}")))?;
+        Ok(inserted)
+    }
+
+    fn reconcile_episode_edges(
+        &self,
+        kind: &str,
+        edges: &[EpisodeEdge],
+    ) -> Result<crate::ReconcileStats, StoreError> {
+        let keep: std::collections::BTreeSet<&str> =
+            edges.iter().map(|e| e.id.0.as_str()).collect();
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin reconcile edges tx: {e}")))?;
+
+        // Read the currently-persisted PKs OF THIS KIND only, then prune any
+        // not in `keep`. Scoping the DELETE to `edge_kind = ?1` means this
+        // reconcile never touches edges of another kind (a future
+        // `co_active` / `referenced` writer is independent).
+        let existing: Vec<String> = {
+            let mut stmt = tx
+                .prepare("SELECT id FROM episode_edges WHERE edge_kind = ?1")
+                .map_err(|e| StoreError::Backend(format!("prepare reconcile edges select: {e}")))?;
+            let mapped = stmt
+                .query_map(params![kind], |r| r.get::<_, String>(0))
+                .map_err(|e| StoreError::Backend(format!("query reconcile edges select: {e}")))?;
+            let mut out = Vec::new();
+            for r in mapped {
+                out.push(r.map_err(|e| StoreError::Backend(format!("row reconcile edge: {e}")))?);
+            }
+            out
+        };
+
+        let mut deleted = 0u64;
+        for id in &existing {
+            if !keep.contains(id.as_str()) {
+                tx.execute("DELETE FROM episode_edges WHERE id = ?1", params![id])
+                    .map_err(|e| StoreError::Backend(format!("DELETE episode_edges: {e}")))?;
+                deleted += 1;
+            }
+        }
+
+        // INSERT OR IGNORE the current set — preserves the first-write ts_us
+        // of edges that already exist, so an unchanged re-run is a true
+        // row-level no-op (zero inserts, zero deletes).
+        let mut inserted = 0u64;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR IGNORE INTO episode_edges (
+                        id, src_episode_id, dst_episode_id, edge_kind,
+                        evidence_entity_ids, ts_us
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                )
+                .map_err(|e| StoreError::Backend(format!("prepare reconcile edges insert: {e}")))?;
+            for edge in edges {
+                let src = i64::try_from(edge.src_episode_id.0).map_err(|e| {
+                    StoreError::InvalidInput(format!(
+                        "src episode id {} out of i64 range: {e}",
+                        edge.src_episode_id.0
+                    ))
+                })?;
+                let dst = i64::try_from(edge.dst_episode_id.0).map_err(|e| {
+                    StoreError::InvalidInput(format!(
+                        "dst episode id {} out of i64 range: {e}",
+                        edge.dst_episode_id.0
+                    ))
+                })?;
+                let ts = i64::try_from(edge.ts_us).unwrap_or(i64::MAX);
+                let changed = stmt
+                    .execute(params![
+                        &edge.id.0,
+                        src,
+                        dst,
+                        &edge.edge_kind,
+                        &edge.evidence_entity_ids,
+                        ts,
+                    ])
+                    .map_err(|e| StoreError::Backend(format!("INSERT reconcile edges: {e}")))?;
+                inserted += u64::try_from(changed).unwrap_or(0);
+            }
+        }
+
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit reconcile edges tx: {e}")))?;
+        Ok(crate::ReconcileStats { inserted, deleted })
+    }
+
+    fn consolidation_watermark(&self) -> Result<ConsolidationWatermark, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let (identity_member_count, max_identity_ts_us): (i64, i64) = guard
+            .conn()
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(ts_us), 0) FROM entity_identities",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| StoreError::Backend(format!("watermark identities: {e}")))?;
+        let (mention_count, max_mention_ts_us): (i64, i64) = guard
+            .conn()
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(ts_us), 0) FROM entity_mentions",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| StoreError::Backend(format!("watermark mentions: {e}")))?;
+        let (segmented_event_count, max_episode_id): (i64, i64) = guard
+            .conn()
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(episode_id), 0)
+                 FROM events WHERE episode_id IS NOT NULL",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| StoreError::Backend(format!("watermark episodes: {e}")))?;
+        Ok(ConsolidationWatermark {
+            identity_member_count,
+            max_identity_ts_us,
+            mention_count,
+            max_mention_ts_us,
+            segmented_event_count,
+            max_episode_id,
+        })
+    }
+
+    fn episode_edges_for_identity(
+        &self,
+        identity_id: &IdentityId,
+    ) -> Result<Vec<EpisodeEdge>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        // Scan the `shared_identity` edges (the `episode_edges_kind` index
+        // serves the predicate), then keep only the ones whose
+        // content-stable PK re-derives for THIS identity. The PK folds the
+        // identity in, so the re-derivation is an exact per-identity filter
+        // — an edge built for a different identity over the same episode
+        // pair has a different PK and is excluded. No episode-set
+        // sub-query needed (and no SQLite variable-limit exposure).
+        //
+        // COST: O(|shared_identity edges|) per call (scan + in-Rust PK
+        // re-derive), returning the few that match. Fine at single-user
+        // Phase-6 scale; if the cross-app graph grows large, a future
+        // migration could denormalize `identity_id` into an indexed column
+        // and pre-filter in SQL (the PK fold is what blocks an index today).
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, src_episode_id, dst_episode_id, edge_kind,
+                        evidence_entity_ids, ts_us
+                 FROM episode_edges
+                 WHERE edge_kind = ?1
+                 ORDER BY src_episode_id, dst_episode_id",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare episode_edges_for_identity: {e}")))?;
+        let rows = stmt
+            .query_map(params![EpisodeEdge::KIND_SHARED_IDENTITY], row_to_episode_edge)
+            .map_err(|e| StoreError::Backend(format!("query episode_edges_for_identity: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let edge = r.map_err(|e| StoreError::Backend(format!("row episode_edge: {e}")))?;
+            let expect = EpisodeEdge::derive_shared_identity_id(
+                edge.src_episode_id,
+                edge.dst_episode_id,
+                identity_id,
+            );
+            if expect.0 == edge.id.0 {
+                out.push(edge);
+            }
+        }
+        Ok(out)
+    }
+
+    fn events_in_episode(
+        &self,
+        episode_id: EpisodeId,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let ep = i64::try_from(episode_id.0).map_err(|e| {
+            StoreError::InvalidInput(format!("episode id {} out of i64 range: {e}", episode_id.0))
+        })?;
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, ts_us, app_bundle_id, window_title, url, text
+                 FROM events
+                 WHERE episode_id = ?1
+                 ORDER BY ts_us DESC
+                 LIMIT ?2",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare events_in_episode: {e}")))?;
+        let rows = stmt
+            .query_map(params![ep, lim], |r| {
+                let id: i64 = r.get(0)?;
+                let ts_us: i64 = r.get(1)?;
+                let app: Option<String> = r.get(2)?;
+                let title: Option<String> = r.get(3)?;
+                let url: Option<String> = r.get(4)?;
+                let text: String = r.get(5)?;
+                Ok((id, ts_us, app, title, url, text))
+            })
+            .map_err(|e| StoreError::Backend(format!("query events_in_episode: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, ts_us, app, title, url, text) =
+                r.map_err(|e| StoreError::Backend(format!("row events_in_episode: {e}")))?;
+            out.push(EventRecord {
+                event_id: EventId(u64::try_from(id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text_snippet: EventRecord::truncate_snippet(&text),
+            });
+        }
+        Ok(out)
+    }
 }
 
 /// Build the `?,?,…` placeholder list for the `RESOLVABLE_KINDS` IN-clause.
 fn resolvable_kinds_placeholders() -> String {
     vec!["?"; RESOLVABLE_KINDS.len()].join(",")
+}
+
+/// rusqlite row → [`EpisodeEdge`]. Column order:
+/// `id, src_episode_id, dst_episode_id, edge_kind, evidence_entity_ids, ts_us`.
+fn row_to_episode_edge(r: &rusqlite::Row<'_>) -> rusqlite::Result<EpisodeEdge> {
+    let src: i64 = r.get(1)?;
+    let dst: i64 = r.get(2)?;
+    let ts_us: i64 = r.get(5)?;
+    Ok(EpisodeEdge {
+        id: EpisodeEdgeId(r.get::<_, String>(0)?),
+        src_episode_id: EpisodeId(u64::try_from(src).unwrap_or(0)),
+        dst_episode_id: EpisodeId(u64::try_from(dst).unwrap_or(0)),
+        edge_kind: r.get::<_, String>(3)?,
+        evidence_entity_ids: r.get::<_, Option<String>>(4)?,
+        ts_us: u64::try_from(ts_us).unwrap_or(0),
+    })
 }
 
 /// rusqlite row → [`EntityIdentity`].

@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_agent::alias_resolver_worker;
+use mci_agent::consolidator_worker;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::brief_worker;
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
@@ -503,6 +504,44 @@ async fn main() -> ExitCode {
                                             }
                                             Err(e) => {
                                                 eprintln!("mci-agent: alias-resolver error: {e}");
+                                            }
+                                        }
+                                    });
+
+                                    // V2-P6 construction-graph wire: the
+                                    // episode-edge Consolidator idle worker
+                                    // — the LAST graph-construction step
+                                    // before the Phase-6 dot-connect demo.
+                                    // THIS is the production caller `git grep
+                                    // run_consolidator_worker` must surface on
+                                    // the live agent path; without it the
+                                    // consolidator is dead code (the
+                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                    // lesson). Runs AFTER identities resolve
+                                    // (it reads `entity_identities`), off the
+                                    // hot path: a cheap watermark gates the
+                                    // derive, so a steady-state session does
+                                    // one watermark query per interval.
+                                    let consolidator_store = Arc::clone(&store);
+                                    let consolidator_shutdown = shutdown_rx.clone();
+                                    tokio::spawn(async move {
+                                        match consolidator_worker::run_consolidator_worker(
+                                            consolidator_store,
+                                            std::time::Duration::from_secs(60),
+                                            consolidator_shutdown,
+                                        )
+                                        .await
+                                        {
+                                            Ok(stats) => {
+                                                eprintln!(
+                                                    "mci-agent: consolidator exited. cycles={} edges_written={} edges_pruned={} edges_derived_last={} store_errors={}",
+                                                    stats.cycles_run, stats.edges_written,
+                                                    stats.edges_pruned, stats.edges_derived_last,
+                                                    stats.store_errors,
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!("mci-agent: consolidator error: {e}");
                                             }
                                         }
                                     });

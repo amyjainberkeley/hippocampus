@@ -22,6 +22,7 @@ pub mod alias_resolver_worker;
 pub mod brain_cli;
 pub mod brain_ingest;
 pub mod brief_worker;
+pub mod consolidator_worker;
 pub mod device_id;
 pub mod episode_worker;
 pub mod health_log;

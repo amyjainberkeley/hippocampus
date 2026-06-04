@@ -267,10 +267,13 @@ pub struct EpisodeEdge {
     pub src_episode_id: EpisodeId,
     /// The destination episode.
     pub dst_episode_id: EpisodeId,
-    /// Edge kind. Suggested values: `"co_active"` (overlapping in
-    /// time), `"referenced"` (one episode cites the other's entity),
-    /// `"responded_to"` (one episode is a reply to the other). Stored
-    /// as TEXT so the writer can mint new kinds without a schema bump.
+    /// Edge kind. The ONLY kind minted in production today is
+    /// [`Self::KIND_SHARED_IDENTITY`] (`"shared_identity"`, the V2-P6
+    /// Consolidator's cross-app link). `"co_active"` (overlapping in
+    /// time), `"referenced"` (one episode cites the other's entity), and
+    /// `"responded_to"` (one episode is a reply to the other) are reserved
+    /// for future writers. Stored as TEXT so a new kind needs no schema
+    /// bump.
     pub edge_kind: String,
     /// JSON-encoded array of [`EntityId`] strings citing why this edge
     /// exists. `None` for edges with no entity evidence (e.g.
@@ -283,6 +286,15 @@ pub struct EpisodeEdge {
 }
 
 impl EpisodeEdge {
+    /// Edge kind the V2-P6 **Consolidator** mints: two episodes whose
+    /// events co-mention the same canonical [`IdentityId`] within a
+    /// time window (the cross-app dot-connect link). Single source of
+    /// truth shared by [`Self::derive_shared_identity_id`], the
+    /// consolidator worker (which stamps it into `edge_kind`), and the
+    /// identity-walk read — so the stored `edge_kind` and the value
+    /// folded into the PK can never drift apart.
+    pub const KIND_SHARED_IDENTITY: &'static str = "shared_identity";
+
     /// Compute the content-stable [`EpisodeEdgeId`] for an
     /// `(edge_kind, src_episode_id, dst_episode_id)` tuple.
     ///
@@ -303,6 +315,58 @@ impl EpisodeEdge {
             edge_kind.as_bytes(),
             src_hex.as_bytes(),
             dst_hex.as_bytes(),
+        ]))
+    }
+
+    /// Compute the content-stable [`EpisodeEdgeId`] for a
+    /// **`shared_identity`** edge between two episodes that co-mention
+    /// the canonical identity `identity_id`.
+    ///
+    /// Unlike [`Self::derive_id`], the identity is folded into the
+    /// natural key, so two *different* identities that link the *same*
+    /// episode pair produce two distinct rows (each edge answers "these
+    /// two episodes are connected because they share THIS identity"),
+    /// and re-deriving the same `(episode-pair, identity)` is a row-level
+    /// no-op (`INSERT OR IGNORE` on the PK).
+    ///
+    /// The pair is **canonicalized** (`min`/`max` by episode rowid)
+    /// before hashing, so the edge is undirected-stable: a Consolidator
+    /// that observes the two mentions in either order converges on the
+    /// same PK. Writers MUST store the same canonical order in
+    /// `src_episode_id` (the `min`) / `dst_episode_id` (the `max`) so the
+    /// identity-walk read can re-derive and verify the PK.
+    ///
+    /// # Why episode-pair, not event-pair
+    ///
+    /// The `episode_edges` schema (migration 0004) keys on
+    /// `(src,dst)_episode_id` — both FK into `episodes(id)`. A single
+    /// identity may be mentioned by many events across the same two
+    /// episodes; deriving one edge per event-pair would mint many rows
+    /// that all collapse onto the same `(src_episode, dst_episode)` link,
+    /// duplicating it. Collapsing every in-window event-pair of one
+    /// identity between two episodes into ONE edge (keyed on the episode
+    /// pair + identity) is the only idempotent realization on this
+    /// schema. The contributing mentions are preserved as
+    /// `evidence_entity_ids`.
+    #[must_use]
+    pub fn derive_shared_identity_id(
+        src_episode_id: EpisodeId,
+        dst_episode_id: EpisodeId,
+        identity_id: &IdentityId,
+    ) -> EpisodeEdgeId {
+        let (lo, hi) = if src_episode_id.0 <= dst_episode_id.0 {
+            (src_episode_id, dst_episode_id)
+        } else {
+            (dst_episode_id, src_episode_id)
+        };
+        let lo_hex = format!("{:016x}", lo.0);
+        let hi_hex = format!("{:016x}", hi.0);
+        EpisodeEdgeId(derive_ulid(&[
+            b"edge",
+            Self::KIND_SHARED_IDENTITY.as_bytes(),
+            lo_hex.as_bytes(),
+            hi_hex.as_bytes(),
+            identity_id.0.as_bytes(),
         ]))
     }
 }
@@ -601,6 +665,46 @@ mod tests {
         let a = EpisodeEdge::derive_id("co_active", EpisodeId(1), EpisodeId(2));
         let b = EpisodeEdge::derive_id("referenced", EpisodeId(1), EpisodeId(2));
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn shared_identity_edge_id_is_undirected_and_deterministic() {
+        let id = EntityIdentity::derive_identity_id("person", "alice smith");
+        let fwd = EpisodeEdge::derive_shared_identity_id(EpisodeId(7), EpisodeId(42), &id);
+        let rev = EpisodeEdge::derive_shared_identity_id(EpisodeId(42), EpisodeId(7), &id);
+        // Canonicalized (min,max) → order-independent (unlike `derive_id`).
+        assert_eq!(fwd, rev, "shared_identity edge is undirected-stable");
+        assert_eq!(fwd.0.len(), 26);
+    }
+
+    #[test]
+    fn shared_identity_edge_id_changes_with_identity() {
+        let alice = EntityIdentity::derive_identity_id("person", "alice smith");
+        let bob = EntityIdentity::derive_identity_id("person", "bob jones");
+        let a = EpisodeEdge::derive_shared_identity_id(EpisodeId(1), EpisodeId(2), &alice);
+        let b = EpisodeEdge::derive_shared_identity_id(EpisodeId(1), EpisodeId(2), &bob);
+        // Same episode pair, different identity → distinct edges (so two
+        // identities linking the same pair are two queryable rows).
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn shared_identity_edge_id_changes_with_episode_pair() {
+        let id = EntityIdentity::derive_identity_id("person", "alice smith");
+        let a = EpisodeEdge::derive_shared_identity_id(EpisodeId(1), EpisodeId(2), &id);
+        let b = EpisodeEdge::derive_shared_identity_id(EpisodeId(1), EpisodeId(3), &id);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn shared_identity_edge_id_distinct_from_generic_co_active() {
+        // The identity-folded PK must not collide with a plain
+        // `derive_id("shared_identity", …)` (the extra identity component
+        // changes the hash input length + bytes).
+        let id = EntityIdentity::derive_identity_id("person", "alice smith");
+        let folded = EpisodeEdge::derive_shared_identity_id(EpisodeId(1), EpisodeId(2), &id);
+        let generic = EpisodeEdge::derive_id(EpisodeEdge::KIND_SHARED_IDENTITY, EpisodeId(1), EpisodeId(2));
+        assert_ne!(folded, generic);
     }
 
     #[test]
