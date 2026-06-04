@@ -65,6 +65,9 @@ models/chat_template.jinja
 # small JSON/vocab files would otherwise be committable. Ship via HF (P6).
 models/*_tokenizer/
 models/*_labels.json
+# Conversion logs (e.g. convert_ner.py stdout/stderr captured to models/) —
+# transient build output, never committed.
+models/*.log
 
 # Output redirects from CLI flag-as-filename mistakes (e.g. --skip-sudo)
 /--*

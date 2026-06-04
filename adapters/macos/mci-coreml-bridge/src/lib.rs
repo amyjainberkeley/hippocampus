@@ -34,5 +34,5 @@ pub mod tokenizer;
 // Backward-compatible crate-root re-exports: consumers keep using
 // `mci_coreml_bridge::Qwen3CoreMLBackend` etc. unchanged — only the
 // crate name moved (was `mci_llama_coreml`).
-pub use model::{CoreMLError, CoreMLModel, Prediction};
+pub use model::{ComputeUnits, CoreMLError, CoreMLModel, Prediction};
 pub use qwen3::{load_backend_or_stub, try_load_qwen3_backend, Qwen3CoreMLBackend};

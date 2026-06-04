@@ -31,8 +31,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::AllocAnyThread;
 use objc2_core_ml::{
-    MLDictionaryFeatureProvider, MLFeatureProvider, MLFeatureType, MLFeatureValue, MLModel,
-    MLModelConfiguration, MLMultiArray, MLMultiArrayDataType,
+    MLComputeUnits, MLDictionaryFeatureProvider, MLFeatureProvider, MLFeatureType, MLFeatureValue,
+    MLModel, MLModelConfiguration, MLMultiArray, MLMultiArrayDataType,
 };
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL};
 
@@ -83,12 +83,63 @@ impl std::fmt::Debug for CoreMLModel {
 unsafe impl Send for CoreMLModel {}
 unsafe impl Sync for CoreMLModel {}
 
+/// Compute-unit policy for [`CoreMLModel::load_with_compute_units`].
+///
+/// A thin safe mirror of Core ML's `MLComputeUnits`. [`CoreMLModel::load`]
+/// uses [`ComputeUnits::All`] (Core ML schedules across ANE/GPU/CPU),
+/// preserving the prior behavior. Pinning matters for the V2-P5+ NER
+/// footprint bake-off (P3), which loads each candidate under each policy
+/// to attribute the *actual* resident compute unit — the per-token
+/// classifier head is not ANE-resident (`docs/research` §7.1), so the
+/// real question is GPU vs CPU, answered empirically by comparing
+/// per-inference latency across these policies. The runtime NER backend
+/// (P4/P5) selects its own policy through the same loader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComputeUnits {
+    /// CPU only (`MLComputeUnitsCPUOnly`).
+    CpuOnly,
+    /// CPU + GPU, no ANE (`MLComputeUnitsCPUAndGPU`).
+    CpuAndGpu,
+    /// CPU + ANE, no GPU (`MLComputeUnitsCPUAndNeuralEngine`).
+    CpuAndNeuralEngine,
+    /// Core ML schedules across ANE/GPU/CPU (`MLComputeUnitsAll`) — the
+    /// [`CoreMLModel::load`] default.
+    All,
+}
+
+impl ComputeUnits {
+    fn to_ml(self) -> MLComputeUnits {
+        match self {
+            ComputeUnits::CpuOnly => MLComputeUnits::CPUOnly,
+            ComputeUnits::CpuAndGpu => MLComputeUnits::CPUAndGPU,
+            ComputeUnits::CpuAndNeuralEngine => MLComputeUnits::CPUAndNeuralEngine,
+            ComputeUnits::All => MLComputeUnits::All,
+        }
+    }
+}
+
 impl CoreMLModel {
     /// Load the compiled `.mlmodelc` at `model_path` with the default
-    /// compute-unit policy (`MLComputeUnits.all` — Core ML schedules
-    /// ANE/GPU/CPU). A compute-unit-pinned loader for the ANE-resident
-    /// GLiNER path is added in a later phase of the same spike.
+    /// compute-unit policy ([`ComputeUnits::All`] — Core ML schedules
+    /// ANE/GPU/CPU). For a pinned policy (e.g. the P3 footprint bake-off's
+    /// per-compute-unit latency attribution), use
+    /// [`Self::load_with_compute_units`].
     pub fn load(model_path: &Path) -> Result<Self, CoreMLError> {
+        Self::load_with_compute_units(model_path, ComputeUnits::All)
+    }
+
+    /// Load the compiled `.mlmodelc` at `model_path`, pinning Core ML to
+    /// the given [`ComputeUnits`] policy at model-configuration time.
+    ///
+    /// Note Core ML always retains CPU fallback: e.g.
+    /// [`ComputeUnits::CpuAndNeuralEngine`] on a graph the ANE cannot
+    /// compile still runs (on CPU), it does not error. Residency is
+    /// therefore inferred from observed latency/energy, not from the
+    /// policy alone.
+    pub fn load_with_compute_units(
+        model_path: &Path,
+        units: ComputeUnits,
+    ) -> Result<Self, CoreMLError> {
         let path_str = model_path
             .to_str()
             .ok_or_else(|| CoreMLError::Load("model path is not valid UTF-8".into()))?;
@@ -101,6 +152,7 @@ impl CoreMLModel {
 
         let url = NSURL::fileURLWithPath(&NSString::from_str(path_str));
         let config = unsafe { MLModelConfiguration::new() };
+        unsafe { config.setComputeUnits(units.to_ml()) };
         let model = unsafe {
             MLModel::modelWithContentsOfURL_configuration_error(&url, &config).map_err(|err| {
                 CoreMLError::Load(format!(
@@ -244,6 +296,20 @@ pub fn multi_array_i32(
     Ok(arr)
 }
 
+/// Total element count of an `MLMultiArray` (the product of its shape).
+///
+/// Lets a caller size an output tensor whose trailing dims are known but
+/// whose leading (e.g. sequence) dim is data-dependent — the NER
+/// token-classifier emits `logits [1, seq, num_labels]`. A caller can
+/// either recover `seq = multi_array_len(arr) / num_labels`, or (as the NER
+/// bake-off does) use it as a defensive lower-bound check against a
+/// tokenizer-derived `seq_len * num_labels` before reading.
+#[must_use]
+pub fn multi_array_len(arr: &MLMultiArray) -> usize {
+    let n = unsafe { arr.count() };
+    usize::try_from(n).unwrap_or(0)
+}
+
 /// Read `len` `f32` values starting at row-major element `offset` from
 /// an `MLMultiArray`, converting from the array's element dtype
 /// (`Float32` or `Float16`).
@@ -335,5 +401,39 @@ mod tests {
         assert!((f16_to_f32(0x3C00) - 1.0).abs() < 1e-6);
         assert!((f16_to_f32(0xBC00) - (-1.0)).abs() < 1e-6);
         assert!((f16_to_f32(0x3800) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pinned_loader_rejects_missing_for_every_policy() {
+        // Exercises the new public loader surface across every ComputeUnits
+        // variant. The path check fires before the configuration is built,
+        // so this is a fast smoke of the signature + error mapping; the
+        // to_ml() residency mapping is exercised live by the P3 NER bake-off.
+        for units in [
+            ComputeUnits::CpuOnly,
+            ComputeUnits::CpuAndGpu,
+            ComputeUnits::CpuAndNeuralEngine,
+            ComputeUnits::All,
+        ] {
+            let err = CoreMLModel::load_with_compute_units(
+                Path::new("/tmp/mci-test-nonexistent.mlmodelc"),
+                units,
+            )
+            .expect_err("missing path");
+            assert!(matches!(err, CoreMLError::Load(_)), "{units:?}: {err:?}");
+        }
+    }
+
+    #[test]
+    fn compute_units_map_to_apple_enum_values() {
+        // The missing-path test never reaches to_ml(), so pin the mapping
+        // directly against Apple's documented MLComputeUnits raw values
+        // (CPUOnly=0, CPUAndGPU=1, All=2, CPUAndNeuralEngine=3). This is the
+        // guard that catches a future match-arm reorder — a swap would
+        // silently send the NER bake-off to the wrong compute unit.
+        assert_eq!(ComputeUnits::CpuOnly.to_ml().0, 0);
+        assert_eq!(ComputeUnits::CpuAndGpu.to_ml().0, 1);
+        assert_eq!(ComputeUnits::All.to_ml().0, 2);
+        assert_eq!(ComputeUnits::CpuAndNeuralEngine.to_ml().0, 3);
     }
 }

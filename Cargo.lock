@@ -1168,6 +1168,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci-ner-bakeoff"
+version = "0.0.1"
+dependencies = [
+ "libc",
+ "mci-brain",
+ "mci-coreml-bridge",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mci-perf-soak"
 version = "0.0.1"
 dependencies = [
