@@ -112,6 +112,11 @@ pub use alias_resolver::{
     AliasResolver, AliasResolverConfig, ResolvedIdentity, ResolvedMember, ResolverEntity,
 };
 
+pub mod consolidator;
+pub use consolidator::{
+    ConsolidatorConfig, DerivedEdge, EpisodeConsolidator, IdentityMentionSite,
+};
+
 mod sqlcipher_brain_store;
 pub mod retention_purger;
 
@@ -775,6 +780,123 @@ pub trait BrainStore: Send + Sync {
             "resolution_watermark not supported by this BrainStore impl (V2-P6)".into(),
         ))
     }
+
+    // -----------------------------------------------------------------------
+    // V2-P6 — Episode-edge Consolidator read+write path
+    //
+    // The consolidator reads `entity_identities ⋈ entity_mentions ⋈ events`
+    // (post-cascade, segmented) and writes `episode_edges` (migration 0004,
+    // NO new schema). All default impls return [`StoreError::Other`] so the
+    // pre-existing wrapper stores keep compiling; [`SqlCipherBrainStore`]
+    // overrides each.
+    // -----------------------------------------------------------------------
+
+    /// Project every (identity, member-entity, mentioning-event) tuple the
+    /// edge consolidator needs: one [`IdentityMentionSite`] per mention of
+    /// an identity-member entity, restricted to **segmented**
+    /// (`episode_id IS NOT NULL`), **post-cascade** (`cascade_reason = 0`)
+    /// events. `redacted_token` placeholders never appear (the join goes
+    /// through `entity_identities`, which only holds the resolver's alias
+    /// allowlist). Ordered by `(identity_id, ts_us)` for a single-pass
+    /// grouping.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn consolidation_candidates(&self) -> Result<Vec<IdentityMentionSite>, StoreError> {
+        Err(StoreError::Other(
+            "consolidation_candidates not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Insert a batch of episode edges in one transaction, `INSERT OR
+    /// IGNORE` on the PK. Returns the count of **newly inserted** rows
+    /// (re-deriving an existing edge contributes 0). Both endpoints of
+    /// every edge MUST reference existing `episodes` rows (FK enforced).
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure (incl. FK violation).
+    fn put_episode_edges(&self, _edges: &[EpisodeEdge]) -> Result<u64, StoreError> {
+        Err(StoreError::Other(
+            "put_episode_edges not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Reconcile the `episode_edges` rows OF ONE `kind` to exactly `edges`:
+    /// delete any edge of that kind whose PK is absent from `edges`, then
+    /// `INSERT OR IGNORE` each row (preserving the first-write `ts_us` of
+    /// edges that already exist).
+    ///
+    /// This is the consolidator's production write path. The
+    /// `AliasResolver`'s leaf-attachment is **non-monotonic** — a
+    /// membership that justified a cross-app edge can later be dropped, at
+    /// which point the edge is no longer derivable. A plain grow-only
+    /// `put_episode_edges` would strand that stale edge forever; pruning to
+    /// the consolidator's CURRENT output fixes that while keeping a re-run
+    /// on an unchanged store a true row-level no-op. Mirrors
+    /// [`Self::reconcile_entity_identities`] (the same pattern the alias
+    /// resolver uses on its grow-only-framed `entity_identities` table).
+    /// The DELETE is scoped to `edge_kind = kind`, so other edge kinds are
+    /// untouched; every element of `edges` MUST carry that `edge_kind`.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure (incl. FK violation).
+    fn reconcile_episode_edges(
+        &self,
+        _kind: &str,
+        _edges: &[EpisodeEdge],
+    ) -> Result<ReconcileStats, StoreError> {
+        Err(StoreError::Other(
+            "reconcile_episode_edges not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Cheap change-detection watermark for the consolidator's idle loop.
+    /// When two snapshots compare equal, nothing the consolidator reads
+    /// (identities, mentions, episode assignments) has changed, so the
+    /// cycle sleeps instead of re-deriving (idle-batch, not hot-path).
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn consolidation_watermark(&self) -> Result<ConsolidationWatermark, StoreError> {
+        Err(StoreError::Other(
+            "consolidation_watermark not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// The dot-connect walk: every `shared_identity` edge that was derived
+    /// for `identity_id`. Precise — an edge is returned only when its PK
+    /// re-derives from `(src, dst, identity_id)` via
+    /// [`EpisodeEdge::derive_shared_identity_id`], so an edge built for a
+    /// *different* identity that happens to link the same episode pair is
+    /// excluded. Empty for an identity with no cross-app links.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn episode_edges_for_identity(
+        &self,
+        _identity_id: &IdentityId,
+    ) -> Result<Vec<EpisodeEdge>, StoreError> {
+        Err(StoreError::Other(
+            "episode_edges_for_identity not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Return the events assigned to `episode_id`, newest first, capped at
+    /// `limit` — the leaf step of the dot-connect walk (edge → episode →
+    /// its events). `limit == 0` returns `Ok(vec![])` without touching
+    /// SQLite.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn events_in_episode(
+        &self,
+        _episode_id: EpisodeId,
+        _limit: usize,
+    ) -> Result<Vec<EventRecord>, StoreError> {
+        Err(StoreError::Other(
+            "events_in_episode not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
 }
 
 /// Outcome of a [`BrainStore::reconcile_entity_identities`] pass.
@@ -800,6 +922,44 @@ pub struct ResolutionWatermark {
     pub mention_count: i64,
     /// Max `entity_mentions.ts_us` (0 if none).
     pub max_mention_ts_us: i64,
+}
+
+/// Cheap change-detection watermark for the V2-P6 episode-edge
+/// **Consolidator** idle loop. The consolidator's output is a pure
+/// function of the canonical identities, the entity mentions, and the
+/// event→episode assignments; this snapshot captures all three cheaply
+/// (COUNT/MAX aggregates over indexed columns). Two equal snapshots ⇒
+/// nothing the consolidator reads has changed ⇒ the cycle sleeps without
+/// re-deriving.
+///
+/// # Sensitivity to membership *shrink*
+///
+/// A pure delete (the `AliasResolver` reconcile dropping a stale leaf)
+/// lowers `identity_member_count`, and any add stamps a fresh monotonic
+/// `ts_us` that raises `max_identity_ts_us` — so every real change to the
+/// membership set moves at least one field. The one shape this misses is a
+/// same-cycle delete+add whose re-add reuses an OLD `ts_us`, which the
+/// alias worker never produces (it stamps `now_us()` on every new row). A
+/// missed tick only *delays* a re-derive to the next detected change; it
+/// never corrupts an edge, and because the consolidator
+/// [`reconcile`](BrainStore::reconcile_episode_edges)s (not appends), that
+/// next run self-heals any edge the shrink left stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ConsolidationWatermark {
+    /// Count of `entity_identities` membership rows.
+    pub identity_member_count: i64,
+    /// Max `entity_identities.ts_us` (0 if none).
+    pub max_identity_ts_us: i64,
+    /// Count of all entity mentions.
+    pub mention_count: i64,
+    /// Max `entity_mentions.ts_us` (0 if none).
+    pub max_mention_ts_us: i64,
+    /// Count of events that have been assigned to an episode
+    /// (`episode_id IS NOT NULL`).
+    pub segmented_event_count: i64,
+    /// Max `episodes.id` seen (0 if none) — bumps when the segmenter mints
+    /// a new episode.
+    pub max_episode_id: i64,
 }
 
 // ---------------------------------------------------------------------------
