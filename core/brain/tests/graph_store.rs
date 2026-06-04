@@ -133,7 +133,8 @@ fn migration_0004_creates_graph_tables_and_indexes() {
             .expect("query sqlite_master index");
         assert_eq!(count, 1, "{index} index missing");
     }
-    // brain_schema_version stamped to "4"; vec-mirror deferred.
+    // brain_schema_version stamped to "5" (0005 entity_identities runs
+    // after 0004); vec-mirror deferred.
     let version: String = db
         .conn()
         .query_row(
@@ -142,7 +143,7 @@ fn migration_0004_creates_graph_tables_and_indexes() {
             |r| r.get(0),
         )
         .expect("schema version");
-    assert_eq!(version, "4");
+    assert_eq!(version, "5");
     let vec_mirror: String = db
         .conn()
         .query_row(
@@ -161,7 +162,7 @@ fn migration_0004_is_idempotent_on_reopen() {
     for _ in 0..3 {
         let _store = SqlCipherBrainStore::new(&path, &key).expect("re-open");
     }
-    // Schema still healthy + still stamped to 4.
+    // Schema still healthy + still stamped to 5.
     let db = raw_open(&path, &key);
     let version: String = db
         .conn()
@@ -171,7 +172,7 @@ fn migration_0004_is_idempotent_on_reopen() {
             |r| r.get(0),
         )
         .expect("schema version");
-    assert_eq!(version, "4");
+    assert_eq!(version, "5");
 }
 
 // ---------------------------------------------------------------------------
