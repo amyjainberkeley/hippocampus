@@ -308,6 +308,116 @@ impl EpisodeEdge {
 }
 
 // ---------------------------------------------------------------------------
+// Identity — V2-P6 AliasResolver canonical-identity membership
+// ---------------------------------------------------------------------------
+
+/// Stable identifier for one canonical **identity** — the cluster a set
+/// of alias [`Entity`] rows resolves to (e.g. a person's display-name
+/// entity + their email entity + their phone entity all map to one
+/// `IdentityId`).
+///
+/// Content-stable per the module rule: derived from the identity's
+/// `(identity_kind, normalized-anchor)` via
+/// [`EntityIdentity::derive_identity_id`], NOT from its membership. The
+/// anchor is the cluster's stable canonical name (a person's full name,
+/// an org's name, a location's name), so adding an alias to a cluster
+/// does NOT move its `IdentityId` — the precondition for incremental
+/// re-resolution being a row-level no-op and for Phase 8 cross-device
+/// convergence (ADR-0023).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct IdentityId(pub String);
+
+impl std::fmt::Display for IdentityId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "identity:{}", self.0)
+    }
+}
+
+/// Stable identifier for one [`EntityIdentity`] membership row.
+///
+/// Content-stable ULID derived from `(identity_id, entity_id)` via
+/// [`EntityIdentity::derive_id`] — re-resolving the same membership is a
+/// PK no-op.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EntityIdentityId(pub String);
+
+impl std::fmt::Display for EntityIdentityId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "entity_identity:{}", self.0)
+    }
+}
+
+/// One membership row: alias [`Entity`] `entity_id` belongs to the
+/// canonical identity `identity_id`.
+///
+/// Stored in the `entity_identities` table per migration 0005. The
+/// natural key is `(identity_id, entity_id)`. The table is grow-only
+/// (`INSERT OR IGNORE`): the AliasResolver re-derives the same rows on
+/// every idle pass without producing duplicates, and a member is never
+/// re-pointed (precision-over-recall — the resolver emits each entity
+/// into at most one identity).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityIdentity {
+    /// Content-stable ULID derived per [`Self::derive_id`].
+    pub id: EntityIdentityId,
+    /// The alias entity that belongs to this identity.
+    pub entity_id: EntityId,
+    /// The canonical identity this entity resolves to.
+    pub identity_id: IdentityId,
+    /// Identity-level kind: `"person"` / `"org"` / `"location"`.
+    /// Distinct from the entity-level kind (`"person_name"` /
+    /// `"organization"` / `"location"` / `"email"` / `"phone"` /
+    /// `"url"`). Stored as TEXT so V2-P9+ can mint kinds without a
+    /// schema bump.
+    pub identity_kind: String,
+    /// Deterministic display name for the identity. The resolver derives
+    /// it from the normalized anchor so it is identical across every
+    /// membership row of the same identity (no denormalization drift).
+    pub identity_canonical_name: String,
+    /// Which high-confidence rule attached this member. One of
+    /// `"anchor"`, `"exact_name"`, `"name_variant"`, `"email_name"`,
+    /// `"phone_cooccur"`, `"domain_org"`.
+    pub rule: String,
+    /// Per-member merge confidence in `[0.0, 1.0]`.
+    pub confidence: f32,
+    /// First-write wall-clock, microseconds since UNIX epoch. The store
+    /// preserves it on PK conflict so a re-run is a true row-level
+    /// no-op.
+    pub ts_us: u64,
+}
+
+impl EntityIdentity {
+    /// Compute the content-stable [`IdentityId`] for an identity from its
+    /// `(identity_kind, normalized_anchor)`.
+    ///
+    /// `normalized_anchor` MUST already be normalized by the caller (the
+    /// AliasResolver lower-cases, strips punctuation, and collapses
+    /// whitespace before calling) so two devices that normalize the same
+    /// cluster the same way converge on the same id. This function does
+    /// NOT normalize — it only hashes — to keep `graph.rs` free of the
+    /// resolver's locale/normalization policy.
+    #[must_use]
+    pub fn derive_identity_id(identity_kind: &str, normalized_anchor: &str) -> IdentityId {
+        IdentityId(derive_ulid(&[
+            b"identity",
+            identity_kind.as_bytes(),
+            normalized_anchor.as_bytes(),
+        ]))
+    }
+
+    /// Compute the content-stable [`EntityIdentityId`] for a
+    /// `(identity_id, entity_id)` membership.
+    #[must_use]
+    pub fn derive_id(identity_id: &IdentityId, entity_id: &EntityId) -> EntityIdentityId {
+        EntityIdentityId(derive_ulid(&[
+            b"entity_identity",
+            identity_id.0.as_bytes(),
+            entity_id.0.as_bytes(),
+        ]))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Hashing + base32 helpers — module-private, exhaustively unit-tested
 // ---------------------------------------------------------------------------
 
@@ -518,5 +628,52 @@ mod tests {
         assert_eq!(m.to_string(), "mention:ABCDEFGHJKMNPQRSTVWXYZ0123");
         let g = EpisodeEdgeId("ABCDEFGHJKMNPQRSTVWXYZ0123".to_string());
         assert_eq!(g.to_string(), "edge:ABCDEFGHJKMNPQRSTVWXYZ0123");
+        let i = IdentityId("ABCDEFGHJKMNPQRSTVWXYZ0123".to_string());
+        assert_eq!(i.to_string(), "identity:ABCDEFGHJKMNPQRSTVWXYZ0123");
+        let em = EntityIdentityId("ABCDEFGHJKMNPQRSTVWXYZ0123".to_string());
+        assert_eq!(em.to_string(), "entity_identity:ABCDEFGHJKMNPQRSTVWXYZ0123");
+    }
+
+    #[test]
+    fn identity_id_is_26_char_crockford_and_deterministic() {
+        let a = EntityIdentity::derive_identity_id("person", "alice smith");
+        let b = EntityIdentity::derive_identity_id("person", "alice smith");
+        assert_eq!(a, b);
+        assert_eq!(a.0.len(), 26);
+        for c in a.0.chars() {
+            assert!(CROCKFORD_ALPHABET.contains(&(c as u8)));
+        }
+    }
+
+    #[test]
+    fn identity_id_changes_with_kind_or_anchor() {
+        let person = EntityIdentity::derive_identity_id("person", "alice smith");
+        let org = EntityIdentity::derive_identity_id("org", "alice smith");
+        let other = EntityIdentity::derive_identity_id("person", "alice chen");
+        assert_ne!(person, org);
+        assert_ne!(person, other);
+    }
+
+    #[test]
+    fn identity_id_distinct_from_entity_id_for_same_text() {
+        // An IdentityId and an EntityId derived from textually-similar
+        // inputs must not collide — the "identity" vs "entity" domain
+        // prefix separates them.
+        let ident = EntityIdentity::derive_identity_id("person", "alice smith");
+        let entity = Entity::derive_id("person", "alice smith");
+        assert_ne!(ident.0, entity.0);
+    }
+
+    #[test]
+    fn membership_id_is_deterministic_and_endpoint_sensitive() {
+        let id = EntityIdentity::derive_identity_id("person", "alice smith");
+        let e1 = Entity::derive_id("email", "alice.smith@corp.com");
+        let e2 = Entity::derive_id("phone", "+15551234567");
+        let m1 = EntityIdentity::derive_id(&id, &e1);
+        let m1_again = EntityIdentity::derive_id(&id, &e1);
+        let m2 = EntityIdentity::derive_id(&id, &e2);
+        assert_eq!(m1, m1_again);
+        assert_ne!(m1, m2);
+        assert_eq!(m1.0.len(), 26);
     }
 }

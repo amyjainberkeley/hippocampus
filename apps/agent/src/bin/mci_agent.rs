@@ -27,6 +27,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use mci_agent::alias_resolver_worker;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::brief_worker;
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
@@ -467,6 +468,41 @@ async fn main() -> ExitCode {
                                             }
                                             Err(e) => {
                                                 eprintln!("mci-agent: episode-worker error: {e}");
+                                            }
+                                        }
+                                    });
+
+                                    // V2-P6 construction-graph wire: the
+                                    // AliasResolver idle worker. THIS is the
+                                    // production caller `git grep
+                                    // run_alias_resolver_worker` must surface
+                                    // on the live agent path — without it the
+                                    // resolver is dead code (the
+                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                    // lesson). Runs off the hot path: a cheap
+                                    // watermark gates the full resolve, so a
+                                    // steady-state session does one watermark
+                                    // query per interval and no more.
+                                    let alias_store = Arc::clone(&store);
+                                    let alias_shutdown = shutdown_rx.clone();
+                                    tokio::spawn(async move {
+                                        match alias_resolver_worker::run_alias_resolver_worker(
+                                            alias_store,
+                                            std::time::Duration::from_secs(30),
+                                            alias_shutdown,
+                                        )
+                                        .await
+                                        {
+                                            Ok(stats) => {
+                                                eprintln!(
+                                                    "mci-agent: alias-resolver exited. cycles={} memberships_written={} memberships_pruned={} identities_last={} store_errors={}",
+                                                    stats.cycles_run, stats.memberships_written,
+                                                    stats.memberships_pruned,
+                                                    stats.identities_last, stats.store_errors,
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!("mci-agent: alias-resolver error: {e}");
                                             }
                                         }
                                     });

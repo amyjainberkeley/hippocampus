@@ -36,16 +36,17 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use crate::alias_resolver::{ResolverEntity, RESOLVABLE_KINDS};
 use crate::episode_segmenter::EpisodeId;
-use crate::graph::{Entity, EntityId, EntityMention, EpisodeEdge};
+use crate::graph::{Entity, EntityId, EntityIdentity, EntityIdentityId, EntityMention, EpisodeEdge, IdentityId};
 use mci_core::crypto::DbKey;
 use mci_core::store::{
     open as mci_core_open, open_readonly as mci_core_open_readonly, Db,
     StoreError as CoreStoreError,
 };
-use rusqlite::params;
+use rusqlite::{params, params_from_iter};
 
-use crate::{BrainStats, Event, EventId, EventRecord, StoreError};
+use crate::{BrainStats, Event, EventId, EventRecord, ResolutionWatermark, StoreError};
 
 /// Phase 3 production `BrainStore`.
 ///
@@ -1048,6 +1049,7 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     let sql_0002 = include_str!("../migrations/0002_briefs.sql");
     let sql_0003 = include_str!("../migrations/0003_events_tab_id.sql");
     let sql_0004 = include_str!("../migrations/0004_v2_graph_schema.sql");
+    let sql_0005 = include_str!("../migrations/0005_entity_identities.sql");
     let tx = db
         .conn_mut()
         .transaction()
@@ -1074,6 +1076,12 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     // apply directly.
     tx.execute_batch(sql_0004)
         .map_err(|e| StoreError::Backend(format!("apply migration 0004: {e}")))?;
+    // 0005 — V2-P6 AliasResolver canonical-identity membership. Fresh
+    // table + indexes only (zero `ALTER TABLE`), every statement
+    // `IF NOT EXISTS` / `INSERT OR REPLACE`, so the apply is idempotent
+    // on re-open with no separate probe (same discipline as 0004).
+    tx.execute_batch(sql_0005)
+        .map_err(|e| StoreError::Backend(format!("apply migration 0005: {e}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
     Ok(())
@@ -1698,6 +1706,270 @@ impl crate::BrainStore for SqlCipherBrainStore {
         }
         Ok(out)
     }
+
+    // -----------------------------------------------------------------------
+    // V2-P6 — AliasResolver read+write path
+    // -----------------------------------------------------------------------
+
+    fn list_resolvable_entities(&self) -> Result<Vec<ResolverEntity>, StoreError> {
+        let placeholders = resolvable_kinds_placeholders();
+        let sql = format!(
+            "SELECT id, kind, canonical_name FROM entities
+             WHERE kind IN ({placeholders}) ORDER BY id"
+        );
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare list_resolvable_entities: {e}")))?;
+        let rows = stmt
+            .query_map(params_from_iter(RESOLVABLE_KINDS.iter()), |r| {
+                Ok(ResolverEntity {
+                    id: EntityId(r.get::<_, String>(0)?),
+                    kind: r.get::<_, String>(1)?,
+                    canonical_name: r.get::<_, String>(2)?,
+                })
+            })
+            .map_err(|e| StoreError::Backend(format!("query list_resolvable_entities: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| StoreError::Backend(format!("row resolvable: {e}")))?);
+        }
+        Ok(out)
+    }
+
+    fn entity_cooccurrences(&self) -> Result<Vec<(EventId, Vec<EntityId>)>, StoreError> {
+        let placeholders = resolvable_kinds_placeholders();
+        // DISTINCT collapses the (rare) two-extractor-passes-same-entity
+        // case so an entity is not double-counted as co-occurring with
+        // itself. Ordered by event so we can group with a single pass.
+        let sql = format!(
+            "SELECT DISTINCT m.event_id, m.entity_id
+             FROM entity_mentions m JOIN entities e ON e.id = m.entity_id
+             WHERE e.kind IN ({placeholders})
+             ORDER BY m.event_id, m.entity_id"
+        );
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare entity_cooccurrences: {e}")))?;
+        let rows = stmt
+            .query_map(params_from_iter(RESOLVABLE_KINDS.iter()), |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            })
+            .map_err(|e| StoreError::Backend(format!("query entity_cooccurrences: {e}")))?;
+        let mut out: Vec<(EventId, Vec<EntityId>)> = Vec::new();
+        for r in rows {
+            let (event_id, entity_id) =
+                r.map_err(|e| StoreError::Backend(format!("row cooccurrence: {e}")))?;
+            let eid = EventId(u64::try_from(event_id).unwrap_or(0));
+            match out.last_mut() {
+                Some((last_eid, members)) if *last_eid == eid => {
+                    members.push(EntityId(entity_id));
+                }
+                _ => out.push((eid, vec![EntityId(entity_id)])),
+            }
+        }
+        Ok(out)
+    }
+
+    fn put_entity_identity(&self, membership: &EntityIdentity) -> Result<(), StoreError> {
+        let ts = i64::try_from(membership.ts_us).unwrap_or(i64::MAX);
+        let confidence = f64::from(membership.confidence);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        // Grow-only: INSERT OR IGNORE preserves the first-write row (incl.
+        // its ts_us) so a re-run on an unchanged store is a true no-op.
+        guard
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO entity_identities (
+                    id, entity_id, identity_id, identity_kind,
+                    identity_canonical_name, rule, confidence, ts_us
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    &membership.id.0,
+                    &membership.entity_id.0,
+                    &membership.identity_id.0,
+                    &membership.identity_kind,
+                    &membership.identity_canonical_name,
+                    &membership.rule,
+                    confidence,
+                    ts,
+                ],
+            )
+            .map_err(|e| StoreError::Backend(format!("INSERT entity_identities: {e}")))?;
+        Ok(())
+    }
+
+    fn reconcile_entity_identities(
+        &self,
+        rows: &[EntityIdentity],
+    ) -> Result<crate::ReconcileStats, StoreError> {
+        let keep: std::collections::BTreeSet<&str> =
+            rows.iter().map(|r| r.id.0.as_str()).collect();
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin reconcile tx: {e}")))?;
+
+        // Read the currently-persisted PKs, then prune any not in `keep`.
+        let existing: Vec<String> = {
+            let mut stmt = tx
+                .prepare("SELECT id FROM entity_identities")
+                .map_err(|e| StoreError::Backend(format!("prepare reconcile select: {e}")))?;
+            let mapped = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(|e| StoreError::Backend(format!("query reconcile select: {e}")))?;
+            let mut out = Vec::new();
+            for r in mapped {
+                out.push(r.map_err(|e| StoreError::Backend(format!("row reconcile: {e}")))?);
+            }
+            out
+        };
+
+        let mut deleted = 0u64;
+        for id in &existing {
+            if !keep.contains(id.as_str()) {
+                tx.execute("DELETE FROM entity_identities WHERE id = ?1", params![id])
+                    .map_err(|e| StoreError::Backend(format!("DELETE entity_identities: {e}")))?;
+                deleted += 1;
+            }
+        }
+
+        // INSERT OR IGNORE the current set — preserves the first-write
+        // ts_us of rows that already exist, so an unchanged re-run is a
+        // true row-level no-op (zero inserts, zero deletes).
+        let mut inserted = 0u64;
+        for membership in rows {
+            let ts = i64::try_from(membership.ts_us).unwrap_or(i64::MAX);
+            let confidence = f64::from(membership.confidence);
+            let changed = tx
+                .execute(
+                    "INSERT OR IGNORE INTO entity_identities (
+                        id, entity_id, identity_id, identity_kind,
+                        identity_canonical_name, rule, confidence, ts_us
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        &membership.id.0,
+                        &membership.entity_id.0,
+                        &membership.identity_id.0,
+                        &membership.identity_kind,
+                        &membership.identity_canonical_name,
+                        &membership.rule,
+                        confidence,
+                        ts,
+                    ],
+                )
+                .map_err(|e| StoreError::Backend(format!("INSERT reconcile: {e}")))?;
+            inserted += u64::try_from(changed).unwrap_or(0);
+        }
+
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit reconcile tx: {e}")))?;
+        Ok(crate::ReconcileStats { inserted, deleted })
+    }
+
+    fn identity_members(
+        &self,
+        identity_id: &IdentityId,
+    ) -> Result<Vec<EntityIdentity>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, entity_id, identity_id, identity_kind,
+                        identity_canonical_name, rule, confidence, ts_us
+                 FROM entity_identities WHERE identity_id = ?1 ORDER BY id",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare identity_members: {e}")))?;
+        let rows = stmt
+            .query_map(params![&identity_id.0], row_to_entity_identity)
+            .map_err(|e| StoreError::Backend(format!("query identity_members: {e}")))?;
+        collect_entity_identities(rows)
+    }
+
+    fn identity_of_entity(
+        &self,
+        entity_id: &EntityId,
+    ) -> Result<Vec<EntityIdentity>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, entity_id, identity_id, identity_kind,
+                        identity_canonical_name, rule, confidence, ts_us
+                 FROM entity_identities WHERE entity_id = ?1 ORDER BY id",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare identity_of_entity: {e}")))?;
+        let rows = stmt
+            .query_map(params![&entity_id.0], row_to_entity_identity)
+            .map_err(|e| StoreError::Backend(format!("query identity_of_entity: {e}")))?;
+        collect_entity_identities(rows)
+    }
+
+    fn resolution_watermark(&self) -> Result<ResolutionWatermark, StoreError> {
+        let placeholders = resolvable_kinds_placeholders();
+        let ent_sql = format!(
+            "SELECT COUNT(*), COALESCE(MAX(updated_ts_us), 0)
+             FROM entities WHERE kind IN ({placeholders})"
+        );
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let (entity_count, max_entity_ts_us): (i64, i64) = guard
+            .conn()
+            .query_row(&ent_sql, params_from_iter(RESOLVABLE_KINDS.iter()), |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .map_err(|e| StoreError::Backend(format!("watermark entities: {e}")))?;
+        let (mention_count, max_mention_ts_us): (i64, i64) = guard
+            .conn()
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(ts_us), 0) FROM entity_mentions",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| StoreError::Backend(format!("watermark mentions: {e}")))?;
+        Ok(ResolutionWatermark {
+            entity_count,
+            max_entity_ts_us,
+            mention_count,
+            max_mention_ts_us,
+        })
+    }
+}
+
+/// Build the `?,?,…` placeholder list for the `RESOLVABLE_KINDS` IN-clause.
+fn resolvable_kinds_placeholders() -> String {
+    vec!["?"; RESOLVABLE_KINDS.len()].join(",")
+}
+
+/// rusqlite row → [`EntityIdentity`].
+fn row_to_entity_identity(r: &rusqlite::Row<'_>) -> rusqlite::Result<EntityIdentity> {
+    let confidence: f64 = r.get(6)?;
+    let ts_us: i64 = r.get(7)?;
+    Ok(EntityIdentity {
+        id: EntityIdentityId(r.get::<_, String>(0)?),
+        entity_id: EntityId(r.get::<_, String>(1)?),
+        identity_id: IdentityId(r.get::<_, String>(2)?),
+        identity_kind: r.get::<_, String>(3)?,
+        identity_canonical_name: r.get::<_, String>(4)?,
+        rule: r.get::<_, String>(5)?,
+        #[allow(clippy::cast_possible_truncation)]
+        confidence: confidence as f32,
+        ts_us: u64::try_from(ts_us).unwrap_or(0),
+    })
+}
+
+/// Drain a mapped-row iterator of [`EntityIdentity`] into a `Vec`.
+fn collect_entity_identities(
+    rows: impl Iterator<Item = rusqlite::Result<EntityIdentity>>,
+) -> Result<Vec<EntityIdentity>, StoreError> {
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| StoreError::Backend(format!("row entity_identity: {e}")))?);
+    }
+    Ok(out)
 }
 
 impl crate::episode_segmenter::EpisodeWriter for SqlCipherBrainStore {

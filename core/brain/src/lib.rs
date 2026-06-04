@@ -103,7 +103,13 @@ pub use extraction::{
     Tier1Extractor, Tier1Match, Tier2Extractor, Tier2Match, Tier2RawMatch,
 };
 pub use graph::{
-    Entity, EntityId, EntityMention, EntityMentionId, EpisodeEdge, EpisodeEdgeId,
+    Entity, EntityId, EntityIdentity, EntityIdentityId, EntityMention, EntityMentionId,
+    EpisodeEdge, EpisodeEdgeId, IdentityId,
+};
+
+pub mod alias_resolver;
+pub use alias_resolver::{
+    AliasResolver, AliasResolverConfig, ResolvedIdentity, ResolvedMember, ResolverEntity,
 };
 
 mod sqlcipher_brain_store;
@@ -642,6 +648,158 @@ pub trait BrainStore: Send + Sync {
             "events_with_entity not supported by this BrainStore impl (V2-P3)".into(),
         ))
     }
+
+    // -----------------------------------------------------------------------
+    // V2-P6 — AliasResolver read+write path
+    //
+    // Reads project the alias-allowlist entities + their co-occurrence;
+    // the write upserts one grow-only `entity_identities` membership row.
+    // All default impls return [`StoreError::Other`] so the pre-V2-P6
+    // wrapper stores keep compiling; the production [`SqlCipherBrainStore`]
+    // overrides each.
+    // -----------------------------------------------------------------------
+
+    /// Project every alias-allowlist entity (`person_name` /
+    /// `organization` / `location` / `email` / `phone` / `url`) into the
+    /// resolver's light input type, ordered by id for determinism.
+    /// `redacted_token` (and every other kind) is excluded at the SQL
+    /// `WHERE kind IN (…)` so a REDACT-classed token never reaches the
+    /// resolver.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn list_resolvable_entities(&self) -> Result<Vec<alias_resolver::ResolverEntity>, StoreError> {
+        Err(StoreError::Other(
+            "list_resolvable_entities not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Return, per event, the alias-allowlist entity ids mentioned in it
+    /// — the co-occurrence signal the resolver uses for phone↔name
+    /// linkage and email/domain tiebreaking. Only events with ≥1
+    /// allowlist mention appear.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn entity_cooccurrences(&self) -> Result<Vec<(EventId, Vec<EntityId>)>, StoreError> {
+        Err(StoreError::Other(
+            "entity_cooccurrences not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Insert one canonical-identity membership row. The row's `id` MUST
+    /// be derived via [`EntityIdentity::derive_id`].
+    ///
+    /// Semantics: grow-only, idempotent on PK collision (`INSERT OR
+    /// IGNORE`) — re-running the resolver on an unchanged store is a true
+    /// row-level no-op. `entity_id` MUST reference an existing
+    /// `entities` row (enforced by FOREIGN KEY); `identity_id` carries no
+    /// FK (the identity is the set of rows sharing the value).
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure (incl. FK violation).
+    fn put_entity_identity(&self, _membership: &EntityIdentity) -> Result<(), StoreError> {
+        Err(StoreError::Other(
+            "put_entity_identity not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Reconcile the ENTIRE `entity_identities` table to exactly `rows`:
+    /// delete any membership whose PK is absent from `rows`, then `INSERT
+    /// OR IGNORE` each row (preserving the first-write `ts_us` of rows
+    /// that already exist).
+    ///
+    /// This is the production write path (the idle worker calls it each
+    /// cycle): the AliasResolver's leaf-attachment rules are
+    /// **non-monotonic** — a leaf (a single-token name, an email) that
+    /// attached unambiguously in an earlier pass can become ambiguous and
+    /// be dropped once a colliding core is later captured. A plain
+    /// grow-only `put_entity_identity` would strand that stale membership
+    /// forever (a persisted false-merge no future pass repairs). Pruning
+    /// to the resolver's CURRENT output fixes that while keeping a re-run
+    /// on an unchanged store a true row-level no-op (nothing deleted,
+    /// nothing inserted, `ts_us` untouched).
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn reconcile_entity_identities(
+        &self,
+        _rows: &[EntityIdentity],
+    ) -> Result<ReconcileStats, StoreError> {
+        Err(StoreError::Other(
+            "reconcile_entity_identities not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Return the membership rows for one identity — the dot-connect
+    /// walk: "give me every alias entity that is this Person/Org". Empty
+    /// for an unknown id.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn identity_members(
+        &self,
+        _identity_id: &IdentityId,
+    ) -> Result<Vec<EntityIdentity>, StoreError> {
+        Err(StoreError::Other(
+            "identity_members not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Return the membership row(s) for one entity — "which identity does
+    /// this alias belong to". At most one under the resolver's
+    /// precision-first invariant, but a `Vec` so a future multi-identity
+    /// model is not blocked. Empty when the entity is its own (implicit)
+    /// identity.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn identity_of_entity(
+        &self,
+        _entity_id: &EntityId,
+    ) -> Result<Vec<EntityIdentity>, StoreError> {
+        Err(StoreError::Other(
+            "identity_of_entity not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+
+    /// Cheap change-detection watermark for the alias resolver's idle
+    /// loop — `(entity_count, max_entity_ts, mention_count,
+    /// max_mention_ts)`. When unchanged between cycles the worker sleeps
+    /// instead of re-resolving (idle-batch, not hot-path).
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure.
+    fn resolution_watermark(&self) -> Result<ResolutionWatermark, StoreError> {
+        Err(StoreError::Other(
+            "resolution_watermark not supported by this BrainStore impl (V2-P6)".into(),
+        ))
+    }
+}
+
+/// Outcome of a [`BrainStore::reconcile_entity_identities`] pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReconcileStats {
+    /// Membership rows newly inserted this pass.
+    pub inserted: u64,
+    /// Stale membership rows pruned this pass (no longer in the resolver's
+    /// output — e.g. a leaf that became ambiguous).
+    pub deleted: u64,
+}
+
+/// Cheap change-detection watermark for the V2-P6 alias-resolver idle
+/// loop. Two snapshots that compare equal mean nothing the resolver reads
+/// has changed, so the cycle can sleep without re-resolving.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ResolutionWatermark {
+    /// Count of alias-allowlist entities.
+    pub entity_count: i64,
+    /// Max `entities.updated_ts_us` over the allowlist (0 if none).
+    pub max_entity_ts_us: i64,
+    /// Count of all entity mentions.
+    pub mention_count: i64,
+    /// Max `entity_mentions.ts_us` (0 if none).
+    pub max_mention_ts_us: i64,
 }
 
 // ---------------------------------------------------------------------------

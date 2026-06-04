@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod alias_resolver_worker;
 pub mod brain_cli;
 pub mod brain_ingest;
 pub mod brief_worker;
