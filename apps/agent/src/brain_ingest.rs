@@ -51,10 +51,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use mci_brain::{
-    BrainStore, ChunkerError, EmbedError, Embedder, Event, EventChunker, EventId, StoreError,
-    Tier1Extractor,
+    mark_event_tier2_processed_as, persist_tier2_matches_as, BrainStore, ChunkerError, EmbedError,
+    Embedder, Event, EventChunker, EventId, NerBackend, StoreError, Tier1Extractor, Tier2Extractor,
 };
 use mci_brain::extraction::tier1::persist_tier1_matches;
+use mci_brain::extraction::tier2::{EXTRACTOR_KIND_NER, SENTINEL_NAME_NER};
 use mci_brain::Chunker;
 use mci_core::ipc::Message;
 
@@ -250,6 +251,19 @@ pub struct BrainPump {
     /// discipline to `counter` above, surfaces as a CRS Telemetry-Gap
     /// signal so a regression in Tier 1 yield is visible.
     tier1_mentions_persisted: AtomicU64,
+    /// V2-P5+ — SYNC Tier-2 BERT NER extractor, run inline on the Allow
+    /// arm after Tier 1. `None` when the bert-base-NER `.mlmodelc` is
+    /// absent (opt-in download) or on non-macOS — the agent constructs a
+    /// [`mci_brain::Tier2Extractor`] wrapping a `NerTier2Backend` and
+    /// injects it via [`BrainPump::with_ner_sync`]. Coexists with the
+    /// async Qwen Tier-2 (`tier2_worker`) via the two-sentinel pattern:
+    /// this tier marks `(extractor_status, ner_sync_processed)`, the Qwen
+    /// tier marks `(extractor_status, qwen_tier2_processed)`.
+    ner_sync: Option<Tier2Extractor>,
+    /// Cumulative `entity_mentions` rows the sync NER tier has inserted.
+    /// Content-free CRS Telemetry-Gap counter, mirroring
+    /// `tier1_mentions_persisted`.
+    ner_sync_mentions_persisted: AtomicU64,
 }
 
 /// Separator injected between extension-sourced page text and the
@@ -275,6 +289,8 @@ impl BrainPump {
             counter: AtomicU64::new(0),
             tier1: Tier1Extractor::new(),
             tier1_mentions_persisted: AtomicU64::new(0),
+            ner_sync: None,
+            ner_sync_mentions_persisted: AtomicU64::new(0),
         }
     }
 
@@ -293,6 +309,8 @@ impl BrainPump {
             counter: AtomicU64::new(0),
             tier1: Tier1Extractor::new(),
             tier1_mentions_persisted: AtomicU64::new(0),
+            ner_sync: None,
+            ner_sync_mentions_persisted: AtomicU64::new(0),
         }
     }
 
@@ -313,6 +331,8 @@ impl BrainPump {
             counter: AtomicU64::new(0),
             tier1: Tier1Extractor::new(),
             tier1_mentions_persisted: AtomicU64::new(0),
+            ner_sync: None,
+            ner_sync_mentions_persisted: AtomicU64::new(0),
         }
     }
 
@@ -323,6 +343,38 @@ impl BrainPump {
     #[must_use]
     pub fn tier1_mentions_persisted_count(&self) -> u64 {
         self.tier1_mentions_persisted.load(Ordering::Relaxed)
+    }
+
+    /// Install the V2-P5+ SYNC Tier-2 BERT NER extractor. The `backend`
+    /// is the macOS `NerTier2Backend` (Core ML, `cpu_only`) in production
+    /// or a `MockNerBackend` in the wiring test; it is wrapped in a
+    /// [`Tier2Extractor`] (cascade-marker SKIP + token-REDACT downstream
+    /// SKIP + hallucination/confidence filters) and run inline after
+    /// Tier 1 on the Allow arm of [`Self::ingest_ocr_event`].
+    ///
+    /// Builder form so the existing 3 constructors keep their signatures
+    /// (mirrors how `embedder = None` stays the default). The production
+    /// caller in `apps/agent/src/bin/mci_agent.rs` calls this only when
+    /// the bert-base-NER model loads; otherwise the pump runs Tier 1 only
+    /// and the sync NER stays disabled (Tier 1 mentions still flow).
+    #[must_use]
+    pub fn with_ner_sync(mut self, backend: Arc<dyn NerBackend>) -> Self {
+        self.ner_sync = Some(Tier2Extractor::new(backend));
+        self
+    }
+
+    /// Cumulative number of `entity_mentions` rows the sync NER tier has
+    /// inserted on the Allow arm. Content-free CRS Telemetry-Gap counter.
+    #[must_use]
+    pub fn ner_sync_mentions_persisted_count(&self) -> u64 {
+        self.ner_sync_mentions_persisted.load(Ordering::Relaxed)
+    }
+
+    /// Whether the sync NER tier is installed (the bert-base-NER model
+    /// loaded). Lets the production caller log enabled/disabled state.
+    #[must_use]
+    pub fn ner_sync_enabled(&self) -> bool {
+        self.ner_sync.is_some()
     }
 }
 
@@ -500,6 +552,60 @@ impl BrainIngestor for BrainPump {
                 Err(_e) => {
                     // Best-effort: keep going. The event lives;
                     // mentions can be backfilled.
+                }
+            }
+        }
+
+        // V2-P5+ — SYNC Tier-2 BERT NER (CEO-ratified hot-path extractor,
+        // dslim/bert-base-NER INT8, cpu_only). Runs inline after Tier 1 on
+        // the same Allow-arm event when the model is installed (else
+        // `ner_sync` is None and this is a no-op — Tier 1 still flows).
+        // Disciplines, inherited from the shared `Tier2Extractor` + the
+        // V2-P3 content-stable ULID schema:
+        //
+        // - **Cascade-marker SKIP / token-REDACT downstream SKIP**: the
+        //   `Tier2Extractor` drops any NER span overlapping a `[REDACTED:…]`
+        //   marker or a V2-P4 `redacted_token` span, so REDACT-classed
+        //   source bytes never reach `entities` / `entity_mentions`.
+        // - **Idempotent**: same `(kind, canonical_name)` → same `EntityId`;
+        //   same `(entity_id, event_id, "ner", mention_text)` → same
+        //   `EntityMentionId`. Re-ingesting the same event is a row-level
+        //   no-op (`INSERT OR IGNORE`), so a re-run converges.
+        // - **Two-sentinel**: marks `(extractor_status, ner_sync_processed)`
+        //   — distinct from the Qwen async sentinel — so both tiers stay
+        //   independently idempotent + forward-compatible.
+        // - **Best-effort**: extract / persist failure must NOT fail the
+        //   ingest (the event already lives). The sentinel is written only
+        //   on a successful extract (including an empty result), never on a
+        //   backend error — a transient model failure leaves the event
+        //   findable for a later backfill pass.
+        if let Some(ner) = &self.ner_sync {
+            match ner.extract(&event.text) {
+                Ok(ner_matches) => {
+                    if let Ok(stats) = persist_tier2_matches_as(
+                        &*self.store,
+                        id,
+                        event.ts_us,
+                        &ner_matches,
+                        EXTRACTOR_KIND_NER,
+                    ) {
+                        self.ner_sync_mentions_persisted
+                            .fetch_add(stats.mentions_inserted as u64, Ordering::Relaxed);
+                    }
+                    // Mark processed (even on empty output) so a future
+                    // backfill's `WHERE NOT EXISTS sentinel` query does not
+                    // re-scan an already-processed event. Best-effort.
+                    let _ = mark_event_tier2_processed_as(
+                        &*self.store,
+                        id,
+                        event.ts_us,
+                        SENTINEL_NAME_NER,
+                        EXTRACTOR_KIND_NER,
+                    );
+                }
+                Err(_e) => {
+                    // Backend failure (model load / inference) — do NOT mark
+                    // processed, so the event stays eligible for a retry.
                 }
             }
         }

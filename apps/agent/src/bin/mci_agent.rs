@@ -360,6 +360,13 @@ async fn main() -> ExitCode {
             // Shutdown channel coordinates both halves on SIGINT/SIGTERM.
             let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
+            // V2-P5+ — the sync BERT NER backend, loaded once (lazily,
+            // only when the store opens below) and SHARED by Arc across
+            // both ingest pumps (main drain + page-content listener) so the
+            // ~220 MB bert-base-NER working set is resident once, not twice.
+            // None when the model is absent (opt-in download) or non-macOS.
+            let mut ner_sync_backend: Option<Arc<dyn mci_brain::NerBackend>> = None;
+
             let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> =
                 match resolve_key_hex() {
                     Some(key_hex) => match decode_hex32(&key_hex) {
@@ -380,14 +387,28 @@ async fn main() -> ExitCode {
                                 Ok(store) => {
                                     let store = Arc::new(store);
                                     let embedder = load_embedder_backend();
-                                    let pump = BrainPump::new(
+                                    // V2-P5+ construction-graph wire: build
+                                    // the sync BERT NER backend and inject it
+                                    // into the ingest pump. THIS is the
+                                    // production caller `git grep
+                                    // NerTier2Backend` must surface on the
+                                    // live ingest path (per
+                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                    // — without this the backend is dead code).
+                                    ner_sync_backend = load_ner_sync_backend();
+                                    let base_pump = BrainPump::new(
                                         Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
                                         None,
                                     );
+                                    let pump = match &ner_sync_backend {
+                                        Some(b) => base_pump.with_ner_sync(Arc::clone(b)),
+                                        None => base_pump,
+                                    };
                                     eprintln!(
-                                        "mci-agent: brain ingest + idle-batch enabled. db={} embedder={}",
+                                        "mci-agent: brain ingest + idle-batch enabled. db={} embedder={} sync_ner={}",
                                         db_path.display(),
                                         if embedder.1 { "CoreML" } else { "zero-fallback" },
+                                        if pump.ner_sync_enabled() { "bert-base-NER/cpu_only" } else { "off" },
                                     );
 
                                     let worker_store = Arc::clone(&store);
@@ -615,10 +636,17 @@ async fn main() -> ExitCode {
                 let sock = page_content_socket_path();
                 match PageContentListener::bind(&sock) {
                     Ok((listener, unix_listener)) => {
-                        let pc_pump: Arc<dyn BrainIngestor> = Arc::new(BrainPump::new(
+                        // Page-content events get the same sync NER tier as
+                        // the OCR drain — share the one resident backend Arc.
+                        let pc_base = BrainPump::new(
                             Arc::clone(store) as Arc<dyn mci_brain::BrainStore>,
                             None,
-                        ));
+                        );
+                        let pc_pump_inner = match &ner_sync_backend {
+                            Some(b) => pc_base.with_ner_sync(Arc::clone(b)),
+                            None => pc_base,
+                        };
+                        let pc_pump: Arc<dyn BrainIngestor> = Arc::new(pc_pump_inner);
                         eprintln!(
                             "mci-agent: page-content listener on {}",
                             sock.display(),
@@ -1040,6 +1068,56 @@ fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     }
     eprintln!("mci-agent: non-macOS platform — using zero-vector embedder fallback");
     (Arc::new(ZeroEmbedder), false)
+}
+
+/// Resolve + load the V2-P5+ SYNC BERT NER backend (`dslim/bert-base-NER`,
+/// INT8, `cpu_only`). Returns `None` when no `.mlmodelc` is found on disk
+/// (opt-in download — Tier 1 + the async Qwen tier still run regardless) or
+/// the load fails. The bundled WordPiece tokenizer travels inside
+/// `mci-brain` (`load_bundled`), so only the model path is resolved here.
+/// Compute units are pinned to CPU inside `NerTier2Backend::load` — never
+/// the `all` latency trap ([[reference-coreml-computeunits-all-trap]]).
+#[cfg(target_os = "macos")]
+fn load_ner_sync_backend() -> Option<Arc<dyn mci_brain::NerBackend>> {
+    use mci_agent::tier2_ner_backend::NerTier2Backend;
+    use std::path::PathBuf;
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(p) = std::env::var_os("MCI_NER_MODEL_PATH") {
+        candidates.push(PathBuf::from(p));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            // Hippocampus.app bundle: Contents/MacOS → Contents/Resources/Models.
+            candidates.push(dir.join("../Resources/Models/bert_base_NER_INT8.mlmodelc"));
+            candidates.push(dir.join("bert_base_NER_INT8.mlmodelc"));
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        candidates.push(home.join("Documents/GitHub/mci/models/bert_base_NER_INT8.mlmodelc"));
+    }
+
+    let model_path = candidates.into_iter().find(|p| p.exists())?;
+    match NerTier2Backend::load(&model_path) {
+        Ok(backend) => {
+            eprintln!(
+                "mci-agent: sync NER enabled (bert-base-NER, cpu_only). model={}",
+                model_path.display()
+            );
+            Some(Arc::new(backend) as Arc<dyn mci_brain::NerBackend>)
+        }
+        Err(e) => {
+            eprintln!("mci-agent: sync NER disabled (model load failed): {e}");
+            None
+        }
+    }
+}
+
+/// Non-macOS: no Core ML yet (Phase 8). Sync NER stays disabled; the Tier 1
+/// regex mentions still flow on the hot path.
+#[cfg(not(target_os = "macos"))]
+fn load_ner_sync_backend() -> Option<Arc<dyn mci_brain::NerBackend>> {
+    None
 }
 
 /// Spawn the daily-brief worker (ADR-0028). Selects between the

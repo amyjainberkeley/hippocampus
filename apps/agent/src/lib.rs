@@ -60,6 +60,13 @@ pub mod supervisor;
 /// `tier2_worker` for the lifetime of the agent.
 #[cfg(target_os = "macos")]
 pub mod tier2_qwen_backend;
+/// V2-P5+ — `dslim/bert-base-NER`-backed `NerBackend` for the **sync**
+/// Tier-2 NER tier (the CEO-ratified hot-path entity extractor, INT8,
+/// `cpu_only`). Runs the committed P2′ tokenizer + `decode_bio` through
+/// `mci_coreml_bridge`. Injected into `BrainPump` via `with_ner_sync`
+/// and run inline after Tier 1 on the ingest Allow arm.
+#[cfg(target_os = "macos")]
+pub mod tier2_ner_backend;
 /// V2-P5 — async idle-batch worker. Polls
 /// `SqlCipherBrainStore::events_pending_tier2` for events lacking the
 /// `(extractor_status, qwen_tier2_processed)` sentinel mention, runs

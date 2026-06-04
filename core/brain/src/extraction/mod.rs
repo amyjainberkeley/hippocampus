@@ -45,6 +45,7 @@ pub mod tier2_ner;
 
 pub use tier1::{persist_tier1_matches, PersistStats, Tier1Extractor, Tier1Match};
 pub use tier2::{
-    mark_event_tier2_processed, persist_tier2_matches, MockNerBackend, NerBackend, NerError,
-    Tier2Extractor, Tier2Match, Tier2RawMatch,
+    mark_event_tier2_processed, mark_event_tier2_processed_as, persist_tier2_matches,
+    persist_tier2_matches_as, MockNerBackend, NerBackend, NerError, Tier2Extractor, Tier2Match,
+    Tier2RawMatch,
 };

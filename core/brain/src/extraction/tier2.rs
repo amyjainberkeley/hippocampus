@@ -129,6 +129,17 @@ pub const KIND_TOPIC: &str = "topic";
 /// natural key so both mentions persist as distinct rows.
 pub const EXTRACTOR_KIND: &str = "qwen";
 
+/// `entity_mentions.extractor_kind` value the V2-P5+ **sync** BERT NER
+/// tier emits (`dslim/bert-base-NER`, run inline on the ingest hot path).
+/// Distinct from [`EXTRACTOR_KIND`] (`"qwen"`, the async idle-batch tier)
+/// so the two NER tiers coexist: the hot-path BERT mention and the
+/// idle-batch Qwen mention of the same entity on the same event land as
+/// separate rows (the `(entity_id, event_id, extractor_kind,
+/// mention_text)` natural key in [`crate::graph`] keeps them disjoint),
+/// and V2-P6 `AliasResolver` reads `regex` / `ner` / `qwen` provenance
+/// uniformly.
+pub const EXTRACTOR_KIND_NER: &str = "ner";
+
 // ---------------------------------------------------------------------------
 // Sentinel "processed" marker — idle-batch watermark
 // ---------------------------------------------------------------------------
@@ -142,6 +153,16 @@ pub const EXTRACTOR_KIND: &str = "qwen";
 pub const SENTINEL_KIND: &str = "extractor_status";
 /// `entities.canonical_name` for the V2-P5 Tier 2 Qwen NER sentinel.
 pub const SENTINEL_NAME: &str = "qwen_tier2_processed";
+/// `entities.canonical_name` for the V2-P5+ **sync** BERT NER sentinel.
+/// Distinct from [`SENTINEL_NAME`] (the Qwen async watermark) so the two
+/// tiers' "this event has been processed" markers never collide. An event
+/// can carry the sync-NER watermark (this) AND, independently, the Qwen
+/// watermark; a future backfill worker can query either via its own
+/// `events_pending_*` LEFT-JOIN without the tiers interfering. The sync
+/// tier runs inline at ingest, so this sentinel is primarily a
+/// forward-compatibility + observability marker (events ingested while the
+/// BERT model was absent carry no sync sentinel and remain findable).
+pub const SENTINEL_NAME_NER: &str = "ner_sync_processed";
 
 // ---------------------------------------------------------------------------
 // Cascade marker regex
@@ -453,7 +474,8 @@ pub fn compute_skip_spans(text: &str) -> Vec<(usize, usize)> {
 // ---------------------------------------------------------------------------
 
 /// Write `matches` to the brain store as `entities` upserts +
-/// `entity_mentions` inserts with `extractor_kind = "qwen"`.
+/// `entity_mentions` inserts with `extractor_kind = "qwen"` (the V2-P5
+/// Qwen idle-batch tier). Thin wrapper over [`persist_tier2_matches_as`].
 ///
 /// `event_id` and `ts_us` come from the parent event. Same content-
 /// stable ULID discipline as V2-P4: same `(kind, canonical_name)` →
@@ -470,6 +492,28 @@ pub fn persist_tier2_matches(
     event_id: EventId,
     ts_us: u64,
     matches: &[Tier2Match],
+) -> Result<PersistStats, StoreError> {
+    persist_tier2_matches_as(store, event_id, ts_us, matches, EXTRACTOR_KIND)
+}
+
+/// Like [`persist_tier2_matches`] but with a caller-chosen
+/// `extractor_kind` provenance string. The V2-P5 Qwen idle-batch tier
+/// passes [`EXTRACTOR_KIND`] (`"qwen"`); the V2-P5+ sync BERT NER tier
+/// passes [`EXTRACTOR_KIND_NER`] (`"ner"`). `extractor_kind` is part of
+/// the `entity_mentions` natural key (see [`crate::graph`]), so the two
+/// tiers' mentions of the same entity on the same event are distinct,
+/// idempotent rows — and re-running either tier on the same event is a
+/// no-op at the row level.
+///
+/// # Errors
+/// Returns the **first** [`StoreError`] encountered. Earlier successful
+/// writes are not rolled back — idempotent on PK, so a retry converges.
+pub fn persist_tier2_matches_as(
+    store: &dyn BrainStore,
+    event_id: EventId,
+    ts_us: u64,
+    matches: &[Tier2Match],
+    extractor_kind: &str,
 ) -> Result<PersistStats, StoreError> {
     let mut stats = PersistStats::default();
     for m in matches {
@@ -488,17 +532,12 @@ pub fn persist_tier2_matches(
 
         let mention_text_for_id = Some(m.mention_text.as_str());
         let mention = EntityMention {
-            id: EntityMention::derive_id(
-                &entity.id,
-                event_id,
-                EXTRACTOR_KIND,
-                mention_text_for_id,
-            ),
+            id: EntityMention::derive_id(&entity.id, event_id, extractor_kind, mention_text_for_id),
             entity_id: entity.id,
             event_id,
             mention_text: Some(m.mention_text.clone()),
             confidence: m.confidence,
-            extractor_kind: EXTRACTOR_KIND.to_string(),
+            extractor_kind: extractor_kind.to_string(),
             ts_us,
         };
         store.put_entity_mention(&mention)?;
@@ -529,25 +568,49 @@ pub fn mark_event_tier2_processed(
     event_id: EventId,
     ts_us: u64,
 ) -> Result<(), StoreError> {
+    mark_event_tier2_processed_as(store, event_id, ts_us, SENTINEL_NAME, EXTRACTOR_KIND)
+}
+
+/// Like [`mark_event_tier2_processed`] but with a caller-chosen sentinel
+/// `canonical_name` + `extractor_kind`. The Qwen idle-batch tier marks
+/// `(SENTINEL_KIND, SENTINEL_NAME)` with `EXTRACTOR_KIND`; the sync BERT
+/// NER tier marks `(SENTINEL_KIND, SENTINEL_NAME_NER)` with
+/// `EXTRACTOR_KIND_NER`. Both sentinels share `kind = "extractor_status"`
+/// and differ only by `canonical_name`, so their content-stable ULIDs
+/// (and therefore their per-event "processed" watermarks) never collide.
+///
+/// Idempotent: the entity upsert is keyed on PK and the mention is
+/// `INSERT OR IGNORE`, so re-marking the same event is a row-level no-op.
+///
+/// # Errors
+/// [`StoreError`] from the underlying store on `put_entity` /
+/// `put_entity_mention` failure.
+pub fn mark_event_tier2_processed_as(
+    store: &dyn BrainStore,
+    event_id: EventId,
+    ts_us: u64,
+    sentinel_name: &str,
+    extractor_kind: &str,
+) -> Result<(), StoreError> {
     let sentinel = Entity {
-        id: Entity::derive_id(SENTINEL_KIND, SENTINEL_NAME),
+        id: Entity::derive_id(SENTINEL_KIND, sentinel_name),
         kind: SENTINEL_KIND.to_string(),
-        canonical_name: SENTINEL_NAME.to_string(),
+        canonical_name: sentinel_name.to_string(),
         summary: None,
         summary_embedding: None,
-        content_hash: Entity::derive_content_hash(SENTINEL_KIND, SENTINEL_NAME),
+        content_hash: Entity::derive_content_hash(SENTINEL_KIND, sentinel_name),
         created_ts_us: ts_us,
         updated_ts_us: ts_us,
     };
     store.put_entity(&sentinel)?;
 
     let mention = EntityMention {
-        id: EntityMention::derive_id(&sentinel.id, event_id, EXTRACTOR_KIND, None),
+        id: EntityMention::derive_id(&sentinel.id, event_id, extractor_kind, None),
         entity_id: sentinel.id,
         event_id,
         mention_text: None,
         confidence: 1.0,
-        extractor_kind: EXTRACTOR_KIND.to_string(),
+        extractor_kind: extractor_kind.to_string(),
         ts_us,
     };
     store.put_entity_mention(&mention)?;
@@ -913,5 +976,39 @@ mod tests {
         let b = MockNerBackend::empty();
         let out = b.extract_entities("anything").unwrap();
         assert!(out.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Two-sentinel + two-extractor-kind coexistence (V2-P5+ sync BERT NER)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ner_sentinel_is_distinct_from_qwen_sentinel() {
+        // Both sentinels share kind="extractor_status" but differ by
+        // canonical_name, so their content-stable ULIDs never collide —
+        // an event can carry the sync-NER watermark and, independently,
+        // the Qwen watermark.
+        let qwen = Entity::derive_id(SENTINEL_KIND, SENTINEL_NAME);
+        let ner = Entity::derive_id(SENTINEL_KIND, SENTINEL_NAME_NER);
+        assert_ne!(
+            qwen, ner,
+            "sync-NER and Qwen sentinels must be distinct entities"
+        );
+        assert_eq!(SENTINEL_NAME_NER, "ner_sync_processed");
+        assert_eq!(EXTRACTOR_KIND_NER, "ner");
+    }
+
+    #[test]
+    fn ner_and_qwen_mentions_of_same_entity_are_distinct_rows() {
+        // The same entity mentioned on the same event by the sync-NER
+        // tier and the Qwen tier produces two distinct entity_mention PKs
+        // (extractor_kind is part of the natural key per crate::graph), so
+        // both provenance rows persist rather than one clobbering the other.
+        let entity = Entity::derive_id(KIND_PERSON_NAME, "Alice Smith");
+        let ev = crate::EventId(42);
+        let mt = Some("Alice Smith");
+        let qwen = EntityMention::derive_id(&entity, ev, EXTRACTOR_KIND, mt);
+        let ner = EntityMention::derive_id(&entity, ev, EXTRACTOR_KIND_NER, mt);
+        assert_ne!(qwen, ner, "two tiers' mentions must be distinct rows");
     }
 }
