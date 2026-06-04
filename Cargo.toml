@@ -70,6 +70,15 @@ members = [
     "adapters/windows",
     "server",
     "tools/perf-soak",
+    # V2-P5+ Phase-3 screen-text NER bake-off harness. Exercises the
+    # PRODUCTION inference path (P2′ WordPiece tokenizer → Core ML via
+    # mci-coreml-bridge → P2′ BIO decoder) over the eval/ner-corpus test
+    # split, emits score_ner.py-format predictions, and measures
+    # compute-unit residency + footprint. Deps gated `cfg(target_os =
+    # "macos")` (Core ML); a non-macOS `cargo build --workspace` compiles
+    # the bin to a no-op main. Measurement-only — no brain/BrainPump
+    # wiring. See docs/research/2026-06-03-ner-bakeoff-results.md.
+    "tools/ner-bakeoff",
 ]
 
 [workspace.package]
