@@ -278,6 +278,80 @@ else
     echo "             python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage"
 fi
 
+# Embed bert-base-NER Core ML model (V2-P5+ sync NER tier; CEO-ratified
+# 2026-06-04 — see project-gliner-variant-pin / PR #297). Mirrors the
+# ArcticEmbedS embedder block above exactly. The .mlpackage is produced
+# offline by the conversion env and committed locally (gitignored — the
+# compiled .mlmodelc is ~103 MB; that bundle bloat is expected and accepted
+# per the CEO "best option" directive). load_ner_sync_backend() in mci-agent
+# resolves Contents/Resources/Models/bert_base_NER_INT8.mlmodelc BEFORE its
+# dev fallback, so an INSTALLED app loads THIS bundled copy.
+NER_PACKAGE="$REPO_ROOT/models/bert_base_NER_INT8.mlpackage"
+NER_COMPILED="$REPO_ROOT/models/bert_base_NER_INT8.mlmodelc"
+NER_DEST_DIR="$RESOURCES/Models"
+NER_DEST="$NER_DEST_DIR/bert_base_NER_INT8.mlmodelc"
+NER_SOURCE_PRESENT=0
+
+if [[ -d "$NER_COMPILED" ]]; then
+    echo "Bundling pre-compiled bert_base_NER_INT8.mlmodelc"
+    NER_SOURCE_PRESENT=1
+    mkdir -p "$NER_DEST_DIR"
+    # rm -rf first so a rebuild REPLACES the model rather than merging into a
+    # stale .mlmodelc. `cp -R src dest/` merges into a pre-existing dest dir,
+    # which on a model-version swap could leave orphaned shards from the old
+    # model that still pass the structural gate below but fail at load.
+    rm -rf "$NER_DEST"
+    cp -R "$NER_COMPILED" "$NER_DEST_DIR/"
+elif [[ -d "$NER_PACKAGE" ]]; then
+    echo "Compiling bert_base_NER_INT8.mlpackage → .mlmodelc"
+    NER_SOURCE_PRESENT=1
+    mkdir -p "$NER_DEST_DIR"
+    rm -rf "$NER_DEST"
+    xcrun coremlcompiler compile "$NER_PACKAGE" "$NER_DEST_DIR"
+else
+    echo "WARNING: bert-base-NER model not found at $NER_COMPILED"
+    echo "  (nor $NER_PACKAGE). The sync NER tier will be DISABLED in this build;"
+    echo "  Tier-1 regex mentions still flow on the hot path. For the shipping /"
+    echo "  dogfood build the model MUST be bundled — provide"
+    echo "  models/bert_base_NER_INT8.mlmodelc before re-running."
+fi
+
+# Fail-loud NER-model gate — FATAL.
+# Codified-WARNs-are-stops discipline (cycle 8.25 — see
+# feedback-codified-warns-are-stops). A matching NER completeness gate is
+# mirrored into build-installer.sh (next to the embedder gate) so the
+# `build-installer.sh --skip-build` path — which bypasses this script — also
+# trips it, exactly as the embedder completeness gate does. If we attempted
+# the copy/compile above, the compiled model MUST be present in the bundle
+# afterward. A silent cp/coremlcompiler failure here is exactly the cycle-8.24
+# class of regression that shipped a broken bundle clean through codesign +
+# notarization (nothing in the signing/notary path inspects resource
+# completeness). Refuse to continue so the operator fixes it and re-runs from
+# scratch instead of shipping an installed app whose NER tier silently
+# disables (or, on a dev checkout, masks the gap via the ~/Documents dev path).
+if [[ "$NER_SOURCE_PRESENT" -eq 1 ]]; then
+    if [[ ! -d "$NER_DEST" ]]; then
+        echo "FATAL: bert_base_NER_INT8.mlmodelc missing at:"
+        echo "         $NER_DEST"
+        echo "       after attempting to bundle it from the source model."
+        echo "       Refusing to ship a bundle whose sync NER tier would silently"
+        echo "       disable on an installed app."
+        exit 1
+    fi
+    # Structural sanity: a compiled .mlmodelc must carry its MIL program
+    # (model.mil), its compiled model description (coremldata.bin — read first
+    # by MLModel at load), and its weight blob (weights/, ~108 MB for this
+    # model). A truncated/partial copy passes the directory-exists check but
+    # fails NerTier2Backend::load at runtime; checking all three catches the
+    # realistic interrupted-copy failure mode.
+    if [[ ! -f "$NER_DEST/model.mil" || ! -d "$NER_DEST/weights" || ! -f "$NER_DEST/coremldata.bin" ]]; then
+        echo "FATAL: bundled $NER_DEST is structurally incomplete"
+        echo "       (missing model.mil, weights/, or coremldata.bin). Refusing to ship."
+        exit 1
+    fi
+    echo "  bert-base-NER bundled OK → $NER_DEST"
+fi
+
 # --- Bundle the Chromium extension as a load-unpacked dir ---
 #
 # The Chrome / Arc / Brave / Edge extension at extensions/chromium/ is
