@@ -181,6 +181,44 @@ if [[ ! -d "$EMBEDDER_PATH" ]]; then
     exit 1
 fi
 
+# --- Completeness gate: refuse to ship a DMG missing the bundled NER model ---
+#
+# Mirror of the embedder gate above for the V2-P5+ sync NER tier
+# (bert-base-NER, CEO-ratified 2026-06-04). build-app.sh bundles
+# bert_base_NER_INT8.mlmodelc and trips its OWN fail-loud gate — but
+# `--skip-build` bypasses build-app.sh entirely (same reason the embedder
+# gate is re-run here). Without this check, `build-installer.sh --skip-build`
+# over a `.app` assembled before the NER-bundling change — or one whose NER
+# copy silently failed/was stripped — would package + codesign + notarize a
+# DMG whose sync NER tier is dead, with nothing in the signing/notary path
+# catching it. The model is a first-class bundled asset now (like the
+# embedder), so its absence is a ship-blocker, not a warning.
+NER_MODEL_PATH="$APP_PATH/Contents/Resources/Models/bert_base_NER_INT8.mlmodelc"
+if [[ ! -d "$NER_MODEL_PATH" ]]; then
+    echo "FATAL: bert_base_NER_INT8.mlmodelc missing at:"
+    echo "         $NER_MODEL_PATH"
+    echo ""
+    echo "Refusing to ship a DMG whose sync NER tier is disabled."
+    echo ""
+    echo "The NER model lives at <repo>/models/bert_base_NER_INT8.{mlpackage,mlmodelc}"
+    echo "and is .gitignored (~103 MB compiled). For worktree builds, copy it in"
+    echo "from the primary checkout before re-running:"
+    echo ""
+    echo "  cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/"
+    echo ""
+    echo "Then re-run (without --skip-build): ./scripts/build-installer.sh"
+    exit 1
+fi
+# Structural completeness — a compiled .mlmodelc must carry its MIL program,
+# compiled model description, and weight blob. Catches a truncated copy that
+# passes the directory-exists check but fails Core ML load at runtime.
+if [[ ! -f "$NER_MODEL_PATH/model.mil" || ! -d "$NER_MODEL_PATH/weights" || ! -f "$NER_MODEL_PATH/coremldata.bin" ]]; then
+    echo "FATAL: bundled NER model is structurally incomplete at:"
+    echo "         $NER_MODEL_PATH"
+    echo "       (missing model.mil, weights/, or coremldata.bin). Refusing to ship."
+    exit 1
+fi
+
 # Launch-verify gate — FATAL.
 # Second invocation (build-app.sh runs it once on the just-built bundle).
 # Re-run here so --skip-build paths still trip the gate, and so the gate
@@ -450,6 +488,18 @@ FINAL_DMG="$DIST_DIR/${DMG_NAME}.dmg"
 # Remove stale outputs
 rm -f "$TEMP_DMG" "$FINAL_DMG" "${FINAL_DMG}.sha256"
 
+# Size the read-write image to the STAGED content + headroom. The previous
+# hardcoded `-size 200m` overflowed ("No space left on device") once the
+# bundled Core ML models pushed the .app past 200 MB (embedder ~64 MB + NER
+# ~103 MB → .app ~210 MB). Compute from the actual staging size and add 120 MB
+# of slack for HFS+ metadata overhead and the .DS_Store Finder writes during
+# the layout step. The image is compacted to UDZO afterward, so over-sizing
+# the intermediate RW image is free in the final artifact. Robust to future
+# model growth.
+STAGING_MB=$(du -sm "$DMG_STAGING" | awk '{print $1}')
+DMG_RW_SIZE_MB=$(( STAGING_MB + 120 ))
+echo "Staged content: ${STAGING_MB} MB → RW image size: ${DMG_RW_SIZE_MB} MB"
+
 # Create read-write DMG (oversized, will be compacted)
 hdiutil create \
     -srcfolder "$DMG_STAGING" \
@@ -457,7 +507,7 @@ hdiutil create \
     -fs HFS+ \
     -fsargs "-c c=64,a=16,e=16" \
     -format UDRW \
-    -size 200m \
+    -size "${DMG_RW_SIZE_MB}m" \
     "$TEMP_DMG"
 
 # --- Step 5: Apply window layout via AppleScript ---
