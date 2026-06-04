@@ -98,8 +98,9 @@ pub mod extraction;
 
 pub use event_chunker::EventChunker;
 pub use extraction::{
-    mark_event_tier2_processed, persist_tier1_matches, persist_tier2_matches, MockNerBackend,
-    NerBackend, NerError, Tier1Extractor, Tier1Match, Tier2Extractor, Tier2Match, Tier2RawMatch,
+    mark_event_tier2_processed, mark_event_tier2_processed_as, persist_tier1_matches,
+    persist_tier2_matches, persist_tier2_matches_as, MockNerBackend, NerBackend, NerError,
+    Tier1Extractor, Tier1Match, Tier2Extractor, Tier2Match, Tier2RawMatch,
 };
 pub use graph::{
     Entity, EntityId, EntityMention, EntityMentionId, EpisodeEdge, EpisodeEdgeId,
