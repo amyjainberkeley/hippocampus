@@ -27,19 +27,33 @@
 //! For an `Allow` outcome (cascade `drop_event = false`):
 //!
 //! - `app_bundle_id = "com.apple.MobileSMS"`
-//! - `window_title = None` — V2-P10 does NOT call `read_thread` to
-//!    recover the chat display_name; that is a per-thread re-query
-//!    and the dispatch is per-row.  V2-P11 may upgrade this with a
-//!    thread-cache.
+//! - `window_title = "from <handle>"` / `"to <handle>"` — **the WHO.**
+//!    The participant handle the cascade just vetted (denylist +
+//!    sensitive-domain already drop the event upstream, so anything
+//!    here is user-allowed) becomes the window "title", with the
+//!    direction word carrying `is_from_me`. `None` for an outgoing row
+//!    that carries no resolved recipient (V2-P10 reader limitation; a
+//!    `read_thread` thread-cache for the recipient is a V2-P11 job).
 //! - `url = None` — Messages has no URL surface
 //! - `tab_id = None`
-//! - `text = ADR-0010 §1.3 context header + redacted_body` —
-//!    `redacted_body` already carries the §3(a) `[REDACTED:SMS_OTP]`
-//!    / `[REDACTED:BANK_NOTIFICATION]` substitutions from the
-//!    cascade. The pump does NOT re-redact.
+//! - `text = ADR-0010 §1.3 context header + redacted_body` — the header
+//!    co-locates the `window_title` (= the handle) into `events.text`, so
+//!    the handle is BOTH displayable AND extractable. `redacted_body`
+//!    already carries the §3(a) `[REDACTED:SMS_OTP]` /
+//!    `[REDACTED:BANK_NOTIFICATION]` substitutions from the cascade. The
+//!    pump does NOT re-redact.
 //!
-//! For a `Drop` outcome: NO row reaches `put_event`; the matching
-//! content-free counter is bumped per
+//! After `put_event`, the Allow arm runs the **Tier-1 regex extractor**
+//! (same as the screen/page `BrainPump`) so the handle — now in
+//! `events.text` — is lifted into a `phone`/`email` entity + an
+//! `entity_mention`. That is what lets the idle-batch `AliasResolver`
+//! anchor a handle-keyed Person identity (even with no saved contact
+//! name) and the Consolidator dot-connect it cross-app. Before this the
+//! Messages pump wrote `put_event` with NO extraction, so Messages
+//! events — and the handle — were invisible to the entity graph.
+//!
+//! For a `Drop` outcome: NO row reaches `put_event` (and so NO
+//! extraction); the matching content-free counter is bumped per
 //! [`MessagesPluginDropReason`].
 //!
 //! # Watermark + cold-start posture
@@ -74,15 +88,14 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use mci_brain::extraction::tier1::persist_tier1_matches;
 use mci_brain::redaction::messages_plugin::{
     redact_messages_plugin_event, MessagesPluginConfig, MessagesPluginDecision,
     MessagesPluginDropReason, MessagesPluginEvent,
 };
 use mci_brain::redaction::MESSAGES_BUNDLE_ID;
-use mci_brain::{BrainStore, EmbedError, Embedder, Event, EventId, StoreError};
-use mci_messages_reader::{
-    list_recent_messages, ChatDbLocation, MessageRow, MessagesReaderError,
-};
+use mci_brain::{BrainStore, EmbedError, Embedder, Event, EventId, StoreError, Tier1Extractor};
+use mci_messages_reader::{list_recent_messages, ChatDbLocation, MessageRow, MessagesReaderError};
 
 use crate::brain_ingest::compose_context_header;
 
@@ -186,6 +199,21 @@ pub struct MessagesPluginPump {
     cfg: MessagesPluginConfig,
     watermark_unix_seconds: AtomicI64,
     counter: MessagesIngestCounters,
+    /// V2-P4 Tier 1 regex entity extractor, run synchronously on the Allow
+    /// arm after `put_event` — mirrors the screen/page `BrainPump`
+    /// (`apps/agent/src/brain_ingest.rs`). Zero-sized (the regex bank lives
+    /// in module-level `LazyLock` statics), so holding it by value costs
+    /// nothing. This is what turns the persisted participant handle (folded
+    /// into `events.text` via the context header) into a `phone`/`email`
+    /// entity + `entity_mention`, so the `AliasResolver` can anchor a
+    /// handle-keyed Person identity and the Consolidator can dot-connect it
+    /// cross-app. Before V2-P? the Messages pump wrote `put_event` with no
+    /// extraction at all, so Messages events yielded zero entities.
+    tier1: Tier1Extractor,
+    /// Cumulative `entity_mentions` rows Tier 1 has inserted on the Allow
+    /// arm. Content-free `u64` CRS Telemetry-Gap counter, identical
+    /// discipline to `BrainPump::tier1_mentions_persisted`.
+    tier1_mentions_persisted: AtomicU64,
 }
 
 impl MessagesPluginPump {
@@ -221,7 +249,17 @@ impl MessagesPluginPump {
             cfg,
             watermark_unix_seconds: AtomicI64::new(initial_watermark_unix),
             counter: MessagesIngestCounters::default(),
+            tier1: Tier1Extractor::new(),
+            tier1_mentions_persisted: AtomicU64::new(0),
         }
+    }
+
+    /// Cumulative `entity_mentions` rows the Tier 1 extractor has inserted
+    /// on the Allow arm. Content-free counter for the CRS Telemetry-Gap
+    /// analyst (a regression in Messages "who" yield is visible here).
+    #[must_use]
+    pub fn tier1_mentions_persisted_count(&self) -> u64 {
+        self.tier1_mentions_persisted.load(Ordering::Relaxed)
     }
 
     /// Read-only access to the live config — exposed for tests +
@@ -323,16 +361,31 @@ impl MessagesPluginPump {
         if decision.drop_event {
             self.bump_drop_counter(decision.drop_reason);
             return Ok(MessagesIngestOutcome::Dropped {
-                reason: decision.drop_reason.unwrap_or(
-                    MessagesPluginDropReason::PluginDisabled,
-                ),
+                reason: decision
+                    .drop_reason
+                    .unwrap_or(MessagesPluginDropReason::PluginDisabled),
             });
         }
         // Allow path — cascade has already rewritten OTP / banking
         // spans in place via `redacted_body`.
         let ts_us = unix_seconds_to_us(row.date_unix);
-        let header =
-            compose_context_header(Some(MESSAGES_BUNDLE_ID), None, None, ts_us);
+
+        // Persist the WHO. The cascade has already DROPPED the event if any
+        // participant was denylisted or matched a sensitive domain (steps 3
+        // + 5 of `redact_messages_plugin_event`), so any handle still here is
+        // user-allowed. We fold it into the per-event context header as the
+        // window "title" — `compose_context_header` co-locates the title into
+        // `events.text`, so the handle is BOTH human-readable on the recall
+        // surface ("who") AND a clean span the Tier-1 phone/email regex lifts
+        // below. The direction word (`from` received / `to` sent) carries
+        // `is_from_me` so "what did I send <friend>" is answerable. The handle
+        // is the user's own contact id, persisted ONLY in the local
+        // SQLCipher-encrypted brain; it is never a secret and is never
+        // redacted (the body redaction is a separate path, unchanged).
+        let participants = participant_handles(row);
+        let who = participant_label(&participants, row.is_from_me);
+
+        let header = compose_context_header(Some(MESSAGES_BUNDLE_ID), who.as_deref(), None, ts_us);
         let mut text = String::with_capacity(header.len() + decision.redacted_body.len());
         text.push_str(&header);
         text.push_str(&decision.redacted_body);
@@ -357,7 +410,9 @@ impl MessagesPluginPump {
             id: EventId(0),
             ts_us,
             app_bundle_id: Some(MESSAGES_BUNDLE_ID.to_string()),
-            window_title: None,
+            // The "who" display field — `from <handle>` / `to <handle>` /
+            // `None` (outgoing rows the V2-P10 reader leaves participant-less).
+            window_title: who,
             url: None,
             text,
             summary: None,
@@ -376,6 +431,34 @@ impl MessagesPluginPump {
             }
         };
         self.counter.allowed.fetch_add(1, Ordering::Relaxed);
+
+        // V2-P? — synchronous Allow-arm Tier 1 extraction (mirrors
+        // `BrainPump::ingest_ocr_event`). Lifts the participant handle (now
+        // in `event.text` via the header) — and any phone/email in the body
+        // — into `entities` + `entity_mentions` so the AliasResolver can
+        // anchor a handle-keyed Person identity and the Consolidator can
+        // dot-connect it cross-app. Best-effort: the event is already
+        // persisted, so an extractor/store failure is logged-and-continued,
+        // never returned (a later pass can backfill — the writer is
+        // idempotent on content-stable PKs). Token-shape REDACT discipline +
+        // cascade-marker SKIP are enforced inside `Tier1Extractor::extract`.
+        let matches = self.tier1.extract(&event.text);
+        if !matches.is_empty() {
+            match persist_tier1_matches(&*self.store, id, event.ts_us, &matches) {
+                Ok(stats) => {
+                    self.tier1_mentions_persisted
+                        .fetch_add(stats.mentions_inserted as u64, Ordering::Relaxed);
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        target: "mci_agent::messages_ingest",
+                        error = %err,
+                        "tier1 extraction failed on Messages event; event persisted, mentions can be backfilled",
+                    );
+                }
+            }
+        }
+
         Ok(MessagesIngestOutcome::Stored {
             id,
             embedded,
@@ -418,16 +501,46 @@ impl MessagesPluginPump {
 /// per-thread cache; the cascade's body-level checks (predicates
 /// 6 + 7) still catch OTP-leak shapes regardless of direction.
 fn project_row_to_event(row: &MessageRow) -> MessagesPluginEvent {
-    let participants = match (row.is_from_me, row.sender_handle.as_deref()) {
-        (false, Some(handle)) if !handle.is_empty() => vec![handle.to_owned()],
-        _ => Vec::new(),
-    };
     MessagesPluginEvent {
-        participants,
+        participants: participant_handles(row),
         body: row.body.clone(),
         service: row.service.as_str().to_owned(),
         is_from_me: row.is_from_me,
     }
+}
+
+/// The non-empty participant handle(s) carried on a chat.db row, in the
+/// same projection the cascade vetted. V2-P10 surfaces the sender's
+/// `handle.id` for an incoming message; an outgoing row (`is_from_me`)
+/// carries none — the user has no `handle` row, and resolving the
+/// recipient is the V2-P11 thread-cache job (see `project_row_to_event`'s
+/// "Participants strategy" note). Single source of truth for the
+/// projection so the cascade's denylist/sensitive-domain gates and the
+/// persisted "who" never diverge.
+fn participant_handles(row: &MessageRow) -> Vec<String> {
+    match (row.is_from_me, row.sender_handle.as_deref()) {
+        (false, Some(handle)) if !handle.is_empty() => vec![handle.to_owned()],
+        _ => Vec::new(),
+    }
+}
+
+/// A human-readable, Tier-1-extractable "who" label for the event's window
+/// title. `from <handle>` for a received message, `to <handle>` for a sent
+/// one — so the direction (`is_from_me`) is recoverable AND the raw handle
+/// is a clean span the phone/email regex can lift out of `events.text`.
+/// `None` when the row carries no participant (e.g. an outgoing message
+/// whose recipient the V2-P10 reader does not yet resolve), preserving the
+/// pre-change `window_title = None` for those rows.
+fn participant_label(participants: &[String], is_from_me: bool) -> Option<String> {
+    if participants.is_empty() {
+        return None;
+    }
+    let who = participants.join(", ");
+    Some(if is_from_me {
+        format!("to {who}")
+    } else {
+        format!("from {who}")
+    })
 }
 
 fn now_unix_seconds() -> i64 {
@@ -462,8 +575,7 @@ pub async fn run_messages_pump(
     loc: ChatDbLocation,
     pump: Arc<MessagesPluginPump>,
 ) -> Result<(), MessagesReaderError> {
-    let mut watcher =
-        mci_messages_reader::watch_inbox(&loc, DEFAULT_WATCH_CHANNEL_CAPACITY)?;
+    let mut watcher = mci_messages_reader::watch_inbox(&loc, DEFAULT_WATCH_CHANNEL_CAPACITY)?;
 
     // Drain anything already on disk that landed since the pump's
     // initial watermark (covers the case where Messages.app wrote a
@@ -527,7 +639,12 @@ mod tests {
         let pump =
             MessagesPluginPump::with_watermark(store.clone(), Some(embedder), enabled_cfg(), 0);
 
-        let r = row(100, Some("Pick up milk on the way home?"), Some("+15551234567"), false);
+        let r = row(
+            100,
+            Some("Pick up milk on the way home?"),
+            Some("+15551234567"),
+            false,
+        );
         let outcome = pump.ingest_row(&r).expect("allow ok");
         let MessagesIngestOutcome::Stored { id, embedded, .. } = outcome else {
             panic!("expected Stored");
@@ -537,7 +654,62 @@ mod tests {
         assert_eq!(ev.app_bundle_id.as_deref(), Some("com.apple.MobileSMS"));
         assert!(ev.text.starts_with("[app=com.apple.MobileSMS"));
         assert!(ev.text.contains("Pick up milk on the way home?"));
+        // V2-P? — the WHO is now persisted: the incoming sender handle is the
+        // window title (display) AND folded into events.text (extractable).
+        assert_eq!(
+            ev.window_title.as_deref(),
+            Some("from +15551234567"),
+            "incoming sender handle persisted as the window 'who' title"
+        );
+        assert!(
+            ev.text.contains("from +15551234567"),
+            "handle is folded into events.text via the context header: {}",
+            ev.text
+        );
         assert_eq!(pump.counters().allowed.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn outgoing_message_persists_with_no_who_today() {
+        // An outgoing row carries no participant (V2-P10 reader limitation),
+        // so the window title stays None — same as before this change.
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let r = row(120, Some("on my way"), None, true);
+        let MessagesIngestOutcome::Stored { id, .. } = pump.ingest_row(&r).expect("allow ok")
+        else {
+            panic!("expected Stored");
+        };
+        let ev = store.get_event(id).unwrap().unwrap();
+        assert_eq!(
+            ev.window_title, None,
+            "outgoing has no resolved recipient yet"
+        );
+        assert!(ev.text.contains("on my way"));
+    }
+
+    #[test]
+    fn participant_label_encodes_direction_and_handle() {
+        assert_eq!(
+            participant_label(&["+15551234567".to_owned()], false).as_deref(),
+            Some("from +15551234567"),
+            "received ⇒ from <handle>"
+        );
+        assert_eq!(
+            participant_label(&["friend@example.com".to_owned()], true).as_deref(),
+            Some("to friend@example.com"),
+            "sent ⇒ to <handle>"
+        );
+        assert_eq!(
+            participant_label(&[], false),
+            None,
+            "no participant ⇒ no who label"
+        );
+        assert_eq!(
+            participant_label(&["a@x.com".to_owned(), "+15550000000".to_owned()], false).as_deref(),
+            Some("from a@x.com, +15550000000"),
+            "group: handles joined"
+        );
     }
 
     #[test]
@@ -547,8 +719,7 @@ mod tests {
         // it. We assert: the raw OTP digits do NOT survive in the
         // persisted row.
         let store = Arc::new(InMemoryBrainStore::new());
-        let pump =
-            MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
 
         let r = row(
             101,
@@ -557,7 +728,10 @@ mod tests {
             false,
         );
         let outcome = pump.ingest_row(&r).expect("ingest ok");
-        let MessagesIngestOutcome::Stored { id, fired_rules, .. } = outcome else {
+        let MessagesIngestOutcome::Stored {
+            id, fired_rules, ..
+        } = outcome
+        else {
             panic!("expected Stored (OTP is in-place redacted, not dropped)");
         };
         assert!(!fired_rules.is_empty(), "the §3(a) regex must have fired");
@@ -596,8 +770,7 @@ mod tests {
     #[test]
     fn attachment_only_drops_with_no_body_reason() {
         let store = Arc::new(InMemoryBrainStore::new());
-        let pump =
-            MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
         let mut r = row(103, None, Some("+15551234567"), false);
         r.has_attachments = true;
         let outcome = pump.ingest_row(&r).expect("drop ok");
@@ -613,9 +786,13 @@ mod tests {
     #[test]
     fn sensitive_sender_handle_drops_with_no_put_event() {
         let store = Arc::new(InMemoryBrainStore::new());
-        let pump =
-            MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
-        let r = row(104, Some("Statement available"), Some("alerts@chase.com"), false);
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let r = row(
+            104,
+            Some("Statement available"),
+            Some("alerts@chase.com"),
+            false,
+        );
         let outcome = pump.ingest_row(&r).expect("drop ok");
         assert!(matches!(
             outcome,
@@ -636,8 +813,7 @@ mod tests {
     #[test]
     fn sensitive_url_in_body_drops() {
         let store = Arc::new(InMemoryBrainStore::new());
-        let pump =
-            MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
         let r = row(
             105,
             Some("Reset link: https://secure.chase.com/login"),
@@ -652,7 +828,9 @@ mod tests {
             }
         ));
         assert_eq!(
-            pump.counters().sensitive_url_in_body.load(Ordering::Relaxed),
+            pump.counters()
+                .sensitive_url_in_body
+                .load(Ordering::Relaxed),
             1
         );
     }
@@ -737,12 +915,8 @@ mod tests {
             root: messages_root,
         };
         let store = Arc::new(InMemoryBrainStore::new());
-        let pump = MessagesPluginPump::with_watermark(
-            store.clone(),
-            None,
-            enabled_cfg(),
-            1_900_000_000,
-        );
+        let pump =
+            MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 1_900_000_000);
 
         let stored = pump.ingest_since_watermark(&loc).expect("ingest ok");
         assert_eq!(stored, 1, "exactly one row should pass the cascade");
@@ -757,7 +931,11 @@ mod tests {
             .unwrap()
             .expect("event was persisted");
         assert_eq!(ev.app_bundle_id.as_deref(), Some("com.apple.MobileSMS"));
-        assert!(!ev.text.contains("482917"), "raw OTP must not survive: {}", ev.text);
+        assert!(
+            !ev.text.contains("482917"),
+            "raw OTP must not survive: {}",
+            ev.text
+        );
         assert!(ev.text.contains("[REDACTED:SMS_OTP]"));
     }
 
