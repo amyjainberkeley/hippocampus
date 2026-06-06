@@ -105,6 +105,10 @@ pub const RULE_EMAIL_NAME: &str = "email_name";
 pub const RULE_PHONE_COOCCUR: &str = "phone_cooccur";
 /// A URL whose host label equals exactly one org's name.
 pub const RULE_DOMAIN_ORG: &str = "domain_org";
+/// A bare phone/email handle that attaches to NO name core but recurs
+/// across ≥`min_handle_sites` events — anchors its OWN handle-keyed Person
+/// identity (the "a number / address you never saved as a contact" case).
+pub const RULE_HANDLE_ANCHOR: &str = "handle_anchor";
 
 const CONF_ANCHOR: f32 = 1.0;
 const CONF_EXACT_NAME: f32 = 1.0;
@@ -113,6 +117,10 @@ const CONF_EMAIL_EXACT: f32 = 0.9;
 const CONF_EMAIL_INITIAL: f32 = 0.75;
 const CONF_PHONE: f32 = 0.7;
 const CONF_DOMAIN: f32 = 0.7;
+/// A handle-anchored Person is identified purely by a unique handle (no
+/// corroborating name). High enough to be actionable in recall, lower than
+/// a name-anchored core to reflect "no human-readable name was observed."
+const CONF_HANDLE_ANCHOR: f32 = 0.6;
 
 /// Leading honorifics stripped from a name before normalization (they do
 /// not change identity). Generational suffixes (`jr` / `sr` / `iii`) are
@@ -178,17 +186,30 @@ pub struct ResolvedIdentity {
 /// Resolver tuning. Defaults are the precision-first production values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AliasResolverConfig {
-    /// Minimum number of member entities for a cluster to be emitted as
-    /// an identity. Default 2 — a singleton (one lone alias) is its own
-    /// implicit identity and needs no row; identities exist to UNIFY
-    /// distinct aliases.
+    /// Minimum number of member entities for a NAME-anchored cluster to be
+    /// emitted as an identity. Default 2 — a singleton (one lone alias) is
+    /// its own implicit identity and needs no row; identities exist to
+    /// UNIFY distinct aliases.
     pub min_cluster_size: usize,
+    /// Minimum number of distinct mention-sites (events) a bare phone/email
+    /// handle must recur across before it anchors its OWN handle-keyed
+    /// Person identity (Phase C). Default 2. A handle is a globally-unique
+    /// identifier, so anchoring a Person on it is the HIGHEST-precision
+    /// merge the resolver makes — two different handles are two different
+    /// identities (distinct canonical keys), and the same handle is one
+    /// entity, so this can never false-merge two people. The recurrence
+    /// gate exists only to keep a one-off handle (e.g. a phone number OCR'd
+    /// once from a web page) from becoming a spurious identity; a handle
+    /// must connect ≥2 events to be worth an identity at all (and the
+    /// cross-app dot-connect needs ≥2 sites regardless).
+    pub min_handle_sites: usize,
 }
 
 impl Default for AliasResolverConfig {
     fn default() -> Self {
         Self {
             min_cluster_size: 2,
+            min_handle_sites: 2,
         }
     }
 }
@@ -483,10 +504,62 @@ impl AliasResolver {
             }
         }
 
-        // --- Emit clusters of size >= min_cluster_size ---
+        // --- Phase C: handle anchoring (bare phone/email → own Person) ---
+        //
+        // A phone or email that attached to NO name core in Phase B is, by
+        // the `min_cluster_size ≥ 2` rule, a dropped singleton today — so a
+        // friend who only ever appears as a bare number/address (no saved
+        // contact name) never becomes a recallable identity and never
+        // dot-connects across apps. But a handle is a globally-unique
+        // identifier: the SAME handle recurring across events IS the same
+        // person. So an unattached handle that recurs across
+        // ≥`min_handle_sites` distinct events anchors its OWN handle-keyed
+        // Person identity.
+        //
+        // Why this STRENGTHENS the §"Precision over recall" invariant rather
+        // than weakening it: two *different* handles have distinct canonical
+        // keys → distinct cores → can never merge; the *same* handle is a
+        // single entity (content-stable id) → one identity. There is no
+        // "bare Alice bridges two people" failure mode because a handle is
+        // not a shared token. A handle that already attached to a NAMED
+        // person in Phase B is skipped (it belongs to that richer identity).
+        for h in emails.iter().chain(phones.iter()) {
+            if entity_to_core.contains_key(&h.id.0) {
+                continue; // already part of a NAMED person — don't double-anchor.
+            }
+            let sites = entity_events.get(&h.id.0).map_or(0, BTreeSet::len);
+            if sites < self.config.min_handle_sites {
+                continue; // a one-off handle is not (yet) identity-grade.
+            }
+            let key = handle_identity_key(&h.kind, &h.canonical_name);
+            let identity_id =
+                crate::graph::EntityIdentity::derive_identity_id(IDENTITY_PERSON, &key);
+            cores.push(Core {
+                identity_id,
+                identity_kind: IDENTITY_PERSON,
+                canonical_name: h.canonical_name.clone(),
+                tokens: Vec::new(),
+                members: Vec::new(),
+                member_ids: BTreeSet::new(),
+                norm: key,
+                force_emit: true,
+            });
+            let idx = cores.len() - 1;
+            attach_leaf(
+                &mut cores,
+                idx,
+                &mut entity_to_core,
+                &h.id,
+                RULE_HANDLE_ANCHOR,
+                CONF_HANDLE_ANCHOR,
+            );
+        }
+
+        // --- Emit name clusters of size >= min_cluster_size, plus every
+        //     force-emit (handle-anchored) core ---
         let mut out: Vec<ResolvedIdentity> = Vec::new();
         for c in cores {
-            if c.member_ids.len() < self.config.min_cluster_size {
+            if !c.force_emit && c.member_ids.len() < self.config.min_cluster_size {
                 continue;
             }
             let mut members = c.members;
@@ -511,12 +584,18 @@ struct Core {
     identity_id: IdentityId,
     identity_kind: &'static str,
     canonical_name: String,
-    /// Normalized tokens of the anchor name (person/org/location).
+    /// Normalized tokens of the anchor name (person/org/location). Empty
+    /// for a handle-anchored core (Phase C) — a handle has no name tokens.
     tokens: Vec<String>,
     members: Vec<ResolvedMember>,
     member_ids: BTreeSet<String>,
     /// Normalized anchor — keyed for core lookup.
     norm: String,
+    /// Emit this core as an identity regardless of `min_cluster_size`. Set
+    /// only for handle-anchored Person cores (Phase C), which are
+    /// identity-grade from a single unique handle entity; name/org/location
+    /// cores leave this `false` and must reach `min_cluster_size` members.
+    force_emit: bool,
 }
 
 /// Find-or-create the core for `(kind, norm)`. The first entity to reach
@@ -542,6 +621,7 @@ fn upsert_core(
         members: Vec::new(),
         member_ids: BTreeSet::new(),
         norm: norm.to_string(),
+        force_emit: false,
     });
     cores.len() - 1
 }
@@ -761,6 +841,15 @@ fn title_case(toks: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Namespaced identity key for a handle-anchored Person (Phase C). The
+/// `kind:` prefix guarantees a handle's derived identity id can never
+/// collide with a name-anchored core's — `derive_identity_id("person",
+/// "phone:15551234567")` is distinct from `derive_identity_id("person",
+/// "alice smith")` even if a name ever normalized to bare digits.
+fn handle_identity_key(kind: &str, canonical_name: &str) -> String {
+    format!("{kind}:{canonical_name}")
 }
 
 /// Split an email into `(localpart, domain)`, both lower-cased. `None`
@@ -1177,6 +1266,7 @@ mod tests {
     fn min_cluster_size_one_emits_singletons() {
         let cfg = AliasResolverConfig {
             min_cluster_size: 1,
+            ..AliasResolverConfig::default()
         };
         let out = AliasResolver::new(cfg).resolve(&[person("Solo Person")], &[]);
         assert_eq!(out.len(), 1);
@@ -1339,5 +1429,134 @@ mod tests {
         // Barclays url resolves to Barclays (registrable label, not "co").
         let b_id = identity_of(&out, &b_url.id).expect("barclays url attaches");
         assert!(b_id.members.iter().any(|m| m.entity_id == barclays.id));
+    }
+
+    // ---- Phase C: handle anchoring (bare phone/email → own Person) ----
+
+    #[test]
+    fn bare_recurring_phone_handle_anchors_person_identity() {
+        // The Messages "who" case: a friend with NO saved contact name texts
+        // twice from the same number. The handle recurs across 2 events → it
+        // anchors its own handle-keyed Person identity.
+        let ph = phone("15551234567");
+        let co = vec![
+            (EventId(1), vec![ph.id.clone()]),
+            (EventId(2), vec![ph.id.clone()]),
+        ];
+        let out = r().resolve(&[ph.clone()], &co);
+        assert_eq!(out.len(), 1, "the recurring handle is one identity");
+        let idy = identity_of(&out, &ph.id).expect("handle anchored");
+        assert_eq!(idy.identity_kind, IDENTITY_PERSON);
+        assert_eq!(idy.canonical_name, "15551234567");
+        let m = idy
+            .members
+            .iter()
+            .find(|m| m.entity_id == ph.id)
+            .expect("handle is a member");
+        assert_eq!(m.rule, RULE_HANDLE_ANCHOR);
+    }
+
+    #[test]
+    fn bare_recurring_email_handle_anchors_person_identity() {
+        let mail = email("friend@example.com");
+        let co = vec![
+            (EventId(1), vec![mail.id.clone()]),
+            (EventId(2), vec![mail.id.clone()]),
+        ];
+        let out = r().resolve(&[mail.clone()], &co);
+        assert_eq!(out.len(), 1);
+        let idy = identity_of(&out, &mail.id).expect("email handle anchored");
+        assert_eq!(idy.identity_kind, IDENTITY_PERSON);
+        assert_eq!(idy.canonical_name, "friend@example.com");
+        assert_eq!(
+            idy.members
+                .iter()
+                .find(|m| m.entity_id == mail.id)
+                .unwrap()
+                .rule,
+            RULE_HANDLE_ANCHOR
+        );
+    }
+
+    #[test]
+    fn one_off_handle_is_not_anchored() {
+        // A handle seen in only ONE event (e.g. a phone number OCR'd once
+        // from a web page) is below the recurrence gate → no identity.
+        let ph = phone("15559998888");
+        let co = vec![(EventId(1), vec![ph.id.clone()])];
+        let out = r().resolve(&[ph.clone()], &co);
+        assert!(
+            out.is_empty(),
+            "a one-off handle must not become a spurious identity"
+        );
+    }
+
+    #[test]
+    fn handle_with_no_cooccurrence_is_not_anchored() {
+        // Defensive: a handle entity that never appears in any event's
+        // co-occurrence list (0 sites) is not anchored.
+        let ph = phone("15557776666");
+        let out = r().resolve(&[ph.clone()], &[]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn two_distinct_recurring_handles_never_merge() {
+        // The precision guarantee for handles: two DIFFERENT numbers are two
+        // DIFFERENT people, always — distinct canonical keys, distinct cores.
+        let p1 = phone("15551110000");
+        let p2 = phone("15552220000");
+        let co = vec![
+            (EventId(1), vec![p1.id.clone()]),
+            (EventId(2), vec![p1.id.clone()]),
+            (EventId(3), vec![p2.id.clone()]),
+            (EventId(4), vec![p2.id.clone()]),
+        ];
+        let out = r().resolve(&[p1.clone(), p2.clone()], &co);
+        assert_eq!(out.len(), 2, "two handles, two identities");
+        for idy in &out {
+            let has1 = idy.members.iter().any(|m| m.entity_id == p1.id);
+            let has2 = idy.members.iter().any(|m| m.entity_id == p2.id);
+            assert!(!(has1 && has2), "two distinct handles must never merge");
+        }
+    }
+
+    #[test]
+    fn handle_attached_to_named_person_is_not_double_anchored() {
+        // When the friend DOES have a name in the brain, Phase B attaches the
+        // phone to the named Person (richer identity); Phase C must NOT also
+        // mint a separate handle-only identity (each entity in ≤1 identity).
+        let alice = person("Alice Smith");
+        let ph = phone("15551234567");
+        let co = vec![
+            (EventId(1), vec![alice.id.clone(), ph.id.clone()]),
+            (EventId(2), vec![alice.id.clone(), ph.id.clone()]),
+        ];
+        let out = r().resolve(&[alice.clone(), ph.clone()], &co);
+        assert_eq!(out.len(), 1, "one named identity, not two");
+        let idy = identity_of(&out, &ph.id).expect("phone attached to Alice");
+        assert_eq!(idy.canonical_name, "Alice Smith");
+        assert_eq!(
+            idy.members
+                .iter()
+                .find(|m| m.entity_id == ph.id)
+                .unwrap()
+                .rule,
+            RULE_PHONE_COOCCUR,
+            "phone attached via co-occurrence, NOT a bare handle anchor"
+        );
+    }
+
+    #[test]
+    fn handle_anchor_is_order_independent() {
+        let p1 = phone("15551110000");
+        let mail = email("friend@example.com");
+        let co = vec![
+            (EventId(1), vec![p1.id.clone(), mail.id.clone()]),
+            (EventId(2), vec![p1.id.clone(), mail.id.clone()]),
+        ];
+        let forward = r().resolve(&[p1.clone(), mail.clone()], &co);
+        let reversed = r().resolve(&[mail, p1], &co);
+        assert_eq!(forward, reversed, "handle anchoring is deterministic");
     }
 }
