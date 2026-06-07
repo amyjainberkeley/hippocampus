@@ -88,8 +88,8 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::AllocAnyThread;
 use objc2_core_ml::{
-    MLDictionaryFeatureProvider, MLFeatureProvider, MLFeatureType, MLFeatureValue, MLModel,
-    MLModelConfiguration, MLMultiArray, MLMultiArrayDataType,
+    MLComputeUnits, MLDictionaryFeatureProvider, MLFeatureProvider, MLFeatureType, MLFeatureValue,
+    MLModel, MLModelConfiguration, MLMultiArray, MLMultiArrayDataType,
 };
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL};
 
@@ -108,9 +108,86 @@ const ATTENTION_MASK_FEATURE_NAME: &str = "attention_mask";
 const OUTPUT_FEATURE_NAME: &str = "embedding";
 
 /// Fixed sequence length the Python conversion script pins. Matches the
-/// `ct.RangeDim(1, 128)` in `scripts/convert_embedder.py`. Tokens are
-/// padded with `[PAD]` (id 0) and truncated to fit.
+/// fixed `shape=(1, 128)` input in `scripts/convert_embedder.py`. Tokens
+/// are padded with `[PAD]` (id 0) and truncated to fit. The Rust runtime
+/// always feeds exactly this many tokens (see [`CoreMLBackend::forward`]),
+/// so the graph's input shape is fixed rather than a `RangeDim` — that
+/// fixed shape is what makes the `embedding` output statically `[1, 384]`
+/// instead of the data-dependent `[?, 384]` that forced Espresso onto the
+/// CPU-fallback path (see the compute-unit note on [`ComputeUnits`]).
 pub const MAX_SEQ_LEN: usize = 128;
+
+/// Compute-unit policy for the embedder load path.
+///
+/// A thin safe mirror of Core ML's `MLComputeUnits`, matching the enum in
+/// `mci-coreml-bridge` so the whole codebase pins compute units the same
+/// way. The crate-internal loader sets this on the `MLModelConfiguration`
+/// *before* the model is loaded.
+///
+/// # Why this exists (the E5RT "Invalid blob shape" story)
+///
+/// Before this enum, the embedder loaded with a bare
+/// `MLModelConfiguration` and never set a compute unit, defaulting to
+/// `MLComputeUnits::All`. On the data-dependent-shape graph that
+/// `scripts/convert_embedder.py` produced (the `embedding` output had no
+/// declared shape, so the dynamic seq dim propagated to `[?, 384]`), the
+/// ANE/GPU path emits
+///
+/// ```text
+/// E5RT ... Espresso exception: "Invalid blob shape":
+/// Data-dependent shapes were disabled: embedding - [?, 384]
+/// ```
+///
+/// to stderr and **falls back to CPU** — predictions still succeed (the
+/// live store's vectors are genuine unit vectors), but the failover wastes
+/// an ANE/GPU compile attempt and spews an alarming-but-benign error.
+/// Pinning the load to [`ComputeUnits::CpuOnly`] avoids the ANE/GPU path
+/// entirely, so the error never appears and the idle-batch worker stays a
+/// low-footprint CPU citizen. The companion fix in
+/// `scripts/convert_embedder.py` pins the input/output shapes so the graph
+/// is statically `[1, 384]` and re-eligible for GPU/ANE — but per the
+/// [Core ML compute-units `.all` is a latency trap] lesson, the optimal
+/// unit is model-dependent and chosen by measurement, not by default. For
+/// this idle-batch (non-hot-path) embedder the measured numbers make
+/// CPU-only the right pin: it tolerates both the current flexible artifact
+/// and the future fixed-shape one (reship-ordering-robust) at a latency
+/// (~3–29 ms) that is irrelevant on a 5-second idle loop.
+///
+/// [Core ML compute-units `.all` is a latency trap]: there is no ANE
+/// residency for this BERT graph; the real choice is GPU vs CPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComputeUnits {
+    /// CPU only (`MLComputeUnitsCPUOnly`). The production pin — see the
+    /// type-level docs.
+    CpuOnly,
+    /// CPU + GPU, no ANE (`MLComputeUnitsCPUAndGPU`). Fastest measured
+    /// clean unit on the fixed-shape graph (~1.9 ms); available for future
+    /// tuning if the embedder ever moves to a hot path.
+    CpuAndGpu,
+    /// CPU + ANE, no GPU (`MLComputeUnitsCPUAndNeuralEngine`). The BERT
+    /// graph fails ANE compile and falls back, emitting its own benign
+    /// E5RT message — kept for completeness/measurement parity.
+    CpuAndNeuralEngine,
+    /// Core ML schedules across ANE/GPU/CPU (`MLComputeUnitsAll`). The
+    /// pre-fix default that produced the data-dependent-shape failover.
+    All,
+}
+
+impl ComputeUnits {
+    fn to_ml(self) -> MLComputeUnits {
+        match self {
+            ComputeUnits::CpuOnly => MLComputeUnits::CPUOnly,
+            ComputeUnits::CpuAndGpu => MLComputeUnits::CPUAndGPU,
+            ComputeUnits::CpuAndNeuralEngine => MLComputeUnits::CPUAndNeuralEngine,
+            ComputeUnits::All => MLComputeUnits::All,
+        }
+    }
+}
+
+/// The compute-unit policy the production loaders ([`CoreMLBackend::open`],
+/// [`try_load_coreml_backend`], [`load_backend_or_fallback`]) pin. CPU-only
+/// per the measured idle-batch rationale on [`ComputeUnits`].
+pub const DEFAULT_COMPUTE_UNITS: ComputeUnits = ComputeUnits::CpuOnly;
 
 /// Core ML / ANE backend for `snowflake-arctic-embed-s`.
 ///
@@ -160,9 +237,26 @@ impl CoreMLBackend {
     ///   resource failed to deserialize, or the loaded model has an
     ///   unexpected feature schema.
     pub fn open(path: &Path) -> Result<Self, EmbedError> {
+        Self::open_with_compute_units(path, DEFAULT_COMPUTE_UNITS)
+    }
+
+    /// Load the `.mlpackage` / `.mlmodelc` at `path` with an explicit
+    /// [`ComputeUnits`] policy, pinned on the `MLModelConfiguration` before
+    /// the model loads. Production uses [`Self::open`] (which pins
+    /// [`DEFAULT_COMPUTE_UNITS`]); this variant exists for compute-unit
+    /// measurement / tuning, mirroring
+    /// `mci-coreml-bridge::CoreMLModel::load_with_compute_units`.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::open`].
+    pub fn open_with_compute_units(
+        path: &Path,
+        units: ComputeUnits,
+    ) -> Result<Self, EmbedError> {
         let tokenizer = WordPieceTokenizer::load_bundled()
             .map_err(|e| EmbedError::Backend(format!("tokenizer: {e}")))?;
-        Self::open_with_tokenizer_arc(path, tokenizer)
+        Self::open_with_tokenizer_arc(path, tokenizer, units)
     }
 
     /// Load the model + an explicit tokenizer file. Dev override for
@@ -178,12 +272,13 @@ impl CoreMLBackend {
     ) -> Result<Self, EmbedError> {
         let tokenizer = WordPieceTokenizer::load_from_file(tokenizer_path)
             .map_err(|e| EmbedError::Backend(format!("tokenizer: {e}")))?;
-        Self::open_with_tokenizer_arc(model_path, tokenizer)
+        Self::open_with_tokenizer_arc(model_path, tokenizer, DEFAULT_COMPUTE_UNITS)
     }
 
     fn open_with_tokenizer_arc(
         path: &Path,
         tokenizer: Arc<WordPieceTokenizer>,
+        units: ComputeUnits,
     ) -> Result<Self, EmbedError> {
         let path_str = path
             .to_str()
@@ -199,6 +294,15 @@ impl CoreMLBackend {
 
         let url = NSURL::fileURLWithPath(&NSString::from_str(path_str));
         let config = unsafe { MLModelConfiguration::new() };
+        // Pin the compute unit BEFORE load. Without this the config
+        // defaults to `MLComputeUnits::All`, which routes the
+        // data-dependent-shape `embedding` output onto the ANE/GPU path and
+        // emits the benign-but-alarming E5RT "Invalid blob shape" failover
+        // to stderr (predictions still succeed on CPU fallback). Pinning
+        // here mirrors `mci-coreml-bridge::CoreMLModel::load_with_compute_units`.
+        // SAFETY: `setComputeUnits:` is a setter on the freshly-allocated
+        // configuration object; no aliasing, no escape.
+        unsafe { config.setComputeUnits(units.to_ml()) };
         // SAFETY: Core ML's `+[MLModel modelWithContentsOfURL:configuration:error:]`
         // is a class method that builds a new MLModel from a file URL. The
         // call blocks briefly on compile-then-load for `.mlpackage`.
@@ -564,8 +668,31 @@ mod tests {
 
     #[test]
     fn max_seq_len_is_128() {
-        // Wave-17: pinned in scripts/convert_embedder.py via
-        // ct.RangeDim(1, 128).
+        // Pinned in scripts/convert_embedder.py via the fixed input
+        // shape=(1, 128). The Rust runtime always feeds exactly 128 tokens.
         assert_eq!(MAX_SEQ_LEN, 128);
+    }
+
+    #[test]
+    fn default_compute_units_is_cpu_only() {
+        // Production pin: idle-batch is non-hot-path; CPU-only tolerates
+        // both the flexible and fixed-shape artifacts and never triggers
+        // the ANE/GPU E5RT failover. If this ever changes, re-measure per
+        // the ComputeUnits doc rationale.
+        assert_eq!(DEFAULT_COMPUTE_UNITS, ComputeUnits::CpuOnly);
+    }
+
+    #[test]
+    fn open_with_compute_units_still_errors_on_missing_file() {
+        // Negative control: pinning a compute unit must NOT change the
+        // load-failure trigger that drives ZeroBackend graceful
+        // degradation. A missing model still surfaces a Backend error
+        // (which load_backend_or_fallback maps to ZeroBackend).
+        let err = CoreMLBackend::open_with_compute_units(
+            Path::new("/tmp/mci-test-nonexistent-arctic.mlpackage"),
+            ComputeUnits::CpuAndGpu,
+        )
+        .expect_err("missing path must still error under a pinned compute unit");
+        assert!(matches!(err, EmbedError::Backend(_)), "{err:?}");
     }
 }

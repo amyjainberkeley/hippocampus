@@ -1125,6 +1125,49 @@ fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
     let (backend, is_real) = load_backend_or_fallback(&path_refs);
     let embedder = ArcticEmbedSEmbedder::new_document(backend);
+
+    // Load-time smoke embed: prove the model can actually PREDICT, not just
+    // load. mci-embed-coreml's verify_schema is type-only and passes even on
+    // a model whose predict path would throw — so a successful load does NOT
+    // guarantee a working embedder. Probe once at startup so a dead embedder
+    // is known loudly here, instead of inferred from a climbing embed_errors
+    // aggregate at idle-batch worker exit. (Content-free: a fixed probe
+    // string, never user content.)
+    {
+        use mci_brain::Embedder as _;
+        let smoke = embedder.embed_one("mci embedder load-time smoke probe");
+        match (&smoke, is_real) {
+            (Ok(v), true) => {
+                let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let healthy = v.len() == 384 && norm.is_finite() && (norm - 1.0).abs() < 1e-2;
+                if healthy {
+                    eprintln!(
+                        "mci-agent: embedder smoke OK — CoreML (cpu_only pin), dim={} |v|={norm:.4}",
+                        v.len(),
+                    );
+                } else {
+                    eprintln!(
+                        "mci-agent: WARNING embedder loaded but smoke vector looks wrong \
+                         (dim={} |v|={norm:.4}, expected dim=384 |v|~1.0) — semantic ingest \
+                         may be degraded.",
+                        v.len(),
+                    );
+                }
+            }
+            (Err(e), true) => {
+                eprintln!(
+                    "mci-agent: WARNING embedder LOADED but smoke embed FAILED — semantic \
+                     ingest is DEAD: {e}. Events will accumulate unembedded (embed_errors \
+                     will climb). Check the bundled ArcticEmbedS model / compute-unit pin.",
+                );
+            }
+            // is_real == false: ZeroBackend fallback. The degradation is
+            // already reported at the call site via the `embedder=zero-fallback`
+            // log line; the smoke "succeeds" trivially (zeros), so stay quiet.
+            (_, false) => {}
+        }
+    }
+
     (Arc::new(embedder), is_real)
 }
 

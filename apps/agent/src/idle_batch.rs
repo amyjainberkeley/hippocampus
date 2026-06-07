@@ -99,8 +99,23 @@ pub async fn run_idle_batch_worker(
 
             let embedding = match embedder.embed_one(&event.text) {
                 Ok(v) => v,
-                Err(_e) => {
+                Err(e) => {
                     stats.embed_errors += 1;
+                    // Rate-limited per-error surfacing. Previously the error
+                    // was swallowed to `_e` and only an aggregate count
+                    // surfaced once at worker exit — a dead embedder was
+                    // invisible until shutdown. Log the first failure and
+                    // every 64th thereafter with the actual backend error
+                    // string so a persistent failure is known immediately
+                    // without flooding logs. Content-free: `e` is backend
+                    // diagnostic text and `event.id` is a row id, never
+                    // event content.
+                    if stats.embed_errors == 1 || stats.embed_errors % 64 == 0 {
+                        eprintln!(
+                            "mci-agent: idle-batch embed error #{} (event {}): {e}",
+                            stats.embed_errors, event.id,
+                        );
+                    }
                     continue;
                 }
             };

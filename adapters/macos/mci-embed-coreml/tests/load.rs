@@ -43,6 +43,78 @@ fn load_empty_path_is_invalid_input() {
     assert!(matches!(err, EmbedError::InvalidInput(_)), "{err:?}");
 }
 
+/// Locate the bundled / repo-local compiled embedder model, mirroring the
+/// `apps/agent` candidate-paths chain. `None` (skip) when no artifact is
+/// present (headless CI), `Some(path)` on a live Mac with the model built.
+fn embedder_model_path() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir.join("../../..").canonicalize().ok()?;
+    for c in [
+        repo_root.join("models/ArcticEmbedS_INT8.mlmodelc"),
+        repo_root.join("models/ArcticEmbedS_INT8.mlpackage"),
+    ] {
+        if c.exists() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// PRODUCTION-PATH smoke: the exact loader the live agent uses
+/// ([`CoreMLBackend::open`], which pins [`ComputeUnits::CpuOnly`]) must
+/// produce a finite, L2-normalized, 384-d vector for a probe string —
+/// proving the embedder genuinely predicts, not just loads. This is the
+/// regression guard for the E5RT "Invalid blob shape" class of bug: a
+/// model whose predict path throws (or whose CPU pin regresses) fails
+/// here, not silently at runtime via a nonzero `embed_errors` aggregate.
+///
+/// Skips (passes) when no model artifact is present (headless CI). On a
+/// live Mac with `models/ArcticEmbedS_INT8.{mlmodelc,mlpackage}` built, it
+/// runs the real Core ML inference.
+#[test]
+fn production_path_smoke_embed_is_finite_unit_vector() {
+    let Some(model) = embedder_model_path() else {
+        println!(
+            "load.rs: skipping production-path smoke — no \
+             ArcticEmbedS_INT8.{{mlmodelc,mlpackage}} under <repo>/models/. \
+             Run scripts/convert_embedder.py --output \
+             models/ArcticEmbedS_INT8.mlpackage --verify to produce it."
+        );
+        return;
+    };
+
+    // Production loader: CoreMLBackend::open pins DEFAULT_COMPUTE_UNITS
+    // (CpuOnly). Wrap in the document-side embedder exactly as
+    // load_embedder_backend does on the ingest path.
+    let backend = CoreMLBackend::open(&model)
+        .unwrap_or_else(|e| panic!("CoreMLBackend::open (cpu_only pin) failed: {e:?}"));
+    let embedder = ArcticEmbedSEmbedder::new_document(Arc::new(backend));
+
+    let v = embedder
+        .embed_one("mci embedder production-path smoke probe")
+        .unwrap_or_else(|e| panic!("production-path embed_one failed: {e:?}"));
+
+    assert_eq!(
+        v.len(),
+        ARCTIC_EMBED_S_DIMENSION,
+        "expected 384-d vector, got {}",
+        v.len()
+    );
+    assert!(
+        v.iter().all(|x| x.is_finite()),
+        "embedding contains non-finite components"
+    );
+    assert!(
+        v.iter().any(|&x| x != 0.0),
+        "embedding is all zeros — looks like the ZeroBackend fallback, not a real model"
+    );
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    assert!(
+        (norm - 1.0).abs() < 1e-2,
+        "embedding is not L2-normalized: |v| = {norm} (expected ~1.0 from in-graph L2-norm)"
+    );
+}
+
 #[test]
 fn debug_impl_does_not_leak_model_schema() {
     // We cannot construct a real CoreMLBackend without an .mlpackage on
