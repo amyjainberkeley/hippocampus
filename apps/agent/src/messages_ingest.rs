@@ -31,9 +31,11 @@
 //!    The participant handle the cascade just vetted (denylist +
 //!    sensitive-domain already drop the event upstream, so anything
 //!    here is user-allowed) becomes the window "title", with the
-//!    direction word carrying `is_from_me`. `None` for an outgoing row
-//!    that carries no resolved recipient (V2-P10 reader limitation; a
-//!    `read_thread` thread-cache for the recipient is a V2-P11 job).
+//!    direction word carrying `is_from_me`. The incoming "who" is the
+//!    sender's `handle.id`; the outgoing "who" is the recipient set the
+//!    reader resolves from the message's chat (a group chat names every
+//!    recipient, joined with `, `). `None` only when no counterparty is
+//!    resolvable (an outgoing row whose chat has no remote handle).
 //! - `url = None` — Messages has no URL surface
 //! - `tab_id = None`
 //! - `text = ADR-0010 §1.3 context header + redacted_body` — the header
@@ -410,8 +412,9 @@ impl MessagesPluginPump {
             id: EventId(0),
             ts_us,
             app_bundle_id: Some(MESSAGES_BUNDLE_ID.to_string()),
-            // The "who" display field — `from <handle>` / `to <handle>` /
-            // `None` (outgoing rows the V2-P10 reader leaves participant-less).
+            // The "who" display field — `from <sender>` (incoming) /
+            // `to <recipient(s)>` (outgoing, resolved from the chat) /
+            // `None` only when no counterparty is resolvable.
             window_title: who,
             url: None,
             text,
@@ -490,16 +493,16 @@ impl MessagesPluginPump {
 
 /// Project one `MessageRow` to the cascade-equivalent's input shape.
 ///
-/// **Participants strategy.** V2-P10 passes the sender's `handle.id`
-/// as the single participant when present. For outgoing messages
-/// (`is_from_me = true`) the row carries no participant id (the
-/// user has no row in `handle`); we pass an empty participants vec.
-/// The cascade's participant-denylist + sensitive-participant-domain
-/// checks fire on the sender alone — sufficient for the incoming
-/// banking-SMS shape that is the dominant V2-P10 leak surface. The
-/// outgoing-to-sensitive-recipient shape is left to V2-P11 + a
-/// per-thread cache; the cascade's body-level checks (predicates
-/// 6 + 7) still catch OTP-leak shapes regardless of direction.
+/// **Participants strategy.** The participant set is the direction-keyed
+/// "who" from [`participant_handles`]: the sender's `handle.id` for an
+/// incoming row, the chat's resolved recipient set for an outgoing one.
+/// Because the SAME set feeds the cascade, the participant-denylist +
+/// sensitive-participant-domain gates now fire on BOTH directions — an
+/// outgoing message to `alerts@chase.com` is vetted (and dropped) exactly
+/// like an incoming one, closing the SENT-direction hole that the prior
+/// "outgoing rows carry no participant" projection left open. (The
+/// cascade's body-level checks — predicates 6 + 7 — already ran
+/// regardless of direction.)
 fn project_row_to_event(row: &MessageRow) -> MessagesPluginEvent {
     MessagesPluginEvent {
         participants: participant_handles(row),
@@ -510,27 +513,48 @@ fn project_row_to_event(row: &MessageRow) -> MessagesPluginEvent {
 }
 
 /// The non-empty participant handle(s) carried on a chat.db row, in the
-/// same projection the cascade vetted. V2-P10 surfaces the sender's
-/// `handle.id` for an incoming message; an outgoing row (`is_from_me`)
-/// carries none — the user has no `handle` row, and resolving the
-/// recipient is the V2-P11 thread-cache job (see `project_row_to_event`'s
-/// "Participants strategy" note). Single source of truth for the
-/// projection so the cascade's denylist/sensitive-domain gates and the
-/// persisted "who" never diverge.
+/// same projection the cascade vetted. The "who" is direction-keyed:
+///
+/// - **Incoming** (`is_from_me = false`): the sender's `handle.id`, which
+///   lives on the message row itself (`MessageRow::sender_handle`). This
+///   arm is byte-identical to the pre-recipient-resolution projection — the
+///   #305 incoming path is unchanged (the construction-graph negative
+///   control).
+/// - **Outgoing** (`is_from_me = true`): the recipient(s). Apple sets
+///   `handle_id = 0` on every sent row (the local user is never a row in
+///   `handle`), so the recipient is NOT on the message — the reader sources
+///   it from the message's chat's remote participants into
+///   [`MessageRow::recipient_handles`] (a 1:1 DM yields one, a group yields
+///   N). We surface that whole set so the cascade vets EACH recipient and
+///   the persisted "who" names every counterparty.
+///
+/// Single source of truth for the projection: it feeds BOTH the cascade
+/// (via [`project_row_to_event`], so the denylist + sensitive-participant-
+/// domain gates fire on the resolved recipient) AND the persisted "who"
+/// label, so the two never diverge.
 fn participant_handles(row: &MessageRow) -> Vec<String> {
-    match (row.is_from_me, row.sender_handle.as_deref()) {
-        (false, Some(handle)) if !handle.is_empty() => vec![handle.to_owned()],
-        _ => Vec::new(),
+    if row.is_from_me {
+        row.recipient_handles
+            .iter()
+            .filter(|h| !h.is_empty())
+            .cloned()
+            .collect()
+    } else {
+        match row.sender_handle.as_deref() {
+            Some(handle) if !handle.is_empty() => vec![handle.to_owned()],
+            _ => Vec::new(),
+        }
     }
 }
 
 /// A human-readable, Tier-1-extractable "who" label for the event's window
 /// title. `from <handle>` for a received message, `to <handle>` for a sent
 /// one — so the direction (`is_from_me`) is recoverable AND the raw handle
-/// is a clean span the phone/email regex can lift out of `events.text`.
-/// `None` when the row carries no participant (e.g. an outgoing message
-/// whose recipient the V2-P10 reader does not yet resolve), preserving the
-/// pre-change `window_title = None` for those rows.
+/// is a clean span the phone/email regex can lift out of `events.text`. A
+/// group conversation joins every counterparty with `, ` (e.g.
+/// `to a@x.com, +15550000000`), so each handle stays an extractable span.
+/// `None` only when the row carries no participant at all (an outgoing
+/// message whose chat has no resolvable remote handle).
 fn participant_label(participants: &[String], is_from_me: bool) -> Option<String> {
     if participants.is_empty() {
         return None;
@@ -620,6 +644,17 @@ mod tests {
             handle_rowid: if is_from_me { 0 } else { 1 },
             sender_handle: sender.map(str::to_owned),
             has_attachments: false,
+            recipient_handles: Vec::new(),
+        }
+    }
+
+    /// An outgoing (`is_from_me = true`) row whose recipient(s) the reader
+    /// resolved from the message's chat — `handle_id = 0` / no sender, the
+    /// counterparty lives in `recipient_handles`.
+    fn outgoing_row(rowid: i64, body: Option<&str>, recipients: &[&str]) -> MessageRow {
+        MessageRow {
+            recipient_handles: recipients.iter().map(|s| (*s).to_owned()).collect(),
+            ..row(rowid, body, None, true)
         }
     }
 
@@ -670,22 +705,119 @@ mod tests {
     }
 
     #[test]
-    fn outgoing_message_persists_with_no_who_today() {
-        // An outgoing row carries no participant (V2-P10 reader limitation),
-        // so the window title stays None — same as before this change.
+    fn outgoing_message_persists_recipient_as_who() {
+        // An outgoing row now carries the recipient the reader resolved from
+        // the message's chat, so the recipient is the window "who" AND folded
+        // into events.text (so "what did I send <friend>" is answerable).
         let store = Arc::new(InMemoryBrainStore::new());
         let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
-        let r = row(120, Some("on my way"), None, true);
+        let r = outgoing_row(120, Some("on my way"), &["+15557654321"]);
         let MessagesIngestOutcome::Stored { id, .. } = pump.ingest_row(&r).expect("allow ok")
         else {
             panic!("expected Stored");
         };
         let ev = store.get_event(id).unwrap().unwrap();
         assert_eq!(
-            ev.window_title, None,
-            "outgoing has no resolved recipient yet"
+            ev.window_title.as_deref(),
+            Some("to +15557654321"),
+            "outgoing recipient is the window 'who' title"
+        );
+        assert!(
+            ev.text.contains("to +15557654321"),
+            "recipient is folded into events.text via the context header: {}",
+            ev.text
         );
         assert!(ev.text.contains("on my way"));
+    }
+
+    #[test]
+    fn outgoing_message_with_unresolved_recipient_keeps_none_who() {
+        // The only remaining `None` who case: an outgoing row whose chat had
+        // no resolvable remote handle (recipient_handles empty). Preserves the
+        // pre-change behavior for that corner.
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let r = outgoing_row(121, Some("anybody home?"), &[]);
+        let MessagesIngestOutcome::Stored { id, .. } = pump.ingest_row(&r).expect("allow ok")
+        else {
+            panic!("expected Stored");
+        };
+        let ev = store.get_event(id).unwrap().unwrap();
+        assert_eq!(ev.window_title, None, "no resolvable recipient ⇒ no who");
+        assert!(ev.text.contains("anybody home?"));
+    }
+
+    #[test]
+    fn outgoing_to_sensitive_recipient_now_drops() {
+        // PRIVACY IMPROVEMENT (driver-CSO): before this change an outgoing row
+        // carried no participant, so the sensitive-participant-domain gate
+        // never saw the recipient — a user texting alerts@chase.com was
+        // un-vetted on the SENT direction. Now the resolved recipient feeds
+        // the cascade and the event drops, exactly like the incoming case.
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let r = outgoing_row(130, Some("here is the info you asked for"), &["alerts@chase.com"]);
+        let outcome = pump.ingest_row(&r).expect("drop ok");
+        assert!(
+            matches!(
+                outcome,
+                MessagesIngestOutcome::Dropped {
+                    reason: MessagesPluginDropReason::SensitiveParticipantDomain
+                }
+            ),
+            "outgoing-to-sensitive-recipient must drop, got {outcome:?}"
+        );
+        assert_eq!(
+            pump.counters()
+                .sensitive_participant_domain
+                .load(Ordering::Relaxed),
+            1
+        );
+        // No store side-effects: nothing about the sensitive recipient lands.
+        assert!(store.get_event(EventId(1)).unwrap().is_none());
+    }
+
+    #[test]
+    fn outgoing_to_denylisted_recipient_now_drops() {
+        // Companion to the sensitive-domain case: the user-curated participant
+        // denylist also now fires on the SENT direction.
+        let store = Arc::new(InMemoryBrainStore::new());
+        let cfg = MessagesPluginConfig {
+            plugin_enabled: true,
+            participant_denylist: vec!["+15550001111".to_owned()],
+            ..MessagesPluginConfig::DEFAULT
+        };
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, cfg, 0);
+        let r = outgoing_row(131, Some("secret plan"), &["+15550001111"]);
+        let outcome = pump.ingest_row(&r).expect("drop ok");
+        assert!(matches!(
+            outcome,
+            MessagesIngestOutcome::Dropped {
+                reason: MessagesPluginDropReason::ParticipantDenylisted
+            }
+        ));
+        assert!(store.get_event(EventId(1)).unwrap().is_none());
+    }
+
+    #[test]
+    fn outgoing_group_recipients_all_named_in_who() {
+        // A group send names every recipient in the who label and folds each
+        // as a clean span into events.text (so each is Tier-1 extractable).
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let r = outgoing_row(132, Some("see you all there"), &["a@x.com", "+15550000000"]);
+        let MessagesIngestOutcome::Stored { id, .. } = pump.ingest_row(&r).expect("allow ok")
+        else {
+            panic!("expected Stored");
+        };
+        let ev = store.get_event(id).unwrap().unwrap();
+        assert_eq!(
+            ev.window_title.as_deref(),
+            Some("to a@x.com, +15550000000"),
+            "group send names every recipient"
+        );
+        assert!(ev.text.contains("a@x.com"));
+        assert!(ev.text.contains("+15550000000"));
     }
 
     #[test]
@@ -988,21 +1120,38 @@ mod tests {
     }
 
     #[test]
-    fn project_row_strips_sender_for_outgoing_messages() {
-        // Outgoing rows carry no participant (the user has no row in
-        // handle), so the cascade's participant-denylist + sensitive-
-        // domain checks see an empty participants vec.
-        let r = row(110, Some("hi"), None, true);
+    fn project_row_resolves_recipient_for_outgoing_messages() {
+        // Outgoing rows now feed the cascade the recipient(s) the reader
+        // resolved from the chat — so the participant-denylist + sensitive-
+        // domain gates fire on the SENT direction too.
+        let r = outgoing_row(110, Some("hi"), &["+15551234567"]);
         let evt = project_row_to_event(&r);
-        assert!(evt.participants.is_empty(), "outgoing → no participants");
+        assert_eq!(
+            evt.participants,
+            vec!["+15551234567".to_owned()],
+            "outgoing → recipient is the cascade participant"
+        );
         assert!(evt.is_from_me);
+
+        // An outgoing row with no resolvable recipient still yields an empty
+        // participants vec (the only remaining empty case).
+        let bare = outgoing_row(111, Some("hi"), &[]);
+        assert!(project_row_to_event(&bare).participants.is_empty());
     }
 
     #[test]
     fn project_row_uses_sender_handle_for_incoming() {
-        let r = row(111, Some("hi"), Some("+15551234567"), false);
+        // Negative control: the incoming projection is byte-identical to the
+        // #305 path — sender handle only, recipient_handles ignored even if
+        // the reader populated the chat's remote set.
+        let mut r = row(112, Some("hi"), Some("+15551234567"), false);
+        r.recipient_handles = vec!["+15559998888".to_owned()];
         let evt = project_row_to_event(&r);
-        assert_eq!(evt.participants, vec!["+15551234567".to_owned()]);
+        assert_eq!(
+            evt.participants,
+            vec!["+15551234567".to_owned()],
+            "incoming who stays the sender; recipient_handles is ignored"
+        );
     }
 
     #[test]

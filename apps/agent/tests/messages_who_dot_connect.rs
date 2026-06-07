@@ -101,6 +101,25 @@ fn incoming_row(rowid: i64, body: &str) -> MessageRow {
         handle_rowid: 1,
         sender_handle: Some(HANDLE.to_owned()),
         has_attachments: false,
+        recipient_handles: Vec::new(),
+    }
+}
+
+/// An outgoing Messages row the user SENT to `HANDLE` — `is_from_me = true`,
+/// `handle_id = 0` (no sender row), the recipient resolved by the reader
+/// from the message's chat into `recipient_handles` (no saved contact name).
+fn outgoing_row(rowid: i64, body: &str) -> MessageRow {
+    MessageRow {
+        rowid,
+        guid: format!("M-{rowid}"),
+        date_unix: BASE_UNIX_S + rowid,
+        is_from_me: true,
+        service: ChatService::IMessage,
+        body: Some(body.to_owned()),
+        handle_rowid: 0,
+        sender_handle: None,
+        has_attachments: false,
+        recipient_handles: vec![HANDLE.to_owned()],
     }
 }
 
@@ -272,6 +291,155 @@ async fn messages_handle_dot_connects_cross_app_end_to_end() {
     assert!(
         apps.iter().any(|a| a == MESSAGES),
         "the connected hit includes the Messages event ({apps:?})"
+    );
+    assert!(
+        apps.iter().any(|a| a == SAFARI),
+        "the connected hit includes the Safari event ({apps:?})"
+    );
+}
+
+/// The SENT-direction twin of the gate above: the user TEXTS a number with
+/// no saved contact name, then looks it up in Safari. The outgoing
+/// recipient — resolved by the reader from the message's chat — must become
+/// the "who", get extracted as the SAME phone entity, anchor a Person
+/// identity, and dot-connect cross-app. This is the gate that proves "what
+/// did I send my friend" is answerable.
+#[tokio::test]
+#[allow(clippy::too_many_lines)] // one cohesive end-to-end gate: ingest → resolve → consolidate → query
+async fn outgoing_message_handle_dot_connects_cross_app_end_to_end() {
+    let (_dir, store, _path, _key) = open_temp_store();
+
+    // 1) The user texts a number with NO saved contact name — ingested
+    //    through the PRODUCTION Messages pump as an OUTGOING row.
+    let pump = MessagesPluginPump::with_watermark(
+        Arc::clone(&store) as Arc<dyn BrainStore>,
+        None,
+        enabled_cfg(),
+        0,
+    );
+    let outcome = pump
+        .ingest_row(&outgoing_row(1, "dinner at 7?"))
+        .expect("ingest");
+    let MessagesIngestOutcome::Stored { id: msg_id, .. } = outcome else {
+        panic!("expected the allowed outgoing Messages event to be Stored");
+    };
+
+    // The SENT "who" is persisted (display) AND the recipient handle was
+    // extracted (graph) — the direction word is `to`, not `from`.
+    let msg_ev = store.get_event(msg_id).unwrap().unwrap();
+    assert_eq!(
+        msg_ev.window_title.as_deref(),
+        Some("to +15551234567"),
+        "the resolved recipient handle is the window 'who' title"
+    );
+    assert!(
+        pump.tier1_mentions_persisted_count() >= 1,
+        "the recipient handle was extracted into entity_mentions"
+    );
+
+    // The phone entity exists (content-stable DIGIT canonical form) and is
+    // mentioned ON the outgoing Messages event.
+    let phone_id = Entity::derive_id("phone", HANDLE_DIGITS);
+    let entities = store.list_resolvable_entities().unwrap();
+    assert!(
+        entities
+            .iter()
+            .any(|e| e.id == phone_id && e.kind == "phone"),
+        "a phone entity was extracted for the recipient handle ({entities:?})"
+    );
+    let cooccurrences = store.entity_cooccurrences().unwrap();
+    assert!(
+        cooccurrences
+            .iter()
+            .any(|(eid, members)| *eid == msg_id && members.contains(&phone_id)),
+        "the recipient handle is mentioned on the outgoing event ({cooccurrences:?})"
+    );
+
+    // 2) ~30 s later the SAME number appears in a Safari page — production
+    //    screen/page pump, SAME content-stable phone entity.
+    let brain = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, None);
+    let page_ts = (BASE_UNIX_S as u64 + 1) * S + 30 * S; // 30 s after the text
+    brain
+        .ingest_ocr_event(&safari_page(page_ts, "Call Jamie back at +15551234567"))
+        .expect("ingest safari page");
+
+    // 3) Segment → resolve → consolidate, via the production workers.
+    let seg_store = Arc::clone(&store);
+    one_cycle(move |rx| async move {
+        episode_worker::run_episode_worker(
+            seg_store,
+            Arc::new(HeuristicEpisodeSegmenter::new()),
+            64,
+            Duration::from_millis(50),
+            rx,
+        )
+        .await
+        .unwrap()
+    })
+    .await;
+
+    let alias_store = Arc::clone(&store);
+    one_cycle(move |rx| async move {
+        alias_resolver_worker::run_alias_resolver_worker(alias_store, Duration::from_millis(50), rx)
+            .await
+            .unwrap()
+    })
+    .await;
+
+    // The bare recipient handle anchored its OWN Person identity (Phase C).
+    let memberships = store.identity_of_entity(&phone_id).unwrap();
+    assert_eq!(
+        memberships.len(),
+        1,
+        "the recipient handle resolves to exactly one identity"
+    );
+    let membership = &memberships[0];
+    assert_eq!(membership.identity_kind, "person", "handle → Person identity");
+    assert_eq!(
+        membership.rule, "handle_anchor",
+        "anchored purely by the handle (no contact name)"
+    );
+    let identity = membership.identity_id.clone();
+
+    let cons_store = Arc::clone(&store);
+    let stats = one_cycle(move |rx| async move {
+        consolidator_worker::run_consolidator_worker(cons_store, Duration::from_millis(50), rx)
+            .await
+            .unwrap()
+    })
+    .await;
+    assert!(stats.cycles_run >= 1);
+    assert_eq!(stats.store_errors, 0);
+    assert!(
+        stats.edges_written >= 1,
+        "wrote ≥1 cross-app dot-connect edge"
+    );
+
+    // 4) THE DOT-CONNECT QUERY: recipient identity → edges → linked events.
+    let edges = store.episode_edges_for_identity(&identity).unwrap();
+    assert_eq!(edges.len(), 1, "exactly one cross-app link for this handle");
+    assert_eq!(
+        edges[0].edge_kind,
+        mci_brain::EpisodeEdge::KIND_SHARED_IDENTITY
+    );
+    let evidence: Vec<String> =
+        serde_json::from_str(edges[0].evidence_entity_ids.as_deref().unwrap()).unwrap();
+    assert!(
+        evidence.contains(&phone_id.0),
+        "the recipient handle entity is the edge evidence ({evidence:?})"
+    );
+
+    // The connected hit holds the OUTGOING Messages event AND the Safari
+    // event — "I texted them, then looked them up".
+    let mut apps: Vec<String> = Vec::new();
+    for ep in [edges[0].src_episode_id, edges[0].dst_episode_id] {
+        for ev in store.events_in_episode(ep, 10).unwrap() {
+            apps.push(ev.app_bundle_id.unwrap_or_default());
+        }
+    }
+    assert!(
+        apps.iter().any(|a| a == MESSAGES),
+        "the connected hit includes the outgoing Messages event ({apps:?})"
     );
     assert!(
         apps.iter().any(|a| a == SAFARI),
