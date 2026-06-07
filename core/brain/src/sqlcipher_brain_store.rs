@@ -33,6 +33,7 @@
 //! sign-off block on PR P3.2 asserts the ADR-0008 + ADR-0016 §4
 //! invariants in source (see the PR body).
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -47,6 +48,7 @@ use mci_core::store::{
     open as mci_core_open, open_readonly as mci_core_open_readonly, Db,
     StoreError as CoreStoreError,
 };
+use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter};
 
 use crate::{
@@ -251,9 +253,9 @@ impl SqlCipherBrainStore {
     /// [`StoreError::Backend`] on any rusqlite failure.
     pub fn stats(&self) -> Result<BrainStats, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
-        // One query — COUNT + MIN + MAX over the same scan.
-        let row = guard
-            .conn()
+        let conn = guard.conn();
+        // One query — COUNT + MIN + MAX over the same events scan.
+        let row = conn
             .query_row(
                 "SELECT COUNT(*), MIN(ts_us), MAX(ts_us) FROM events",
                 [],
@@ -266,10 +268,27 @@ impl SqlCipherBrainStore {
             )
             .map_err(|e| StoreError::Backend(format!("query stats: {e}")))?;
         let (count, min_ts, max_ts) = row;
+        // Four scalar counts over the V2-P6 graph tables (Phase-6 close).
+        // Each is a cheap COUNT(*) over a table the current schema (0004 +
+        // 0005) always provides; the readers only ever open a migrated DB.
+        let table_count = |sql: &str| -> Result<u64, StoreError> {
+            let n: i64 = conn
+                .query_row(sql, [], |r| r.get(0))
+                .map_err(|e| StoreError::Backend(format!("query stats graph count: {e}")))?;
+            Ok(u64::try_from(n).unwrap_or(0))
+        };
+        let entity_count = table_count("SELECT COUNT(*) FROM entities")?;
+        let entity_mention_count = table_count("SELECT COUNT(*) FROM entity_mentions")?;
+        let entity_identity_count = table_count("SELECT COUNT(*) FROM entity_identities")?;
+        let episode_edge_count = table_count("SELECT COUNT(*) FROM episode_edges")?;
         Ok(BrainStats {
             event_count: u64::try_from(count).unwrap_or(0),
             oldest_ts_us: min_ts.map(|v| u64::try_from(v).unwrap_or(0)),
             newest_ts_us: max_ts.map(|v| u64::try_from(v).unwrap_or(0)),
+            entity_count,
+            entity_mention_count,
+            entity_identity_count,
+            episode_edge_count,
         })
     }
 
@@ -2261,6 +2280,148 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 url,
                 text_snippet: EventRecord::truncate_snippet(&text),
             });
+        }
+        Ok(out)
+    }
+
+    // -----------------------------------------------------------------------
+    // Recall-surface fusion (Phase-6 close) — query-side entity reads
+    // -----------------------------------------------------------------------
+
+    fn mention_match_for_events(
+        &self,
+        query_entity_ids: &[EntityId],
+        candidate_ids: &[EventId],
+    ) -> Result<HashMap<EventId, u32>, StoreError> {
+        if query_entity_ids.is_empty() || candidate_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        // Two positional IN-lists: candidate event ids (INTEGER) then
+        // query entity ids (TEXT). Bound counts are small — candidate_ids
+        // ≤ k_lex + k_sem (default 400) and query_entity_ids is a handful —
+        // so the total stays far under SQLite's variable limit.
+        let events_in = vec!["?"; candidate_ids.len()].join(",");
+        let entities_in = vec!["?"; query_entity_ids.len()].join(",");
+        let sql = format!(
+            "SELECT event_id, COUNT(*) FROM entity_mentions
+             WHERE event_id IN ({events_in}) AND entity_id IN ({entities_in})
+             GROUP BY event_id"
+        );
+        let mut binds: Vec<Value> =
+            Vec::with_capacity(candidate_ids.len() + query_entity_ids.len());
+        for id in candidate_ids {
+            binds.push(Value::Integer(i64::try_from(id.0).unwrap_or(i64::MAX)));
+        }
+        for eid in query_entity_ids {
+            binds.push(Value::Text(eid.0.clone()));
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare mention_match_for_events: {e}")))?;
+        let rows = stmt
+            .query_map(params_from_iter(binds.iter()), |r| {
+                let event_id: i64 = r.get(0)?;
+                let count: i64 = r.get(1)?;
+                Ok((event_id, count))
+            })
+            .map_err(|e| StoreError::Backend(format!("query mention_match_for_events: {e}")))?;
+        let mut out: HashMap<EventId, u32> = HashMap::new();
+        for r in rows {
+            let (event_id, count) =
+                r.map_err(|e| StoreError::Backend(format!("row mention_match: {e}")))?;
+            out.insert(
+                EventId(u64::try_from(event_id).unwrap_or(0)),
+                u32::try_from(count).unwrap_or(u32::MAX),
+            );
+        }
+        Ok(out)
+    }
+
+    fn entity_names_for_event(
+        &self,
+        event_id: EventId,
+        limit: usize,
+    ) -> Result<Vec<String>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        // Restrict to the resolver allowlist (person/org/location/email/
+        // phone/url) so a `redacted_token` subkind label can never surface.
+        let placeholders = resolvable_kinds_placeholders();
+        let sql = format!(
+            "SELECT DISTINCT en.canonical_name
+             FROM entity_mentions m JOIN entities en ON en.id = m.entity_id
+             WHERE m.event_id = ? AND en.kind IN ({placeholders})
+             ORDER BY en.canonical_name
+             LIMIT ?"
+        );
+        let mut binds: Vec<Value> = Vec::with_capacity(RESOLVABLE_KINDS.len() + 2);
+        binds.push(Value::Integer(i64::try_from(event_id.0).unwrap_or(i64::MAX)));
+        for k in RESOLVABLE_KINDS {
+            binds.push(Value::Text((*k).to_string()));
+        }
+        binds.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare entity_names_for_event: {e}")))?;
+        let rows = stmt
+            .query_map(params_from_iter(binds.iter()), |r| r.get::<_, String>(0))
+            .map_err(|e| StoreError::Backend(format!("query entity_names_for_event: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| StoreError::Backend(format!("row entity_name: {e}")))?);
+        }
+        Ok(out)
+    }
+
+    fn linked_event_ids_for_event(
+        &self,
+        event_id: EventId,
+        limit: usize,
+    ) -> Result<Vec<EventId>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let ev = i64::try_from(event_id.0).unwrap_or(i64::MAX);
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        // Walk: hit event e0 → its episode → every `shared_identity` edge
+        // touching that episode → the OTHER endpoint episode → its events e2.
+        // Post-cascade only (`e2.cascade_reason = 0`, mirroring the
+        // consolidation_candidates wall at this file's L1969-1974), excludes
+        // the hit itself, newest first.
+        let sql = "SELECT DISTINCT e2.id
+             FROM events e0
+             JOIN episode_edges ee
+               ON ee.edge_kind = ?1
+              AND (ee.src_episode_id = e0.episode_id OR ee.dst_episode_id = e0.episode_id)
+             JOIN events e2
+               ON e2.episode_id = CASE WHEN ee.src_episode_id = e0.episode_id
+                                       THEN ee.dst_episode_id ELSE ee.src_episode_id END
+             WHERE e0.id = ?2
+               AND e0.episode_id IS NOT NULL
+               AND e2.cascade_reason = 0
+               AND e2.id <> e0.id
+             ORDER BY e2.ts_us DESC
+             LIMIT ?3";
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(sql)
+            .map_err(|e| StoreError::Backend(format!("prepare linked_event_ids_for_event: {e}")))?;
+        let rows = stmt
+            .query_map(
+                params![EpisodeEdge::KIND_SHARED_IDENTITY, ev, lim],
+                |r| r.get::<_, i64>(0),
+            )
+            .map_err(|e| StoreError::Backend(format!("query linked_event_ids_for_event: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let id = r.map_err(|e| StoreError::Backend(format!("row linked_event: {e}")))?;
+            out.push(EventId(u64::try_from(id).unwrap_or(0)));
         }
         Ok(out)
     }

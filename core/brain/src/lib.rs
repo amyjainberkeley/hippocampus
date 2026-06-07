@@ -199,6 +199,20 @@ pub struct BrainStats {
     pub oldest_ts_us: Option<u64>,
     /// Largest `events.ts_us`. `None` when the store is empty.
     pub newest_ts_us: Option<u64>,
+    /// Total rows in `entities` — the V2-P6 graph node count (people,
+    /// orgs, locations, urls, …). `0` on a store with no graph tables
+    /// written yet.
+    pub entity_count: u64,
+    /// Total rows in `entity_mentions` — the event→entity provenance
+    /// edges the extractors (regex + NER) wrote.
+    pub entity_mention_count: u64,
+    /// Total rows in `entity_identities` — the alias→canonical-identity
+    /// memberships the `AliasResolver` (V2-P6) clustered.
+    pub entity_identity_count: u64,
+    /// Total rows in `episode_edges` — the cross-app dot-connect links
+    /// the Consolidator (V2-P6) derived (`shared_identity` + reserved
+    /// kinds).
+    pub episode_edge_count: u64,
 }
 
 pub mod episode_segmenter;
@@ -896,6 +910,90 @@ pub trait BrainStore: Send + Sync {
         Err(StoreError::Other(
             "events_in_episode not supported by this BrainStore impl (V2-P6)".into(),
         ))
+    }
+
+    // -----------------------------------------------------------------------
+    // Recall-surface fusion (Phase-6 close) — query-side entity reads
+    //
+    // Unlike every V2-P3/P6 method above (which defaults to `Err` so a
+    // pre-V2 wrapper asked to WRITE or traverse the graph fails loudly),
+    // these are *additive read* surfaces for recall fusion + the `mci_recall`
+    // output. They default to `Ok(empty)` so a backend with no graph tables
+    // (`InMemoryBrainStore`, the headless-test store; the recording/
+    // sanitizing wrappers) degrades to "no entity signal / no linked events"
+    // rather than erroring the whole recall — recall must never regress
+    // because the graph surface is unavailable. Real SQL lives only in the
+    // production `SqlCipherBrainStore`.
+    // -----------------------------------------------------------------------
+
+    /// Count, per candidate event, how many of its `entity_mentions`
+    /// reference one of `query_entity_ids` — the per-event signal the
+    /// `w_entity` arm of the hybrid fusion (ADR-0010 §5 + the Phase-6-close
+    /// recall-surface fusion) consumes. Backs
+    /// `SELECT event_id, COUNT(*) FROM entity_mentions WHERE event_id IN (…)
+    /// AND entity_id IN (…) GROUP BY event_id` in the production impl.
+    ///
+    /// Events with zero matching mentions are **absent** from the map (the
+    /// caller treats a missing key as `0`). Returns an empty map when either
+    /// input slice is empty.
+    ///
+    /// Default `Ok(HashMap::new())` — a backend without the graph tables
+    /// contributes no entity signal, so the entity arm is inert.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure (production impl only).
+    fn mention_match_for_events(
+        &self,
+        _query_entity_ids: &[EntityId],
+        _candidate_ids: &[EventId],
+    ) -> Result<std::collections::HashMap<EventId, u32>, StoreError> {
+        Ok(std::collections::HashMap::new())
+    }
+
+    /// The canonical names of the resolver-allowlist entities (`person_name`
+    /// / `organization` / `location` / `email` / `phone` / `url` — **never**
+    /// a `redacted_token`) that `event_id` mentions, deduped and ordered,
+    /// capped at `limit`. Powers the additive `entities[]` field of
+    /// `mci_recall`.
+    ///
+    /// Restricting to the resolver allowlist mirrors
+    /// [`Self::list_resolvable_entities`] so a REDACT-classed token's subkind
+    /// label can never reach the recall surface. `limit == 0` returns
+    /// `Ok(vec![])`.
+    ///
+    /// Default `Ok(vec![])`.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure (production impl only).
+    fn entity_names_for_event(
+        &self,
+        _event_id: EventId,
+        _limit: usize,
+    ) -> Result<Vec<String>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    /// The cross-app dot-connect: event ids reachable from `event_id`'s
+    /// episode via a `shared_identity` [`EpisodeEdge`] (the V2-P6
+    /// Consolidator's link). Walks `event → episode → shared_identity edge →
+    /// linked episode → its events`. Restricted to **post-cascade**
+    /// (`cascade_reason = 0`) events, **excludes `event_id` itself**, newest
+    /// first, capped at `limit`. Powers the additive `linked_event_ids[]`
+    /// field of `mci_recall`.
+    ///
+    /// `limit == 0`, an unsegmented hit (`episode_id IS NULL`), or an episode
+    /// with no cross-app link all return `Ok(vec![])`.
+    ///
+    /// Default `Ok(vec![])`.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on SQLite failure (production impl only).
+    fn linked_event_ids_for_event(
+        &self,
+        _event_id: EventId,
+        _limit: usize,
+    ) -> Result<Vec<EventId>, StoreError> {
+        Ok(Vec::new())
     }
 }
 

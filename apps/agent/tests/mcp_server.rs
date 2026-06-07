@@ -72,6 +72,10 @@ impl StubBrainReader {
                 event_count: 42,
                 oldest_ts_us: Some(1_000_000),
                 newest_ts_us: Some(9_000_000),
+                entity_count: 5,
+                entity_mention_count: 11,
+                entity_identity_count: 2,
+                episode_edge_count: 1,
             },
             episode_records: vec![sample_episode(
                 1,
@@ -163,6 +167,8 @@ fn sample_hit(id: u64, ts_us: u64, text: &str, url: Option<&str>) -> McpHit {
             text_snippet: text.to_owned(),
         },
         score: 0.875,
+        entities: Vec::new(),
+        linked_event_ids: Vec::new(),
     }
 }
 

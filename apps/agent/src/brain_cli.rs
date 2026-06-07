@@ -24,6 +24,11 @@ pub fn format_stats_human(s: &BrainStats) -> String {
         Some(ts) => out.push_str(&format!("Newest: {} ({})\n", format_ts_us(ts), ts)),
         None => out.push_str("Newest: (none)\n"),
     }
+    // V2-P6 graph surface (Phase-6 close).
+    out.push_str(&format!("Entities: {}\n", s.entity_count));
+    out.push_str(&format!("Entity mentions: {}\n", s.entity_mention_count));
+    out.push_str(&format!("Identities: {}\n", s.entity_identity_count));
+    out.push_str(&format!("Episode links: {}\n", s.episode_edge_count));
     out
 }
 
@@ -33,6 +38,10 @@ pub fn format_stats_json(s: &BrainStats) -> String {
         "event_count": s.event_count,
         "oldest_ts_us": s.oldest_ts_us,
         "newest_ts_us": s.newest_ts_us,
+        "entity_count": s.entity_count,
+        "entity_mention_count": s.entity_mention_count,
+        "entity_identity_count": s.entity_identity_count,
+        "episode_edge_count": s.episode_edge_count,
     })
     .to_string()
 }

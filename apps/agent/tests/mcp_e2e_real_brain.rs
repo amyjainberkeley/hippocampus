@@ -23,8 +23,11 @@ use mci_agent::mcp::{
     JsonRpcId, JsonRpcRequest, JsonRpcResponse, LiveBrainReader, Server, ServerCounters,
     INVALID_PARAMS, METHOD_NOT_FOUND,
 };
+use mci_brain::episode_segmenter::{EpisodeId, EpisodeWriter};
+use mci_brain::extraction::tier2::KIND_PERSON_NAME;
+use mci_brain::graph::{Entity, EntityIdentity, EntityMention, EpisodeEdge};
 use mci_brain::stubs::FixedDimEmbedder;
-use mci_brain::{BrainStore, Embedder, Event, EventId, SqlCipherBrainStore};
+use mci_brain::{BrainStore, Embedder, Event, EventId, IdentityId, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 
 // ---------------------------------------------------------------------------
@@ -1080,5 +1083,346 @@ fn two_brains_are_isolated() {
             .and_then(|s| s.get("event_count"))
             .and_then(|v| v.as_u64()),
         Some(2)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase-6-close recall-surface fusion — additive entities[] /
+// linked_event_ids[] + graph stat counts surface through Server::dispatch.
+// ---------------------------------------------------------------------------
+
+fn graph_entity(kind: &str, name: &str) -> Entity {
+    Entity {
+        id: Entity::derive_id(kind, name),
+        kind: kind.to_string(),
+        canonical_name: name.to_string(),
+        summary: None,
+        summary_embedding: None,
+        content_hash: Entity::derive_content_hash(kind, name),
+        created_ts_us: 1,
+        updated_ts_us: 1,
+    }
+}
+
+fn graph_mention(entity: &Entity, event_id: EventId) -> EntityMention {
+    EntityMention {
+        id: EntityMention::derive_id(&entity.id, event_id, "ner", None),
+        entity_id: entity.id.clone(),
+        event_id,
+        mention_text: None,
+        confidence: 1.0,
+        extractor_kind: "ner".to_string(),
+        ts_us: 1,
+    }
+}
+
+fn graph_shared_edge(a: EpisodeId, b: EpisodeId, identity: &IdentityId) -> EpisodeEdge {
+    let (lo, hi) = if a.0 <= b.0 { (a, b) } else { (b, a) };
+    EpisodeEdge {
+        id: EpisodeEdge::derive_shared_identity_id(lo, hi, identity),
+        src_episode_id: lo,
+        dst_episode_id: hi,
+        edge_kind: EpisodeEdge::KIND_SHARED_IDENTITY.to_string(),
+        evidence_entity_ids: None,
+        ts_us: 1,
+    }
+}
+
+/// WIRING-PROOF (MCP output): a real cross-app graph seeded under the store,
+/// recalled through the production `LiveBrainReader` → `Server::dispatch`,
+/// returns the additive `entities[]` + `linked_event_ids[]` on the hit.
+#[test]
+fn recall_surfaces_entities_and_cross_app_linked_event_ids() {
+    let (_dir, store) = open_temp_store();
+
+    // ep1 = Safari (the pricing page the query finds), ep2 = Messages.
+    let ep1 = store
+        .create_episode(0, 100, Some("com.apple.Safari"))
+        .unwrap();
+    let ep2 = store
+        .create_episode(0, 100, Some("com.apple.MobileSMS"))
+        .unwrap();
+
+    let alice = graph_entity(KIND_PERSON_NAME, "Alice");
+    store.put_entity(&alice).unwrap();
+
+    // E1 (Safari): the lexical hit for "pricing", mentioning Alice.
+    let e1 = Event {
+        episode_id: Some(ep1.0),
+        ..make_event("quarterly pricing roadmap", 1_000_000)
+    };
+    let id1 = store.put_event(&e1).unwrap();
+    store.put_entity_mention(&graph_mention(&alice, id1)).unwrap();
+
+    // E2 (Messages): the cross-app counterpart, in ep2.
+    let e2 = Event {
+        episode_id: Some(ep2.0),
+        ..make_event("note to alice about it", 1_100_000)
+    };
+    let id2 = store.put_event(&e2).unwrap();
+    store.put_entity_mention(&graph_mention(&alice, id2)).unwrap();
+
+    let identity = EntityIdentity::derive_identity_id("person", "alice");
+    store
+        .put_episode_edges(&[graph_shared_edge(ep1, ep2, &identity)])
+        .unwrap();
+
+    // FTS5-only recall — the enrichment runs on every hit regardless of the
+    // hybrid/lexical path. "pricing" matches E1's text.
+    let srv = server_fts_only(store);
+    let result = extract_result(srv.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({
+            "name": "mci_recall",
+            "arguments": { "query": "pricing", "limit": 10 }
+        })),
+    )));
+
+    let hits = result.get("hits").and_then(|v| v.as_array()).expect("hits");
+    let hit = hits
+        .iter()
+        .find(|h| h.get("event_id").and_then(serde_json::Value::as_u64) == Some(id1.0))
+        .expect("E1 must be a recall hit");
+
+    // Additive schema present + populated.
+    let entities: Vec<&str> = hit
+        .get("entities")
+        .and_then(|v| v.as_array())
+        .expect("entities[] present")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert_eq!(entities, vec!["Alice"], "hit must surface its mentioned entity");
+
+    let linked: Vec<u64> = hit
+        .get("linked_event_ids")
+        .and_then(|v| v.as_array())
+        .expect("linked_event_ids[] present")
+        .iter()
+        .filter_map(serde_json::Value::as_u64)
+        .collect();
+    assert_eq!(
+        linked,
+        vec![id2.0],
+        "cross-app dot-connect: E1's episode links to E2 via the shared_identity edge"
+    );
+}
+
+/// The four new V2-P6 graph counts surface through the `mci_stats` tool.
+#[test]
+fn stats_surfaces_graph_counts_through_server() {
+    let (_dir, store) = open_temp_store();
+    let ep1 = store
+        .create_episode(0, 100, Some("com.apple.Safari"))
+        .unwrap();
+    let ep2 = store
+        .create_episode(0, 100, Some("com.apple.MobileSMS"))
+        .unwrap();
+    let alice = graph_entity(KIND_PERSON_NAME, "Alice");
+    store.put_entity(&alice).unwrap();
+    let e1 = Event {
+        episode_id: Some(ep1.0),
+        ..make_event("pricing", 1_000_000)
+    };
+    let id1 = store.put_event(&e1).unwrap();
+    let e2 = Event {
+        episode_id: Some(ep2.0),
+        ..make_event("alice", 1_100_000)
+    };
+    store.put_event(&e2).unwrap();
+    store.put_entity_mention(&graph_mention(&alice, id1)).unwrap();
+    let identity = EntityIdentity::derive_identity_id("person", "alice");
+    store
+        .put_entity_identity(&EntityIdentity {
+            id: EntityIdentity::derive_id(&identity, &alice.id),
+            entity_id: alice.id.clone(),
+            identity_id: identity.clone(),
+            identity_kind: "person".into(),
+            identity_canonical_name: "Alice".into(),
+            rule: "anchor".into(),
+            confidence: 1.0,
+            ts_us: 1,
+        })
+        .unwrap();
+    store
+        .put_episode_edges(&[graph_shared_edge(ep1, ep2, &identity)])
+        .unwrap();
+
+    let srv = server_fts_only(store);
+    let result = extract_result(srv.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({"name": "mci_stats", "arguments": {}})),
+    )));
+    let stats = result.get("stats").expect("stats");
+    assert_eq!(stats.get("entity_count").and_then(|v| v.as_u64()), Some(1));
+    assert_eq!(
+        stats.get("entity_mention_count").and_then(|v| v.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        stats.get("entity_identity_count").and_then(|v| v.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        stats.get("episode_edge_count").and_then(|v| v.as_u64()),
+        Some(1)
+    );
+}
+
+/// PRODUCTION-PATH WIRING PROOF — the `w_entity` arm fires through the
+/// `FtsSanitizingStore` decorator the live hybrid recall path wraps the store
+/// in. This is the construction-graph proof the bounce of PR #307 exists for.
+///
+/// The arm, its store reads, and the `recall_fusion.rs` integration tests all
+/// shipped at the inert commit — but `recall_fusion.rs` drives
+/// `HybridRetriever` over the **concrete** `SqlCipherBrainStore`, so it never
+/// exercised the production decorator. `LiveBrainReader::recall_hybrid` wraps
+/// the store in `FtsSanitizingStore` before handing it to the retriever; until
+/// that wrapper delegated the query-side entity reads
+/// (`mention_match_for_events` / `find_entity_by_alias` / `identity_of_entity` /
+/// `identity_members`) to the inner store, those calls hit the `BrainStore`
+/// trait defaults (`Ok(empty)` / `Err`, both swallowed) and the entity arm was
+/// silently `0` for every candidate in production — the exact inertness this
+/// test catches.
+///
+/// Seed: two events tying on lexical + semantic signal (identical text +
+/// identical `FixedDimEmbedder` embedding). `e_alice` is OLDER but carries an
+/// NER mention of `Alice` and sits in a Safari episode cross-app-linked to a
+/// Messages episode; `e_plain` is NEWER and mentions nothing — so absent the
+/// entity arm `e_plain` wins on recency. A query naming `Alice` must rank
+/// `e_alice` above `e_plain` (arm fired through the wrapper) and surface the
+/// dot-connect (`entities == [Alice]`, `linked_event_ids` populated).
+#[test]
+fn w_entity_arm_fires_through_fts_sanitizing_store_in_production_recall() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    const HOUR_US: u64 = 3_600_000_000;
+
+    let (_dir, store) = open_temp_store();
+    let embedder = Arc::new(FixedDimEmbedder::default());
+
+    // Anchor event timestamps near the real wall clock so the recency arm —
+    // which uses `SystemTime::now()` inside `recall_hybrid`, not injectable —
+    // is meaningful: `e_plain` is the newest, the recency winner the entity
+    // arm must overcome.
+    let now_us = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros(),
+    )
+    .unwrap();
+
+    // ep1 = Safari (holds the entity hit), ep2 = Messages (cross-app link).
+    let ep1 = store
+        .create_episode(0, 100, Some("com.apple.Safari"))
+        .unwrap();
+    let ep2 = store
+        .create_episode(0, 100, Some("com.apple.MobileSMS"))
+        .unwrap();
+
+    let alice = graph_entity(KIND_PERSON_NAME, "Alice");
+    store.put_entity(&alice).unwrap();
+
+    // e_alice: older, in ep1, mentions Alice via NER. The literal text does
+    // NOT contain "Alice" (a resolved-mention scenario) — so the entity arm,
+    // not lexical overlap, is what can lift it.
+    let e_alice = Event {
+        episode_id: Some(ep1.0),
+        ..make_event_with_embedding(
+            "pricing discussion notes",
+            now_us - HOUR_US - 60_000_000,
+            embedder.as_ref(),
+        )
+    };
+    let id_alice = store.put_event(&e_alice).unwrap();
+    store
+        .put_entity_mention(&graph_mention(&alice, id_alice))
+        .unwrap();
+
+    // e_plain: newest, identical text + embedding, no mention, no episode —
+    // wins on recency absent the entity arm.
+    let e_plain = make_event_with_embedding(
+        "pricing discussion notes",
+        now_us - 60_000_000,
+        embedder.as_ref(),
+    );
+    let id_plain = store.put_event(&e_plain).unwrap();
+
+    // e_linked: cross-app counterpart in ep2, reachable from e_alice's episode
+    // via the shared_identity edge.
+    let e_linked = Event {
+        episode_id: Some(ep2.0),
+        ..make_event_with_embedding(
+            "note to alice about it",
+            now_us - 2 * HOUR_US,
+            embedder.as_ref(),
+        )
+    };
+    let id_linked = store.put_event(&e_linked).unwrap();
+
+    let identity = EntityIdentity::derive_identity_id("person", "alice");
+    store
+        .put_episode_edges(&[graph_shared_edge(ep1, ep2, &identity)])
+        .unwrap();
+
+    // Drive the PRODUCTION hybrid path: `server_with_embedder` builds a
+    // `LiveBrainReader` whose `recall_hybrid` wraps the store in
+    // `FtsSanitizingStore`.
+    let srv = server_with_embedder(store, embedder);
+    let result = extract_result(srv.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({
+            "name": "mci_recall",
+            "arguments": { "query": "Alice pricing discussion", "limit": 10 }
+        })),
+    )));
+
+    let hits = result
+        .get("hits")
+        .and_then(|v| v.as_array())
+        .expect("hits array");
+    let pos = |id: u64| {
+        hits.iter()
+            .position(|h| h.get("event_id").and_then(serde_json::Value::as_u64) == Some(id))
+    };
+    let pos_alice = pos(id_alice.0).expect("e_alice must be a recall hit");
+    let pos_plain = pos(id_plain.0).expect("e_plain must be a recall hit");
+
+    // THE WIRING PROOF: the entity-naming query lifts the older Alice-
+    // mentioning event above the newer plain recency winner. Fails when the
+    // w_entity arm is inert (FtsSanitizingStore not delegating the entity
+    // reads) — both events then tie on lex+sem and e_plain wins on recency.
+    assert!(
+        pos_alice < pos_plain,
+        "w_entity arm must rank the Alice-mentioning event (pos {pos_alice}) above the \
+         recency winner (pos {pos_plain}); the arm is inert through FtsSanitizingStore. hits={hits:?}"
+    );
+
+    // Dot-connect surface on the entity hit.
+    let alice_hit = &hits[pos_alice];
+    let entities: Vec<&str> = alice_hit
+        .get("entities")
+        .and_then(|v| v.as_array())
+        .expect("entities[] present")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert_eq!(
+        entities,
+        vec!["Alice"],
+        "entity hit must surface its mentioned entity"
+    );
+
+    let linked: Vec<u64> = alice_hit
+        .get("linked_event_ids")
+        .and_then(|v| v.as_array())
+        .expect("linked_event_ids[] present")
+        .iter()
+        .filter_map(serde_json::Value::as_u64)
+        .collect();
+    assert!(
+        linked.contains(&id_linked.0),
+        "cross-app dot-connect: e_alice's episode must link to e_linked via the \
+         shared_identity edge; got {linked:?}"
     );
 }

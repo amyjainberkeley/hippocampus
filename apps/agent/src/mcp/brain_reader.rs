@@ -24,6 +24,18 @@ pub struct McpHit {
     /// `-bm25(events_fts)` score from `BrainStore::fts5_search`. Higher
     /// is better.
     pub score: f32,
+    /// **Additive (Phase-6 close).** Canonical names of the resolver-
+    /// allowlist entities (person / org / location / email / phone / url —
+    /// never a redacted token) this hit's event mentions. Empty when the
+    /// store has no graph data or the event mentions nothing in the
+    /// allowlist. Filled by `BrainStore::entity_names_for_event`.
+    pub entities: Vec<String>,
+    /// **Additive (Phase-6 close).** The cross-app dot-connect: event ids
+    /// reachable from this hit's episode via a `shared_identity`
+    /// `episode_edge` (the V2-P6 Consolidator's link). Empty when the hit's
+    /// episode has no cross-app link. Filled by
+    /// `BrainStore::linked_event_ids_for_event` (post-cascade only).
+    pub linked_event_ids: Vec<u64>,
 }
 
 /// Errors a [`BrainReader`] may surface to the MCP dispatcher.
