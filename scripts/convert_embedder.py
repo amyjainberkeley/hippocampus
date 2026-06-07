@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """Convert Snowflake/snowflake-arctic-embed-s to Core ML .mlpackage.
 
-Wave-17 schema (CEO + CRS ratified 2026-05-22):
+Wave-17 schema (CEO + CRS ratified 2026-05-22; fixed-shape erratum
+2026-06-06):
 
-    Input  input_ids       Int32     [1, 128]
-    Input  attention_mask  Int32     [1, 128]
-    Output embedding       Float32   [384]   (CLS-pooled + L2-normalized in graph)
+    Input  input_ids       Int32     [1, 128]   (FIXED, not RangeDim)
+    Input  attention_mask  Int32     [1, 128]   (FIXED, not RangeDim)
+    Output embedding       Float32   [1, 384]   (CLS-pooled + L2-normalized in graph)
+
+The input shapes are FIXED (1, 128), not RangeDim(1, 128): the Rust runtime
+always feeds exactly 128 tokens, and the fixed inputs let coremltools infer
+a static [1, 384] output instead of the data-dependent [?, 384] that forced
+Espresso onto a slow CPU-fallback path and spewed an "Invalid blob shape"
+E5RT line. See the inline note at the ct.convert call.
 
 The CLS-pool and L2-normalize are INSIDE the Core ML graph so the
 Rust runtime receives a unit vector with no post-processing. The
@@ -304,19 +311,29 @@ def convert(
     )
 
     log.info("Converting to Core ML...")
+    # FIXED input shapes — (1, 128), NOT ct.RangeDim(1, 128).
+    #
+    # Why fixed: the Rust runtime always feeds exactly MAX_SEQ_LEN (128)
+    # tokens — it pads with [PAD] (id 0) and truncates to fit (see
+    # mci-embed-coreml `forward` + `build_int32_multiarray_1xn`). A RangeDim
+    # buys nothing the runtime uses, and it leaves the `embedding` output
+    # shape data-dependent: with no shape declared on the output, the
+    # dynamic seq dim propagated to `embedding - [?, 384]`, which Espresso's
+    # ANE/GPU path refuses to materialize at inference ("Invalid blob shape:
+    # Data-dependent shapes were disabled"), forcing a silent CPU fallback
+    # (~29 ms) and an alarming E5RT line on stderr. Pinning the inputs to a
+    # fixed (1, 128) lets coremltools statically infer the output as
+    # [1, 384] (no shapeRange), which removes the error at the root and makes
+    # the graph GPU/ANE-eligible (measured ~1.2-2.2 ms). The output
+    # TensorType stays name+dtype only: coremltools infers its shape from
+    # the now-fixed inputs (a `shape=` kwarg on an *output* TensorType is not
+    # honored — the static [1, 384] comes from the fixed inputs, verified via
+    # spec.description.output[0].type.multiArrayType.shape == [1, 384]).
     mlmodel = ct.convert(
         traced,
         inputs=[
-            ct.TensorType(
-                name="input_ids",
-                shape=(1, ct.RangeDim(1, MAX_SEQ_LEN)),
-                dtype=np.int32,
-            ),
-            ct.TensorType(
-                name="attention_mask",
-                shape=(1, ct.RangeDim(1, MAX_SEQ_LEN)),
-                dtype=np.int32,
-            ),
+            ct.TensorType(name="input_ids", shape=(1, MAX_SEQ_LEN), dtype=np.int32),
+            ct.TensorType(name="attention_mask", shape=(1, MAX_SEQ_LEN), dtype=np.int32),
         ],
         outputs=[ct.TensorType(name="embedding", dtype=np.float32)],
         compute_units=ct.ComputeUnit.CPU_AND_NE,
@@ -360,10 +377,27 @@ def convert(
         loaded = ct.models.MLModel(output_path)
         spec = loaded.get_spec()
         out_desc = spec.description.output[0]
+        out_shape = list(out_desc.type.multiArrayType.shape)
+        out_ranges = list(out_desc.type.multiArrayType.shapeRange.sizeRanges)
         log.info(
-            "  Output: %s, shape: %s",
+            "  Output: %s, shape: %s, shapeRange: %s",
             out_desc.name,
-            out_desc.type.multiArrayType.shape,
+            out_shape,
+            [(r.lowerBound, r.upperBound) for r in out_ranges],
+        )
+        # Fixed-shape contract (2026-06-06 erratum): the output must be a
+        # static [1, 384] with NO symbolic/data-dependent dim. A non-empty
+        # shapeRange or a non-[1, 384] shape means the data-dependent-shape
+        # regression is back — that is exactly what triggered the Espresso
+        # "Invalid blob shape" E5RT failover. Fail the conversion loudly.
+        assert out_shape == [1, OUTPUT_DIM], (
+            f"output shape is {out_shape}, expected [1, {OUTPUT_DIM}]. The "
+            "data-dependent-shape regression is back — check that the inputs "
+            "are fixed shape=(1, 128), NOT ct.RangeDim."
+        )
+        assert not out_ranges, (
+            f"output declares a flexible shapeRange {out_ranges}; expected a "
+            "static shape. RangeDim inputs leak a symbolic dim into the output."
         )
 
         test_ids = tokenizer(
