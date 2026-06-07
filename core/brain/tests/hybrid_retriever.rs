@@ -123,6 +123,7 @@ fn pure_semantic_path_ranks_by_embedding_cosine() {
         w_sem: 1.0,
         w_lex: 0.0,
         w_rec: 0.0,
+        w_entity: 0.0,
         w_src: 0.0,
     });
 
@@ -173,6 +174,7 @@ fn pure_lexical_path_ranks_by_fts_match_density() {
         w_sem: 0.0,
         w_lex: 1.0,
         w_rec: 0.0,
+        w_entity: 0.0,
         w_src: 0.0,
     });
 
@@ -206,7 +208,9 @@ fn hybrid_fusion_beats_lexical_only_when_lexical_misses_the_intent() {
     //
     // Pure-lexical (`w_lex = 1`) ranks `dense_lex` on top (denser
     // pseudo-BM25). Default-weight hybrid ranks `semantic_answer` on
-    // top because `w_sem = 0.5` dominates `w_lex = 0.3`.
+    // top because `w_sem = 0.40` still dominates `w_lex = 0.30` (the
+    // Phase-6-close rebalance funded `w_entity` out of `w_sem`/`w_rec`,
+    // and this entity-free query leaves the entity arm at 0).
     let e = embedder();
     let dense_lex = event_at(
         "rust",
@@ -235,6 +239,7 @@ fn hybrid_fusion_beats_lexical_only_when_lexical_misses_the_intent() {
             w_sem: 0.0,
             w_lex: 1.0,
             w_rec: 0.0,
+            w_entity: 0.0,
             w_src: 0.0,
         },
     );
@@ -537,9 +542,10 @@ fn zero_limit_returns_empty_result_set_without_calling_store() {
 fn default_fusion_weights_and_pool_sizes_match_adr_0010() {
     let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let w = r.weights();
-    assert!((w.w_sem - 0.5).abs() < f32::EPSILON);
-    assert!((w.w_lex - 0.3).abs() < f32::EPSILON);
-    assert!((w.w_rec - 0.15).abs() < f32::EPSILON);
+    assert!((w.w_sem - 0.40).abs() < f32::EPSILON);
+    assert!((w.w_lex - 0.30).abs() < f32::EPSILON);
+    assert!((w.w_rec - 0.10).abs() < f32::EPSILON);
+    assert!((w.w_entity - 0.15).abs() < f32::EPSILON);
     assert!((w.w_src - 0.05).abs() < f32::EPSILON);
     assert_eq!(DEFAULT_K_LEX, 200);
 }
@@ -662,29 +668,37 @@ fn rand_f32_unit(state: &mut u64) -> f32 {
 fn property_fused_score_in_unit_interval_for_unit_weights() {
     let mut rng = 0xDEAD_BEEF_CAFE_BABEu64;
     for _ in 0..256 {
+        // Split a unit budget across all FIVE convex arms.
         let a = rand_f32_unit(&mut rng);
         let b = rand_f32_unit(&mut rng) * (1.0 - a);
         let c = rand_f32_unit(&mut rng) * (1.0 - a - b);
-        let d = 1.0 - a - b - c;
+        let en = rand_f32_unit(&mut rng) * (1.0 - a - b - c);
+        let d = 1.0 - a - b - c - en;
         let w = FusionWeights {
             w_sem: a,
             w_lex: b,
             w_rec: c,
+            w_entity: en,
             w_src: d,
         };
 
         let sem = rand_f32_unit(&mut rng);
         let lex = rand_f32_unit(&mut rng);
         let rec = rand_f32_unit(&mut rng);
+        let entity = rand_f32_unit(&mut rng);
         let src = rand_f32_unit(&mut rng);
 
         let fused = w.w_sem.mul_add(
             sem,
-            w.w_lex.mul_add(lex, w.w_rec.mul_add(rec, w.w_src * src)),
+            w.w_lex.mul_add(
+                lex,
+                w.w_rec
+                    .mul_add(rec, w.w_entity.mul_add(entity, w.w_src * src)),
+            ),
         );
         assert!(
             fused >= -1e-6 && fused <= 1.0 + 1e-6,
-            "fused {fused} out of [0,1] for w={w:?} scores=({sem},{lex},{rec},{src})"
+            "fused {fused} out of [0,1] for w={w:?} scores=({sem},{lex},{rec},{entity},{src})"
         );
     }
 }
@@ -702,27 +716,30 @@ fn property_monotonicity_of_fusion() {
             w_sem: 0.1 + rand_f32_unit(&mut rng) * 0.4,
             w_lex: 0.1 + rand_f32_unit(&mut rng) * 0.3,
             w_rec: 0.05 + rand_f32_unit(&mut rng) * 0.2,
+            w_entity: 0.05 + rand_f32_unit(&mut rng) * 0.1,
             w_src: 0.01 + rand_f32_unit(&mut rng) * 0.1,
         };
 
         let base_sem = rand_f32_unit(&mut rng) * 0.8;
         let base_lex = rand_f32_unit(&mut rng);
         let base_rec = rand_f32_unit(&mut rng);
+        let base_entity = rand_f32_unit(&mut rng);
         let base_src = rand_f32_unit(&mut rng);
 
         let bump = 0.01 + rand_f32_unit(&mut rng) * 0.19;
         let bumped_sem = (base_sem + bump).min(1.0);
 
-        let score_lo = w.w_sem.mul_add(
-            base_sem,
-            w.w_lex
-                .mul_add(base_lex, w.w_rec.mul_add(base_rec, w.w_src * base_src)),
-        );
-        let score_hi = w.w_sem.mul_add(
-            bumped_sem,
-            w.w_lex
-                .mul_add(base_lex, w.w_rec.mul_add(base_rec, w.w_src * base_src)),
-        );
+        // The entity arm is held constant across the bump (we only bump
+        // sem), so monotonicity in sem must still hold with it present.
+        let tail = w
+            .w_lex
+            .mul_add(
+                base_lex,
+                w.w_rec
+                    .mul_add(base_rec, w.w_entity.mul_add(base_entity, w.w_src * base_src)),
+            );
+        let score_lo = w.w_sem.mul_add(base_sem, tail);
+        let score_hi = w.w_sem.mul_add(bumped_sem, tail);
         assert!(
             score_hi >= score_lo - 1e-6,
             "monotonicity violated: bumping sem {base_sem}->{bumped_sem} dropped score {score_lo}->{score_hi}"

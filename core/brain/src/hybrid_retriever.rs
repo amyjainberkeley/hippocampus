@@ -20,10 +20,18 @@
 //!   pool (default `k_sem = 200`).
 //! - **Min-max normalization** of both score lists across the
 //!   response set (Bruch et al. ACM TOIS 2023, arXiv:2210.11934).
-//! - **Fuse** per ADR-0010 §5:
-//!   `score = w_sem · sem̂ + w_lex · lex̂ + w_rec · exp(−λ · Δt_h) + w_src · src`
-//!   with default weights [`FusionWeights::default`] =
-//!   `0.5 / 0.3 / 0.15 / 0.05`.
+//! - **Fuse** per ADR-0010 §5 + the Phase-6-close recall-surface fusion:
+//!   `score = w_sem · sem̂ + w_lex · lex̂ + w_rec · exp(−λ · Δt_h)
+//!   + w_entity · ent̂ + w_src · src` with default weights
+//!   [`FusionWeights::default`] = `0.40 / 0.30 / 0.10 / 0.15 / 0.05`.
+//!   `ent̂` is the query-aware deterministic entity-match signal (see
+//!   [`HybridRetriever::derive_query_entity_ids`]): the query is run
+//!   through the Tier-1 regex extractor + an exact alias lookup, the
+//!   matched entities are expanded across their canonical identities, and
+//!   each candidate event is scored by how many of those entities it
+//!   mentions (normalized to `[0, 1]` across the pool). Entity-free
+//!   queries leave the arm at `0` for every candidate — a pure read-only
+//!   no-op vs. the four-arm fusion.
 //! - **App / time pre-filter** drops candidate hits whose `app_bundle_id`
 //!   or `ts_us` does not match the [`RetrievalQuery::app_filter`] /
 //!   [`RetrievalQuery::time_filter`] (the OS-free analog of the SQL
@@ -56,7 +64,11 @@
 //! `cfg(target_os = ...)`, no FFI, no OS-specific deps. Composes with any
 //! `BrainStore` + `Embedder` impl (production `SqlCipherBrainStore` +
 //! `ArcticEmbedSEmbedder`; or `InMemoryBrainStore` + `FixedDimEmbedder`
-//! in headless tests).
+//! in headless tests). The Phase-6-close entity-match arm uses the
+//! pure-Rust [`Tier1Extractor`] (regex bank, no OS deps) plus the
+//! existing `BrainStore` entity reads — it adds no OS surface, and on a
+//! backend without graph tables every entity read degrades to "no
+//! signal" (the arm goes to `0`) rather than erroring recall.
 //!
 //! # Privacy invariants (ADR-0016 §4)
 //!
@@ -69,9 +81,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::extraction::tier1::{Tier1Extractor, KIND_REDACTED_TOKEN};
+use crate::extraction::tier2::{KIND_LOCATION, KIND_ORGANIZATION, KIND_PERSON_NAME};
 use crate::{
-    BrainStore, Embedder, EventId, RetrievalHit, RetrievalQuery, RetrieveError, Retriever,
-    TimeRange,
+    BrainStore, Embedder, EntityId, EventId, RetrievalHit, RetrievalQuery, RetrieveError,
+    Retriever, TimeRange,
 };
 
 // ---------------------------------------------------------------------------
@@ -102,13 +116,20 @@ pub const DEFAULT_HALF_LIFE_HOURS: f32 = 24.0;
 // FusionWeights — defaults per ADR-0010 §5
 // ---------------------------------------------------------------------------
 
-/// Convex-combination weights for the min-max CC fusion (ADR-0010 §5).
+/// Convex-combination weights for the min-max CC fusion (ADR-0010 §5 +
+/// the Phase-6-close recall-surface fusion).
 ///
 /// Weights are convex (each in `[0, 1]`) but the impl does not enforce
-/// `w_sem + w_lex + w_rec + w_src == 1.0` — the fusion is monotone in each
-/// term regardless, and the eval gate at P3.7 close (ADR-0010 §7) tunes
-/// the actual values. The defaults `0.5 / 0.3 / 0.15 / 0.05` are the
-/// ADR-0010 §5 starting set.
+/// `w_sem + w_lex + w_rec + w_entity + w_src == 1.0` — the fusion is
+/// monotone in each term regardless, and the eval gate at P3.7 close
+/// (ADR-0010 §7) tunes the actual values. The defaults
+/// `0.40 / 0.30 / 0.10 / 0.15 / 0.05` rebalance the ADR-0010 §5 starting
+/// set (`0.5 / 0.3 / 0.15 / — / 0.05`) to fund the new `w_entity` arm:
+/// `0.10` of the budget comes from `w_sem` (semantic stays the lead arm)
+/// and `0.05` from `w_rec` (the query-aware entity match already
+/// concentrates on the events a recency-seeking query is reaching for, so
+/// a slightly lighter standalone recency weight avoids double-counting).
+/// `w_lex` / `w_src` are left at their eval-tuned values.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FusionWeights {
     /// Weight on the min-max-normalized semantic cosine.
@@ -117,6 +138,11 @@ pub struct FusionWeights {
     pub w_lex: f32,
     /// Weight on the recency-decay term `exp(−λ · Δt_hours)`.
     pub w_rec: f32,
+    /// Weight on the query-aware deterministic entity-match term `ent̂` ∈
+    /// `[0, 1]` (Phase-6-close recall-surface fusion). `0` for every
+    /// candidate when the query references no known entity, so the arm is
+    /// inert on entity-free queries.
+    pub w_entity: f32,
     /// Weight on the source-quality prior. Reserved for Phase 7
     /// (browser-extension page-text > AX > OCR); the Phase-3
     /// retriever uses `src ≡ 0.0` for every event so the term
@@ -127,9 +153,10 @@ pub struct FusionWeights {
 impl Default for FusionWeights {
     fn default() -> Self {
         Self {
-            w_sem: 0.5,
-            w_lex: 0.3,
-            w_rec: 0.15,
+            w_sem: 0.40,
+            w_lex: 0.30,
+            w_rec: 0.10,
+            w_entity: 0.15,
             w_src: 0.05,
         }
     }
@@ -377,6 +404,27 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         candidate_ids.extend(lex_map.keys().copied());
         candidate_ids.extend(sem_map.keys().copied());
 
+        // Query-aware deterministic entity signal (Phase-6-close
+        // recall-surface fusion, Option A). Derive the entity ids the query
+        // references, then in ONE additional store read count how many of
+        // them each candidate event mentions. `entity_max` normalizes the
+        // per-event counts into `ent̂ ∈ [0, 1]`. Both the derivation and
+        // the count are best-effort: a backend without the graph surface
+        // yields an empty set / map, so the arm contributes `0` for every
+        // candidate and the ranking is byte-identical to the four-arm
+        // fusion (the read-only no-op the negative-control test pins).
+        let query_entity_ids = self.derive_query_entity_ids(&query.text);
+        let entity_counts: HashMap<EventId, u32> = if query_entity_ids.is_empty() {
+            HashMap::new()
+        } else {
+            let qids: Vec<EntityId> = query_entity_ids.into_iter().collect();
+            let candidate_vec: Vec<EventId> = candidate_ids.iter().copied().collect();
+            self.store
+                .mention_match_for_events(&qids, &candidate_vec)
+                .unwrap_or_default()
+        };
+        let entity_max = entity_counts.values().copied().max().unwrap_or(0);
+
         let mut hits: Vec<RetrievalHit> = Vec::with_capacity(candidate_ids.len());
         for id in candidate_ids {
             let event_opt = self
@@ -401,6 +449,22 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             let lex_hat = minmax_normalize(lex_raw, lex_bounds.0, lex_bounds.1);
             let sem_hat = minmax_normalize(sem_raw, sem_bounds.0, sem_bounds.1);
             let recency = recency_decay(self.now_us, event.ts_us, self.recency.half_life_hours);
+            // Query-aware entity match, normalized across the candidate pool
+            // by the pool max. A genuine zero (no matching mention) stays a
+            // zero — unlike the cosine/BM25 arms it is NOT min-max-mapped to
+            // the `0.5` degenerate midpoint, because "mentions none of the
+            // query's entities" is a meaningful absence, not missing rank
+            // info. When `entity_max == 0` (entity-free query) the arm is
+            // `0` for every candidate.
+            let entity_hat = if entity_max > 0 {
+                #[allow(clippy::cast_precision_loss)]
+                let n = entity_counts.get(&id).copied().unwrap_or(0) as f32;
+                #[allow(clippy::cast_precision_loss)]
+                let d = entity_max as f32;
+                n / d
+            } else {
+                0.0
+            };
             // Phase 3 has no source-quality prior wired yet (extension
             // page-text path is Phase 7; manual user-tag is later).
             // `src ≡ 0.0` for every event keeps the term inert until
@@ -410,9 +474,12 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 sem_hat,
                 self.weights.w_lex.mul_add(
                     lex_hat,
-                    self.weights
-                        .w_rec
-                        .mul_add(recency, self.weights.w_src * src),
+                    self.weights.w_rec.mul_add(
+                        recency,
+                        self.weights
+                            .w_entity
+                            .mul_add(entity_hat, self.weights.w_src * src),
+                    ),
                 ),
             );
             hits.push(RetrievalHit {
@@ -430,6 +497,82 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         });
         hits.truncate(query.limit);
         Ok(hits)
+    }
+
+    /// Derive the set of [`EntityId`]s a query references, via the
+    /// **in-fence deterministic** path only (Phase-6-close Option A — this
+    /// is NOT the Qwen NER tier and NOT the `AliasResolver` worker):
+    ///
+    /// 1. Run the pure-Rust [`Tier1Extractor`] over the query string and
+    ///    look each non-redacted match (`email` / `phone` / `url` / …) up by
+    ///    its `(kind, canonical_name)` via [`BrainStore::find_entity_by_alias`].
+    /// 2. Pull the query's capitalized tokens + adjacent-capitalized bigrams
+    ///    (candidate person / org / location names) and look each up under
+    ///    the three name kinds.
+    /// 3. **Identity-expand**: for every directly-matched entity, add every
+    ///    co-member of its canonical identity
+    ///    ([`BrainStore::identity_of_entity`] → [`BrainStore::identity_members`]).
+    ///    This is what lets a query naming "Alice" also match an event that
+    ///    only mentions her `alice@corp.com` alias once the resolver has
+    ///    clustered them.
+    ///
+    /// **Best-effort:** every store read here is one of the pre-existing
+    /// V2-P3/P6 methods that default to `Err` on a graph-less backend
+    /// (`InMemoryBrainStore`). Such an `Err` is swallowed (`.ok()` /
+    /// `.unwrap_or_default()`) and treated as "no match" so the entity arm
+    /// silently goes to `0` rather than failing recall — the read-only
+    /// no-regression contract. A genuine `SqlCipher` backend error likewise
+    /// only forfeits the additive boost; lexical + semantic recall still
+    /// returns.
+    fn derive_query_entity_ids(&self, query_text: &str) -> HashSet<EntityId> {
+        // Bound the work: a pathological query cannot fan out into an
+        // unbounded number of indexed lookups.
+        const MAX_CANDIDATES: usize = 24;
+
+        let mut ids: HashSet<EntityId> = HashSet::new();
+
+        // (1) Tier-1 regex matches → exact (kind, canonical_name) lookup.
+        for m in Tier1Extractor::new().extract(query_text) {
+            if m.kind == KIND_REDACTED_TOKEN {
+                continue; // never key recall on a redacted token
+            }
+            if let Some(ent) = self
+                .store
+                .find_entity_by_alias(&m.kind, &m.canonical_name)
+                .ok()
+                .flatten()
+            {
+                ids.insert(ent.id);
+            }
+        }
+
+        // (2) Capitalized tokens + bigrams → person / org / location.
+        for cand in capitalized_candidates(query_text)
+            .into_iter()
+            .take(MAX_CANDIDATES)
+        {
+            for kind in [KIND_PERSON_NAME, KIND_ORGANIZATION, KIND_LOCATION] {
+                if let Some(ent) = self.store.find_entity_by_alias(kind, &cand).ok().flatten() {
+                    ids.insert(ent.id);
+                }
+            }
+        }
+
+        // (3) Identity-expand the directly-matched entities.
+        let direct: Vec<EntityId> = ids.iter().cloned().collect();
+        for eid in direct {
+            for membership in self.store.identity_of_entity(&eid).unwrap_or_default() {
+                for member in self
+                    .store
+                    .identity_members(&membership.identity_id)
+                    .unwrap_or_default()
+                {
+                    ids.insert(member.entity_id);
+                }
+            }
+        }
+
+        ids
     }
 
     /// Anchor-then-window per ADR-0010 §6: top-1 semantic locates the
@@ -545,6 +688,45 @@ fn intersect_ranges(a: Option<TimeRange>, b: Option<TimeRange>) -> Option<TimeRa
 
 fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|n| haystack.contains(n))
+}
+
+/// Capitalized single tokens + adjacent-capitalized bigrams from a query —
+/// the candidate person / org / location surface forms for the exact alias
+/// lookup in [`HybridRetriever::derive_query_entity_ids`]. Punctuation is
+/// stripped from token edges; the original case is preserved (the NER
+/// extractor stores title-cased `canonical_name`s, and
+/// [`BrainStore::find_entity_by_alias`] is an exact match). Over-generation
+/// is harmless — a non-entity capitalized word (a sentence-initial "What")
+/// simply finds no entity row.
+fn capitalized_candidates(query: &str) -> Vec<String> {
+    let tokens: Vec<&str> = query
+        .split_whitespace()
+        .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let is_cap = |t: &str| t.chars().next().is_some_and(char::is_uppercase);
+
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut push = |s: String, out: &mut Vec<String>| {
+        if seen.insert(s.clone()) {
+            out.push(s);
+        }
+    };
+
+    for (i, &tok) in tokens.iter().enumerate() {
+        if !is_cap(tok) {
+            continue;
+        }
+        push(tok.to_string(), &mut out);
+        if let Some(&next) = tokens.get(i + 1) {
+            if is_cap(next) {
+                push(format!("{tok} {next}"), &mut out);
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -693,10 +875,14 @@ mod tests {
     #[test]
     fn fusion_weights_default_matches_adr_0010() {
         let w = FusionWeights::default();
-        assert!((w.w_sem - 0.5).abs() < f32::EPSILON);
-        assert!((w.w_lex - 0.3).abs() < f32::EPSILON);
-        assert!((w.w_rec - 0.15).abs() < f32::EPSILON);
+        assert!((w.w_sem - 0.40).abs() < f32::EPSILON);
+        assert!((w.w_lex - 0.30).abs() < f32::EPSILON);
+        assert!((w.w_rec - 0.10).abs() < f32::EPSILON);
+        assert!((w.w_entity - 0.15).abs() < f32::EPSILON);
         assert!((w.w_src - 0.05).abs() < f32::EPSILON);
+        // Rebalanced convex set still sums to 1.0.
+        let sum = w.w_sem + w.w_lex + w.w_rec + w.w_entity + w.w_src;
+        assert!((sum - 1.0).abs() < 1e-6, "weights sum to {sum}, want 1.0");
     }
 
     #[test]

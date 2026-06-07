@@ -27,13 +27,16 @@
 //! After P3.10e, all four read surfaces (Recall UI + MCP + Brain CLI +
 //! Hippocampus.app) use `open_readonly`.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use mci_brain::graph::{Entity, EntityIdentity};
 use mci_brain::{
-    BrainStats, BrainStore, EmbedError, Embedder, EpisodeRecord, Event, EventId, EventRecord,
-    HybridRetriever, RetrievalQuery, Retriever, SqlCipherBrainStore, StoreError,
+    BrainStats, BrainStore, EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId,
+    EventRecord, HybridRetriever, IdentityId, RetrievalQuery, Retriever, SqlCipherBrainStore,
+    StoreError,
 };
 use mci_core::crypto::DbKey;
 
@@ -94,6 +97,65 @@ impl BrainStore for FtsSanitizingStore {
         limit: usize,
     ) -> Result<Vec<(EventId, f32)>, StoreError> {
         self.inner.vec_search(query_embedding, limit)
+    }
+
+    // -----------------------------------------------------------------------
+    // Recall-surface fusion (Phase-6 close) — graph-read delegation
+    //
+    // `HybridRetriever` calls these through whatever `BrainStore` it is given.
+    // In production it is given THIS wrapper (see `recall_hybrid`), so the
+    // wrapper MUST forward them to the inner `SqlCipherBrainStore`. Without
+    // these overrides the calls fall through to the `BrainStore` trait
+    // defaults — `Ok(empty)` for the recall reads, `Err(StoreError::Other)`
+    // for the V2-P3/P6 reads, both swallowed by the retriever's best-effort
+    // `.ok()` / `.unwrap_or_default()` — so the `w_entity` arm reads no graph
+    // data and is silently `0` for every candidate. That is the inert seam
+    // the production-path wiring test
+    // (`w_entity_arm_fires_through_fts_sanitizing_store_in_production_recall`)
+    // pins: a transparent decorator must delegate EVERY read it is asked for,
+    // not just the FTS5 path.
+    //
+    // All read-only — consistent with the `put_event` `unreachable!` above
+    // (P3.10e read-only discipline). The four the entity arm needs:
+    fn mention_match_for_events(
+        &self,
+        query_entity_ids: &[EntityId],
+        candidate_ids: &[EventId],
+    ) -> Result<HashMap<EventId, u32>, StoreError> {
+        self.inner
+            .mention_match_for_events(query_entity_ids, candidate_ids)
+    }
+    fn find_entity_by_alias(&self, kind: &str, alias: &str) -> Result<Option<Entity>, StoreError> {
+        self.inner.find_entity_by_alias(kind, alias)
+    }
+    fn identity_of_entity(&self, entity_id: &EntityId) -> Result<Vec<EntityIdentity>, StoreError> {
+        self.inner.identity_of_entity(entity_id)
+    }
+    fn identity_members(
+        &self,
+        identity_id: &IdentityId,
+    ) -> Result<Vec<EntityIdentity>, StoreError> {
+        self.inner.identity_members(identity_id)
+    }
+
+    // The two enrichment reads `mci_recall`'s `entities[]` / `linked_event_ids[]`
+    // use. The production reader currently calls these on the concrete store
+    // (`enrich_hit`), so they already reach real data — but a faithful read
+    // decorator must forward them too, so the same inert-seam class can never
+    // reappear if a future caller routes enrichment through the wrapper.
+    fn entity_names_for_event(
+        &self,
+        event_id: EventId,
+        limit: usize,
+    ) -> Result<Vec<String>, StoreError> {
+        self.inner.entity_names_for_event(event_id, limit)
+    }
+    fn linked_event_ids_for_event(
+        &self,
+        event_id: EventId,
+        limit: usize,
+    ) -> Result<Vec<EventId>, StoreError> {
+        self.inner.linked_event_ids_for_event(event_id, limit)
     }
 }
 
@@ -201,6 +263,36 @@ impl LiveBrainReader {
         Self { store, embedder }
     }
 
+    /// Fill the additive Phase-6-close recall fields for one hit event:
+    /// the resolver-allowlist entity names it mentions + the cross-app
+    /// dot-connect event ids reachable from its episode.
+    ///
+    /// **Best-effort + read-only:** both reads default to `Ok(empty)` on a
+    /// graph-less backend and are `.unwrap_or_default()`-ed here, so an
+    /// enrichment failure degrades a hit to "no entities / no links" rather
+    /// than failing the whole recall. The store's `linked_event_ids_for_event`
+    /// applies the `cascade_reason = 0` wall and `entity_names_for_event`
+    /// restricts to the resolver allowlist, so neither surface can leak a
+    /// suppressed event or a redacted-token label.
+    fn enrich_hit(&self, event_id: EventId) -> (Vec<String>, Vec<u64>) {
+        /// Max entity names surfaced per hit.
+        const ENTITY_LIMIT: usize = 16;
+        /// Max cross-app linked events surfaced per hit.
+        const LINK_LIMIT: usize = 16;
+        let entities = self
+            .store
+            .entity_names_for_event(event_id, ENTITY_LIMIT)
+            .unwrap_or_default();
+        let linked_event_ids = self
+            .store
+            .linked_event_ids_for_event(event_id, LINK_LIMIT)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.0)
+            .collect();
+        (entities, linked_event_ids)
+    }
+
     /// FTS5-only recall (Embedder=None fallback).
     fn recall_fts5_only(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError> {
         let sanitized = sanitize_fts5_query(query);
@@ -221,6 +313,7 @@ impl LiveBrainReader {
             else {
                 continue;
             };
+            let (entities, linked_event_ids) = self.enrich_hit(event_id);
             out.push(McpHit {
                 record: EventRecord {
                     event_id,
@@ -231,6 +324,8 @@ impl LiveBrainReader {
                     text_snippet: EventRecord::truncate_snippet(&event.text),
                 },
                 score,
+                entities,
+                linked_event_ids,
             });
         }
         Ok(out)
@@ -280,6 +375,7 @@ impl LiveBrainReader {
             else {
                 continue;
             };
+            let (entities, linked_event_ids) = self.enrich_hit(hit.event_id);
             out.push(McpHit {
                 record: EventRecord {
                     event_id: hit.event_id,
@@ -290,6 +386,8 @@ impl LiveBrainReader {
                     text_snippet: EventRecord::truncate_snippet(&event.text),
                 },
                 score: hit.score_combined,
+                entities,
+                linked_event_ids,
             });
         }
         Ok(out)

@@ -299,6 +299,8 @@ impl Server {
                             "url": h.record.url,
                             "text_snippet": h.record.text_snippet,
                             "score": h.score,
+                            "entities": h.entities,
+                            "linked_event_ids": h.linked_event_ids,
                         })
                     })
                     .collect();
@@ -384,6 +386,10 @@ impl Server {
                     "event_count": s.event_count,
                     "oldest_ts_us": s.oldest_ts_us,
                     "newest_ts_us": s.newest_ts_us,
+                    "entity_count": s.entity_count,
+                    "entity_mention_count": s.entity_mention_count,
+                    "entity_identity_count": s.entity_identity_count,
+                    "episode_edge_count": s.episode_edge_count,
                 });
                 JsonRpcResponse::ok(
                     id,

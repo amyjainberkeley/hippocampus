@@ -99,6 +99,7 @@ fn bench_hybrid_recall(c: &mut Criterion) {
                 w_sem: 0.0,
                 w_lex: 1.0,
                 w_rec: 0.0,
+                w_entity: 0.0,
                 w_src: 0.0,
             });
         b.iter(|| {
@@ -120,6 +121,7 @@ fn bench_hybrid_recall(c: &mut Criterion) {
                 w_sem: 1.0,
                 w_lex: 0.0,
                 w_rec: 0.0,
+                w_entity: 0.0,
                 w_src: 0.0,
             });
         b.iter(|| {

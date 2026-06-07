@@ -901,11 +901,17 @@ mod tests {
             event_count: 0,
             oldest_ts_us: None,
             newest_ts_us: None,
+            entity_count: 0,
+            entity_mention_count: 0,
+            entity_identity_count: 0,
+            episode_edge_count: 0,
         };
         let out = brain_cli::format_stats_human(&s);
         assert!(out.contains("Events: 0"));
         assert!(out.contains("Oldest: (none)"));
         assert!(out.contains("Newest: (none)"));
+        assert!(out.contains("Entities: 0"));
+        assert!(out.contains("Episode links: 0"));
     }
 
     #[test]
@@ -914,12 +920,20 @@ mod tests {
             event_count: 42,
             oldest_ts_us: Some(1_000_000),
             newest_ts_us: Some(2_000_000),
+            entity_count: 7,
+            entity_mention_count: 19,
+            entity_identity_count: 3,
+            episode_edge_count: 2,
         };
         let out = brain_cli::format_stats_json(&s);
         let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
         assert_eq!(v["event_count"], 42);
         assert_eq!(v["oldest_ts_us"], 1_000_000);
         assert_eq!(v["newest_ts_us"], 2_000_000);
+        assert_eq!(v["entity_count"], 7);
+        assert_eq!(v["entity_mention_count"], 19);
+        assert_eq!(v["entity_identity_count"], 3);
+        assert_eq!(v["episode_edge_count"], 2);
     }
 
     // -- sanitize_fts5_query --
