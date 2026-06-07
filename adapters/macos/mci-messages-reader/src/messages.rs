@@ -77,13 +77,35 @@ pub struct MessageRow {
     /// (the user has no row in `handle`).
     pub handle_rowid: i64,
     /// `handle.id` for the sender (phone or email). `None` when
-    /// `is_from_me=1` or the join is empty.
+    /// `is_from_me=1` or the join is empty. This is the **incoming**
+    /// "who": it is keyed on the message row's own `handle_id`, which
+    /// Apple sets to `0` on every row the user SENT (the local user is
+    /// never a row in `handle`). For the **outgoing** "who" see
+    /// [`Self::recipient_handles`].
     pub sender_handle: Option<String>,
     /// `1` when the message has attachments. The body of an
     /// attachment-only message is `None`; this field lets the
     /// cascade-equivalent route to a "drop with `reason=plugin_no_body`"
     /// surface vs. running the SMS-OTP regex on `Some("")`.
     pub has_attachments: bool,
+    /// The remote participant set of the **chat this message belongs
+    /// to**, resolved via `chat_message_join ⨝ chat_handle_join ⨝
+    /// handle`. This is the **outgoing** "who": for a row the user sent
+    /// (`is_from_me = 1`, `handle_rowid = 0`) the recipient is NOT on the
+    /// message row — it lives on the conversation, so we source it from
+    /// the chat's remote participants. A 1:1 DM yields exactly one entry;
+    /// a group chat yields N (every remote member). Empty when the
+    /// message maps to no chat or the chat has no resolvable remote
+    /// handle. Deduped and sorted (byte-lexicographic ascending) by the
+    /// reader so the persisted who-label is stable across reads — SQLite's
+    /// `group_concat` order is otherwise unspecified (see
+    /// [`parse_recipient_handles`]).
+    ///
+    /// Populated for **every** row (incoming rows also belong to a chat),
+    /// but the brain-ingest pump only consults it for the outgoing
+    /// direction — an incoming row's "who" is its [`Self::sender_handle`],
+    /// kept byte-identical to the pre-recipient-resolution behavior.
+    pub recipient_handles: Vec<String>,
 }
 
 /// `message.service` enum, normalized to a closed set.
@@ -204,8 +226,14 @@ fn map_sqlite_io_err(
 /// next watermark.
 ///
 /// The query joins `handle` left-anchored on `message.handle_id` to
-/// recover the sender's phone/email address in one round-trip. Joining
-/// `chat` for the originating thread is left to [`read_thread`].
+/// recover the **sender's** phone/email address (the incoming "who") in
+/// one round-trip. The **recipient** set — the outgoing "who" — is NOT on
+/// the message row (Apple sets `handle_id = 0` on everything the user
+/// sent); it lives on the conversation, so the correlated subquery walks
+/// `chat_message_join ⨝ chat_handle_join ⨝ handle` to recover the chat's
+/// remote participants. [`MessageRow::recipient_handles`] carries that
+/// set; see [`row_to_message`] for how the `char(31)`-joined aggregate is
+/// split back out.
 ///
 /// Apple stores `message.date` in nanoseconds since 2001-01-01 UTC; the
 /// `WHERE` predicate converts the input watermark *back* to that frame so
@@ -229,7 +257,12 @@ pub fn list_recent_messages(
              m.text,
              COALESCE(m.handle_id, 0),
              h.id,
-             COALESCE(m.cache_has_attachments, 0)
+             COALESCE(m.cache_has_attachments, 0),
+             (SELECT group_concat(rh.id, char(31))
+                FROM chat_message_join cmj
+                JOIN chat_handle_join chj ON chj.chat_id = cmj.chat_id
+                JOIN handle rh ON rh.ROWID = chj.handle_id
+               WHERE cmj.message_id = m.ROWID)
          FROM message m
          LEFT JOIN handle h ON h.ROWID = m.handle_id
          WHERE COALESCE(m.date, 0) >= ?1
@@ -301,7 +334,10 @@ pub fn read_thread(
         })?
         .collect::<rusqlite::Result<_>>()?;
 
-    // 3) messages.
+    // 3) messages. Projects the SAME column shape as `list_recent_messages`
+    // (the shared `row_to_message` reads column 9 = the recipient-handle
+    // aggregate), so the correlated `chat_message_join ⨝ chat_handle_join ⨝
+    // handle` subquery is repeated here verbatim.
     let mut m_stmt = conn.prepare(
         "SELECT m.ROWID,
                 COALESCE(m.guid, ''),
@@ -311,7 +347,12 @@ pub fn read_thread(
                 m.text,
                 COALESCE(m.handle_id, 0),
                 h.id,
-                COALESCE(m.cache_has_attachments, 0)
+                COALESCE(m.cache_has_attachments, 0),
+                (SELECT group_concat(rh.id, char(31))
+                   FROM chat_message_join cmj2
+                   JOIN chat_handle_join chj ON chj.chat_id = cmj2.chat_id
+                   JOIN handle rh ON rh.ROWID = chj.handle_id
+                  WHERE cmj2.message_id = m.ROWID)
            FROM chat_message_join cmj
            JOIN message m ON m.ROWID = cmj.message_id
            LEFT JOIN handle h ON h.ROWID = m.handle_id
@@ -333,6 +374,12 @@ pub fn read_thread(
 }
 
 /// Project one `message` row → [`MessageRow`].
+///
+/// Column 9 is the `char(31)`-joined recipient-handle aggregate produced by
+/// the correlated subquery in [`list_recent_messages`] / [`read_thread`].
+/// `group_concat` returns `NULL` (→ `None`) when the message maps to no
+/// chat-participant row; [`parse_recipient_handles`] splits + dedups the
+/// non-null case.
 fn row_to_message(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
     let rowid: i64 = row.get(0)?;
     let guid: String = row.get(1)?;
@@ -343,6 +390,7 @@ fn row_to_message(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
     let handle_rowid: i64 = row.get(6)?;
     let sender_handle: Option<String> = row.get(7)?;
     let has_attachments_i: i64 = row.get(8)?;
+    let recipient_raw: Option<String> = row.get(9)?;
     Ok(MessageRow {
         rowid,
         guid,
@@ -353,7 +401,38 @@ fn row_to_message(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
         handle_rowid,
         sender_handle,
         has_attachments: has_attachments_i != 0,
+        recipient_handles: parse_recipient_handles(recipient_raw.as_deref()),
     })
+}
+
+/// Split the `char(31)`-joined recipient aggregate from the SQL layer into a
+/// deduped, **sorted** `Vec<String>`. `char(31)` (ASCII unit separator) never
+/// appears in a phone number or email address, so it is an unambiguous
+/// delimiter for `group_concat`. Empty / whitespace-only fragments are
+/// dropped and duplicates collapsed (a message that maps to more than one
+/// chat — or a handle that exists once per service — can repeat an address).
+///
+/// The output is sorted (byte-lexicographic ascending) **here in Rust**, not
+/// in SQL: `group_concat` leaves element order unspecified absent a per-
+/// aggregate `ORDER BY` (and the ordered form needs SQLite ≥ 3.44), so
+/// sorting at the boundary makes the persisted who-label (`to a, b, c`)
+/// stable across reads of identical data regardless of the query plan or the
+/// bundled SQLite version. The set membership is what the cascade gates and
+/// per-handle extraction consume; both are order-independent, so the sort is
+/// purely for a deterministic display string.
+fn parse_recipient_handles(raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for part in raw.split('\u{1f}') {
+        let p = part.trim();
+        if !p.is_empty() && !out.iter().any(|e| e == p) {
+            out.push(p.to_owned());
+        }
+    }
+    out.sort();
+    out
 }
 
 /// Convert an Apple-absolute nanoseconds value to unix seconds.
@@ -453,7 +532,8 @@ mod tests {
             INSERT INTO handle (ROWID, id, service, country) VALUES
                 (1, '+15551234567', 'iMessage', 'US'),
                 (2, 'bob@example.com', 'iMessage', 'US'),
-                (3, '+15559999999', 'SMS', 'US');
+                (3, '+15559999999', 'SMS', 'US'),
+                (4, '+15558887777', 'iMessage', 'US');
 
             INSERT INTO chat (ROWID, guid, style, service_name, display_name, chat_identifier)
             VALUES
@@ -474,17 +554,24 @@ mod tests {
                 (102, 'M-CCCC', '482917 is your verification code.',      3, 'SMS',
                        921693000000000000, 0, 0, 1, 1, 0, 0),
                 (103, 'M-DDDD', NULL,                                     2, 'iMessage',
-                       921693100000000000, 0, 0, 1, 1, 1, 0);
+                       921693100000000000, 0, 0, 1, 1, 1, 0),
+                -- Outgoing (is_from_me=1, handle_id=0) into the group chat 11.
+                -- The recipient is NOT on this row; it is chat 11's remote
+                -- participant set {bob@example.com, +15558887777}.
+                (104, 'M-EEEE', 'See you all there (synthetic).',         0, 'iMessage',
+                       921693200000000000, 1, 1, 1, 1, 0, 0);
 
             INSERT INTO chat_handle_join (chat_id, handle_id) VALUES
                 (10, 1),
-                (11, 2);
+                (11, 2),
+                (11, 4);
 
             INSERT INTO chat_message_join (chat_id, message_id, message_date) VALUES
                 (10, 100, 921692800000000000),
                 (10, 101, 921692900000000000),
                 (10, 102, 921693000000000000),
-                (11, 103, 921693100000000000);
+                (11, 103, 921693100000000000),
+                (11, 104, 921693200000000000);
             ",
         )
         .unwrap();
@@ -521,10 +608,11 @@ mod tests {
     fn list_recent_messages_returns_rows_in_date_order() {
         let (_guard, loc) = fixture_location();
         let all = list_recent_messages(&loc, 0).unwrap();
-        assert_eq!(all.len(), 4);
+        assert_eq!(all.len(), 5);
         // Ordered ascending by `date`.
         assert!(all[0].date_unix <= all[1].date_unix);
         assert!(all[1].date_unix <= all[2].date_unix);
+        assert!(all[3].date_unix <= all[4].date_unix);
 
         // First row is the Alice → me iMessage.
         assert_eq!(all[0].rowid, 100);
@@ -542,6 +630,14 @@ mod tests {
         assert_eq!(all[3].rowid, 103);
         assert!(all[3].body.is_none());
         assert!(all[3].has_attachments);
+
+        // Last row is the outgoing group message.
+        assert_eq!(all[4].rowid, 104);
+        assert!(all[4].is_from_me);
+        // The user has no row in `handle`, so the message row's own sender
+        // join is empty — the recipient must come from the chat instead.
+        assert!(all[4].sender_handle.is_none());
+        assert_eq!(all[4].handle_rowid, 0);
     }
 
     #[test]
@@ -552,7 +648,7 @@ mod tests {
         // = 921_692_900 + 978_307_200 = 1_900_000_100. The first row's
         // unix_seconds is 1_900_000_000; the second is 1_900_000_100.
         let recent = list_recent_messages(&loc, 1_900_000_100).unwrap();
-        assert_eq!(recent.len(), 3);
+        assert_eq!(recent.len(), 4);
         assert_eq!(recent[0].rowid, 101);
     }
 
@@ -585,10 +681,93 @@ mod tests {
         let t = read_thread(&loc, 11).unwrap().expect("chat 11 exists");
         assert_eq!(t.style, 45);
         assert_eq!(t.display_name.as_deref(), Some("Project crew"));
-        assert_eq!(t.participants.len(), 1);
-        assert_eq!(t.messages.len(), 1);
+        assert_eq!(t.participants.len(), 2);
+        let p_ids: Vec<&str> = t.participants.iter().map(|p| p.id.as_str()).collect();
+        assert!(p_ids.contains(&"bob@example.com"));
+        assert!(p_ids.contains(&"+15558887777"));
+        // chat 11 now holds the attachment-only incoming row AND the
+        // outgoing group reply.
+        assert_eq!(t.messages.len(), 2);
         assert_eq!(t.messages[0].rowid, 103);
         assert!(t.messages[0].has_attachments);
+        assert_eq!(t.messages[1].rowid, 104);
+        assert!(t.messages[1].is_from_me);
+    }
+
+    #[test]
+    fn list_recent_messages_resolves_dm_recipient_for_outgoing() {
+        // Row 101 is the user's outgoing reply in the 1:1 DM (chat 10).
+        // `handle_id = 0` (no sender row), so the recipient is sourced from
+        // the chat's single remote participant.
+        let (_guard, loc) = fixture_location();
+        let all = list_recent_messages(&loc, 0).unwrap();
+        let outgoing = all.iter().find(|m| m.rowid == 101).expect("row 101");
+        assert!(outgoing.is_from_me);
+        assert!(outgoing.sender_handle.is_none(), "no sender on a sent row");
+        assert_eq!(
+            outgoing.recipient_handles,
+            vec!["+15551234567".to_owned()],
+            "DM: exactly the one remote participant of the chat"
+        );
+    }
+
+    #[test]
+    fn list_recent_messages_resolves_group_recipients_for_outgoing() {
+        // Row 104 is the user's outgoing message into the GROUP chat 11,
+        // whose remote participants are {bob@example.com, +15558887777}.
+        let (_guard, loc) = fixture_location();
+        let all = list_recent_messages(&loc, 0).unwrap();
+        let outgoing = all.iter().find(|m| m.rowid == 104).expect("row 104");
+        assert!(outgoing.is_from_me);
+        let mut got = outgoing.recipient_handles.clone();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["+15558887777".to_owned(), "bob@example.com".to_owned()],
+            "group: the full remote participant set, deduped"
+        );
+    }
+
+    #[test]
+    fn list_recent_messages_incoming_recipient_set_excludes_no_one() {
+        // The recipient aggregate is populated for incoming rows too (they
+        // also belong to a chat); the pump simply ignores it for the
+        // incoming direction. Row 100 is incoming in the DM (chat 10).
+        let (_guard, loc) = fixture_location();
+        let all = list_recent_messages(&loc, 0).unwrap();
+        let incoming = all.iter().find(|m| m.rowid == 100).expect("row 100");
+        assert!(!incoming.is_from_me);
+        // Incoming "who" stays on `sender_handle` (unchanged); the chat's
+        // remote set is also resolvable but is not the incoming who.
+        assert_eq!(incoming.sender_handle.as_deref(), Some("+15551234567"));
+        assert_eq!(incoming.recipient_handles, vec!["+15551234567".to_owned()]);
+    }
+
+    #[test]
+    fn parse_recipient_handles_dedups_trims_drops_empties_and_sorts() {
+        // `None` (group_concat returned NULL — no chat-participant row).
+        assert!(parse_recipient_handles(None).is_empty());
+
+        // Drives every branch at once: a leading/trailing-whitespace
+        // fragment (trimmed), a duplicate (a message that maps to two chats —
+        // or a handle that exists once per service — can repeat an address;
+        // collapsed), and empty fragments from a doubled / trailing
+        // separator (dropped). Output is sorted byte-lexicographic ascending,
+        // so '+' (0x2B) precedes 'b' (0x62) deterministically.
+        let raw = "  bob@example.com \u{1f}+15558887777\u{1f}bob@example.com\u{1f}\u{1f}";
+        assert_eq!(
+            parse_recipient_handles(Some(raw)),
+            vec!["+15558887777".to_owned(), "bob@example.com".to_owned()],
+        );
+
+        // A single handle round-trips unchanged.
+        assert_eq!(
+            parse_recipient_handles(Some("+15551234567")),
+            vec!["+15551234567".to_owned()]
+        );
+
+        // Separator-only / all-empty input collapses to nothing.
+        assert!(parse_recipient_handles(Some("\u{1f}\u{1f}")).is_empty());
     }
 
     #[test]
