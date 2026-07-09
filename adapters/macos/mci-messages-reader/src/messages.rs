@@ -97,7 +97,7 @@ pub struct MessageRow {
     /// a group chat yields N (every remote member). Empty when the
     /// message maps to no chat or the chat has no resolvable remote
     /// handle. Deduped and sorted (byte-lexicographic ascending) by the
-    /// reader so the persisted who-label is stable across reads — SQLite's
+    /// reader so the persisted who-label is stable across reads — `SQLite`'s
     /// `group_concat` order is otherwise unspecified (see
     /// [`parse_recipient_handles`]).
     ///
@@ -414,10 +414,10 @@ fn row_to_message(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
 ///
 /// The output is sorted (byte-lexicographic ascending) **here in Rust**, not
 /// in SQL: `group_concat` leaves element order unspecified absent a per-
-/// aggregate `ORDER BY` (and the ordered form needs SQLite ≥ 3.44), so
+/// aggregate `ORDER BY` (and the ordered form needs `SQLite` ≥ 3.44), so
 /// sorting at the boundary makes the persisted who-label (`to a, b, c`)
 /// stable across reads of identical data regardless of the query plan or the
-/// bundled SQLite version. The set membership is what the cascade gates and
+/// bundled `SQLite` version. The set membership is what the cascade gates and
 /// per-handle extraction consume; both are order-independent, so the sort is
 /// purely for a deterministic display string.
 fn parse_recipient_handles(raw: Option<&str>) -> Vec<String> {
