@@ -52,8 +52,33 @@ echo "Wait:     ${WAIT_SECONDS}s"
 # Capture both stdout + stderr to a temp file so we can surface the
 # fatalError message verbatim on failure.
 LOG=$(mktemp -t hippocampus-verify)
-# shellcheck disable=SC2064
-trap "rm -f '$LOG'" EXIT
+
+# Unique per-spawn SQLite path — cycles 8.21–8.23 tripped because
+# successive verify runs collided on the shared brain-store lock when an
+# orphan mci-agent child from a previous invocation still held it. A
+# unique path per invocation makes the lock class of race impossible.
+export MCI_DB_PATH="/tmp/mci-verify-$$-$(date +%s).sqlite"
+
+# Cleanup must fire on normal exit AND on ctrl-C / SIGTERM, otherwise a
+# killed verify run leaks the whole child-process tree (Hippocampus.app
+# forks mci-agent workers that hold the SQLite lock). Kill the entire
+# process group under APP_PID via pkill -P, not just the top-level PID.
+cleanup() {
+    if [[ -n "${APP_PID:-}" ]]; then
+        pkill -TERM -P "$APP_PID" 2>/dev/null || true
+        kill -TERM "$APP_PID" 2>/dev/null || true
+        sleep 1
+        pkill -KILL -P "$APP_PID" 2>/dev/null || true
+        kill -KILL "$APP_PID" 2>/dev/null || true
+        wait "$APP_PID" 2>/dev/null || true
+    fi
+    rm -f "$LOG" "$MCI_DB_PATH" "$MCI_DB_PATH"-shm "$MCI_DB_PATH"-wal
+}
+# INT/TERM re-raise as an explicit exit so the EXIT handler runs cleanup
+# exactly once with a stable exit code.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Run the binary in a subshell so we can capture its exit reliably.
 "$APP_BIN" >"$LOG" 2>&1 &
@@ -78,12 +103,6 @@ while (( ELAPSED < WAIT_SECONDS )); do
     fi
 done
 
-# Survived. Kill cleanly and report.
-kill "$APP_PID" 2>/dev/null || true
-# Give it a moment to wind down so we don't leave a stray process.
-sleep 1
-kill -9 "$APP_PID" 2>/dev/null || true
-wait "$APP_PID" 2>/dev/null || true
-
+# Survived. The EXIT trap will kill the process group + wait + rm logs.
 echo "ok: $(basename "$APP") survived ${WAIT_SECONDS}s without crashing"
 exit 0
