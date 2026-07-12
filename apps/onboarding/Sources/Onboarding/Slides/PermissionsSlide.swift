@@ -39,6 +39,19 @@ struct PermissionsSlide: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 480)
 
+                // Pre-flight overview: shows ALL 4 upcoming TCC asks
+                // before the first OS dialog fires. Kills the Rewind
+                // bad pattern (surprise dialog #3 on the Browser
+                // Extension slide + surprise FDA on Allowlist).
+                // Renders above the per-permission grant sections so
+                // the user sees the map first, then the actions.
+                TCCPreflightOverview(
+                    screenRecordingStatus: screenRecording.status,
+                    accessibilityStatus: accessibility.status,
+                    automationStatus: flowVM.automationPermission.status,
+                    fullDiskAccessStatus: flowVM.fullDiskAccessStatus
+                )
+
                 if screenRecordingDenied {
                     denialRecoveryBanner
                 }
@@ -54,6 +67,12 @@ struct PermissionsSlide: View {
         }
         .onAppear {
             flowVM.refreshPermissions()
+        }
+        .task {
+            // Snapshot FDA status into the flow VM so the pre-flight
+            // overview pill reflects any prior grant (e.g. user came
+            // back to Permissions from the Allowlist slide).
+            await flowVM.refreshFullDiskAccessStatus()
         }
         .onReceive(pollTimer) { _ in
             // Cheap CGPreflightScreenCaptureAccess / AXIsProcessTrusted

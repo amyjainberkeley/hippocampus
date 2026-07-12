@@ -6,6 +6,14 @@ import AppKit
 
 struct BrowserExtensionSlide: View {
     @EnvironmentObject var extensionVM: BrowserExtensionViewModel
+    @EnvironmentObject var flowVM: OnboardingFlowViewModel
+    /// True after the user has clicked "Open Safari → Settings" once
+    /// this session. Drives the inline Automation warning so it only
+    /// shows before the first click (there's no value repeating the
+    /// warning after the user has already seen the OS dialog). Reset
+    /// on view teardown — a user coming back to this slide gets the
+    /// warning again, which is fine (defensive re-education).
+    @State private var didAttemptSafariAutomation = false
 
     var body: some View {
         SlideContainer {
@@ -37,44 +45,139 @@ struct BrowserExtensionSlide: View {
     }
 
     private var browserList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(extensionVM.rows) { row in
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 12) {
-                        browserIcon(for: row.browser)
-                            .frame(width: 20)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.browser.name)
-                                .font(.system(size: 14, weight: .medium))
-                            if row.browser.kind == .safari {
-                                Text("Opens Safari → Settings → Extensions. Toggle Hippocampus on.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        extensionStatusBadge(row.extensionStatus)
+        VStack(alignment: .leading, spacing: 12) {
+            // Inline Automation-TCC warning for the Safari row.
+            // Renders before the first click (info) or after a prior
+            // denial (recovery). Explains WHY the OS dialog is about
+            // to appear so the user doesn't panic-deny (audit F1).
+            automationCallout
 
-                        Button(row.browser.kind == .safari ? "Open Safari → Settings" : "Install") {
-                            extensionVM.installAction(for: row.browser)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(extensionVM.rows) { row in
+                    browserRow(row)
+                }
+            }
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .frame(maxWidth: 480)
+    }
+
+    @ViewBuilder
+    private func browserRow(_ row: BrowserExtensionViewModel.BrowserRow) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                browserIcon(for: row.browser)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.browser.name)
+                        .font(.system(size: 14, weight: .medium))
+                    if row.browser.kind == .safari {
+                        Text("Opens Safari → Settings → Extensions. Toggle Hippocampus on.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                extensionStatusBadge(row.extensionStatus)
+                installButton(for: row.browser)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+
+            if let instructions = row.installInstructions {
+                chromiumInstructions(instructions)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+            }
+        }
+    }
+
+    private func installButton(for browser: DetectedBrowser) -> some View {
+        Button(browser.kind == .safari ? "Open Safari → Settings" : "Install") {
+            if browser.kind == .safari {
+                didAttemptSafariAutomation = true
+            }
+            extensionVM.installAction(for: browser)
+            // After Safari click, probe Automation TCC ~2s later so
+            // the OS has time to record grant/deny and the denial
+            // banner can render on the next paint.
+            if browser.kind == .safari {
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    _ = flowVM.probeAutomation()
+                }
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(OnboardingTheme.accentBlue)
+    }
+
+    /// Info callout pre-click OR recovery banner post-denial. Only
+    /// renders when at least one Safari row exists — no Safari, no
+    /// Automation TCC.
+    @ViewBuilder
+    private var automationCallout: some View {
+        let hasSafari = extensionVM.rows.contains { $0.browser.kind == .safari }
+        let status = flowVM.automationPermission.status
+        if hasSafari && status == .denied {
+            calloutBanner(
+                icon: "exclamationmark.triangle.fill",
+                tint: .orange,
+                title: "Automation was denied",
+                body: "macOS won't re-prompt until you grant it in Settings, or reset the permission.",
+                showRecoveryActions: true
+            )
+        } else if hasSafari && status != .granted && !didAttemptSafariAutomation {
+            calloutBanner(
+                icon: "info.circle.fill",
+                tint: OnboardingTheme.accentBlue,
+                title: "Safari asks for Automation",
+                body: "Safari asks for Automation because Hippocampus reads the active tab's URL and text — everything stays local. macOS will show a system dialog the first time you click \"Open Safari → Settings\".",
+                showRecoveryActions: false
+            )
+        }
+    }
+
+    private func calloutBanner(
+        icon: String,
+        tint: Color,
+        title: String,
+        body: String,
+        showRecoveryActions: Bool
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+                .font(.system(size: 14))
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.system(size: 12, weight: .semibold))
+                Text(body)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if showRecoveryActions {
+                    HStack(spacing: 8) {
+                        Button("Reset & retry") {
+                            Task {
+                                _ = await flowVM.automationPermission.resetAndRetry()
+                                flowVM.refreshPermissions()
+                            }
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .tint(OnboardingTheme.accentBlue)
-                    }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 14)
-
-                    if let instructions = row.installInstructions {
-                        chromiumInstructions(instructions)
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, 12)
+                        Button("Open Automation Settings") {
+                            flowVM.automationPermission.openPrivacySettings()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
                 }
             }
         }
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-        .frame(maxWidth: 480)
+        .padding(10)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
