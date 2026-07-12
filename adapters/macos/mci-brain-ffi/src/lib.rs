@@ -152,6 +152,23 @@ pub struct QueryJson {
     pub app_filter: Option<String>,
 }
 
+/// JSON payload format for [`mci_brain_ffi_events_by_ids`] input.
+///
+/// **Cycle 8.37 PR-3** — the related-hits flyout in the recall UI needs to
+/// resolve a `hit.linked_event_ids: Vec<u64>` (populated in PR-1) into full
+/// [`HitJson`] rows so the flyout can render app · time · snippet for each
+/// linked sibling. This payload is the input side of that dot-connect
+/// fetch surface. Capped at [`EVENTS_BY_IDS_CAP`] ids per call — a hostile
+/// caller cannot trick the FFI into an unbounded per-id `get_event` loop.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventsByIdsQueryJson {
+    /// Event ids to look up. Duplicates are tolerated; order in the result
+    /// follows input order for the ids that resolve (missing ids are
+    /// silently dropped so the caller can pass a raw `linked_event_ids`
+    /// slice without pre-filtering deleted rows).
+    pub ids: Vec<u64>,
+}
+
 /// JSON payload format for [`mci_brain_ffi_list_observed_apps`] input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservedAppsQueryJson {
@@ -428,6 +445,109 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
         })
         .collect();
     json_to_c_string(&hits)
+}
+
+/// Resolve a batch of event ids into full [`HitJson`] rows. Powers the
+/// **related-hits flyout** in the recall UI (cycle 8.37 PR-3, PR #27
+/// carried the `linked_event_ids` field the flyout resolves through this
+/// call). Given a hit whose `linked_event_ids: Vec<u64>` names its
+/// cross-app siblings, the Swift side calls this to render the "your
+/// email about X is connected to your Slack message about Y and your
+/// Safari tab about Z" strip.
+///
+/// `query_json` is a UTF-8 JSON string of [`EventsByIdsQueryJson`]:
+///
+/// ```json
+/// {"ids": [101, 202, 303]}
+/// ```
+///
+/// Returns a JSON array of [`HitJson`] rows for the ids that resolve.
+/// Order in the output follows input order for the ids that resolve;
+/// ids that no longer exist in the store are silently dropped (a
+/// linked-event id can refer to an event that was later suppressed by
+/// the cascade — the store's `get_event` returns `None` and the flyout
+/// gracefully skips the row). Each row carries the same
+/// `entities` + `linked_event_ids` enrichment as `mci_brain_ffi_search`
+/// so a flyout row remains navigable to further siblings.
+///
+/// The result's `source` is `"linked"` and `score` is `None` — this is
+/// a dot-connect lookup, not a ranked retrieval.
+///
+/// **Input cap**: at most [`EVENTS_BY_IDS_CAP`] ids per call
+/// (excess ids are truncated silently). A hostile caller cannot use
+/// this entry point to trigger an unbounded `get_event` loop.
+///
+/// Same read-only + allocator discipline as the other returners; caller
+/// MUST pass the returned pointer back to [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+///
+/// `h` must be a live handle. `query_json` must be a non-null,
+/// null-terminated UTF-8 C string containing an
+/// [`EventsByIdsQueryJson`] payload.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
+    h: *mut Handle,
+    query_json: *const c_char,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_events_by_ids: null handle");
+        return ptr::null_mut();
+    }
+    if query_json.is_null() {
+        set_last_error("mci_brain_ffi_events_by_ids: null query");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a live handle.
+    let handle = unsafe { &*h };
+    // Safety: caller guarantees a null-terminated UTF-8 C string.
+    let query_c = unsafe { CStr::from_ptr(query_json) };
+    let Ok(query_str) = query_c.to_str() else {
+        set_last_error("mci_brain_ffi_events_by_ids: non-UTF8 query");
+        return ptr::null_mut();
+    };
+    let query: EventsByIdsQueryJson = match serde_json::from_str(query_str) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!(
+                "mci_brain_ffi_events_by_ids: bad query JSON: {e}"
+            ));
+            return ptr::null_mut();
+        }
+    };
+    // Silent truncation at the cap — the recall-UI flyout paginates below
+    // this anyway. See EVENTS_BY_IDS_CAP for the load-bearing bound.
+    let ids: Vec<u64> = query.ids.into_iter().take(EVENTS_BY_IDS_CAP).collect();
+
+    let mut out: Vec<HitJson> = Vec::with_capacity(ids.len());
+    for id in ids {
+        match handle.store.get_event(EventId(id)) {
+            Ok(Some(ev)) => {
+                let (entities, linked_event_ids) = enrich_hit(&handle.store, EventId(id));
+                out.push(HitJson {
+                    event_id: id,
+                    ts_us: ev.ts_us,
+                    app_bundle_id: ev.app_bundle_id,
+                    window_title: ev.window_title,
+                    url: ev.url,
+                    ocr_text_snippet: snippet(&ev.text),
+                    source: "linked".into(),
+                    score: None,
+                    entities,
+                    linked_event_ids,
+                });
+            }
+            Ok(None) => {
+                // Linked event was suppressed (cascade) or deleted since
+                // the source hit was recorded — silently drop.
+            }
+            Err(e) => {
+                set_last_error(&format!("mci_brain_ffi_events_by_ids: get_event: {e}"));
+                return ptr::null_mut();
+            }
+        }
+    }
+    json_to_c_string(&out)
 }
 
 /// Fetch the N most recent privacy-moment cards. Returns a JSON array
@@ -774,6 +894,15 @@ pub const ENTITY_LIMIT: usize = 16;
 /// `LiveBrainReader::enrich_hit`. The "Related (N)" flyout (PR-3, next
 /// cycle) paginates below this anyway.
 pub const LINK_LIMIT: usize = 16;
+
+/// Maximum ids the recall UI may resolve in one
+/// [`mci_brain_ffi_events_by_ids`] call. The related-hits flyout
+/// (cycle 8.37 PR-3) issues at most `LINK_LIMIT` (=16) ids because a
+/// hit's `linked_event_ids` vector is itself capped at that size, but
+/// this outer cap guards against a hostile caller stuffing the JSON
+/// with an arbitrary list. 32 leaves headroom for the future
+/// "expand siblings-of-siblings" path without unbounding the loop.
+pub const EVENTS_BY_IDS_CAP: usize = 32;
 
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<Option<CString>> = const {
@@ -1232,5 +1361,55 @@ mod tests {
     fn list_episodes_with_null_handle_returns_null() {
         let p = unsafe { mci_brain_ffi_list_episodes(std::ptr::null_mut(), 5) };
         assert!(p.is_null());
+    }
+
+    // -----------------------------------------------------------------
+    // events_by_ids — cycle 8.37 PR-3 related-hits flyout fetch surface
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn events_by_ids_query_json_parses() {
+        let q: EventsByIdsQueryJson =
+            serde_json::from_str(r#"{"ids":[101,202,303]}"#).expect("valid ids payload");
+        assert_eq!(q.ids, vec![101, 202, 303]);
+    }
+
+    #[test]
+    fn events_by_ids_query_json_accepts_empty_list() {
+        let q: EventsByIdsQueryJson =
+            serde_json::from_str(r#"{"ids":[]}"#).expect("empty ids payload");
+        assert!(q.ids.is_empty());
+    }
+
+    #[test]
+    fn events_by_ids_cap_is_bounded() {
+        // 32 is chosen to match LINK_LIMIT * 2 headroom while keeping the
+        // per-call get_event loop bounded. Locked here so a future patch
+        // cannot silently unbound it.
+        assert_eq!(EVENTS_BY_IDS_CAP, 32);
+    }
+
+    #[test]
+    fn events_by_ids_with_null_handle_returns_null() {
+        let q = CString::new(r#"{"ids":[1]}"#).unwrap();
+        let p = unsafe { mci_brain_ffi_events_by_ids(std::ptr::null_mut(), q.as_ptr()) };
+        assert!(p.is_null());
+    }
+
+    #[test]
+    fn events_by_ids_with_null_query_returns_null() {
+        // Dummy non-null handle-shaped pointer so we exercise the null-query
+        // branch, not the null-handle branch. Cannot dereference — the
+        // function's null-query check runs before it touches the handle.
+        // Safe: the entry point uses `if query_json.is_null()` first.
+        let h_stub = 0x1 as *mut Handle;
+        let p = unsafe { mci_brain_ffi_events_by_ids(h_stub, std::ptr::null()) };
+        assert!(p.is_null());
+        let err = unsafe { mci_brain_ffi_last_error_message() };
+        assert!(!err.is_null());
+        let msg = unsafe { CStr::from_ptr(err) }
+            .to_string_lossy()
+            .into_owned();
+        assert!(msg.contains("null query"), "got: {msg}");
     }
 }

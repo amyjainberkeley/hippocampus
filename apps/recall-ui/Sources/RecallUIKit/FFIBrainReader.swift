@@ -151,6 +151,33 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         return try Self.decodeObservedApps(rawJson)
     }
 
+    /// Cycle-8.37 PR-3: resolve a batch of linked event ids into full
+    /// `Hit` rows for the related-hits flyout in `DetailPaneView`. The
+    /// FFI caps the request at 32 ids; we mirror that cap on the Swift
+    /// side so the encoded JSON never violates the contract. Returns
+    /// `[]` when the input is empty (no FFI round trip).
+    public func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard !ids.isEmpty else { return [] }
+        // Mirror the FFI's EVENTS_BY_IDS_CAP so the wire payload is bounded.
+        let capped = Array(ids.prefix(32))
+        let payload = EventsByIdsPayload(ids: capped)
+        let queryJsonData = try JSONEncoder().encode(payload)
+        guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
+            throw BrainReaderError.decodeFailed("FFIBrainReader: non-UTF8 ids payload")
+        }
+        let rawJson: UnsafeMutablePointer<CChar>? = queryJsonString.withCString { q in
+            mci_brain_ffi_events_by_ids(h, q)
+        }
+        guard let rawJson else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeHits(rawJson)
+    }
+
     public func listEpisodes(limit: Int) async throws -> [Episode] {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
@@ -396,6 +423,14 @@ private struct QueryPayload: Encodable {
         case timeToUs = "time_to_us"
         case appFilter = "app_filter"
     }
+}
+
+/// Cycle-8.37 PR-3: input payload for `mci_brain_ffi_events_by_ids`.
+/// Serializes to `{"ids":[<u64>,...]}` — the exact wire the Rust
+/// `EventsByIdsQueryJson` decodes. `ids` is snake_case-safe by virtue of
+/// being a single word.
+private struct EventsByIdsPayload: Encodable {
+    let ids: [UInt64]
 }
 
 private struct ObservedAppsQueryPayload: Encodable {

@@ -46,6 +46,18 @@ char *mci_brain_ffi_search(McibrainHandle *h, const char *query_json);
 /* Fetch the `limit` most-recent events as a JSON array of HitJson. */
 char *mci_brain_ffi_recent_events(McibrainHandle *h, uint32_t limit);
 
+/* Resolve a batch of event ids into full HitJson rows. Powers the recall
+ * UI's related-hits flyout (cycle 8.37 PR-3): given a hit whose
+ * `linked_event_ids` names its cross-app siblings, the Swift side calls
+ * this to render the "your email about X is connected to your Slack
+ * message about Y" strip.
+ *   `query_json`: {"ids":[<u64>,<u64>,...]}
+ *   returns: JSON array of HitJson rows (source="linked", score=null).
+ * Order follows input order for ids that resolve; ids that no longer
+ * exist in the store are silently dropped. Input is capped at 32 ids
+ * (excess is truncated) to bound the per-call get_event loop. */
+char *mci_brain_ffi_events_by_ids(McibrainHandle *h, const char *query_json);
+
 /* Fetch the `limit` most-recent privacy moments as a JSON array.
  * Each row carries ONLY {ts_us, app_bundle_id?, reason_code}.
  * NEVER OCR text / keyframe / windowTitle / url

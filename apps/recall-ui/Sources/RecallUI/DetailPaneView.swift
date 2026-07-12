@@ -4,6 +4,16 @@ import SwiftUI
 
 struct DetailPaneView: View {
     let hit: Hit
+    /// Optional reader injected by the parent so the related-hits flyout
+    /// (cycle 8.37 PR-3) can resolve `hit.linkedEventIds` into full
+    /// sibling `Hit` rows. `nil` on preview / legacy call sites — the
+    /// flyout button is hidden in that case.
+    var reader: BrainReader? = nil
+    /// Bubble a selected sibling up to the parent VM so click-through
+    /// on a flyout row can push it into the search / timeline selection.
+    var onSelectRelated: ((Hit) -> Void)? = nil
+
+    @State private var flyoutScope: RelatedHitsScope? = nil
 
     /// `text_snippet` with the FTS-only context header prefix
     /// (`[app=… | title=… | url=… | ts=…]\n`) stripped for display.
@@ -17,6 +27,9 @@ struct DetailPaneView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 Divider().background(Color.brandCardBorder)
+                if !hit.entities.isEmpty {
+                    entityStrip
+                }
                 if let urlStr = hit.url, !urlStr.isEmpty {
                     urlSection(urlStr)
                 }
@@ -46,6 +59,9 @@ struct DetailPaneView: View {
                     .font(.system(.title3, design: .default).weight(.semibold))
                     .foregroundStyle(Color.brandFgPrimary)
                 Spacer()
+                if reader != nil, !hit.linkedEventIds.isEmpty {
+                    relatedBadge
+                }
                 Text(Formatters.sourceTag(hit.source))
                     .font(.system(.caption2, design: .monospaced))
                     .padding(.horizontal, 6)
@@ -93,6 +109,97 @@ struct DetailPaneView: View {
                     .tint(Color.brandMint)
                 }
             }
+        }
+    }
+
+    /// "🔗 N related" pill next to the source tag. Click opens the
+    /// cross-app dot-connect flyout scoped to every id in
+    /// `hit.linkedEventIds`. Hidden when `reader` is nil (preview /
+    /// legacy call sites) or the hit has no linked siblings.
+    private var relatedBadge: some View {
+        Button {
+            flyoutScope = .all(hitId: hit.eventId)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "link")
+                    .font(.system(size: 9))
+                Text("\(hit.linkedEventIds.count) related")
+                    .font(.system(.caption2, design: .monospaced))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.brandMintSubtle)
+            )
+            .foregroundStyle(Color.brandMint)
+        }
+        .buttonStyle(.plain)
+        .help("Show cross-app siblings of this event")
+        .popover(
+            isPresented: Binding(
+                get: {
+                    if case .all = flyoutScope { return true }
+                    return false
+                },
+                set: { on in if !on { flyoutScope = nil } }
+            ),
+            arrowEdge: .top
+        ) {
+            flyoutBody(scope: .all(hitId: hit.eventId))
+        }
+    }
+
+    /// Horizontal chip strip listing every resolver-allowlist entity the
+    /// event mentions. A chip is BOTH click-to-open and long-hover
+    /// (~500 ms) to open the flyout scoped to that entity. This is the
+    /// per-entity leg of the dot-connect surface (§3.3 of the audit).
+    private var entityStrip: some View {
+        // Use a lightweight flow layout — up to ~6 chips typical.
+        HStack(spacing: 6) {
+            ForEach(Array(hit.entities.prefix(6).enumerated()), id: \.offset) { _, name in
+                EntityChipTrigger(
+                    name: name,
+                    isFlyoutActive: {
+                        if case .entity(_, let n) = flyoutScope { return n == name }
+                        return false
+                    },
+                    onOpen: {
+                        if reader != nil {
+                            flyoutScope = .entity(hitId: hit.eventId, name: name)
+                        }
+                    },
+                    onDismiss: { flyoutScope = nil },
+                    popover: {
+                        flyoutBody(scope: .entity(hitId: hit.eventId, name: name))
+                    }
+                )
+            }
+            if hit.entities.count > 6 {
+                Text("+\(hit.entities.count - 6)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(Color.brandFgMuted)
+            }
+            Spacer()
+        }
+    }
+
+    /// The flyout body factored out so both the badge popover and the
+    /// per-chip popovers share the same construction (and both consult
+    /// `reader` guarded).
+    @ViewBuilder
+    private func flyoutBody(scope: RelatedHitsScope) -> some View {
+        if let reader = reader {
+            RelatedHitsFlyout(
+                hit: hit,
+                scope: scope,
+                reader: reader,
+                onSelect: onSelectRelated,
+                onDismiss: { flyoutScope = nil }
+            )
+        } else {
+            // Should be unreachable — badge / chip hidden when reader nil.
+            EmptyView()
         }
     }
 
@@ -177,6 +284,70 @@ struct DetailPaneView: View {
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.brandBgPrimary)
+            )
+    }
+}
+
+/// One clickable / hoverable entity chip used inside `DetailPaneView`'s
+/// entity strip. Encapsulates the ~500 ms long-hover timer that opens
+/// the related-hits flyout without also firing on a mouse fly-by. Kept
+/// as a nested private-ish helper so `DetailPaneView` stays readable
+/// and the popover state machine is one place. Click opens the same
+/// flyout immediately (bypasses the timer).
+private struct EntityChipTrigger<PopoverContent: View>: View {
+    let name: String
+    /// Poll from the parent's `flyoutScope` so we can drive the
+    /// `.popover(isPresented:)` binding without duplicating truth.
+    let isFlyoutActive: () -> Bool
+    /// Fire the "open flyout for this entity" transition in the parent.
+    let onOpen: () -> Void
+    /// Clear the parent's `flyoutScope` — invoked when the popover
+    /// closes (click-outside / ESC).
+    let onDismiss: () -> Void
+    /// The popover body. Constructed lazily so we don't build it on
+    /// every hover-tick.
+    @ViewBuilder let popover: () -> PopoverContent
+
+    /// Long-hover threshold — ~500 ms per the task spec so a fly-by
+    /// mouse motion does not trigger the popover.
+    private static var hoverOpenDelay: Duration { .milliseconds(500) }
+
+    @State private var hoverTask: Task<Void, Never>? = nil
+
+    var body: some View {
+        Text(name)
+            .font(.system(.caption, design: .default))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.brandMintSubtle)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.brandMintDim, lineWidth: 0.5)
+            )
+            .foregroundStyle(Color.brandMint)
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen() }
+            .onHover { entered in
+                hoverTask?.cancel()
+                guard entered else { return }
+                hoverTask = Task { @MainActor in
+                    try? await Task.sleep(for: Self.hoverOpenDelay)
+                    if !Task.isCancelled { onOpen() }
+                }
+            }
+            .popover(
+                isPresented: Binding(
+                    get: isFlyoutActive,
+                    // Set(false) fires when the popover closes (click-outside /
+                    // ESC). Set(true) is a no-op — parent controls opening
+                    // via `onOpen` (tap / long-hover).
+                    set: { on in if !on { onDismiss() } }
+                ),
+                arrowEdge: .bottom,
+                content: popover
             )
     }
 }

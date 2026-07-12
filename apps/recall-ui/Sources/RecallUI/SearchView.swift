@@ -5,6 +5,11 @@ import SwiftUI
 struct SearchView: View {
     @StateObject var viewModel: SearchViewModel
     var focusTrigger: Bool = false
+    /// Injected so `DetailPaneView`'s related-hits flyout (cycle 8.37
+    /// PR-3) can resolve linked event ids. Optional so previews / tests
+    /// that stub the VM can omit it — the flyout button hides in that
+    /// case.
+    var reader: BrainReader? = nil
     @FocusState private var isSearchFieldFocused: Bool
 
     var body: some View {
@@ -130,7 +135,7 @@ struct SearchView: View {
 
                 if viewModel.isDetailFocused, let hit = viewModel.selectedHit {
                     Divider().background(Color.brandCardBorder)
-                    DetailPaneView(hit: hit)
+                    DetailPaneView(hit: hit, reader: reader)
                         .frame(minWidth: 300, idealWidth: 400)
                 }
             }

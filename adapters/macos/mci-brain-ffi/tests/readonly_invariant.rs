@@ -26,10 +26,10 @@ use std::path::PathBuf;
 
 use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
 use mci_brain_ffi::{
-    mci_brain_ffi_close, mci_brain_ffi_last_error_message, mci_brain_ffi_list_episodes,
-    mci_brain_ffi_list_observed_apps, mci_brain_ffi_open, mci_brain_ffi_recent_events,
-    mci_brain_ffi_recent_privacy_moments, mci_brain_ffi_search, mci_brain_ffi_string_free, HitJson,
-    PrivacyMomentJson,
+    mci_brain_ffi_close, mci_brain_ffi_events_by_ids, mci_brain_ffi_last_error_message,
+    mci_brain_ffi_list_episodes, mci_brain_ffi_list_observed_apps, mci_brain_ffi_open,
+    mci_brain_ffi_recent_events, mci_brain_ffi_recent_privacy_moments, mci_brain_ffi_search,
+    mci_brain_ffi_string_free, HitJson, PrivacyMomentJson,
 };
 use mci_core::crypto::DbKey;
 use mci_core::store::open_readonly as mci_core_open_readonly;
@@ -425,6 +425,77 @@ fn ffi_search_rejects_malformed_query_json() {
 }
 
 // ---------------------------------------------------------------------------
+// 8.5. events_by_ids — cycle 8.37 PR-3, related-hits flyout fetch surface
+//
+// Round-trip: seed three events, fetch by ids via the new FFI, assert the
+// returned HitJson rows preserve input order + drop missing ids silently.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ffi_events_by_ids_resolves_seeded_ids_in_input_order() {
+    let (_dir, path, raw_key) = make_test_db();
+    let key = DbKey::from_bytes(raw_key);
+    let (a, b, c) = {
+        let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+        let a = seed_event(&writer, 100, "com.apple.Safari", "S", "", "safari body");
+        let b = seed_event(&writer, 200, "com.microsoft.VSCode", "V", "", "vscode body");
+        let c = seed_event(&writer, 300, "com.tinyspeck.slackmacgap", "Sl", "", "slack body");
+        (a, b, c)
+    };
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null(), "ffi open must succeed");
+
+    // Ask for [c, a, b] plus a nonexistent id — result must be [c, a, b]
+    // (order preserved, missing id dropped silently).
+    let query = format!(
+        r#"{{"ids":[{},{},{},9999999]}}"#,
+        c.0, a.0, b.0
+    );
+    let query_c = CString::new(query).unwrap();
+    let j = unsafe { mci_brain_ffi_events_by_ids(h, query_c.as_ptr()) };
+    assert!(!j.is_null(), "events_by_ids must succeed");
+    let s = unsafe { CStr::from_ptr(j) }.to_string_lossy().into_owned();
+    let hits: Vec<HitJson> = serde_json::from_str(&s).expect("valid JSON");
+    unsafe { mci_brain_ffi_string_free(j) };
+
+    let ids: Vec<u64> = hits.iter().map(|h| h.event_id).collect();
+    assert_eq!(ids, vec![c.0, a.0, b.0], "order follows input; missing dropped");
+    // Each row must carry source="linked" so the UI can badge these rows
+    // separately from ranked search results.
+    for h in &hits {
+        assert_eq!(h.source, "linked");
+        assert!(h.score.is_none(), "linked lookup has no ranking score");
+    }
+
+    unsafe { mci_brain_ffi_close(h) };
+}
+
+#[test]
+fn ffi_events_by_ids_with_empty_list_returns_empty_json_array() {
+    let (_dir, path, raw_key) = make_test_db();
+    let key = DbKey::from_bytes(raw_key);
+    {
+        let _writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+    }
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null());
+
+    let query_c = CString::new(r#"{"ids":[]}"#).unwrap();
+    let j = unsafe { mci_brain_ffi_events_by_ids(h, query_c.as_ptr()) };
+    assert!(!j.is_null());
+    let s = unsafe { CStr::from_ptr(j) }.to_string_lossy().into_owned();
+    unsafe { mci_brain_ffi_string_free(j) };
+    let hits: Vec<HitJson> = serde_json::from_str(&s).expect("valid JSON");
+    assert!(hits.is_empty());
+
+    unsafe { mci_brain_ffi_close(h) };
+}
+
+// ---------------------------------------------------------------------------
 // 9. FFI does NOT export any mutating surface — compile-time + symbol check
 // ---------------------------------------------------------------------------
 
@@ -453,6 +524,10 @@ fn ffi_exports_no_mutating_surface() {
         "mci_brain_ffi_brief_for_date",
         "mci_brain_ffi_latest_brief",
         "mci_brain_ffi_brief_dates",
+        // Cycle 8.37 PR-3 — related-hits flyout fetch surface (read-only).
+        // Resolves a Vec<u64> of linked event ids into HitJson rows via
+        // BrainStore::get_event, no mutating call path.
+        "mci_brain_ffi_events_by_ids",
         "mci_brain_ffi_string_free",
         "mci_brain_ffi_last_error_message",
     ];
@@ -470,13 +545,14 @@ fn ffi_exports_no_mutating_surface() {
         mci_brain_ffi::mci_brain_ffi_brief_for_date as *const (),
         mci_brain_ffi::mci_brain_ffi_latest_brief as *const (),
         mci_brain_ffi::mci_brain_ffi_brief_dates as *const (),
+        mci_brain_ffi_events_by_ids as *const (),
         mci_brain_ffi_string_free as *const (),
         mci_brain_ffi_last_error_message as *const (),
     ];
     assert_eq!(
         allowed.len(),
-        12,
-        "FFI surface size pinned at 12 (7 base + 2 #178 list_* + 3 #180 brief_*)"
+        13,
+        "FFI surface size pinned at 13 (7 base + 2 #178 list_* + 3 #180 brief_* + 1 cycle-8.37 events_by_ids)"
     );
 }
 

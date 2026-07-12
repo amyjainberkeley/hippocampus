@@ -4,6 +4,10 @@ import SwiftUI
 
 struct TimelineView: View {
     @StateObject var viewModel: TimelineViewModel
+    /// Injected so `DetailPaneView`'s related-hits flyout (cycle 8.37
+    /// PR-3) can resolve linked event ids. Optional so previews / tests
+    /// omit it.
+    var reader: BrainReader? = nil
 
     var body: some View {
         Group {
@@ -84,7 +88,7 @@ struct TimelineView: View {
 
             if viewModel.isDetailFocused, let hit = viewModel.selectedHit {
                 Divider().background(Color.brandCardBorder)
-                DetailPaneView(hit: hit)
+                DetailPaneView(hit: hit, reader: reader)
                     .frame(minWidth: 300, idealWidth: 400)
             }
         }

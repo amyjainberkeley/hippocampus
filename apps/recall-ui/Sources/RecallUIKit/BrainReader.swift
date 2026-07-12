@@ -234,6 +234,20 @@ public protocol BrainReader: Sendable {
     /// Most-recent episodes (sorted by start DESC) from the segmenter.
     func listEpisodes(limit: Int) async throws -> [Episode]
 
+    /// Resolve a batch of event ids into full [`Hit`] rows. Powers the
+    /// related-hits flyout in `DetailPaneView` (cycle 8.37 PR-3): given a
+    /// hit's `linkedEventIds`, the flyout renders app · time · snippet
+    /// for each cross-app sibling — this is the visible dot-connect
+    /// surface ("your Safari tab about X is connected to your Slack
+    /// message about Y and your VSCode buffer about Z").
+    ///
+    /// Order in the result follows input order for the ids that resolve;
+    /// ids that no longer exist in the store are silently dropped (a
+    /// linked-event id can refer to an event later suppressed by the
+    /// cascade). Input is capped at 32 ids at the FFI boundary — excess
+    /// is truncated silently.
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit]
+
     // Daily Brief read surface — backs the Brief tab
     // (`docs/design/brief-viewer-spec.md`).
 
@@ -501,5 +515,13 @@ public struct StubBrainReader: BrainReader {
                 .prefix(max(0, limit))
                 .map(\.dateLocal)
         )
+    }
+
+    /// Silent truncation at 32 mirrors the FFI's `EVENTS_BY_IDS_CAP`.
+    /// Ids that don't match any demo hit are dropped so the stub matches
+    /// the FFI's "linked event may have been suppressed" semantics.
+    public func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] {
+        let byId = Dictionary(uniqueKeysWithValues: Self.demoHits.map { ($0.eventId, $0) })
+        return ids.prefix(32).compactMap { byId[$0] }
     }
 }
