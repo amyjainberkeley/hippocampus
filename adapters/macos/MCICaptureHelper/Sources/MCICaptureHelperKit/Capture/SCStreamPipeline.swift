@@ -209,6 +209,194 @@ public enum SCContentFilterFactory {
         }
         return matched
     }
+
+    // MARK: - V2-P1 third-lift scaffold (multi-window include-set) —
+    //         `SCContentFilter(display:including:exceptingWindows:)`
+    //
+    // Per ADR-0031 §Status "Lift condition (third time)" + the
+    // 2026-05-31 CEO ratification (FORK 3 = B) + the 2026-06-01
+    // redesign memo (`docs/research/v2-p1-redesign-architecture-
+    // 2026-06-01.md`) §1.1 the include-set form is BINDING: the
+    // captured surface is the union of a non-empty include-set of
+    // `SCWindow` values, minus the (usually empty) `exceptingWindows:`
+    // subtraction list.
+    //
+    // This scaffold lands the FACTORY + the pure OS-free selection
+    // helper. It does NOT wire the factory into `SCStreamCaptureSession`
+    // (no `main.swift` change; no `killOcrEmit` flip; no rebind path
+    // yet). Phase 7 PR 13 lands the wiring + the live-Mac corpus per
+    // the redesign memo §2.3 + §3; Phase 7 PR 14 is the standalone M4
+    // lift.
+    //
+    // The scaffold is intentionally scope-fenced to CODE READY TO BE
+    // FLIPPED — no default flip yet. This is the ADR-0031 §Status
+    // discipline "no compounding under any circumstance": memo → PR 13
+    // wiring → PR 14 lift, each a separate PR.
+
+    /// Pure selection helper for the multi-window include-set — the
+    /// V2-P1 third-lift equivalent of `selectFocusedWindow(...)` above,
+    /// extended to a set of windows.
+    ///
+    /// Input:
+    /// - `descriptors`: the visible windows on the target display
+    ///   (mirrors what `SCShareableContent.current.windows` returns at
+    ///   the live call site).
+    /// - `focusedWindowId`: the seed of the include-set. MUST be present
+    ///   in `descriptors` and MUST NOT be denylisted, else `nil` is
+    ///   returned (fail-closed; the caller does not rebind — see
+    ///   `makeMultiWindowFilter(...)` below).
+    /// - `coViewWindowIds`: the ordered co-view candidates the include-set
+    ///   heuristic (redesign memo §1.3.1) proposes alongside the focused
+    ///   seed. Descriptors NOT in this list are ignored; descriptors that
+    ///   ARE in this list but are denylisted are silently dropped (the
+    ///   redesign memo §1.3.1 step 4 "denylist subtract" — a denylisted
+    ///   window never enters the include-set at all).
+    /// - `denylist`: ADR-0013 §1 source-level denylist.
+    ///
+    /// Returns the ordered include-set descriptors (seed FIRST, co-view
+    /// candidates in the caller-supplied order after, all
+    /// non-denylisted) or `nil` if the seed cannot be admitted. The
+    /// returned array is GUARANTEED non-empty (≥1 element: the seed);
+    /// this preserves the redesign memo §1.1 invariant that
+    /// `SCContentFilter(display:including:exceptingWindows:)` never
+    /// receives an empty `including:` list — the cycle 8.27 `-3815`
+    /// antipattern.
+    ///
+    /// Headlessly unit-testable — no OS call. Used by the (future)
+    /// live-Mac corpus runner + the unit tests in this scaffold.
+    public static func selectMultiWindowIncludingSet(
+        from descriptors: [WindowDescriptor],
+        focusedWindowId: CGWindowID,
+        coViewWindowIds: [CGWindowID],
+        denylist: Denylist
+    ) -> [WindowDescriptor]? {
+        // Seed the include-set with the focused window; fail closed if
+        // the focused window is missing or denylisted (mirrors
+        // `selectFocusedWindow(...)`).
+        guard let seed = selectFocusedWindow(
+            from: descriptors,
+            windowId: focusedWindowId,
+            denylist: denylist
+        ) else {
+            return nil
+        }
+        // Denylist-subtract every co-view candidate. Preserve the
+        // caller-supplied order for determinism; skip candidates that
+        // are missing from `descriptors` (window closed between the
+        // heuristic recompute and this call — bounded race, treated as
+        // "no longer a candidate").
+        var result: [WindowDescriptor] = [seed]
+        for candidateId in coViewWindowIds {
+            // Skip the seed if the caller passed it as a co-view too.
+            if candidateId == focusedWindowId { continue }
+            guard let candidate = descriptors.first(where: { $0.windowId == candidateId })
+            else { continue }
+            if denylist.appIsDenied(bundleId: candidate.bundleId) { continue }
+            result.append(candidate)
+        }
+        // Post-condition: result is non-empty (contains at least the
+        // seed). Explicit invariant assert — a future refactor that
+        // regresses this is a §5 protected-set breach.
+        precondition(!result.isEmpty, "include-set must be non-empty post-select")
+        return result
+    }
+
+    /// ADR-0031 V2-P1 third-lift — multi-window include-set capture
+    /// filter. PROTECTED-SET per AGENT_PROTOCOL §5.
+    ///
+    /// BINDING API SHAPE (redesign memo §1.1): the captured surface is
+    /// the union of the `including:` list minus `exceptingWindows:`,
+    /// per Apple's `SCContentFilter(display:including:exceptingWindows:)`
+    /// initializer. The `including:` list MUST be non-empty at the call
+    /// site — an empty list is the cycle 8.27 `-3815` antipattern
+    /// ("Failed to find any displays or windows to capture"; PR #264
+    /// mis-used `exceptingWindows:` to the same effect).
+    ///
+    /// This factory REFUSES TO CONSTRUCT and returns `nil` when:
+    ///   1. `SCShareableContent.current.displays` is empty (no display
+    ///      to bind against — throws `noDisplay`).
+    ///   2. The pure selection helper (`selectMultiWindowIncludingSet`)
+    ///      returns `nil` — the focused window is not present in the
+    ///      live enumeration OR its owning app is on the ADR-0013 §1
+    ///      denylist. The caller (`SCStreamCaptureSession` in Phase 7
+    ///      PR 13) treats `nil` as "do not rebind"; the prior installed
+    ///      filter stays active and the race gate trips on every frame
+    ///      until focus returns to an allowed window.
+    ///   3. The resolved include-set would be empty (would throw
+    ///      `emptyIncludeSet`; unreachable via the selection helper's
+    ///      non-empty post-condition, but defended structurally — a
+    ///      future refactor that removes the seed-fail-closed rule must
+    ///      trip this check before reaching the Apple constructor).
+    ///
+    /// This scaffold is NOT wired into the live capture path yet. It
+    /// exists as CODE READY TO BE FLIPPED per the ADR-0031 §Status
+    /// discipline. Phase 7 PR 13 lands the wiring at `main.swift` and
+    /// the live-Mac corpus; Phase 7 PR 14 is the standalone M4 lift.
+    ///
+    /// `// UNVERIFIED — needs live macOS; do not claim working`. The
+    /// OS-touching `SCShareableContent.current` call requires a real
+    /// screen + Screen-Recording TCC grant; the pure selection logic is
+    /// factored into `selectMultiWindowIncludingSet(...)` which IS
+    /// unit-tested. The Apple constructor call itself is covered by the
+    /// live-Mac corpus §3.2 harnesses (out of scope for this scaffold).
+    public static func makeMultiWindowFilter(
+        focusedWindowId: CGWindowID,
+        coViewWindowIds: [CGWindowID],
+        denylist: Denylist
+    ) async throws -> SCContentFilter? {
+        let content = try await SCShareableContent.current
+        guard let display = content.displays.first else {
+            throw SCStreamPipelineError.noDisplay
+        }
+        // Build the pure selection over the OS-enumerated visible
+        // windows. The descriptor form is the same shape
+        // `selectFocusedWindow(...)` accepts; we hydrate it from the
+        // live `SCShareableContent`.
+        let descriptors: [WindowDescriptor] = content.windows.compactMap { w in
+            guard let bundleId = w.owningApplication?.bundleIdentifier else {
+                return nil
+            }
+            return WindowDescriptor(windowId: w.windowID, bundleId: bundleId)
+        }
+        guard let selected = selectMultiWindowIncludingSet(
+            from: descriptors,
+            focusedWindowId: focusedWindowId,
+            coViewWindowIds: coViewWindowIds,
+            denylist: denylist
+        ) else {
+            // Fail-closed: focused window missing or denylisted. The
+            // caller MUST NOT rebind; the prior filter (or display
+            // fallback) stays installed.
+            return nil
+        }
+        // Materialize the `SCWindow` values for the selected descriptors.
+        // Skip any descriptor whose live `SCWindow` disappeared between
+        // the descriptor build and this pass (bounded race).
+        let scWindowById: [CGWindowID: SCWindow] = Dictionary(
+            uniqueKeysWithValues: content.windows.map { ($0.windowID, $0) }
+        )
+        let includingSet: [SCWindow] = selected.compactMap { scWindowById[$0.windowId] }
+        // Refuse-to-construct discipline (redesign memo §1.1 + third-
+        // lift condition 1): an empty include-set is forbidden. The
+        // selection helper's post-condition already guarantees ≥1
+        // element under normal flow; this check catches any residual
+        // bounded-race window where every selected window vanished
+        // between the descriptor build and the SCWindow materialization.
+        if includingSet.isEmpty {
+            throw SCStreamPipelineError.emptyIncludeSet
+        }
+        // The BINDING form per ADR-0031 §Status FORK 3 = B:
+        // `SCContentFilter(display:including:exceptingWindows:)` with a
+        // non-empty include list. `exceptingWindows:` stays empty —
+        // ADR-0013 §1 denylist is enforced via the selection helper's
+        // denylist-subtract path (redesign memo §1.3.1 step 4), NOT via
+        // `exceptingWindows:` (per the memo's "cleaner semantic" note).
+        return SCContentFilter(
+            display: display,
+            including: includingSet,
+            exceptingWindows: []
+        )
+    }
 }
 
 /// Errors the SCStream pipeline surfaces.
@@ -219,6 +407,15 @@ public enum SCStreamPipelineError: Error, Equatable {
     /// an internal invariant breach. Should be impossible by
     /// construction; asserted so a refactor can't regress the gate.
     case encodeBeforeCascade
+    /// V2-P1 third-lift: `makeMultiWindowFilter(...)` was asked to
+    /// construct an `SCContentFilter(display:including:exceptingWindows:)`
+    /// but the resolved include-set was empty. Refusing to construct
+    /// (per ADR-0031 §Status third-lift condition 1 + redesign memo
+    /// §1.1) — an empty include-set is the cycle 8.27 `-3815` antipattern
+    /// class. The caller MUST NOT swallow this into a "capture nothing"
+    /// state; the discipline is fail-closed = fall back to the prior
+    /// installed filter, NOT degrade silently.
+    case emptyIncludeSet
 }
 
 /// An owned, opaque lease on one captured surface.
