@@ -34,6 +34,29 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     /// Fused score [0,1] for search; `nil` for plain timeline rows.
     public let score: Float?
 
+    /// Canonical names of the resolver-allowlist entities
+    /// (person / org / location / email / phone / url — never a
+    /// redacted-token label) this event mentions. Powers the entity-chip
+    /// strip on `HitRow` and the detail-pane entity list (cycle 8.35 PR-2).
+    ///
+    /// Empty when the store has no graph data or the event mentions
+    /// nothing in the allowlist. Mirrors the `entities` field on the FFI's
+    /// `HitJson` and on the MCP `mci_recall` wire
+    /// (`apps/agent/src/mcp/server.rs:302`) — capped at 16 names per hit
+    /// (`ENTITY_LIMIT` in `mci-brain-ffi`).
+    public let entities: [String]
+
+    /// Cross-app "dot-connect" event ids reachable from this hit's episode
+    /// via a `shared_identity` `episode_edge`. Powers the "Related (N)"
+    /// flyout in `DetailPaneView` (cycle 8.35 PR-3).
+    ///
+    /// Empty when the hit's episode has no cross-app link, or when the
+    /// store has no `episode_edges` data. Post-cascade only. Mirrors the
+    /// `linked_event_ids` field on the FFI's `HitJson` and on the MCP
+    /// `mci_recall` wire (`apps/agent/src/mcp/server.rs:303`) — capped
+    /// at 16 ids per hit (`LINK_LIMIT` in `mci-brain-ffi`).
+    public let linkedEventIds: [UInt64]
+
     public init(
         eventId: UInt64,
         tsUs: UInt64,
@@ -42,7 +65,9 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         url: String?,
         ocrTextSnippet: String,
         source: String,
-        score: Float?
+        score: Float?,
+        entities: [String] = [],
+        linkedEventIds: [UInt64] = []
     ) {
         self.eventId = eventId
         self.tsUs = tsUs
@@ -52,6 +77,8 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         self.ocrTextSnippet = ocrTextSnippet
         self.source = source
         self.score = score
+        self.entities = entities
+        self.linkedEventIds = linkedEventIds
     }
 }
 
@@ -228,6 +255,12 @@ public protocol BrainReader: Sendable {
 /// P3.9b lands.
 public struct StubBrainReader: BrainReader {
     /// Canned demo corpus. Stable order so tests can assert on it.
+    ///
+    /// The three rows are wired so the cross-hit link topology is
+    /// realistic — hit 101 ↔ hit 102 (both mention "MCI"), hit 102 ↔ hit
+    /// 103 (both mention "MCI"). This matches the "same topic showed up
+    /// across Safari + VSCode + Slack over the past 3 days" WOW example
+    /// in `docs/research/2026-07-12-recall-ui-audit.md` §7.
     public static let demoHits: [Hit] = [
         Hit(
             eventId: 101,
@@ -238,7 +271,9 @@ public struct StubBrainReader: BrainReader {
             ocrTextSnippet:
                 "Privacy is a fundamental human right. Your data is yours.",
             source: "lexical",
-            score: 0.91
+            score: 0.91,
+            entities: ["Apple", "privacy"],
+            linkedEventIds: [102]
         ),
         Hit(
             eventId: 102,
@@ -248,7 +283,9 @@ public struct StubBrainReader: BrainReader {
             url: nil,
             ocrTextSnippet: "pub trait Chunker: Send + Sync { fn chunk(&self ...",
             source: "lexical",
-            score: 0.74
+            score: 0.74,
+            entities: ["MCI", "Chunker"],
+            linkedEventIds: [101, 103]
         ),
         Hit(
             eventId: 103,
@@ -258,7 +295,9 @@ public struct StubBrainReader: BrainReader {
             url: nil,
             ocrTextSnippet: "shipping P3.9 today — recall UI v1",
             source: "lexical",
-            score: 0.62
+            score: 0.62,
+            entities: ["MCI", "recall-ui"],
+            linkedEventIds: [102]
         ),
     ]
 

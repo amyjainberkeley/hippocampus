@@ -317,6 +317,15 @@ private struct HitWire: Decodable {
     let ocr_text_snippet: String
     let source: String
     let score: Float?
+    /// Cycle-8.35 PR-1: additive entity chip surface. `serde(default)` on
+    /// the Rust side means older FFI builds (or hand-rolled test payloads)
+    /// that omit this key still decode — we mirror that here by defaulting
+    /// to an empty array on the Swift side too. See `docs/research/
+    /// 2026-07-12-recall-ui-audit.md` §3.1.
+    let entities: [String]?
+    /// Cycle-8.35 PR-1: additive cross-app dot-connect ids. Same
+    /// `serde(default)` compatibility contract as `entities` above.
+    let linked_event_ids: [UInt64]?
 
     func toHit() -> Hit {
         Hit(
@@ -327,7 +336,9 @@ private struct HitWire: Decodable {
             url: url,
             ocrTextSnippet: ocr_text_snippet,
             source: source,
-            score: score
+            score: score,
+            entities: entities ?? [],
+            linkedEventIds: linked_event_ids ?? []
         )
     }
 }
