@@ -104,4 +104,46 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         vm.goTo(.browserExtension) // raw 5 out of allCases.count - 1 = 11
         XCTAssertEqual(vm.progress, 5.0 / 11.0, accuracy: 0.001)
     }
+
+    // MARK: - Migration source (cycle 8.38 audit F4 / PR-2)
+
+    func testMigrationSourceDefaultsToNil() {
+        let vm = makeVM()
+        XCTAssertNil(vm.migrationSource,
+            "Cold-start install must not surface migration-specific copy.")
+    }
+
+    func testApplyLaunchURLWithRewindMigration() {
+        let vm = makeVM()
+        let ok = vm.applyLaunchURL(URL(string: "onboarding://start?migration=rewind")!)
+        XCTAssertTrue(ok)
+        XCTAssertEqual(vm.migrationSource, .rewind)
+    }
+
+    func testApplyLaunchURLWithUnknownMigrationIsIgnored() {
+        let vm = makeVM()
+        let ok = vm.applyLaunchURL(URL(string: "onboarding://start?migration=notion")!)
+        XCTAssertFalse(ok)
+        XCTAssertNil(vm.migrationSource,
+            "Stale/unknown migration deep-links must not surprise a non-migrator user.")
+    }
+
+    func testApplyLaunchURLWithoutMigrationQueryIsIgnored() {
+        let vm = makeVM()
+        let ok = vm.applyLaunchURL(URL(string: "onboarding://start")!)
+        XCTAssertFalse(ok)
+        XCTAssertNil(vm.migrationSource)
+    }
+
+    func testMigrationSourceInjectableViaInit() {
+        // Test-side injection path — bypasses the URL parse so a slide
+        // test can hold a "user came from Rewind" fixture directly.
+        let vm = OnboardingFlowViewModel(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
+            stateStore: InMemoryOnboardingStateStore(),
+            migrationSource: .rewind
+        )
+        XCTAssertEqual(vm.migrationSource, .rewind)
+    }
 }

@@ -20,7 +20,7 @@ struct DoneSlide: View {
 
                 summaryChecklist
 
-                shortcutsSection
+                menuBarHint
             }
         }
     }
@@ -70,25 +70,24 @@ struct DoneSlide: View {
         }
     }
 
-    private var shortcutsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            shortcutRow(keys: "\u{21E7}\u{2318}P", label: "Pause capture instantly")
-            shortcutRow(keys: "\u{21E7}\u{2318}F", label: "Search what you've seen")
+    // Cycle 8.38 audit F5 — the previous "shortcutsSection" advertised
+    // ⇧⌘P / ⇧⌘F as global hotkeys, neither of which is bound anywhere
+    // in HippocampusApp. Rather than lie in the final slide, point the
+    // user at the always-present menu-bar entry point. If the hotkeys
+    // ship (recall-UI audit PR-5), restore a shortcuts row *then*.
+    private var menuBarHint: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "menubar.arrow.up.rectangle")
+                .foregroundStyle(OnboardingTheme.accentBlue)
+                .frame(width: 20)
+            Text(OnboardingCopy.doneMenuBarHint)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
         }
         .padding(14)
         .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
         .frame(maxWidth: 380)
-    }
-
-    private func shortcutRow(keys: String, label: String) -> some View {
-        HStack(spacing: 10) {
-            Text(keys)
-                .font(.system(size: 13, design: .monospaced))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
-            Text(label)
-                .font(.system(size: 14))
-        }
     }
 }

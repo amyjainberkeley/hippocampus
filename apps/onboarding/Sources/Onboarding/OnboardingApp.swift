@@ -100,6 +100,14 @@ struct OnboardingApp: App {
                     width: OnboardingTheme.windowWidth,
                     height: OnboardingTheme.windowHeight
                 )
+                // Deep-link entrypoint. `onboarding://start?migration=rewind`
+                // (fired by the `/rewind` landing lane, cycle 8.37 PR #30)
+                // flips the flow VM's `migrationSource` so `WelcomeSlide`
+                // renders the Rewind sub-header. Unknown query values are
+                // silently ignored — see `OnboardingFlowViewModel.applyLaunchURL`.
+                .onOpenURL { url in
+                    flowVM.applyLaunchURL(url)
+                }
         }
         .windowResizability(.contentSize)
         .commands {
