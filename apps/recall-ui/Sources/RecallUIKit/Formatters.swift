@@ -48,6 +48,11 @@ public enum Formatters {
 
     /// Render the source tag the row was retrieved with into a short
     /// display label. Keep the strings stable — tests assert on them.
+    ///
+    /// **Legacy — kept for tests / debug UIs.** The user-facing recall list
+    /// now renders `matchReason(_:)` instead so users see plain English
+    /// ("Matched: meaning") rather than engineer jargon ("hyb"). Cycle
+    /// 8.36 PR-2 (`docs/research/2026-07-12-recall-ui-audit.md` §5, G6).
     public static func sourceTag(_ s: String) -> String {
         switch s {
         case "lexical": return "lex"
@@ -55,6 +60,88 @@ public enum Formatters {
         case "timeline": return "time"
         default: return s
         }
+    }
+
+    /// Plain-English "why did this match?" label for the recall list.
+    /// Maps the internal source tag to a user-facing string; returns `nil`
+    /// for `"timeline"` (chronological rows have no match reason worth
+    /// showing — the timestamp already communicates provenance) and for
+    /// unknown sources (forward-compat: a future retrieval mode shouldn't
+    /// leak raw jargon into the UI).
+    ///
+    /// - `"lexical"` → `"Matched: text"` (BM25 / FTS5 keyword match)
+    /// - `"hybrid"`  → `"Matched: meaning"` (fused BM25 + embeddings +
+    ///   entity path — Phase-6 fusion)
+    /// - `"timeline"` → `nil`
+    /// - unknown → `nil`
+    ///
+    /// Cycle 8.36 PR-2 per `docs/research/2026-07-12-recall-ui-audit.md`
+    /// §5 / G6 / §7 WOW moment.
+    public static func matchReason(_ s: String) -> String? {
+        switch s {
+        case "lexical": return "Matched: text"
+        case "hybrid": return "Matched: meaning"
+        case "timeline": return nil
+        default: return nil
+        }
+    }
+
+    // MARK: - Entity chip overflow
+    //
+    // `HitRow` renders the hit's `entities` as pill chips. When the hit
+    // has many mentions we cap the visible chips and show a `"+N more"`
+    // affordance so a single row never grows past two lines and stays
+    // keyboard-scannable. The math is a pure function so tests can pin it
+    // without spinning a SwiftUI scene.
+
+    /// Result of applying the visible-chip cap to a hit's entity list.
+    /// - `visible` — the entity names to render as chips (in original order).
+    /// - `overflow` — how many additional entities are hidden; `0` when
+    ///   nothing was truncated. Render a `"+N more"` chip when > 0.
+    public struct EntityChipDisplay: Equatable, Sendable {
+        public let visible: [String]
+        public let overflow: Int
+        public init(visible: [String], overflow: Int) {
+            self.visible = visible
+            self.overflow = overflow
+        }
+    }
+
+    /// Default cap: at most 5 chips render inline before the row falls
+    /// back to the `"+N more"` affordance. Matches the audit-doc spec
+    /// (§5 PR-2 mentions "cap ~5") and keeps the row layout stable at
+    /// standard window widths.
+    public static let entityChipCap: Int = 5
+
+    /// Split `entities` into `visible` (first N) + `overflow` count.
+    /// Preserves the original order; ignores duplicates on purpose (the
+    /// upstream FFI already de-dupes — see `enrich_hit` in
+    /// `adapters/macos/mci-brain-ffi/src/lib.rs`).
+    public static func entityChipDisplay(
+        _ entities: [String],
+        cap: Int = entityChipCap
+    ) -> EntityChipDisplay {
+        guard cap > 0 else {
+            return EntityChipDisplay(visible: [], overflow: entities.count)
+        }
+        if entities.count <= cap {
+            return EntityChipDisplay(visible: entities, overflow: 0)
+        }
+        let visible = Array(entities.prefix(cap))
+        return EntityChipDisplay(
+            visible: visible,
+            overflow: entities.count - cap
+        )
+    }
+
+    /// Content-free "N related" label for the linked-event badge on
+    /// `HitRow`. Returns `nil` for an empty list so the caller can skip
+    /// rendering the badge entirely. Singular/plural aware.
+    public static func linkedBadge(_ linkedEventIds: [UInt64]) -> String? {
+        let n = linkedEventIds.count
+        if n == 0 { return nil }
+        if n == 1 { return "1 related" }
+        return "\(n) related"
     }
 
     /// Relative time display: "just now", "3 min ago", "2 hours ago", etc.
