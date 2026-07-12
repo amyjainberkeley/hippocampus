@@ -54,8 +54,8 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::EventId;
 use crate::episode_segmenter::EpisodeId;
+use crate::EventId;
 
 // ---------------------------------------------------------------------------
 // Newtype ids — keep graph PKs out of arithmetic with raw String
@@ -159,7 +159,11 @@ impl Entity {
     /// precondition.
     #[must_use]
     pub fn derive_id(kind: &str, canonical_name: &str) -> EntityId {
-        EntityId(derive_ulid(&[b"entity", kind.as_bytes(), canonical_name.as_bytes()]))
+        EntityId(derive_ulid(&[
+            b"entity",
+            kind.as_bytes(),
+            canonical_name.as_bytes(),
+        ]))
     }
 
     /// Compute the canonical SHA-256 hex digest for a `(kind,
@@ -703,7 +707,11 @@ mod tests {
         // changes the hash input length + bytes).
         let id = EntityIdentity::derive_identity_id("person", "alice smith");
         let folded = EpisodeEdge::derive_shared_identity_id(EpisodeId(1), EpisodeId(2), &id);
-        let generic = EpisodeEdge::derive_id(EpisodeEdge::KIND_SHARED_IDENTITY, EpisodeId(1), EpisodeId(2));
+        let generic = EpisodeEdge::derive_id(
+            EpisodeEdge::KIND_SHARED_IDENTITY,
+            EpisodeId(1),
+            EpisodeId(2),
+        );
         assert_ne!(folded, generic);
     }
 

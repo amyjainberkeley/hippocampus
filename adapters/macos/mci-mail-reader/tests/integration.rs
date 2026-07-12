@@ -13,7 +13,9 @@ use mci_mail_reader::{
     discover::{find_mail_data_root, list_accounts},
     envelope::{list_recent_messages, schema_version},
     parse::address_domain,
-    read_message, watch::watch_path, EmlxMetadata,
+    read_message,
+    watch::watch_path,
+    EmlxMetadata,
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -102,7 +104,9 @@ fn discover_round_trips_against_synthesized_tree() {
     let mail = tmp.path().join("Library").join("Mail");
     fs::create_dir_all(mail.join("V9")).unwrap();
     fs::create_dir_all(mail.join("V10")).unwrap();
-    let acct = mail.join("V10").join("11111111-2222-3333-4444-555555555555");
+    let acct = mail
+        .join("V10")
+        .join("11111111-2222-3333-4444-555555555555");
     fs::create_dir_all(&acct).unwrap();
     fs::create_dir_all(mail.join("V10").join("MailData")).unwrap();
 

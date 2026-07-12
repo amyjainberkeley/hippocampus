@@ -189,10 +189,7 @@ impl HttpSseTransport {
     /// # Errors
     /// - [`McpError::Io`] wrapping [`HttpSseError`] for loopback /
     ///   network failures.
-    pub async fn connect(
-        sse_url: LoopbackHost,
-        auth_header: Option<String>,
-    ) -> McpResult<Self> {
+    pub async fn connect(sse_url: LoopbackHost, auth_header: Option<String>) -> McpResult<Self> {
         if sse_url.scheme == Scheme::Https {
             return Err(HttpSseError::HttpsNotSupported.into());
         }
@@ -233,11 +230,9 @@ impl HttpSseTransport {
             .map_err(|e| HttpSseError::SseOpen(format!("hyper request: {e}")))?;
 
         if !response.status().is_success() {
-            return Err(HttpSseError::SseOpen(format!(
-                "non-success status {}",
-                response.status()
-            ))
-            .into());
+            return Err(
+                HttpSseError::SseOpen(format!("non-success status {}", response.status())).into(),
+            );
         }
 
         // Read SSE events off the response body. The reader task owns
@@ -331,11 +326,7 @@ impl HttpSseTransport {
             .await
             .map_err(|e| HttpSseError::Post(format!("hyper request: {e}")))?;
         if !resp.status().is_success() && resp.status() != StatusCode::ACCEPTED {
-            return Err(HttpSseError::Post(format!(
-                "non-success status {}",
-                resp.status()
-            ))
-            .into());
+            return Err(HttpSseError::Post(format!("non-success status {}", resp.status())).into());
         }
         // The POST body is intentionally discarded — the server's
         // JSON-RPC response arrives on the SSE GET stream, not in the
@@ -455,14 +446,7 @@ async fn sse_reader_loop(
                 if !event_data.is_empty() || event_kind.is_some() {
                     let kind = event_kind.take().unwrap_or_else(|| "message".to_owned());
                     let data = std::mem::take(&mut event_data);
-                    dispatch_event(
-                        &kind,
-                        &data,
-                        &base_url,
-                        &mut endpoint_tx,
-                        &pending,
-                    )
-                    .await;
+                    dispatch_event(&kind, &data, &base_url, &mut endpoint_tx, &pending).await;
                 }
                 continue;
             }
@@ -487,11 +471,7 @@ async fn sse_reader_loop(
             };
             match std::str::from_utf8(field).unwrap_or("") {
                 "event" => {
-                    event_kind = Some(
-                        std::str::from_utf8(value)
-                            .unwrap_or("message")
-                            .to_owned(),
-                    );
+                    event_kind = Some(std::str::from_utf8(value).unwrap_or("message").to_owned());
                 }
                 "data" => {
                     if event_data.len().saturating_add(value.len()) > MAX_SSE_LINE_BYTES {
@@ -677,11 +657,7 @@ impl Service<Name> for LoopbackResolver {
     type Response = std::vec::IntoIter<std::net::SocketAddr>;
     type Error = std::io::Error;
     type Future = Pin<
-        Box<
-            dyn std::future::Future<Output = Result<Self::Response, Self::Error>>
-                + Send
-                + 'static,
-        >,
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>,
     >;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -726,8 +702,7 @@ mod tests {
 
     #[test]
     fn absolute_endpoint_passes_through() {
-        let resolved =
-            resolve_relative_url("http://127.0.0.1:7890/sse", "http://127.0.0.1:7890/m");
+        let resolved = resolve_relative_url("http://127.0.0.1:7890/sse", "http://127.0.0.1:7890/m");
         assert_eq!(resolved, "http://127.0.0.1:7890/m");
     }
 

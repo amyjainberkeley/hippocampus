@@ -103,7 +103,10 @@ fn list_recent_messages_returns_synth_rows_ordered() {
     fs::create_dir_all(&messages_dir).unwrap();
     let db = messages_dir.join("chat.db");
     build_chat_db(&db);
-    let loc = ChatDbLocation { path: db, root: messages_dir };
+    let loc = ChatDbLocation {
+        path: db,
+        root: messages_dir,
+    };
 
     let rows = list_recent_messages(&loc, 0).unwrap();
     assert_eq!(rows.len(), 2);
@@ -125,7 +128,10 @@ fn read_thread_returns_synth_thread() {
     fs::create_dir_all(&messages_dir).unwrap();
     let db = messages_dir.join("chat.db");
     build_chat_db(&db);
-    let loc = ChatDbLocation { path: db, root: messages_dir };
+    let loc = ChatDbLocation {
+        path: db,
+        root: messages_dir,
+    };
 
     let t = read_thread(&loc, 1).unwrap().expect("chat 1 exists");
     assert_eq!(t.chat_rowid, 1);

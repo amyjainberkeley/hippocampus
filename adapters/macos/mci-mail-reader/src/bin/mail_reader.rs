@@ -115,10 +115,7 @@ fn cmd_list(rest: &[String]) -> Result<(), MailReaderError> {
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         if a == "--since" {
-            since = it
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
+            since = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         }
     }
     let (root, _) = discover_accounts()?;
@@ -173,10 +170,7 @@ fn cmd_read(rest: &[String]) -> Result<(), MailReaderError> {
             .join(", ")
     );
     println!("subject         {}", m.subject.as_deref().unwrap_or(""));
-    println!(
-        "message_id      {}",
-        m.message_id.as_deref().unwrap_or("")
-    );
+    println!("message_id      {}", m.message_id.as_deref().unwrap_or(""));
     println!("headers_count   {}", m.headers.len());
     println!(
         "body_text_bytes {}",

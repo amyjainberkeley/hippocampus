@@ -208,16 +208,12 @@ impl Service<Request<Incoming>> for StubService {
     type Response = Response<StubBody>;
     type Error = Infallible;
     type Future = Pin<
-        Box<
-            dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send + 'static,
-        >,
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>,
     >;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let svc = self.clone();
-        Box::pin(async move {
-            Ok(svc.dispatch(req).await)
-        })
+        Box::pin(async move { Ok(svc.dispatch(req).await) })
     }
 }
 

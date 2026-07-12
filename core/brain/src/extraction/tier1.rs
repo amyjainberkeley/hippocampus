@@ -157,8 +157,7 @@ static RE_CASCADE_REDACTED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[REDACTED:[A-Z_]+\]").expect("cascade_redacted"));
 
 static RE_JWT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\beyJ[A-Za-z0-9_=-]{8,}\.[A-Za-z0-9_=-]{8,}\.[A-Za-z0-9_=-]{4,}\b")
-        .expect("jwt")
+    Regex::new(r"\beyJ[A-Za-z0-9_=-]{8,}\.[A-Za-z0-9_=-]{8,}\.[A-Za-z0-9_=-]{4,}\b").expect("jwt")
 });
 
 static RE_AWS_ACCESS_KEY: LazyLock<Regex> =
@@ -186,17 +185,14 @@ static RE_PHONE: LazyLock<Regex> = LazyLock::new(|| {
     // 3-digit, 3-digit, 4-digit groups separated by [-.\s]. Country-
     // code-only-shaped (e.g. `+1 415 555 1234`, `+44 20 7946 0123`)
     // is the same pattern under different separators.
-    Regex::new(r"(?:\+\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b")
-        .expect("phone")
+    Regex::new(r"(?:\+\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b").expect("phone")
 });
 
 static RE_IPV4: LazyLock<Regex> = LazyLock::new(|| {
     // Each octet matches 0-255 via the alternation; no post-pass
     // range-validation needed.
-    Regex::new(
-        r"\b(?:25[0-5]|2[0-4]\d|[01]?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3}\b",
-    )
-    .expect("ipv4")
+    Regex::new(r"\b(?:25[0-5]|2[0-4]\d|[01]?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3}\b")
+        .expect("ipv4")
 });
 
 static RE_IPV6: LazyLock<Regex> = LazyLock::new(|| {
@@ -221,10 +217,8 @@ static RE_GITHUB_REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?:^|[\s\(\[\{])#(\d{1,8})\b").expect("github_ref"));
 
 static RE_UUID: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
-    )
-    .expect("uuid")
+    Regex::new(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+        .expect("uuid")
 });
 
 static RE_ULID: LazyLock<Regex> = LazyLock::new(|| {
@@ -237,8 +231,7 @@ static RE_ULID: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static RE_FILE_PATH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:^|[\s\(\[\{])(/(?:[A-Za-z0-9._-]+/)+[A-Za-z0-9._-]+)\b")
-        .expect("file_path")
+    Regex::new(r"(?:^|[\s\(\[\{])(/(?:[A-Za-z0-9._-]+/)+[A-Za-z0-9._-]+)\b").expect("file_path")
 });
 
 // ---------------------------------------------------------------------------
@@ -417,12 +410,7 @@ pub fn persist_tier1_matches(
 
         let mention_text_for_id = Some(m.mention_text.as_str());
         let mention = EntityMention {
-            id: EntityMention::derive_id(
-                &entity.id,
-                event_id,
-                EXTRACTOR_KIND,
-                mention_text_for_id,
-            ),
+            id: EntityMention::derive_id(&entity.id, event_id, EXTRACTOR_KIND, mention_text_for_id),
             entity_id: entity.id,
             event_id,
             mention_text: Some(m.mention_text.clone()),
@@ -777,8 +765,7 @@ mod tests {
     #[test]
     fn url_match_lowercases_scheme_and_host_only() {
         let ex = Tier1Extractor::new();
-        let matches =
-            ex.extract("Visit https://Example.COM/Path?Q=1#Frag for details");
+        let matches = ex.extract("Visit https://Example.COM/Path?Q=1#Frag for details");
         let urls: Vec<&Tier1Match> = matches.iter().filter(|m| m.kind == KIND_URL).collect();
         assert_eq!(urls.len(), 1);
         assert_eq!(urls[0].canonical_name, "https://example.com/Path?Q=1#Frag");
@@ -811,7 +798,8 @@ mod tests {
     #[test]
     fn email_rejects_short_tld() {
         let ex = Tier1Extractor::new();
-        let none = ex.extract("foo@bar.x just a single-char TLD")
+        let none = ex
+            .extract("foo@bar.x just a single-char TLD")
             .into_iter()
             .find(|m| m.kind == KIND_EMAIL);
         assert!(none.is_none(), "1-char TLD should not match");
@@ -862,10 +850,7 @@ mod tests {
             .into_iter()
             .find(|m| m.kind == KIND_IP_ADDRESS)
             .expect("ipv6");
-        assert_eq!(
-            m.canonical_name,
-            "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
-        );
+        assert_eq!(m.canonical_name, "2001:0db8:85a3:0000:0000:8a2e:0370:7334");
     }
 
     #[test]
@@ -1039,7 +1024,10 @@ mod tests {
             ("aws_access_key", "AKIAIOSFODNN7EXAMPLE"),
             ("github_pat", "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AB"),
             ("stripe_api_key", "sk_test_FIXTUREREMOVED"),
-            ("bitcoin_wif", "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"),
+            (
+                "bitcoin_wif",
+                "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ",
+            ),
         ];
         for (subkind, bytes) in secrets {
             let text = format!("[ctx] {bytes} [ctx]");
@@ -1088,7 +1076,9 @@ mod tests {
         // 2. Exactly one `redacted_token` entity for the marker.
         let markers: Vec<_> = hits
             .iter()
-            .filter(|m| m.kind == KIND_REDACTED_TOKEN && m.canonical_name == SUBKIND_CASCADE_REDACTED)
+            .filter(|m| {
+                m.kind == KIND_REDACTED_TOKEN && m.canonical_name == SUBKIND_CASCADE_REDACTED
+            })
             .collect();
         assert_eq!(
             markers.len(),

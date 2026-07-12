@@ -261,9 +261,7 @@ fn main() -> ExitCode {
         return ExitCode::from(10);
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!(
-            "mci-seed-brief: MCI_DB_KEY_HEX must be 64 hex characters (32 bytes)."
-        );
+        eprintln!("mci-seed-brief: MCI_DB_KEY_HEX must be 64 hex characters (32 bytes).");
         return ExitCode::from(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -271,10 +269,7 @@ fn main() -> ExitCode {
     if let Some(parent) = args.db_path.parent() {
         if !parent.exists() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!(
-                    "mci-seed-brief: create_dir_all({}): {e}",
-                    parent.display()
-                );
+                eprintln!("mci-seed-brief: create_dir_all({}): {e}", parent.display());
                 return ExitCode::from(12);
             }
         }

@@ -105,10 +105,7 @@ pub fn score_brief(
     // ── Citation validity ───────────────────────────────────────────────
     let valid_ids: HashSet<u64> = fixture.event_ids().into_iter().collect();
     let cited_ids: HashSet<u64> = brief.citations.iter().map(|id| id.0).collect();
-    let valid_cited = cited_ids
-        .iter()
-        .filter(|id| valid_ids.contains(id))
-        .count();
+    let valid_cited = cited_ids.iter().filter(|id| valid_ids.contains(id)).count();
     let citation_validity = if cited_ids.is_empty() {
         // No citations at all is a hard fail elsewhere (structure
         // and gold.min_citations); avoid a divide-by-zero here.
@@ -123,7 +120,8 @@ pub fn score_brief(
         .copied()
         .filter(|id| !valid_ids.contains(id))
         .collect();
-    let citation_pass = !cited_ids.is_empty() && citation_validity >= thresholds.min_citation_validity;
+    let citation_pass =
+        !cited_ids.is_empty() && citation_validity >= thresholds.min_citation_validity;
 
     // ── Stub-fallback detection ─────────────────────────────────────────
     let stub_signature_count = brief
@@ -132,12 +130,8 @@ pub fn score_brief(
         .count();
     let stub_pass = !thresholds.require_real_model || stub_signature_count == 0;
 
-    let all_pass = fact_pass
-        && forbidden_pass
-        && structure_pass
-        && length_pass
-        && citation_pass
-        && stub_pass;
+    let all_pass =
+        fact_pass && forbidden_pass && structure_pass && length_pass && citation_pass && stub_pass;
 
     let forbidden_hits_count = forbidden_hits.len();
     let forbidden_hits_detail = if forbidden_hits.is_empty() {

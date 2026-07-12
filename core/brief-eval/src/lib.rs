@@ -27,7 +27,7 @@ pub mod report;
 pub mod scorer;
 pub mod scripted;
 
-pub use fixture::{FixtureDay, FixtureEvent, FixtureError};
+pub use fixture::{FixtureDay, FixtureError, FixtureEvent};
 pub use gold::{GoldBrief, GoldError};
 pub use report::{EvalReport, FixtureOutcome, MetricScore};
 pub use scorer::{score_brief, PassThresholds};

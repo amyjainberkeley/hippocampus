@@ -518,7 +518,9 @@ mod tests {
         // ADR-0010 §1.3 — events.text now carries the prepended context
         // header. The OCR body is preserved at the tail.
         assert!(
-            ev.text.starts_with("[app=com.apple.Safari | title=MyTitle | url=https://example.com/page | ts="),
+            ev.text.starts_with(
+                "[app=com.apple.Safari | title=MyTitle | url=https://example.com/page | ts="
+            ),
             "expected ADR-0010 §1.3 header, got: {}",
             &ev.text[..ev.text.len().min(160)]
         );

@@ -219,8 +219,9 @@ async fn swift_v07_fixture_decodes_ingests_and_recalls_end_to_end() {
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
     assert!(
-        row.text_snippet
-            .starts_with(&format!("[app={FIXTURE_APP_BUNDLE_ID} | title=T | url=U | ts=")),
+        row.text_snippet.starts_with(&format!(
+            "[app={FIXTURE_APP_BUNDLE_ID} | title=T | url=U | ts="
+        )),
         "events.text must carry the ADR-0010 §1.3 header sourced from \
          the Swift fixture payload; got: {}",
         row.text_snippet
@@ -261,7 +262,10 @@ async fn single_byte_version_flip_to_future_version_is_rejected_no_silent_accept
     // unchanged — proves the decoder fails on the version mismatch
     // alone.
     let mut corrupted: Vec<u8> = OCR_EVENT_V07_FIXTURE.to_vec();
-    assert_eq!(corrupted[1], 0x07, "fixture sanity: byte 1 is the v0x07 version byte");
+    assert_eq!(
+        corrupted[1], 0x07,
+        "fixture sanity: byte 1 is the v0x07 version byte"
+    );
     corrupted[1] = 0x10;
 
     let (dir, _db_path, _key, store) = open_temp_store();
@@ -269,10 +273,7 @@ async fn single_byte_version_flip_to_future_version_is_rejected_no_silent_accept
     let clock = SystemWallClock;
     let id = device_id(dir.path()).await;
     let embedder: Arc<dyn Embedder> = Arc::new(FixedDimEmbedder::default());
-    let pump = BrainPump::new(
-        Arc::clone(&store) as Arc<dyn BrainStore>,
-        Some(embedder),
-    );
+    let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, Some(embedder));
 
     let mut cursor = Cursor::new(corrupted);
     let err = drain_to_log_with_brain(&mut cursor, &log, &clock, &id, &pump)
@@ -326,10 +327,7 @@ async fn dual_accept_v07_and_v08_both_decode_ocr_event() {
         let clock = SystemWallClock;
         let id = device_id(dir.path()).await;
         let embedder: Arc<dyn Embedder> = Arc::new(FixedDimEmbedder::default());
-        let pump = BrainPump::new(
-            Arc::clone(&store) as Arc<dyn BrainStore>,
-            Some(embedder),
-        );
+        let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, Some(embedder));
 
         let mut cursor = Cursor::new(bytes);
         drain_to_log_with_brain(&mut cursor, &log, &clock, &id, &pump)

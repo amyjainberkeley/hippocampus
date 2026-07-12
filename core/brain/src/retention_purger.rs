@@ -189,7 +189,9 @@ mod tests {
         for i in 0..100 {
             // Events at day 0, day 0.6, day 1.2, ... day 59.4
             let ts = (i as u64) * (60 * day_us / 100);
-            store.put_event(&make_event(ts, &format!("event {i}"))).unwrap();
+            store
+                .put_event(&make_event(ts, &format!("event {i}")))
+                .unwrap();
         }
         assert_eq!(store.stats().unwrap().event_count, 100);
 
@@ -212,7 +214,9 @@ mod tests {
         // Insert 60 events, one per day.
         for i in 0..60 {
             let ts = (i as u64) * day_us;
-            store.put_event(&make_event(ts, &format!("day {i}"))).unwrap();
+            store
+                .put_event(&make_event(ts, &format!("day {i}")))
+                .unwrap();
         }
         assert_eq!(store.stats().unwrap().event_count, 60);
 
@@ -228,7 +232,9 @@ mod tests {
 
         for i in 0..100 {
             let ts = (i as u64) * day_us;
-            store.put_event(&make_event(ts, &format!("event {i}"))).unwrap();
+            store
+                .put_event(&make_event(ts, &format!("event {i}")))
+                .unwrap();
         }
         assert_eq!(store.stats().unwrap().event_count, 100);
 

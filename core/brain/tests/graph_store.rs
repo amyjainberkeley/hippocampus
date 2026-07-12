@@ -71,7 +71,12 @@ fn make_entity(kind: &str, name: &str, ts_us: u64) -> Entity {
     }
 }
 
-fn make_mention(entity: &Entity, event_id: EventId, extractor: &str, text: Option<&str>) -> EntityMention {
+fn make_mention(
+    entity: &Entity,
+    event_id: EventId,
+    extractor: &str,
+    text: Option<&str>,
+) -> EntityMention {
     EntityMention {
         id: EntityMention::derive_id(&entity.id, event_id, extractor, text),
         entity_id: entity.id.clone(),
@@ -427,7 +432,9 @@ fn events_with_entity_orders_by_ts_desc_and_caps_limit() {
 
     let mut ids = Vec::new();
     for ts in [100_u64, 50, 300, 200] {
-        let ev = store.put_event(&blank_event(ts, "Alice")).expect("put_event");
+        let ev = store
+            .put_event(&blank_event(ts, "Alice"))
+            .expect("put_event");
         store
             .put_entity_mention(&make_mention(&alice, ev, "regex", Some("Alice")))
             .expect("put_mention");

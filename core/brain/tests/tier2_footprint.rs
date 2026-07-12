@@ -132,9 +132,7 @@ fn filter_chain_sustained_load_holds_steady_state_budget() {
         let _ = ex.extract(&text).expect("iter");
     }
     let elapsed = start.elapsed();
-    eprintln!(
-        "[tier2-footprint] {total_events} events filter-chain in {elapsed:?} (steady-state)"
-    );
+    eprintln!("[tier2-footprint] {total_events} events filter-chain in {elapsed:?} (steady-state)");
 
     // The whole 60-event filter chain must complete in <300 ms on
     // any reasonable hardware. The 60 s wall-clock budget at 15%

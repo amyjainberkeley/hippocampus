@@ -190,15 +190,9 @@ impl ServerHandle {
             ServerHandleState::Closed => Err(McpError::Closed),
             ServerHandleState::NotConnected => {
                 let transport: Arc<dyn McpTransport> = match &self.registration.spec {
-                    ServerSpec::Stdio {
-                        command,
-                        args,
-                        env,
-                    } => {
-                        let env: Vec<(String, String)> = env
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect();
+                    ServerSpec::Stdio { command, args, env } => {
+                        let env: Vec<(String, String)> =
+                            env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
                         let t = StdioTransport::spawn(command, args, &env).await?;
                         Arc::new(t)
                     }
@@ -206,11 +200,8 @@ impl ServerHandle {
                         sse_url,
                         auth_header,
                     } => {
-                        let t = HttpSseTransport::connect(
-                            sse_url.clone(),
-                            auth_header.clone(),
-                        )
-                        .await?;
+                        let t =
+                            HttpSseTransport::connect(sse_url.clone(), auth_header.clone()).await?;
                         Arc::new(t)
                     }
                 };

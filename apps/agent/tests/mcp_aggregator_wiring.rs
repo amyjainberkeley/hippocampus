@@ -73,7 +73,10 @@ fn read_all(store: &InMemoryBrainStore) -> Vec<mci_brain::Event> {
 
 /// Helper: stand up one stub MCP server, register it as an HTTP MCP
 /// entry, and return the `(server, registry)`.
-async fn one_server_named(name: &str, resources: Vec<StubResource>) -> (StubMcpServer, Arc<ServerRegistry>) {
+async fn one_server_named(
+    name: &str,
+    resources: Vec<StubResource>,
+) -> (StubMcpServer, Arc<ServerRegistry>) {
     let server = StubMcpServer::start().await;
     server.set_resources(resources).await;
     let url = format!("http://127.0.0.1:{}/sse", server.port());
@@ -88,8 +91,16 @@ async fn one_server_named(name: &str, resources: Vec<StubResource>) -> (StubMcpS
 #[tokio::test]
 async fn reconcile_persists_small_resources_with_mcp_source_tag() {
     let resources = vec![
-        StubResource::new("slack://channels/C1", "design-review", "the design looks good"),
-        StubResource::new("slack://channels/C2", "engineering", "we shipped V2-MCP-2 today"),
+        StubResource::new(
+            "slack://channels/C1",
+            "design-review",
+            "the design looks good",
+        ),
+        StubResource::new(
+            "slack://channels/C2",
+            "engineering",
+            "we shipped V2-MCP-2 today",
+        ),
     ];
     let (server, registry) = one_server_named("slack", resources).await;
     let store = Arc::new(InMemoryBrainStore::new());
@@ -118,8 +129,14 @@ async fn reconcile_persists_small_resources_with_mcp_source_tag() {
         let tag = ev.app_bundle_id.as_deref().expect("source tag set");
         assert_eq!(tag, "mcp:slack");
         assert!(is_mcp_source(tag));
-        assert_eq!(ev.cascade_reason, 0, "all MCP events ingest at the Allow arm");
-        assert!(ev.embedding.is_none(), "idle-batch worker fills embeddings later");
+        assert_eq!(
+            ev.cascade_reason, 0,
+            "all MCP events ingest at the Allow arm"
+        );
+        assert!(
+            ev.embedding.is_none(),
+            "idle-batch worker fills embeddings later"
+        );
         assert!(ev.keyframe_blob.is_none());
         assert!(ev.tab_id.is_none());
     }
@@ -128,14 +145,13 @@ async fn reconcile_persists_small_resources_with_mcp_source_tag() {
     // per Fork F6 = A.
     let bodies: Vec<&str> = events.iter().map(|e| e.text.as_str()).collect();
     assert!(bodies.iter().any(|b| b.contains("the design looks good")));
-    assert!(bodies.iter().any(|b| b.contains("we shipped V2-MCP-2 today")));
+    assert!(bodies
+        .iter()
+        .any(|b| b.contains("we shipped V2-MCP-2 today")));
 
     // Each event carries the resource URI as `event.url` (so the
     // recall surface has a click-through target).
-    let urls: Vec<&str> = events
-        .iter()
-        .filter_map(|e| e.url.as_deref())
-        .collect();
+    let urls: Vec<&str> = events.iter().filter_map(|e| e.url.as_deref()).collect();
     assert!(urls.contains(&"slack://channels/C1"));
     assert!(urls.contains(&"slack://channels/C2"));
 
@@ -304,7 +320,10 @@ async fn tool_catalog_is_populated_per_server() {
     let server = StubMcpServer::start().await;
     server
         .set_tools(vec![
-            ("slack_search".to_owned(), Some("search messages".to_owned())),
+            (
+                "slack_search".to_owned(),
+                Some("search messages".to_owned()),
+            ),
             ("slack_post".to_owned(), None),
         ])
         .await;
@@ -324,9 +343,7 @@ async fn tool_catalog_is_populated_per_server() {
     agg.reconcile_once().await;
 
     let catalog = agg.tool_catalog().await;
-    let server_tools = catalog
-        .get("slack-mcp")
-        .expect("server present in catalog");
+    let server_tools = catalog.get("slack-mcp").expect("server present in catalog");
     let names: Vec<&str> = server_tools.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"slack_search"));
     assert!(names.contains(&"slack_post"));
@@ -448,11 +465,7 @@ async fn n_5_servers_with_idle_loop_holds_steady_state() {
         let url = format!("http://127.0.0.1:{}/sse", server.port());
         let host = LoopbackHost::parse(&url).await.unwrap();
         let _h = registry
-            .register(ServerRegistration::http(
-                &format!("svc{i}"),
-                host,
-                None,
-            ))
+            .register(ServerRegistration::http(&format!("svc{i}"), host, None))
             .await;
         servers.push(server);
     }

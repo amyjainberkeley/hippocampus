@@ -164,10 +164,18 @@ fn brain_pump_two_ingests_same_url_yields_one_entity_two_mentions() {
     let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, None);
 
     let url = "https://example.com/dup";
-    pump.ingest_ocr_event(&make_event(1, 1_700_000_000_000_000, &format!("first {url}")))
-        .expect("ingest 1");
-    pump.ingest_ocr_event(&make_event(2, 1_700_000_001_000_000, &format!("again {url}")))
-        .expect("ingest 2");
+    pump.ingest_ocr_event(&make_event(
+        1,
+        1_700_000_000_000_000,
+        &format!("first {url}"),
+    ))
+    .expect("ingest 1");
+    pump.ingest_ocr_event(&make_event(
+        2,
+        1_700_000_001_000_000,
+        &format!("again {url}"),
+    ))
+    .expect("ingest 2");
 
     let db = mci_core_open(&path, &key).expect("raw_open");
     let conn = db.conn();

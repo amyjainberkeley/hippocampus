@@ -162,9 +162,7 @@ mod tests {
 
         let mut got = None;
         for _ in 0..50 {
-            if let Ok(ev) =
-                tokio::time::timeout(Duration::from_millis(100), w.next()).await
-            {
+            if let Ok(ev) = tokio::time::timeout(Duration::from_millis(100), w.next()).await {
                 got = ev;
                 if got.is_some() {
                     break;
@@ -198,9 +196,7 @@ mod tests {
 
         let mut got = None;
         for _ in 0..50 {
-            if let Ok(ev) =
-                tokio::time::timeout(Duration::from_millis(100), w.next()).await
-            {
+            if let Ok(ev) = tokio::time::timeout(Duration::from_millis(100), w.next()).await {
                 got = ev;
                 if got.is_some() {
                     break;

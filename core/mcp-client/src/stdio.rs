@@ -201,11 +201,8 @@ impl McpTransport for StdioTransport {
         if *self.closed.lock().await {
             return Err(McpError::Closed);
         }
-        let id = request.id.clone().ok_or_else(|| {
-            McpError::MalformedFrame {
-                reason: "call() requires a request with an id (notifications use notify())"
-                    .to_owned(),
-            }
+        let id = request.id.clone().ok_or_else(|| McpError::MalformedFrame {
+            reason: "call() requires a request with an id (notifications use notify())".to_owned(),
         })?;
         let method = request.method.clone();
         let rx = self.register_waiter(&id).await;

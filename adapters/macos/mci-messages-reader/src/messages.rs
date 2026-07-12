@@ -204,9 +204,7 @@ fn open_read_only(chat_db: &Path) -> Result<Connection, MessagesReaderError> {
     Ok(conn)
 }
 
-fn map_sqlite_io_err(
-    path: &Path,
-) -> impl FnOnce(rusqlite::Error) -> MessagesReaderError + '_ {
+fn map_sqlite_io_err(path: &Path) -> impl FnOnce(rusqlite::Error) -> MessagesReaderError + '_ {
     move |err| {
         if let rusqlite::Error::SqliteFailure(ffi, _) = &err {
             if ffi.code == rusqlite::ErrorCode::CannotOpen
@@ -617,14 +615,20 @@ mod tests {
         // First row is the Alice → me iMessage.
         assert_eq!(all[0].rowid, 100);
         assert_eq!(all[0].guid, "M-AAAA");
-        assert_eq!(all[0].body.as_deref(), Some("Hello from Alice (synthetic)."));
+        assert_eq!(
+            all[0].body.as_deref(),
+            Some("Hello from Alice (synthetic).")
+        );
         assert!(!all[0].is_from_me);
         assert_eq!(all[0].service, ChatService::IMessage);
         assert_eq!(all[0].sender_handle.as_deref(), Some("+15551234567"));
 
         // SMS row carries the OTP shape — V2-P10 redaction will catch it.
         assert_eq!(all[2].service, ChatService::Sms);
-        assert_eq!(all[2].body.as_deref(), Some("482917 is your verification code."));
+        assert_eq!(
+            all[2].body.as_deref(),
+            Some("482917 is your verification code.")
+        );
 
         // Attachment-only row has body=None.
         assert_eq!(all[3].rowid, 103);
@@ -777,7 +781,10 @@ mod tests {
         assert_eq!(ChatService::from_str_ci("SMS"), ChatService::Sms);
         assert_eq!(ChatService::from_str_ci("MMS"), ChatService::Sms);
         assert_eq!(ChatService::from_str_ci("RCS"), ChatService::Rcs);
-        assert_eq!(ChatService::from_str_ci("future-protocol"), ChatService::Other);
+        assert_eq!(
+            ChatService::from_str_ci("future-protocol"),
+            ChatService::Other
+        );
         assert_eq!(ChatService::IMessage.as_str(), "iMessage");
         assert_eq!(ChatService::Sms.as_str(), "SMS");
     }

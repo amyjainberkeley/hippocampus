@@ -69,9 +69,7 @@ impl AttributionCascadeDecision {
     /// `attribution_redactions_count` counter.
     #[must_use]
     pub fn any_rewritten(&self) -> bool {
-        self.calendar_subject_rewritten
-            || self.track_title_rewritten
-            || self.track_artist_rewritten
+        self.calendar_subject_rewritten || self.track_title_rewritten || self.track_artist_rewritten
     }
 }
 
@@ -188,9 +186,7 @@ mod tests {
     fn calendar_subject_with_sms_otp_shape_is_rewritten() {
         // Calendar invite subject containing an SMS-OTP shape — rare
         // but possible (auth-app event reminder, banking 2FA invite).
-        let mut subject = String::from(
-            "Your verification code is 123456 — Apple ID"
-        );
+        let mut subject = String::from("Your verification code is 123456 — Apple ID");
         let r = redact_calendar_subject(&mut subject);
         assert!(r.matched(), "SMS-OTP-shaped subject must be rewritten");
         assert!(
@@ -223,9 +219,7 @@ mod tests {
     #[test]
     fn track_title_with_otp_shape_is_rewritten() {
         // Hypothetical podcast episode title carrying an OTP phrase.
-        let mut title = String::from(
-            "Episode 42: Your OTP is 654321"
-        );
+        let mut title = String::from("Episode 42: Your OTP is 654321");
         let r = redact_track_title(&mut title);
         assert!(r.matched(), "OTP-shaped track title must be rewritten");
         assert!(!title.contains("654321"));
@@ -281,8 +275,7 @@ mod tests {
         // would otherwise look OTP-shaped, the function does NOT
         // inspect or alter the identifier bytes.
         let id = "9C2D0F12-3456-789A-BCDE-F00BAA112233".to_string();
-        let decision =
-            redact_attribution_fields(None, None, None, Some(&id));
+        let decision = redact_attribution_fields(None, None, None, Some(&id));
         assert!(!decision.any_rewritten());
         assert!(decision.fired_rules.is_empty());
     }
@@ -297,7 +290,10 @@ mod tests {
         let _ = redact_calendar_subject(&mut subject);
         let after_first = subject.clone();
         let r2 = redact_calendar_subject(&mut subject);
-        assert!(!r2.matched(), "second pass on already-redacted text must not match");
+        assert!(
+            !r2.matched(),
+            "second pass on already-redacted text must not match"
+        );
         assert_eq!(subject, after_first);
     }
 }

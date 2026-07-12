@@ -57,8 +57,12 @@ pub fn find_mail_data_root(home: &Path) -> Result<MailDataRoot, MailReaderError>
             Err(err) => return Err(MailReaderError::from_io(mail_dir.clone(), err)),
         };
         let name = entry.file_name();
-        let Some(name_str) = name.to_str() else { continue };
-        let Some(rest) = name_str.strip_prefix('V') else { continue };
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        let Some(rest) = name_str.strip_prefix('V') else {
+            continue;
+        };
         // The naming convention is V<digits>. Anything else is junk
         // (e.g. PersistenceInfo.plist).
         if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
@@ -98,7 +102,9 @@ pub fn list_accounts(root: &MailDataRoot) -> Result<Vec<MailAccount>, MailReader
             Err(err) => return Err(MailReaderError::from_io(root.path.clone(), err)),
         };
         let name = entry.file_name();
-        let Some(name_str) = name.to_str() else { continue };
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
 
         // Skip MailData (the cross-account shared dir) and the persistent
         // metadata plist at `~/Library/Mail/PersistenceInfo.plist` (which
@@ -139,7 +145,7 @@ pub fn discover_accounts() -> Result<(MailDataRoot, Vec<MailAccount>), MailReade
 }
 
 /// Path to `MailData/Envelope Index` inside a discovered root.
-#[must_use] 
+#[must_use]
 pub fn envelope_index_path(root: &MailDataRoot) -> PathBuf {
     root.path.join("MailData").join("Envelope Index")
 }

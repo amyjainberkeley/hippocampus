@@ -394,7 +394,10 @@ async fn outgoing_message_handle_dot_connects_cross_app_end_to_end() {
         "the recipient handle resolves to exactly one identity"
     );
     let membership = &memberships[0];
-    assert_eq!(membership.identity_kind, "person", "handle → Person identity");
+    assert_eq!(
+        membership.identity_kind, "person",
+        "handle → Person identity"
+    );
     assert_eq!(
         membership.rule, "handle_anchor",
         "anchored purely by the handle (no contact name)"

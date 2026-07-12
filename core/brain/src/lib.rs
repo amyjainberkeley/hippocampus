@@ -113,15 +113,13 @@ pub use alias_resolver::{
 };
 
 pub mod consolidator;
-pub use consolidator::{
-    ConsolidatorConfig, DerivedEdge, EpisodeConsolidator, IdentityMentionSite,
-};
+pub use consolidator::{ConsolidatorConfig, DerivedEdge, EpisodeConsolidator, IdentityMentionSite};
 
-mod sqlcipher_brain_store;
 pub mod retention_purger;
+mod sqlcipher_brain_store;
 
-pub use sqlcipher_brain_store::SqlCipherBrainStore;
 pub use retention_purger::{PurgeStats, RetentionConfig};
+pub use sqlcipher_brain_store::SqlCipherBrainStore;
 
 // ---------------------------------------------------------------------------
 // Read-only views used by the agent-API loopback (P3.10b) and recall UI
@@ -773,10 +771,7 @@ pub trait BrainStore: Send + Sync {
     ///
     /// # Errors
     /// [`StoreError::Backend`] on SQLite failure.
-    fn identity_of_entity(
-        &self,
-        _entity_id: &EntityId,
-    ) -> Result<Vec<EntityIdentity>, StoreError> {
+    fn identity_of_entity(&self, _entity_id: &EntityId) -> Result<Vec<EntityIdentity>, StoreError> {
         Err(StoreError::Other(
             "identity_of_entity not supported by this BrainStore impl (V2-P6)".into(),
         ))

@@ -731,13 +731,13 @@ fn property_monotonicity_of_fusion() {
 
         // The entity arm is held constant across the bump (we only bump
         // sem), so monotonicity in sem must still hold with it present.
-        let tail = w
-            .w_lex
-            .mul_add(
-                base_lex,
-                w.w_rec
-                    .mul_add(base_rec, w.w_entity.mul_add(base_entity, w.w_src * base_src)),
-            );
+        let tail = w.w_lex.mul_add(
+            base_lex,
+            w.w_rec.mul_add(
+                base_rec,
+                w.w_entity.mul_add(base_entity, w.w_src * base_src),
+            ),
+        );
         let score_lo = w.w_sem.mul_add(base_sem, tail);
         let score_hi = w.w_sem.mul_add(bumped_sem, tail);
         assert!(

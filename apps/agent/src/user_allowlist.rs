@@ -90,7 +90,9 @@ impl UserAllowlist {
     /// (no `user-allowlist.toml` on disk).
     #[must_use]
     pub fn empty() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// Bundle ids the user has opted IN to capture. Returned as a
@@ -129,8 +131,7 @@ impl UserAllowlist {
     pub fn deep_hook_state_hash(&self) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        let mut bundles: Vec<String> =
-            self.deep_hook_enabled_bundle_ids().into_iter().collect();
+        let mut bundles: Vec<String> = self.deep_hook_enabled_bundle_ids().into_iter().collect();
         bundles.sort();
         let mut h = DefaultHasher::new();
         bundles.hash(&mut h);
@@ -190,8 +191,7 @@ pub enum UserAllowlistError {
 /// helper's `defaultUserAllowlistURL`.
 #[must_use]
 pub fn default_user_allowlist_path() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     home.join("Library/Application Support/MCI/user-allowlist.toml")
 }
 
@@ -455,10 +455,7 @@ fn parse_kv(line: &str, line_number: usize) -> Result<(String, Value), UserAllow
         return Ok((key, Value::Bool(false)));
     }
 
-    if value_part.len() < 2
-        || !value_part.starts_with('"')
-        || !value_part.ends_with('"')
-    {
+    if value_part.len() < 2 || !value_part.starts_with('"') || !value_part.ends_with('"') {
         return Err(UserAllowlistError::MalformedKvLine { line: line_number });
     }
     let inner = &value_part[1..value_part.len() - 1];
@@ -644,15 +641,18 @@ mod tests {
         // capture_enabled=true are BOTH required.
         let list = UserAllowlist {
             entries: vec![
-                entry("com.apple.MobileSMS", true, true),   // OK — both on
-                entry("com.apple.mail", false, true),       // contradiction
-                entry("com.spotify.client", true, false),   // capture-only
-                entry("com.apple.Notes", false, false),     // not opted in
+                entry("com.apple.MobileSMS", true, true), // OK — both on
+                entry("com.apple.mail", false, true),     // contradiction
+                entry("com.spotify.client", true, false), // capture-only
+                entry("com.apple.Notes", false, false),   // not opted in
             ],
         };
         let dh = list.deep_hook_enabled_bundle_ids();
         assert!(dh.contains("com.apple.MobileSMS"));
-        assert!(!dh.contains("com.apple.mail"), "deep_hook with capture_off → DROPPED");
+        assert!(
+            !dh.contains("com.apple.mail"),
+            "deep_hook with capture_off → DROPPED"
+        );
         assert!(!dh.contains("com.spotify.client"));
         assert!(!dh.contains("com.apple.Notes"));
         assert_eq!(dh.len(), 1);
@@ -697,12 +697,12 @@ mod tests {
 
     #[test]
     fn empty_list_has_empty_sets() {
-        assert!(UserAllowlist::empty().capture_enabled_bundle_ids().is_empty());
-        assert!(
-            UserAllowlist::empty()
-                .deep_hook_enabled_bundle_ids()
-                .is_empty()
-        );
+        assert!(UserAllowlist::empty()
+            .capture_enabled_bundle_ids()
+            .is_empty());
+        assert!(UserAllowlist::empty()
+            .deep_hook_enabled_bundle_ids()
+            .is_empty());
     }
 
     // ----- File-permission gate (driver-CSO audit row 2) -----

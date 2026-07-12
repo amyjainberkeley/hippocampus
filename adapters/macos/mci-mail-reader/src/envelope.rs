@@ -81,9 +81,7 @@ fn open_read_only(envelope_index: &Path) -> Result<Connection, MailReaderError> 
     Ok(conn)
 }
 
-fn map_sqlite_io_err(
-    path: &Path,
-) -> impl FnOnce(rusqlite::Error) -> MailReaderError + '_ {
+fn map_sqlite_io_err(path: &Path) -> impl FnOnce(rusqlite::Error) -> MailReaderError + '_ {
     move |err| {
         // rusqlite hides the underlying errno; the only path where SQLite
         // can't open a file we know exists is permission denied — which on
@@ -185,11 +183,7 @@ fn row_to_metadata(row: &Row<'_>, vn_root: &Path) -> rusqlite::Result<EmlxMetada
 /// has from `FSEvents`. V2-P8b can promote this to a strict resolver once
 /// the `<MBOX-UUID>` cache lands. For now: return `None` — the explicit
 /// `read_message(path)` API is the supported entry point.
-fn resolve_emlx_path(
-    _vn_root: &Path,
-    _mailbox_url: &str,
-    _message_id: i64,
-) -> Option<PathBuf> {
+fn resolve_emlx_path(_vn_root: &Path, _mailbox_url: &str, _message_id: i64) -> Option<PathBuf> {
     None
 }
 

@@ -53,14 +53,8 @@ async fn run_one_cycle(store: &Arc<SqlCipherBrainStore>) -> episode_worker::Segm
     // Spawn the worker; it will process one batch then idle-sleep.
     // We send shutdown after a short delay to let it finish one cycle.
     let handle = tokio::spawn(async move {
-        episode_worker::run_episode_worker(
-            store_c,
-            segmenter,
-            256,
-            Duration::from_millis(50),
-            rx,
-        )
-        .await
+        episode_worker::run_episode_worker(store_c, segmenter, 256, Duration::from_millis(50), rx)
+            .await
     });
 
     // Give worker time to process the batch and enter idle sleep.
@@ -117,10 +111,7 @@ async fn gap_exceeds_threshold_new_episode() {
     let base = 1_000_000u64;
     // First cluster: 3 events at 0, 3min, 6min
     for i in 0..3 {
-        let ev = make_event(
-            base + i * 3 * 60 * 1_000_000,
-            Some("com.apple.Safari"),
-        );
+        let ev = make_event(base + i * 3 * 60 * 1_000_000, Some("com.apple.Safari"));
         store.put_event(&ev).unwrap();
     }
     // Gap: 11 minutes from last event (6min + 11min = 17min mark)

@@ -790,11 +790,7 @@ fn decode_payload(
             // layouts are identical across all four accepted versions
             // (see FRAME_VERSION doc), so dual-accept is byte-equivalent
             // for them.
-            let frames_encode_failed = if version == 0x06 {
-                0
-            } else {
-                p.u64_le()?
-            };
+            let frames_encode_failed = if version == 0x06 { 0 } else { p.u64_le()? };
             let frames_focus_race_dropped = if version == 0x07 || version == 0x06 {
                 0
             } else {
@@ -1082,8 +1078,8 @@ mod tests {
                 ("com.microsoft.VSCode".to_string(), 87),
                 ("com.googlecode.iterm2".to_string(), 63),
             ],
-            cpu_pct_micro: 15_000,         // 1.5%
-            rss_bytes: 187 * 1024 * 1024,  // 187 MiB
+            cpu_pct_micro: 15_000,        // 1.5%
+            rss_bytes: 187 * 1024 * 1024, // 187 MiB
             tracker_alive_at_us: 1_700_000_000_000_000,
         });
     }
@@ -1172,20 +1168,14 @@ mod tests {
             0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // seq = 42
             0x5D, 0x00, 0x00, 0x00, // payload len = 93
             // 9 × u64 LE (1..=9):
-            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            // failsafe_by_app: entry_count = 0 (1 byte), no entries.
-            0x00,
-            // cpu_pct_micro = 0 (u32 LE)
-            0x00, 0x00, 0x00, 0x00,
-            // rss_bytes = 0 (u64 LE)
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, // failsafe_by_app: entry_count = 0 (1 byte), no entries.
+            0x00, // cpu_pct_micro = 0 (u32 LE)
+            0x00, 0x00, 0x00, 0x00, // rss_bytes = 0 (u64 LE)
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             // tracker_alive_at_us = 0 (u64 LE)
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1491,7 +1481,7 @@ mod tests {
             payload.extend_from_slice(&v.to_le_bytes());
         }
         payload.push(MAX_FAILSAFE_BY_APP_ENTRIES + 1); // entry_count = 9
-        // No entries follow — decoder rejects on the count alone.
+                                                       // No entries follow — decoder rejects on the count alone.
 
         let mut buf = vec![FRAME_MAGIC, FRAME_VERSION];
         buf.extend_from_slice(&(MessageType::HelperHealth as u16).to_le_bytes());
@@ -2010,7 +2000,13 @@ mod tests {
         assert_eq!(frame.seq, 7);
         match frame.message {
             Message::PageContentEvent {
-                seq, ts_us, url, title, full_text, source_browser, tab_id,
+                seq,
+                ts_us,
+                url,
+                title,
+                full_text,
+                source_browser,
+                tab_id,
             } => {
                 assert_eq!(seq, 7);
                 assert_eq!(ts_us, 0x0102_0304_0506_0708);

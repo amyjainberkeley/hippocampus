@@ -34,22 +34,39 @@ fn register_mcp_writes_to_claude_json_not_settings_json() {
         .output()
         .expect("spawn mci-agent");
 
-    assert!(output.status.success(), "register-mcp failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "register-mcp failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let claude_json = home.join(".claude.json");
-    assert!(claude_json.exists(), "~/.claude.json should exist after register-mcp");
+    assert!(
+        claude_json.exists(),
+        "~/.claude.json should exist after register-mcp"
+    );
 
     let settings_json = home.join(".claude").join("settings.json");
-    assert!(!settings_json.exists(), "~/.claude/settings.json should NOT be written by register-mcp");
+    assert!(
+        !settings_json.exists(),
+        "~/.claude/settings.json should NOT be written by register-mcp"
+    );
 
     let content: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&claude_json).unwrap()).unwrap();
-    let servers = content.get("mcpServers").expect("mcpServers key should exist");
-    let hippo = servers.get("hippocampus").expect("hippocampus entry should exist");
+    let servers = content
+        .get("mcpServers")
+        .expect("mcpServers key should exist");
+    let hippo = servers
+        .get("hippocampus")
+        .expect("hippocampus entry should exist");
     assert_eq!(hippo.get("type").and_then(|v| v.as_str()), Some("stdio"));
     assert!(hippo.get("command").and_then(|v| v.as_str()).is_some());
     assert_eq!(
-        hippo.get("args").and_then(|v| v.as_array()).map(|a| a.len()),
+        hippo
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len()),
         Some(1)
     );
 }
@@ -76,12 +93,12 @@ fn register_mcp_includes_env_block_when_dev_key_exists() {
 
     assert!(output.status.success());
 
-    let content: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(home.join(".claude.json")).unwrap(),
-    )
-    .unwrap();
+    let content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
     let hippo = &content["mcpServers"]["hippocampus"];
-    let env = hippo.get("env").expect("env block should be present when dev.key exists");
+    let env = hippo
+        .get("env")
+        .expect("env block should be present when dev.key exists");
     assert_eq!(
         env.get("MCI_DB_KEY_HEX").and_then(|v| v.as_str()),
         Some(key_hex.as_str())
@@ -101,10 +118,8 @@ fn register_mcp_omits_env_block_when_dev_key_missing() {
 
     assert!(output.status.success());
 
-    let content: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(home.join(".claude.json")).unwrap(),
-    )
-    .unwrap();
+    let content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
     let hippo = &content["mcpServers"]["hippocampus"];
     assert!(
         hippo.get("env").is_none(),

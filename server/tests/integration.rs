@@ -316,9 +316,13 @@ async fn creator_full_crypto_round_trip(factory: fn() -> Box<dyn WorkspaceStore>
 
     let mut nonce_arr = [0u8; 12];
     nonce_arr.copy_from_slice(&envelope.nonce);
-    let decrypted =
-        aead::decrypt(&envelope.ciphertext, &AeadNonce(nonce_arr), &restored_key, &envelope.aad)
-            .unwrap();
+    let decrypted = aead::decrypt(
+        &envelope.ciphertext,
+        &AeadNonce(nonce_arr),
+        &restored_key,
+        &envelope.aad,
+    )
+    .unwrap();
     assert_eq!(decrypted, content);
 }
 
@@ -373,15 +377,9 @@ async fn vouch_admits_new_member_who_reads_briefs(factory: fn() -> Box<dyn Works
         .unwrap();
     let vouch_resp = app.clone().oneshot(vouch_req).await.unwrap();
     assert_eq!(vouch_resp.status(), StatusCode::OK);
-    let updated: EnrollmentRequest = serde_json::from_slice(
-        &vouch_resp
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes(),
-    )
-    .unwrap();
+    let updated: EnrollmentRequest =
+        serde_json::from_slice(&vouch_resp.into_body().collect().await.unwrap().to_bytes())
+            .unwrap();
     assert_eq!(updated.state, EnrollmentState::Active);
 
     // Step 3: creator uploads brief with key wraps for BOTH members.
@@ -605,9 +603,13 @@ async fn server_blobs_undecryptable_without_private_key(factory: fn() -> Box<dyn
     // Correct private key DOES work (control proof).
     let ws_key_bytes = key_wrap::unwrap(&stolen_wrap, &member_private).unwrap();
     let restored_key = AeadKey::from_bytes(ws_key_bytes);
-    let decrypted =
-        aead::decrypt(&envelope.ciphertext, &AeadNonce(nonce_arr), &restored_key, &envelope.aad)
-            .unwrap();
+    let decrypted = aead::decrypt(
+        &envelope.ciphertext,
+        &AeadNonce(nonce_arr),
+        &restored_key,
+        &envelope.aad,
+    )
+    .unwrap();
     assert_eq!(decrypted, content);
 }
 

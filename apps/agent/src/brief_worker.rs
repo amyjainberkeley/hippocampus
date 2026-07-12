@@ -129,7 +129,10 @@ pub const QWEN3_MODEL_ID: &str = "qwen3-1.7b-fp16";
 /// canonical layout written by `ModelDownloadManager`'s unpack step.
 #[must_use]
 pub fn qwen3_model_present(model_dir: &std::path::Path) -> bool {
-    model_dir.join(QWEN3_MODEL_ID).join(QWEN3_MODEL_BASENAME).exists()
+    model_dir
+        .join(QWEN3_MODEL_ID)
+        .join(QWEN3_MODEL_BASENAME)
+        .exists()
 }
 
 /// Run the daily brief loop until the shutdown signal fires.
@@ -148,21 +151,28 @@ pub async fn run_brief_worker(
 
     // First-launch check: fire a partial-day brief if appropriate.
     match first_launch_decision(&store).await {
-        Ok(true) => match run_one_cycle(&store, &author_factory, "First brief", &tz_offset_resolver).await {
-            Ok(CycleOutcome::Stored { date_local, word_count, event_count, id }) => {
-                stats.briefs_generated += 1;
-                eprintln!(
+        Ok(true) => {
+            match run_one_cycle(&store, &author_factory, "First brief", &tz_offset_resolver).await {
+                Ok(CycleOutcome::Stored {
+                    date_local,
+                    word_count,
+                    event_count,
+                    id,
+                }) => {
+                    stats.briefs_generated += 1;
+                    eprintln!(
                     "mci-agent: brief generated for {date_local} (first-launch, id={id}, {event_count} events, {word_count} words)"
                 );
+                }
+                Ok(CycleOutcome::SkippedEmpty) => {
+                    stats.cycles_skipped_empty += 1;
+                }
+                Err(e) => {
+                    stats.cycle_errors += 1;
+                    eprintln!("mci-agent: first-launch brief error: {e}");
+                }
             }
-            Ok(CycleOutcome::SkippedEmpty) => {
-                stats.cycles_skipped_empty += 1;
-            }
-            Err(e) => {
-                stats.cycle_errors += 1;
-                eprintln!("mci-agent: first-launch brief error: {e}");
-            }
-        },
+        }
         Ok(false) => {}
         Err(e) => {
             stats.cycle_errors += 1;
@@ -192,7 +202,12 @@ pub async fn run_brief_worker(
         }
 
         match run_one_cycle(&store, &author_factory, "Daily brief", &tz_offset_resolver).await {
-            Ok(CycleOutcome::Stored { date_local, word_count, event_count, id }) => {
+            Ok(CycleOutcome::Stored {
+                date_local,
+                word_count,
+                event_count,
+                id,
+            }) => {
                 stats.briefs_generated += 1;
                 eprintln!(
                     "mci-agent: brief generated for {date_local} (id={id}, {event_count} events, {word_count} words)"
@@ -221,9 +236,7 @@ pub async fn run_disabled_idle(
     reason: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> BriefWorkerStats {
-    eprintln!(
-        "mci-agent: brief worker disabled ({reason}); will sleep until shutdown"
-    );
+    eprintln!("mci-agent: brief worker disabled ({reason}); will sleep until shutdown");
     let _ = shutdown.changed().await;
     BriefWorkerStats {
         disabled: true,
@@ -267,12 +280,14 @@ async fn run_one_cycle(
     let factory_c = Arc::clone(factory);
     let topic_owned = topic.to_owned();
     let records_for_author = records;
-    let brief = tokio::task::spawn_blocking(move || -> Result<mci_brief::model::Brief, BriefWorkerError> {
-        let author = (factory_c)()?;
-        author
-            .author(&records_for_author, &topic_owned)
-            .map_err(|e| BriefWorkerError::Author(e.to_string()))
-    })
+    let brief = tokio::task::spawn_blocking(
+        move || -> Result<mci_brief::model::Brief, BriefWorkerError> {
+            let author = (factory_c)()?;
+            author
+                .author(&records_for_author, &topic_owned)
+                .map_err(|e| BriefWorkerError::Author(e.to_string()))
+        },
+    )
     .await
     .map_err(|e| BriefWorkerError::Fatal(format!("author join: {e}")))??;
 
@@ -314,9 +329,7 @@ async fn run_one_cycle(
 ///
 /// Fires iff the briefs table is empty AND the brain has at least one
 /// event AND the oldest event is at least [`FIRST_BRIEF_MIN_AGE`] old.
-async fn first_launch_decision(
-    store: &Arc<SqlCipherBrainStore>,
-) -> Result<bool, BriefWorkerError> {
+async fn first_launch_decision(store: &Arc<SqlCipherBrainStore>) -> Result<bool, BriefWorkerError> {
     let store_c = Arc::clone(store);
     let (brief_count, oldest_ts_us) = tokio::task::spawn_blocking(move || {
         let bc = store_c.brief_count()?;
@@ -327,7 +340,11 @@ async fn first_launch_decision(
     .map_err(|e| BriefWorkerError::Fatal(format!("first_launch join: {e}")))?
     .map_err(|e| BriefWorkerError::Store(format!("first_launch read: {e}")))?;
 
-    Ok(should_fire_first_brief(brief_count, oldest_ts_us, unix_now_us()))
+    Ok(should_fire_first_brief(
+        brief_count,
+        oldest_ts_us,
+        unix_now_us(),
+    ))
 }
 
 /// Pure: should the first-launch brief fire?
@@ -657,10 +674,8 @@ mod tests {
         // Mirrors the on-disk layout written by `ModelDownloadManager`:
         // `<model_dir>/qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc/`.
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(
-            dir.path().join(QWEN3_MODEL_ID).join(QWEN3_MODEL_BASENAME),
-        )
-        .unwrap();
+        std::fs::create_dir_all(dir.path().join(QWEN3_MODEL_ID).join(QWEN3_MODEL_BASENAME))
+            .unwrap();
         assert!(qwen3_model_present(dir.path()));
     }
 
@@ -699,9 +714,7 @@ mod tests {
     #[tokio::test]
     async fn disabled_idle_returns_disabled_flag_on_shutdown() {
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(async move {
-            run_disabled_idle("test", rx).await
-        });
+        let handle = tokio::spawn(async move { run_disabled_idle("test", rx).await });
         // give the task a tick to install the .changed() future
         tokio::task::yield_now().await;
         let _ = tx.send(true);

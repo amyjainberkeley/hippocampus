@@ -261,7 +261,8 @@ impl<T: McpTransport + 'static> BlockingMcpClient<T> {
 
     /// Synchronous `tools/call`.
     pub fn tools_call(&self, name: &str, arguments: serde_json::Value) -> McpResult<ToolResult> {
-        self.runtime.block_on(self.inner.tools_call(name, arguments))
+        self.runtime
+            .block_on(self.inner.tools_call(name, arguments))
     }
 
     /// Synchronous `resources/list`.
@@ -285,7 +286,8 @@ impl<T: McpTransport + 'static> BlockingMcpClient<T> {
         name: &str,
         arguments: serde_json::Value,
     ) -> McpResult<Vec<PromptMessage>> {
-        self.runtime.block_on(self.inner.prompts_get(name, arguments))
+        self.runtime
+            .block_on(self.inner.prompts_get(name, arguments))
     }
 
     /// Synchronous close.
@@ -311,9 +313,9 @@ fn response_result(resp: JsonRpcResponse) -> McpResult<serde_json::Value> {
             "response id was null on a success response".into(),
         ));
     }
-    resp.result.ok_or_else(|| McpError::SchemaMismatch(
-        "response missing both 'result' and 'error'".into(),
-    ))
+    resp.result.ok_or_else(|| {
+        McpError::SchemaMismatch("response missing both 'result' and 'error'".into())
+    })
 }
 
 #[cfg(test)]
@@ -341,7 +343,10 @@ mod tests {
             }
         }
         fn set_response(&self, method: &str, value: serde_json::Value) {
-            self.responses.lock().unwrap().insert(method.to_owned(), value);
+            self.responses
+                .lock()
+                .unwrap()
+                .insert(method.to_owned(), value);
         }
         fn set_error(&self, method: &str, err: crate::jsonrpc::JsonRpcError) {
             self.errors.lock().unwrap().insert(method.to_owned(), err);
@@ -379,7 +384,10 @@ mod tests {
             })
         }
         async fn notify(&self, n: JsonRpcRequest) -> McpResult<()> {
-            self.notifications.lock().unwrap().push((n.method, n.params));
+            self.notifications
+                .lock()
+                .unwrap()
+                .push((n.method, n.params));
             Ok(())
         }
         async fn close(&self) {}

@@ -756,7 +756,11 @@ mod tests {
         // the cascade and the event drops, exactly like the incoming case.
         let store = Arc::new(InMemoryBrainStore::new());
         let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
-        let r = outgoing_row(130, Some("here is the info you asked for"), &["alerts@chase.com"]);
+        let r = outgoing_row(
+            130,
+            Some("here is the info you asked for"),
+            &["alerts@chase.com"],
+        );
         let outcome = pump.ingest_row(&r).expect("drop ok");
         assert!(
             matches!(

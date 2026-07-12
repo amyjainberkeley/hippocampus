@@ -236,12 +236,8 @@ impl MailIngestPump {
         let headered = if body.is_empty() {
             String::new()
         } else {
-            let header = compose_context_header(
-                Some(MAIL_BUNDLE_ID),
-                subject.as_deref(),
-                None,
-                ts_us,
-            );
+            let header =
+                compose_context_header(Some(MAIL_BUNDLE_ID), subject.as_deref(), None, ts_us);
             let mut s = String::with_capacity(header.len() + body.len());
             s.push_str(&header);
             s.push_str(&body);
@@ -362,9 +358,7 @@ fn first_address_domain(addrs: &[mci_mail_reader::ParsedAddress]) -> String {
         .unwrap_or_default()
 }
 
-fn first_address_domain_opt(
-    addrs: &[mci_mail_reader::ParsedAddress],
-) -> Option<String> {
+fn first_address_domain_opt(addrs: &[mci_mail_reader::ParsedAddress]) -> Option<String> {
     let d = first_address_domain(addrs);
     if d.is_empty() {
         None
@@ -385,9 +379,7 @@ fn extract_list_id_domain(value: &str) -> String {
     let trimmed = value.trim();
     if let (Some(open), Some(close)) = (trimmed.rfind('<'), trimmed.rfind('>')) {
         if open < close {
-            return trimmed[open + 1..close]
-                .trim()
-                .to_ascii_lowercase();
+            return trimmed[open + 1..close].trim().to_ascii_lowercase();
         }
     }
     trimmed.to_ascii_lowercase()
@@ -469,13 +461,22 @@ mod tests {
 
     #[test]
     fn list_id_extracts_bracketed_host() {
-        assert_eq!(extract_list_id_domain("<list.example.com>"), "list.example.com");
+        assert_eq!(
+            extract_list_id_domain("<list.example.com>"),
+            "list.example.com"
+        );
         assert_eq!(
             extract_list_id_domain("Friendly Name <list.example.com>"),
             "list.example.com"
         );
-        assert_eq!(extract_list_id_domain("bare.example.com"), "bare.example.com");
-        assert_eq!(extract_list_id_domain("<Mixed.CASE.example.com>"), "mixed.case.example.com");
+        assert_eq!(
+            extract_list_id_domain("bare.example.com"),
+            "bare.example.com"
+        );
+        assert_eq!(
+            extract_list_id_domain("<Mixed.CASE.example.com>"),
+            "mixed.case.example.com"
+        );
     }
 
     #[test]
@@ -522,7 +523,8 @@ mod tests {
         assert!(ev.url.is_none());
         assert!(ev.tab_id.is_none());
         assert!(
-            ev.text.starts_with("[app=com.apple.mail | title=Sprint kickoff notes |"),
+            ev.text
+                .starts_with("[app=com.apple.mail | title=Sprint kickoff notes |"),
             "ADR-0010 §1.3 header prefix; got: {}",
             &ev.text[..ev.text.len().min(160)]
         );
@@ -573,9 +575,17 @@ mod tests {
             "body URLs must not appear in header-only row"
         );
         // The audit marker + categorical sender domain ARE persisted.
-        assert!(ev.text.starts_with("[REDACTED:MAIL_HEADER_MATCH] from=chase.com"));
-        assert_eq!(ev.window_title.as_deref(), Some("[REDACTED:MAIL_HEADER_MATCH]"));
-        assert!(ev.embedding.is_none(), "no embedding for content-free audit row");
+        assert!(ev
+            .text
+            .starts_with("[REDACTED:MAIL_HEADER_MATCH] from=chase.com"));
+        assert_eq!(
+            ev.window_title.as_deref(),
+            Some("[REDACTED:MAIL_HEADER_MATCH]")
+        );
+        assert!(
+            ev.embedding.is_none(),
+            "no embedding for content-free audit row"
+        );
         assert_eq!(pump.counters().header_only.load(Ordering::Relaxed), 1);
         assert_eq!(pump.counters().allowed.load(Ordering::Relaxed), 0);
     }
@@ -694,7 +704,10 @@ mod tests {
         let headers = to_parsed_headers(&parsed);
         assert_eq!(headers.from_domain, "example.com");
         assert_eq!(headers.reply_to_domain.as_deref(), Some("example.org"));
-        assert_eq!(headers.list_id_domain.as_deref(), Some("my-list.example.net"));
+        assert_eq!(
+            headers.list_id_domain.as_deref(),
+            Some("my-list.example.net")
+        );
         assert_eq!(headers.subject, "Hi");
         // Silence unused-binding for mail-parser's parser ref above.
         let _ = msg;

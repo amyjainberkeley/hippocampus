@@ -411,10 +411,13 @@ fn harnesses() -> Vec<Harness> {
 
 fn main() {
     let hs = harnesses();
-    let results: Vec<(Harness, HarnessResult)> = hs.into_iter().map(|h| {
-        let r = run_harness(&h);
-        (h, r)
-    }).collect();
+    let results: Vec<(Harness, HarnessResult)> = hs
+        .into_iter()
+        .map(|h| {
+            let r = run_harness(&h);
+            (h, r)
+        })
+        .collect();
 
     let all_pass = results.iter().all(|(_, r)| r.pass);
 
@@ -495,7 +498,11 @@ fn main() {
                 w.window_id,
                 w.bundle_id,
                 w.visible_text,
-                if w.window_id == h.focused_window_id { "yes" } else { "no" },
+                if w.window_id == h.focused_window_id {
+                    "yes"
+                } else {
+                    "no"
+                },
             );
         }
         if let Some((installed, observed)) = h.race {
@@ -503,7 +510,11 @@ fn main() {
             println!(
                 "Race: SCStream filter installed under generation `{installed}`; \
                  callback observes generation `{observed}` → race gate {}.",
-                if race_gate_passes(installed, observed) { "passes" } else { "TRIPS" }
+                if race_gate_passes(installed, observed) {
+                    "passes"
+                } else {
+                    "TRIPS"
+                }
             );
         }
         println!();

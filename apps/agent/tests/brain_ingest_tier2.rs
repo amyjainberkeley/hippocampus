@@ -130,9 +130,7 @@ fn full_pipeline_brain_pump_tier1_then_tier2_populates_entity_mentions() {
     assert_eq!(count_kind(KIND_REDACTED_TOKEN, SUBKIND_JWT), 1);
 
     // ----- Event still pending V2-P5 -----
-    let pending_before = store
-        .events_pending_tier2(10)
-        .expect("pending before");
+    let pending_before = store.events_pending_tier2(10).expect("pending before");
     assert!(
         pending_before.iter().any(|e| e.id == id),
         "event should be in V2-P5 pending set before Tier 2 runs"
@@ -163,7 +161,8 @@ fn full_pipeline_brain_pump_tier1_then_tier2_populates_entity_mentions() {
     let topic_start = event_text.find(topic_phrase).expect("topic");
     let topic_end = topic_start + topic_phrase.len();
 
-    let jwt_phrase = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    let jwt_phrase =
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     let jwt_start = event_text.find(jwt_phrase).expect("jwt");
     let jwt_end = jwt_start + jwt_phrase.len();
 
@@ -284,7 +283,9 @@ fn full_pipeline_brain_pump_tier1_then_tier2_populates_entity_mentions() {
         .prepare("SELECT mention_text FROM entity_mentions WHERE extractor_kind=?1")
         .expect("prepare");
     let mention_texts: Vec<String> = stmt2
-        .query_map(params![TIER2_EXTRACTOR_KIND], |r| r.get::<_, Option<String>>(0))
+        .query_map(params![TIER2_EXTRACTOR_KIND], |r| {
+            r.get::<_, Option<String>>(0)
+        })
         .expect("query")
         .filter_map(|r| r.ok().flatten())
         .collect();
@@ -300,9 +301,7 @@ fn full_pipeline_brain_pump_tier1_then_tier2_populates_entity_mentions() {
     }
 
     // ----- Event no longer pending V2-P5 -----
-    let pending_after = store
-        .events_pending_tier2(10)
-        .expect("pending after");
+    let pending_after = store.events_pending_tier2(10).expect("pending after");
     assert!(
         pending_after.iter().all(|e| e.id != id),
         "event must be removed from V2-P5 pending set after the sentinel mark"

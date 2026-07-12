@@ -126,8 +126,8 @@ fn round_trip_per_kind_writes_entity_and_mention_rows() {
     let ex = Tier2Extractor::new(Arc::new(MockNerBackend::new(raws)));
     let matches = ex.extract(text).expect("extract ok");
     assert_eq!(matches.len(), 5);
-    let stats = persist_tier2_matches(&store as &dyn BrainStore, eid, ts, &matches)
-        .expect("persist ok");
+    let stats =
+        persist_tier2_matches(&store as &dyn BrainStore, eid, ts, &matches).expect("persist ok");
     assert_eq!(stats.entities_upserted, 5);
     assert_eq!(stats.mentions_inserted, 5);
 
@@ -187,20 +187,16 @@ fn second_pass_is_no_op_at_row_level() {
     mark_event_tier2_processed(&store as &dyn BrainStore, eid, ts).expect("mark 1");
 
     let db = raw_open(&path, &key);
-    let entities_after_first =
-        raw_count_where(&db, "SELECT COUNT(*) FROM entities", &[]);
-    let mentions_after_first =
-        raw_count_where(&db, "SELECT COUNT(*) FROM entity_mentions", &[]);
+    let entities_after_first = raw_count_where(&db, "SELECT COUNT(*) FROM entities", &[]);
+    let mentions_after_first = raw_count_where(&db, "SELECT COUNT(*) FROM entity_mentions", &[]);
 
     // Second pass.
     let m2 = ex.extract(text).expect("extract 2");
     persist_tier2_matches(&store as &dyn BrainStore, eid, ts, &m2).expect("persist 2");
     mark_event_tier2_processed(&store as &dyn BrainStore, eid, ts).expect("mark 2");
 
-    let entities_after_second =
-        raw_count_where(&db, "SELECT COUNT(*) FROM entities", &[]);
-    let mentions_after_second =
-        raw_count_where(&db, "SELECT COUNT(*) FROM entity_mentions", &[]);
+    let entities_after_second = raw_count_where(&db, "SELECT COUNT(*) FROM entities", &[]);
+    let mentions_after_second = raw_count_where(&db, "SELECT COUNT(*) FROM entity_mentions", &[]);
 
     assert_eq!(
         entities_after_first, entities_after_second,
@@ -289,9 +285,7 @@ fn tier1_redacted_token_bytes_never_re_persisted_via_tier2() {
     let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     let text = format!("Authorization: Bearer {jwt} (please redact)");
     let ts = 1_700_000_000_000_000;
-    let eid = store
-        .put_event(&make_event(ts, &text))
-        .expect("put_event");
+    let eid = store.put_event(&make_event(ts, &text)).expect("put_event");
 
     // Backend (wrongly) classifies the JWT as an organization. The
     // extractor must drop because Tier 1 already redacted these
@@ -467,7 +461,10 @@ fn every_mention_references_a_valid_entity() {
          WHERE e.id IS NULL",
         &[],
     );
-    assert_eq!(orphans, 0, "no entity_mention may reference a missing entity");
+    assert_eq!(
+        orphans, 0,
+        "no entity_mention may reference a missing entity"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -490,16 +487,12 @@ fn sentinel_processed_marker_removes_event_from_pending_set() {
         .expect("put 2");
 
     // Both events pending before any marker is written.
-    let pending = store
-        .events_pending_tier2(10)
-        .expect("pending");
+    let pending = store.events_pending_tier2(10).expect("pending");
     assert_eq!(pending.len(), 2);
 
     // Mark event #1 processed. Now only event #2 is pending.
     mark_event_tier2_processed(&store as &dyn BrainStore, eid1, ts1).expect("mark");
-    let pending_after = store
-        .events_pending_tier2(10)
-        .expect("pending after");
+    let pending_after = store.events_pending_tier2(10).expect("pending after");
     assert_eq!(pending_after.len(), 1);
     assert_ne!(pending_after[0].id, eid1);
 }
@@ -517,14 +510,19 @@ fn sentinel_marker_handles_empty_ner_output() {
 
     // Empty NER backend.
     let ex = Tier2Extractor::new(Arc::new(MockNerBackend::empty()));
-    let matches = ex.extract("no entities in this text whatsoever").expect("ok");
+    let matches = ex
+        .extract("no entities in this text whatsoever")
+        .expect("ok");
     assert!(matches.is_empty());
     persist_tier2_matches(&store as &dyn BrainStore, eid, ts, &matches).expect("persist");
     mark_event_tier2_processed(&store as &dyn BrainStore, eid, ts).expect("mark");
 
     // Event no longer in pending set despite producing zero NER mentions.
     let pending = store.events_pending_tier2(10).expect("pending");
-    assert!(pending.is_empty(), "empty NER output must still be marked done");
+    assert!(
+        pending.is_empty(),
+        "empty NER output must still be marked done"
+    );
 
     // Sentinel entity row + mention row exist.
     let db = raw_open(&path, &key);
@@ -535,7 +533,10 @@ fn sentinel_marker_handles_empty_ner_output() {
         "SELECT COUNT(*) FROM entity_mentions WHERE entity_id=?1 AND event_id=?2",
         &[&sentinel_id, &eid_i64],
     );
-    assert_eq!(mentions, 1, "exactly one sentinel mention per processed event");
+    assert_eq!(
+        mentions, 1,
+        "exactly one sentinel mention per processed event"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -641,11 +642,7 @@ fn multi_kind_event_populates_each_kind_correctly() {
         KIND_TOPIC,
         KIND_PRODUCT_NAME,
     ] {
-        let n = raw_count_where(
-            &db,
-            "SELECT COUNT(*) FROM entities WHERE kind=?1",
-            &[&kind],
-        );
+        let n = raw_count_where(&db, "SELECT COUNT(*) FROM entities WHERE kind=?1", &[&kind]);
         assert!(n >= 1, "kind {kind} missing from entities");
     }
 }

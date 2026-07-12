@@ -183,7 +183,13 @@ fn sample_record(id: u64, ts_us: u64, text: &str) -> EventRecord {
     }
 }
 
-fn sample_episode(id: u64, app: &str, ts_start: u64, ts_end: u64, event_count: u64) -> EpisodeRecord {
+fn sample_episode(
+    id: u64,
+    app: &str,
+    ts_start: u64,
+    ts_end: u64,
+    event_count: u64,
+) -> EpisodeRecord {
     EpisodeRecord {
         id,
         app_bundle_id: Some(app.to_owned()),
@@ -257,7 +263,10 @@ fn initialize_returns_server_info_and_protocol_version() {
         Some("hippocampus")
     );
     assert!(
-        result.get("instructions").and_then(|v| v.as_str()).is_some(),
+        result
+            .get("instructions")
+            .and_then(|v| v.as_str())
+            .is_some(),
         "initialize must include instructions for Claude Code"
     );
 }
@@ -554,9 +563,7 @@ fn tools_call_mci_episodes_returns_canned_episode() {
         Some(1)
     );
     assert_eq!(
-        episodes[0]
-            .get("app_bundle_id")
-            .and_then(|v| v.as_str()),
+        episodes[0].get("app_bundle_id").and_then(|v| v.as_str()),
         Some("com.example.app")
     );
     assert_eq!(
@@ -628,16 +635,11 @@ fn tools_call_mci_events_by_app_returns_matching_events() {
         .expect("events array");
     assert_eq!(events.len(), 2);
     assert_eq!(
-        events[0]
-            .get("app_bundle_id")
-            .and_then(|v| v.as_str()),
+        events[0].get("app_bundle_id").and_then(|v| v.as_str()),
         Some("com.example.app")
     );
     let invs = stub.invocations();
-    assert_eq!(
-        invs.events_by_app,
-        vec![("com.example.app".to_owned(), 10)]
-    );
+    assert_eq!(invs.events_by_app, vec![("com.example.app".to_owned(), 10)]);
 }
 
 #[test]
@@ -653,10 +655,7 @@ fn tools_call_mci_events_by_app_default_limit_is_fifty() {
         ))
         .expect("response");
     let invs = stub.invocations();
-    assert_eq!(
-        invs.events_by_app,
-        vec![("com.example.app".to_owned(), 50)]
-    );
+    assert_eq!(invs.events_by_app, vec![("com.example.app".to_owned(), 50)]);
 }
 
 // ---------------------------------------------------------------------------
