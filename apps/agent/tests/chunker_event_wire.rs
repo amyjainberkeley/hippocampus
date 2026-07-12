@@ -50,9 +50,7 @@ use std::sync::Arc;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::device_id::{load_or_generate, DeviceId};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
-use mci_agent::mcp::{
-    BrainReader, JsonRpcId, JsonRpcRequest, LiveBrainReader, Server,
-};
+use mci_agent::mcp::{BrainReader, JsonRpcId, JsonRpcRequest, LiveBrainReader, Server};
 use mci_agent::runner::drain_to_log_with_brain;
 use mci_agent::wall_clock::SystemWallClock;
 use mci_brain::stubs::FixedDimEmbedder;
@@ -66,7 +64,12 @@ use std::io::Cursor;
 // Helpers
 // -----------------------------------------------------------------------
 
-fn open_temp_store() -> (tempfile::TempDir, std::path::PathBuf, DbKey, Arc<SqlCipherBrainStore>) {
+fn open_temp_store() -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    DbKey,
+    Arc<SqlCipherBrainStore>,
+) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dogfood5.sqlite");
     let key = DbKey::from_bytes([0xCC; 32]);
@@ -88,7 +91,14 @@ async fn device_id(dir: &std::path::Path) -> DeviceId {
 
 /// Construct an `OCREvent` wire frame whose payload looks like a real
 /// twice-cleared helper emission (ADR-0016 §1.6).
-fn make_ocr_frame(seq: u64, ts_us: u64, app_id: &str, title: &str, url: &str, body: &str) -> Vec<u8> {
+fn make_ocr_frame(
+    seq: u64,
+    ts_us: u64,
+    app_id: &str,
+    title: &str,
+    url: &str,
+    body: &str,
+) -> Vec<u8> {
     let mut bundle = [0u8; 64];
     let copy_len = app_id.len().min(64);
     bundle[..copy_len].copy_from_slice(&app_id.as_bytes()[..copy_len]);
@@ -136,11 +146,46 @@ async fn n_synthetic_ocr_events_become_n_rows_and_recall_hits() {
     // Five distinct synthetic events. Each body carries a unique
     // distinguishing token so FTS5 recall can be asserted per-event.
     let fixtures: Vec<(u64, u64, &str, &str, &str, &str)> = vec![
-        (0, 1_000_000, "com.apple.Safari", "Login — bank", "https://bank.example.com/login", "alpha onetime balance"),
-        (1, 2_000_000, "com.google.Chrome", "Pricing — example", "https://example.com/pricing", "bravo annual subscription"),
-        (2, 3_000_000, "com.apple.Notes", "Meeting notes", "", "charlie standup mci roadmap"),
-        (3, 4_000_000, "com.tinyspeck.slackmacgap", "general — Slack", "", "delta deploy postmortem"),
-        (4, 5_000_000, "com.apple.Safari", "Issue #42", "https://github.com/test/repo/issues/42", "echo regression fixed"),
+        (
+            0,
+            1_000_000,
+            "com.apple.Safari",
+            "Login — bank",
+            "https://bank.example.com/login",
+            "alpha onetime balance",
+        ),
+        (
+            1,
+            2_000_000,
+            "com.google.Chrome",
+            "Pricing — example",
+            "https://example.com/pricing",
+            "bravo annual subscription",
+        ),
+        (
+            2,
+            3_000_000,
+            "com.apple.Notes",
+            "Meeting notes",
+            "",
+            "charlie standup mci roadmap",
+        ),
+        (
+            3,
+            4_000_000,
+            "com.tinyspeck.slackmacgap",
+            "general — Slack",
+            "",
+            "delta deploy postmortem",
+        ),
+        (
+            4,
+            5_000_000,
+            "com.apple.Safari",
+            "Issue #42",
+            "https://github.com/test/repo/issues/42",
+            "echo regression fixed",
+        ),
     ];
 
     let mut bytes = Vec::new();
@@ -257,10 +302,7 @@ async fn tombstones_interleaved_with_ocr_never_reach_real_store() {
     let clock = SystemWallClock;
     let id = device_id(dir.path()).await;
     let embedder: Arc<dyn Embedder> = Arc::new(FixedDimEmbedder::default());
-    let pump = BrainPump::new(
-        Arc::clone(&store) as Arc<dyn BrainStore>,
-        Some(embedder),
-    );
+    let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, Some(embedder));
 
     let mut bytes = Vec::new();
     bytes.extend(encode(

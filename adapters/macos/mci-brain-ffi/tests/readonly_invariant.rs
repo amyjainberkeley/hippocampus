@@ -28,8 +28,8 @@ use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
 use mci_brain_ffi::{
     mci_brain_ffi_close, mci_brain_ffi_last_error_message, mci_brain_ffi_list_episodes,
     mci_brain_ffi_list_observed_apps, mci_brain_ffi_open, mci_brain_ffi_recent_events,
-    mci_brain_ffi_recent_privacy_moments, mci_brain_ffi_search, mci_brain_ffi_string_free,
-    HitJson, PrivacyMomentJson,
+    mci_brain_ffi_recent_privacy_moments, mci_brain_ffi_search, mci_brain_ffi_string_free, HitJson,
+    PrivacyMomentJson,
 };
 use mci_core::crypto::DbKey;
 use mci_core::store::open_readonly as mci_core_open_readonly;

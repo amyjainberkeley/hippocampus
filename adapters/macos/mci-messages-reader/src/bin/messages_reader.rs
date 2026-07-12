@@ -136,13 +136,15 @@ fn cmd_thread(rest: &[String]) -> Result<(), MessagesReaderError> {
     println!("chat_rowid    {}", t.chat_rowid);
     println!("guid          {}", t.guid);
     println!("style         {}", t.style);
-    println!(
-        "display_name  {}",
-        t.display_name.as_deref().unwrap_or("")
-    );
+    println!("display_name  {}", t.display_name.as_deref().unwrap_or(""));
     println!("participants  {}", t.participants.len());
     for p in &t.participants {
-        println!("  rowid={:<3} svc={:<8} id={}", p.rowid, p.service.as_str(), p.id);
+        println!(
+            "  rowid={:<3} svc={:<8} id={}",
+            p.rowid,
+            p.service.as_str(),
+            p.id
+        );
     }
     println!("messages      {}", t.messages.len());
     for m in t.messages.iter().take(50) {

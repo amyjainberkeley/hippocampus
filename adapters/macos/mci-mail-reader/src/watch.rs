@@ -67,10 +67,7 @@ pub fn watch_inbox(
 
 /// Watch an arbitrary directory tree. Exposed as a separate entry point so
 /// tests can target a tempdir without synthesizing a `MailAccount`.
-pub fn watch_path(
-    root: &Path,
-    channel_capacity: usize,
-) -> Result<InboxWatcher, MailReaderError> {
+pub fn watch_path(root: &Path, channel_capacity: usize) -> Result<InboxWatcher, MailReaderError> {
     let (tx, rx) = mpsc::channel(channel_capacity.max(1));
     let tx = Arc::new(tx);
 
@@ -137,7 +134,12 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn emits_event_on_new_emlx() {
         let tmp = tempdir().unwrap();
-        let sub = tmp.path().join("INBOX.mbox").join("UUID").join("Data").join("Messages");
+        let sub = tmp
+            .path()
+            .join("INBOX.mbox")
+            .join("UUID")
+            .join("Data")
+            .join("Messages");
         fs::create_dir_all(&sub).unwrap();
 
         let mut w = watch_path(tmp.path(), 16).expect("watch ok");
@@ -154,9 +156,7 @@ mod tests {
         // cold runner.
         let mut got = None;
         for _ in 0..50 {
-            if let Ok(ev) =
-                tokio::time::timeout(Duration::from_millis(100), w.next()).await
-            {
+            if let Ok(ev) = tokio::time::timeout(Duration::from_millis(100), w.next()).await {
                 got = ev;
                 if got.is_some() {
                     break;

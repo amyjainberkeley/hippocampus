@@ -515,10 +515,7 @@ pub unsafe extern "C" fn mci_brain_ffi_list_observed_apps(
 /// `h` must be a live handle. `limit` is treated as `u32` and clamped
 /// to [`MAX_LIMIT`] internally.
 #[no_mangle]
-pub unsafe extern "C" fn mci_brain_ffi_list_episodes(
-    h: *mut Handle,
-    limit: u32,
-) -> *mut c_char {
+pub unsafe extern "C" fn mci_brain_ffi_list_episodes(h: *mut Handle, limit: u32) -> *mut c_char {
     if h.is_null() {
         set_last_error("mci_brain_ffi_list_episodes: null handle");
         return ptr::null_mut();
@@ -665,10 +662,7 @@ pub unsafe extern "C" fn mci_brain_ffi_latest_brief(h: *mut Handle) -> *mut c_ch
 /// # Safety
 /// `h` must be a live handle.
 #[no_mangle]
-pub unsafe extern "C" fn mci_brain_ffi_brief_dates(
-    h: *mut Handle,
-    limit: u32,
-) -> *mut c_char {
+pub unsafe extern "C" fn mci_brain_ffi_brief_dates(h: *mut Handle, limit: u32) -> *mut c_char {
     if h.is_null() {
         set_last_error("mci_brain_ffi_brief_dates: null handle");
         return ptr::null_mut();

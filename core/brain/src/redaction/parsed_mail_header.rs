@@ -460,7 +460,10 @@ mod tests {
 
     #[test]
     fn h3_google_g_prefix_subject_drops() {
-        let h = headers("notify.example.com", "G-018472 is your Google verification code");
+        let h = headers(
+            "notify.example.com",
+            "G-018472 is your Google verification code",
+        );
         assert!(matches!(
             cascade_equivalent(&h),
             MailCascadeDecision::HeaderOnly {

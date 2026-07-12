@@ -14,9 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mci_mcp_client::{
-    McpClient, McpError, ServerRegistration, ServerRegistry, StdioTransport,
-};
+use mci_mcp_client::{McpClient, McpError, ServerRegistration, ServerRegistry, StdioTransport};
 
 /// Located at compile time — Cargo populates this when the
 /// `test-fixtures` feature is enabled (which the dev-dependency
@@ -74,7 +72,10 @@ async fn tools_list_and_call_round_trip() {
         .resources_read("mci-fixture://hello")
         .await
         .expect("resources/read");
-    assert_eq!(content.contents[0].text.as_deref(), Some("hello from fixture"));
+    assert_eq!(
+        content.contents[0].text.as_deref(),
+        Some("hello from fixture")
+    );
 
     // prompts/list is empty in the fixture
     let prompts = client.prompts_list().await.expect("prompts/list");
@@ -157,7 +158,7 @@ async fn server_crash_after_initialize_surfaces_closed_on_subsequent_call() {
     let transport = transport.with_timeout(Duration::from_secs(2));
     let client = McpClient::new(Arc::new(transport));
     let _ = client.initialize().await; // may succeed or fail depending on race
-    // Give the reader task time to observe EOF on stdout.
+                                       // Give the reader task time to observe EOF on stdout.
     tokio::time::sleep(Duration::from_millis(50)).await;
     let err = client
         .tools_call("echo", serde_json::json!({"msg": "hi"}))
@@ -226,12 +227,8 @@ async fn registry_concurrent_multi_server_calls() {
     let alpha = registry.connect("alpha").await.expect("alpha");
     let beta = registry.connect("beta").await.expect("beta");
     let gamma = registry.connect("gamma").await.expect("gamma");
-    let _ = tokio::try_join!(
-        alpha.initialize(),
-        beta.initialize(),
-        gamma.initialize()
-    )
-    .expect("init all three");
+    let _ = tokio::try_join!(alpha.initialize(), beta.initialize(), gamma.initialize())
+        .expect("init all three");
 
     // Idempotent connect: a second call returns the same client.
     let alpha2 = registry.connect("alpha").await.expect("alpha2");

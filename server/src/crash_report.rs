@@ -142,10 +142,7 @@ pub fn crash_report_router(state: Arc<CrashReportLog>) -> Router {
         .with_state(state)
 }
 
-async fn receive_crash_report(
-    State(log): State<Arc<CrashReportLog>>,
-    body: String,
-) -> StatusCode {
+async fn receive_crash_report(State(log): State<Arc<CrashReportLog>>, body: String) -> StatusCode {
     let report: CrashReport = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(_) => return StatusCode::BAD_REQUEST,
@@ -201,10 +198,9 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let contents =
-            tokio::fs::read_to_string(tmp.path().join("crash-reports.jsonl"))
-                .await
-                .unwrap();
+        let contents = tokio::fs::read_to_string(tmp.path().join("crash-reports.jsonl"))
+            .await
+            .unwrap();
         assert_eq!(contents.lines().count(), 1);
         assert!(contents.contains("\"ts\":\"1.001\""));
     }
@@ -267,10 +263,9 @@ mod tests {
         log.append(&report).await.unwrap();
         log.append(&report).await.unwrap();
 
-        let contents =
-            tokio::fs::read_to_string(tmp.path().join("crash-reports.jsonl"))
-                .await
-                .unwrap();
+        let contents = tokio::fs::read_to_string(tmp.path().join("crash-reports.jsonl"))
+            .await
+            .unwrap();
         assert_eq!(contents.lines().count(), 2);
     }
 
@@ -299,7 +294,11 @@ mod tests {
         let active = tokio::fs::read_to_string(tmp.path().join("crash-reports.jsonl"))
             .await
             .unwrap();
-        assert_eq!(active.lines().count(), 0, "active file empty after rotation");
+        assert_eq!(
+            active.lines().count(),
+            0,
+            "active file empty after rotation"
+        );
     }
 
     #[tokio::test]

@@ -156,10 +156,7 @@ enum CheckOutcome {
     Fail,
 }
 
-fn check_decision(
-    actual: &MailCascadeDecision,
-    expected: &ExpectedOutcome,
-) -> CheckOutcome {
+fn check_decision(actual: &MailCascadeDecision, expected: &ExpectedOutcome) -> CheckOutcome {
     match (actual, expected) {
         (MailCascadeDecision::Allow, ExpectedOutcome::Allow) => CheckOutcome::Pass,
         (
@@ -204,8 +201,13 @@ fn fmt_decision(d: &MailCascadeDecision) -> String {
         MailCascadeDecision::HeaderOnly {
             sender_domain,
             reason,
-        } => format!("HeaderOnly {{ sender={sender_domain}, reason={} }}", reason.as_str()),
-        MailCascadeDecision::Refuse { reason } => format!("Refuse {{ reason={} }}", reason.as_str()),
+        } => format!(
+            "HeaderOnly {{ sender={sender_domain}, reason={} }}",
+            reason.as_str()
+        ),
+        MailCascadeDecision::Refuse { reason } => {
+            format!("Refuse {{ reason={} }}", reason.as_str())
+        }
     }
 }
 
@@ -215,7 +217,10 @@ fn fmt_expected(e: &ExpectedOutcome) -> String {
         ExpectedOutcome::HeaderOnly {
             sender_domain,
             reason,
-        } => format!("HeaderOnly {{ sender={sender_domain}, reason={} }}", reason.as_str()),
+        } => format!(
+            "HeaderOnly {{ sender={sender_domain}, reason={} }}",
+            reason.as_str()
+        ),
         ExpectedOutcome::Refuse { reason } => format!("Refuse {{ reason={} }}", reason.as_str()),
     }
 }
@@ -274,9 +279,7 @@ fn main() {
     println!("# ADR-0030 §3(c)(ii) Mail cascade-equivalent corpus-run artifact (V2-P8b)");
     println!();
     println!("- **Date:** 2026-05-30");
-    println!(
-        "- **Generator:** `cargo run -p mci-brain --bin mail_cascade_corpus --release`"
-    );
+    println!("- **Generator:** `cargo run -p mci-brain --bin mail_cascade_corpus --release`");
     println!("- **Code under test:** `core/brain/src/redaction/parsed_mail_header.rs::cascade_equivalent`");
     println!("- **ADR:** `docs/decisions/0030-messages-mail-redaction-threat-model.md` §3(c)(ii) (V2-P8b amendment)");
     println!("- **Mail spike:** `docs/research/mail-envelope-schema-2026-05-29.md` §9 (parsed-header retrospective)");

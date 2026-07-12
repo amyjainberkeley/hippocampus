@@ -30,8 +30,7 @@ use std::fmt::Write;
 
 use mci_brain::redaction::sms_otp::{redact_sms_shapes, TOKEN_BANK_NOTIFICATION, TOKEN_SMS_OTP};
 
-const CORPUS_MD: &str =
-    include_str!("../../../../docs/research/sms-2fa-test-corpus-shapes.md");
+const CORPUS_MD: &str = include_str!("../../../../docs/research/sms-2fa-test-corpus-shapes.md");
 
 #[derive(Debug, Clone)]
 struct Entry {
@@ -67,8 +66,7 @@ fn main() {
     let entries = parse_corpus(CORPUS_MD);
 
     let mut overall = Tally::default();
-    let mut by_class: std::collections::BTreeMap<char, Tally> =
-        std::collections::BTreeMap::new();
+    let mut by_class: std::collections::BTreeMap<char, Tally> = std::collections::BTreeMap::new();
 
     // Build the per-entry table + tally.
     let mut rows = String::new();
@@ -125,7 +123,10 @@ fn main() {
     println!();
     println!("- **Date:** 2026-05-28");
     println!("- **Generator:** `cargo run -p mci-brain --bin redaction_corpus --release`");
-    println!("- **Corpus source:** `docs/research/sms-2fa-test-corpus-shapes.md` ({total} entries)", total = entries.len());
+    println!(
+        "- **Corpus source:** `docs/research/sms-2fa-test-corpus-shapes.md` ({total} entries)",
+        total = entries.len()
+    );
     println!("- **Code under test:** `core/brain/src/redaction/sms_otp.rs` (Tier 1–4 + sentinel + password-reset prose)");
     println!("- **Replacement tokens:** `{TOKEN_SMS_OTP}` and `{TOKEN_BANK_NOTIFICATION}`");
     println!();
@@ -199,9 +200,13 @@ fn main() {
     println!("## ADR references");
     println!();
     println!("- ADR-0030 §3(a) — SMS-OTP / banking-notification regex set (this corpus's gate)");
-    println!("- ADR-0030 §1 condition (4) — committed corpus-run artifact with catch ≥99% / FP ≤5%");
+    println!(
+        "- ADR-0030 §1 condition (4) — committed corpus-run artifact with catch ≥99% / FP ≤5%"
+    );
     println!("- ADR-0013 Amendment 1 §3 — fail-safe-default-redact (the rule that motivates redacting on partial matches)");
-    println!("- ADR-0016 §4.2 — cascade-twice-for-OCR (the integration point this layer mounts at)");
+    println!(
+        "- ADR-0016 §4.2 — cascade-twice-for-OCR (the integration point this layer mounts at)"
+    );
     println!("- ADR-0029 §5 — corpus-then-flip discipline (this PR's structure mirrors that)");
 
     // Exit code is 0 even on gate failure — the orchestrator reads
@@ -374,7 +379,11 @@ mod tests {
             if e.class == 'H' {
                 assert!(!e.must_redact, "H-{} should be must_redact=false", e.id);
             } else {
-                assert!(e.must_redact, "{}-{} should be must_redact=true", e.class, e.id);
+                assert!(
+                    e.must_redact,
+                    "{}-{} should be must_redact=true",
+                    e.class, e.id
+                );
             }
         }
     }

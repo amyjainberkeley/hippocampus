@@ -263,9 +263,7 @@ pub fn redact_messages_plugin_event(
         if !p.is_empty() && sensitive_domains::matches_sensitive_domain(p) {
             return MessagesPluginDecision {
                 drop_event: true,
-                drop_reason: Some(
-                    MessagesPluginDropReason::SensitiveParticipantDomain,
-                ),
+                drop_reason: Some(MessagesPluginDropReason::SensitiveParticipantDomain),
                 redacted_body: String::new(),
                 fired_rules: Vec::new(),
             };
@@ -314,7 +312,9 @@ fn any_participant_matches(participants: &[String], set: &[String]) -> bool {
 /// (`.`, `,`, `;`, `)`, `]`, `>`, `"`, `'`).
 fn body_tokens(body: &str) -> impl Iterator<Item = &str> {
     body.split(|c: char| c.is_ascii_whitespace())
-        .map(|t| t.trim_matches(|c: char| matches!(c, '.' | ',' | ';' | ')' | ']' | '>' | '"' | '\'')))
+        .map(|t| {
+            t.trim_matches(|c: char| matches!(c, '.' | ',' | ';' | ')' | ']' | '>' | '"' | '\''))
+        })
         .filter(|t| !t.is_empty())
 }
 
@@ -359,7 +359,10 @@ mod tests {
             &MessagesPluginConfig::DEFAULT,
         );
         assert!(d.drop_event);
-        assert_eq!(d.drop_reason, Some(MessagesPluginDropReason::PluginDisabled));
+        assert_eq!(
+            d.drop_reason,
+            Some(MessagesPluginDropReason::PluginDisabled)
+        );
         assert!(d.redacted_body.is_empty());
     }
 
@@ -473,10 +476,7 @@ mod tests {
     #[test]
     fn bare_sensitive_domain_in_body_drops() {
         let d = redact_messages_plugin_event(
-            &evt(
-                Some("Open chase.com to verify."),
-                &["+15551234567"],
-            ),
+            &evt(Some("Open chase.com to verify."), &["+15551234567"]),
             &enabled_cfg(),
         );
         assert!(d.drop_event);
@@ -547,10 +547,7 @@ mod tests {
 
     #[test]
     fn empty_body_string_is_ingested_with_empty_redacted_body() {
-        let d = redact_messages_plugin_event(
-            &evt(Some(""), &["+15551234567"]),
-            &enabled_cfg(),
-        );
+        let d = redact_messages_plugin_event(&evt(Some(""), &["+15551234567"]), &enabled_cfg());
         // Empty Some("") body is *technically* present — the cascade
         // runs the regex (no match) and the body is ingested as ""
         // by the brain-side caller.
@@ -560,10 +557,7 @@ mod tests {
 
     #[test]
     fn empty_participants_list_does_not_drop_when_body_safe() {
-        let d = redact_messages_plugin_event(
-            &evt(Some("ping"), &[]),
-            &enabled_cfg(),
-        );
+        let d = redact_messages_plugin_event(&evt(Some("ping"), &[]), &enabled_cfg());
         // No participants → no denylist match, no domain match, no
         // allowlist gate (allow_all = true). Body is safe → not dropped.
         assert!(!d.drop_event);

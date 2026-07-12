@@ -250,10 +250,7 @@ impl CoreMLBackend {
     /// # Errors
     ///
     /// As for [`Self::open`].
-    pub fn open_with_compute_units(
-        path: &Path,
-        units: ComputeUnits,
-    ) -> Result<Self, EmbedError> {
+    pub fn open_with_compute_units(path: &Path, units: ComputeUnits) -> Result<Self, EmbedError> {
         let tokenizer = WordPieceTokenizer::load_bundled()
             .map_err(|e| EmbedError::Backend(format!("tokenizer: {e}")))?;
         Self::open_with_tokenizer_arc(path, tokenizer, units)

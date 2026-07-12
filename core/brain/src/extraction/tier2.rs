@@ -728,10 +728,7 @@ mod tests {
             span_end: 5,
             confidence: 0.6,
         }];
-        let lax = Tier2Extractor::with_threshold(
-            Arc::new(MockNerBackend::new(raw.clone())),
-            0.5,
-        );
+        let lax = Tier2Extractor::with_threshold(Arc::new(MockNerBackend::new(raw.clone())), 0.5);
         let strict = Tier2Extractor::with_threshold(Arc::new(MockNerBackend::new(raw)), 0.8);
         assert_eq!(lax.extract(text).expect("lax").len(), 1);
         assert_eq!(strict.extract(text).expect("strict").len(), 0);
@@ -812,7 +809,8 @@ mod tests {
 
     #[test]
     fn extract_drops_partial_overlap_with_tier1_redacted_span() {
-        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let jwt =
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
         let text = format!("Foo Bearer {jwt} bar");
         let jwt_start = "Foo Bearer ".len();
         let jwt_end = jwt_start + jwt.len();
@@ -896,7 +894,8 @@ mod tests {
 
     #[test]
     fn compute_skip_spans_includes_tier1_redacted_tokens() {
-        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let jwt =
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
         let text = format!("Auth: {jwt} end");
         let jwt_start = "Auth: ".len();
         let jwt_end = jwt_start + jwt.len();
@@ -922,7 +921,9 @@ mod tests {
         let tier1_marker_spans: Vec<(usize, usize)> = tier1
             .extract(text)
             .into_iter()
-            .filter(|m| m.kind == TIER1_KIND_REDACTED && m.canonical_name == SUBKIND_CASCADE_REDACTED)
+            .filter(|m| {
+                m.kind == TIER1_KIND_REDACTED && m.canonical_name == SUBKIND_CASCADE_REDACTED
+            })
             .map(|m| (m.span_start, m.span_end))
             .collect();
         let tier2_spans = compute_skip_spans(text);
@@ -944,8 +945,14 @@ mod tests {
     #[test]
     fn overlaps_any_handles_edge_cases() {
         let skip = vec![(10_usize, 20_usize)];
-        assert!(!overlaps_any(&skip, 0, 10), "adjacent before is not overlap");
-        assert!(!overlaps_any(&skip, 20, 30), "adjacent after is not overlap");
+        assert!(
+            !overlaps_any(&skip, 0, 10),
+            "adjacent before is not overlap"
+        );
+        assert!(
+            !overlaps_any(&skip, 20, 30),
+            "adjacent after is not overlap"
+        );
         assert!(overlaps_any(&skip, 5, 15), "partial overlap before");
         assert!(overlaps_any(&skip, 15, 25), "partial overlap after");
         assert!(overlaps_any(&skip, 12, 18), "contained");

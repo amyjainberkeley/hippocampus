@@ -432,7 +432,9 @@ impl McpAggregator {
             .await;
             match outcome {
                 Ok(Ok(())) => {
-                    self.stats.server_reconciles_ok.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .server_reconciles_ok
+                        .fetch_add(1, Ordering::Relaxed);
                 }
                 Ok(Err(e)) => {
                     self.stats
@@ -467,10 +469,7 @@ impl McpAggregator {
 
     /// One server's reconcile: connect, handshake, catalog tools,
     /// discover + materialize resources within the per-tick budget.
-    async fn reconcile_server(
-        &self,
-        registration: &ServerRegistration,
-    ) -> Result<(), McpError> {
+    async fn reconcile_server(&self, registration: &ServerRegistration) -> Result<(), McpError> {
         let server_name = &registration.name;
         let client = self.registry.connect(server_name).await?;
         let _init = client.initialize().await?;
@@ -533,12 +532,7 @@ impl McpAggregator {
                 Ok(read_result) => {
                     let body = concat_text(&read_result.contents);
                     if body.len() <= self.materialize_max_bytes {
-                        let event = self.materialize_event(
-                            server_name,
-                            resource,
-                            &body,
-                            ts_us,
-                        );
+                        let event = self.materialize_event(server_name, resource, &body, ts_us);
                         match self.store.put_event(&event) {
                             Ok(id) => {
                                 self.stats
@@ -563,16 +557,10 @@ impl McpAggregator {
                                 // lives; mentions can be backfilled
                                 // later because every Tier 1 writer
                                 // is idempotent on PK by construction.
-                                self.run_tier1_extraction(
-                                    server_name,
-                                    id,
-                                    &event,
-                                );
+                                self.run_tier1_extraction(server_name, id, &event);
                             }
                             Err(e) => {
-                                self.stats
-                                    .put_event_errors
-                                    .fetch_add(1, Ordering::Relaxed);
+                                self.stats.put_event_errors.fetch_add(1, Ordering::Relaxed);
                                 tracing::warn!(
                                     target: "mci_agent::mcp_aggregator",
                                     server = %server_name,
@@ -581,12 +569,8 @@ impl McpAggregator {
                             }
                         }
                     } else {
-                        let event = self.catalog_only_event(
-                            server_name,
-                            resource,
-                            Some(body.len()),
-                            ts_us,
-                        );
+                        let event =
+                            self.catalog_only_event(server_name, resource, Some(body.len()), ts_us);
                         self.persist_catalog_event(server_name, &event);
                     }
                     tick_materialized += 1;
@@ -606,10 +590,7 @@ impl McpAggregator {
         // lock. Holding the lock here is fine — the per-server async
         // network calls already returned.
         let mut state = self.state.lock().await;
-        let bk = state
-            .per_server
-            .entry(server_name.clone())
-            .or_default();
+        let bk = state.per_server.entry(server_name.clone()).or_default();
         bk.tools = tools;
         bk.seen_resource_uris.extend(newly_seen);
 
@@ -653,9 +634,7 @@ impl McpAggregator {
                     .fetch_add(1, Ordering::Relaxed);
             }
             Err(e) => {
-                self.stats
-                    .put_event_errors
-                    .fetch_add(1, Ordering::Relaxed);
+                self.stats.put_event_errors.fetch_add(1, Ordering::Relaxed);
                 tracing::warn!(
                     target: "mci_agent::mcp_aggregator",
                     server = %server_name,
@@ -829,7 +808,8 @@ mod tests {
     use mci_brain::stubs::InMemoryBrainStore;
     use mci_mcp_client::{ServerRegistration, ServerRegistry};
 
-    fn aggregator_with_empty_registry() -> (Arc<ServerRegistry>, Arc<InMemoryBrainStore>, McpAggregator) {
+    fn aggregator_with_empty_registry(
+    ) -> (Arc<ServerRegistry>, Arc<InMemoryBrainStore>, McpAggregator) {
         let registry = Arc::new(ServerRegistry::new());
         let store = Arc::new(InMemoryBrainStore::new());
         let agg = McpAggregator::new(
@@ -906,7 +886,8 @@ mod tests {
     fn catalog_event_carries_marker_and_source_tag() {
         let (_reg, _store, agg) = aggregator_with_empty_registry();
         let resource = make_resource("notion://page/abc", "Q4 Plan", "text/html");
-        let event = agg.catalog_only_event("notion", &resource, Some(1_500_000), 1_700_000_000_000_000);
+        let event =
+            agg.catalog_only_event("notion", &resource, Some(1_500_000), 1_700_000_000_000_000);
         assert_eq!(event.app_bundle_id.as_deref(), Some("mcp:notion"));
         assert_eq!(event.cascade_reason, 0);
         assert!(event.text.contains(CATALOG_ONLY_MARKER));
@@ -966,7 +947,9 @@ mod tests {
         // We assert the sanitizer is exhaustive over the McpError
         // variants by exercising every constructable shape.
         assert_eq!(
-            sanitized_err(&McpError::SchemaMismatch("payload that must not leak".into())),
+            sanitized_err(&McpError::SchemaMismatch(
+                "payload that must not leak".into()
+            )),
             "schema_mismatch",
         );
         assert_eq!(sanitized_err(&McpError::Closed), "closed");
@@ -1010,9 +993,11 @@ mod tests {
         // Let one tick happen.
         tokio::time::sleep(Duration::from_millis(50)).await;
         tx.send(true).expect("shutdown send");
-        let join =
-            tokio::time::timeout(Duration::from_millis(500), handle).await;
-        assert!(join.is_ok(), "aggregator should exit within 500ms of shutdown");
+        let join = tokio::time::timeout(Duration::from_millis(500), handle).await;
+        assert!(
+            join.is_ok(),
+            "aggregator should exit within 500ms of shutdown"
+        );
     }
 
     #[tokio::test]

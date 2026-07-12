@@ -173,11 +173,7 @@ fn ffi_brief_dates_returns_descending_capped() {
     let (_dir, path, raw_key) = fresh_db();
     {
         let writer = SqlCipherBrainStore::new(&path, &DbKey::from_bytes(raw_key)).expect("writer");
-        for (d, ts) in [
-            ("2026-05-20", 1u64),
-            ("2026-05-22", 3),
-            ("2026-05-21", 2),
-        ] {
+        for (d, ts) in [("2026-05-20", 1u64), ("2026-05-22", 3), ("2026-05-21", 2)] {
             seed_brief(&writer, d, ts, "body");
         }
     }

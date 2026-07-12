@@ -35,10 +35,7 @@ pub const EMLX_PREFIX_LEN: usize = 11;
 /// Split an emlx byte buffer into its segments.
 ///
 /// `path` is only used for error attribution.
-pub fn split_emlx<'a>(
-    bytes: &'a [u8],
-    path: &Path,
-) -> Result<EmlxParts<'a>, MailReaderError> {
+pub fn split_emlx<'a>(bytes: &'a [u8], path: &Path) -> Result<EmlxParts<'a>, MailReaderError> {
     if bytes.len() < EMLX_PREFIX_LEN {
         return Err(MailReaderError::InvalidEmlx {
             path: path.to_path_buf(),
@@ -53,7 +50,10 @@ pub fn split_emlx<'a>(
     // The 10-byte ASCII length field is right-padded with 0x20 (space).
     // It is the byte-count of segment 2 (the RFC 5322 message).
     let length_field = &bytes[..10];
-    if !length_field.iter().all(|b| b.is_ascii_digit() || *b == b' ') {
+    if !length_field
+        .iter()
+        .all(|b| b.is_ascii_digit() || *b == b' ')
+    {
         return Err(MailReaderError::InvalidEmlx {
             path: path.to_path_buf(),
             reason: "length-prefix bytes are not ASCII digits or spaces".into(),
@@ -62,29 +62,25 @@ pub fn split_emlx<'a>(
     if bytes[10] != b'\n' {
         return Err(MailReaderError::InvalidEmlx {
             path: path.to_path_buf(),
-            reason: format!(
-                "byte 10 is 0x{:02x}, expected LF (0x0a)",
-                bytes[10]
-            ),
+            reason: format!("byte 10 is 0x{:02x}, expected LF (0x0a)", bytes[10]),
         });
     }
 
     // Trim space-padding and decode. `from_utf8` is safe because we already
     // verified ASCII digits + spaces.
-    let trimmed = core::str::from_utf8(length_field)
-        .expect("ASCII")
-        .trim();
+    let trimmed = core::str::from_utf8(length_field).expect("ASCII").trim();
     let n: usize = trimmed.parse().map_err(|e| MailReaderError::InvalidEmlx {
         path: path.to_path_buf(),
         reason: format!("length-prefix decode failed ({e}): {trimmed:?}"),
     })?;
 
-    let segment2_end = EMLX_PREFIX_LEN
-        .checked_add(n)
-        .ok_or_else(|| MailReaderError::InvalidEmlx {
-            path: path.to_path_buf(),
-            reason: "length-prefix arithmetic overflow".into(),
-        })?;
+    let segment2_end =
+        EMLX_PREFIX_LEN
+            .checked_add(n)
+            .ok_or_else(|| MailReaderError::InvalidEmlx {
+                path: path.to_path_buf(),
+                reason: "length-prefix arithmetic overflow".into(),
+            })?;
     if segment2_end > bytes.len() {
         return Err(MailReaderError::InvalidEmlx {
             path: path.to_path_buf(),
@@ -137,8 +133,14 @@ mod tests {
                         <plist version=\"1.0\"><dict><key>flags</key><integer>1</integer></dict></plist>\n";
         let buf = synthesize_emlx(body, trailer);
         let parts = split_emlx(&buf, &fake_path()).expect("split ok");
-        assert_eq!(parts.rfc5322, body, "RFC 5322 segment must round-trip exact bytes");
-        assert_eq!(parts.plist_trailer, trailer, "plist trailer must round-trip exact bytes");
+        assert_eq!(
+            parts.rfc5322, body,
+            "RFC 5322 segment must round-trip exact bytes"
+        );
+        assert_eq!(
+            parts.plist_trailer, trailer,
+            "plist trailer must round-trip exact bytes"
+        );
     }
 
     #[test]

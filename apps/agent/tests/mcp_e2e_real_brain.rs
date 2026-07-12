@@ -950,8 +950,7 @@ fn counters_track_real_brain_dispatches() {
         })),
     ));
 
-    let (recall, events, stats, _episodes, _events_by_app, _parse, unknown) =
-        counters.snapshot();
+    let (recall, events, stats, _episodes, _events_by_app, _parse, unknown) = counters.snapshot();
     assert_eq!(recall, 2, "recall_count");
     assert_eq!(events, 1, "events_since_count");
     assert_eq!(stats, 3, "stats_count");
@@ -1034,7 +1033,10 @@ fn initialize_returns_capabilities_and_server_info_real_brain() {
         Some("hippocampus")
     );
     assert!(
-        result.get("instructions").and_then(|v| v.as_str()).is_some(),
+        result
+            .get("instructions")
+            .and_then(|v| v.as_str())
+            .is_some(),
         "initialize must include instructions for Claude Code"
     );
 }
@@ -1152,7 +1154,9 @@ fn recall_surfaces_entities_and_cross_app_linked_event_ids() {
         ..make_event("quarterly pricing roadmap", 1_000_000)
     };
     let id1 = store.put_event(&e1).unwrap();
-    store.put_entity_mention(&graph_mention(&alice, id1)).unwrap();
+    store
+        .put_entity_mention(&graph_mention(&alice, id1))
+        .unwrap();
 
     // E2 (Messages): the cross-app counterpart, in ep2.
     let e2 = Event {
@@ -1160,7 +1164,9 @@ fn recall_surfaces_entities_and_cross_app_linked_event_ids() {
         ..make_event("note to alice about it", 1_100_000)
     };
     let id2 = store.put_event(&e2).unwrap();
-    store.put_entity_mention(&graph_mention(&alice, id2)).unwrap();
+    store
+        .put_entity_mention(&graph_mention(&alice, id2))
+        .unwrap();
 
     let identity = EntityIdentity::derive_identity_id("person", "alice");
     store
@@ -1192,7 +1198,11 @@ fn recall_surfaces_entities_and_cross_app_linked_event_ids() {
         .iter()
         .filter_map(serde_json::Value::as_str)
         .collect();
-    assert_eq!(entities, vec!["Alice"], "hit must surface its mentioned entity");
+    assert_eq!(
+        entities,
+        vec!["Alice"],
+        "hit must surface its mentioned entity"
+    );
 
     let linked: Vec<u64> = hit
         .get("linked_event_ids")
@@ -1230,7 +1240,9 @@ fn stats_surfaces_graph_counts_through_server() {
         ..make_event("alice", 1_100_000)
     };
     store.put_event(&e2).unwrap();
-    store.put_entity_mention(&graph_mention(&alice, id1)).unwrap();
+    store
+        .put_entity_mention(&graph_mention(&alice, id1))
+        .unwrap();
     let identity = EntityIdentity::derive_identity_id("person", "alice");
     store
         .put_entity_identity(&EntityIdentity {

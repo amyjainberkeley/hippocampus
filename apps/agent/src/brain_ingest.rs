@@ -50,13 +50,13 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use mci_brain::extraction::tier1::persist_tier1_matches;
+use mci_brain::extraction::tier2::{EXTRACTOR_KIND_NER, SENTINEL_NAME_NER};
+use mci_brain::Chunker;
 use mci_brain::{
     mark_event_tier2_processed_as, persist_tier2_matches_as, BrainStore, ChunkerError, EmbedError,
     Embedder, Event, EventChunker, EventId, NerBackend, StoreError, Tier1Extractor, Tier2Extractor,
 };
-use mci_brain::extraction::tier1::persist_tier1_matches;
-use mci_brain::extraction::tier2::{EXTRACTOR_KIND_NER, SENTINEL_NAME_NER};
-use mci_brain::Chunker;
 use mci_core::ipc::Message;
 
 use crate::page_content::PageContentCache;
@@ -160,7 +160,10 @@ impl NoopBrainIngestor {
 
 impl BrainIngestor for NoopBrainIngestor {
     fn ingest_ocr_event(&self, msg: &Message) -> Result<IngestOutcome, IngestError> {
-        if matches!(msg, Message::OCREvent { .. } | Message::PageContentEvent { .. }) {
+        if matches!(
+            msg,
+            Message::OCREvent { .. } | Message::PageContentEvent { .. }
+        ) {
             self.seen.fetch_add(1, Ordering::Relaxed);
             Ok(IngestOutcome::Stored {
                 id: EventId(0),
@@ -421,8 +424,16 @@ impl BrainIngestor for BrainPump {
                 keyframe_hash,
             } => {
                 let app = bundle_id_from_padded_bytes(app_bundle_id);
-                let title = if window_title.is_empty() { None } else { Some(window_title.clone()) };
-                let u = if url.is_empty() { None } else { Some(url.clone()) };
+                let title = if window_title.is_empty() {
+                    None
+                } else {
+                    Some(window_title.clone())
+                };
+                let u = if url.is_empty() {
+                    None
+                } else {
+                    Some(url.clone())
+                };
                 let kb = if keyframe_hash.iter().all(|b| *b == 0) {
                     None
                 } else {
@@ -443,8 +454,16 @@ impl BrainIngestor for BrainPump {
                 tab_id,
             } => {
                 let app = browser_bundle_id(source_browser);
-                let t = if title.is_empty() { None } else { Some(title.clone()) };
-                let u = if url.is_empty() { None } else { Some(url.clone()) };
+                let t = if title.is_empty() {
+                    None
+                } else {
+                    Some(title.clone())
+                };
+                let u = if url.is_empty() {
+                    None
+                } else {
+                    Some(url.clone())
+                };
                 // V2-P2: plumb tab_id end-to-end. Extension JS in
                 // both extensions/chromium/background.js and
                 // extensions/safari/background.js sends `0` when no
@@ -919,7 +938,9 @@ mod tests {
     #[test]
     fn noop_ingestor_counts_page_content_events() {
         let n = NoopBrainIngestor::new();
-        let _ = n.ingest_ocr_event(&make_page_content_event(1, "hi")).unwrap();
+        let _ = n
+            .ingest_ocr_event(&make_page_content_event(1, "hi"))
+            .unwrap();
         assert_eq!(n.events_ingested_count(), 1);
     }
 
@@ -950,11 +971,7 @@ mod tests {
                 // is the primary body content (before the [VISIBLE-OCR]
                 // separator), not necessarily the absolute prefix.
                 assert!(ev.text.starts_with("[app="), "header prefix");
-                let body_start = ev
-                    .text
-                    .find('\n')
-                    .map(|i| i + 1)
-                    .expect("header newline");
+                let body_start = ev.text.find('\n').map(|i| i + 1).expect("header newline");
                 assert!(
                     ev.text[body_start..].starts_with("Full DOM text from extension"),
                     "extension text must be primary body; got: {}",

@@ -419,11 +419,7 @@ impl Server {
         let parsed: EpisodesArgs = match serde_json::from_value::<EpisodesArgs>(args) {
             Ok(v) => v,
             Err(e) => {
-                return JsonRpcResponse::err(
-                    id,
-                    INVALID_PARAMS,
-                    format!("mci_episodes args: {e}"),
-                )
+                return JsonRpcResponse::err(id, INVALID_PARAMS, format!("mci_episodes args: {e}"))
             }
         };
         let limit = parsed

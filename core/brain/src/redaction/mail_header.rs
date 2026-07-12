@@ -131,7 +131,10 @@ mod tests {
 
     #[test]
     fn drops_bank_sender_domain_chase() {
-        assert!(should_drop_mail_frame(&h("chase.com", "Statement available")));
+        assert!(should_drop_mail_frame(&h(
+            "chase.com",
+            "Statement available"
+        )));
     }
 
     #[test]
@@ -201,10 +204,7 @@ mod tests {
 
     #[test]
     fn allows_empty_from_with_safe_subject() {
-        assert!(!should_drop_mail_frame(&h(
-            "",
-            "Lunch tomorrow at 12:30"
-        )));
+        assert!(!should_drop_mail_frame(&h("", "Lunch tomorrow at 12:30")));
     }
 
     #[test]
@@ -218,10 +218,7 @@ mod tests {
     #[test]
     fn allows_unrelated_domain_chase_substring() {
         // Right-anchored domain match — "notchase.com" is NOT chase.com.
-        assert!(!should_drop_mail_frame(&h(
-            "notchase.com",
-            "Daily digest"
-        )));
+        assert!(!should_drop_mail_frame(&h("notchase.com", "Daily digest")));
         // The "chase.com" string appearing only in the rendered body
         // is not the From-header — this module is structural about
         // which field is checked.

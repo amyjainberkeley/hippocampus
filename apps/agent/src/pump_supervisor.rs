@@ -131,9 +131,7 @@ impl FdaProber for DiskFdaProber {
     fn probe_messages(&self) -> FdaProbe {
         match mci_messages_reader::discover_chat_db() {
             Ok(_loc) => FdaProbe::Granted,
-            Err(mci_messages_reader::MessagesReaderError::AccessDenied { .. }) => {
-                FdaProbe::Denied
-            }
+            Err(mci_messages_reader::MessagesReaderError::AccessDenied { .. }) => FdaProbe::Denied,
             Err(mci_messages_reader::MessagesReaderError::ChatDbMissing(_)) => {
                 FdaProbe::SourceMissing
             }
@@ -270,7 +268,8 @@ impl PumpSupervisor {
             .deep_hook_enabled_bundle_ids()
             .contains(MAIL_BUNDLE_ID);
 
-        self.reconcile_bundle(MESSAGES_BUNDLE_ID, wants_messages).await;
+        self.reconcile_bundle(MESSAGES_BUNDLE_ID, wants_messages)
+            .await;
         self.reconcile_bundle(MAIL_BUNDLE_ID, wants_mail).await;
     }
 
@@ -304,9 +303,7 @@ impl PumpSupervisor {
                 }
             }
             let mut inner = self.state.lock().await;
-            inner
-                .bundles
-                .insert(bundle_id.to_owned(), PumpState::Off);
+            inner.bundles.insert(bundle_id.to_owned(), PumpState::Off);
             return;
         }
 
@@ -348,9 +345,7 @@ impl PumpSupervisor {
                 // Messages.app never run / no Mail accounts. Stay Off
                 // without surfacing a permission complaint.
                 let mut inner = self.state.lock().await;
-                inner
-                    .bundles
-                    .insert(bundle_id.to_owned(), PumpState::Off);
+                inner.bundles.insert(bundle_id.to_owned(), PumpState::Off);
             }
         }
     }
@@ -702,7 +697,10 @@ mod tests {
              deep_hook_enabled = true\n\
              added_at = \"2026-05-31\"\n",
         );
-        let prober = Arc::new(StubProber::new(FdaProbe::SourceMissing, FdaProbe::SourceMissing));
+        let prober = Arc::new(StubProber::new(
+            FdaProbe::SourceMissing,
+            FdaProbe::SourceMissing,
+        ));
         // SourceMissing → state Off (Messages.app never run on the
         // test machine's tmp $HOME), but the gate fires BEFORE the
         // probe — we don't even reach the probe for a deep_hook=false

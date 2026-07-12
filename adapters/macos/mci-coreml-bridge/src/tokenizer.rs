@@ -76,10 +76,7 @@ impl BpeTokenizer {
             )));
         }
         let inner = Tokenizer::from_file(&tok_path).map_err(|e| {
-            GenerateError::Backend(format!(
-                "failed to load {}: {e}",
-                tok_path.display()
-            ))
+            GenerateError::Backend(format!("failed to load {}: {e}", tok_path.display()))
         })?;
         Ok(Self { inner })
     }
@@ -107,10 +104,7 @@ impl BpeTokenizer {
     /// `skip_special_tokens = false` so the brief-author parser can see
     /// the `###CITATIONS:` block exactly as the model emitted it.
     pub fn decode(&self, ids: &[i32]) -> String {
-        let u_ids: Vec<u32> = ids
-            .iter()
-            .filter_map(|&i| u32::try_from(i).ok())
-            .collect();
+        let u_ids: Vec<u32> = ids.iter().filter_map(|&i| u32::try_from(i).ok()).collect();
         self.inner.decode(&u_ids, false).unwrap_or_default()
     }
 

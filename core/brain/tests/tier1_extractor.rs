@@ -9,10 +9,9 @@
 use std::path::{Path, PathBuf};
 
 use mci_brain::extraction::tier1::{
-    persist_tier1_matches, EXTRACTOR_KIND, KIND_CRYPTO_ADDRESS, KIND_EMAIL,
-    KIND_FILE_PATH, KIND_GITHUB_REF, KIND_IP_ADDRESS, KIND_PHONE, KIND_REDACTED_TOKEN,
-    KIND_URL, KIND_UUID, SUBKIND_AWS_ACCESS_KEY, SUBKIND_CASCADE_REDACTED, SUBKIND_JWT,
-    SUBKIND_STRIPE_API_KEY,
+    persist_tier1_matches, EXTRACTOR_KIND, KIND_CRYPTO_ADDRESS, KIND_EMAIL, KIND_FILE_PATH,
+    KIND_GITHUB_REF, KIND_IP_ADDRESS, KIND_PHONE, KIND_REDACTED_TOKEN, KIND_URL, KIND_UUID,
+    SUBKIND_AWS_ACCESS_KEY, SUBKIND_CASCADE_REDACTED, SUBKIND_JWT, SUBKIND_STRIPE_API_KEY,
 };
 use mci_brain::graph::Entity;
 use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore, Tier1Extractor};
@@ -82,9 +81,12 @@ fn round_trip_writes_entity_and_mention_rows() {
     let eid = store.put_event(&event).expect("put_event");
 
     let matches = Tier1Extractor::new().extract(&event.text);
-    let stats = persist_tier1_matches(&store as &dyn BrainStore, eid, ts, &matches)
-        .expect("persist");
-    assert!(stats.entities_upserted >= 2, "expected URL + email entities");
+    let stats =
+        persist_tier1_matches(&store as &dyn BrainStore, eid, ts, &matches).expect("persist");
+    assert!(
+        stats.entities_upserted >= 2,
+        "expected URL + email entities"
+    );
     assert!(stats.mentions_inserted >= 2);
 
     // Read back via find_entity_by_alias.
@@ -166,7 +168,10 @@ fn shared_entity_across_events_keeps_one_entity_row() {
     )
     .expect("persist 1");
 
-    let ev2 = make_event(1_700_000_001_000_000, "Second mention https://example.com/x again");
+    let ev2 = make_event(
+        1_700_000_001_000_000,
+        "Second mention https://example.com/x again",
+    );
     let id2 = store.put_event(&ev2).expect("put_event 2");
     persist_tier1_matches(
         &store as &dyn BrainStore,
@@ -218,7 +223,10 @@ fn redacted_sms_event_yields_no_phone_entity_but_yields_redacted_marker() {
     // Simulate the post-cascade text: the OCR-time §6 redaction has
     // already replaced the OTP/phone digits with the literal marker.
     let ts = 1_700_000_000_000_000;
-    let event = make_event(ts, "Your one-time code is [REDACTED:SMS_OTP] please confirm");
+    let event = make_event(
+        ts,
+        "Your one-time code is [REDACTED:SMS_OTP] please confirm",
+    );
     let eid = store.put_event(&event).expect("put_event");
 
     let matches = Tier1Extractor::new().extract(&event.text);
@@ -266,9 +274,7 @@ fn token_shape_rows_never_carry_source_bytes() {
     let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     let aws = "AKIAIOSFODNN7EXAMPLE";
     let stripe = "sk_test_FIXTUREREMOVED";
-    let text = format!(
-        "secrets: jwt={jwt} aws={aws} stripe={stripe} end"
-    );
+    let text = format!("secrets: jwt={jwt} aws={aws} stripe={stripe} end");
     let event = make_event(ts, &text);
     let eid = store.put_event(&event).expect("put_event");
 
@@ -480,7 +486,10 @@ fn content_stable_ulid_converges_across_events() {
     )
     .expect("persist 1");
 
-    let ev2 = make_event(1_700_000_001_000_000, "again https://example.com/x reposted");
+    let ev2 = make_event(
+        1_700_000_001_000_000,
+        "again https://example.com/x reposted",
+    );
     let id2 = store.put_event(&ev2).expect("put 2");
     persist_tier1_matches(
         &store as &dyn BrainStore,

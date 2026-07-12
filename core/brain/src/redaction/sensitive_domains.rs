@@ -81,8 +81,8 @@ pub fn get() -> &'static SensitiveDomainTable {
 impl SensitiveDomainTable {
     /// Parse [`RAW_TOML`] and compile all URL-pattern regexes.
     fn load() -> Self {
-        let parsed: RawTable = toml::from_str(RAW_TOML)
-            .expect("docs/research/sensitive-domains.toml failed to parse");
+        let parsed: RawTable =
+            toml::from_str(RAW_TOML).expect("docs/research/sensitive-domains.toml failed to parse");
 
         let mut domains: HashSet<String> = HashSet::new();
         for entry in &parsed.us_bank {
@@ -453,10 +453,7 @@ mod tests {
             extract_host("http://user:pass@chase.com:8080/x"),
             Some("chase.com")
         );
-        assert_eq!(
-            extract_host("https://chase.com?next=1"),
-            Some("chase.com")
-        );
+        assert_eq!(extract_host("https://chase.com?next=1"), Some("chase.com"));
         assert_eq!(extract_host("chase.com/login"), None);
         assert_eq!(extract_host(""), None);
     }

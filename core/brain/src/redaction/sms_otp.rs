@@ -193,9 +193,7 @@ static T2_KEYWORD_RIGHT: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Tier 2 pattern C: `G-<6 digits>` Google verification prefix
 /// (D-02). The leading `G-` makes this unambiguous.
-static T2_GOOGLE_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
-    ci(r"\bG-\d{6}\b")
-});
+static T2_GOOGLE_PREFIX: LazyLock<Regex> = LazyLock::new(|| ci(r"\bG-\d{6}\b"));
 
 /// Tier 2 pattern D: "OTP: <digits>" / "Code: <digits>" / "Your code:
 /// <digits>" — the minimalist short-code shape (C-02 "Your code:
@@ -253,9 +251,8 @@ static T3_IOS_AUTOFILL: LazyLock<Regex> =
 /// Tier 3 pattern B: Android SMS Retriever form — `[#] <digits>` /
 /// `[#] <digits> is your verification code` (C-08). Anchored on
 /// the `[#]` prefix.
-static T3_ANDROID_RETRIEVER: LazyLock<Regex> = LazyLock::new(|| {
-    ci(r"\[#\]\s*\d{3,8}(?:\s+is\s+your\s+(?:verification\s+code|code|OTP))?")
-});
+static T3_ANDROID_RETRIEVER: LazyLock<Regex> =
+    LazyLock::new(|| ci(r"\[#\]\s*\d{3,8}(?:\s+is\s+your\s+(?:verification\s+code|code|OTP))?"));
 
 /// Tier 3 pattern C: dotted-format OTP — the form 3 digits + dash + 3
 /// digits standalone, used by Authy / 1Password / Duo notification
@@ -344,27 +341,111 @@ pub fn redact_sms_shapes(text: &str) -> RedactionResult {
     // Run FIRST so the issuer + transaction phrase is taken out
     // before any Tier-1 issuer-prefix would only catch the issuer
     // header.
-    apply_rule(&mut redacted, &mut fired, &T4_BANK_NOTIFICATION, "bank-notification", TOKEN_BANK_NOTIFICATION);
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T4_BANK_NOTIFICATION,
+        "bank-notification",
+        TOKEN_BANK_NOTIFICATION,
+    );
     // Tier 1 — issuer-prefix + code keyword + digits.
-    apply_rule(&mut redacted, &mut fired, &T1_ISSUER_PREFIX, "issuer-prefix-code", TOKEN_SMS_OTP);
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T1_ISSUER_PREFIX,
+        "issuer-prefix-code",
+        TOKEN_SMS_OTP,
+    );
     // Tier 3 — autofill shapes (iOS WebKit, Android SMS Retriever)
     // before Tier 2 so the `<#>` / `[#]` framing is consumed
     // verbatim instead of leaving a `<#>` / `[#]` residue.
-    apply_rule(&mut redacted, &mut fired, &T3_IOS_AUTOFILL, "ios-autofill", TOKEN_SMS_OTP);
-    apply_rule(&mut redacted, &mut fired, &T3_ANDROID_RETRIEVER, "android-sms-retriever", TOKEN_SMS_OTP);
-    apply_rule(&mut redacted, &mut fired, &T3_AUTH_APP_NOTIFICATION, "auth-app-notification", TOKEN_SMS_OTP);
-    apply_rule(&mut redacted, &mut fired, &T3_AUTH_APP_DASH, "auth-app-dash", TOKEN_SMS_OTP);
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T3_IOS_AUTOFILL,
+        "ios-autofill",
+        TOKEN_SMS_OTP,
+    );
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T3_ANDROID_RETRIEVER,
+        "android-sms-retriever",
+        TOKEN_SMS_OTP,
+    );
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T3_AUTH_APP_NOTIFICATION,
+        "auth-app-notification",
+        TOKEN_SMS_OTP,
+    );
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T3_AUTH_APP_DASH,
+        "auth-app-dash",
+        TOKEN_SMS_OTP,
+    );
     // Tier 2 — keyword + digit shapes.
-    apply_rule(&mut redacted, &mut fired, &T2_KEYWORD_LEFT, "keyword-left-digit", TOKEN_SMS_OTP);
-    apply_rule(&mut redacted, &mut fired, &T2_KEYWORD_RIGHT, "digit-keyword-right", TOKEN_SMS_OTP);
-    apply_rule(&mut redacted, &mut fired, &T2_GOOGLE_PREFIX, "google-g-prefix", TOKEN_SMS_OTP);
-    apply_rule(&mut redacted, &mut fired, &T2_LABEL_COLON, "label-colon-digit", TOKEN_SMS_OTP);
-    apply_rule(&mut redacted, &mut fired, &T2_USE_CODE, "use-code-verb", TOKEN_SMS_OTP);
-    apply_rule(&mut redacted, &mut fired, &T2_ISSUER_RIGHT, "digit-issuer-right", TOKEN_SMS_OTP);
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T2_KEYWORD_LEFT,
+        "keyword-left-digit",
+        TOKEN_SMS_OTP,
+    );
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T2_KEYWORD_RIGHT,
+        "digit-keyword-right",
+        TOKEN_SMS_OTP,
+    );
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T2_GOOGLE_PREFIX,
+        "google-g-prefix",
+        TOKEN_SMS_OTP,
+    );
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T2_LABEL_COLON,
+        "label-colon-digit",
+        TOKEN_SMS_OTP,
+    );
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T2_USE_CODE,
+        "use-code-verb",
+        TOKEN_SMS_OTP,
+    );
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &T2_ISSUER_RIGHT,
+        "digit-issuer-right",
+        TOKEN_SMS_OTP,
+    );
     // R — password-reset URL prose form.
-    apply_rule(&mut redacted, &mut fired, &R_PASSWORD_RESET_URL, "password-reset-prose", TOKEN_SMS_OTP);
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &R_PASSWORD_RESET_URL,
+        "password-reset-prose",
+        TOKEN_SMS_OTP,
+    );
     // Sentinel — "Don't share / Never share" defense-in-depth.
-    apply_rule(&mut redacted, &mut fired, &SENTINEL_NEVER_SHARE, "sentinel-never-share", TOKEN_SMS_OTP);
+    apply_rule(
+        &mut redacted,
+        &mut fired,
+        &SENTINEL_NEVER_SHARE,
+        "sentinel-never-share",
+        TOKEN_SMS_OTP,
+    );
 
     RedactionResult {
         redacted_text: redacted,
@@ -405,7 +486,10 @@ mod tests {
             "483921 is your Apple ID Verification Code. Don't share it with anyone.",
         );
         assert!(r.matched(), "A-01 must match");
-        assert!(!r.redacted_text.contains("483921"), "digits must not survive");
+        assert!(
+            !r.redacted_text.contains("483921"),
+            "digits must not survive"
+        );
     }
 
     #[test]
@@ -623,7 +707,8 @@ mod tests {
         assert!(r.matched(), "R-03 must match");
         // R-03 prose form must drop entire phrase.
         assert!(
-            !r.redacted_text.contains("https://example.com/reset?t=abc123def456"),
+            !r.redacted_text
+                .contains("https://example.com/reset?t=abc123def456"),
             "R-03 reset URL must be redacted, got: {}",
             r.redacted_text
         );

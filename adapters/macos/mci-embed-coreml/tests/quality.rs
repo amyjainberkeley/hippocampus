@@ -121,9 +121,7 @@ fn model_and_reference_or_skip() -> Option<(CoreMLBackend, Vec<String>, Vec<Vec<
     };
     // Trailing newline at EOF would otherwise produce an extra empty
     // sentence — strip exactly one trailing newline if present.
-    let trimmed = sentences_text
-        .strip_suffix('\n')
-        .unwrap_or(&sentences_text);
+    let trimmed = sentences_text.strip_suffix('\n').unwrap_or(&sentences_text);
     let sentences: Vec<String> = trimmed.split('\n').map(str::to_string).collect();
 
     let reference = match read_npy_f32_2d(&ref_path) {
@@ -327,7 +325,9 @@ fn read_npy_f32_2d(path: &std::path::Path) -> Result<Vec<Vec<f32>>, String> {
     let rows = shape[0];
     let cols = shape[1];
     if cols != ARCTIC_EMBED_S_DIMENSION {
-        return Err(format!("npy second dim is {cols}, expected {ARCTIC_EMBED_S_DIMENSION}"));
+        return Err(format!(
+            "npy second dim is {cols}, expected {ARCTIC_EMBED_S_DIMENSION}"
+        ));
     }
 
     let payload = &bytes[header_end..];
@@ -398,9 +398,7 @@ fn header_find_shape(header: &str) -> Result<Vec<usize>, String> {
         if t.is_empty() {
             continue;
         }
-        let v: usize = t
-            .parse()
-            .map_err(|e| format!("npy shape dim {t:?}: {e}"))?;
+        let v: usize = t.parse().map_err(|e| format!("npy shape dim {t:?}: {e}"))?;
         dims.push(v);
     }
     Ok(dims)

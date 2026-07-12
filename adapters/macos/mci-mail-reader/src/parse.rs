@@ -78,10 +78,7 @@ pub fn read_message(path: &Path) -> Result<ParsedMessage, MailReaderError> {
 
 /// Parse already-loaded emlx bytes. Exposed for tests + the watcher path
 /// where the file content is loaded by the dispatcher.
-pub fn parse_message_bytes(
-    bytes: &[u8],
-    path: &Path,
-) -> Result<ParsedMessage, MailReaderError> {
+pub fn parse_message_bytes(bytes: &[u8], path: &Path) -> Result<ParsedMessage, MailReaderError> {
     let parts = split_emlx(bytes, path)?;
 
     let parser = MessageParser::default();
@@ -168,9 +165,9 @@ fn header_raw_to_string(value: &HeaderValue<'_>) -> String {
             .join(", "),
         HeaderValue::Address(addr) => format_address(addr),
         HeaderValue::DateTime(dt) => dt.to_string(),
-        HeaderValue::Received(_)
-        | HeaderValue::ContentType(_)
-        | HeaderValue::Empty => String::new(),
+        HeaderValue::Received(_) | HeaderValue::ContentType(_) | HeaderValue::Empty => {
+            String::new()
+        }
     }
 }
 
@@ -196,7 +193,7 @@ fn format_pair(name: &str, addr: &str) -> String {
 /// Returns everything after the last `@`, lower-cased; bare-address with
 /// no `@` returns `None`. The cascade in V2-P8b will replace this with a
 /// real eTLD+1 lookup (publicsuffix list).
-#[must_use] 
+#[must_use]
 pub fn address_domain(a: &ParsedAddress) -> Option<String> {
     let (_, domain) = a.address.split_once('@')?;
     Some(domain.to_ascii_lowercase())
@@ -261,7 +258,10 @@ mod tests {
         assert_eq!(m.in_reply_to, vec!["fixture-0@example.invalid".to_string()]);
         assert_eq!(m.references, vec!["fixture-0@example.invalid".to_string()]);
 
-        assert!(m.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case("subject")));
+        assert!(m
+            .headers
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case("subject")));
         assert!(m.body_text.as_deref().unwrap().contains("hello body."));
         // mail-parser may surface the same plain body via body_html() too
         // (it materializes a text representation on demand); we do not

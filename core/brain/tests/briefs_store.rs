@@ -249,7 +249,10 @@ fn latest_brief_returns_most_recent_by_generated_ts() {
     store.put_brief(&later).expect("put 2");
     store.put_brief(&middle).expect("put 3");
 
-    let got = store.latest_brief().expect("latest_brief").expect("present");
+    let got = store
+        .latest_brief()
+        .expect("latest_brief")
+        .expect("present");
     assert_eq!(got.date_local, "2026-05-22");
     assert_eq!(got.generated_ts_us, 3_000_000);
 }

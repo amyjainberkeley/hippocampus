@@ -272,8 +272,7 @@ pub fn parse_jsonl_line(line: &str) -> Result<HealthLogRecord, ParseError> {
     // Back-compat: wire-`0x08` (ADR-0031 V2-P1) added the
     // `frames_focus_race_dropped` field. Lines from older agents lack
     // the key — same absent-as-zero policy as the prior counters.
-    let frames_focus_race_dropped =
-        extract_u64_field_or_zero(s, "\"frames_focus_race_dropped\":")?;
+    let frames_focus_race_dropped = extract_u64_field_or_zero(s, "\"frames_focus_race_dropped\":")?;
     // Back-compat: wire-`0x09` (Phase 6 PR 6) added four trailing
     // fields. Lines from older agents lack them — absent-as-empty
     // for the map, absent-as-zero for the three scalars.
@@ -340,9 +339,9 @@ fn extract_failsafe_by_app_or_empty(s: &str) -> Result<Vec<(String, u64)>, Parse
         let after_colon = after_quote.strip_prefix(':').ok_or_else(|| {
             ParseError::Field(format!("failsafe_by_app entry missing colon: {entry}"))
         })?;
-        let counter: u64 = after_colon
-            .parse()
-            .map_err(|e| ParseError::Field(format!("failsafe_by_app entry counter {entry}: {e}")))?;
+        let counter: u64 = after_colon.parse().map_err(|e| {
+            ParseError::Field(format!("failsafe_by_app entry counter {entry}: {e}"))
+        })?;
         out.push((bundle_id.to_string(), counter));
     }
     Ok(out)
@@ -352,9 +351,8 @@ fn extract_failsafe_by_app_or_empty(s: &str) -> Result<Vec<(String, u64)>, Parse
 /// to `0`. Used for fields added by a later wire/log-schema bump.
 fn extract_u32_field_or_zero(s: &str, key_with_colon: &str) -> Result<u32, ParseError> {
     let v = extract_u64_field_or_zero(s, key_with_colon)?;
-    u32::try_from(v).map_err(|_| {
-        ParseError::Field(format!("{key_with_colon} value exceeds u32 max"))
-    })
+    u32::try_from(v)
+        .map_err(|_| ParseError::Field(format!("{key_with_colon} value exceeds u32 max")))
 }
 
 fn extract_string_field(s: &str, key_with_open_quote: &str) -> Result<String, ParseError> {
@@ -469,15 +467,13 @@ where
                         rec.frames_dropped_late_ack
                             .saturating_sub(p.frames_dropped_late_ack),
                     );
-                summary.frames_encode_failed_delta = summary
-                    .frames_encode_failed_delta
-                    .saturating_add(
+                summary.frames_encode_failed_delta =
+                    summary.frames_encode_failed_delta.saturating_add(
                         rec.frames_encode_failed
                             .saturating_sub(p.frames_encode_failed),
                     );
-                summary.frames_focus_race_dropped_delta = summary
-                    .frames_focus_race_dropped_delta
-                    .saturating_add(
+                summary.frames_focus_race_dropped_delta =
+                    summary.frames_focus_race_dropped_delta.saturating_add(
                         rec.frames_focus_race_dropped
                             .saturating_sub(p.frames_focus_race_dropped),
                     );

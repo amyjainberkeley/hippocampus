@@ -28,21 +28,21 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_agent::alias_resolver_worker;
-use mci_agent::consolidator_worker;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::brief_worker;
+use mci_agent::consolidator_worker;
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
+use mci_agent::episode_worker;
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
-use mci_agent::episode_worker;
 use mci_agent::idle_batch;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
 use mci_agent::page_content::PageContentListener;
+use mci_agent::panic_uploader::{self, PanicUploader};
 #[cfg(target_os = "macos")]
 use mci_agent::pump_supervisor::PumpSupervisor;
 use mci_agent::retention_worker;
 use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
-use mci_agent::panic_uploader::{self, PanicUploader};
 #[cfg(unix)]
 use mci_agent::user_allowlist::default_user_allowlist_path;
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
@@ -369,9 +369,10 @@ async fn main() -> ExitCode {
             // None when the model is absent (opt-in download) or non-macOS.
             let mut ner_sync_backend: Option<Arc<dyn mci_brain::NerBackend>> = None;
 
-            let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> =
-                match resolve_key_hex() {
-                    Some(key_hex) => match decode_hex32(&key_hex) {
+            let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> = match resolve_key_hex()
+            {
+                Some(key_hex) => {
+                    match decode_hex32(&key_hex) {
                         Some(key_bytes) => {
                             if let Some(parent) = db_path.parent() {
                                 if !parent.exists() {
@@ -576,10 +577,7 @@ async fn main() -> ExitCode {
                                     // 06:00 local. Disabled-idle if the Qwen3
                                     // model is not present OR
                                     // MCI_BRIEFS_DISABLED=1.
-                                    spawn_brief_worker(
-                                        Arc::clone(&store),
-                                        shutdown_rx.clone(),
-                                    );
+                                    spawn_brief_worker(Arc::clone(&store), shutdown_rx.clone());
 
                                     // V2-P5 — Tier 2 Qwen NER idle-batch
                                     // worker (FORK 8 = A; CTO Phase 6 PR 9).
@@ -605,10 +603,7 @@ async fn main() -> ExitCode {
                                     // per
                                     // [[project-v2p1-unit-tests-passed-but-never-wired]]
                                     // this is the load-bearing wire.
-                                    spawn_tier2_worker(
-                                        Arc::clone(&store),
-                                        shutdown_rx.clone(),
-                                    );
+                                    spawn_tier2_worker(Arc::clone(&store), shutdown_rx.clone());
 
                                     // V2-P10 — deep-hook pump supervisor.
                                     // Reads ~/Library/Application Support/MCI/
@@ -659,19 +654,27 @@ async fn main() -> ExitCode {
                                 }
                                 Err(e) => {
                                     eprintln!("\n========================================================");
-                                    eprintln!("WARNING: BRAIN OPEN FAILED — CAPTURE IS NOT BEING SAVED");
-                                    eprintln!("========================================================");
+                                    eprintln!(
+                                        "WARNING: BRAIN OPEN FAILED — CAPTURE IS NOT BEING SAVED"
+                                    );
+                                    eprintln!(
+                                        "========================================================"
+                                    );
                                     eprintln!("  Error: {e}");
                                     eprintln!("  Path:  {}", db_path.display());
                                     eprintln!();
-                                    eprintln!("  Hippocampus is running but your screen activity is NOT");
+                                    eprintln!(
+                                        "  Hippocampus is running but your screen activity is NOT"
+                                    );
                                     eprintln!("  being stored in the brain. Possible causes:");
                                     eprintln!("    * Stale brain encrypted with old key");
                                     eprintln!("    * Wrong MCI_DB_KEY_HEX env var");
                                     eprintln!("    * Permissions issue on brain file");
                                     eprintln!();
                                     eprintln!("  To reset: quit Hippocampus.app, delete");
-                                    eprintln!("  ~/Library/Application Support/MCI/mci.sqlite + dev.key,");
+                                    eprintln!(
+                                        "  ~/Library/Application Support/MCI/mci.sqlite + dev.key,"
+                                    );
                                     eprintln!("  then relaunch the app to start fresh.");
                                     eprintln!("========================================================\n");
                                     if strict {
@@ -690,18 +693,19 @@ async fn main() -> ExitCode {
                             }
                             None
                         }
-                    },
-                    None => {
-                        eprintln!(
+                    }
+                }
+                None => {
+                    eprintln!(
                             "mci-agent: no brain key found (MCI_DB_KEY_HEX not set, no dev.key). \
                              Health-only drain. Set the key or launch Hippocampus.app to initialize."
                         );
-                        if strict {
-                            return ExitCode::from(23);
-                        }
-                        None
+                    if strict {
+                        return ExitCode::from(23);
                     }
-                };
+                    None
+                }
+            };
 
             // Page-content socket listener — accepts PageContentEvent
             // wire frames from the native messaging host (Chromium) and
@@ -722,18 +726,13 @@ async fn main() -> ExitCode {
                             None => pc_base,
                         };
                         let pc_pump: Arc<dyn BrainIngestor> = Arc::new(pc_pump_inner);
-                        eprintln!(
-                            "mci-agent: page-content listener on {}",
-                            sock.display(),
-                        );
+                        eprintln!("mci-agent: page-content listener on {}", sock.display(),);
                         Some(tokio::spawn(async move {
                             listener.run(unix_listener, pc_pump).await;
                         }))
                     }
                     Err(e) => {
-                        eprintln!(
-                            "mci-agent: page-content listener bind failed: {e}"
-                        );
+                        eprintln!("mci-agent: page-content listener bind failed: {e}");
                         None
                     }
                 }
@@ -931,8 +930,8 @@ fn resolve_key_hex() -> Option<String> {
 /// `mcpServers` without clobbering other servers. Includes an `env`
 /// block with `MCI_DB_KEY_HEX` when the dev.key file exists.
 fn register_mcp() -> Result<(), String> {
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("cannot resolve own binary path: {e}"))?;
+    let exe =
+        std::env::current_exe().map_err(|e| format!("cannot resolve own binary path: {e}"))?;
     let exe_str = exe.to_str().ok_or("binary path is not valid UTF-8")?;
 
     let home = std::env::var("HOME").map_err(|_| "HOME not set")?;
@@ -976,15 +975,17 @@ fn register_mcp() -> Result<(), String> {
             if existing.get("command").and_then(|v| v.as_str()) == Some(exe_str)
                 && existing.get("env") == hippocampus_entry.get("env")
             {
-                println!("Hippocampus already registered with Claude Code (path and key unchanged).");
+                println!(
+                    "Hippocampus already registered with Claude Code (path and key unchanged)."
+                );
                 return Ok(());
             }
         }
         obj.insert("hippocampus".to_owned(), hippocampus_entry);
     }
 
-    let output = serde_json::to_string_pretty(&root)
-        .map_err(|e| format!("serialize settings: {e}"))?;
+    let output =
+        serde_json::to_string_pretty(&root).map_err(|e| format!("serialize settings: {e}"))?;
     std::fs::write(&settings_path, output.as_bytes())
         .map_err(|e| format!("write {}: {e}", settings_path.display()))?;
 
@@ -1356,11 +1357,7 @@ fn spawn_brief_worker(
 
     if brief_worker::briefs_disabled_via_env() {
         tokio::spawn(async move {
-            let stats = brief_worker::run_disabled_idle(
-                "MCI_BRIEFS_DISABLED=1",
-                shutdown,
-            )
-            .await;
+            let stats = brief_worker::run_disabled_idle("MCI_BRIEFS_DISABLED=1", shutdown).await;
             eprintln!(
                 "mci-agent: brief worker exited (disabled). generated={} skipped_empty={} errors={}",
                 stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
@@ -1372,11 +1369,8 @@ fn spawn_brief_worker(
     let model_dir = brief_worker::default_model_dir();
     if !brief_worker::qwen3_model_present(&model_dir) {
         tokio::spawn(async move {
-            let stats = brief_worker::run_disabled_idle(
-                "Qwen3 model not installed",
-                shutdown,
-            )
-            .await;
+            let stats =
+                brief_worker::run_disabled_idle("Qwen3 model not installed", shutdown).await;
             eprintln!(
                 "mci-agent: brief worker exited (no model). generated={} skipped_empty={} errors={}",
                 stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
@@ -1393,9 +1387,9 @@ fn spawn_brief_worker(
     let tokenizer_dir = model_subdir.clone();
     let factory: brief_worker::AuthorFactory = Arc::new(move || {
         let backend = mci_coreml_bridge::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir)
-            .map_err(|e| brief_worker::BriefWorkerError::Author(format!(
-                "Qwen3CoreMLBackend::open: {e}"
-            )))?;
+            .map_err(|e| {
+                brief_worker::BriefWorkerError::Author(format!("Qwen3CoreMLBackend::open: {e}"))
+            })?;
         let backend_arc: Arc<dyn LlamaBackend> = Arc::new(backend);
         let author = LlamaBriefAuthor::new(backend_arc);
         let boxed: Box<dyn BriefAuthor> = Box::new(author);
@@ -1480,8 +1474,7 @@ fn spawn_tier2_worker(
     let model_dir = brief_worker::default_model_dir();
     if !brief_worker::qwen3_model_present(&model_dir) {
         tokio::spawn(async move {
-            let stats =
-                run_disabled_idle("Qwen3 model not installed", shutdown).await;
+            let stats = run_disabled_idle("Qwen3 model not installed", shutdown).await;
             eprintln!(
                 "mci-agent: tier2 NER worker exited (no model). scanned={} mentions={} ner_errors={} disabled={}",
                 stats.events_scanned,
@@ -1503,8 +1496,7 @@ fn spawn_tier2_worker(
     let model_path = model_subdir.join(brief_worker::QWEN3_MODEL_BASENAME);
     let tokenizer_dir = model_subdir;
 
-    let backend_result =
-        mci_coreml_bridge::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir);
+    let backend_result = mci_coreml_bridge::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir);
     let backend = match backend_result {
         Ok(b) => b,
         Err(e) => {
@@ -1628,8 +1620,7 @@ fn spawn_mcp_aggregator(
     embedder: Option<Arc<dyn mci_brain::Embedder>>,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
-    let aggregator =
-        mci_agent::mcp_aggregator::McpAggregator::new(registry, store, embedder);
+    let aggregator = mci_agent::mcp_aggregator::McpAggregator::new(registry, store, embedder);
     eprintln!(
         "mci-agent: MCP aggregator started (reconcile every {}s; materialize cap {} bytes)",
         mci_agent::mcp_aggregator::DEFAULT_RECONCILE_INTERVAL.as_secs(),

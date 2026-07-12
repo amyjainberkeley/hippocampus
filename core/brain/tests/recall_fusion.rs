@@ -289,9 +289,15 @@ fn mention_match_for_events_counts_query_entity_mentions_per_event() {
 
     // e1 mentions Alice twice (two extractor passes = two rows), e2 once,
     // e3 only mentions Bob (not in the query set).
-    store.put_entity_mention(&mention(&alice, e1, "regex")).unwrap();
-    store.put_entity_mention(&mention(&alice, e1, "ner")).unwrap();
-    store.put_entity_mention(&mention(&alice, e2, "ner")).unwrap();
+    store
+        .put_entity_mention(&mention(&alice, e1, "regex"))
+        .unwrap();
+    store
+        .put_entity_mention(&mention(&alice, e1, "ner"))
+        .unwrap();
+    store
+        .put_entity_mention(&mention(&alice, e2, "ner"))
+        .unwrap();
     store.put_entity_mention(&mention(&bob, e3, "ner")).unwrap();
 
     let counts = store
@@ -323,8 +329,12 @@ fn entity_names_for_event_returns_allowlist_only_excludes_redacted() {
     let e = store
         .put_event(&mk_event(10, "msg", "com.apple.Safari", None, None))
         .unwrap();
-    store.put_entity_mention(&mention(&alice, e, "ner")).unwrap();
-    store.put_entity_mention(&mention(&secret, e, "regex")).unwrap();
+    store
+        .put_entity_mention(&mention(&alice, e, "ner"))
+        .unwrap();
+    store
+        .put_entity_mention(&mention(&secret, e, "regex"))
+        .unwrap();
 
     let names = store.entity_names_for_event(e, 16).expect("names");
     assert_eq!(
@@ -348,13 +358,31 @@ fn linked_event_ids_walks_shared_identity_edges_cross_app() {
 
     // e1 + e3 in ep1; e2 in ep2.
     let e1 = store
-        .put_event(&mk_event(10, "pricing", "com.apple.Safari", Some(ep1.0), None))
+        .put_event(&mk_event(
+            10,
+            "pricing",
+            "com.apple.Safari",
+            Some(ep1.0),
+            None,
+        ))
         .unwrap();
     let e3 = store
-        .put_event(&mk_event(15, "more safari", "com.apple.Safari", Some(ep1.0), None))
+        .put_event(&mk_event(
+            15,
+            "more safari",
+            "com.apple.Safari",
+            Some(ep1.0),
+            None,
+        ))
         .unwrap();
     let e2 = store
-        .put_event(&mk_event(20, "hi alice", "com.apple.MobileSMS", Some(ep2.0), None))
+        .put_event(&mk_event(
+            20,
+            "hi alice",
+            "com.apple.MobileSMS",
+            Some(ep2.0),
+            None,
+        ))
         .unwrap();
 
     // Unsegmented event — no episode, so no links.
@@ -398,7 +426,9 @@ fn stats_reports_the_four_graph_counts() {
     store.put_entity(&alice).unwrap();
     store.put_entity(&bob).unwrap();
 
-    let ep1 = store.create_episode(0, 100, Some("com.apple.Safari")).unwrap();
+    let ep1 = store
+        .create_episode(0, 100, Some("com.apple.Safari"))
+        .unwrap();
     let ep2 = store
         .create_episode(0, 100, Some("com.apple.MobileSMS"))
         .unwrap();
@@ -409,8 +439,12 @@ fn stats_reports_the_four_graph_counts() {
         .put_event(&mk_event(20, "y", "com.apple.MobileSMS", Some(ep2.0), None))
         .unwrap();
 
-    store.put_entity_mention(&mention(&alice, e1, "ner")).unwrap();
-    store.put_entity_mention(&mention(&alice, e2, "ner")).unwrap();
+    store
+        .put_entity_mention(&mention(&alice, e1, "ner"))
+        .unwrap();
+    store
+        .put_entity_mention(&mention(&alice, e2, "ner"))
+        .unwrap();
     store.put_entity_mention(&mention(&bob, e1, "ner")).unwrap();
 
     let identity = EntityIdentity::derive_identity_id("person", "alice");

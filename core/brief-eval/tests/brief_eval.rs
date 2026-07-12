@@ -50,10 +50,9 @@ fn every_fixture_passes_with_scripted_backend() {
     let mut failures = Vec::new();
 
     for name in &names {
-        let fixture = FixtureDay::load(&dir, name)
-            .unwrap_or_else(|e| panic!("load fixture {name}: {e}"));
-        let gold =
-            GoldBrief::load(&dir, name).unwrap_or_else(|e| panic!("load gold {name}: {e}"));
+        let fixture =
+            FixtureDay::load(&dir, name).unwrap_or_else(|e| panic!("load fixture {name}: {e}"));
+        let gold = GoldBrief::load(&dir, name).unwrap_or_else(|e| panic!("load gold {name}: {e}"));
 
         let scripted = load_scripted(name);
         let backend: Arc<dyn LlamaBackend> = Arc::new(ScriptedLlamaBackend::new(scripted));

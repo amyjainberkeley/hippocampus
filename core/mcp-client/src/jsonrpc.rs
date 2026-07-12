@@ -71,7 +71,11 @@ impl JsonRpcRequest {
     /// Build a JSON-RPC 2.0 request with the given id, method, and
     /// optional params.
     #[must_use]
-    pub fn new(id: JsonRpcId, method: impl Into<String>, params: Option<serde_json::Value>) -> Self {
+    pub fn new(
+        id: JsonRpcId,
+        method: impl Into<String>,
+        params: Option<serde_json::Value>,
+    ) -> Self {
         Self {
             jsonrpc: "2.0".to_owned(),
             method: method.into(),

@@ -54,5 +54,5 @@ pub use discover::{discover_accounts, MailAccount, MailDataRoot};
 pub use emlx::{split_emlx, EmlxParts};
 pub use envelope::{list_recent_messages, EmlxMetadata};
 pub use error::MailReaderError;
-pub use parse::{read_message, ParsedMessage, ParsedAddress};
+pub use parse::{read_message, ParsedAddress, ParsedMessage};
 pub use watch::{watch_inbox, NewMessageEvent};

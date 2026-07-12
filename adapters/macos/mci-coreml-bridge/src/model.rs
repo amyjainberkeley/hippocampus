@@ -192,8 +192,10 @@ impl CoreMLModel {
     /// supported (Qwen3 passes two; GLiNER passes six), which is the
     /// whole point of the Path-A generic core.
     pub fn predict(&self, inputs: &[(&str, &MLMultiArray)]) -> Result<Prediction, CoreMLError> {
-        let keys: Vec<Retained<NSString>> =
-            inputs.iter().map(|(name, _)| NSString::from_str(name)).collect();
+        let keys: Vec<Retained<NSString>> = inputs
+            .iter()
+            .map(|(name, _)| NSString::from_str(name))
+            .collect();
         let values: Vec<Retained<MLFeatureValue>> = inputs
             .iter()
             .map(|&(_, arr)| unsafe { MLFeatureValue::featureValueWithMultiArray(arr) })
@@ -389,7 +391,10 @@ mod tests {
             .expect_err("missing path");
         match err {
             CoreMLError::Load(msg) => {
-                assert!(msg.contains("not found"), "expected 'not found', got {msg:?}");
+                assert!(
+                    msg.contains("not found"),
+                    "expected 'not found', got {msg:?}"
+                );
             }
             other => panic!("expected Load, got {other:?}"),
         }

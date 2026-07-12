@@ -224,10 +224,7 @@ fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<
         return Ok(());
     }
 
-    let text = truncate_at_sentence_boundary(
-        &msg.text,
-        MAX_PAGE_CONTENT_TEXT_BYTES as usize,
-    );
+    let text = truncate_at_sentence_boundary(&msg.text, MAX_PAGE_CONTENT_TEXT_BYTES as usize);
 
     // The `url` field on the binary wire is the frame's own URL — for
     // top frames this matches today's behavior (page URL); for sub-
@@ -260,10 +257,7 @@ fn main() {
     let sock_path = socket_path();
     let Ok(mut socket) = UnixStream::connect(&sock_path) else {
         let ack = serde_json::json!({"status": "error", "reason": "agent_not_running"});
-        let _ = write_native_message(
-            &mut io::stdout().lock(),
-            ack.to_string().as_bytes(),
-        );
+        let _ = write_native_message(&mut io::stdout().lock(), ack.to_string().as_bytes());
         return;
     };
 
@@ -466,12 +460,7 @@ mod tests {
 
     /// Builder for an SH-Fork-E1-era sub-frame message. `frame_url` is
     /// the iframe's own URL; `parent_url` is the top-level tab URL.
-    fn sub_frame_msg(
-        parent_url: &str,
-        frame_url: &str,
-        title: &str,
-        text: &str,
-    ) -> BrowserMessage {
+    fn sub_frame_msg(parent_url: &str, frame_url: &str, title: &str, text: &str) -> BrowserMessage {
         BrowserMessage {
             // background.js sends `url = parent_url` for sub-frames so
             // the brain's per-page index stays anchored to the page the
@@ -525,16 +514,16 @@ mod tests {
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         assert!(!msg.is_top_frame);
         assert_eq!(msg.frame_id, 3);
-        assert_eq!(msg.frame_url, "https://js.stripe.com/v3/elements-inner-payment.html");
+        assert_eq!(
+            msg.frame_url,
+            "https://js.stripe.com/v3/elements-inner-payment.html"
+        );
         assert_eq!(msg.parent_url, "https://merchant.example.com/checkout");
     }
 
     #[test]
     fn decorate_iframe_title_prefix() {
-        let decorated = decorate_iframe_title(
-            "https://merchant.example.com/checkout",
-            "Card form",
-        );
+        let decorated = decorate_iframe_title("https://merchant.example.com/checkout", "Card form");
         assert_eq!(
             decorated,
             "[iframe of https://merchant.example.com/checkout] Card form"

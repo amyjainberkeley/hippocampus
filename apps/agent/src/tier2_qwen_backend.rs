@@ -293,8 +293,7 @@ mod tests {
     #[test]
     fn parse_qwen_ner_output_handles_missing_confidence() {
         let text = "Alice met Bob";
-        let raw =
-            r#"{"entities": [{"kind": "person_name", "canonical": "Alice", "text": "Alice", "span": [0, 5]}]}"#;
+        let raw = r#"{"entities": [{"kind": "person_name", "canonical": "Alice", "text": "Alice", "span": [0, 5]}]}"#;
         let out = parse_qwen_ner_output(raw, text).expect("parse ok");
         assert_eq!(out.len(), 1);
         // Default confidence is 0.7.
@@ -386,7 +385,9 @@ mod tests {
         let backend = QwenTier2Backend::new(llama);
         let err = backend.extract_entities("").expect_err("empty rejected");
         assert!(matches!(err, NerError::InvalidInput(_)));
-        let err2 = backend.extract_entities("   \t  ").expect_err("whitespace rejected");
+        let err2 = backend
+            .extract_entities("   \t  ")
+            .expect_err("whitespace rejected");
         assert!(matches!(err2, NerError::InvalidInput(_)));
     }
 

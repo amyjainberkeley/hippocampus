@@ -90,7 +90,11 @@ impl EvalReport {
     pub fn render_text(&self) -> String {
         use std::fmt::Write;
         let mut out = String::new();
-        let _ = writeln!(out, "MCI brief-author eval — backend: {}", self.backend_label);
+        let _ = writeln!(
+            out,
+            "MCI brief-author eval — backend: {}",
+            self.backend_label
+        );
         let _ = writeln!(
             out,
             "Fixtures: {} | Passed: {} | Author time: {:.2?}",

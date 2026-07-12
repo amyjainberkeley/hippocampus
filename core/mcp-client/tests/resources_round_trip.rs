@@ -53,7 +53,10 @@ async fn resources_list_and_read_round_trip() {
         .resources_read("notion://page/b")
         .await
         .expect("read b ok");
-    assert_eq!(read_b.contents[0].text.as_deref(), Some("the body of notes"));
+    assert_eq!(
+        read_b.contents[0].text.as_deref(),
+        Some("the body of notes")
+    );
 
     client.close().await;
     server.shutdown().await;
@@ -63,9 +66,10 @@ async fn resources_list_and_read_round_trip() {
 async fn set_tools_overrides_default_catalog() {
     let server = StubMcpServer::start().await;
     server
-        .set_tools(vec![
-            ("custom_tool".to_owned(), Some("does a thing".to_owned())),
-        ])
+        .set_tools(vec![(
+            "custom_tool".to_owned(),
+            Some("does a thing".to_owned()),
+        )])
         .await;
     let sse_url = format!("http://127.0.0.1:{}/sse", server.port());
     let host = LoopbackHost::parse(&sse_url).await.unwrap();
@@ -93,7 +97,10 @@ async fn resources_list_empty_when_none_registered() {
     let _init = client.initialize().await.expect("initialize ok");
 
     let resources = client.resources_list().await.expect("ok");
-    assert!(resources.is_empty(), "no resources expected; got {resources:?}");
+    assert!(
+        resources.is_empty(),
+        "no resources expected; got {resources:?}"
+    );
 
     client.close().await;
     server.shutdown().await;

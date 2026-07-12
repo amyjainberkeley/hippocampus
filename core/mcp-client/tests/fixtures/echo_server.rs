@@ -196,10 +196,7 @@ fn handle_tools_call(id: &Value, params: Option<Value>) -> Value {
         }
         "slow_echo" => {
             let msg = args.get("msg").and_then(|v| v.as_str()).unwrap_or("");
-            let delay_ms = args
-                .get("delay_ms")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let delay_ms = args.get("delay_ms").and_then(|v| v.as_u64()).unwrap_or(0);
             if delay_ms > 0 {
                 std::thread::sleep(Duration::from_millis(delay_ms));
             }

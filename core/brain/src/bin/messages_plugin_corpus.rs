@@ -29,8 +29,7 @@ use mci_brain::redaction::messages_plugin::{
     redact_messages_plugin_event, MessagesPluginConfig, MessagesPluginEvent,
 };
 
-const CORPUS_MD: &str =
-    include_str!("../../../../docs/research/messages-plugin-test-corpus.md");
+const CORPUS_MD: &str = include_str!("../../../../docs/research/messages-plugin-test-corpus.md");
 
 #[derive(Debug, Clone)]
 struct Entry {
@@ -96,8 +95,7 @@ fn main() {
 
     let mut overall_sensitive = Tally::default();
     let mut overall_honey = Tally::default();
-    let mut by_class: std::collections::BTreeMap<String, Tally> =
-        std::collections::BTreeMap::new();
+    let mut by_class: std::collections::BTreeMap<String, Tally> = std::collections::BTreeMap::new();
 
     // The cascade-equivalent runs with plugin_enabled=true so the runner
     // exercises the actual redaction logic. (DEFAULT is plugin_enabled=
@@ -125,10 +123,11 @@ fn main() {
         } else {
             overall_sensitive.record(e.expect, observed_drop, observed_redact);
         }
-        by_class
-            .entry(e.class.clone())
-            .or_default()
-            .record(e.expect, observed_drop, observed_redact);
+        by_class.entry(e.class.clone()).or_default().record(
+            e.expect,
+            observed_drop,
+            observed_redact,
+        );
 
         let outcome = match (e.expect, observed_drop, observed_redact) {
             (Expect::Drop, true, _) => "drop_caught",
@@ -179,7 +178,10 @@ fn main() {
     println!();
     println!("- **Date:** 2026-05-30");
     println!("- **Generator:** `cargo run -p mci-brain --bin messages_plugin_corpus --release`");
-    println!("- **Corpus source:** `docs/research/messages-plugin-test-corpus.md` ({total} entries)", total = entries.len());
+    println!(
+        "- **Corpus source:** `docs/research/messages-plugin-test-corpus.md` ({total} entries)",
+        total = entries.len()
+    );
     println!("- **Code under test:** `core/brain/src/redaction/messages_plugin.rs`");
     println!("- **Adapter crate:** `adapters/macos/mci-messages-reader/` (READ-ONLY)");
     println!();

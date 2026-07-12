@@ -172,9 +172,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
             }
             "--min-citation-validity" => {
                 let Some(v) = argv.get(i + 1) else {
-                    return ParseOutcome::Error(
-                        "--min-citation-validity requires a value".into(),
-                    );
+                    return ParseOutcome::Error("--min-citation-validity requires a value".into());
                 };
                 match v.parse::<f64>() {
                     Ok(f) => thresholds.min_citation_validity = f,

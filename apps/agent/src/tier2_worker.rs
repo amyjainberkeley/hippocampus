@@ -156,10 +156,9 @@ pub async fn run_tier2_worker(
             // never block the tokio runtime).
             let ex_for_call = extractor.clone();
             let text = event.text.clone();
-            let extract_result =
-                tokio::task::spawn_blocking(move || ex_for_call.extract(&text))
-                    .await
-                    .map_err(|e| Tier2WorkerError::StoreRead(format!("extract join: {e}")))?;
+            let extract_result = tokio::task::spawn_blocking(move || ex_for_call.extract(&text))
+                .await
+                .map_err(|e| Tier2WorkerError::StoreRead(format!("extract join: {e}")))?;
 
             let matches = match extract_result {
                 Ok(m) => m,
@@ -176,16 +175,15 @@ pub async fn run_tier2_worker(
             let eid = event.id;
             let ts = event.ts_us;
             let matches_for_write = matches;
-            let write_result = tokio::task::spawn_blocking(
-                move || -> Result<usize, mci_brain::StoreError> {
+            let write_result =
+                tokio::task::spawn_blocking(move || -> Result<usize, mci_brain::StoreError> {
                     let stats =
                         persist_tier2_matches(&*store_for_write, eid, ts, &matches_for_write)?;
                     mark_event_tier2_processed(&*store_for_write, eid, ts)?;
                     Ok(stats.mentions_inserted)
-                },
-            )
-            .await
-            .map_err(|e| Tier2WorkerError::StoreRead(format!("write join: {e}")))?;
+                })
+                .await
+                .map_err(|e| Tier2WorkerError::StoreRead(format!("write join: {e}")))?;
 
             match write_result {
                 Ok(n) => {
@@ -212,9 +210,7 @@ pub async fn run_disabled_idle(
     reason: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> Tier2WorkerStats {
-    eprintln!(
-        "mci-agent: tier2 NER worker disabled ({reason}); will sleep until shutdown"
-    );
+    eprintln!("mci-agent: tier2 NER worker disabled ({reason}); will sleep until shutdown");
     let _ = shutdown.changed().await;
     Tier2WorkerStats {
         disabled: true,

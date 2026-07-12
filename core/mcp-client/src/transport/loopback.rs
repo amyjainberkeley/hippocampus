@@ -187,14 +187,12 @@ impl LoopbackHost {
     /// Re-validation errors mirror those from [`Self::parse`].
     pub async fn resolve_now(&self) -> Result<std::net::SocketAddr, LoopbackError> {
         match &self.kind {
-            HostKind::Ipv4Literal(addr) => Ok(std::net::SocketAddr::new(
-                IpAddr::V4(*addr),
-                self.port,
-            )),
-            HostKind::Ipv6Literal(addr) => Ok(std::net::SocketAddr::new(
-                IpAddr::V6(*addr),
-                self.port,
-            )),
+            HostKind::Ipv4Literal(addr) => {
+                Ok(std::net::SocketAddr::new(IpAddr::V4(*addr), self.port))
+            }
+            HostKind::Ipv6Literal(addr) => {
+                Ok(std::net::SocketAddr::new(IpAddr::V6(*addr), self.port))
+            }
             HostKind::Dns(name) => {
                 let target = format!("{name}:{}", self.port);
                 let resolved = tokio::net::lookup_host(target.as_str())
@@ -263,7 +261,12 @@ fn parse_uri(raw: &str) -> Result<LoopbackHost, LoopbackError> {
     if let Ok(addr) = Ipv6Addr::from_str(host_raw) {
         return if is_ipv6_loopback(&addr) {
             Ok(LoopbackHost {
-                url: rebuild_url(scheme, host_raw, port, uri.path_and_query().map(|p| p.as_str()))?,
+                url: rebuild_url(
+                    scheme,
+                    host_raw,
+                    port,
+                    uri.path_and_query().map(|p| p.as_str()),
+                )?,
                 scheme,
                 host: host_raw.to_owned(),
                 port,
@@ -276,7 +279,12 @@ fn parse_uri(raw: &str) -> Result<LoopbackHost, LoopbackError> {
     if let Ok(addr) = Ipv4Addr::from_str(host_raw) {
         return if is_ipv4_loopback(&addr) {
             Ok(LoopbackHost {
-                url: rebuild_url(scheme, host_raw, port, uri.path_and_query().map(|p| p.as_str()))?,
+                url: rebuild_url(
+                    scheme,
+                    host_raw,
+                    port,
+                    uri.path_and_query().map(|p| p.as_str()),
+                )?,
                 scheme,
                 host: host_raw.to_owned(),
                 port,
@@ -297,7 +305,12 @@ fn parse_uri(raw: &str) -> Result<LoopbackHost, LoopbackError> {
     }
 
     Ok(LoopbackHost {
-        url: rebuild_url(scheme, host_raw, port, uri.path_and_query().map(|p| p.as_str()))?,
+        url: rebuild_url(
+            scheme,
+            host_raw,
+            port,
+            uri.path_and_query().map(|p| p.as_str()),
+        )?,
         scheme,
         host: host_raw.to_owned(),
         port,
@@ -378,7 +391,9 @@ mod tests {
     async fn ipv4_loopback_127_anything_in_range_accepted() {
         // 127.0.0.0/8 covers e.g. 127.0.0.1, 127.1.2.3 — all of them
         // are loopback.
-        let h = LoopbackHost::parse("http://127.1.2.3:8080/x").await.unwrap();
+        let h = LoopbackHost::parse("http://127.1.2.3:8080/x")
+            .await
+            .unwrap();
         assert!(matches!(h.kind, HostKind::Ipv4Literal(_)));
     }
 

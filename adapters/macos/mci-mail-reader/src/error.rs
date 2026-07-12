@@ -73,7 +73,7 @@ impl MailReaderError {
     /// Map an `std::io::Error` to a typed [`MailReaderError`], distinguishing
     /// `PermissionDenied` (which means Full Disk Access has not been
     /// granted) from generic I/O failures.
-    #[must_use] 
+    #[must_use]
     pub fn from_io(path: PathBuf, source: io::Error) -> Self {
         if source.kind() == io::ErrorKind::PermissionDenied {
             Self::AccessDenied { path }

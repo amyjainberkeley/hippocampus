@@ -712,10 +712,7 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// [`StoreError::Backend`] on any underlying `SQLite` failure.
-    pub fn recent_episodes(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<crate::EpisodeRecord>, StoreError> {
+    pub fn recent_episodes(&self, limit: usize) -> Result<Vec<crate::EpisodeRecord>, StoreError> {
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -951,16 +948,12 @@ impl SqlCipherBrainStore {
                 ],
             )
             .map_err(|e| StoreError::Backend(format!("put_brief: {e}")))?;
-        let id_i64 = guard
-            .conn()
-            .last_insert_rowid();
+        let id_i64 = guard.conn().last_insert_rowid();
         Ok(u64::try_from(id_i64).unwrap_or(0))
     }
 
     /// Look up the brief for one local date. `Ok(None)` if absent.
-    pub fn brief_for_date(&self, date_local: &str)
-        -> Result<Option<crate::BriefRow>, StoreError>
-    {
+    pub fn brief_for_date(&self, date_local: &str) -> Result<Option<crate::BriefRow>, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         let row_opt = guard
             .conn()
@@ -1652,11 +1645,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
         Ok(())
     }
 
-    fn find_entity_by_alias(
-        &self,
-        kind: &str,
-        alias: &str,
-    ) -> Result<Option<Entity>, StoreError> {
+    fn find_entity_by_alias(&self, kind: &str, alias: &str) -> Result<Option<Entity>, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         let row_opt = guard
             .conn()
@@ -1831,8 +1820,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
         &self,
         rows: &[EntityIdentity],
     ) -> Result<crate::ReconcileStats, StoreError> {
-        let keep: std::collections::BTreeSet<&str> =
-            rows.iter().map(|r| r.id.0.as_str()).collect();
+        let keep: std::collections::BTreeSet<&str> = rows.iter().map(|r| r.id.0.as_str()).collect();
         let mut guard = self.db.lock().expect("brain store mutex poisoned");
         let tx = guard
             .conn_mut()
@@ -1915,10 +1903,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
         collect_entity_identities(rows)
     }
 
-    fn identity_of_entity(
-        &self,
-        entity_id: &EntityId,
-    ) -> Result<Vec<EntityIdentity>, StoreError> {
+    fn identity_of_entity(&self, entity_id: &EntityId) -> Result<Vec<EntityIdentity>, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         let mut stmt = guard
             .conn()
@@ -2217,7 +2202,10 @@ impl crate::BrainStore for SqlCipherBrainStore {
             )
             .map_err(|e| StoreError::Backend(format!("prepare episode_edges_for_identity: {e}")))?;
         let rows = stmt
-            .query_map(params![EpisodeEdge::KIND_SHARED_IDENTITY], row_to_episode_edge)
+            .query_map(
+                params![EpisodeEdge::KIND_SHARED_IDENTITY],
+                row_to_episode_edge,
+            )
             .map_err(|e| StoreError::Backend(format!("query episode_edges_for_identity: {e}")))?;
         let mut out = Vec::new();
         for r in rows {
@@ -2358,7 +2346,9 @@ impl crate::BrainStore for SqlCipherBrainStore {
              LIMIT ?"
         );
         let mut binds: Vec<Value> = Vec::with_capacity(RESOLVABLE_KINDS.len() + 2);
-        binds.push(Value::Integer(i64::try_from(event_id.0).unwrap_or(i64::MAX)));
+        binds.push(Value::Integer(
+            i64::try_from(event_id.0).unwrap_or(i64::MAX),
+        ));
         for k in RESOLVABLE_KINDS {
             binds.push(Value::Text((*k).to_string()));
         }
@@ -2413,10 +2403,9 @@ impl crate::BrainStore for SqlCipherBrainStore {
             .prepare(sql)
             .map_err(|e| StoreError::Backend(format!("prepare linked_event_ids_for_event: {e}")))?;
         let rows = stmt
-            .query_map(
-                params![EpisodeEdge::KIND_SHARED_IDENTITY, ev, lim],
-                |r| r.get::<_, i64>(0),
-            )
+            .query_map(params![EpisodeEdge::KIND_SHARED_IDENTITY, ev, lim], |r| {
+                r.get::<_, i64>(0)
+            })
             .map_err(|e| StoreError::Backend(format!("query linked_event_ids_for_event: {e}")))?;
         let mut out = Vec::new();
         for r in rows {

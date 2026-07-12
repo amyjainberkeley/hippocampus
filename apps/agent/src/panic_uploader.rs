@@ -225,10 +225,7 @@ async fn post_json(url: &str, body: &str) -> Result<u16, UploadError> {
     let mut response = vec![0u8; 1024];
     let n = stream.read(&mut response).await?;
     let response_str = String::from_utf8_lossy(&response[..n]);
-    let status_line = response_str
-        .lines()
-        .next()
-        .ok_or(UploadError::InvalidUrl)?;
+    let status_line = response_str.lines().next().ok_or(UploadError::InvalidUrl)?;
     let status = status_line
         .split_whitespace()
         .nth(1)
@@ -246,10 +243,7 @@ mod tests {
 
     #[test]
     fn scrub_single_path() {
-        assert_eq!(
-            scrub_user_paths("/Users/ao/src/main.rs"),
-            "<redacted-path>"
-        );
+        assert_eq!(scrub_user_paths("/Users/ao/src/main.rs"), "<redacted-path>");
     }
 
     #[test]
@@ -338,7 +332,8 @@ mod tests {
 
     #[test]
     fn valid_line_deserializes() {
-        let line = r#"{"ts":"1.001","thread":"main","location":"src/main.rs:1:1","message":"boom"}"#;
+        let line =
+            r#"{"ts":"1.001","thread":"main","location":"src/main.rs:1:1","message":"boom"}"#;
         let r: CrashReport = serde_json::from_str(line).unwrap();
         assert_eq!(r.ts, "1.001");
         assert_eq!(r.message, "boom");
@@ -466,8 +461,7 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("panic.jsonl");
-        let valid =
-            r#"{"ts":"1.001","thread":"main","location":"src/main.rs:1:1","message":"ok"}"#;
+        let valid = r#"{"ts":"1.001","thread":"main","location":"src/main.rs:1:1","message":"ok"}"#;
         let malformed = r#"{"garbage": true}"#;
         tokio::fs::write(&path, format!("{malformed}\n{valid}\n"))
             .await
@@ -476,7 +470,10 @@ mod tests {
         let uploader = PanicUploader::new(url, true);
         let count = drain_pending(&uploader, &path).await.unwrap();
         assert_eq!(count, 1, "only valid line uploaded");
-        assert!(!path.exists(), "file removed: malformed dropped, valid uploaded");
+        assert!(
+            !path.exists(),
+            "file removed: malformed dropped, valid uploaded"
+        );
 
         server.await.unwrap();
     }
@@ -504,7 +501,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("panic.jsonl");
-        let line = r#"{"ts":"1","thread":"t","location":"l","message":"err at /Users/ao/secret.rs:42"}"#;
+        let line =
+            r#"{"ts":"1","thread":"t","location":"l","message":"err at /Users/ao/secret.rs:42"}"#;
         tokio::fs::write(&path, format!("{line}\n")).await.unwrap();
 
         let uploader = PanicUploader::new(url, true);

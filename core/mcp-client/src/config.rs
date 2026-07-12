@@ -196,10 +196,7 @@ impl McpServersConfig {
     ///   ARE registered (the registry is mutated as we go); the agent
     ///   supervisor logs the row and continues. This matches the
     ///   stdio surface's "best-effort spawn" posture.
-    pub async fn register_all(
-        &self,
-        registry: &ServerRegistry,
-    ) -> Result<usize, ConfigError> {
+    pub async fn register_all(&self, registry: &ServerRegistry) -> Result<usize, ConfigError> {
         let mut count = 0;
         for (idx, entry) in self.servers.iter().enumerate() {
             if !entry.enabled {
@@ -208,11 +205,7 @@ impl McpServersConfig {
             let host = LoopbackHost::parse(&entry.url)
                 .await
                 .map_err(|source| ConfigError::Loopback { index: idx, source })?;
-            let reg = ServerRegistration::http(
-                entry.name.clone(),
-                host,
-                entry.auth_header.clone(),
-            );
+            let reg = ServerRegistration::http(entry.name.clone(), host, entry.auth_header.clone());
             registry.register(reg).await;
             count += 1;
         }
@@ -436,7 +429,9 @@ url = ""
         let mut perms = tokio::fs::metadata(&path).await.unwrap().permissions();
         perms.set_mode(0o644);
         tokio::fs::set_permissions(&path, perms).await.unwrap();
-        let err = McpServersConfig::load(&path).await.expect_err("loose perms");
+        let err = McpServersConfig::load(&path)
+            .await
+            .expect_err("loose perms");
         assert!(matches!(err, ConfigError::Permissions));
         let _ = tokio::fs::remove_file(&path).await;
     }
