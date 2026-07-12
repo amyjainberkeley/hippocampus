@@ -51,7 +51,27 @@
 //   3-row mini-audit row 3 in PR body), 2026-06-01
 
 import Foundation
-import MetricKit
+#if os(iOS)
+    import MetricKit
+#endif
+
+// MetricKit's `MXMetricPayload`, `MXDiagnosticPayload`, `MXMetricManager`,
+// and `MXMetricManagerSubscriber` are annotated
+// `API_UNAVAILABLE(macos, tvos, watchos)` in Apple's SDK — the framework
+// header imports on macOS but the types themselves are iOS-only. PR #284
+// shipped this file without that guard and broke the macOS helper build
+// (PR #19 cycle 8.35 CI-STOP). The fix conditionally compiles the iOS-only
+// subscriber body behind `#if os(iOS)` while leaving `MetricKitFileSink`
+// (pure Foundation, no MetricKit types) unconditional. When macOS gains
+// MetricKit — WWDC 2027 or later per Apple's current pattern — remove the
+// guards and re-enable the delegate path.
+//
+// Driver-CSO audit (this fix, PR follow-up to PR #19):
+//   (a) No new telemetry counters added.
+//   (b) No new fields captured.
+//   (c) macOS restored to pre-PR #284 posture — no macOS MetricKit
+//       counters, which is where we already were before that shipped
+//       broken.
 
 /// Public-facing protocol so headless tests can substitute a mock
 /// subscriber without an `MXMetricPayload` (which is not constructible
@@ -128,80 +148,119 @@ public actor MetricKitFileSink: MetricKitPayloadSink {
 /// `MetricKitPayloadSink`. Holds the sink + an optional log gate.
 /// Strongly retained at helper top level via
 /// `MetricKitSubscriber.install(_:)`.
-public final class MetricKitSubscriber: NSObject, MXMetricManagerSubscriber, @unchecked Sendable {
-    private let sink: MetricKitPayloadSink
+///
+/// On iOS, this conforms to `MXMetricManagerSubscriber` and receives
+/// daily `MXMetricPayload` + `MXDiagnosticPayload` callbacks from
+/// `MXMetricManager.shared`. On macOS (and tvOS/watchOS), MetricKit
+/// exists as an SDK header but the payload/subscriber types are
+/// `API_UNAVAILABLE`; we compile a no-op stub that keeps the same
+/// public API surface — `init(sink:)` and `install(sink:)` — so call
+/// sites (helper `main.swift`, `MetricKitSubscriberTests`) build and
+/// link cleanly. The stub does NOT emit any telemetry; macOS remains
+/// at pre-PR #284 posture until Apple ships MetricKit for macOS.
+#if os(iOS)
+    public final class MetricKitSubscriber: NSObject, MXMetricManagerSubscriber, @unchecked Sendable {
+        private let sink: MetricKitPayloadSink
 
-    public init(sink: MetricKitPayloadSink) {
-        self.sink = sink
-        super.init()
-    }
+        public init(sink: MetricKitPayloadSink) {
+            self.sink = sink
+            super.init()
+        }
 
-    /// Apple delegate hook. Called approximately daily by MetricKit's
-    /// system-aggregation cadence. The delegate is responsible for
-    /// persisting the payload; MetricKit does NOT re-deliver a
-    /// payload after `didReceive` returns.
-    public func didReceive(_ payloads: [MXMetricPayload]) {
-        for payload in payloads {
-            // `jsonRepresentation()` is Apple's canonical content-free
-            // serialization. The UUID is derived from the payload's
-            // begin/end timestamps and is stable across retries.
-            let json = payload.jsonRepresentation()
-            let uuid = payloadStableUUID(payload)
-            Task {
-                await sink.write(payloadJSON: json, payloadUUID: uuid)
+        /// Apple delegate hook. Called approximately daily by MetricKit's
+        /// system-aggregation cadence. The delegate is responsible for
+        /// persisting the payload; MetricKit does NOT re-deliver a
+        /// payload after `didReceive` returns.
+        public func didReceive(_ payloads: [MXMetricPayload]) {
+            for payload in payloads {
+                // `jsonRepresentation()` is Apple's canonical content-free
+                // serialization. The UUID is derived from the payload's
+                // begin/end timestamps and is stable across retries.
+                let json = payload.jsonRepresentation()
+                let uuid = payloadStableUUID(payload)
+                Task {
+                    await sink.write(payloadJSON: json, payloadUUID: uuid)
+                }
             }
         }
-    }
 
-    /// Diagnostic payload hook (hangs, disk write exceptions, CPU
-    /// exceptions). Same content-free posture — Apple's
-    /// `MXDiagnosticPayload.jsonRepresentation()` carries only resource-
-    /// envelope diagnostics, never user content.
-    public func didReceive(_ payloads: [MXDiagnosticPayload]) {
-        for payload in payloads {
-            let json = payload.jsonRepresentation()
-            let uuid = diagnosticPayloadStableUUID(payload)
-            Task {
-                await sink.write(payloadJSON: json, payloadUUID: "diag-\(uuid)")
+        /// Diagnostic payload hook (hangs, disk write exceptions, CPU
+        /// exceptions). Same content-free posture — Apple's
+        /// `MXDiagnosticPayload.jsonRepresentation()` carries only resource-
+        /// envelope diagnostics, never user content.
+        public func didReceive(_ payloads: [MXDiagnosticPayload]) {
+            for payload in payloads {
+                let json = payload.jsonRepresentation()
+                let uuid = diagnosticPayloadStableUUID(payload)
+                Task {
+                    await sink.write(payloadJSON: json, payloadUUID: "diag-\(uuid)")
+                }
             }
         }
-    }
 
-    /// Build a stable UUID-like string for a payload from its
-    /// timestamp range. MetricKit payloads do not expose a native
-    /// UUID; the begin/end timestamps are unique per device-day.
-    private func payloadStableUUID(_ payload: MXMetricPayload) -> String {
-        let begin = Int64(payload.timeStampBegin.timeIntervalSince1970)
-        let end = Int64(payload.timeStampEnd.timeIntervalSince1970)
-        return "metric-\(begin)-\(end)"
-    }
-
-    private func diagnosticPayloadStableUUID(_ payload: MXDiagnosticPayload) -> String {
-        let begin = Int64(payload.timeStampBegin.timeIntervalSince1970)
-        let end = Int64(payload.timeStampEnd.timeIntervalSince1970)
-        return "\(begin)-\(end)"
-    }
-
-    /// Strong reference held at helper top level so the
-    /// `MXMetricManager` subscriber registration stays alive for the
-    /// process lifetime (MetricKit holds subscribers WEAKLY — same
-    /// retention discipline as SCStream's delegate per
-    /// SCSTREAM-LIVE-001).
-    nonisolated(unsafe) private static var installed: MetricKitSubscriber?
-
-    /// Register a new subscriber with `MXMetricManager.shared`. Idempotent
-    /// — calling twice replaces the prior subscriber (with `remove` of the
-    /// old) so a test re-install does not leak a stale subscriber.
-    /// Returns the installed subscriber so the caller can drop it from a
-    /// top-level `_ = ...` binding for explicit process-lifetime retention.
-    @discardableResult
-    public static func install(sink: MetricKitPayloadSink) -> MetricKitSubscriber {
-        let subscriber = MetricKitSubscriber(sink: sink)
-        if let prior = installed {
-            MXMetricManager.shared.remove(prior)
+        /// Build a stable UUID-like string for a payload from its
+        /// timestamp range. MetricKit payloads do not expose a native
+        /// UUID; the begin/end timestamps are unique per device-day.
+        private func payloadStableUUID(_ payload: MXMetricPayload) -> String {
+            let begin = Int64(payload.timeStampBegin.timeIntervalSince1970)
+            let end = Int64(payload.timeStampEnd.timeIntervalSince1970)
+            return "metric-\(begin)-\(end)"
         }
-        installed = subscriber
-        MXMetricManager.shared.add(subscriber)
-        return subscriber
+
+        private func diagnosticPayloadStableUUID(_ payload: MXDiagnosticPayload) -> String {
+            let begin = Int64(payload.timeStampBegin.timeIntervalSince1970)
+            let end = Int64(payload.timeStampEnd.timeIntervalSince1970)
+            return "\(begin)-\(end)"
+        }
+
+        /// Strong reference held at helper top level so the
+        /// `MXMetricManager` subscriber registration stays alive for the
+        /// process lifetime (MetricKit holds subscribers WEAKLY — same
+        /// retention discipline as SCStream's delegate per
+        /// SCSTREAM-LIVE-001).
+        nonisolated(unsafe) private static var installed: MetricKitSubscriber?
+
+        /// Register a new subscriber with `MXMetricManager.shared`. Idempotent
+        /// — calling twice replaces the prior subscriber (with `remove` of the
+        /// old) so a test re-install does not leak a stale subscriber.
+        /// Returns the installed subscriber so the caller can drop it from a
+        /// top-level `_ = ...` binding for explicit process-lifetime retention.
+        @discardableResult
+        public static func install(sink: MetricKitPayloadSink) -> MetricKitSubscriber {
+            let subscriber = MetricKitSubscriber(sink: sink)
+            if let prior = installed {
+                MXMetricManager.shared.remove(prior)
+            }
+            installed = subscriber
+            MXMetricManager.shared.add(subscriber)
+            return subscriber
+        }
     }
-}
+#else
+    // macOS / tvOS / watchOS stub. Same public API shape as the iOS
+    // implementation; no MetricKit delegate registration because the
+    // types are `API_UNAVAILABLE`. `install(sink:)` still returns a
+    // fresh subscriber each call (test contract: object identity
+    // differs across installs) and retains it in a static binding so
+    // the API is compatible when a future macOS MetricKit SDK lets us
+    // drop the guard.
+    public final class MetricKitSubscriber: NSObject, @unchecked Sendable {
+        // Retained for symmetry with the iOS build; the stub does not
+        // exercise the sink because no payloads are delivered on macOS.
+        private let sink: MetricKitPayloadSink
+
+        public init(sink: MetricKitPayloadSink) {
+            self.sink = sink
+            super.init()
+        }
+
+        nonisolated(unsafe) private static var installed: MetricKitSubscriber?
+
+        @discardableResult
+        public static func install(sink: MetricKitPayloadSink) -> MetricKitSubscriber {
+            let subscriber = MetricKitSubscriber(sink: sink)
+            installed = subscriber
+            return subscriber
+        }
+    }
+#endif
