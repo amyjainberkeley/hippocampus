@@ -1029,6 +1029,14 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     };
     let key = DbKey::from_bytes(key_bytes);
 
+    // P3.8 / CRS G3 fix: wire the query-side embedder so `mci_recall` runs
+    // full ADR-0010 hybrid (FTS5 + semantic min-max CC), not lexical-only.
+    // Mirrors the ingest-side `load_embedder_backend()` pattern (see
+    // `run` path around line 391) but constructs `new_query` (adds the
+    // model-card query prefix per ADR-0011 §3) instead of `new_document`.
+    // Core ML compute units stay pinned to `cpu_only` inside
+    // `load_backend_or_fallback` — the "all" tier is the latency trap
+    // ([[reference-coreml-computeunits-all-trap]]).
     let embedder: Option<Arc<dyn mci_brain::Embedder>> =
         if std::env::var("MCI_EMBEDDER_DISABLED").as_deref() == Ok("1") {
             eprintln!(
@@ -1037,13 +1045,21 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
             );
             None
         } else {
-            // TODO(P3.8): attempt ArcticEmbedSEmbedder::new_query(CoreMlBackend::new(...))
-            // when the .mlpackage is bundled. Until then, fall back gracefully.
-            eprintln!(
-                "mci-agent mcp-serve: no embedder backend available yet \
-                 (ships at P3.8). Lexical-only recall."
-            );
-            None
+            let (emb, is_real) = load_query_embedder_backend();
+            if is_real {
+                Some(emb)
+            } else {
+                // Zero-vector / non-macOS fallback: hybrid retriever would
+                // just add noise (every doc "matches" the zero query with
+                // cosine 0), so stay on FTS5-only until a real backend is
+                // bundled.
+                eprintln!(
+                    "mci-agent mcp-serve: query embedder unavailable \
+                     (no ArcticEmbedS model bundled or non-macOS). \
+                     Lexical-only recall."
+                );
+                None
+            }
         };
 
     let recall_mode = if embedder.is_some() {
@@ -1075,21 +1091,12 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     Ok(())
 }
 
-/// Load the best available embedder backend for the idle-batch worker.
-///
-/// On macOS: tries to load the Core ML `.mlpackage` from candidate
-/// paths; falls back to the zero-vector backend when the model isn't
-/// bundled (development builds). Returns `(Arc<dyn Embedder>, is_real)`.
-///
-/// The ArcticEmbedSEmbedder wrapper applies the model-card prefix
-/// discipline + L2-norm (ADR-0011 §3). Document-side prefix (empty
-/// for arctic-embed-s) is used for idle-batch embedding.
+/// Candidate on-disk paths for the `ArcticEmbedS` Core ML model, in probe
+/// order. Shared by the ingest-side (document) and query-side embedder
+/// loaders so both surfaces resolve the same bundle-first, dev-fallback
+/// list. See ADR-0028 §4 for the bundle-path contract.
 #[cfg(target_os = "macos")]
-fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
-    use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
-    use mci_embed_coreml::load_backend_or_fallback;
-    use std::path::Path;
-
+fn arctic_embed_s_model_candidates() -> Vec<std::path::PathBuf> {
     let home = std::env::var_os("HOME").map_or_else(
         || std::path::PathBuf::from("/tmp"),
         std::path::PathBuf::from,
@@ -1121,7 +1128,25 @@ fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     candidates.push(
         home.join("Applications/MCICaptureHelper.app/Contents/Resources/arctic-embed-s.mlpackage"),
     );
+    candidates
+}
 
+/// Load the best available embedder backend for the idle-batch worker.
+///
+/// On macOS: tries to load the Core ML `.mlpackage` from candidate
+/// paths; falls back to the zero-vector backend when the model isn't
+/// bundled (development builds). Returns `(Arc<dyn Embedder>, is_real)`.
+///
+/// The ArcticEmbedSEmbedder wrapper applies the model-card prefix
+/// discipline + L2-norm (ADR-0011 §3). Document-side prefix (empty
+/// for arctic-embed-s) is used for idle-batch embedding.
+#[cfg(target_os = "macos")]
+fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
+    use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
+    use mci_embed_coreml::load_backend_or_fallback;
+    use std::path::Path;
+
+    let candidates = arctic_embed_s_model_candidates();
     let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
     let (backend, is_real) = load_backend_or_fallback(&path_refs);
     let embedder = ArcticEmbedSEmbedder::new_document(backend);
@@ -1185,6 +1210,85 @@ fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
         }
     }
     eprintln!("mci-agent: non-macOS platform — using zero-vector embedder fallback");
+    (Arc::new(ZeroEmbedder), false)
+}
+
+/// Load the query-side embedder for `mci-agent mcp-serve` (recall path).
+///
+/// Mirrors [`load_embedder_backend`] but constructs `new_query` so the
+/// `ArcticEmbedS` model-card query prefix (per ADR-0011 §3) is applied to
+/// every recall-time embed call. Same Core ML backend + `cpu_only` pin
+/// (per PR #310 lesson — the "all" compute-unit setting is the latency
+/// trap [[reference-coreml-computeunits-all-trap]]); a separate wrapper
+/// instance because the prefix is baked into the wrapper, not selectable
+/// per call.
+///
+/// Returns `(Arc<dyn Embedder>, is_real)` where `is_real == false` means
+/// the `ZeroBackend` fallback fired (no model on disk) — callers should
+/// prefer FTS5-only recall in that case rather than feeding a zero
+/// vector into `HybridRetriever`.
+#[cfg(target_os = "macos")]
+fn load_query_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
+    use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
+    use mci_embed_coreml::load_backend_or_fallback;
+    use std::path::Path;
+
+    let candidates = arctic_embed_s_model_candidates();
+    let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
+    let (backend, is_real) = load_backend_or_fallback(&path_refs);
+    let embedder = ArcticEmbedSEmbedder::new_query(backend);
+
+    // Load-time smoke embed: same probe discipline as the ingest-side
+    // loader (PR #310) — verify_schema is type-only, so a "loaded" model
+    // whose predict path throws will still light up the recall path
+    // producing errors on every user query. Probe once at startup so a
+    // dead query embedder is known loudly here.
+    if is_real {
+        use mci_brain::Embedder as _;
+        match embedder.embed_one("mci query embedder load-time smoke probe") {
+            Ok(v) => {
+                let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let healthy = v.len() == 384 && norm.is_finite() && (norm - 1.0).abs() < 1e-2;
+                if healthy {
+                    eprintln!(
+                        "mci-agent: query embedder smoke OK — CoreML (cpu_only pin), dim={} |v|={norm:.4}",
+                        v.len(),
+                    );
+                } else {
+                    eprintln!(
+                        "mci-agent: WARNING query embedder loaded but smoke vector looks wrong \
+                         (dim={} |v|={norm:.4}, expected dim=384 |v|~1.0) — hybrid recall may \
+                         be degraded.",
+                        v.len(),
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "mci-agent: WARNING query embedder LOADED but smoke embed FAILED — hybrid \
+                     recall is DEAD: {e}. Check the bundled ArcticEmbedS model / compute-unit pin.",
+                );
+            }
+        }
+    }
+
+    (Arc::new(embedder), is_real)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn load_query_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
+    // Non-macOS: no Core ML / ONNX yet (Phase 8). Return a zero-vector
+    // embedder marked `is_real = false` so the caller stays on FTS5-only
+    // rather than seeding HybridRetriever with a useless zero vector.
+    struct ZeroEmbedder;
+    impl mci_brain::Embedder for ZeroEmbedder {
+        fn dimension(&self) -> usize {
+            384
+        }
+        fn embed_one(&self, _text: &str) -> Result<Vec<f32>, mci_brain::EmbedError> {
+            Ok(vec![0.0_f32; 384])
+        }
+    }
     (Arc::new(ZeroEmbedder), false)
 }
 
