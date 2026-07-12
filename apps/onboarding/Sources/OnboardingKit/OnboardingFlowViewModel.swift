@@ -22,17 +22,39 @@ public final class OnboardingFlowViewModel: ObservableObject {
 
     public let screenRecordingPermission: any TCCPermission
     public let accessibilityPermission: any TCCPermission
+    /// Automation TCC — wired in per audit gap G1 so `PermissionsSlide`
+    /// can surface it in the pre-flight overview and
+    /// `BrowserExtensionSlide` can render an inline warning + a
+    /// `.denied` recovery path when Safari's osascript keystroke is
+    /// blocked (previously the error was silently swallowed).
+    public let automationPermission: any TCCPermission
+    /// Full Disk Access status snapshot. Refreshed alongside TCC
+    /// probes so the pre-flight overview can pill the FDA row without
+    /// touching the actor on every render. Stays `.notRequested`
+    /// until the user toggles a Messages / Mail deep-hook on the
+    /// Allowlist slide (ADR-0032 §3(b)).
+    @Published public private(set) var fullDiskAccessStatus: FullDiskAccessStatus = .notRequested
 
     private let stateStore: any OnboardingStateStore
+    private let fdaPermission: (any FullDiskAccessPermission)?
 
     public init(
         screenRecording: any TCCPermission,
         accessibility: any TCCPermission,
+        automation: (any TCCPermission)? = nil,
+        fullDiskAccess: (any FullDiskAccessPermission)? = nil,
         stateStore: any OnboardingStateStore = FileOnboardingStateStore(),
         migrationSource: MigrationSource? = nil
     ) {
+        // Default the Automation permission to a stub so pre-audit
+        // callers (unit tests + any downstream) keep compiling without
+        // having to construct one. Production callers in
+        // `OnboardingApp.init` inject `RealAutomationPermission`.
+        let automation = automation ?? StubTCCPermission(kind: .automation, status: .notRequested)
         self.screenRecordingPermission = screenRecording
         self.accessibilityPermission = accessibility
+        self.automationPermission = automation
+        self.fdaPermission = fullDiskAccess
         self.stateStore = stateStore
         self.migrationSource = migrationSource
 
@@ -71,7 +93,37 @@ public final class OnboardingFlowViewModel: ObservableObject {
     public func refreshPermissions() {
         _ = screenRecordingPermission.checkCurrent()
         _ = accessibilityPermission.checkCurrent()
+        // Automation: cheap probe (NSAppleScript against System Events).
+        // Do NOT probe here on the Permissions slide poll if the user
+        // hasn't yet reached the Browser Extension flow — probing pre-
+        // grant would fire the OS Automation dialog silently, which is
+        // exactly the "surprise dialog #3" pattern we're fixing.
+        // Instead, only trust the last-known status; the Browser
+        // Extension slide will do the real probe when the user clicks
+        // the Safari install button.
+        _ = automationPermission.status
         permissionRefreshCount += 1
+    }
+
+    /// Snapshot the Full Disk Access status from the actor into the
+    /// synchronous `fullDiskAccessStatus` @Published so views can pill
+    /// the row without awaiting on every render. Idempotent.
+    public func refreshFullDiskAccessStatus() async {
+        guard let fda = fdaPermission else { return }
+        let s = await fda.status()
+        if s != fullDiskAccessStatus {
+            fullDiskAccessStatus = s
+        }
+    }
+
+    /// Probe Automation TCC on demand — called by the Browser
+    /// Extension slide just before the Safari click so the returned
+    /// status reflects "did the user grant when they saw the dialog?"
+    /// Distinct from `refreshPermissions()` (which deliberately doesn't
+    /// probe Automation — see comment there).
+    @discardableResult
+    public func probeAutomation() -> TCCStatus {
+        automationPermission.checkCurrent()
     }
 
     public var canGoBack: Bool {

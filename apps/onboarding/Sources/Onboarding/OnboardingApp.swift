@@ -40,13 +40,26 @@ struct OnboardingApp: App {
         #if canImport(AppKit)
         let sr: any TCCPermission = RealScreenRecordingPermission()
         let ax: any TCCPermission = RealAccessibilityPermission()
+        // Wire the previously-orphaned Automation TCC surface. Used by
+        // BrowserExtensionSlide's Safari flow (osascript → System
+        // Events keystroke, which fires the Automation dialog) and
+        // surfaced up-front in the PermissionsSlide pre-flight
+        // overview. Fixes audit gap G1 — the Rewind bad pattern where
+        // dialog #3 lands unannounced.
+        let am: any TCCPermission = RealAutomationPermission()
+        let fda: any FullDiskAccessPermission = RealFullDiskAccessPermission()
         #else
         let sr: any TCCPermission = StubTCCPermission(kind: .screenRecording)
         let ax: any TCCPermission = StubTCCPermission(kind: .accessibility)
+        let am: any TCCPermission = StubTCCPermission(kind: .automation)
+        let fda: any FullDiskAccessPermission = StubFullDiskAccessPermission()
         #endif
 
         _flowVM = StateObject(wrappedValue: OnboardingFlowViewModel(
-            screenRecording: sr, accessibility: ax
+            screenRecording: sr,
+            accessibility: ax,
+            automation: am,
+            fullDiskAccess: fda
         ))
         _trustVM = StateObject(wrappedValue: TrustPanelViewModel(
             allowlistStore: StubAllowlistStore(),
@@ -59,12 +72,17 @@ struct OnboardingApp: App {
         #if canImport(AppKit)
         let detector: any BrowserDetector = RealBrowserDetector()
         let appsDetector: any RunningAppsDetector = RealRunningAppsDetector()
-        let fdaPermission: any FullDiskAccessPermission = RealFullDiskAccessPermission()
         #else
         let detector: any BrowserDetector = StubBrowserDetector()
         let appsDetector: any RunningAppsDetector = StubRunningAppsDetector()
-        let fdaPermission: any FullDiskAccessPermission = StubFullDiskAccessPermission()
         #endif
+        // Share the same FDA permission instance across the flow VM
+        // (drives the pre-flight overview pill) and the allowlist
+        // editor (fires the actual deep-link on deep-hook toggle).
+        // Two separate instances would drift out of sync — the
+        // pre-flight would show "Not requested" even after the user
+        // opened Settings from the Allowlist slide.
+        let fdaPermission = fda
         _extensionVM = StateObject(wrappedValue: BrowserExtensionViewModel(
             detector: detector
         ))
