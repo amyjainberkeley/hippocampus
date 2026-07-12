@@ -1,5 +1,9 @@
 name: Cargo — test + clippy + fmt
 
+# Companion workflow: .github/workflows/cargo-audit.yml runs `cargo audit`
+# against the RustSec advisory DB on ubuntu-latest (cheaper than macOS
+# runners and no platform-specific behavior needed for a lockfile scan).
+
 on:
   push:
     branches: [main]
