@@ -103,12 +103,13 @@ struct RootView: View {
         TabView(selection: $selectedTab) {
             SearchView(
                 viewModel: SearchViewModel(reader: reader),
-                focusTrigger: searchFocusTrigger
+                focusTrigger: searchFocusTrigger,
+                reader: reader
             )
             .tag(RecallTab.search)
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
-            TimelineView(viewModel: TimelineViewModel(reader: reader))
+            TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
                 .tag(RecallTab.timeline)
                 .tabItem { Label("Timeline", systemImage: "clock") }
 
