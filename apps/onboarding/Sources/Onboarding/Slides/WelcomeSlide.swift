@@ -3,9 +3,20 @@ import AppKit
 import OnboardingKit
 
 struct WelcomeSlide: View {
+    @EnvironmentObject var flowVM: OnboardingFlowViewModel
+
     var body: some View {
         SlideContainer {
             VStack(spacing: 24) {
+                // Rewind-migrator sub-header — renders ONLY when the app
+                // was launched via `onboarding://start?migration=rewind`
+                // (cycle 8.37 `/rewind` landing lane, PR #30). Copy is
+                // held verbatim from the audit doc so a stale deep-link
+                // never surprises a non-Rewind user.
+                if flowVM.migrationSource == .rewind {
+                    rewindSubheader
+                }
+
                 // Brand hero — the same head+brain glyph the menu-bar uses, at 72pt.
                 // CSO note (cycle 8.12 / PR #214): MUST NOT regress to SF Symbol
                 // `brain.head.profile` here — Apple SF Symbols License §2(b) prohibits
@@ -39,6 +50,21 @@ struct WelcomeSlide: View {
                 .padding(.top, 8)
             }
         }
+    }
+
+    private var rewindSubheader: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "arrow.triangle.branch")
+                .foregroundStyle(OnboardingTheme.accentBlue)
+                .frame(width: 20)
+            Text(OnboardingCopy.welcomeRewindSubheader)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(10)
+        .background(OnboardingTheme.accentBlue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 420)
     }
 
     private func bulletPoint(icon: String, text: String) -> some View {

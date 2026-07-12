@@ -31,7 +31,7 @@ struct HowItWorksSlide: View {
                 VStack(spacing: 12) {
                     featureRow(
                         icon: "cpu",
-                        text: "Less than 2% CPU, under 250 MB RAM — designed to disappear."
+                        text: OnboardingCopy.howItWorksFootprint
                     )
                     featureRow(
                         icon: "sparkles",
