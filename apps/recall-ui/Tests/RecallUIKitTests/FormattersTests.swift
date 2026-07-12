@@ -93,6 +93,97 @@ final class FormattersTests: XCTestCase {
         XCTAssertEqual(Formatters.sourceTag("custom"), "custom")
     }
 
+    // MARK: - matchReason (cycle 8.36 PR-2, audit §5 G6)
+
+    func testMatchReasonMapsLexicalToPlainEnglish() {
+        XCTAssertEqual(Formatters.matchReason("lexical"), "Matched: text")
+    }
+
+    func testMatchReasonMapsHybridToPlainEnglish() {
+        XCTAssertEqual(Formatters.matchReason("hybrid"), "Matched: meaning")
+    }
+
+    func testMatchReasonTimelineIsNil() {
+        // Chronological rows have no match reason worth showing —
+        // caller must render nothing (not the raw tag).
+        XCTAssertNil(Formatters.matchReason("timeline"))
+    }
+
+    func testMatchReasonUnknownSourceIsNil() {
+        // Forward-compat: a future retrieval mode shouldn't leak raw
+        // jargon into the UI. Callers hide the label until the mapping
+        // is extended.
+        XCTAssertNil(Formatters.matchReason("custom"))
+        XCTAssertNil(Formatters.matchReason(""))
+    }
+
+    // MARK: - entityChipDisplay
+
+    func testEntityChipDisplayUnderCapShowsAll() {
+        let d = Formatters.entityChipDisplay(["a", "b", "c"])
+        XCTAssertEqual(d.visible, ["a", "b", "c"])
+        XCTAssertEqual(d.overflow, 0)
+    }
+
+    func testEntityChipDisplayAtCapShowsAllNoOverflow() {
+        // Cap defaults to 5 — the boundary case must not report overflow.
+        let d = Formatters.entityChipDisplay(["a", "b", "c", "d", "e"])
+        XCTAssertEqual(d.visible.count, 5)
+        XCTAssertEqual(d.overflow, 0)
+    }
+
+    func testEntityChipDisplayOverCapTruncates() {
+        let d = Formatters.entityChipDisplay(
+            ["a", "b", "c", "d", "e", "f", "g"]
+        )
+        XCTAssertEqual(d.visible, ["a", "b", "c", "d", "e"])
+        XCTAssertEqual(d.overflow, 2)
+    }
+
+    func testEntityChipDisplayPreservesOriginalOrder() {
+        let d = Formatters.entityChipDisplay(
+            ["MCP", "Anthropic", "vector-db", "sqlite-vec", "embedding", "MCI"]
+        )
+        XCTAssertEqual(
+            d.visible,
+            ["MCP", "Anthropic", "vector-db", "sqlite-vec", "embedding"]
+        )
+        XCTAssertEqual(d.overflow, 1)
+    }
+
+    func testEntityChipDisplayEmptyList() {
+        let d = Formatters.entityChipDisplay([])
+        XCTAssertEqual(d.visible, [])
+        XCTAssertEqual(d.overflow, 0)
+    }
+
+    func testEntityChipDisplayCustomCap() {
+        let d = Formatters.entityChipDisplay(["a", "b", "c", "d"], cap: 2)
+        XCTAssertEqual(d.visible, ["a", "b"])
+        XCTAssertEqual(d.overflow, 2)
+    }
+
+    func testEntityChipDisplayZeroCapReportsAllAsOverflow() {
+        // Defensive: cap == 0 shouldn't crash; reports everything hidden.
+        let d = Formatters.entityChipDisplay(["a", "b"], cap: 0)
+        XCTAssertEqual(d.visible, [])
+        XCTAssertEqual(d.overflow, 2)
+    }
+
+    // MARK: - linkedBadge
+
+    func testLinkedBadgeEmptyIsNil() {
+        XCTAssertNil(Formatters.linkedBadge([]))
+    }
+
+    func testLinkedBadgeSingularOne() {
+        XCTAssertEqual(Formatters.linkedBadge([42]), "1 related")
+    }
+
+    func testLinkedBadgePluralMany() {
+        XCTAssertEqual(Formatters.linkedBadge([1, 2, 3, 4, 5]), "5 related")
+    }
+
     func testScoreStringFormatting() {
         XCTAssertEqual(Formatters.scoreString(0.0), "0.0%")
         XCTAssertEqual(Formatters.scoreString(1.0), "100.0%")
