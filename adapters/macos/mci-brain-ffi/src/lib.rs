@@ -54,7 +54,7 @@ use std::path::PathBuf;
 use std::ptr;
 use std::sync::Arc;
 
-use mci_brain::{BrainStore, SqlCipherBrainStore};
+use mci_brain::{BrainStore, EventId, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 use serde::{Deserialize, Serialize};
 
@@ -94,6 +94,27 @@ pub struct HitJson {
     /// monotone-with-relevance lexical score. `None` for plain timeline
     /// rows where no query was issued.
     pub score: Option<f32>,
+    /// **Additive (Phase-6 close, cycle 8.35 PR-1).** Canonical names of the
+    /// resolver-allowlist entities (person / org / location / email / phone /
+    /// url — never a redacted-token label) this event mentions. Mirrors the
+    /// `entities` field on the MCP `mci_recall` wire
+    /// (`apps/agent/src/mcp/server.rs:302`) so recall UI can render entity
+    /// chips. Empty when the store has no graph data or the event mentions
+    /// nothing in the resolver allowlist. Filled by
+    /// [`mci_brain::BrainStore::entity_names_for_event`] — capped at
+    /// [`ENTITY_LIMIT`] names per hit.
+    #[serde(default)]
+    pub entities: Vec<String>,
+    /// **Additive (Phase-6 close, cycle 8.35 PR-1).** Cross-app "dot-connect"
+    /// event ids reachable from this hit's episode via a `shared_identity`
+    /// `episode_edge` (the V2-P6 Consolidator's link). Mirrors the
+    /// `linked_event_ids` field on the MCP `mci_recall` wire
+    /// (`apps/agent/src/mcp/server.rs:303`). Empty when the hit's episode has
+    /// no cross-app link. Post-cascade only (`cascade_reason = 0` wall).
+    /// Filled by [`mci_brain::BrainStore::linked_event_ids_for_event`] —
+    /// capped at [`LINK_LIMIT`] ids per hit.
+    #[serde(default)]
+    pub linked_event_ids: Vec<u64>,
 }
 
 /// A privacy-moment card row returned by
@@ -338,6 +359,7 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
                 ) {
                     continue;
                 }
+                let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
                 hits_json.push(HitJson {
                     event_id: event_id.0,
                     ts_us: ev.ts_us,
@@ -347,6 +369,8 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
                     ocr_text_snippet: snippet(&ev.text),
                     source: "lexical".into(),
                     score: Some(score),
+                    entities,
+                    linked_event_ids,
                 });
             }
             Ok(None) => {}
@@ -387,15 +411,20 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
     };
     let hits: Vec<HitJson> = events
         .into_iter()
-        .map(|ev| HitJson {
-            event_id: ev.id.0,
-            ts_us: ev.ts_us,
-            app_bundle_id: ev.app_bundle_id,
-            window_title: ev.window_title,
-            url: ev.url,
-            ocr_text_snippet: snippet(&ev.text),
-            source: "timeline".into(),
-            score: None,
+        .map(|ev| {
+            let (entities, linked_event_ids) = enrich_hit(&handle.store, ev.id);
+            HitJson {
+                event_id: ev.id.0,
+                ts_us: ev.ts_us,
+                app_bundle_id: ev.app_bundle_id,
+                window_title: ev.window_title,
+                url: ev.url,
+                ocr_text_snippet: snippet(&ev.text),
+                source: "timeline".into(),
+                score: None,
+                entities,
+                linked_event_ids,
+            }
         })
         .collect();
     json_to_c_string(&hits)
@@ -732,6 +761,20 @@ pub const MAX_LIMIT: u32 = 10_000;
 /// without re-flowing; raise only when the UI grows a long-form preview.
 pub const SNIPPET_CHAR_CAP: usize = 280;
 
+/// Maximum entity names surfaced per hit in [`HitJson::entities`]. Mirrors
+/// the cap used by the MCP `LiveBrainReader::enrich_hit`
+/// (`apps/agent/src/mcp/live.rs`) so the two recall surfaces cannot drift.
+/// The recall UI's chip strip renders at most ~3 chips before ellipsis;
+/// surfacing more is upside for future filter facets without breaking the
+/// list-cell layout.
+pub const ENTITY_LIMIT: usize = 16;
+
+/// Maximum cross-app linked event ids surfaced per hit in
+/// [`HitJson::linked_event_ids`]. Mirrors the cap used by the MCP
+/// `LiveBrainReader::enrich_hit`. The "Related (N)" flyout (PR-3, next
+/// cycle) paginates below this anyway.
+pub const LINK_LIMIT: usize = 16;
+
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<Option<CString>> = const {
         std::cell::RefCell::new(None)
@@ -791,6 +834,35 @@ fn snippet(s: &str) -> String {
         return s.to_string();
     }
     s.chars().take(SNIPPET_CHAR_CAP).collect()
+}
+
+/// Fill the additive Phase-6-close recall fields for one hit event:
+/// the resolver-allowlist entity names it mentions + the cross-app
+/// dot-connect event ids reachable from its episode.
+///
+/// **Best-effort + read-only:** both reads default to `Vec::new()` on a
+/// graph-less backend (the `BrainStore` trait defaults return
+/// `Ok(vec![])`) and are `.unwrap_or_default()`-ed here — an enrichment
+/// failure degrades a hit to "no entities / no links" rather than failing
+/// the whole recall. This mirrors the discipline of
+/// `apps/agent/src/mcp/live.rs::LiveBrainReader::enrich_hit` so the FFI
+/// and MCP recall surfaces cannot drift.
+///
+/// The store's `linked_event_ids_for_event` applies the
+/// `cascade_reason = 0` wall and `entity_names_for_event` restricts to
+/// the resolver allowlist, so neither surface can leak a suppressed
+/// event or a redacted-token label (ADR-0016 §4.3 + ADR-0017 §5.1).
+fn enrich_hit(store: &SqlCipherBrainStore, event_id: EventId) -> (Vec<String>, Vec<u64>) {
+    let entities = store
+        .entity_names_for_event(event_id, ENTITY_LIMIT)
+        .unwrap_or_default();
+    let linked_event_ids: Vec<u64> = store
+        .linked_event_ids_for_event(event_id, LINK_LIMIT)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.0)
+        .collect();
+    (entities, linked_event_ids)
 }
 
 /// Post-fetch filter that matches the optional `time_filter` /
@@ -1023,10 +1095,60 @@ mod tests {
             ocr_text_snippet: "The quick brown fox …".into(),
             source: "lexical".into(),
             score: Some(0.83),
+            entities: vec!["Anthropic".into(), "MCP".into()],
+            linked_event_ids: vec![101, 202, 303],
         };
         let s = serde_json::to_string(&h).unwrap();
         let back: HitJson = serde_json::from_str(&s).unwrap();
         assert_eq!(h, back);
+    }
+
+    #[test]
+    fn hit_json_deserializes_legacy_payload_without_entity_fields() {
+        // Backward compat: earlier FFI callers (or fixtures) that predate the
+        // cycle-8.35 wire widening emit no `entities` / `linked_event_ids`
+        // keys. Serde `#[serde(default)]` on both fields must accept this and
+        // yield empty vecs so a Swift client running against a rolled-back
+        // Rust build (or vice versa) does not blow up on decode.
+        let legacy = r#"{
+            "event_id": 7,
+            "ts_us": 1700000000000000,
+            "app_bundle_id": null,
+            "window_title": null,
+            "url": null,
+            "ocr_text_snippet": "hello",
+            "source": "timeline",
+            "score": null
+        }"#;
+        let h: HitJson = serde_json::from_str(legacy).expect("legacy JSON must decode");
+        assert!(h.entities.is_empty());
+        assert!(h.linked_event_ids.is_empty());
+    }
+
+    #[test]
+    fn hit_json_emits_entity_fields_in_serialized_json() {
+        // Positive assertion: the serialized JSON carries both new keys so
+        // the Swift `HitWire` decoder can rely on them being present when a
+        // fresh Rust FFI writes the payload. This locks the wire shape.
+        let h = HitJson {
+            event_id: 1,
+            ts_us: 0,
+            app_bundle_id: None,
+            window_title: None,
+            url: None,
+            ocr_text_snippet: String::new(),
+            source: "hybrid".into(),
+            score: None,
+            entities: vec!["vector-db".into()],
+            linked_event_ids: vec![9],
+        };
+        let s = serde_json::to_string(&h).unwrap();
+        assert!(s.contains("\"entities\""), "missing entities key in {s}");
+        assert!(
+            s.contains("\"linked_event_ids\""),
+            "missing linked_event_ids key in {s}"
+        );
+        assert!(s.contains("vector-db"));
     }
 
     #[test]
