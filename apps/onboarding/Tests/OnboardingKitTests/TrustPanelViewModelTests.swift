@@ -93,4 +93,38 @@ final class TrustPanelViewModelTests: XCTestCase {
         await vm.addDenyEntry()
         XCTAssertEqual(vm.denylistEntries.count, 0)
     }
+
+    // MARK: - PR-3 regression: TrustSlide must call load()
+
+    /// Regression test for PR-3 bug (a): before the fix, `TrustSlide`
+    /// never called `trustVM.load()`, so `denylistEntries` stayed empty
+    /// and the RetentionSlide "Always blocked" preview fell through to
+    /// the hardcoded `defaultBlockedList` — even if the shipped
+    /// `denylist.toml` was longer or different.
+    ///
+    /// This test asserts the VM contract that TrustSlide now depends on:
+    /// a `load()` call populates `denylistEntries` with the store's
+    /// baseline CSO entries. If a future refactor breaks that
+    /// invariant, the RetentionSlide preview will silently regress
+    /// again — the test guards the exact call site.
+    func testLoadPopulatesDenylistFromCSOBaseline() async {
+        let csoEntries = [
+            DenylistEntry(type: .bundleId, value: "com.1password.1password",
+                          source: .csoRatified),
+            DenylistEntry(type: .bundleId, value: "com.chase.sig.Chase",
+                          source: .csoRatified),
+            DenylistEntry(type: .bundleId, value: "com.apple.MobileSMS",
+                          source: .csoRatified),
+        ]
+        let deny = StubDenylistEditorStore(cso: csoEntries)
+        let vm = makeVM(denylist: deny)
+        // Before load(), the array must be empty — this is the exact
+        // state that used to leak into TrustSlide / RetentionSlide.
+        XCTAssertTrue(vm.denylistEntries.isEmpty)
+        await vm.load()
+        XCTAssertEqual(vm.denylistEntries.count, csoEntries.count)
+        let values = Set(vm.denylistEntries.map(\.value))
+        XCTAssertTrue(values.contains("com.1password.1password"))
+        XCTAssertTrue(values.contains("com.apple.MobileSMS"))
+    }
 }

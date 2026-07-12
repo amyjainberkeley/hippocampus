@@ -124,10 +124,16 @@ public final class AllowlistEditorViewModel: ObservableObject {
 
         // 1. Baseline rows (read-only, always "captureOnly" since baseline
         //    doesn't carry per-app deep-hook state — that's user-layer-only).
+        //    Resolve a human-friendly display name (`com.apple.MobileSMS`
+        //    → `Messages`) so the UI never shows a raw bundle id. See
+        //    `BundleDisplayNameResolver` for the local-only NSWorkspace
+        //    + static-table + prettify ladder.
         for entry in baseline {
             rows.append(EditorRow(
                 bundleId: entry.bundleId,
-                displayName: entry.bundleId,
+                displayName: BundleDisplayNameResolver.displayName(
+                    for: entry.bundleId
+                ),
                 posture: .captureOnly,
                 supportsDeepHook: Self.deepHookableBundles.contains(entry.bundleId),
                 isBaselineEntry: true
@@ -161,7 +167,9 @@ public final class AllowlistEditorViewModel: ObservableObject {
         }
 
         // 3. User-layer entries not running right now (still listed so
-        //    the user can see + manage them).
+        //    the user can see + manage them). Resolve display name the
+        //    same way as baseline — the running-apps case above already
+        //    has a name from NSWorkspace via the detector.
         for entry in userEntries where !seen.contains(entry.bundleId) {
             let posture: AllowlistTogglePosture
             if entry.deepHookEnabled {
@@ -173,7 +181,9 @@ public final class AllowlistEditorViewModel: ObservableObject {
             }
             rows.append(EditorRow(
                 bundleId: entry.bundleId,
-                displayName: entry.bundleId,
+                displayName: BundleDisplayNameResolver.displayName(
+                    for: entry.bundleId
+                ),
                 posture: posture,
                 supportsDeepHook: Self.deepHookableBundles.contains(entry.bundleId),
                 isBaselineEntry: false

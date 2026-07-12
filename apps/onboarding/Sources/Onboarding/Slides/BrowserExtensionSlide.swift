@@ -101,7 +101,12 @@ struct BrowserExtensionSlide: View {
                 .foregroundStyle(.orange)
                 .font(.system(size: 14))
         case .unknown:
-            EmptyView()
+            // Distinguish "probe hasn't run yet" from "probe ran and
+            // found nothing" — the empirical delivery probe returns
+            // `.notInstalled` (orange) only after `mci-agent stats`
+            // has responded. Before that, show a gentle spinning
+            // hourglass so the user knows we're still checking.
+            CheckingBadge()
         }
     }
 
@@ -196,5 +201,34 @@ struct BrowserExtensionSlide: View {
         #if canImport(AppKit)
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         #endif
+    }
+}
+
+/// Loading-state badge for the `.unknown` extension-status case. Rotates
+/// an hourglass 360° every 2s to signal "checking…" without adding a
+/// second string of copy to the row. Kept `internal` (default) so tests
+/// can reference the type directly.
+///
+/// Design choice: hourglass vs `ProgressView` — the hourglass reads as
+/// "waiting on a check" more clearly than a spinner (which reads as
+/// "downloading" in the surrounding onboarding context). Slow rotation
+/// avoids attention-hijacking the row while the probe runs.
+struct CheckingBadge: View {
+    @State private var isRotating: Bool = false
+
+    var body: some View {
+        Image(systemName: "hourglass")
+            .foregroundStyle(.secondary)
+            .font(.system(size: 14))
+            .rotationEffect(.degrees(isRotating ? 360 : 0))
+            .animation(
+                .linear(duration: 2.0).repeatForever(autoreverses: false),
+                value: isRotating
+            )
+            .onAppear {
+                isRotating = true
+            }
+            .accessibilityLabel("Checking extension status")
+            .accessibilityIdentifier("BrowserExtensionStatusBadgeChecking")
     }
 }
