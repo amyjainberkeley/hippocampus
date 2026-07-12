@@ -20,12 +20,53 @@ import Foundation
 /// Preset date-range buckets shown as filter pills. The `custom` case
 /// carries an explicit `ClosedRange<Date>`; the calendar popover writes
 /// it. `none` means "no date filter" (the implicit default).
-public enum DateRangePreset: Equatable, Sendable, Hashable {
+public enum DateRangePreset: Equatable, Sendable, Hashable, Codable {
     case none
     case today
     case yesterday
     case last7Days
     case custom(from: Date, to: Date)
+
+    // Custom Codable — the associated-value `.custom` case doesn't
+    // round-trip through the synthesized encoder cleanly, so we
+    // serialize as `{ "kind": "custom", "from": <epoch>, "to": <epoch> }`.
+    // Bumping the "kind" strings would be a schema break; keep stable.
+    private enum CodingKeys: String, CodingKey {
+        case kind, from, to
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .none: try c.encode("none", forKey: .kind)
+        case .today: try c.encode("today", forKey: .kind)
+        case .yesterday: try c.encode("yesterday", forKey: .kind)
+        case .last7Days: try c.encode("last7Days", forKey: .kind)
+        case .custom(let from, let to):
+            try c.encode("custom", forKey: .kind)
+            try c.encode(from, forKey: .from)
+            try c.encode(to, forKey: .to)
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try c.decode(String.self, forKey: .kind)
+        switch kind {
+        case "none": self = .none
+        case "today": self = .today
+        case "yesterday": self = .yesterday
+        case "last7Days": self = .last7Days
+        case "custom":
+            let from = try c.decode(Date.self, forKey: .from)
+            let to = try c.decode(Date.self, forKey: .to)
+            self = .custom(from: from, to: to)
+        default:
+            // Unknown kind from a newer version — degrade to `.none`
+            // rather than throw. Persisted state must never crash the app.
+            self = .none
+        }
+    }
 
     /// Short label for pill display.
     public var label: String {
@@ -67,7 +108,7 @@ public enum FilterPill: String, CaseIterable, Sendable, Equatable, Hashable, Ide
 
 /// The recall-UI search filter model. Equatable so the SearchView's
 /// `.onChange` only re-fires when something actually changes.
-public struct FilterState: Equatable, Sendable {
+public struct FilterState: Equatable, Sendable, Codable {
     /// App bundle ids the user has narrowed to. Empty ⇒ no app filter.
     public var appBundleIds: Set<String> = []
     /// Time-window preset. `.none` ⇒ no time filter.
@@ -76,6 +117,18 @@ public struct FilterState: Equatable, Sendable {
     public var hasUrl: Bool = false
 
     public init() {}
+
+    /// Explicit member-wise init so tests / restore can hydrate a
+    /// state without going through the toggle helpers.
+    public init(
+        appBundleIds: Set<String>,
+        dateRange: DateRangePreset,
+        hasUrl: Bool
+    ) {
+        self.appBundleIds = appBundleIds
+        self.dateRange = dateRange
+        self.hasUrl = hasUrl
+    }
 
     /// `true` when any filter dimension would narrow the result set.
     public var anyActive: Bool {

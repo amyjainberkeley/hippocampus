@@ -2,6 +2,7 @@
 // scenes bind to. Kept in the testable library target so unit tests
 // can exercise state transitions without spinning a SwiftUI scene.
 
+import Combine
 import Foundation
 
 @MainActor
@@ -18,9 +19,32 @@ public final class SearchViewModel: ObservableObject {
     @Published public private(set) var observedApps: [ObservedApp] = []
 
     private let reader: BrainReader
+    /// Persists `{ query, filters }` across quit/restore. Cycle 8.35
+    /// audit follow-up. Injectable so tests can pass an in-memory store.
+    private let persistence: QueryPersistence
+    private var persistCancellable: AnyCancellable?
 
-    public init(reader: BrainReader) {
+    public init(
+        reader: BrainReader,
+        persistence: QueryPersistence = QueryPersistence()
+    ) {
         self.reader = reader
+        self.persistence = persistence
+        // Rehydrate synchronously so the view's first render already
+        // reflects the user's last session. Falls through to defaults
+        // on nil / corrupted blob (see QueryPersistence.load).
+        if let restored = persistence.load() {
+            self.query = restored.query
+            self.filters = restored.filters
+        }
+        // Debounce writes so a fast typist doesn't hammer UserDefaults.
+        // 250 ms matches the audit spec; the trailing edge fires so the
+        // final keystroke is always captured.
+        self.persistCancellable = Publishers.CombineLatest($query, $filters)
+            .debounce(for: .milliseconds(250), scheduler: DispatchQueue.main)
+            .sink { [persistence] q, f in
+                persistence.save(PersistedQueryState(query: q, filters: f))
+            }
     }
 
     /// Refresh the per-app pill source. Cheap aggregate query — call on
@@ -111,6 +135,10 @@ public final class SearchViewModel: ObservableObject {
         hits = []
         errorMessage = nil
         filters = FilterState()
+        // Eagerly wipe persistence too — the debounced sink would
+        // eventually erase it (empty state ⇒ delete key) but the user
+        // clicked "×" so make it immediate.
+        persistence.clear()
     }
 
     public func moveSelectionUp() {
