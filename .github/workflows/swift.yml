@@ -3,7 +3,39 @@ name: Swift — MCICaptureHelper + recall-ui + installer
 on:
   push:
     branches: [main]
+    paths:
+      - '**.swift'
+      - '**/Package.swift'
+      - '**/Package.resolved'
+      - 'adapters/macos/**'
+      - 'apps/recall-ui/**'
+      - 'apps/hippocampus/**'
+      - 'apps/hippocampus-native-host/**'
+      - 'apps/onboarding/**'
+      - 'scripts/build-installer.sh'
+      - 'scripts/build-app.sh'
+      - '.github/workflows/swift.yml'
+      - 'core/mci-brain-ffi/**'
+      - '**.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   pull_request:
+    paths:
+      - '**.swift'
+      - '**/Package.swift'
+      - '**/Package.resolved'
+      - 'adapters/macos/**'
+      - 'apps/recall-ui/**'
+      - 'apps/hippocampus/**'
+      - 'apps/hippocampus-native-host/**'
+      - 'apps/onboarding/**'
+      - 'scripts/build-installer.sh'
+      - 'scripts/build-app.sh'
+      - '.github/workflows/swift.yml'
+      - 'core/mci-brain-ffi/**'
+      - '**.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 concurrency:
   group: swift-${{ github.ref }}
