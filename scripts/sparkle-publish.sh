@@ -20,8 +20,11 @@ set -euo pipefail
 #                          Default: GitHub Releases URL derived from --release-tag.
 #   --release-tag TAG      Git tag of the release that hosts the DMG asset.
 #                          Default: "v<version>" extracted from DMG filename.
-#   --hosting-mode MODE    "ghpages-releases" (default) | "s3"
+#   --hosting-mode MODE    "vercel-landing" (default) | "ghpages-releases" | "s3"
 #                          Only changes the default --download-url shape.
+#                          "vercel-landing"  → https://hippocampus-swart.vercel.app/<dmg>
+#                          "ghpages-releases" → GitHub Releases asset URL
+#                          "s3"               → https://releases.hippocampus.ai/<dmg>
 #   --dist DIR             Output directory for appcast.xml (default: dist/)
 #   --no-confirm           Skip interactive confirmation for destructive ops.
 #   --help                 Show this help.
@@ -45,7 +48,7 @@ RELEASE_NOTES_PATH=""
 APPCAST_PATH=""
 DOWNLOAD_URL=""
 RELEASE_TAG=""
-HOSTING_MODE="ghpages-releases"
+HOSTING_MODE="vercel-landing"
 DIST_DIR="$REPO_ROOT/dist"
 NO_CONFIRM=0
 
@@ -66,7 +69,7 @@ Optional:
                          Default: \$DIST_DIR/appcast.xml.
   --download-url URL     Full URL where users will fetch the DMG.
   --release-tag TAG      Git tag that publishes the DMG (default: v<version>).
-  --hosting-mode MODE    "ghpages-releases" (default) | "s3".
+  --hosting-mode MODE    "vercel-landing" (default) | "ghpages-releases" | "s3".
   --dist DIR             Output directory for appcast.xml (default: dist/).
   --no-confirm           Bypass interactive confirmation prompts.
   --help                 Show this help.
@@ -173,19 +176,36 @@ if [[ -z "$RELEASE_TAG" ]]; then RELEASE_TAG="v${VERSION}"; fi
 
 if [[ -z "$DOWNLOAD_URL" ]]; then
     case "$HOSTING_MODE" in
+        vercel-landing)
+            # Same origin as landing/index.html serves the DMG from. When the
+            # `hippocampus.ai` custom domain is provisioned (OWNER_TASKS #3),
+            # swap this URL together with `SUFeedURL` in Info.plist.
+            DOWNLOAD_URL="https://hippocampus-swart.vercel.app/$(basename "$DMG_PATH")"
+            ;;
         ghpages-releases)
             DOWNLOAD_URL="https://github.com/amyjainberkeley/hippocampus/releases/download/${RELEASE_TAG}/$(basename "$DMG_PATH")"
             ;;
         s3)
             DOWNLOAD_URL="https://releases.hippocampus.ai/$(basename "$DMG_PATH")"
             ;;
-        *) die "Unknown --hosting-mode: $HOSTING_MODE (use ghpages-releases or s3)" ;;
+        *) die "Unknown --hosting-mode: $HOSTING_MODE (use vercel-landing, ghpages-releases, or s3)" ;;
     esac
 fi
 
 # --- Default appcast path ---
+#
+# We write directly into the checked-in `landing/appcast.xml` under
+# vercel-landing mode so `landing/deploy.sh --prod` picks up the new <item>
+# in the same push. Under ghpages-releases mode the historical `dist/appcast.xml`
+# staging path is preserved so the docs/appcast-hosting.md GH-Pages recipe still
+# works unchanged.
 
-if [[ -z "$APPCAST_PATH" ]]; then APPCAST_PATH="$DIST_DIR/appcast.xml"; fi
+if [[ -z "$APPCAST_PATH" ]]; then
+    case "$HOSTING_MODE" in
+        vercel-landing) APPCAST_PATH="$REPO_ROOT/landing/appcast.xml" ;;
+        *)              APPCAST_PATH="$DIST_DIR/appcast.xml" ;;
+    esac
+fi
 mkdir -p "$(dirname "$APPCAST_PATH")"
 
 # --- Summary + confirm if writing outside dist/ ---
@@ -212,9 +232,10 @@ confirm() {
 }
 
 case "$APPCAST_PATH" in
-    "$REPO_ROOT"/dist/*) ;;
+    "$REPO_ROOT"/dist/*)      ;;
+    "$REPO_ROOT"/landing/*)   ;;
     *)
-        echo "WARNING: --appcast points outside dist/ — this will write to: $APPCAST_PATH"
+        echo "WARNING: --appcast points outside dist/ or landing/ — this will write to: $APPCAST_PATH"
         if ! confirm "Write appcast.xml to this location?"; then
             echo "Aborted." >&2; exit 2
         fi
@@ -417,7 +438,19 @@ echo "  Version:  $VERSION (build $BUILD_NUMBER)"
 echo "  DMG URL:  $DOWNLOAD_URL"
 echo ""
 echo "Next:"
-echo "  1. Upload $DMG_PATH as a release asset for tag $RELEASE_TAG:"
-echo "       gh release create $RELEASE_TAG --notes-file $RELEASE_NOTES_PATH $DMG_PATH"
-echo "  2. Commit + push $APPCAST_PATH to the public appcast repo"
-echo "     (see docs/appcast-hosting.md for the GH Pages procedure)."
+case "$HOSTING_MODE" in
+    vercel-landing)
+        echo "  1. Commit the updated $APPCAST_PATH to the current branch."
+        echo "  2. Copy the DMG next to it and deploy to Vercel:"
+        echo "       cp $DMG_PATH $REPO_ROOT/landing/"
+        echo "       (landing/deploy.sh will do the copy + \`vercel deploy --prod\` for you.)"
+        echo "  3. Verify:  curl -sI $DOWNLOAD_URL | head -1"
+        echo "             curl -sS https://hippocampus-swart.vercel.app/appcast.xml | xmllint --noout - && echo OK"
+        ;;
+    *)
+        echo "  1. Upload $DMG_PATH as a release asset for tag $RELEASE_TAG:"
+        echo "       gh release create $RELEASE_TAG --notes-file $RELEASE_NOTES_PATH $DMG_PATH"
+        echo "  2. Commit + push $APPCAST_PATH to the public appcast repo"
+        echo "     (see docs/appcast-hosting.md for the GH Pages procedure)."
+        ;;
+esac
