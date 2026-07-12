@@ -47,14 +47,30 @@
             </array>
         </dict>
     </array>
-    <!-- Sparkle 2.x auto-update configuration -->
+    <!-- Sparkle 2.x auto-update configuration.
+         Feed URL is co-hosted with the DMG on the Vercel landing surface
+         until the `hippocampus.ai` custom domain is provisioned (OWNER_TASKS #3);
+         at that point the URL flips to https://appcast.hippocampus.ai/appcast.xml
+         per docs/appcast-hosting.md, and Sparkle picks it up on the next reship.
+         SUPublicEDKey is a placeholder Ed25519 public key — Amy runs
+         scripts/sparkle-keygen.sh (OWNER_TASKS #4) to mint the real keypair,
+         which replaces this string. The placeholder means unsigned builds
+         will fetch the feed but reject any <item> until the real key is
+         wired — deliberate; keeps the pipeline testable end-to-end without
+         shipping trust before the key is in 1Password. -->
     <key>SUFeedURL</key>
-    <string>https://hippocampus.ai/appcast.xml</string>
+    <string>https://hippocampus-swart.vercel.app/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>XRC6iJSDpOpPuA78CqB0vC6Lw1YUyZalLIXgyBCfG00=</string>
     <key>SUEnableSystemProfiling</key>
     <false/>
     <key>SUEnableInstallerLauncher</key>
     <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>

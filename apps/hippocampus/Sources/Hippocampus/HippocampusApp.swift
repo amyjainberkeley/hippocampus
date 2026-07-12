@@ -28,6 +28,13 @@ struct HippocampusApp: App {
                 // Here we only do menu-open-time chores: Sparkle updater
                 // start + the LoginItem one-time prompt mark.
                 updater.startUpdater()
+                // One-shot delayed background poll of the Sparkle appcast.
+                // The 10 s delay lets `ProcessSupervisor.start()` finish
+                // spinning up MCICaptureHelper + mci-agent before the
+                // updater does any network I/O + XML parse work. Gated on
+                // the user's opt-in inside `checkForUpdatesInBackground()`
+                // — no network call happens if auto-check is OFF.
+                updater.scheduleBackgroundCheck(after: 10.0)
                 if loginItemVM.shouldPrompt {
                     loginItemVM.markPrompted()
                 }

@@ -73,4 +73,36 @@ public final class SparkleUpdaterService: NSObject, UpdaterService, @unchecked S
         controller.checkForUpdates(nil)
         logger.info("updater: manual check initiated")
     }
+
+    /// Silent background poll of the appcast feed. Unlike `checkForUpdates()`,
+    /// this does NOT surface UI unless a new version is actually available —
+    /// matches Sparkle's default background behavior. Gated on the same
+    /// `automaticallyChecksForUpdates` opt-in the user controls from the menu;
+    /// if auto-check is off, this is a no-op.
+    ///
+    /// Called by `HippocampusApp` with a 10 s delay after launch so the
+    /// network + XML parse never competes with `ProcessSupervisor.start()`
+    /// (which is spinning up MCICaptureHelper + mci-agent + the recall-ui
+    /// bind path in that window).
+    public func checkForUpdatesInBackground() {
+        guard canCheckForUpdates else { return }
+        guard controller.updater.automaticallyChecksForUpdates else {
+            logger.info("updater: background check skipped (auto-check opt-in is OFF)")
+            return
+        }
+        stateSubject.send(.checking)
+        controller.updater.checkForUpdatesInBackground()
+        logger.info("updater: background check initiated")
+    }
+
+    /// Schedule a one-shot background check `delay` seconds after this call.
+    /// Called from the app launch path; the delay is a launch-storm mitigator,
+    /// not a rate-limit — Sparkle's own `SUScheduledCheckInterval` handles
+    /// steady-state polling once auto-check is opted in.
+    public func scheduleBackgroundCheck(after delay: TimeInterval) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            self?.checkForUpdatesInBackground()
+        }
+    }
 }

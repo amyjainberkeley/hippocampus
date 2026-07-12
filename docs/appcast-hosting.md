@@ -3,6 +3,17 @@
 How to host the Hippocampus `appcast.xml` and DMG so Sparkle auto-update works
 end-to-end. This is the runbook the owner follows once per release.
 
+> **Current wiring (2026-07-12).** The appcast is co-hosted with the DMG on
+> the Vercel landing surface at `https://hippocampus-swart.vercel.app/appcast.xml`.
+> `apps/hippocampus/Resources/Info.plist` `SUFeedURL` points here. This is
+> deliberate short-term: same origin as the DMG = one deploy step per release
+> (`landing/deploy.sh --prod`) instead of two, and no dependency on
+> `hippocampus.ai` (not yet purchased — OWNER_TASKS #3). When that domain lands,
+> flip `SUFeedURL` + Vercel's custom-domain config together; existing installs
+> pick up the new URL on their next `SUFeedURL`-baked binary. The GH Pages +
+> `appcast.hippocampus.ai` architecture below is the "when volume warrants"
+> Option B, same as S3+CloudFront was previously.
+
 The two scripts referenced below are:
 
 - `scripts/sparkle-keygen.sh`  — mint the EdDSA signing keypair (one-time).
