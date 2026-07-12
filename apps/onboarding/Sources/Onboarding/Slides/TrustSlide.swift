@@ -45,6 +45,18 @@ struct TrustSlide: View {
                 onClose: { showKeyWrapAudit = false }
             )
         }
+        // Load the CSO baseline denylist so the RetentionSlide "Always
+        // blocked" preview reflects the real shipped policy instead of
+        // the hardcoded 5-entry fallback in `defaultBlockedList`. Cascade
+        // steps render fine either way (they're a static `let`), but any
+        // new dynamic surface reading `trustVM.denylistEntries` /
+        // `trustVM.allowlistEntries` was silently empty before this call.
+        // `TrustPanelViewModel.load()` swallows errors (empty arrays on
+        // failure), so the hardcoded fallback in RetentionSlide remains
+        // the safety net.
+        .task {
+            await trustVM.load()
+        }
     }
 
     private func currentReport() -> KeyWrapAuditReport {
