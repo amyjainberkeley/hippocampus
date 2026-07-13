@@ -79,6 +79,8 @@ struct SearchView: View {
                         .foregroundStyle(Color.brandFgMuted)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+                .accessibilityHint("Clears the query and any active filters")
             }
         }
         .padding(.horizontal, MCI.Spacing.m)

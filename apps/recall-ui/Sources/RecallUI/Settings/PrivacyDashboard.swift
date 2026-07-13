@@ -278,6 +278,11 @@ struct PrivacySummaryCard: View {
                 .stroke(Color.brandCardBorder, lineWidth: 1)
         )
         .cornerRadius(8)
+        // Combine the lock icon + heading + summary + reassurance into
+        // one VoiceOver announcement so a screen-reader user hears the
+        // trust posture as a single statement rather than four
+        // fragmented Texts.
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -390,6 +395,8 @@ struct EventRow: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .accessibilityLabel("Event actions")
+            .accessibilityHint("Delete this event, hour, or day; or report as sensitive")
         }
         .padding(10)
         .background(Color.brandBgSecondary)
@@ -587,6 +594,15 @@ struct RecentActivitySection: View {
                                     .truncationMode(.tail)
                             }
                             .font(.system(.caption, design: .monospaced))
+                            // Combine so VoiceOver reads
+                            // "2026-07-13 14:32:11, deleteEventsInRange,
+                            //  count=47" as one row-line, not three.
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(
+                                "\(Self.displayFormatter.string(from: entry.timestamp)), "
+                                + "\(entry.action.rawValue), "
+                                + "\(Self.formatDetails(entry.details))"
+                            )
                         }
                     }
                 }

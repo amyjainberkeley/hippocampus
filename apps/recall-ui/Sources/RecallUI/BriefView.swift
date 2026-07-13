@@ -171,6 +171,8 @@ struct DateSelectorBar: View {
             .disabled(!viewModel.canPickPrevious)
             .keyboardShortcut(.leftArrow, modifiers: .command)
             .help("Previous brief")
+            .accessibilityLabel("Previous brief")
+            .accessibilityHint("Show the brief for the previous day")
 
             Text(viewModel.selectedDate.map(Self.humanReadable) ?? "—")
                 .font(.system(.title3, design: .default).weight(.semibold))
@@ -189,6 +191,8 @@ struct DateSelectorBar: View {
             .disabled(!viewModel.canPickNext)
             .keyboardShortcut(.rightArrow, modifiers: .command)
             .help("Next brief")
+            .accessibilityLabel("Next brief")
+            .accessibilityHint("Show the brief for the following day")
         }
     }
 

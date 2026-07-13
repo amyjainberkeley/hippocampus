@@ -170,6 +170,8 @@ struct DetailPaneView: View {
         }
         .buttonStyle(.plain)
         .help("Show cross-app siblings of this event")
+        .accessibilityLabel("Show \(hit.linkedEventIds.count) related events")
+        .accessibilityHint("Opens the cross-app siblings flyout for this event")
         .popover(
             isPresented: Binding(
                 get: {
@@ -363,6 +365,10 @@ private struct EntityChipTrigger<PopoverContent: View>: View {
             )
             .foregroundStyle(Color.brandMint)
             .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Entity \(name)")
+            .accessibilityHint("Show related events for this entity")
+            .accessibilityAddTraits(.isButton)
             .onTapGesture { onOpen() }
             .onHover { entered in
                 hoverTask?.cancel()

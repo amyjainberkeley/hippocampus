@@ -179,6 +179,7 @@ struct AllowlistSlide: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 280)
             .labelsHidden()
+            .accessibilityLabel("Capture posture for \(row.displayName)")
             Button {
                 Task { await editorVM.removeUserEntry(bundleId: row.bundleId) }
             } label: {
@@ -186,6 +187,7 @@ struct AllowlistSlide: View {
             }
             .buttonStyle(.borderless)
             .help("Remove from user allowlist")
+            .accessibilityLabel("Remove \(row.displayName) from allowlist")
         }
         .padding(8)
         .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
