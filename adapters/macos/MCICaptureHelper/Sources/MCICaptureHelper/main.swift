@@ -132,7 +132,40 @@ let args = parseArgs(CommandLine.arguments)
 // ADR-0013 Amendment 1 §4 — live capture is DEFAULT-OFF / dev-only.
 // `captureEnabled` is true ONLY if the non-default `--capture` flag was
 // explicitly passed. The default path never constructs an `SCStream`.
-let captureOptions = CaptureLaunchOptions.parse(CommandLine.arguments)
+let parsedCaptureOptions = CaptureLaunchOptions.parse(CommandLine.arguments)
+
+// ADR-0031 §Status M4 LIFT (env-var-gated interim, Phase 7 PR 14).
+// Read `HIPPOCAMPUS_ENABLE_V2P1` at boot; when set to exactly "1" the
+// gate overrides BOTH capture flags:
+//   • `captureOptions.captureEnabled` : false → true
+//   • `CascadeTwiceOCREmitter.killOcrEmit` : true → false
+// When the env var is unset or set to anything else, both flags stay at
+// their pre-M4-lift defaults — users on the shipped DMG see NO change.
+// The full lift (removing the gate) is a follow-up PR after Amy's live-
+// Mac §7-equivalent smoke test passes (redesign memo §3.2 H6′–H10′).
+//
+// One-way, read-once, cached at first access. See
+// `MCICaptureHelperKit/Capture/MciV2P1Gate.swift` header for the full
+// CSO sign-off block.
+let v2p1GateState = MciV2P1Gate.current
+FileHandle.standardError.write(
+    MciV2P1Gate.stderrBreadcrumb(v2p1GateState).data(using: .utf8) ?? Data()
+)
+let captureOptions: CaptureLaunchOptions
+switch v2p1GateState {
+case .enabled:
+    // M4 lift active — override the argv-parsed default-OFF gate and
+    // flip the cascade-twice OCR emit kill-switch off. These two
+    // overrides constitute the FULL M4 lift; the SCContentFilter
+    // multi-window factory is already wired at construction time via
+    // PR #28 (V2-P1 third-lift wiring).
+    captureOptions = CaptureLaunchOptions(captureEnabled: true)
+    CascadeTwiceOCREmitter.activateM4Lift(enabled: true)
+case .disabled:
+    // Preserve pre-M4-lift behavior. `killOcrEmit` remains the module
+    // default (`true`); `captureEnabled` follows the argv parse.
+    captureOptions = parsedCaptureOptions
+}
 
 // Output file handle.
 let outputHandle: FileHandle
