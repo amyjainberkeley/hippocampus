@@ -152,19 +152,28 @@ public struct SearchOptions: Sendable, Equatable {
     public let appFilter: String?
     public let timeFromUs: UInt64?
     public let timeToUs: UInt64?
+    /// Cycle 8.42 — user-defined entity aliases (`UserDictionary`). Keys
+    /// are canonical names, values are the alias list. The recall pipeline
+    /// OR-expands the FTS5 query at the FFI boundary so a search for one
+    /// spelling also matches events that mention any of the other
+    /// spellings. Empty (or nil) = no expansion, byte-identical to the
+    /// baseline recall path.
+    public let userAliases: [String: [String]]?
 
     public init(
         text: String,
         limit: Int = 50,
         appFilter: String? = nil,
         timeFromUs: UInt64? = nil,
-        timeToUs: UInt64? = nil
+        timeToUs: UInt64? = nil,
+        userAliases: [String: [String]]? = nil
     ) {
         self.text = text
         self.limit = limit
         self.appFilter = appFilter
         self.timeFromUs = timeFromUs
         self.timeToUs = timeToUs
+        self.userAliases = userAliases
     }
 }
 

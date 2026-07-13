@@ -150,6 +150,17 @@ pub struct QueryJson {
     /// Restrict to one `appBundleId`. `None` ⇒ no filter.
     #[serde(default)]
     pub app_filter: Option<String>,
+    /// **Additive (cycle 8.42).** User-defined entity aliases from the
+    /// recall UI's `UserDictionary`. Keys are canonical names; values are
+    /// the alias list. When the query text contains a token that appears
+    /// as either a canonical name or one of its aliases (case-insensitive),
+    /// the FTS5 query is OR-expanded to include all the other spellings
+    /// so a search for `"AJ"` also matches events that mention `"Amy Jain"`.
+    /// Missing key / empty map = no expansion; the recall path is
+    /// byte-identical to the pre-8.42 behavior. Backward-compat by
+    /// `#[serde(default)]`.
+    #[serde(default)]
+    pub user_aliases: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// JSON payload format for [`mci_brain_ffi_events_by_ids`] input.
@@ -353,9 +364,16 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
     }
     let limit = query.limit.min(MAX_LIMIT as usize).max(1);
 
+    // Cycle 8.42: expand the FTS5 query with the user's dictionary aliases
+    // BEFORE handing it to `fts5_search`. Empty alias map = identity
+    // (`expanded == query.text`), which preserves the pre-8.42 recall
+    // trace byte-for-byte on stores that don't send the field. See
+    // `expand_query_with_user_aliases` for the expansion rules.
+    let expanded = expand_query_with_user_aliases(&query.text, &query.user_aliases);
+
     // P3.9b: FTS5-only lexical search. See module docs for the HybridRetriever
     // swap point (P3.3 Core ML embedder needs to land first).
-    let hits_raw = match handle.store.fts5_search(&query.text, limit) {
+    let hits_raw = match handle.store.fts5_search(&expanded, limit) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_search: fts5_search: {e}"));
@@ -904,6 +922,20 @@ pub const LINK_LIMIT: usize = 16;
 /// "expand siblings-of-siblings" path without unbounding the loop.
 pub const EVENTS_BY_IDS_CAP: usize = 32;
 
+/// Cycle 8.42 — cap on the number of canonical-alias groups accepted from
+/// the recall UI's user dictionary per query. Bounds the FTS5 query size
+/// (`~cap * cap * avg_len` bytes) so a hostile caller cannot inflate the
+/// query into an OOM shape. 64 leaves ample headroom for the "one alias
+/// per contact + a dozen topics" use case while staying well inside the
+/// FTS5 boolean planner's happy range.
+pub const USER_ALIAS_GROUP_CAP: usize = 64;
+
+/// Cycle 8.42 — cap on the number of aliases per canonical name. Same
+/// budget rationale as [`USER_ALIAS_GROUP_CAP`]. A user with more than 16
+/// spellings for the same person / topic should split into multiple
+/// canonical groups.
+pub const USER_ALIAS_PER_GROUP_CAP: usize = 16;
+
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<Option<CString>> = const {
         std::cell::RefCell::new(None)
@@ -992,6 +1024,78 @@ fn enrich_hit(store: &SqlCipherBrainStore, event_id: EventId) -> (Vec<String>, V
         .map(|e| e.0)
         .collect();
     (entities, linked_event_ids)
+}
+
+/// Expand a raw user query with the caller's user-dictionary aliases
+/// (cycle 8.42). When the query text contains — as a case-insensitive
+/// substring — a canonical name or any of its aliases, the FTS5 query is
+/// rewritten as an OR-group over all the equivalent spellings so a
+/// search for `"AJ email"` also matches events that mention
+/// `"Amy Jain email"`. Multi-word spellings are quoted so FTS5 treats
+/// them as a single phrase.
+///
+/// **Match semantics.** Case-insensitive substring on the query text.
+/// This is intentionally loose so `"AJ"`, `"aj"`, `"aj@example.com"` all
+/// trigger the expansion for a canonical `"AJ"`. False positives are
+/// bounded: an expansion only *adds* an OR-branch to FTS5; it never
+/// removes candidate events, so worst-case a spurious expansion just
+/// widens the candidate pool.
+///
+/// **Bounds.** The map is capped at [`USER_ALIAS_GROUP_CAP`] groups; each
+/// group's aliases are capped at [`USER_ALIAS_PER_GROUP_CAP`] entries.
+/// A hostile caller cannot inflate the FTS5 query beyond
+/// `~cap * cap * avg_len` bytes.
+///
+/// **No-op paths.** Empty map, or a map whose keys/aliases don't appear
+/// in the query, returns the input unchanged — the recall trace is
+/// byte-identical to the pre-8.42 behavior. This is what preserves the
+/// "backward-compat by construction" contract.
+fn expand_query_with_user_aliases(
+    text: &str,
+    aliases: &std::collections::HashMap<String, Vec<String>>,
+) -> String {
+    if aliases.is_empty() {
+        return text.to_string();
+    }
+    let text_lc = text.to_lowercase();
+    let mut expansions: Vec<String> = Vec::new();
+
+    // Iterate at most USER_ALIAS_GROUP_CAP groups. HashMap order is
+    // non-deterministic, but the resulting FTS5 query is order-independent
+    // (OR is commutative in FTS5's boolean layer).
+    for (canonical, alt_list) in aliases.iter().take(USER_ALIAS_GROUP_CAP) {
+        let all_terms: Vec<&str> = std::iter::once(canonical.as_str())
+            .chain(alt_list.iter().map(String::as_str).take(USER_ALIAS_PER_GROUP_CAP))
+            .collect();
+        // Fire only if the user's query mentions this group. Case-insensitive
+        // substring match on any of the group's spellings.
+        let touched = all_terms
+            .iter()
+            .any(|term| !term.is_empty() && text_lc.contains(&term.to_lowercase()));
+        if !touched {
+            continue;
+        }
+        let quoted: Vec<String> = all_terms
+            .iter()
+            .filter(|t| !t.is_empty())
+            .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
+            .collect();
+        if quoted.is_empty() {
+            continue;
+        }
+        expansions.push(format!("({})", quoted.join(" OR ")));
+    }
+    if expansions.is_empty() {
+        return text.to_string();
+    }
+    // Compose as `(<original>) OR <group1> OR <group2> ...`. Wrapping the
+    // original in parens preserves any user-authored FTS5 operators.
+    let mut out = format!("({text})");
+    for e in expansions {
+        out.push_str(" OR ");
+        out.push_str(&e);
+    }
+    out
 }
 
 /// Post-fetch filter that matches the optional `time_filter` /
@@ -1394,6 +1498,102 @@ mod tests {
         let q = CString::new(r#"{"ids":[1]}"#).unwrap();
         let p = unsafe { mci_brain_ffi_events_by_ids(std::ptr::null_mut(), q.as_ptr()) };
         assert!(p.is_null());
+    }
+
+    // -----------------------------------------------------------------
+    // user-dictionary alias expansion — cycle 8.42
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn query_json_accepts_user_aliases_field() {
+        // Positive: the new field parses and populates the map.
+        let q: QueryJson = serde_json::from_str(
+            r#"{"text":"AJ email","limit":5,"user_aliases":{"Amy Jain":["AJ","Amy"]}}"#,
+        )
+        .expect("valid alias payload parses");
+        assert_eq!(q.user_aliases.get("Amy Jain").map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn query_json_defaults_user_aliases_to_empty_when_missing() {
+        // Backward-compat: pre-8.42 clients omit the key entirely; serde
+        // default gives an empty map, and the FFI's expansion becomes a
+        // no-op (baseline recall trace).
+        let q: QueryJson =
+            serde_json::from_str(r#"{"text":"hello","limit":5}"#).expect("legacy parses");
+        assert!(q.user_aliases.is_empty());
+    }
+
+    #[test]
+    fn expand_query_empty_map_is_identity() {
+        let m = std::collections::HashMap::new();
+        assert_eq!(expand_query_with_user_aliases("hello", &m), "hello");
+    }
+
+    #[test]
+    fn expand_query_untriggered_group_is_identity() {
+        let mut m = std::collections::HashMap::new();
+        m.insert("Amy Jain".to_string(), vec!["AJ".into()]);
+        // Query has nothing to do with Amy — no expansion.
+        assert_eq!(
+            expand_query_with_user_aliases("vector database", &m),
+            "vector database"
+        );
+    }
+
+    #[test]
+    fn expand_query_touches_alias_and_ors_in_canonical_and_siblings() {
+        let mut m = std::collections::HashMap::new();
+        m.insert("Amy Jain".to_string(), vec!["AJ".into(), "Amy".into()]);
+        let out = expand_query_with_user_aliases("AJ email", &m);
+        // Must preserve the original query in parens.
+        assert!(out.starts_with("(AJ email)"), "got: {out}");
+        // Must OR in the canonical + every alias, quoted.
+        assert!(out.contains("\"Amy Jain\""), "got: {out}");
+        assert!(out.contains("\"AJ\""), "got: {out}");
+        assert!(out.contains("\"Amy\""), "got: {out}");
+        assert!(out.contains(" OR "), "got: {out}");
+    }
+
+    #[test]
+    fn expand_query_is_case_insensitive_on_the_input() {
+        let mut m = std::collections::HashMap::new();
+        m.insert("Hippocampus".to_string(), vec!["MCI".into()]);
+        // Lower-case in the query still triggers the group whose
+        // canonical is capitalized.
+        let out = expand_query_with_user_aliases("mci demo", &m);
+        assert!(out.contains("\"Hippocampus\""), "got: {out}");
+        assert!(out.contains("\"MCI\""), "got: {out}");
+    }
+
+    #[test]
+    fn expand_query_only_expands_touched_groups() {
+        // A hit for one group must NOT drag in unrelated groups. This is
+        // the load-bearing precision guarantee — a user with 50 aliases
+        // never sees all 50 stitched into every query.
+        let mut m = std::collections::HashMap::new();
+        m.insert("Amy Jain".to_string(), vec!["AJ".into()]);
+        m.insert("Hippocampus".to_string(), vec!["MCI".into()]);
+        let out = expand_query_with_user_aliases("AJ email", &m);
+        assert!(out.contains("\"Amy Jain\""));
+        assert!(!out.contains("Hippocampus"), "leaked untouched group: {out}");
+    }
+
+    #[test]
+    fn expand_query_group_cap_bounds_output_size() {
+        // Load 2 * cap groups. Only cap of them can appear in the output.
+        let mut m = std::collections::HashMap::new();
+        let mut query = String::new();
+        for i in 0..(USER_ALIAS_GROUP_CAP * 2) {
+            let name = format!("Name{i}");
+            m.insert(name.clone(), vec![format!("N{i}")]);
+            query.push_str(&name);
+            query.push(' ');
+        }
+        let out = expand_query_with_user_aliases(&query, &m);
+        // Count OR-group parens after the leading `(<query>)`.
+        let or_count = out.matches(" OR (").count();
+        assert!(or_count <= USER_ALIAS_GROUP_CAP, "got {or_count} OR-groups");
     }
 
     #[test]
