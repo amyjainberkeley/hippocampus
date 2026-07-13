@@ -72,30 +72,22 @@ struct HippocampusApp: App {
     }
 }
 
+/// Menu-bar icon rendered as a status light.
+///
+/// Cycle 8.45 Raycast/Cotypist peer study pattern #3 (P0) + cycle 8.44
+/// product-readiness audit polish gap #1. Four visually distinct
+/// states — idle / recording / paused / error — driven by
+/// `ProcessSupervisor.state` (existing @Published surface, no new XPC
+/// bridge). See `HippocampusKit/MenuBarStatus.swift` for the state
+/// derivation + pulse animation.
 struct MenuBarIcon: View {
     @ObservedObject var supervisor: ProcessSupervisor
 
     var body: some View {
-        switch supervisor.state {
-        case .running, .paused:
-            Image(nsImage: Self.templateImage)
-        case .crashed:
-            Image(systemName: "exclamationmark.circle.fill")
-        default:
-            Image(nsImage: Self.templateImage)
-        }
+        MenuBarStatusLabel(
+            status: MenuBarStatus.derive(from: supervisor.state)
+        )
     }
-
-    /// Loaded once from `Contents/Resources/statusbar-icon.png` (+ @2x/@3x).
-    /// `isTemplate = true` is the OS contract that makes NSStatusItem tint
-    /// the alpha mask for light/dark menu bars; setting it programmatically
-    /// is more reliable than the "*Template" filename convention or
-    /// SwiftUI's `.renderingMode(.template)` modifier in MenuBarExtra.
-    private static let templateImage: NSImage = {
-        let img = NSImage(named: "statusbar-icon") ?? NSImage(size: NSSize(width: 22, height: 22))
-        img.isTemplate = true
-        return img
-    }()
 }
 
 @MainActor
