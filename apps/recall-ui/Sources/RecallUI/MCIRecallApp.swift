@@ -12,6 +12,29 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+
+        // Wire the CEO-directed Spotlight-like recall popup: ⇧⌘Space
+        // toggles a floating panel that types-through to the same
+        // FFI search path as the main recall UI. Registration is
+        // best-effort — if Carbon returns an error (e.g. another app
+        // has claimed the same combo), we surface a menu-bar hint
+        // and continue booting so the recall UI proper still works.
+        MainActor.assumeIsolated {
+            GlobalRecallPopupController.shared.configure(reader: MCIRecallApp.reader)
+            let result = GlobalHotkeyManager.shared.registerDefault {
+                GlobalRecallPopupController.shared.toggle()
+            }
+            if case .osError = result {
+                // Not fatal; the popup can still be invoked via the
+                // hippocampus://recall?popup=1 URL or the ⌘K Action
+                // Panel command. Log so support has a trail.
+                NSLog(
+                    "MCI: global hotkey registration failed (%@); " +
+                    "popup remains accessible via ⌘K command / URL scheme.",
+                    String(describing: result)
+                )
+            }
+        }
     }
 }
 
@@ -31,6 +54,17 @@ struct MCIRecallApp: App {
             .frame(minWidth: 720, minHeight: 480)
             .background(Color.brandBgPrimary)
             .preferredColorScheme(.dark)
+            .onOpenURL { url in
+                // `hippocampus://recall?popup=1` — invoked by the
+                // ⌘K Action Panel from other Hippocampus apps or a
+                // command-palette shortcut. Presents the global
+                // popup without touching the current tab state.
+                let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                let items = comps?.queryItems ?? []
+                if items.contains(where: { $0.name == "popup" && $0.value == "1" }) {
+                    GlobalRecallPopupController.shared.show()
+                }
+            }
             .task {
                 // Per `docs/design/brief-viewer-spec.md` §"When the user
                 // discovers their first brief": on Recall app launch, ask
@@ -160,6 +194,14 @@ struct RootView: View {
                 if let url = URL(string: "hippocampus://help") {
                     NSWorkspace.shared.open(url)
                 }
+            },
+            .init(
+                id: "app.showGlobalRecallPopup",
+                title: "Show Global Recall Popup",
+                shortcut: "⇧⌘Space",
+                category: .app
+            ) {
+                GlobalRecallPopupController.shared.show()
             },
             .init(id: "app.quit", title: "Quit Hippocampus Recall", shortcut: "⌘Q", category: .app) {
                 NSApp.terminate(nil)
