@@ -241,6 +241,29 @@ pub struct EpisodeJson {
     pub event_count: u64,
 }
 
+/// Content-free aggregate returned by [`mci_brain_ffi_summary_stats`].
+/// Mirrors [`mci_brain::BrainStats`] for the count + oldest/newest, plus
+/// the on-disk byte size of the brain SQLite file. Zero row content is
+/// exposed — this is the payload for the Privacy Dashboard's "MCI has
+/// captured X events across Y days, using Z MB of encrypted storage"
+/// summary card. Amy's directive (2026-07-13): "show the full control,
+/// no collection."
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SummaryStatsJson {
+    /// Total rows in `events`. `0` on an empty store.
+    pub total_events: u64,
+    /// Smallest `events.ts_us` in microseconds since epoch, or `None` on
+    /// an empty store.
+    pub oldest_ts_us: Option<u64>,
+    /// Largest `events.ts_us` in microseconds since epoch, or `None` on
+    /// an empty store.
+    pub newest_ts_us: Option<u64>,
+    /// On-disk byte count of the SQLCipher `.sqlite` file. `0` if the
+    /// file cannot be stat'd (should never happen since the FFI is
+    /// holding an open handle to it, but graceful fallback).
+    pub disk_bytes: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Handle — opaque pointer the Swift side holds across calls
 // ---------------------------------------------------------------------------
@@ -256,6 +279,13 @@ pub struct Handle {
     /// open new files or write — the FFI is READ-ONLY by construction; the
     /// Swift caller is the one that stats + decodes the referenced blob.
     blob_dir: PathBuf,
+    /// Absolute path to the brain SQLite file. Used ONLY by
+    /// [`mci_brain_ffi_summary_stats`] to `fs::metadata(...)` the file and
+    /// return the on-disk byte count for the Privacy Dashboard's
+    /// "encrypted storage" summary card. Content-free — we never open or
+    /// read the file through this path; the store handle above is the
+    /// read-only surface.
+    brain_path: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +362,7 @@ pub unsafe extern "C" fn mci_brain_ffi_open(
     let h = Box::new(Handle {
         store: Arc::new(store),
         blob_dir,
+        brain_path: p,
     });
     Box::into_raw(h)
 }
@@ -898,6 +929,55 @@ pub unsafe extern "C" fn mci_brain_ffi_brief_dates(h: *mut Handle, limit: u32) -
             ptr::null_mut()
         }
     }
+}
+
+/// Content-free aggregate summary for the Privacy Dashboard's top card.
+/// Returns a JSON object of [`SummaryStatsJson`] on success — total event
+/// count, oldest/newest ts, and the on-disk byte size of the SQLCipher
+/// brain file. NO event content, no bundle-id list, no window titles.
+///
+/// The `disk_bytes` field is the `fs::metadata(brain_path).len()` of the
+/// file the handle was opened against — the FFI already holds the path
+/// (`Handle::brain_path`) and stat'ing it is content-free (no read of
+/// row bytes). A stat failure degrades to `0` rather than propagating an
+/// error, because a failure to size the file must not block the
+/// dashboard from rendering the counts.
+///
+/// Same allocator discipline as the other returners; caller MUST pass
+/// the returned pointer back to [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+///
+/// `h` must be a live handle previously returned by
+/// [`mci_brain_ffi_open`] and not yet closed.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_summary_stats(h: *mut Handle) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_summary_stats: null handle");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a valid live handle.
+    let handle = unsafe { &*h };
+    let stats = match handle.store.stats() {
+        Ok(s) => s,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_summary_stats: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    // Best-effort disk size. A missing/unreadable brain file falls back to
+    // 0 — the dashboard's summary card shows "0 MB" which is honest under
+    // that (impossible) failure mode rather than a full-screen error.
+    let disk_bytes = std::fs::metadata(&handle.brain_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let out = SummaryStatsJson {
+        total_events: stats.event_count,
+        oldest_ts_us: stats.oldest_ts_us,
+        newest_ts_us: stats.newest_ts_us,
+        disk_bytes,
+    };
+    json_to_c_string(&out)
 }
 
 /// Free a `*mut c_char` previously returned by any FFI function that

@@ -19,6 +19,11 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// Cycle 8.42 — minimal Settings surface hosting the user-dictionary
     /// editor. Future settings can grow into the same scene.
     case settings = 6
+    /// Cycle 8.46 — Privacy Dashboard (⌘7). Enterprise-grade trust
+    /// artifact: shows what MCI has captured + gives the user delete /
+    /// export controls over their brain. Amy's directive 2026-07-13:
+    /// "show the full control, no collection."
+    case privacyDashboard = 7
 
     /// Map a deep-link `?tab=…` query value (case-insensitive) to a
     /// `RecallTab`. Returns `nil` for unknown values so callers can
@@ -33,6 +38,7 @@ public enum RecallTab: Int, Hashable, Sendable {
         case "privacy":  return .privacy
         case "brief":    return .brief
         case "settings": return .settings
+        case "dashboard", "privacy-dashboard": return .privacyDashboard
         default:         return nil
         }
     }

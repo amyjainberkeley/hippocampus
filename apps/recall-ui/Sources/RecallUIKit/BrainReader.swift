@@ -297,6 +297,55 @@ public protocol BrainReader: Sendable {
     /// List up to `limit` brief dates (`YYYY-MM-DD`) most-recent first.
     /// Powers the date selector's `<` / `>` arrows.
     func briefDates(limit: Int) async throws -> [String]
+
+    /// Content-free aggregate — event count, oldest/newest ts,
+    /// on-disk byte size. Powers the Privacy Dashboard's top summary
+    /// card ("MCI has captured X events across Y days, using Z MB of
+    /// encrypted storage"). No row content is exposed.
+    func summaryStats() async throws -> SummaryStats
+}
+
+/// Content-free brain aggregate — mirrors the FFI's `SummaryStatsJson`.
+/// The Privacy Dashboard top card renders `"MCI has captured
+/// {totalEvents} events across {daysCovered} days, using
+/// {formattedDiskBytes} of encrypted storage."`
+public struct SummaryStats: Sendable, Equatable, Codable {
+    /// Total rows in `events`. `0` on an empty store.
+    public let totalEvents: UInt64
+    /// Smallest `events.ts_us`. `nil` on an empty store.
+    public let oldestTsUs: UInt64?
+    /// Largest `events.ts_us`. `nil` on an empty store.
+    public let newestTsUs: UInt64?
+    /// On-disk byte count of the SQLCipher brain file.
+    public let diskBytes: UInt64
+
+    public init(
+        totalEvents: UInt64,
+        oldestTsUs: UInt64?,
+        newestTsUs: UInt64?,
+        diskBytes: UInt64
+    ) {
+        self.totalEvents = totalEvents
+        self.oldestTsUs = oldestTsUs
+        self.newestTsUs = newestTsUs
+        self.diskBytes = diskBytes
+    }
+
+    /// Days spanned by the capture window (`ceil((newest - oldest) /
+    /// 86_400_000_000)`), or `0` when the store is empty / all events
+    /// share one day.
+    public var daysCovered: UInt64 {
+        guard let oldest = oldestTsUs, let newest = newestTsUs, newest >= oldest
+        else { return 0 }
+        let deltaUs = newest - oldest
+        let dayUs: UInt64 = 86_400_000_000
+        // ceil-divide so a partial day counts as one.
+        let d = (deltaUs + dayUs - 1) / dayUs
+        // Empty (delta == 0) still means the user has data for "1 day"
+        // if totalEvents > 0 — but the caller renders that; here we just
+        // report the spanned-day count and let the view decide.
+        return max(d, totalEvents > 0 ? 1 : 0)
+    }
 }
 
 /// In-memory stub reader. Returns deterministic canned data so the
@@ -560,5 +609,17 @@ public struct StubBrainReader: BrainReader {
     public func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] {
         let byId = Dictionary(uniqueKeysWithValues: Self.demoHits.map { ($0.eventId, $0) })
         return ids.prefix(32).compactMap { byId[$0] }
+    }
+
+    /// Aggregate the canned corpus for the dashboard preview. Realistic
+    /// enough for the summary card snapshot test; not a live disk read.
+    public func summaryStats() async throws -> SummaryStats {
+        let ts = Self.demoHits.map(\.tsUs)
+        return SummaryStats(
+            totalEvents: UInt64(Self.demoHits.count),
+            oldestTsUs: ts.min(),
+            newestTsUs: ts.max(),
+            diskBytes: 12_582_912  // ~12 MB — matches a plausible ~3-day capture.
+        )
     }
 }
