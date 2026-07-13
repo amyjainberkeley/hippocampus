@@ -31,14 +31,8 @@ struct EpisodesView: View {
     }
 
     private var emptyView: some View {
-        ContentUnavailableView(
-            "No episodes yet",
-            systemImage: "rectangle.stack",
-            description: Text(
-                "Episodes will appear after Hippocampus has captured a few minutes of work in any app."
-            )
-        )
-        .foregroundStyle(Color.brandFgSecondary)
+        // Cycle 8.49 polished empty state (audit-gap fix).
+        MCIEmptyState.noEpisodes()
     }
 
     private func errorView(_ err: String) -> some View {

@@ -131,11 +131,10 @@ struct RelatedHitsFlyout: View {
                 .foregroundStyle(Color.brandFgMuted)
                 .padding(12)
         case .loaded(let hits) where hits.isEmpty:
-            Text("No cross-app siblings yet.")
-                .font(.caption)
-                .foregroundStyle(Color.brandFgMuted)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Cycle 8.49 polished empty state (audit-gap fix). Scaled
+            // to fit the flyout's fixed 320pt width envelope.
+            MCIEmptyState.noRelatedHits()
+                .padding(.vertical, MCI.Spacing.s)
         case .loaded(let hits):
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
