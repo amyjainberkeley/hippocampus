@@ -139,6 +139,8 @@ struct UserDictionaryEditor: View {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel("Remove custom name row")
+                .accessibilityHint("Deletes this canonical name and its aliases")
             }
             TextField(
                 "Aliases, comma-separated (e.g. AJ, Amy, @amyjainberkeley)",

@@ -154,6 +154,7 @@ struct McpServersSlide: View {
             }
             .buttonStyle(.borderless)
             .help("Remove this server")
+            .accessibilityLabel("Remove MCP server \(entry.name)")
         }
         .padding(8)
         .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
