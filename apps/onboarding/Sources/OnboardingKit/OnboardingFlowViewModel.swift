@@ -19,6 +19,13 @@ public final class OnboardingFlowViewModel: ObservableObject {
     /// normal cold-start. Currently only `.rewind` is honored — surfaces
     /// a WelcomeSlide sub-header re-using the `/rewind` landing lane copy.
     @Published public var migrationSource: MigrationSource?
+    /// Cycle 8.48 — Raycast peer-study P0 pattern #1. Flipped to `true`
+    /// when the user completes the ⇧⌘Space live-try on the
+    /// `PrimaryHotkeySlide` (either by pressing the hotkey while the
+    /// slide is frontmost, or by tapping "Skip" — the flag records "we
+    /// showed them the moment, they engaged with it" for downstream
+    /// telemetry-gap analysis, not "the hotkey actually works").
+    @Published public private(set) var hotkeyPracticed: Bool = false
 
     public let screenRecordingPermission: any TCCPermission
     public let accessibilityPermission: any TCCPermission
@@ -87,7 +94,24 @@ public final class OnboardingFlowViewModel: ObservableObject {
         if currentStep == .permissions {
             return screenRecordingPermission.status == .granted
         }
+        if currentStep == .primaryHotkey {
+            // The slide's Continue button binds `.disabled(!canAdvance)`;
+            // `hotkeyPracticed` is flipped by either the live-try monitor
+            // or the Skip fallback. Either path unblocks — Skip is
+            // REQUIRED for accessibility (SetApp/Alfred can grab ⇧⌘Space).
+            return hotkeyPracticed
+        }
         return true
+    }
+
+    /// Called by `PrimaryHotkeySlide` when the user either presses
+    /// ⇧⌘Space while the slide is frontmost OR taps "Skip". Idempotent
+    /// — a second call is a no-op. Persists nothing beyond the flow
+    /// VM (the `.onboarding-state` file already records the step; a
+    /// user who quits mid-hotkey-slide re-lands here and re-tries).
+    public func markHotkeyPracticed() {
+        guard !hotkeyPracticed else { return }
+        hotkeyPracticed = true
     }
 
     public func refreshPermissions() {

@@ -171,7 +171,12 @@ struct RootView: View {
                 // via FFI. Included for discoverability.
             },
             .init(id: "app.showOnboarding", title: "Show Onboarding", shortcut: "", category: .app) {
-                if let url = URL(string: "hippocampus://onboarding?show=1") {
+                // Cycle 8.48 — canonical form is
+                // `hippocampus://onboarding/show`; the legacy
+                // `?show=1` query-form is also honored by
+                // `HippocampusApp.application(_:open:)` so any older
+                // NSWorkspace-open callers keep working.
+                if let url = URL(string: "hippocampus://onboarding/show") {
                     NSWorkspace.shared.open(url)
                 }
             },

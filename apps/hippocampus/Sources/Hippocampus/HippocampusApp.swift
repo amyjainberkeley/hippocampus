@@ -349,18 +349,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard url.scheme == "hippocampus", url.host == "recall" else { continue }
-            // Parse `?tab=brief` (or other) per the Brief Viewer spec:
-            // `hippocampus://recall?tab=brief` deep-links the Brief tab.
-            // Unknown values fall through to the recall-ui's default tab.
-            let initialTab: String? = URLComponents(
-                url: url, resolvingAgainstBaseURL: false
-            )?
-            .queryItems?
-            .first(where: { $0.name == "tab" })?
-            .value
-            Task { @MainActor in
-                supervisor.openRecallUI(initialTab: initialTab)
+            guard let route = HippocampusURLRoute.parse(url) else { continue }
+            switch route {
+            case .openRecall(let tab):
+                // Per Brief Viewer spec: `hippocampus://recall?tab=brief`
+                // deep-links the Brief tab. Unknown tab values fall
+                // through to the recall-ui's default tab.
+                Task { @MainActor in
+                    supervisor.openRecallUI(initialTab: tab)
+                }
+            case .showOnboarding:
+                // Cycle 8.48 — the cycle 8.46 Action Panel "Show
+                // Onboarding" command now works end-to-end. Re-opens
+                // the Onboarding executable so users can revisit the
+                // flow (e.g. to re-run the ⇧⌘Space live-try after
+                // configuring Alfred/SetApp, or to review the trust
+                // panel). No sentinel change — reopening is safe
+                // even after first-run has completed.
+                Task { @MainActor in
+                    _ = supervisor.openOnboarding()
+                }
+            case .unknown:
+                continue
             }
         }
     }
