@@ -56,12 +56,16 @@ fn hit_json_round_trips_entities_and_linked_event_ids() {
             "MCP".into(),
         ],
         linked_event_ids: vec![101, 202, 303, 404],
+        thumbnail_path: Some(
+            "/Users/x/Library/Application Support/MCI/blobs/deadbeef.bin".into(),
+        ),
     };
     let s = serde_json::to_string(&h).expect("serialize");
     let back: HitJson = serde_json::from_str(&s).expect("deserialize");
     assert_eq!(h, back, "HitJson serde round trip must be lossless");
     assert_eq!(back.entities.len(), 3);
     assert_eq!(back.linked_event_ids, vec![101, 202, 303, 404]);
+    assert!(back.thumbnail_path.as_deref().unwrap().ends_with("deadbeef.bin"));
 }
 
 /// Assert the exact `snake_case` wire the Swift `HitWire` decoder in
@@ -85,13 +89,17 @@ fn hit_json_wire_uses_snake_case_keys_for_new_fields() {
         score: None,
         entities: vec!["Amy Jain".into()],
         linked_event_ids: vec![9],
+        thumbnail_path: None,
     };
     let s = serde_json::to_string(&h).unwrap();
     // Snake_case, exactly matches server.rs:302-303 and the Swift wire.
     assert!(s.contains("\"entities\":[\"Amy Jain\"]"), "got: {s}");
     assert!(s.contains("\"linked_event_ids\":[9]"), "got: {s}");
+    // Cycle 8.35 PR-4: thumbnail_path also snake_case, Optional.
+    assert!(s.contains("\"thumbnail_path\":null"), "got: {s}");
     // Must NOT accidentally emit a camelCase alias — Swift would then miss it.
     assert!(!s.contains("linkedEventIds"), "leaked camelCase: {s}");
+    assert!(!s.contains("thumbnailPath"), "leaked camelCase: {s}");
 }
 
 /// Backward compat: an older FFI build (or a hand-rolled test fixture)
@@ -114,6 +122,8 @@ fn hit_json_decodes_legacy_payload_without_entity_fields() {
     let h: HitJson = serde_json::from_str(legacy).expect("legacy JSON must decode");
     assert!(h.entities.is_empty());
     assert!(h.linked_event_ids.is_empty());
+    // Cycle 8.35 PR-4: thumbnail_path defaults to None on legacy payloads.
+    assert!(h.thumbnail_path.is_none());
 }
 
 /// Empty vectors are the common case (the store defaults to `Ok(vec![])`
@@ -135,6 +145,7 @@ fn hit_json_empty_entity_vecs_still_emit_the_keys() {
         score: None,
         entities: Vec::new(),
         linked_event_ids: Vec::new(),
+        thumbnail_path: None,
     };
     let s = serde_json::to_string(&h).unwrap();
     assert!(s.contains("\"entities\":[]"), "got: {s}");

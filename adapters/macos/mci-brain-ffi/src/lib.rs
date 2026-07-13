@@ -115,6 +115,33 @@ pub struct HitJson {
     /// capped at [`LINK_LIMIT`] ids per hit.
     #[serde(default)]
     pub linked_event_ids: Vec<u64>,
+    /// **Additive (cycle 8.35 PR-4).** Absolute filesystem path to the
+    /// encrypted keyframe blob for this event, or `None` for events that
+    /// carry no keyframe (Messages / Mail / PageContent-only ingest paths;
+    /// legacy events captured before the P3.6.5 blob writer landed).
+    ///
+    /// Derived from `events.keyframe_blob` (the content-addressed sha256 hex
+    /// written by [`KeyframeBlobWriter`] at capture time) + the on-disk
+    /// convention `<brain_dir>/blobs/<hex>.bin` (see
+    /// `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/KeyframeBlobWriter.swift`
+    /// line 10). The path is emitted verbatim — this crate does not stat
+    /// the file. The Swift `HitThumbnail` view treats a missing file as
+    /// "no keyframe" (same UX as `None`), so a hostile / stale hex string
+    /// is graceful degradation, not a crash.
+    ///
+    /// **Privacy invariant (ADR-0016 §4.3, §4.8, item 8).** A keyframe blob
+    /// exists on disk ONLY for events that cleared cascade-twice. The
+    /// brain-store `put_event` wall (`cascade_reason != 0` → rejected)
+    /// means no `.suppress`-decided event can carry a `keyframe_blob`
+    /// column, so surfacing this path here cannot leak a redacted
+    /// keyframe. Verified by inspection at
+    /// `core/brain/src/sqlcipher_brain_store.rs:1258`.
+    ///
+    /// **Backward compat.** `#[serde(default)]` — pre-8.35-PR-4 clients
+    /// omit the key entirely; older Swift decoders that don't know the
+    /// field simply ignore it.
+    #[serde(default)]
+    pub thumbnail_path: Option<String>,
 }
 
 /// A privacy-moment card row returned by
@@ -223,6 +250,12 @@ pub struct EpisodeJson {
 /// duration the recall-ui keeps the brain open.
 pub struct Handle {
     store: Arc<SqlCipherBrainStore>,
+    /// Directory that holds the encrypted keyframe blobs (`<brain_dir>/blobs/`).
+    /// Populated at `open()` from the brain file's parent directory; used to
+    /// derive [`HitJson::thumbnail_path`] (cycle 8.35 PR-4). Never used to
+    /// open new files or write — the FFI is READ-ONLY by construction; the
+    /// Swift caller is the one that stats + decodes the referenced blob.
+    blob_dir: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -285,8 +318,20 @@ pub unsafe extern "C" fn mci_brain_ffi_open(
     };
 
     clear_last_error();
+    // Blob dir convention (P3.6.5, KeyframeBlobWriter): sibling `blobs/`
+    // directory next to the brain file. `~/Library/Application Support/MCI/mci.sqlite`
+    // → `~/Library/Application Support/MCI/blobs/`. If the brain path has
+    // no parent (`/mci.sqlite`), fall back to `./blobs` — surfacing this
+    // as an error would gratuitously fail brain open for a corner case
+    // that never arises in production (the launch path always writes the
+    // brain into Application Support).
+    let blob_dir = p
+        .parent()
+        .map(|parent| parent.join("blobs"))
+        .unwrap_or_else(|| PathBuf::from("blobs"));
     let h = Box::new(Handle {
         store: Arc::new(store),
+        blob_dir,
     });
     Box::into_raw(h)
 }
@@ -395,6 +440,8 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
                     continue;
                 }
                 let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
+                let thumbnail_path =
+                    thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
                 hits_json.push(HitJson {
                     event_id: event_id.0,
                     ts_us: ev.ts_us,
@@ -406,6 +453,7 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
                     score: Some(score),
                     entities,
                     linked_event_ids,
+                    thumbnail_path,
                 });
             }
             Ok(None) => {}
@@ -448,6 +496,8 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
         .into_iter()
         .map(|ev| {
             let (entities, linked_event_ids) = enrich_hit(&handle.store, ev.id);
+            let thumbnail_path =
+                thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             HitJson {
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
@@ -459,6 +509,7 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
                 score: None,
                 entities,
                 linked_event_ids,
+                thumbnail_path,
             }
         })
         .collect();
@@ -542,6 +593,8 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
         match handle.store.get_event(EventId(id)) {
             Ok(Some(ev)) => {
                 let (entities, linked_event_ids) = enrich_hit(&handle.store, EventId(id));
+                let thumbnail_path =
+                    thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
                 out.push(HitJson {
                     event_id: id,
                     ts_us: ev.ts_us,
@@ -553,6 +606,7 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
                     score: None,
                     entities,
                     linked_event_ids,
+                    thumbnail_path,
                 });
             }
             Ok(None) => {
@@ -1026,6 +1080,41 @@ fn enrich_hit(store: &SqlCipherBrainStore, event_id: EventId) -> (Vec<String>, V
     (entities, linked_event_ids)
 }
 
+/// Resolve `Event.keyframe_blob` (sha256 hex, `None` when no keyframe was
+/// captured) into the absolute filesystem path the Swift `HitThumbnail`
+/// view opens. Convention: `<blob_dir>/<hex>.bin` per the P3.6.5
+/// `KeyframeBlobWriter` on-disk layout.
+///
+/// Read-only: no file I/O — the FFI never stats or opens the referenced
+/// blob. A stale / missing hex is graceful degradation in the Swift view
+/// (falls back to the placeholder icon).
+///
+/// **Privacy invariant carry-through.** `Event.keyframe_blob` is only ever
+/// non-`None` for events that cleared cascade-twice (ADR-0016 §4.8);
+/// `put_event`'s `cascade_reason != 0` wall means a redacted event has no
+/// keyframe hex in the store, so this helper returns `None` for those
+/// rows by construction.
+fn thumbnail_path_for(blob_dir: &std::path::Path, keyframe_blob: Option<&str>) -> Option<String> {
+    let hex = keyframe_blob?.trim();
+    if hex.is_empty() {
+        return None;
+    }
+    // Defence-in-depth: reject anything that isn't a lower-case hex string
+    // of the expected length. Prevents a hostile stored value (e.g. a
+    // filesystem-escape like "../../etc/passwd") from being handed to
+    // Swift as an "absolute path". SHA256 = 64 hex chars.
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let file = format!("{hex}.bin");
+    Some(
+        blob_dir
+            .join(file)
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
 /// Expand a raw user query with the caller's user-dictionary aliases
 /// (cycle 8.42). When the query text contains — as a case-insensitive
 /// substring — a canonical name or any of its aliases, the FTS5 query is
@@ -1330,10 +1419,77 @@ mod tests {
             score: Some(0.83),
             entities: vec!["Anthropic".into(), "MCP".into()],
             linked_event_ids: vec![101, 202, 303],
+            thumbnail_path: Some(
+                "/Users/x/Library/Application Support/MCI/blobs/abcdef.bin".into(),
+            ),
         };
         let s = serde_json::to_string(&h).unwrap();
         let back: HitJson = serde_json::from_str(&s).unwrap();
         assert_eq!(h, back);
+    }
+
+    #[test]
+    fn hit_json_round_trip_without_thumbnail() {
+        // Text-only events (Messages, Mail, PageContent) legitimately have
+        // no keyframe. Round-trip with `thumbnail_path: None` must decode
+        // cleanly — this is the common case for the near-term corpus
+        // where most hits are page-content ingest.
+        let h = HitJson {
+            event_id: 7,
+            ts_us: 1_700_000_000_000_000,
+            app_bundle_id: Some("com.apple.mail".into()),
+            window_title: None,
+            url: None,
+            ocr_text_snippet: "email body".into(),
+            source: "timeline".into(),
+            score: None,
+            entities: vec![],
+            linked_event_ids: vec![],
+            thumbnail_path: None,
+        };
+        let s = serde_json::to_string(&h).unwrap();
+        let back: HitJson = serde_json::from_str(&s).unwrap();
+        assert_eq!(h, back);
+        // Wire shape uses JSON `null` (not missing) when we explicitly
+        // emit None — Swift's Optional decoder reads either. Assert the
+        // key is present so a client watching the wire sees the field.
+        assert!(s.contains("\"thumbnail_path\""), "expected key in {s}");
+    }
+
+    #[test]
+    fn thumbnail_path_for_hex_composes_blob_dir() {
+        let hex = "a".repeat(64);
+        let dir = std::path::Path::new("/tmp/mci/blobs");
+        let p = thumbnail_path_for(dir, Some(&hex)).expect("expected path");
+        assert!(p.starts_with("/tmp/mci/blobs/"));
+        assert!(p.ends_with(".bin"));
+    }
+
+    #[test]
+    fn thumbnail_path_for_none_returns_none() {
+        let dir = std::path::Path::new("/tmp/mci/blobs");
+        assert_eq!(thumbnail_path_for(dir, None), None);
+    }
+
+    #[test]
+    fn thumbnail_path_for_empty_string_returns_none() {
+        let dir = std::path::Path::new("/tmp/mci/blobs");
+        assert_eq!(thumbnail_path_for(dir, Some("")), None);
+        assert_eq!(thumbnail_path_for(dir, Some("   ")), None);
+    }
+
+    #[test]
+    fn thumbnail_path_for_rejects_non_hex_and_bad_length() {
+        // Defence-in-depth against a hostile / corrupt stored value.
+        // 63 chars (too short) → rejected. Path-escape → rejected on
+        // non-hex chars before length even matters.
+        let dir = std::path::Path::new("/tmp/mci/blobs");
+        assert_eq!(thumbnail_path_for(dir, Some(&"a".repeat(63))), None);
+        assert_eq!(thumbnail_path_for(dir, Some("../etc/passwd")), None);
+        assert_eq!(
+            thumbnail_path_for(dir, Some(&format!("{}../..", "a".repeat(58)))),
+            None
+        );
     }
 
     #[test]
@@ -1356,6 +1512,10 @@ mod tests {
         let h: HitJson = serde_json::from_str(legacy).expect("legacy JSON must decode");
         assert!(h.entities.is_empty());
         assert!(h.linked_event_ids.is_empty());
+        // Cycle 8.35 PR-4 thumbnail_path also serde(default)s — a pre-PR-4
+        // Rust build (or a hand-rolled test fixture) that omits the key
+        // must still decode without error.
+        assert!(h.thumbnail_path.is_none());
     }
 
     #[test]
@@ -1374,6 +1534,7 @@ mod tests {
             score: None,
             entities: vec!["vector-db".into()],
             linked_event_ids: vec![9],
+            thumbnail_path: None,
         };
         let s = serde_json::to_string(&h).unwrap();
         assert!(s.contains("\"entities\""), "missing entities key in {s}");

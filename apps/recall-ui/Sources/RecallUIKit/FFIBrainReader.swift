@@ -354,6 +354,15 @@ private struct HitWire: Decodable {
     /// Cycle-8.35 PR-1: additive cross-app dot-connect ids. Same
     /// `serde(default)` compatibility contract as `entities` above.
     let linked_event_ids: [UInt64]?
+    /// Cycle-8.35 PR-4: additive on-disk keyframe path. `serde(default)`
+    /// on the Rust side + `Optional` on this decoder means older FFI
+    /// builds (or hand-rolled test payloads) that omit the key still
+    /// decode; the field simply reads as `nil` on the Swift side and
+    /// the `HitRow` renders the placeholder-icon thumbnail. Wire key
+    /// is snake_case (`thumbnail_path`), locked by
+    /// `hit_json_wire_uses_snake_case_keys_for_new_fields` in
+    /// `adapters/macos/mci-brain-ffi/tests/hit_entities_wire.rs`.
+    let thumbnail_path: String?
 
     func toHit() -> Hit {
         Hit(
@@ -366,7 +375,8 @@ private struct HitWire: Decodable {
             source: source,
             score: score,
             entities: entities ?? [],
-            linkedEventIds: linked_event_ids ?? []
+            linkedEventIds: linked_event_ids ?? [],
+            thumbnailPath: thumbnail_path
         )
     }
 }

@@ -57,6 +57,32 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     /// at 16 ids per hit (`LINK_LIMIT` in `mci-brain-ffi`).
     public let linkedEventIds: [UInt64]
 
+    /// Absolute filesystem path to the encrypted keyframe blob captured
+    /// alongside this event, or `nil` for events without a keyframe
+    /// (Messages / Mail / PageContent-only ingest; legacy events captured
+    /// before the P3.6.5 blob writer landed). Mirrors the FFI's
+    /// `HitJson.thumbnail_path` (cycle 8.35 PR-4).
+    ///
+    /// The path is opened by the `HitThumbnail` view in `HitRow`, which
+    /// applies a light blur + slight desaturation for defense-in-depth
+    /// against over-shoulder viewing. A missing file (stale hex,
+    /// user-deleted blob dir) falls back to the placeholder icon —
+    /// never a crash.
+    ///
+    /// **Privacy invariant.** A keyframe blob exists on disk ONLY for
+    /// events that cleared cascade-twice (ADR-0016 §4.8). The brain-store
+    /// `put_event` wall (`cascade_reason != 0` → rejected) means no
+    /// `.suppress`-decided event carries this field. Surfacing the path
+    /// here cannot leak a redacted keyframe.
+    public let thumbnailPath: String?
+
+    /// Convenience: file URL for the thumbnail, or `nil` when no path
+    /// was populated. Purely a derivation from `thumbnailPath` — no I/O.
+    public var thumbnailURL: URL? {
+        guard let p = thumbnailPath, !p.isEmpty else { return nil }
+        return URL(fileURLWithPath: p)
+    }
+
     public init(
         eventId: UInt64,
         tsUs: UInt64,
@@ -67,7 +93,8 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         source: String,
         score: Float?,
         entities: [String] = [],
-        linkedEventIds: [UInt64] = []
+        linkedEventIds: [UInt64] = [],
+        thumbnailPath: String? = nil
     ) {
         self.eventId = eventId
         self.tsUs = tsUs
@@ -79,6 +106,7 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         self.score = score
         self.entities = entities
         self.linkedEventIds = linkedEventIds
+        self.thumbnailPath = thumbnailPath
     }
 }
 
