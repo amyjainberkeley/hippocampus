@@ -13,6 +13,18 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        // Cycle 8.51 — enterprise audit trail. Record every launch to
+        // the plaintext audit log so the "who touched user data when"
+        // trail is complete for a security-review buyer. Fire-and-forget:
+        // AuditLog.record is thread-safe and never throws to the caller.
+        AuditLog.shared.record(
+            action: .appLaunched,
+            details: [
+                "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+                    as? String ?? "unknown",
+            ]
+        )
+
         // Wire the CEO-directed Spotlight-like recall popup: ⇧⌘Space
         // toggles a floating panel that types-through to the same
         // FFI search path as the main recall UI. Registration is
