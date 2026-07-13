@@ -30,6 +30,13 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// chronological list); the two coexist during Phase D scaffold and
     /// may collapse into one tab in Phase D full impl (cycle 8.55+).
     case timelineStrip = 8
+    /// Cycle 8.52 — Chat surface stub (⌘9). UI-only preview of the future
+    /// V2-P12 chat-with-your-memory experience per ADR-0035 (Proposed).
+    /// No ML runtime is loaded here; the tab renders placeholder responses
+    /// framed as "coming in v1.5" so the CEO can review the intended
+    /// shape before ratifying ADR-0035. See
+    /// `docs/decisions/0035-v2-p12-chat-surface-anylanguagemodel.md`.
+    case chat = 9
 
     /// Map a deep-link `?tab=…` query value (case-insensitive) to a
     /// `RecallTab`. Returns `nil` for unknown values so callers can
@@ -46,6 +53,7 @@ public enum RecallTab: Int, Hashable, Sendable {
         case "settings": return .settings
         case "dashboard", "privacy-dashboard": return .privacyDashboard
         case "timeline-strip", "strip": return .timelineStrip
+        case "chat":     return .chat
         default:         return nil
         }
     }

@@ -285,6 +285,15 @@ struct RootView: View {
                 GlobalRecallPopupController.shared.show()
             },
             .init(
+                id: "app.showChat",
+                title: "Show Chat",
+                shortcut: "⌘9",
+                category: .app,
+                description: "Preview the future chat-with-your-memory surface (ships in v1.5)."
+            ) {
+                selectedTab = .chat
+            },
+            .init(
                 id: "app.quit",
                 title: "Quit Hippocampus Recall",
                 shortcut: "⌘Q",
@@ -360,6 +369,17 @@ struct RootView: View {
             TimelineStripView(reader: reader)
                 .tag(RecallTab.timelineStrip)
                 .tabItem { Label("Strip", systemImage: "chart.bar.doc.horizontal") }
+
+            // Cycle 8.52 — Chat surface STUB (⌘9). UI-only preview of the
+            // V2-P12 chat-with-your-memory experience per ADR-0035 (Proposed).
+            // No ML runtime loaded; replies are placeholder strings framed as
+            // "coming in v1.5" so the CEO can review the shape before
+            // ratifying ADR-0035.
+            ChatSurfaceView()
+                .tag(RecallTab.chat)
+                .tabItem {
+                    Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
+                }
         }
         .padding(.top, 6)
         .background(Color.brandBgPrimary)
@@ -367,7 +387,7 @@ struct RootView: View {
         .onKeyPress(
             keys: [
                 .init("1"), .init("2"), .init("3"), .init("4"),
-                .init("5"), .init("6"), .init("7"), .init("8"),
+                .init("5"), .init("6"), .init("7"), .init("8"), .init("9"),
             ],
             phases: .down
         ) { press in
@@ -382,6 +402,7 @@ struct RootView: View {
             case KeyEquivalent("7"): selectedTab = .privacyDashboard
             // V2-P13 (Phase D scaffold) — ⌘8 = timeline strip tab.
             case KeyEquivalent("8"): selectedTab = .timelineStrip
+            case KeyEquivalent("9"): selectedTab = .chat
             default: return .ignored
             }
             return .handled
