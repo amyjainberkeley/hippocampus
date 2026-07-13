@@ -29,12 +29,14 @@ struct GlobalRecallPopupView: View {
         }
         .frame(width: 640)
         .background(Color.brandBgSecondary.opacity(0.98))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        // Cycle 8.48 MCIDesignSystem: modal-scale radius + modal shadow
+        // token. Stripe-style — subtle but present, no MacOS pillow.
+        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.xl))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: MCI.Radius.xl)
                 .strokeBorder(Color.brandCardBorder, lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.5), radius: 32, x: 0, y: 12)
+        .mciShadow(.modal)
         .onAppear { isFieldFocused = true }
         .onKeyPress(.escape, phases: .down) { _ in
             onDismiss(); return .handled
@@ -55,13 +57,16 @@ struct GlobalRecallPopupView: View {
     }
 
     private var inputField: some View {
-        HStack(spacing: 12) {
+        // Cycle 8.48 MCIDesignSystem: outer padding on 8pt grid + Stripe
+        // display-scale for the query (title tracking curve applied).
+        HStack(spacing: MCI.Spacing.m) {
             Image(systemName: "sparkle.magnifyingglass")
                 .foregroundStyle(Color.brandMint)
                 .font(.system(size: 18))
             TextField("Recall anything…", text: $viewModel.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 20))
+                .font(.system(size: 20, weight: .regular))
+                .tracking(MCI.Font.title2Tracking)
                 .foregroundStyle(Color.brandFgPrimary)
                 .focused($isFieldFocused)
                 .accessibilityLabel("Recall query")
@@ -71,8 +76,8 @@ struct GlobalRecallPopupView: View {
                     .accessibilityLabel("Searching")
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .padding(.horizontal, MCI.Spacing.l + 2)
+        .padding(.vertical, MCI.Spacing.l)
     }
 
     @ViewBuilder

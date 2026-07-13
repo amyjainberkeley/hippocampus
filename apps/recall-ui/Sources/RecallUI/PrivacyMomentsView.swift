@@ -59,19 +59,21 @@ struct PrivacyMomentCard: View {
     let moment: PrivacyMoment
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // MCIDesignSystem cycle 8.48: card rhythm on 8pt grid + Stripe
+        // two-weight typography (.bodyStrong for the redaction headline).
+        VStack(alignment: .leading, spacing: MCI.Spacing.s) {
             HStack(alignment: .firstTextBaseline) {
                 Image(systemName: "eye.slash.fill")
                     .foregroundStyle(Color.brandMintDim)
                 Text("Hippocampus redacted this")
-                    .font(.headline)
+                    .mciFont(.bodyStrong)
                     .foregroundStyle(Color.brandFgPrimary)
                 Spacer()
                 Text(ReasonStrings.sectionTag(for: moment.reasonCode))
-                    .font(.system(.caption, design: .monospaced))
+                    .font(MCI.Font.mono)
                     .foregroundStyle(Color.brandMintDim)
             }
-            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
+            Grid(alignment: .leading, horizontalSpacing: MCI.Spacing.s, verticalSpacing: MCI.Spacing.xs) {
                 GridRow {
                     Text("App:").foregroundStyle(Color.brandFgMuted)
                     Text(moment.appBundleId ?? "(unknown)")
@@ -95,15 +97,16 @@ struct PrivacyMomentCard: View {
                 .font(.caption)
                 .foregroundStyle(Color.brandFgMuted)
         }
-        .padding(12)
+        .padding(MCI.Spacing.m)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: MCI.Radius.m)
                 .fill(Color.brandCardBg)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: MCI.Radius.m)
                 .stroke(Color.brandCardBorder, lineWidth: 0.5)
         )
-        .padding(.vertical, 4)
+        .mciShadow(.card)
+        .padding(.vertical, MCI.Spacing.xs)
     }
 }

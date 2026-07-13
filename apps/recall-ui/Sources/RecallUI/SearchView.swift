@@ -48,7 +48,8 @@ struct SearchView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: 8) {
+        // MCIDesignSystem cycle 8.48: 8pt grid + Stripe-tuned body font.
+        HStack(spacing: MCI.Spacing.s) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(Color.brandFgMuted)
             TextField(
@@ -56,6 +57,7 @@ struct SearchView: View {
                 text: $viewModel.query
             )
             .textFieldStyle(.plain)
+            .mciFont(.body)
             .foregroundStyle(Color.brandFgPrimary)
             .focused($isSearchFieldFocused)
             .onSubmit {
@@ -74,8 +76,8 @@ struct SearchView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, MCI.Spacing.m)
+        .padding(.vertical, MCI.Spacing.m - 2)
         .background(Color.brandBgPrimary)
     }
 

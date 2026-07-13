@@ -22,35 +22,40 @@ struct HitRow: View {
     let hit: Hit
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        // Spacing tokens (cycle 8.48 MCIDesignSystem): row internal
+        // rhythm is on the 8pt grid — 10pt inter-column, 4pt tight
+        // stack, 8pt inline. The pre-refactor magic numbers matched
+        // the grid already; naming them makes it audit-safe.
+        HStack(alignment: .top, spacing: MCI.Spacing.m - 2) {
             HitThumbnail(url: hit.thumbnailURL)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: MCI.Spacing.s) {
                     Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
-                        .font(.system(.caption, design: .monospaced))
+                        .font(MCI.Font.mono)
                         .foregroundStyle(Color.brandMint)
                         .help(Formatters.tsString(usSinceEpoch: hit.tsUs))
                     Text(Formatters.contextLine(hit))
-                        .font(.system(.body, design: .default).weight(.semibold))
+                        .mciFont(.bodyStrong)
                         .foregroundStyle(Color.brandFgPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Spacer(minLength: 8)
+                    Spacer(minLength: MCI.Spacing.s)
                     if let reason = Formatters.matchReason(hit.source) {
                         Text(reason)
-                            .font(.system(.caption2, design: .default))
+                            .font(MCI.Font.footnote)
                             .textCase(.uppercase)
+                            .tracking(0.4)
                             .foregroundStyle(Color.brandMintDim)
                             .accessibilityLabel(reason)
                     }
                     if !Formatters.scoreString(hit.score).isEmpty {
                         Text(Formatters.scoreString(hit.score))
-                            .font(.system(.caption2, design: .monospaced))
+                            .font(MCI.Font.mono)
                             .foregroundStyle(Color.brandFgMuted)
                     }
                 }
                 Text(Formatters.snippet(Formatters.stripContextHeader(hit.ocrTextSnippet)))
-                    .font(.system(.body, design: .default))
+                    .mciFont(.body)
                     .foregroundStyle(Color.brandFgSecondary)
                     .lineLimit(3)
                 // Entity chips + related-events badge. Only render the row
@@ -58,17 +63,17 @@ struct HitRow: View {
                 // zero-entity case stays visually identical to the pre-PR-2
                 // layout.
                 if !hit.entities.isEmpty || !hit.linkedEventIds.isEmpty {
-                    HStack(spacing: 6) {
+                    HStack(spacing: MCI.Spacing.s - 2) {
                         EntityChipStrip(entities: hit.entities)
                         if let badge = Formatters.linkedBadge(hit.linkedEventIds) {
                             LinkedEventsBadge(label: badge)
                         }
                     }
-                    .padding(.top, 2)
+                    .padding(.top, MCI.Spacing.xxs)
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, MCI.Spacing.s - 2)
     }
 }
 
@@ -117,9 +122,9 @@ struct HitThumbnail: View {
             }
         }
         .frame(width: Self.width, height: Self.height)
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.xs, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
+            RoundedRectangle(cornerRadius: MCI.Radius.xs, style: .continuous)
                 .stroke(Color.brandCardBorder, lineWidth: 0.5)
         )
         .task(id: url) {

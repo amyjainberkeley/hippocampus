@@ -25,10 +25,13 @@ struct ActionPanel: View {
             .frame(width: 450)
             .frame(maxHeight: 400)
             .background(Color.brandBgSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: Color.black.opacity(0.4), radius: 24, x: 0, y: 8)
+            // Cycle 8.48 MCIDesignSystem: use modal radius + modal shadow
+            // preset so all floating panels (this + GlobalRecallPopup)
+            // share a single depth language.
+            .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.l))
+            .mciShadow(.modal)
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: MCI.Radius.l)
                     .strokeBorder(Color.brandCardBorder, lineWidth: 1)
             )
         }
@@ -138,6 +141,8 @@ struct ActionPanelHost: ViewModifier {
                 ActionPanel(registry: registry).transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: registry.isVisible)
+        // Cycle 8.48 MCIDesignSystem: opt into the shared `snap` motion
+        // token so every quick reveal in the app times the same.
+        .animation(MCI.Motion.snap, value: registry.isVisible)
     }
 }

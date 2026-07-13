@@ -41,6 +41,37 @@ extension Color {
     }
 }
 
+// Bridge legacy `brandXxx` names to the `MCI.Color.*` semantic tokens
+// (cycle 8.48 MCIDesignSystem PR). During the incremental refactor,
+// views MAY reference either surface — new code should prefer
+// `MCI.Color.foreground` etc.; the aliases below let a diff stay
+// small on any given view PR.
+//
+// The mapping is deliberately conservative: it does NOT lift the
+// legacy dark-only palette onto MCI's new light+dark aware tokens
+// automatically, because BrandTheme's constants are hex-literal (dark
+// mode only). A follow-up cycle can flip individual `Color.brandXxx`
+// references to the light-adaptive tokens once each view is verified
+// visually. Track that in `docs/design/design-system.md` §Migration.
+public extension Color {
+    // Convenience: names that mirror MCI.Color for grep-ability. They
+    // resolve to the same dark-mode-first constants that BrandTheme
+    // has always produced, so no visual delta lands with this PR.
+    static var mciAccent: Color { .brandMint }
+    static var mciAccentDim: Color { .brandMintDim }
+    static var mciAccentSubtle: Color { .brandMintSubtle }
+    static var mciBackground: Color { .brandBgPrimary }
+    static var mciSurface: Color { .brandBgSecondary }
+    static var mciSurfaceElevated: Color { .brandBgElevated }
+    static var mciForeground: Color { .brandFgPrimary }
+    static var mciForegroundSecondary: Color { .brandFgSecondary }
+    static var mciForegroundMuted: Color { .brandFgMuted }
+    static var mciBorder: Color { .brandCardBorder }
+    static var mciBorderStrong: Color { .brandInputBorder }
+    static var mciError: Color { .brandError }
+    static var mciWarning: Color { .brandWarning }
+}
+
 struct ShimmerView: View {
     @State private var phase: CGFloat = -1
 
