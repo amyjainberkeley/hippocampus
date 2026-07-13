@@ -44,6 +44,12 @@ struct PrivacyDashboard: View {
     @State private var errorMessage: String? = nil
     @State private var confirmation: DestructiveConfirmationBox? = nil
     @State private var banner: String? = nil
+    /// Cycle 8.51: newest-first slice of the audit log for the "Recent
+    /// activity" section. Reloaded on tab open and after every
+    /// destructive action so the user sees their most recent action
+    /// reflected immediately.
+    @State private var auditEntries: [AuditEntry] = []
+    @State private var showAllAudit: Bool = false
 
     /// Convenience init for reader-only surfaces (preview / stub tests).
     init(reader: BrainReader, mutator: PrivacyMutator? = nil) {
@@ -90,6 +96,18 @@ struct PrivacyDashboard: View {
                 if let err = errorMessage {
                     Text(err).mciFont(.body).foregroundStyle(Color.brandError)
                 }
+                // Cycle 8.51 — enterprise-audit-log surface. Renders the
+                // last 20 audit lines (or the whole log when the user
+                // clicks "Show all") so a security-review buyer sees the
+                // trust artifact live in the product.
+                RecentActivitySection(
+                    entries: showAllAudit
+                        ? AuditLog.shared.readRecent(count: 10_000)
+                        : auditEntries,
+                    showingAll: showAllAudit,
+                    onShowAll: { showAllAudit.toggle() },
+                    onExport: { runExportAuditLog() }
+                )
                 // Freemium tier footer (cycle 8.48). Reinforces trust
                 // invariant #1 from `docs/business/tier-structure.md`
                 // — every v1.0 feature stays Free forever. Reads from
@@ -134,9 +152,23 @@ struct PrivacyDashboard: View {
                 result = try await mutator.deleteEventsInRange(
                     startTsUs: startUs, endTsUs: endUs
                 )
+                // Cycle 8.51 — audit-log every destructive action so
+                // enterprise buyers have a plaintext trail. Details are
+                // meta-only (count + range); NO brain content.
+                AuditLog.shared.record(
+                    action: .deleteEventsInRange,
+                    details: [
+                        "count": "\(result.eventsDeleted)",
+                        "range_hours": "24",
+                    ]
+                )
             case .deleteEverything:
                 let token = try await mutator.prepareWipe()
                 result = try await mutator.wipeBrain(token: token)
+                AuditLog.shared.record(
+                    action: .wipeBrain,
+                    details: ["count": "\(result.eventsDeleted)"]
+                )
             }
             banner =
                 "Removed \(result.eventsDeleted) events."
@@ -162,7 +194,22 @@ struct PrivacyDashboard: View {
         } catch {
             errorMessage = "Couldn't load dashboard: \(error)"
         }
+        // Refresh the audit slice too; every reload (initial + post-
+        // destructive-action) should reflect the newest recorded lines.
+        auditEntries = AuditLog.shared.readRecent(count: 20)
         isLoading = false
+    }
+
+    /// Write the current audit log to `~/Downloads/…` and surface the
+    /// destination in the banner. Failures are surfaced inline.
+    @MainActor
+    private func runExportAuditLog() {
+        do {
+            let url = try AuditLog.shared.exportToDownloads()
+            banner = "Exported activity log to \(url.path)."
+        } catch {
+            errorMessage = "Export activity log failed: \(error)"
+        }
     }
 
     @MainActor
@@ -185,6 +232,15 @@ struct PrivacyDashboard: View {
             banner =
                 "Exported \(events.count) events to \(out). "
                 + "WARNING: unencrypted — move to encrypted storage if sensitive."
+            // Cycle 8.51 — audit-log the export. Only meta (count +
+            // destination path); brain content NEVER touches the log.
+            AuditLog.shared.record(
+                action: .exportJson,
+                details: ["events": "\(events.count)", "path": out]
+            )
+            Task { @MainActor in
+                auditEntries = AuditLog.shared.readRecent(count: 20)
+            }
         } catch {
             errorMessage = "Export failed: \(error)"
         }
@@ -464,6 +520,92 @@ extension JSONEncoder {
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
         return e
     }()
+}
+
+// MARK: - Recent activity (audit log)
+
+/// Cycle 8.51 — enterprise audit-log surface in the Privacy Dashboard.
+/// Renders a scrollable table of the most-recent `AuditEntry` values.
+/// Toggling "Show all" swaps in the whole log; "Export activity log"
+/// writes a plaintext copy to `~/Downloads/`. Uses `MCIDesignSystem`
+/// tokens for spacing / radius / color so the surface matches the rest
+/// of the dashboard.
+struct RecentActivitySection: View {
+    let entries: [AuditEntry]
+    let showingAll: Bool
+    let onShowAll: () -> Void
+    let onExport: () -> Void
+
+    private static let displayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.timeZone = TimeZone.current
+        return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MCI.Spacing.s) {
+            HStack {
+                Text("Recent activity")
+                    .font(.headline)
+                    .foregroundStyle(Color.brandFgPrimary)
+                Spacer()
+                Button(showingAll ? "Show recent" : "Show all") { onShowAll() }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.brandMint)
+                Button("Export activity log") { onExport() }
+                    .buttonStyle(.bordered)
+                    .tint(Color.brandMint)
+            }
+            Text(
+                "Every delete, wipe, export, and permission change is "
+                + "recorded to a plaintext local log — no upload. Share "
+                + "with your security team to prove what MCI touched."
+            )
+            .font(.caption)
+            .foregroundStyle(Color.brandFgMuted)
+
+            if entries.isEmpty {
+                Text("No recorded activity yet.")
+                    .font(.callout)
+                    .foregroundStyle(Color.brandFgMuted)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(entries) { entry in
+                            HStack(spacing: MCI.Spacing.m) {
+                                Text(Self.displayFormatter.string(from: entry.timestamp))
+                                    .foregroundStyle(Color.brandFgSecondary)
+                                    .frame(width: 150, alignment: .leading)
+                                Text(entry.action.rawValue)
+                                    .foregroundStyle(Color.brandFgPrimary)
+                                    .frame(width: 190, alignment: .leading)
+                                Text(Self.formatDetails(entry.details))
+                                    .foregroundStyle(Color.brandFgSecondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                            .font(.system(.caption, design: .monospaced))
+                        }
+                    }
+                }
+                .frame(maxHeight: showingAll ? 400 : 240)
+            }
+        }
+        .padding(MCI.Spacing.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.brandBgSecondary)
+        .cornerRadius(MCI.Radius.m)
+    }
+
+    /// Compact one-line details renderer. `{"count":"47"}` → `count=47`.
+    private static func formatDetails(_ details: [String: String]) -> String {
+        if details.isEmpty { return "—" }
+        return details.keys.sorted()
+            .map { "\($0)=\(details[$0] ?? "")" }
+            .joined(separator: ", ")
+    }
 }
 
 // MARK: - Tier footer
