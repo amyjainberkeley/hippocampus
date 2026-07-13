@@ -120,6 +120,17 @@ struct StatusMenuView: View {
 
             Divider()
 
+            // Freemium tier indicator (cycle 8.48). Non-interactive
+            // trust signal. See `docs/business/tier-structure.md` — in
+            // v1.0 every user is on the Free tier forever; Pro is a
+            // v1.5+ addition that never retroactively gates a shipped
+            // feature (trust invariant #1). Rendered as a disabled
+            // menu row so it visually reads as a status label rather
+            // than an actionable button.
+            Text("You're on Free forever")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Button("About Hippocampus") {
                 showAbout = true
                 openAboutWindow()
