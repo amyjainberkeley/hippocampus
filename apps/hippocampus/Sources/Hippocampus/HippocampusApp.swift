@@ -139,6 +139,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hard fail-fast for Intel / Rosetta hosts. Hippocampus's local-AI
+        // path (Core ML brief-author + embeddings + Neural Engine) is
+        // Apple Silicon-only; on Intel it silently degrades or crashes.
+        // Cycle 8.44 product-readiness audit polish gap. See
+        // `MciBootGuards.hostIsAppleSilicon()` for the host-CPU check
+        // (which correctly ignores Rosetta translation of the running
+        // process). No env override — Intel is unsupported, period.
+        guard MciBootGuards.hostIsAppleSilicon() else {
+            Self.presentUnsupportedArchitectureAlert()
+            NSApp.terminate(nil)
+            return
+        }
+
         // FIRST thing on launch, before any pipe / socket / Process /
         // xattr work: mask SIGPIPE.
         //
@@ -263,6 +276,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .map { "\($0.browser)=\($0.action.rawValue)" }
             .joined(separator: " ")
         firstLaunchLogger.info("browser-host install: \(summary, privacy: .public)")
+    }
+
+    /// Shown at boot when the host is not Apple Silicon. Modal so the
+    /// user sees it before `NSApp.terminate` tears the process down.
+    /// Single "Quit" button — no bypass path.
+    static func presentUnsupportedArchitectureAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Hippocampus requires Apple Silicon"
+        alert.informativeText = """
+            This Mac appears to use an Intel processor. Hippocampus uses \
+            the Apple Silicon Neural Engine for local AI (Core ML). \
+            Intel Macs are not supported.
+
+            Learn more at https://hippocampus-swart.vercel.app
+            """
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Quit")
+        alert.runModal()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
