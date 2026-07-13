@@ -85,7 +85,10 @@ struct MenuBarIcon: View {
 
     var body: some View {
         MenuBarStatusLabel(
-            status: MenuBarStatus.derive(from: supervisor.state)
+            status: MenuBarStatus.derive(
+                from: supervisor.state,
+                tccRevokedSurface: supervisor.tccRevokedSurface
+            )
         )
     }
 }
@@ -114,6 +117,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sentinelWatcher: DispatchSourceFileSystemObject?
     private var sentinelWatcherFd: Int32 = -1
     private var sentinelPollTask: Task<Void, Never>?
+
+    /// TCC-revoke pipeline (cycle 8.47 PR #80 follow-up):
+    ///   helper stderr → helper.stderr.log → tccStderrTail → sink →
+    ///   TCCRevokedNotifier (system notification) + supervisor.tccRevokedSurface
+    ///   (menu-bar red pill).
+    ///
+    /// Owned by AppDelegate so its lifetime matches the app process
+    /// (not tied to supervisor.start/stop — the helper crash+respawn
+    /// cycle keeps writing to the same log file, and we want to keep
+    /// tailing across those transitions).
+    private let tccNotifier = TCCRevokedNotifier()
+    private var tccStderrTail: TCCHelperStderrTail?
 
     override init() {
         // `ProcessSupervisor.init` is `@MainActor`; this class is too
@@ -252,6 +267,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             self.installBrowserHostManifests()
             self.startSupervisorOrDeferUntilOnboarded()
+            self.armTCCStderrTail()
+        }
+    }
+
+    /// Arm the helper-stderr TCC tail (cycle 8.47 PR #80 follow-up).
+    ///
+    /// The tail is armed AFTER `startSupervisorOrDeferUntilOnboarded`
+    /// so the helper's stderr log file has (usually) been created;
+    /// however it also works if the file doesn't exist yet — the
+    /// dispatch source watches the parent directory and picks up the
+    /// file's first appearance.
+    ///
+    /// Also registers the notification category so the "Open Settings"
+    /// action button on the actionable TCC-revoke notification renders
+    /// when the notifier's `add(_:)` fires.
+    @MainActor
+    private func armTCCStderrTail() {
+        let sink = TCCNotifierAndSupervisorSink(
+            notifier: tccNotifier,
+            supervisor: supervisor
+        )
+        let tail = TCCHelperStderrTail(sink: sink)
+        tail.start()
+        tccStderrTail = tail
+
+        // Fire-and-forget category registration; safe to call on every
+        // launch (setNotificationCategories replaces).
+        Task { @MainActor in
+            await tccNotifier.registerCategory()
         }
     }
 
@@ -290,6 +334,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         cancelSentinelWatcher()
+        tccStderrTail?.stop()
+        tccStderrTail = nil
         supervisor.stop()
     }
 

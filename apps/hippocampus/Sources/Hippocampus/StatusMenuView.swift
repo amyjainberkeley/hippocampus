@@ -209,7 +209,10 @@ struct StatusMenuView: View {
     /// baked into the menu-bar icon overlay so the two surfaces
     /// always agree. See `MenuBarStatus.derive` for precedence rules.
     private var menuBarStatus: MenuBarStatus {
-        MenuBarStatus.derive(from: supervisor.state)
+        MenuBarStatus.derive(
+            from: supervisor.state,
+            tccRevokedSurface: supervisor.tccRevokedSurface
+        )
     }
 
     @ViewBuilder
