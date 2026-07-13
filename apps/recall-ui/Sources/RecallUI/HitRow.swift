@@ -143,12 +143,27 @@ struct HitThumbnail: View {
 
     /// Off-main-actor loader. Nil URL, missing file, or undecodable
     /// bytes all return nil — the view falls back to the placeholder.
-    /// Note: today's blobs on disk are AES-GCM-encrypted (P3.6.5,
-    /// `KeyframeBlobWriter`); the CSO-owned decrypt path is a follow-on
-    /// wired outside this PR. Until then this loader will return nil
-    /// for any real-capture blob (graceful degradation), and the row
-    /// renders the placeholder. That is deliberate: this PR ships the
-    /// UI seam so the decrypt path can plug in cleanly later.
+    ///
+    /// On-disk blobs (P3.6.5, `KeyframeBlobWriter`) are AES-GCM-256
+    /// sealed under an HKDF-derived per-blob key. As of cycle 8.47 the
+    /// on-disk layout is `salt(16) || sealed box`, so decryption from
+    /// disk bytes alone is now cryptographically well-defined — see
+    /// `KeyframeBlobEncoder.decrypt(blob:blobKeyMaterial:)`.
+    ///
+    /// This loader currently STILL returns nil for encrypted blobs
+    /// because the DbKey plumb-through into the recall-ui process is a
+    /// separate PR (needs a helper-XPC / Keychain read path so the
+    /// recall UI can obtain the key material without violating the
+    /// key-custody model in ADR-0008 §5). Until then real-capture rows
+    /// render the muted placeholder — same graceful-degradation UX as
+    /// pre-cycle-8.47.
+    ///
+    /// Blobs written under the buggy pre-cycle-8.47 code path
+    /// (SHA256(plaintext) as HKDF salt) are UNRECOVERABLE by
+    /// construction: their bytes-on-disk do not carry the salt that
+    /// was used to derive the key. Once the DbKey plumb lands, those
+    /// blobs will also return nil from `decrypt` (AES-GCM tag failure)
+    /// and render the same placeholder — no user-visible regression.
     static func load(url: URL?) -> NSImage? {
         guard let url else { return nil }
         // FileManager check avoids a spammy warning when the blob is

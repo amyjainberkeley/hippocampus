@@ -7,7 +7,7 @@
 // Encodes a captured CVPixelBuffer as a downscaled JPEG, encrypts with
 // a per-blob key derived via HKDF from the SQLCipher DbKey, writes to
 // a content-addressed blob store under
-// ~/Library/Application Support/MCI/blobs/<sha256-of-ciphertext>.bin,
+// ~/Library/Application Support/MCI/blobs/<sha256-of-blob>.bin,
 // and returns the sha256 hash for the OCREvent.keyframeHash wire field.
 //
 // CSO invariants:
@@ -15,23 +15,64 @@
 //     key material, no new key custody surface (ADR-0008 §5).
 //   - Blob writes happen ONLY on .allow paths gated by cascade-twice
 //     (ADR-0016 §4.8). No keyframe ever written for a tombstone.
-//   - Blob filename is sha256 of CIPHERTEXT, not plaintext — leaks
-//     zero metadata about the original screen content.
+//   - Blob filename is sha256 of the ON-DISK BLOB, not plaintext —
+//     leaks zero metadata about the original screen content.
 //   - Drop-oldest queue matches OCR worker discipline (ADR-0016 §3).
+//
+// On-disk blob layout (cycle 8.47 salt fix — closes cycle 8.46 PR #70
+// HKDF invariant hole):
+//
+//     [ 16 bytes: random HKDF salt ] [ AES-GCM sealed box: nonce(12) || ct || tag(16) ]
+//
+// The salt is generated per-blob from `SecRandomCopyBytes` and
+// PREPENDED to the sealed box before the file hits disk. At decrypt
+// time the loader reads the file, splits the first 16 bytes as salt,
+// runs HKDF to reproduce the per-blob key, and opens the sealed box.
+//
+// Rationale for the layout change (see cycle 8.46 PR #70 audit): the
+// previous implementation used SHA256(plaintext) as the HKDF salt but
+// only stored SHA256(ciphertext), so the decrypt path could NOT
+// reproduce the salt from what's on disk. Blobs written under the
+// old code path are UNRECOVERABLE — their first 16 bytes are part of
+// the differently-salted sealed box, so AES-GCM tag verification will
+// fail on decrypt (returning nil to the caller, which the UI renders
+// as the "no thumbnail" placeholder — same UX as the pre-fix state).
+//
+// Salt discipline (ADR-0008 §5 clarification): the salt is random per
+// blob, not derived from content. This is the textbook HKDF pattern —
+// content-hash salts add nothing over a random salt for HKDF (HKDF's
+// extract phase already handles non-uniform IKM), and they broke the
+// decrypt-side recomputation contract. 16 bytes × 10k keyframes/day
+// ≈ 60 MB/year on-disk cost — negligible.
 
 import CoreGraphics
 import CoreImage
 import CoreVideo
 import CryptoKit
 import Foundation
+import Security
 
 // MARK: - Blob encoding (stateless, no actor isolation needed)
 
 public enum KeyframeBlobEncoder {
 
+    /// Size of the per-blob HKDF salt, in bytes, prepended to the sealed
+    /// box in the on-disk blob layout. 16 bytes = 128 bits of salt
+    /// entropy, matching the AES-GCM nonce width and the standard HKDF
+    /// salt recommendation (RFC 5869 §3.1).
+    public static let saltLength: Int = 16
+
+    /// HKDF `info` string (context / application binding). Bumped
+    /// alongside any change to the on-disk layout or salt discipline.
+    /// Cycle 8.47: bumped to v2 (random salt prefix layout, see the
+    /// file header for the reasoning). v1 was the buggy plaintext-hash
+    /// salt scheme — its blobs are unrecoverable by construction.
+    static let hkdfInfo: Data = Data("mci-blob-v2".utf8)
+
     /// Encode a CVPixelBuffer as a downscaled JPEG, derive a per-blob
-    /// encryption key via HKDF, AES-GCM-256 encrypt, and return the
-    /// sha256 of the ciphertext alongside the ciphertext itself.
+    /// encryption key via HKDF from a fresh random salt, AES-GCM-256
+    /// encrypt, and return the sha256 of the ON-DISK blob (salt ||
+    /// sealed box) alongside the blob bytes themselves.
     ///
     /// Returns `nil` on any encoding or encryption failure — the caller
     /// emits the OCREvent with `keyframeHash = [0; 32]` (no blob).
@@ -41,7 +82,9 @@ public enum KeyframeBlobEncoder {
     ///   - blobKeyMaterial: 32-byte DbKey read from `MCI_DB_KEY_HEX` env var.
     ///   - maxLongEdge: Target maximum dimension for the long edge (default 1280).
     ///   - jpegQuality: JPEG compression quality 0.0–1.0 (default 0.7).
-    /// - Returns: `(sha256, ciphertext)` or `nil`.
+    /// - Returns: `(sha256, ciphertext)` where `ciphertext` is the full
+    ///   on-disk blob (salt || sealed box) and `sha256` is SHA256 of
+    ///   that blob. Returns `nil` on any failure.
     public static func encodeAndEncrypt(
         pixelBuffer: CVPixelBuffer,
         blobKeyMaterial: [UInt8],
@@ -58,16 +101,16 @@ public enum KeyframeBlobEncoder {
             return nil
         }
 
-        guard let ciphertext = encrypt(
+        guard let blob = encrypt(
             plaintext: jpegData,
             blobKeyMaterial: blobKeyMaterial
         ) else {
             return nil
         }
 
-        let digest = SHA256.hash(data: ciphertext)
+        let digest = SHA256.hash(data: blob)
         let sha256 = Array(digest)
-        return (sha256: sha256, ciphertext: ciphertext)
+        return (sha256: sha256, ciphertext: blob)
     }
 
     // MARK: JPEG encoding
@@ -111,50 +154,87 @@ public enum KeyframeBlobEncoder {
 
     // MARK: Encryption — AES-GCM-256 with HKDF-derived per-blob key
 
+    /// Encrypt `plaintext` with a per-blob key derived via HKDF from a
+    /// fresh random 16-byte salt. Returns the ON-DISK BLOB bytes:
+    ///
+    ///     salt(16) || AES-GCM sealed box(nonce(12) || ct || tag(16))
+    ///
+    /// The salt is prepended so that `decrypt(blob:blobKeyMaterial:)`
+    /// can reproduce the HKDF-derived key from the on-disk bytes
+    /// alone (no side channel required). Returns `nil` if the salt
+    /// RNG or AES-GCM seal fails.
     static func encrypt(
         plaintext: Data,
         blobKeyMaterial: [UInt8]
     ) -> Data? {
-        let plaintextDigest = SHA256.hash(data: plaintext)
-        let salt = Data(plaintextDigest)
+        guard let salt = randomSalt(count: saltLength) else { return nil }
 
         let ikm = SymmetricKey(data: blobKeyMaterial)
         let derivedKey = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: ikm,
             salt: salt,
-            info: Data("mci-blob-v1".utf8),
+            info: hkdfInfo,
             outputByteCount: 32
         )
 
         guard let sealedBox = try? AES.GCM.seal(plaintext, using: derivedKey) else {
             return nil
         }
-
         guard let combined = sealedBox.combined else { return nil }
-        return combined
+
+        var blob = Data(capacity: salt.count + combined.count)
+        blob.append(salt)
+        blob.append(combined)
+        return blob
     }
 
-    /// Decrypt a blob. Used in tests to verify round-trip correctness.
+    /// Decrypt an on-disk blob produced by `encrypt(plaintext:...)`.
+    /// Splits the leading 16 bytes as the HKDF salt, reproduces the
+    /// per-blob key, and opens the sealed box. Returns `nil` for any
+    /// failure — undersized input, unopenable sealed box, AES-GCM tag
+    /// verification failure, or (importantly) a pre-cycle-8.47 blob
+    /// whose first 16 bytes are NOT a real HKDF salt.
+    ///
+    /// - Parameters:
+    ///   - blob: The full on-disk blob bytes (salt || sealed box).
+    ///   - blobKeyMaterial: 32-byte DbKey (same as encrypt).
     public static func decrypt(
-        ciphertext: Data,
-        originalPlaintext: Data,
+        blob: Data,
         blobKeyMaterial: [UInt8]
     ) -> Data? {
-        let plaintextDigest = SHA256.hash(data: originalPlaintext)
-        let salt = Data(plaintextDigest)
+        guard blobKeyMaterial.count == 32 else { return nil }
+        guard blob.count > saltLength else { return nil }
+
+        let salt = blob.prefix(saltLength)
+        let sealed = blob.suffix(from: blob.startIndex + saltLength)
 
         let ikm = SymmetricKey(data: blobKeyMaterial)
         let derivedKey = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: ikm,
             salt: salt,
-            info: Data("mci-blob-v1".utf8),
+            info: hkdfInfo,
             outputByteCount: 32
         )
 
-        guard let sealedBox = try? AES.GCM.SealedBox(combined: ciphertext) else {
+        guard let sealedBox = try? AES.GCM.SealedBox(combined: sealed) else {
             return nil
         }
         return try? AES.GCM.open(sealedBox, using: derivedKey)
+    }
+
+    // MARK: Random salt (SecRandomCopyBytes — kernel CSPRNG)
+
+    /// Generate `count` cryptographically random bytes via the system
+    /// CSPRNG. Returns `nil` if the syscall fails (extremely rare —
+    /// documented failure mode is the entropy pool being torn down
+    /// during process shutdown).
+    static func randomSalt(count: Int) -> Data? {
+        var bytes = [UInt8](repeating: 0, count: count)
+        let status = bytes.withUnsafeMutableBufferPointer { buf in
+            SecRandomCopyBytes(kSecRandomDefault, count, buf.baseAddress!)
+        }
+        guard status == errSecSuccess else { return nil }
+        return Data(bytes)
     }
 }
 
