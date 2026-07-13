@@ -153,6 +153,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// the store directly and feed it via `FocusTracker.tickOnce(...)`).
     private let focusTracker: FocusTracker?
 
+    /// Cycle 8.44 audit risk #1 — screen-share leak detector. When
+    /// supplied, `start()` also starts the detector, and the session
+    /// registers itself as the detector's observer so it can pause
+    /// SCStream when a Zoom/Meet/AirPlay session is active. `nil`
+    /// preserves pre-cycle-8.44 behaviour (no screen-share awareness)
+    /// — used by tests + any legacy build.
+    private let screenShareDetector: ScreenShareDetector?
+
     /// Test-only accessor: proves the OCR emitter wire is connected.
     /// Not public API — `internal` so `@testable import` can read it.
     internal var ocrPostAllowEmitterForTest: (any OCRPostAllowEmitter)? {
@@ -192,6 +200,20 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// on the wire.
     private var firstSampleLogged: Bool = false
 
+    /// Cycle 8.44 audit risk #1 — set to `true` while the detector
+    /// says a Zoom/Meet/AirPlay session is active. Guarded by `lock`.
+    /// While `true`, `start()` skips actually starting the SCStream
+    /// (the detector's observer callback stops the stream and this
+    /// flag prevents an accidental resume from a competing code path)
+    /// and `pauseForScreenShare` / `resumeFromScreenShare` toggle it.
+    private var pausedForScreenShare: Bool = false
+
+    /// The last SCStream instance that was paused because of screen-
+    /// share detection. Not retained across pauses (we call
+    /// `stopCapture()`, so the stream is dead after pause) — this
+    /// exists only to prove idempotence in tests.
+    private var lastPausedActor: String?
+
     public init(
         pipeline: SCStreamPipeline,
         denylist: Denylist,
@@ -201,7 +223,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         urlProvider: URLProvider? = nil,
         ocrPostAllowEmitter: (any OCRPostAllowEmitter)? = nil,
         focusedWindowStore: FocusedWindowStore? = nil,
-        focusTracker: FocusTracker? = nil
+        focusTracker: FocusTracker? = nil,
+        screenShareDetector: ScreenShareDetector? = nil
     ) {
         self.pipeline = pipeline
         self.denylist = denylist
@@ -212,8 +235,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         self.ocrPostAllowEmitter = ocrPostAllowEmitter
         self.focusedWindowStore = focusedWindowStore
         self.focusTracker = focusTracker
+        self.screenShareDetector = screenShareDetector
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
+        // The detector holds a `weak` observer, so this create-then-set
+        // pattern is safe: no retain cycle.
+        self.screenShareDetector?.setObserver(self)
     }
 
     /// Start the live capture stream.
@@ -283,6 +310,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         storeStream(scStream)
         storeInstalledFocusGeneration(initialFocusGeneration)
         startRebindTaskIfNeeded()
+
+        // Cycle 8.44 audit risk #1 — start the screen-share detector
+        // after the SCStream is live. The detector will pause the
+        // stream immediately if a share is already active on start
+        // (fail-safe: on start we don't know share state until the
+        // first debounced verdict lands).
+        screenShareDetector?.start()
     }
 
     /// Stop the live capture stream (idempotent).
@@ -292,11 +326,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // UNVERIFIED — needs live macOS; do not claim working.
         cancelRebindTask()
         focusTracker?.stop()
+        screenShareDetector?.stop()
         let s = takeStream()
         try await s?.stopCapture()
         // No frames will arrive after `stopCapture()`; clear the §2
         // verdict so a subsequent `start()` begins from fail-safe.
         blackedRegionProbe?.reset()
+        // Clear the paused-for-share flag so a fresh `start()` on the
+        // same instance doesn't erroneously refuse to bring up the
+        // SCStream (the detector will re-arm on the next `start()`).
+        lock.lock(); pausedForScreenShare = false; lastPausedActor = nil; lock.unlock()
     }
 
     // Locked critical sections live in non-async helpers: `NSLock` is
@@ -519,6 +558,115 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             url: resolvedUrl,
             pageText: nil
         )
+    }
+
+    // MARK: - Cycle 8.44 — screen-share pause/resume
+
+    /// Pause the live SCStream because a screen-share was detected.
+    /// Idempotent. Emits a stderr `helper_health screen_share_active=
+    /// true actor=<bundleId>` breadcrumb so the parent app (Hippocampus)
+    /// can drive the menu-bar red pill until the sibling
+    /// `MenuBarStatus.pausedForScreenShare(actor:)` enum lands (mission
+    /// brief §7). Content-free: only bundle-id + boolean cross the
+    /// process boundary. The pause drops the SCStream strong ref, so
+    /// the ingest pipeline sees a clean capture-off surface (M4 kill-
+    /// switch pattern).
+    ///
+    /// `// UNVERIFIED — needs live macOS; do not claim working` for
+    /// the OS-touching `stopCapture()`; state-flag logic is headless-
+    /// tested.
+    public func pauseForScreenShare(actor: String?) async {
+        lock.lock()
+        if pausedForScreenShare { lock.unlock(); return }
+        pausedForScreenShare = true
+        lastPausedActor = actor
+        lock.unlock()
+
+        FileHandle.standardError.write(
+            "mci-capture-helper: helper_health screen_share_active=true actor=\(actor ?? "unknown")\n"
+                .data(using: .utf8) ?? Data()
+        )
+
+        // UNVERIFIED — needs live macOS; do not claim working.
+        let s = takeStream()
+        try? await s?.stopCapture()
+    }
+
+    /// Resume from a screen-share pause. Idempotent. If the underlying
+    /// SCStream rebuild throws (e.g. TCC revoked during the pause), the
+    /// session stays paused and the next detector cycle can retry —
+    /// fail-safe = pause more aggressively (mission constraint).
+    ///
+    /// `// UNVERIFIED — needs live macOS; do not claim working`.
+    public func resumeFromScreenShare() async throws {
+        lock.lock()
+        if !pausedForScreenShare { lock.unlock(); return }
+        // Clear optimistically so `start()` doesn't recurse; restore on
+        // throw so the next detector cycle retries.
+        pausedForScreenShare = false
+        lock.unlock()
+
+        FileHandle.standardError.write(
+            "mci-capture-helper: helper_health screen_share_active=false\n"
+                .data(using: .utf8) ?? Data()
+        )
+
+        do {
+            try await bringUpSCStreamOnly()
+        } catch {
+            lock.lock(); pausedForScreenShare = true; lock.unlock()
+            FileHandle.standardError.write(
+                "mci-capture-helper: SCStream resume-from-pause failed (staying paused): \(error)\n"
+                    .data(using: .utf8) ?? Data()
+            )
+            throw error
+        }
+    }
+
+    /// Bring up ONLY the SCStream (used by `resumeFromScreenShare`),
+    /// bypassing `focusTracker.start()` / `screenShareDetector.start()`
+    /// — those are already running from the initial `start()`.
+    /// `// UNVERIFIED — needs live macOS; do not claim working`.
+    private func bringUpSCStreamOnly() async throws {
+        // UNVERIFIED — needs live macOS; do not claim working.
+        let filter: SCContentFilter
+        let initialFocusGeneration: UInt64
+        if let store = focusedWindowStore {
+            let initialSnapshot = store.currentSync()
+            if let focused = initialSnapshot.focused,
+               let focusedFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
+                   windowId: focused.windowId,
+                   denylist: denylist
+               )
+            {
+                filter = focusedFilter
+                initialFocusGeneration = initialSnapshot.generation
+            } else {
+                filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
+                initialFocusGeneration = 0
+            }
+        } else {
+            filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
+            initialFocusGeneration = 0
+        }
+        let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
+        let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        try scStream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
+        try await scStream.startCapture()
+        storeStream(scStream)
+        storeInstalledFocusGeneration(initialFocusGeneration)
+    }
+
+    /// Test-only accessor — proves the pause state without exposing
+    /// the mutable field. Not public API.
+    internal func isPausedForScreenShareForTest() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return pausedForScreenShare
+    }
+
+    internal func lastPausedActorForTest() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return lastPausedActor
     }
 
     // MARK: - SCStreamOutput
@@ -877,5 +1025,26 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             }
         }
         return grid
+    }
+}
+
+// MARK: - Cycle 8.44 — screen-share detector observer conformance
+
+extension SCStreamCaptureSession: ScreenShareDetector.Observer {
+    /// Debounced transitions arrive here. `isSharingActive == true`
+    /// pauses; `false` resumes. Idempotent — the underlying
+    /// pause/resume methods no-op on repeated same-state calls.
+    public func screenShareDetectorDidTransition(
+        to sample: ScreenShareSample
+    ) async {
+        if sample.isSharingActive {
+            await pauseForScreenShare(actor: sample.sharingActor)
+        } else {
+            // Resume best-effort — a throw here leaves the session
+            // in the paused state and the next detector cycle can
+            // retry. Do NOT re-throw: the observer callback is
+            // fire-and-forget from the detector's side.
+            try? await resumeFromScreenShare()
+        }
     }
 }
