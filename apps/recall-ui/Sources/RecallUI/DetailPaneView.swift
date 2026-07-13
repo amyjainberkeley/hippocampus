@@ -23,8 +23,11 @@ struct DetailPaneView: View {
     }
 
     var body: some View {
+        // 8pt-grid rhythm (cycle 8.48 MCIDesignSystem): section spacing
+        // + outer padding = MCI.Spacing.l (16pt). Reads as calm; keeps
+        // the Stripe-tuned airiness without visual regression.
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: MCI.Spacing.l) {
                 header
                 Divider().background(Color.brandCardBorder)
                 if !hit.entities.isEmpty {
@@ -35,7 +38,7 @@ struct DetailPaneView: View {
                 }
                 ocrSection
             }
-            .padding(16)
+            .padding(MCI.Spacing.l)
         }
         .background(Color.brandBgSecondary)
         .focusable()
@@ -84,21 +87,21 @@ struct DetailPaneView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MCI.Spacing.s) {
             HStack(alignment: .firstTextBaseline) {
                 Text(hit.appBundleId ?? "(no app)")
-                    .font(.system(.title3, design: .default).weight(.semibold))
+                    .mciFont(.title2)
                     .foregroundStyle(Color.brandFgPrimary)
                 Spacer()
                 if reader != nil, !hit.linkedEventIds.isEmpty {
                     relatedBadge
                 }
                 Text(Formatters.sourceTag(hit.source))
-                    .font(.system(.caption2, design: .monospaced))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .font(MCI.Font.mono)
+                    .padding(.horizontal, MCI.Spacing.s - 2)
+                    .padding(.vertical, MCI.Spacing.xxs)
                     .background(
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: MCI.Radius.xs)
                             .stroke(Color.brandMintDim, lineWidth: 0.5)
                     )
                     .foregroundStyle(Color.brandMintDim)

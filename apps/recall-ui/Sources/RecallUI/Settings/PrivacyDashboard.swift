@@ -52,8 +52,10 @@ struct PrivacyDashboard: View {
     }
 
     var body: some View {
+        // Cycle 8.48 MCIDesignSystem: 24pt section rhythm, 24pt outer
+        // padding — Stripe-tuned airiness for a trust-projecting surface.
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: MCI.Spacing.xl) {
                 PrivacySummaryCard(summary: summary, isLoading: isLoading)
                 FilterBar(filter: $filter, observedApps: observedApps)
                 EventList(events: filter.apply(to: events), isLoading: isLoading)
@@ -68,24 +70,24 @@ struct PrivacyDashboard: View {
                     isBusy: isMutating
                 )
                 if isMutating {
-                    HStack(spacing: 8) {
+                    HStack(spacing: MCI.Spacing.s) {
                         ProgressView().controlSize(.small)
                         Text("Working…").foregroundStyle(Color.brandFgMuted)
                     }
                 }
                 if let banner {
                     Text(banner)
-                        .font(.callout)
+                        .mciFont(.body)
                         .foregroundStyle(Color.brandMint)
-                        .padding(8)
+                        .padding(MCI.Spacing.s)
                         .background(Color.brandMintSubtle)
-                        .cornerRadius(6)
+                        .cornerRadius(MCI.Radius.s)
                 }
                 if let err = errorMessage {
-                    Text(err).font(.callout).foregroundStyle(Color.brandError)
+                    Text(err).mciFont(.body).foregroundStyle(Color.brandError)
                 }
             }
-            .padding(20)
+            .padding(MCI.Spacing.xl)
         }
         .background(Color.brandBgPrimary)
         .task { await reloadAll() }
