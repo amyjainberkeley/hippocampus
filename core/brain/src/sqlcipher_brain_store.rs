@@ -1051,6 +1051,68 @@ impl SqlCipherBrainStore {
         }
         Ok(out)
     }
+
+    /// Boot-time `SQLCipher` integrity gate — the wrapper `apps/agent`
+    /// calls immediately after [`SqlCipherBrainStore::new`] and BEFORE
+    /// serving any read/write.
+    ///
+    /// Runs [`SqlCipherBrainStore::integrity_check`] (`PRAGMA
+    /// integrity_check`) and enforces the healthy-DB contract: a valid
+    /// store returns exactly `["ok"]`. Any deviation (backend error,
+    /// non-`"ok"` row, or an unexpected row count) is corruption and
+    /// surfaces as an [`IntegrityError`] with the raw pragma output
+    /// preserved for the caller's debug log + follow-up repair UX.
+    ///
+    /// The pragma output is content-free (schema / index diagnostics
+    /// only — no user event text) so callers may safely log it to
+    /// stderr and the helper-health JSON log.
+    ///
+    /// Cycle 8.44 audit — closes breakage risk #3 (silent-data-loss on
+    /// a corrupted DB). Wraps `integrity_check` per PR-body constraint;
+    /// does not alter the underlying pragma path.
+    ///
+    /// # Errors
+    /// - [`IntegrityError::Backend`] if the pragma itself failed
+    ///   (driver-level; the underlying `StoreError::Backend` is
+    ///   preserved verbatim).
+    /// - [`IntegrityError::Corrupted`] if any pragma row is not
+    ///   exactly `"ok"`. The full row set is preserved so the agent
+    ///   can log it before refusing to serve.
+    pub fn verify_integrity_on_boot(&self) -> Result<(), IntegrityError> {
+        let rows = self
+            .integrity_check()
+            .map_err(|e| IntegrityError::Backend(format!("{e}")))?;
+        if rows.len() == 1 && rows[0] == "ok" {
+            // Observability signal — the boot path's caller (apps/agent)
+            // additionally emits a `helper_health` line via its
+            // structured logger. This crate stays log-framework-free.
+            eprintln!("brain: integrity_check ok");
+            Ok(())
+        } else {
+            Err(IntegrityError::Corrupted(rows))
+        }
+    }
+}
+
+/// Typed outcome of [`SqlCipherBrainStore::verify_integrity_on_boot`].
+///
+/// A `Corrupted` variant is the trigger for the agent's refuse-to-serve
+/// path (cycle 8.44 audit breakage risk #3): on this error the agent
+/// MUST NOT accept MCP requests or start ingest pumps. The raw pragma
+/// output is preserved so the caller can log it + surface it to the
+/// menu-bar red-pill / repair modal.
+#[derive(Debug, thiserror::Error)]
+pub enum IntegrityError {
+    /// The underlying `PRAGMA integrity_check` query itself failed
+    /// (driver / SQLCipher-level error). The wrapped string is the
+    /// original [`StoreError`] `Display`.
+    #[error("integrity: backend: {0}")]
+    Backend(String),
+    /// The pragma completed but reported at least one non-`"ok"` row —
+    /// the DB is corrupted. All rows are preserved verbatim; a healthy
+    /// DB is exactly `["ok"]` per `SQLite` semantics.
+    #[error("integrity: corrupted ({0:?})")]
+    Corrupted(Vec<String>),
 }
 
 /// Schema migration — ADR-0016 §1.4. Idempotent: every `CREATE` is

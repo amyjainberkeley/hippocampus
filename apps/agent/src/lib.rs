@@ -23,6 +23,14 @@ pub mod brain_cli;
 pub mod brain_ingest;
 pub mod brief_worker;
 pub mod consolidator_worker;
+/// Cycle 8.44 audit — lock-file-based unclean-shutdown detection.
+/// On boot, [`crash_recovery::acquire_lock`] returns a
+/// [`crash_recovery::LockAcquireOutcome`] that tells the caller whether
+/// the prior process exited cleanly, crashed, or is still running. A
+/// crash outcome triggers an extra `SqlCipherBrainStore::verify_integrity_on_boot`
+/// call before serving. Companion to
+/// `mci_brain::integrity_scheduler` (weekly background check).
+pub mod crash_recovery;
 pub mod device_id;
 pub mod episode_worker;
 pub mod health_log;
