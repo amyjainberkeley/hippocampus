@@ -7,6 +7,18 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var state: SupervisorState = .idle
     @Published public private(set) var health: HealthSnapshot?
 
+    /// The current TCC-revoked surface (if any). Populated by the
+    /// AppDelegate's `TCCHelperStderrTail` when the helper's stderr
+    /// emits a `helper_health tcc_revoked=<surface>` breadcrumb; cleared
+    /// on the matching `tcc_restored=<surface>`. Read by `MenuBarIcon`
+    /// + `StatusMenuView.menuBarStatus` and passed to
+    /// `MenuBarStatus.derive(tccRevokedSurface:)` so the icon flips to
+    /// the red-pill error state without the supervisor itself changing
+    /// state (the helper handles its own pause).
+    ///
+    /// Cycle 8.47 PR #80 pipeline follow-up.
+    @Published public internal(set) var tccRevokedSurface: TCCRevokedReason?
+
     private let locator: BinaryLocator
     private let keyStore: KeyStore
     private let runtimeConfig: RuntimeConfig
