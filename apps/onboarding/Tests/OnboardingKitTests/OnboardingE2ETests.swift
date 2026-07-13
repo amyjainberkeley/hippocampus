@@ -266,6 +266,137 @@ final class OnboardingE2ETests: XCTestCase {
             "clearResumeState() must scrub the persisted step on finish")
     }
 
+    // MARK: - Test 7: Deferred-permission choreography — happy path
+
+    /// Cotypist P0 pattern #2. User walks the choreographed permission
+    /// sub-steps one at a time. Each `recordPermissionOutcome` advances
+    /// the sequence pointer; after both required surfaces resolve, the
+    /// user can advance past `.permissions`.
+    func testDeferredPermissionChoreographyHappyPath() {
+        let vm = OnboardingFlowViewModel(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .notRequested),
+            accessibility: StubTCCPermission(kind: .accessibility, status: .notRequested),
+            stateStore: InMemoryOnboardingStateStore()
+        )
+        vm.goTo(.permissions)
+        XCTAssertEqual(vm.currentPermissionSurface, .screenRecording,
+            "Choreography must open with Screen Recording.")
+        XCTAssertFalse(vm.canAdvance, "SR not granted — nav-bar must be locked.")
+
+        // Sub-step 1 → grant SR.
+        (vm.screenRecordingPermission as! StubTCCPermission).simulateGrant()
+        vm.recordPermissionOutcome(.screenRecording, .granted)
+        XCTAssertEqual(vm.currentPermissionSurface, .accessibility)
+
+        // Sub-step 2 → grant AX.
+        (vm.accessibilityPermission as! StubTCCPermission).simulateGrant()
+        vm.recordPermissionOutcome(.accessibility, .granted)
+
+        // Automation + FDA are notApplicable on cold start; sequence complete.
+        XCTAssertNil(vm.currentPermissionSurface,
+            "After both required surfaces, choreography must be complete.")
+        XCTAssertTrue(vm.canAdvance)
+        vm.advance()
+        XCTAssertEqual(vm.currentStep, .primaryHotkey)
+    }
+
+    // MARK: - Test 8: Deny-then-continue path
+
+    /// User denies Accessibility. The choreography records the outcome
+    /// as `.denied` and advances (drives the inline "Screen capture is
+    /// optional; grant later in Settings" recovery banner in the slide).
+    /// AX denial is a soft-fail — the sequence completes and canAdvance
+    /// unblocks once SR is granted.
+    func testDeferredPermissionChoreographyDenyAccessibilityThenContinue() {
+        let vm = OnboardingFlowViewModel(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
+            accessibility: StubTCCPermission(kind: .accessibility, status: .notRequested),
+            stateStore: InMemoryOnboardingStateStore()
+        )
+        vm.goTo(.permissions)
+        XCTAssertEqual(vm.currentPermissionSurface, .accessibility,
+            "SR was already granted at init — choreography opens at AX.")
+
+        // User clicks Grant → OS dialog fires → user denies.
+        (vm.accessibilityPermission as! StubTCCPermission).simulateDeny()
+        // Slide's denial-recovery banner shows; user clicks Continue.
+        vm.recordPermissionOutcome(.accessibility, .denied)
+
+        XCTAssertEqual(vm.permissionResults[.accessibility], .denied,
+            "Denial-with-Continue must record .denied — not .pending.")
+        XCTAssertNil(vm.currentPermissionSurface,
+            "Denial resolves the sub-step; sequence must complete.")
+        XCTAssertTrue(vm.canAdvance,
+            "AX denial is a soft-fail; SR is granted — nav-bar must unblock.")
+    }
+
+    // MARK: - Test 9: Skip path
+
+    /// User taps "Skip for now" on every optional surface. Sequence
+    /// completes; canAdvance unblocks once SR is granted.
+    func testDeferredPermissionChoreographySkipEverything() {
+        let vm = OnboardingFlowViewModel(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .notRequested),
+            accessibility: StubTCCPermission(kind: .accessibility, status: .notRequested),
+            stateStore: InMemoryOnboardingStateStore()
+        )
+        vm.goTo(.permissions)
+
+        // SR is required — skipping it must NOT unblock advance.
+        vm.recordPermissionOutcome(.screenRecording, .skipped)
+        XCTAssertEqual(vm.permissionResults[.screenRecording], .skipped)
+        XCTAssertFalse(vm.canAdvance,
+            "SR skipped ⇒ still blocked (only required surface).")
+
+        // User skips AX too.
+        vm.recordPermissionOutcome(.accessibility, .skipped)
+        XCTAssertTrue(vm.permissionChoreographyComplete,
+            "Skipping everything completes the choreography (per Cotypist pattern — always let user skip).")
+        XCTAssertFalse(vm.canAdvance,
+            "Choreography complete but SR still not granted — flow VM invariant holds.")
+    }
+
+    // MARK: - Test 10: Mixed grants (Cotypist P0 pattern #2)
+
+    /// User grants SR, skips AX, marks Automation applicable then denies,
+    /// FDA stays notApplicable. Assert every outcome is recorded and the
+    /// nav-bar unblocks.
+    func testDeferredPermissionChoreographyMixedOutcomes() {
+        let vm = OnboardingFlowViewModel(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .notRequested),
+            accessibility: StubTCCPermission(kind: .accessibility, status: .notRequested),
+            automation: StubTCCPermission(kind: .automation, status: .notRequested),
+            stateStore: InMemoryOnboardingStateStore()
+        )
+        vm.goTo(.permissions)
+
+        // User grants SR.
+        (vm.screenRecordingPermission as! StubTCCPermission).simulateGrant()
+        vm.recordPermissionOutcome(.screenRecording, .granted)
+
+        // User skips AX.
+        vm.recordPermissionOutcome(.accessibility, .skipped)
+
+        // Automation is only applicable if the user plans to use
+        // Safari — assume they do (BrowserExtensionSlide would call
+        // this in production).
+        vm.markPermissionApplicable(.automation)
+        XCTAssertEqual(vm.currentPermissionSurface, .automation)
+        vm.recordPermissionOutcome(.automation, .denied)
+
+        // FDA stays notApplicable — no deep-hooks toggled.
+        XCTAssertNil(vm.currentPermissionSurface)
+        XCTAssertTrue(vm.permissionChoreographyComplete)
+        XCTAssertTrue(vm.canAdvance,
+            "Mixed outcomes with SR granted must unblock nav-bar advance.")
+
+        // Snapshot the results map — used by settings-pane re-enable flow.
+        XCTAssertEqual(vm.permissionResults[.screenRecording], .granted)
+        XCTAssertEqual(vm.permissionResults[.accessibility], .skipped)
+        XCTAssertEqual(vm.permissionResults[.automation], .denied)
+        XCTAssertEqual(vm.permissionResults[.fullDiskAccess], .notApplicable)
+    }
+
     // MARK: - Invariant guard
 
     /// If a future PR inserts a step without updating this suite's walk
