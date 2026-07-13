@@ -71,3 +71,7 @@ models/*.log
 
 # Output redirects from CLI flag-as-filename mistakes (e.g. --skip-sudo)
 /--*
+
+# perf-soak run artifacts (JSONL samples, agent stdout, device-id, health log).
+# Score cards from analyze.py are the shareable artifact; raw runs stay local.
+tools/perf-soak/out/
