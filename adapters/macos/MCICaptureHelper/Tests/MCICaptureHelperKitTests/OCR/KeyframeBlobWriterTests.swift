@@ -98,6 +98,11 @@ final class KeyframeBlobEncoderTests: XCTestCase {
     }
 
     // MARK: - Encryption round-trip
+    //
+    // Cycle 8.47 note: `encrypt` now returns the FULL on-disk blob
+    // (salt(16) || sealed box), and `decrypt` recomputes the HKDF salt
+    // from that layout instead of the previous plaintext-hash scheme
+    // (which was un-recomputable at load time — see file header).
 
     func testEncryptionRoundTrip() {
         let pb = makePixelBuffer()
@@ -107,23 +112,24 @@ final class KeyframeBlobEncoderTests: XCTestCase {
             return XCTFail("JPEG encode failed")
         }
 
-        guard let ciphertext = KeyframeBlobEncoder.encrypt(
+        guard let blob = KeyframeBlobEncoder.encrypt(
             plaintext: jpeg,
             blobKeyMaterial: Self.testKey
         ) else {
             return XCTFail("encryption failed")
         }
 
-        // Ciphertext is nonce(12) + ciphertext + tag(16) — always larger than plaintext.
-        XCTAssertGreaterThan(ciphertext.count, jpeg.count)
+        // Blob is salt(16) + nonce(12) + ciphertext + tag(16) — always
+        // strictly larger than the plaintext.
+        XCTAssertGreaterThan(blob.count, jpeg.count + KeyframeBlobEncoder.saltLength)
 
-        // Round-trip decrypt.
+        // Round-trip decrypt from ONLY the on-disk bytes + key.
+        // This is the invariant that broke in cycle 8.46 PR #70.
         guard let decrypted = KeyframeBlobEncoder.decrypt(
-            ciphertext: ciphertext,
-            originalPlaintext: jpeg,
+            blob: blob,
             blobKeyMaterial: Self.testKey
         ) else {
-            return XCTFail("decryption failed")
+            return XCTFail("decryption failed — round-trip invariant violated")
         }
         XCTAssertEqual(decrypted, jpeg, "decrypted data must match original JPEG")
     }
@@ -136,22 +142,132 @@ final class KeyframeBlobEncoderTests: XCTestCase {
             return XCTFail("JPEG encode failed")
         }
 
-        guard let ciphertext = KeyframeBlobEncoder.encrypt(
+        guard let blob = KeyframeBlobEncoder.encrypt(
             plaintext: jpeg,
             blobKeyMaterial: Self.testKey
         ) else {
             return XCTFail("encryption failed")
         }
 
-        // Try to decrypt with a different key — should fail.
+        // Try to decrypt with a different key — HKDF derives a different
+        // key, AES-GCM tag fails, decrypt returns nil.
         var wrongKey = Self.testKey
         wrongKey[0] ^= 0xFF
         let result = KeyframeBlobEncoder.decrypt(
-            ciphertext: ciphertext,
-            originalPlaintext: jpeg,
+            blob: blob,
             blobKeyMaterial: wrongKey
         )
         XCTAssertNil(result, "decryption with wrong key must fail")
+    }
+
+    /// Round-trip goes through the writer/reader boundary: encrypt,
+    /// write to disk, read back, decrypt. This is the CSO-invariant
+    /// regression gate — pre-fix code path failed here because the
+    /// SHA256(plaintext) salt could not be recomputed from bytes on
+    /// disk.
+    func testDiskRoundTripThroughBlobFile() throws {
+        let pb = makePixelBuffer()
+        guard let result = KeyframeBlobEncoder.encodeAndEncrypt(
+            pixelBuffer: pb, blobKeyMaterial: Self.testKey
+        ) else {
+            return XCTFail("encodeAndEncrypt failed")
+        }
+
+        // Simulate the on-disk write (matches KeyframeBlobWriter.writeFile).
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mci-roundtrip-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try result.ciphertext.write(to: tmp, options: .atomic)
+
+        // Load from disk exactly as `HitThumbnail.load` will.
+        let onDisk = try Data(contentsOf: tmp)
+        XCTAssertEqual(onDisk, result.ciphertext, "file bytes must be identical")
+
+        // Filename invariant: sha256 wire field == SHA256(on-disk file).
+        let rehash = Array(SHA256.hash(data: onDisk))
+        XCTAssertEqual(result.sha256, rehash,
+                       "sha256 wire field must equal SHA256(on-disk blob)")
+
+        // Decrypt from the on-disk bytes + key. This is what the
+        // recall UI decrypt path will call once wired.
+        guard let decrypted = KeyframeBlobEncoder.decrypt(
+            blob: onDisk, blobKeyMaterial: Self.testKey
+        ) else {
+            return XCTFail("on-disk round-trip decrypt failed — CSO invariant")
+        }
+        // JPEG magic bytes: FF D8.
+        XCTAssertGreaterThan(decrypted.count, 2)
+        XCTAssertEqual(decrypted[0], 0xFF)
+        XCTAssertEqual(decrypted[1], 0xD8)
+    }
+
+    /// Different salts per call → different derived keys → different
+    /// ciphertext even for identical plaintext + identical DbKey. This
+    /// asserts the salt is actually random per blob (not stubbed to a
+    /// constant or the plaintext hash).
+    func testSaltIsRandomPerCall() {
+        let pb = makePixelBuffer()
+        guard let jpeg = KeyframeBlobEncoder.encodeJPEG(
+            pixelBuffer: pb, maxLongEdge: 1280, quality: 0.7
+        ) else {
+            return XCTFail("JPEG encode failed")
+        }
+        guard let a = KeyframeBlobEncoder.encrypt(
+            plaintext: jpeg, blobKeyMaterial: Self.testKey
+        ), let b = KeyframeBlobEncoder.encrypt(
+            plaintext: jpeg, blobKeyMaterial: Self.testKey
+        ) else {
+            return XCTFail("encrypt failed")
+        }
+        // Salt is the 16-byte prefix. Two random draws should differ.
+        XCTAssertNotEqual(a.prefix(KeyframeBlobEncoder.saltLength),
+                          b.prefix(KeyframeBlobEncoder.saltLength),
+                          "salt must be random per encrypt call")
+    }
+
+    /// Pre-cycle-8.47 blobs on disk fail decrypt gracefully (nil, not
+    /// crash). Simulates a leftover file written under the old buggy
+    /// code path — its first 16 bytes are the start of the sealed box,
+    /// NOT a real HKDF salt, so HKDF derives the wrong key and the
+    /// AES-GCM tag verification fails.
+    func testPreFixBlobIsUnrecoverableGracefully() {
+        // 128 bytes of arbitrary garbage — this represents a legacy
+        // blob written by the v1 (buggy) code path.
+        var legacy = Data()
+        for i in 0..<128 { legacy.append(UInt8(i)) }
+        let result = KeyframeBlobEncoder.decrypt(
+            blob: legacy, blobKeyMaterial: Self.testKey
+        )
+        XCTAssertNil(result,
+                     "legacy v1 blobs must fail decrypt to nil (UI shows placeholder)")
+    }
+
+    func testDecryptRejectsUndersizedBlob() {
+        // Fewer than 16 bytes = can't even carve the salt.
+        let tiny = Data([1, 2, 3])
+        XCTAssertNil(KeyframeBlobEncoder.decrypt(
+            blob: tiny, blobKeyMaterial: Self.testKey
+        ))
+
+        // Exactly 16 bytes = salt with no sealed box = still nil.
+        let saltOnly = Data(repeating: 0xAB, count: 16)
+        XCTAssertNil(KeyframeBlobEncoder.decrypt(
+            blob: saltOnly, blobKeyMaterial: Self.testKey
+        ))
+    }
+
+    func testDecryptRejectsWrongSizeKey() {
+        let pb = makePixelBuffer()
+        guard let jpeg = KeyframeBlobEncoder.encodeJPEG(
+            pixelBuffer: pb, maxLongEdge: 1280, quality: 0.7
+        ), let blob = KeyframeBlobEncoder.encrypt(
+            plaintext: jpeg, blobKeyMaterial: Self.testKey
+        ) else {
+            return XCTFail("setup failed")
+        }
+        XCTAssertNil(KeyframeBlobEncoder.decrypt(
+            blob: blob, blobKeyMaterial: [1, 2, 3]
+        ), "decrypt must reject short key")
     }
 
     // MARK: - SHA256 stability
@@ -166,14 +282,15 @@ final class KeyframeBlobEncoderTests: XCTestCase {
         )
         XCTAssertNotNil(result1)
         XCTAssertNotNil(result2)
-        // Note: AES-GCM uses random nonces, so ciphertext differs per
-        // call. SHA256 of ciphertext will differ too. This is correct —
-        // content-addressed means content-of-ciphertext, not plaintext.
-        // Stability means: given the same ciphertext, sha256 is stable.
+        // Note: AES-GCM uses random nonces AND (cycle 8.47) random per-
+        // blob salts, so the on-disk blob differs per call. SHA256 of
+        // the blob will differ too. This is correct — content-
+        // addressed means content-of-blob, not plaintext.
+        // Stability means: given the same on-disk blob, sha256 is stable.
         if let r1 = result1 {
             let rehash = Array(SHA256.hash(data: r1.ciphertext))
             XCTAssertEqual(r1.sha256, rehash,
-                           "sha256 field must equal SHA256(ciphertext)")
+                           "sha256 field must equal SHA256(on-disk blob)")
         }
     }
 
