@@ -36,15 +36,7 @@ struct StatusMenuView: View {
 
             Divider()
 
-            if supervisor.state == .running {
-                Button("Pause Capture") {
-                    supervisor.setPaused(true)
-                }
-            } else if supervisor.state == .paused {
-                Button("Resume Capture") {
-                    supervisor.setPaused(false)
-                }
-            }
+            quickActionsSection
 
             if !supervisor.state.isActive && supervisor.state != .starting {
                 Button("Start Recording") {
@@ -55,13 +47,6 @@ struct StatusMenuView: View {
                     supervisor.stop()
                 }
             }
-
-            Divider()
-
-            Button("Open Recall…") {
-                supervisor.openRecallUI()
-            }
-            .keyboardShortcut("r")
 
             if supervisor.hasOnboarding {
                 Button("Open Onboarding") {
@@ -134,6 +119,17 @@ struct StatusMenuView: View {
             Button("About Hippocampus") {
                 showAbout = true
                 openAboutWindow()
+            }
+
+            // "Learn more" — public landing page. Cotypist parity: an
+            // always-visible link out to marketing / docs so a user
+            // who's never opened the app before still has a discovery
+            // path to features they haven't found yet. See brief §Steps
+            // "Learn more — opens landing page".
+            Button("Learn more") {
+                if let url = URL(string: "https://hippocampus-swart.vercel.app") {
+                    NSWorkspace.shared.open(url)
+                }
             }
 
             Button("Quit Hippocampus") {
@@ -213,6 +209,81 @@ struct StatusMenuView: View {
             from: supervisor.state,
             tccRevokedSurface: supervisor.tccRevokedSurface
         )
+    }
+
+    /// Cotypist-style always-visible quick-action block. The six
+    /// verbs a user needs at their fingertips regardless of what the
+    /// current state is:
+    ///
+    ///   - Pause / Resume Capture  ⌘⇧P  (toggle; label flips per state)
+    ///   - Open Recall Popup       ⇧⌘Space (global spotlight-style
+    ///                              popup already registered by
+    ///                              PR #79 — this menu item is a
+    ///                              visible fallback + discovery hint)
+    ///   - Show Recall Window      ⌘R
+    ///   - Show Timeline           ⌘T  (⌘8 in the recall-ui window,
+    ///                              but from the menu-bar the entry
+    ///                              point is a distinct verb; deep-links
+    ///                              to `timeline` tab via MCI_INITIAL_TAB)
+    ///   - Preferences             ⌘,  (opens About/Prefs sheet)
+    ///
+    /// Pause is a USER-initiated pause distinct from the TCC-revoke
+    /// pause (PR #80) and the screen-share-leak pause (PR #75). It
+    /// flips `UserPauseController.shared.isPaused` AND asks the
+    /// supervisor to SIGSTOP the helper via the existing `setPaused`
+    /// path so the visible `MenuBarStatus` derivation flips to
+    /// `.paused`. The controller emits a `helper_health
+    /// user_paused=<bool>` breadcrumb so the health-log ring
+    /// distinguishes user pauses from automated ones.
+    @ViewBuilder
+    private var quickActionsSection: some View {
+        let paused = (supervisor.state == .paused)
+            || UserPauseController.shared.isPaused
+
+        Button(paused ? "Resume Capture" : "Pause Capture") {
+            toggleUserPause()
+        }
+        .keyboardShortcut("p", modifiers: [.command, .shift])
+
+        Button("Open Recall Popup") {
+            supervisor.openRecallUI()
+        }
+        .keyboardShortcut(.space, modifiers: [.command, .shift])
+
+        Divider()
+
+        Button("Show Recall Window") {
+            supervisor.openRecallUI()
+        }
+        .keyboardShortcut("r", modifiers: [.command])
+
+        Button("Show Timeline") {
+            supervisor.openRecallUI(initialTab: "timeline")
+        }
+        .keyboardShortcut("t", modifiers: [.command])
+
+        Button("Preferences") {
+            openAboutWindow()
+        }
+        .keyboardShortcut(",", modifiers: [.command])
+
+        Divider()
+    }
+
+    /// Flip user pause state. Called from menu-bar ⌘⇧P and from the
+    /// ⌘K Action Panel (PR #74). Keeps the two layers coherent:
+    ///   - `UserPauseController.shared` — the user-facing flag +
+    ///     breadcrumb emitter.
+    ///   - `supervisor.setPaused(_:)` — the SIGSTOP/SIGCONT gate on
+    ///     the capture helper. Only fired if the supervisor is in a
+    ///     paused-compatible state (`.running` / `.paused`); otherwise
+    ///     we still flip the user flag so a subsequent `.start()`
+    ///     honours it.
+    private func toggleUserPause() {
+        let nextPaused = UserPauseController.shared.togglePaused()
+        if supervisor.state == .running || supervisor.state == .paused {
+            supervisor.setPaused(nextPaused)
+        }
     }
 
     @ViewBuilder
