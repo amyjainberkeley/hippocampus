@@ -85,16 +85,31 @@ public enum MenuBarStatus: Equatable, Sendable {
         return false
     }
 
-    /// Derive from the current supervisor state + an optional error
-    /// override. `integrityError` is `nil` in the common case; when
-    /// non-nil it forces `.error` regardless of the underlying
-    /// supervisor state. Integrity errors are surfaced by the helper
-    /// via `helper-health.jsonl` (`integrity_check_failed`, wired
-    /// separately) and read by the app-side status coordinator.
+    /// Derive from the current supervisor state + optional error
+    /// overrides. `integrityError` and `tccRevokedSurface` are `nil`
+    /// in the common case; when either is non-nil it forces `.error`
+    /// regardless of the underlying supervisor state.
+    ///
+    /// Precedence when multiple errors overlap:
+    ///   1. `tccRevokedSurface` — TCC revoke is user-recoverable in
+    ///      one click, and the actionable notification hangs off THIS
+    ///      reason string. Surface it first.
+    ///   2. `integrityError` — DB integrity failure, wired separately.
+    ///   3. `.crashed(reason)` from the supervisor.
+    ///
+    /// Cycle 8.45 audit risk #2: `tccRevokedSurface` is populated from
+    /// the `helper_health tcc_revoked=<surface>` breadcrumb the helper
+    /// emits via `TCCHelperHealth.line(...)`. The app-side status
+    /// coordinator maps the enum to the human-readable reason string
+    /// via `TCCRevokedReason`.
     public static func derive(
         from state: SupervisorState,
-        integrityError: String? = nil
+        integrityError: String? = nil,
+        tccRevokedSurface: TCCRevokedReason? = nil
     ) -> MenuBarStatus {
+        if let reason = tccRevokedSurface {
+            return .error(reason: reason.menuBarReason)
+        }
         if let reason = integrityError {
             return .error(reason: reason)
         }
@@ -108,6 +123,82 @@ public enum MenuBarStatus: Equatable, Sendable {
         case .idle, .starting, .stopped:
             return .idle
         }
+    }
+}
+
+// MARK: - TCC revoked reason (cycle 8.45 audit risk #2)
+
+/// Per-surface human-readable copy for the menu-bar red-pill + the
+/// user-facing notification (`TCCRevokedNotifier`). Kept as an enum
+/// (rather than plain strings) so the surface identity round-trips
+/// through the app: the notification click-action deep-links to the
+/// correct System Settings pane per `settingsPaneURLString` below.
+public enum TCCRevokedReason: String, Sendable, Equatable, CaseIterable {
+    case screenRecording
+    case accessibility
+    case fullDiskAccess
+    case automation
+
+    /// Short reason string embedded in `MenuBarStatus.error(reason:)`.
+    /// Rendered in the drop-down header + read by VoiceOver via
+    /// `MenuBarStatusLabel.accessibilityLabel`.
+    public var menuBarReason: String {
+        switch self {
+        case .screenRecording: return "Screen Recording revoked"
+        case .accessibility: return "Accessibility revoked"
+        case .fullDiskAccess: return "Full Disk Access revoked"
+        case .automation: return "Automation revoked"
+        }
+    }
+
+    /// Human-readable title for the user-facing notification.
+    public var notificationTitle: String {
+        return "Hippocampus can't record"
+    }
+
+    /// Human-readable body for the user-facing notification. Explains
+    /// why capture stopped in one plain sentence + tells the user the
+    /// button re-grants.
+    public var notificationBody: String {
+        switch self {
+        case .screenRecording:
+            return "Screen Recording permission was revoked in System Settings. Click to re-grant."
+        case .accessibility:
+            return "Accessibility permission was revoked in System Settings. Click to re-grant."
+        case .fullDiskAccess:
+            return "Full Disk Access permission was revoked in System Settings. Click to re-grant."
+        case .automation:
+            return "Automation permission was revoked in System Settings. Click to re-grant."
+        }
+    }
+
+    /// Deep-link URL string for the notification's action button. The
+    /// `x-apple.systempreferences:` scheme drops the user directly on
+    /// the correct pane; on macOS 13+ System Settings honours the
+    /// anchor. NOT parsed into a real `URL` here so this type stays
+    /// portable across targets that don't import `Foundation.URL`.
+    public var settingsPaneURLString: String {
+        switch self {
+        case .screenRecording:
+            return "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        case .accessibility:
+            return "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        case .fullDiskAccess:
+            return "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+        case .automation:
+            return "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
+        }
+    }
+
+    /// Parse the surface identifier the helper emits via
+    /// `helper_health tcc_revoked=<surface>` (see
+    /// `MCICaptureHelperKit/TCCHelperHealth.line(...)`). Returns nil
+    /// for unknown identifiers so a future helper that adds a new
+    /// surface without a corresponding app update cannot crash the
+    /// app-side parser — the unknown revoke is simply ignored (the
+    /// helper's own pause still holds).
+    public static func fromHealthLogSurface(_ raw: String) -> TCCRevokedReason? {
+        return TCCRevokedReason(rawValue: raw)
     }
 }
 
