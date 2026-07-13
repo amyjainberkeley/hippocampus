@@ -161,6 +161,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// — used by tests + any legacy build.
     private let screenShareDetector: ScreenShareDetector?
 
+    /// Cycle 8.45 audit risk #2 — TCC-revoked-mid-run monitor. When
+    /// supplied, `start()` seeds the initial TCC snapshot and starts
+    /// the monitor; the session registers itself as observer so a
+    /// mid-run revoke of Screen Recording / Accessibility / FDA
+    /// immediately pauses SCStream + emits a helper-health breadcrumb
+    /// the parent app can drive the menu-bar red pill from. `nil`
+    /// preserves pre-cycle-8.45 behaviour (no TCC-revoke awareness) —
+    /// used by tests + any legacy build.
+    private let tccStatusMonitor: TCCStatusMonitor?
+
     /// Test-only accessor: proves the OCR emitter wire is connected.
     /// Not public API — `internal` so `@testable import` can read it.
     internal var ocrPostAllowEmitterForTest: (any OCRPostAllowEmitter)? {
@@ -214,6 +224,21 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// exists only to prove idempotence in tests.
     private var lastPausedActor: String?
 
+    /// Cycle 8.45 audit risk #2 — set to `true` while the TCC monitor
+    /// says at least one required surface is revoked. Guarded by `lock`.
+    /// While `true`, `resumeFromTCC` is a no-op until every revoked
+    /// surface has restored. Independent of `pausedForScreenShare` so
+    /// the two pause reasons compose (e.g. TCC revoked mid-Zoom-share
+    /// → both flags set → resume only when BOTH clear).
+    private var pausedForTCC: Bool = false
+
+    /// The surfaces currently observed as revoked. Populated by the
+    /// TCC monitor's transition callback. When empty, `pausedForTCC`
+    /// flips to `false` and the SCStream is brought back up. `String`-
+    /// keyed (over `TCCSurface` enum) so tests can inspect it via the
+    /// internal accessor without exporting the enum outside the kit.
+    private var revokedSurfaces: Set<TCCSurface> = []
+
     public init(
         pipeline: SCStreamPipeline,
         denylist: Denylist,
@@ -224,7 +249,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         ocrPostAllowEmitter: (any OCRPostAllowEmitter)? = nil,
         focusedWindowStore: FocusedWindowStore? = nil,
         focusTracker: FocusTracker? = nil,
-        screenShareDetector: ScreenShareDetector? = nil
+        screenShareDetector: ScreenShareDetector? = nil,
+        tccStatusMonitor: TCCStatusMonitor? = nil
     ) {
         self.pipeline = pipeline
         self.denylist = denylist
@@ -236,11 +262,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         self.focusedWindowStore = focusedWindowStore
         self.focusTracker = focusTracker
         self.screenShareDetector = screenShareDetector
+        self.tccStatusMonitor = tccStatusMonitor
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
-        // The detector holds a `weak` observer, so this create-then-set
-        // pattern is safe: no retain cycle.
+        // The detector / monitor hold `weak` observers, so this create-
+        // then-set pattern is safe: no retain cycle.
         self.screenShareDetector?.setObserver(self)
+        self.tccStatusMonitor?.setObserver(self)
     }
 
     /// Start the live capture stream.
@@ -317,6 +345,15 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // (fail-safe: on start we don't know share state until the
         // first debounced verdict lands).
         screenShareDetector?.start()
+
+        // Cycle 8.45 audit risk #2 — seed the initial TCC snapshot
+        // (so the first tick does NOT fire spurious "revoked"
+        // transitions for surfaces already in their boot state) then
+        // start the poll. Any subsequent revoke fires
+        // `tccStatusDidTransition` on this session (observer conformance
+        // below), which drives pauseForTCC.
+        tccStatusMonitor?.seedInitialSnapshot()
+        tccStatusMonitor?.start()
     }
 
     /// Stop the live capture stream (idempotent).
@@ -327,15 +364,22 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         cancelRebindTask()
         focusTracker?.stop()
         screenShareDetector?.stop()
+        tccStatusMonitor?.stop()
         let s = takeStream()
         try await s?.stopCapture()
         // No frames will arrive after `stopCapture()`; clear the §2
         // verdict so a subsequent `start()` begins from fail-safe.
         blackedRegionProbe?.reset()
-        // Clear the paused-for-share flag so a fresh `start()` on the
-        // same instance doesn't erroneously refuse to bring up the
-        // SCStream (the detector will re-arm on the next `start()`).
-        lock.lock(); pausedForScreenShare = false; lastPausedActor = nil; lock.unlock()
+        // Clear the paused-for-share + paused-for-TCC flags so a fresh
+        // `start()` on the same instance doesn't erroneously refuse to
+        // bring up the SCStream (the detector + monitor will re-arm on
+        // the next `start()`).
+        lock.lock()
+        pausedForScreenShare = false
+        lastPausedActor = nil
+        pausedForTCC = false
+        revokedSurfaces.removeAll()
+        lock.unlock()
     }
 
     // Locked critical sections live in non-async helpers: `NSLock` is
@@ -667,6 +711,117 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     internal func lastPausedActorForTest() -> String? {
         lock.lock(); defer { lock.unlock() }
         return lastPausedActor
+    }
+
+    // MARK: - Cycle 8.45 — TCC pause/resume
+
+    /// Pause the live SCStream because the TCC monitor observed a
+    /// mid-run permission revoke. Idempotent per-surface. Emits a
+    /// stderr `helper_health tcc_revoked=<surface>` breadcrumb the
+    /// parent app tails to drive the menu-bar red pill + user
+    /// notification (`TCCRevokedNotifier` in HippocampusKit). Content-
+    /// free: only the enum-name of the revoked surface crosses the
+    /// process boundary — no file paths, no bundle-ids, no user data.
+    ///
+    /// The pause drops the SCStream strong ref, so the ingest pipeline
+    /// sees a clean capture-off surface (M4 kill-switch pattern) — the
+    /// user's expectation "revoke Screen Recording ⇒ MCI stops
+    /// recording" is now honoured atomically, not silently violated.
+    ///
+    /// `// UNVERIFIED — needs live macOS; do not claim working` for
+    /// the OS-touching `stopCapture()`; the state-flag logic is
+    /// headless-tested.
+    public func pauseForTCC(surface: TCCSurface) async {
+        lock.lock()
+        let alreadyRevoked = revokedSurfaces.contains(surface)
+        revokedSurfaces.insert(surface)
+        let wasPaused = pausedForTCC
+        pausedForTCC = true
+        lock.unlock()
+
+        if alreadyRevoked { return }
+
+        FileHandle.standardError.write(
+            TCCHelperHealth.line(
+                for: TCCStatusMonitor.Transition(
+                    surface: surface,
+                    oldStatus: .granted,
+                    newStatus: .denied
+                )
+            ).data(using: .utf8) ?? Data()
+        )
+
+        guard !wasPaused else { return }
+
+        // UNVERIFIED — needs live macOS; do not claim working.
+        let s = takeStream()
+        try? await s?.stopCapture()
+    }
+
+    /// Resume from a TCC pause. Called by the observer when the
+    /// monitor's debounced verdict returns to `.granted` for a
+    /// previously-revoked surface. If OTHER surfaces remain revoked,
+    /// this is a no-op (bookkeeping only) — the SCStream stays down
+    /// until every required TCC surface is back. If the SCStream
+    /// rebuild throws (e.g. the OS is still catching up on the grant),
+    /// the session stays paused and the next monitor tick can retry
+    /// via the same path.
+    ///
+    /// `// UNVERIFIED — needs live macOS; do not claim working`.
+    public func resumeFromTCC(surface: TCCSurface) async throws {
+        lock.lock()
+        revokedSurfaces.remove(surface)
+        let stillRevoked = !revokedSurfaces.isEmpty
+        let stillSharing = pausedForScreenShare
+        lock.unlock()
+
+        FileHandle.standardError.write(
+            TCCHelperHealth.line(
+                for: TCCStatusMonitor.Transition(
+                    surface: surface,
+                    oldStatus: .denied,
+                    newStatus: .granted
+                )
+            ).data(using: .utf8) ?? Data()
+        )
+
+        if stillRevoked || stillSharing {
+            // Other pause reasons remain — do not bring up the SCStream.
+            // The next resume path (TCC restore or screen-share end)
+            // will retry when it's actually safe.
+            return
+        }
+
+        lock.lock(); pausedForTCC = false; lock.unlock()
+
+        do {
+            try await bringUpSCStreamOnly()
+        } catch {
+            // The OS hasn't caught up on the grant yet — go back to
+            // paused so the next monitor tick can retry via the same
+            // "granted debounced → resume" path.
+            lock.lock()
+            pausedForTCC = true
+            revokedSurfaces.insert(surface)
+            lock.unlock()
+            FileHandle.standardError.write(
+                "mci-capture-helper: SCStream resume-from-TCC-\(surface.rawValue) failed (staying paused): \(error)\n"
+                    .data(using: .utf8) ?? Data()
+            )
+            throw error
+        }
+    }
+
+    /// Test-only accessors — prove the pause state without exposing
+    /// mutable fields. Not public API.
+    internal func isPausedForTCCForTest() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return pausedForTCC
+    }
+
+    internal func revokedSurfacesForTest() -> Set<TCCSurface> {
+        lock.lock(); defer { lock.unlock() }
+        return revokedSurfaces
     }
 
     // MARK: - SCStreamOutput
@@ -1045,6 +1200,36 @@ extension SCStreamCaptureSession: ScreenShareDetector.Observer {
             // retry. Do NOT re-throw: the observer callback is
             // fire-and-forget from the detector's side.
             try? await resumeFromScreenShare()
+        }
+    }
+}
+
+// MARK: - Cycle 8.45 — TCC monitor observer conformance
+
+extension SCStreamCaptureSession: TCCStatusMonitor.Observer {
+    /// Debounced TCC transitions arrive here. A `.denied` verdict
+    /// pauses the SCStream immediately for the affected surface; a
+    /// `.granted` verdict releases the pause once all previously-
+    /// revoked surfaces have restored. Idempotent — the underlying
+    /// pause/resume methods no-op on repeated same-state calls per
+    /// surface.
+    public func tccStatusDidTransition(
+        _ transition: TCCStatusMonitor.Transition
+    ) async {
+        switch transition.newStatus {
+        case .denied:
+            await pauseForTCC(surface: transition.surface)
+        case .granted:
+            // Resume best-effort — a throw here leaves the session in
+            // the paused state and the next monitor tick can retry
+            // once the OS catches up on the grant. Do NOT re-throw:
+            // the observer callback is fire-and-forget.
+            try? await resumeFromTCC(surface: transition.surface)
+        case .unknown:
+            // Monitor never emits `.unknown` transitions (probe errors
+            // are absorbed as no-op). This branch exists for exhaust-
+            // iveness only.
+            return
         }
     }
 }
