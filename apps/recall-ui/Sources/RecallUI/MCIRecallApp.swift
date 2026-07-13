@@ -93,10 +93,78 @@ struct RootView: View {
     let reader: BrainReader
     @State private var selectedTab: RecallTab
     @State private var searchFocusTrigger = false
+    @ObservedObject private var actionPanelRegistry = ActionPanelRegistry.shared
 
     init(reader: BrainReader, initialTab: RecallTab = .search) {
         self.reader = reader
         self._selectedTab = State(initialValue: initialTab)
+    }
+
+    /// Global (non-contextual) commands. Registered once for the
+    /// lifetime of the recall UI. Contextual commands (per-hit,
+    /// per-view) are registered by their owning views on
+    /// `.onAppear`.
+    private var globalCommands: [ActionPanelCommand] {
+        [
+            .init(id: "app.newSearch", title: "New Search", shortcut: "⌘N", category: .search) {
+                selectedTab = .search
+                searchFocusTrigger.toggle()
+            },
+            .init(id: "app.showTimeline", title: "Show Timeline", shortcut: "⌘T", category: .app) {
+                selectedTab = .timeline
+            },
+            .init(id: "app.openSettings", title: "Open Settings", shortcut: "⌘,", category: .app) {
+                selectedTab = .settings
+            },
+            .init(
+                id: "app.openCustomNames",
+                title: "Open Custom Names Dictionary",
+                shortcut: "⌘6",
+                category: .app
+            ) {
+                selectedTab = .settings
+            },
+            .init(id: "app.toggleDarkMode", title: "Toggle Dark Mode", shortcut: "⌘⇧D", category: .app) {
+                // No-op stub: recall UI is dark-locked today (see
+                // `preferredColorScheme(.dark)` in MCIRecallApp).
+                // Registered for discoverability per peer study §4.
+            },
+            .init(id: "app.togglePlayback", title: "Toggle Playback", shortcut: "Space", category: .app) {
+                selectedTab = .timeline
+            },
+            .init(id: "app.refreshBrain", title: "Refresh Brain", shortcut: "⌘R", category: .app) {
+                // Refresh is a no-op at this seam — brain is read-only
+                // via FFI. Included for discoverability.
+            },
+            .init(id: "app.showOnboarding", title: "Show Onboarding", shortcut: "", category: .app) {
+                if let url = URL(string: "hippocampus://onboarding?show=1") {
+                    NSWorkspace.shared.open(url)
+                }
+            },
+            .init(
+                id: "app.exportDebugBundle",
+                title: "Export Debug Bundle",
+                shortcut: "",
+                category: .debug
+            ) {
+                if let url = URL(string: "hippocampus://debug?export=1") {
+                    NSWorkspace.shared.open(url)
+                }
+            },
+            .init(
+                id: "app.showHelp",
+                title: "Show Help / Keyboard Shortcuts",
+                shortcut: "⌘/",
+                category: .app
+            ) {
+                if let url = URL(string: "hippocampus://help") {
+                    NSWorkspace.shared.open(url)
+                }
+            },
+            .init(id: "app.quit", title: "Quit Hippocampus Recall", shortcut: "⌘Q", category: .app) {
+                NSApp.terminate(nil)
+            },
+        ]
     }
 
     var body: some View {
@@ -177,6 +245,8 @@ struct RootView: View {
             selectedTab = .brief
             return .handled
         }
+        .registerActionPanelCommands(globalCommands, registry: actionPanelRegistry)
+        .actionPanelHost(registry: actionPanelRegistry)
     }
 }
 

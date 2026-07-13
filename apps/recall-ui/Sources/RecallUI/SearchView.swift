@@ -34,6 +34,17 @@ struct SearchView: View {
         .onChange(of: focusTrigger) { _, _ in
             isSearchFieldFocused = true
         }
+        .registerActionPanelCommands([
+            .init(
+                id: "search.clearQuery",
+                title: "Clear Query",
+                shortcut: "⌘⇧K",
+                category: .search,
+                isEnabled: { !viewModel.query.isEmpty || viewModel.filters.anyActive }
+            ) {
+                viewModel.clear()
+            }
+        ])
     }
 
     private var searchBar: some View {
