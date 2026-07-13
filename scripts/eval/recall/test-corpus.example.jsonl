@@ -1,0 +1,8 @@
+{"query": "arxiv paper on convex combination fusion", "expected_top_k": ["evt-fake-001", "evt-fake-002"], "context_note": "semantic recall: user remembers reading a fusion paper but not the title (Bruch 2210.11934)."}
+{"query": "figma link Alex shared for onboarding icons", "expected_top_k": ["evt-fake-010"], "context_note": "cross-app dot-connect: URL was posted in Slack, then opened in Figma; expects the entity-graph fusion to bridge the two events."}
+{"query": "last Thursday afternoon deep work session", "expected_top_k": ["evt-fake-020", "evt-fake-021", "evt-fake-022"], "context_note": "temporal: exercises the anchor-then-window / LLM-time-range branch of the query router (ADR-0010 §6)."}
+{"query": "the terminal command that fixed the sqlite lock", "expected_top_k": ["evt-fake-030"], "context_note": "entity mention (Terminal app + sqlite keyword): exercises FTS + entity-fusion; single canonical hit."}
+{"query": "notion doc about the launch playbook", "expected_top_k": ["evt-fake-040", "evt-fake-041"], "context_note": "URL lookup + entity mention: two versions of the same doc across editing sessions."}
+{"query": "email from counsel about the LLC filing", "expected_top_k": ["evt-fake-050"], "context_note": "entity mention with sensitivity: verifies the runner does NOT redact expected content when the case is scored."}
+{"query": "screenshot I took of the CoreML shape error", "expected_top_k": ["evt-fake-060"], "context_note": "visual recall via OCR text: exercises the OCR-source-prior branch of CC fusion (src(e))."}
+{"query": "PR that shipped the entity aliases feature", "expected_top_k": ["evt-fake-070", "evt-fake-071"], "context_note": "cross-app dot-connect: GitHub PR + local editor session; expects graph fusion to co-rank both."}
