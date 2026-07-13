@@ -104,6 +104,15 @@ char *mci_brain_ffi_latest_brief(McibrainHandle *h);
  * boundary so a hostile value cannot allocate unbounded memory. */
 char *mci_brain_ffi_brief_dates(McibrainHandle *h, uint32_t limit);
 
+/* Content-free summary for the Privacy Dashboard's top card.
+ * Returns a UTF-8 JSON object of shape
+ *   {"total_events":N,"oldest_ts_us":<u64?>,"newest_ts_us":<u64?>,
+ *    "disk_bytes":N}
+ * — total event count, oldest/newest ts (nil on empty store), and the
+ * on-disk byte size of the SQLCipher brain file. NO row content is
+ * exposed. Same allocator discipline as the other returners. */
+char *mci_brain_ffi_summary_stats(McibrainHandle *h);
+
 /* Free a string previously returned by this header's functions.
  * NULL is a no-op. Double-free is undefined. */
 void mci_brain_ffi_string_free(char *s);

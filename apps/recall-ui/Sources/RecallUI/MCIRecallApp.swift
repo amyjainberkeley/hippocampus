@@ -214,12 +214,19 @@ struct RootView: View {
             UserDictionaryEditor()
                 .tag(RecallTab.settings)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+
+            PrivacyDashboard(reader: reader)
+                .tag(RecallTab.privacyDashboard)
+                .tabItem { Label("Privacy", systemImage: "lock.shield") }
         }
         .padding(.top, 6)
         .background(Color.brandBgPrimary)
         .focusable()
         .onKeyPress(
-            keys: [.init("1"), .init("2"), .init("3"), .init("4"), .init("5"), .init("6")],
+            keys: [
+                .init("1"), .init("2"), .init("3"), .init("4"),
+                .init("5"), .init("6"), .init("7"),
+            ],
             phases: .down
         ) { press in
             guard press.modifiers == .command else { return .ignored }
@@ -230,6 +237,7 @@ struct RootView: View {
             case KeyEquivalent("4"): selectedTab = .brief
             case KeyEquivalent("5"): selectedTab = .privacy
             case KeyEquivalent("6"): selectedTab = .settings
+            case KeyEquivalent("7"): selectedTab = .privacyDashboard
             default: return .ignored
             }
             return .handled

@@ -218,6 +218,31 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         return try Self.decodeOptionalBrief(rawJson)
     }
 
+    public func summaryStats() async throws -> SummaryStats {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let rawJson = mci_brain_ffi_summary_stats(h) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        let s = String(cString: rawJson)
+        guard let data = s.data(using: .utf8) else {
+            throw BrainReaderError.decodeFailed("non-UTF8 JSON from FFI (summary_stats)")
+        }
+        do {
+            let wire = try JSONDecoder().decode(SummaryStatsWire.self, from: data)
+            return SummaryStats(
+                totalEvents: wire.total_events,
+                oldestTsUs: wire.oldest_ts_us,
+                newestTsUs: wire.newest_ts_us,
+                diskBytes: wire.disk_bytes
+            )
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader.summaryStats: \(error)")
+        }
+    }
+
     public func briefDates(limit: Int) async throws -> [String] {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
@@ -484,4 +509,11 @@ private struct EpisodeWire: Decodable {
             eventCount: event_count
         )
     }
+}
+
+private struct SummaryStatsWire: Decodable {
+    let total_events: UInt64
+    let oldest_ts_us: UInt64?
+    let newest_ts_us: UInt64?
+    let disk_bytes: UInt64
 }

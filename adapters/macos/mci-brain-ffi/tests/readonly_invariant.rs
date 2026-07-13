@@ -528,6 +528,11 @@ fn ffi_exports_no_mutating_surface() {
         // Resolves a Vec<u64> of linked event ids into HitJson rows via
         // BrainStore::get_event, no mutating call path.
         "mci_brain_ffi_events_by_ids",
+        // Cycle 8.46 — Privacy Dashboard summary card (read-only).
+        // Returns content-free aggregate: event count, oldest/newest ts,
+        // on-disk byte size. Uses `BrainStore::stats` + `fs::metadata` —
+        // no row content is exposed.
+        "mci_brain_ffi_summary_stats",
         "mci_brain_ffi_string_free",
         "mci_brain_ffi_last_error_message",
     ];
@@ -546,13 +551,14 @@ fn ffi_exports_no_mutating_surface() {
         mci_brain_ffi::mci_brain_ffi_latest_brief as *const (),
         mci_brain_ffi::mci_brain_ffi_brief_dates as *const (),
         mci_brain_ffi_events_by_ids as *const (),
+        mci_brain_ffi::mci_brain_ffi_summary_stats as *const (),
         mci_brain_ffi_string_free as *const (),
         mci_brain_ffi_last_error_message as *const (),
     ];
     assert_eq!(
         allowed.len(),
-        13,
-        "FFI surface size pinned at 13 (7 base + 2 #178 list_* + 3 #180 brief_* + 1 cycle-8.37 events_by_ids)"
+        14,
+        "FFI surface size pinned at 14 (7 base + 2 #178 list_* + 3 #180 brief_* + 1 cycle-8.37 events_by_ids + 1 cycle-8.46 summary_stats)"
     );
 }
 
