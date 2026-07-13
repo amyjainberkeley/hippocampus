@@ -171,6 +171,22 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// used by tests + any legacy build.
     private let tccStatusMonitor: TCCStatusMonitor?
 
+    /// V2-P1 third-lift (Phase 7 PR 13 wiring). The last include-set size
+    /// observed at SCStream filter (re)bind time — surfaced for the
+    /// live-Mac smoke test / later inspection per the redesign memo
+    /// §3.2.4 H9′ / §3.3 corpus assertion floor. In-process only (NOT
+    /// on the wire); read via `lastIncludeListSizeForTest`. Guarded by
+    /// `lock`. `0` = "no multi-window filter has been (re)bound yet"
+    /// (the pre-M4-lift default state; also the legacy display-filter
+    /// path).
+    ///
+    /// This is NOT a HelperHealth wire field addition — the scaffold
+    /// discipline (ADR-0031 §Status + `docs/research/v2-p1-third-lift-
+    /// scaffold.md` §4) forbids adding a wire slot in this PR. A future
+    /// PR (Phase 7 PR 14 or later) may promote this to a wire field
+    /// after the live-Mac smoke passes.
+    private var lastIncludeListSize: UInt32 = 0
+
     /// Test-only accessor: proves the OCR emitter wire is connected.
     /// Not public API — `internal` so `@testable import` can read it.
     internal var ocrPostAllowEmitterForTest: (any OCRPostAllowEmitter)? {
@@ -198,6 +214,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// SCStream filter follows focus changes promptly. Guarded by
     /// `lock`; cancelled on `stop()`.
     private var rebindTask: Task<Void, Never>?
+
+    /// V2-P1 third-lift (Phase 7 PR 13 wiring): per-session count of
+    /// race-gate drops observed so far. Used to throttle the stderr
+    /// log breadcrumb so a sustained race storm (the cycle 8.27 shape
+    /// where 73 % of frames tripped the gate) does not saturate
+    /// stderr. Guarded by `lock`. Content-free — a single UInt64.
+    private var focusRaceDropSeen: UInt64 = 0
 
     /// Set to `true` by the first invocation of
     /// `stream(_:didOutputSampleBuffer:of:)` that actually carries a
@@ -279,16 +302,34 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// screen + Screen-Recording TCC grant. Only reachable via the
     /// non-default `--capture` dev flag (Amendment 1 §4).
     ///
-    /// ADR-0031 V2-P1: when `focusedWindowStore` was supplied, the
-    /// FocusTracker is started first, an initial focused-window
-    /// snapshot is read, and the SCStream filter is bound to that
-    /// window (Option (a) — the captured pixel surface IS the focused
-    /// window). When no focused window is observable on the initial
-    /// read, the session falls back to the display-scoped filter so
-    /// startup is never blocked by a missing focused window; the
-    /// background rebind task will swap the filter once focus is
-    /// observable. When `focusedWindowStore` is `nil` the session
-    /// preserves pre-V2-P1 display-filter behaviour byte-for-byte.
+    /// ADR-0031 V2-P1 third-lift (Phase 7 PR 13 wiring): when
+    /// `focusedWindowStore` was supplied, the FocusTracker is started
+    /// first, an initial focused-window snapshot is read, and the
+    /// SCStream filter is bound to a MULTI-WINDOW include-set via
+    /// `SCContentFilterFactory.makeMultiWindowFilter(...)` — the
+    /// FORK 3 = B ratified `SCContentFilter(display:including:
+    /// exceptingWindows:)` shape (redesign memo §1.1 +
+    /// `orchestrator-ratification-state-2026-05-31.md` §1). The include
+    /// list is seeded with the focused window; co-view candidates are
+    /// currently empty pending CEO §6.1 co-view-heuristic ratification
+    /// — this matches redesign-memo §6.1 alternative A (focused-only-
+    /// via-multi-window-API), which delivers the API-correctness value
+    /// of the third lift without depending on unratified heuristics.
+    ///
+    /// When no focused window is observable on the initial read (login
+    /// window, fast-user-switch, no eligible window), `start()` refuses
+    /// to build a multi-window filter and logs one stderr breadcrumb
+    /// (`helper_health: no_eligible_window`) to satisfy the task
+    /// discipline "do NOT throw — this is a routine no-content case."
+    /// The session falls back to the pre-V2-P1 `makeDisplayFilter(...)`
+    /// so startup is never blocked; the background rebind task will
+    /// swap to the multi-window filter once focus becomes observable.
+    /// The race gate covers the transition (sentinel `installedFocus
+    /// Generation == 0` fail-close, §5.2 hardening).
+    ///
+    /// When `focusedWindowStore` is `nil` the session preserves
+    /// pre-V2-P1 display-filter behaviour byte-for-byte (legacy /
+    /// headless test path).
     public func start() async throws {
         // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         // Force the §2 probe back to its fail-safe initial state so a
@@ -301,35 +342,60 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
         let filter: SCContentFilter
         let initialFocusGeneration: UInt64
+        let initialIncludeListSize: UInt32
         if let store = focusedWindowStore {
             let initialSnapshot = store.currentSync()
-            // The initial focused-window read may miss (no frontmost,
-            // login window, fast-user-switch transition). Fall back to
-            // the display filter so capture is never blocked; the
-            // background rebind task will pick up the first focused
-            // window observation and swap to Option (a).
+            // Runtime guard: the initial focused-window read may miss
+            // (no frontmost, login window, fast-user-switch transition,
+            // lock screen, no eligible window). Do NOT construct the
+            // multi-window filter with an empty include-set — that
+            // would throw `emptyIncludeSet` from the factory (correct
+            // fail-closed direction, but startup is not the right place
+            // to surface that as an error). Instead, log a helper_health
+            // stderr breadcrumb and fall back to the display filter so
+            // capture is never blocked; the background rebind task will
+            // pick up the first focused window observation and swap to
+            // the multi-window include-set. This satisfies the task's
+            // "graceful log-and-skip, not throw" discipline for the
+            // no-eligible-window case.
             if let focused = initialSnapshot.focused,
-               let focusedFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
-                   windowId: focused.windowId,
+               let multiWindowFilter = try await SCContentFilterFactory.makeMultiWindowFilter(
+                   focusedWindowId: focused.windowId,
+                   // Seed-only include-set pending CEO §6.1 co-view
+                   // heuristic ratification. Redesign memo §6.1 alt A.
+                   coViewWindowIds: [],
                    denylist: denylist
                )
             {
-                filter = focusedFilter
+                filter = multiWindowFilter
                 initialFocusGeneration = initialSnapshot.generation
+                // Seed-only include-set ⇒ size 1. The factory's non-
+                // empty post-condition (redesign memo §1.1 + scaffold
+                // helper's precondition) guarantees ≥1.
+                initialIncludeListSize = 1
             } else {
+                // Runtime guard: no eligible window is observable at
+                // startup. Log a helper_health breadcrumb per the
+                // Phase 7 PR 13 dispatch discipline. Content-free —
+                // only the reason token reaches stderr.
+                FileHandle.standardError.write(
+                    ("mci-capture-helper: helper_health: no_eligible_window "
+                     + "at startup — falling back to display filter; the "
+                     + "rebind task will swap to the multi-window include-"
+                     + "set once focus is observable.\n")
+                        .data(using: .utf8) ?? Data()
+                )
                 filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
                 // Sentinel `0` — race gate will fire on every frame
-                // until the rebind task installs a real focused filter.
-                // The cascade still runs (the legacy display filter is
-                // active); the race gate path is only consulted when
-                // `focusedWindowStore` is non-nil, which is fail-closed
-                // until rebind: frames go to `focusRaceDropped`
-                // tombstones rather than mis-attributed OCREvents.
+                // until the rebind task installs a real focused filter
+                // (§5.2 sentinel fail-close hardening).
                 initialFocusGeneration = 0
+                initialIncludeListSize = 0
             }
         } else {
             filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
             initialFocusGeneration = 0
+            initialIncludeListSize = 0
         }
         let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
         let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
@@ -337,6 +403,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         try await scStream.startCapture()
         storeStream(scStream)
         storeInstalledFocusGeneration(initialFocusGeneration)
+        storeIncludeListSize(initialIncludeListSize)
         startRebindTaskIfNeeded()
 
         // Cycle 8.44 audit risk #1 — start the screen-share detector
@@ -415,6 +482,49 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         lock.lock(); installedFocusGeneration = gen; lock.unlock()
     }
 
+    /// Write the include-list size observed at the most recent
+    /// SCStream filter (re)bind. Lock-guarded. Emits one stderr
+    /// breadcrumb per bind so the live-Mac smoke test / later
+    /// inspection can correlate include-set membership against the
+    /// harness fixtures (redesign memo §3.2.3 H8′ / §3.2.4 H9′).
+    private func storeIncludeListSize(_ size: UInt32) {
+        lock.lock()
+        lastIncludeListSize = size
+        lock.unlock()
+        // Content-free breadcrumb (numeric only — no bundle id, no
+        // window id, no title). Steady-state cost = one FileHandle
+        // write per SCStream rebind (bounded by focus-change rate;
+        // the rebind task runs at 200 ms cadence with no-op-suppress
+        // via generation comparison).
+        FileHandle.standardError.write(
+            ("mci-capture-helper: helper_health: include_list_size=\(size)\n")
+                .data(using: .utf8) ?? Data()
+        )
+    }
+
+    /// Test-only accessor for the last observed include-set size.
+    /// `internal` so `@testable import` can prove the (re)bind
+    /// bookkeeping without introducing a public API surface.
+    internal func lastIncludeListSizeForTest() -> UInt32 {
+        lock.lock(); defer { lock.unlock() }
+        return lastIncludeListSize
+    }
+
+    /// Increment and return the per-session race-drop count. Guarded
+    /// by `lock`. Called by the SCStream callback's race gate before
+    /// dispatching the pipeline's `emitFocusRaceDropped(...)`.
+    private func bumpFocusRaceDropSeen() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        focusRaceDropSeen &+= 1
+        return focusRaceDropSeen
+    }
+
+    /// Test-only accessor for the race-drop-seen counter.
+    internal func focusRaceDropSeenForTest() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        return focusRaceDropSeen
+    }
+
     /// Start the background rebind task that observes focus changes
     /// and calls `updateContentFilter` on the live SCStream. Lock-
     /// guarded; second call while running is a no-op.
@@ -476,8 +586,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         snapshotGeneration: UInt64
     ) async throws {
         guard let currentStream = currentStream() else { return }
-        guard let newFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
-            windowId: focusedWindow.windowId,
+        // V2-P1 third-lift (Phase 7 PR 13 wiring): the rebind path
+        // also uses the multi-window FORK 3 = B API form. Seed-only
+        // include-set pending CEO §6.1 co-view heuristic ratification.
+        guard let newFilter = try await SCContentFilterFactory.makeMultiWindowFilter(
+            focusedWindowId: focusedWindow.windowId,
+            coViewWindowIds: [],
             denylist: denylist
         ) else {
             // Focused window was not in `SCShareableContent` (closed /
@@ -491,6 +605,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         }
         try await currentStream.updateContentFilter(newFilter)
         storeInstalledFocusGeneration(snapshotGeneration)
+        // Seed-only include-set (redesign-memo §6.1 alt A) ⇒ size 1.
+        // Future co-view-heuristic wiring lifts this above 1.
+        storeIncludeListSize(1)
     }
 
     /// Lock-guarded read of the live SCStream pointer.
@@ -936,6 +1053,24 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                     raceReleaser = BorrowedNoRetainReleaser()
                 }
                 let raceLease = SurfaceLease(releaser: raceReleaser)
+                // V2-P1 third-lift (Phase 7 PR 13 wiring): throttled
+                // stderr breadcrumb for `frames_focus_race_dropped`
+                // counter increments. Log the first drop + every 100
+                // drops thereafter so the CEO's live-Mac smoke can see
+                // the race path is being exercised without stderr
+                // saturation under a sustained race storm (the cycle
+                // 8.27 shape hit 73 % — one line per drop would be
+                // untenable). Content-free — count only, no bundle id.
+                let seen = bumpFocusRaceDropSeen()
+                if seen == 1 || seen.isMultiple(of: 100) {
+                    FileHandle.standardError.write(
+                        ("mci-capture-helper: helper_health: "
+                         + "frames_focus_race_dropped=\(seen) "
+                         + "(installedGen=\(installedGen), "
+                         + "observedGen=\(focusedSnapshot?.generation.description ?? "nil"))\n")
+                            .data(using: .utf8) ?? Data()
+                    )
+                }
                 let pipeline = self.pipeline
                 Task.detached {
                     try? await pipeline.emitFocusRaceDropped(

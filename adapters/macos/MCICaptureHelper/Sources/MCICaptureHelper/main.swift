@@ -555,28 +555,35 @@ if captureOptions.captureEnabled {
     // heartbeat. No new wire field; no `.allow` widening; strictly
     // more observability.
     //
-    // ADR-0031 V2-P1 wiring REVERTED 2026-05-30 (cycle 8.27 emergency,
-    // per `docs/research/v2-p1-production-leak-2026-05-30.md` §3 H1).
-    // PR #264 wired `FocusedWindowStore` + `FocusTracker` into the
-    // SCStream session and lifted M4 — but the cycle 8.27 production
-    // probe (helper.stderr) showed `SCStream stopped with error:
-    // Code=-3815 "Failed to find any displays or windows to capture"`
-    // on a ~30s restart loop with 73% `frames_focus_race_dropped`.
-    // Root cause:
-    // `SCContentFilter(display:exceptingWindows:[focusedWindow])` is an
-    // EXCLUDE filter, not an INCLUDE-ONLY filter, so passing the single
-    // focused window as the `exceptingWindows` list excludes the only
-    // window we want to capture — SCStream has nothing left and
-    // emits -3815. Wiring reverted to nil defaults so `start()` falls
-    // through to `makeDisplayFilter(...)` (cycle 8.17 full-display
-    // shape, working in production for 11+ cycles). M4 stays
-    // re-engaged (`OCRPostAllowEmitter.killOcrEmit = true`) as the
-    // structural mitigation that closes the OCR-text leak at the
-    // emit gate. V2-P1 needs a redesign with the
-    // `includingWindows`-correct API + a production-realistic corpus
-    // that exercises the real Apple API before the second lift can
-    // succeed (tracked: follow-on memo
-    // `v2-p1-redesign-includingwindows`).
+    // ADR-0031 V2-P1 third-lift wiring RE-INTRODUCED 2026-07-12 (Phase 7
+    // PR 13 — Director-Recording, this PR). The cycle 8.27 revert
+    // documented the -3815 antipattern (`SCContentFilter(display:
+    // exceptingWindows:[focusedWindow])` — an EXCLUDE filter used
+    // where an INCLUDE-ONLY filter was needed); the 2026-05-31 CEO
+    // ratification (FORK 3 = B) and the 2026-06-01 redesign memo
+    // (`docs/research/v2-p1-redesign-architecture-2026-06-01.md`)
+    // §1.1 bound the correct API form: `SCContentFilter(display:
+    // including:exceptingWindows:)` with a non-empty include list.
+    // Cycle 8.35 PR #20 landed the scaffold factory + selection
+    // helper (`SCContentFilterFactory.makeMultiWindowFilter(...)`);
+    // THIS PR wires that factory into the live capture path via
+    // `SCStreamCaptureSession`.
+    //
+    // Scope-fence discipline per ADR-0031 §Status "M4 lift is a
+    // SEPARATE standalone PR…no compounding under any circumstance":
+    // this PR wires the multi-window filter path but keeps the
+    // capture OFF at runtime — `killOcrEmit = true` remains, so the
+    // wire is INERT until Phase 7 PR 14 flips the switch after
+    // Amy's live-Mac smoke test passes.
+    //
+    // Co-view heuristic (redesign memo §6.1) is not yet CEO-ratified;
+    // the wiring uses the seed-only include-set (alt A) which
+    // delivers the API-correctness value of the third lift without
+    // depending on an unratified heuristic — the include-set has
+    // exactly one member (the focused window) and satisfies the
+    // FORK 3 = B non-empty invariant by construction.
+    let focusedWindowStore = FocusedWindowStore()
+    let focusTracker = FocusTracker(store: focusedWindowStore)
     captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
@@ -598,10 +605,15 @@ if captureOptions.captureEnabled {
         // the snapshot's frontmost bundle id.
         contextSnapshot: contextSnapshot,
         urlProvider: urlProvider,
-        ocrPostAllowEmitter: ocrEmitter
-        // ADR-0031 V2-P1 wiring intentionally OMITTED — see comment
-        // block above. `focusedWindowStore` + `focusTracker` default
-        // to `nil` so `start()` falls back to `makeDisplayFilter(...)`.
+        ocrPostAllowEmitter: ocrEmitter,
+        // ADR-0031 V2-P1 third-lift wiring — the scaffold factory
+        // (`SCContentFilterFactory.makeMultiWindowFilter(...)`) is
+        // reachable via `SCStreamCaptureSession.start()` iff the
+        // focused-window store is non-nil. The rebind task follows
+        // focus changes at 200 ms cadence; the race-consistency gate
+        // covers residual buffer-delivery races.
+        focusedWindowStore: focusedWindowStore,
+        focusTracker: focusTracker
     )
 } else {
     captureSession = nil
