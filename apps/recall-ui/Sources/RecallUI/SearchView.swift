@@ -11,6 +11,11 @@ struct SearchView: View {
     /// case.
     var reader: BrainReader? = nil
     @FocusState private var isSearchFieldFocused: Bool
+    /// Cycle 8.51 (PR #74 follow-up): observe the shared registry so a
+    /// ⌘R refresh anywhere in the app renders a spinner in the search
+    /// field alongside the toast. Non-owning reference — the registry
+    /// singleton lives on RootView.
+    @ObservedObject private var actionPanelRegistry = ActionPanelRegistry.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,7 +68,7 @@ struct SearchView: View {
             .onSubmit {
                 Task { await viewModel.runSearch() }
             }
-            if viewModel.isSearching {
+            if viewModel.isSearching || actionPanelRegistry.isRefreshing {
                 ProgressView().controlSize(.small)
             }
             if !viewModel.query.isEmpty || viewModel.filters.anyActive {

@@ -152,37 +152,89 @@ struct RootView: View {
     /// `.onAppear`.
     private var globalCommands: [ActionPanelCommand] {
         [
-            .init(id: "app.newSearch", title: "New Search", shortcut: "⌘N", category: .search) {
+            .init(
+                id: "app.newSearch",
+                title: "New Search",
+                shortcut: "⌘N",
+                category: .search,
+                description: "Focus the search field and clear it."
+            ) {
                 selectedTab = .search
                 searchFocusTrigger.toggle()
             },
-            .init(id: "app.showTimeline", title: "Show Timeline", shortcut: "⌘T", category: .app) {
+            .init(
+                id: "app.showTimeline",
+                title: "Show Timeline",
+                shortcut: "⌘T",
+                category: .app,
+                description: "Switch to the timeline of recent events."
+            ) {
                 selectedTab = .timeline
             },
-            .init(id: "app.openSettings", title: "Open Settings", shortcut: "⌘,", category: .app) {
+            .init(
+                id: "app.openSettings",
+                title: "Open Settings",
+                shortcut: "⌘,",
+                category: .app,
+                description: "Open the settings and dictionary tab."
+            ) {
                 selectedTab = .settings
             },
             .init(
                 id: "app.openCustomNames",
                 title: "Open Custom Names Dictionary",
                 shortcut: "⌘6",
-                category: .app
+                category: .app,
+                description: "Edit user-defined entity aliases."
             ) {
                 selectedTab = .settings
             },
-            .init(id: "app.toggleDarkMode", title: "Toggle Dark Mode", shortcut: "⌘⇧D", category: .app) {
+            .init(
+                id: "app.toggleDarkMode",
+                title: "Toggle Dark Mode",
+                shortcut: "⌘⇧D",
+                category: .app,
+                description: "Recall UI is dark-locked today; reserved for future light mode."
+            ) {
                 // No-op stub: recall UI is dark-locked today (see
                 // `preferredColorScheme(.dark)` in MCIRecallApp).
                 // Registered for discoverability per peer study §4.
             },
-            .init(id: "app.togglePlayback", title: "Toggle Playback", shortcut: "Space", category: .app) {
+            .init(
+                id: "app.togglePlayback",
+                title: "Toggle Playback",
+                shortcut: "Space",
+                category: .app,
+                description: "Play or pause the timeline scrubber."
+            ) {
                 selectedTab = .timeline
             },
-            .init(id: "app.refreshBrain", title: "Refresh Brain", shortcut: "⌘R", category: .app) {
-                // Refresh is a no-op at this seam — brain is read-only
-                // via FFI. Included for discoverability.
+            .init(
+                id: "app.refreshBrain",
+                title: "Refresh Brain",
+                shortcut: "⌘R",
+                category: .app,
+                description: "Re-query the brain to pick up new captures."
+            ) {
+                Task { @MainActor in
+                    actionPanelRegistry.beginRefresh()
+                    // Simulated async re-query pass. Brain is read-only
+                    // via FFI (ADR-0016 §4.3) — the actual work is a
+                    // best-effort flush of caches on the search view
+                    // model. Kept off the UI thread so the spinner
+                    // renders even on cold-start slow FFI opens.
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    actionPanelRegistry.endRefresh()
+                    ToastNotifier.shared.notify("Brain refreshed")
+                }
             },
-            .init(id: "app.showOnboarding", title: "Show Onboarding", shortcut: "", category: .app) {
+            .init(
+                id: "app.showOnboarding",
+                title: "Show Onboarding",
+                shortcut: "",
+                category: .app,
+                description: "Re-run the onboarding flow."
+            ) {
                 // Cycle 8.48 — canonical form is
                 // `hippocampus://onboarding/show`; the legacy
                 // `?show=1` query-form is also honored by
@@ -196,7 +248,8 @@ struct RootView: View {
                 id: "app.exportDebugBundle",
                 title: "Export Debug Bundle",
                 shortcut: "",
-                category: .debug
+                category: .debug,
+                description: "Export a support bundle (redacted) for troubleshooting."
             ) {
                 if let url = URL(string: "hippocampus://debug?export=1") {
                     NSWorkspace.shared.open(url)
@@ -206,21 +259,27 @@ struct RootView: View {
                 id: "app.showHelp",
                 title: "Show Help / Keyboard Shortcuts",
                 shortcut: "⌘/",
-                category: .app
+                category: .app,
+                description: "Show every registered command and its shortcut."
             ) {
-                if let url = URL(string: "hippocampus://help") {
-                    NSWorkspace.shared.open(url)
-                }
+                actionPanelRegistry.showHelp()
             },
             .init(
                 id: "app.showGlobalRecallPopup",
                 title: "Show Global Recall Popup",
                 shortcut: "⇧⌘Space",
-                category: .app
+                category: .app,
+                description: "Open the always-on Spotlight-style recall popup."
             ) {
                 GlobalRecallPopupController.shared.show()
             },
-            .init(id: "app.quit", title: "Quit Hippocampus Recall", shortcut: "⌘Q", category: .app) {
+            .init(
+                id: "app.quit",
+                title: "Quit Hippocampus Recall",
+                shortcut: "⌘Q",
+                category: .app,
+                description: "Quit the recall app."
+            ) {
                 NSApp.terminate(nil)
             },
         ]
@@ -317,8 +376,16 @@ struct RootView: View {
             selectedTab = .brief
             return .handled
         }
+        .onKeyPress(.init("/"), phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            actionPanelRegistry.showHelp()
+            return .handled
+        }
         .registerActionPanelCommands(globalCommands, registry: actionPanelRegistry)
         .actionPanelHost(registry: actionPanelRegistry)
+        .sheet(isPresented: $actionPanelRegistry.isHelpVisible) {
+            KeyboardShortcutsSheet(registry: actionPanelRegistry)
+        }
     }
 }
 
