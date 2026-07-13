@@ -88,7 +88,8 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
             limit: opts.limit,
             timeFromUs: opts.timeFromUs,
             timeToUs: opts.timeToUs,
-            appFilter: opts.appFilter
+            appFilter: opts.appFilter,
+            userAliases: opts.userAliases
         )
         let queryJsonData = try JSONEncoder().encode(payload)
         guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
@@ -415,6 +416,10 @@ private struct QueryPayload: Encodable {
     let timeFromUs: UInt64?
     let timeToUs: UInt64?
     let appFilter: String?
+    /// Cycle 8.42 — user-defined alias map. `nil` (default) is encoded as
+    /// missing key so the FFI's `#[serde(default)]` yields an empty map,
+    /// preserving pre-8.42 behavior.
+    let userAliases: [String: [String]]?
 
     enum CodingKeys: String, CodingKey {
         case text
@@ -422,6 +427,7 @@ private struct QueryPayload: Encodable {
         case timeFromUs = "time_from_us"
         case timeToUs = "time_to_us"
         case appFilter = "app_filter"
+        case userAliases = "user_aliases"
     }
 }
 

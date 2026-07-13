@@ -16,6 +16,9 @@ public enum RecallTab: Int, Hashable, Sendable {
     case episodes = 3
     case brief = 4
     case privacy = 5
+    /// Cycle 8.42 — minimal Settings surface hosting the user-dictionary
+    /// editor. Future settings can grow into the same scene.
+    case settings = 6
 
     /// Map a deep-link `?tab=…` query value (case-insensitive) to a
     /// `RecallTab`. Returns `nil` for unknown values so callers can
@@ -29,6 +32,7 @@ public enum RecallTab: Int, Hashable, Sendable {
         case "episodes": return .episodes
         case "privacy":  return .privacy
         case "brief":    return .brief
+        case "settings": return .settings
         default:         return nil
         }
     }

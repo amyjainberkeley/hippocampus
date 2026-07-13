@@ -23,13 +23,21 @@ public final class SearchViewModel: ObservableObject {
     /// audit follow-up. Injectable so tests can pass an in-memory store.
     private let persistence: QueryPersistence
     private var persistCancellable: AnyCancellable?
+    /// Cycle 8.42 — snapshot of the user dictionary. Reloaded before every
+    /// search so edits in the Settings tab take effect on the next query
+    /// without a restart. Injectable for tests.
+    private let userDictionaryLoader: @Sendable () -> UserDictionary
 
     public init(
         reader: BrainReader,
-        persistence: QueryPersistence = QueryPersistence()
+        persistence: QueryPersistence = QueryPersistence(),
+        userDictionaryLoader: @escaping @Sendable () -> UserDictionary = {
+            (try? loadUserDictionary()) ?? .empty
+        }
     ) {
         self.reader = reader
         self.persistence = persistence
+        self.userDictionaryLoader = userDictionaryLoader
         // Rehydrate synchronously so the view's first render already
         // reflects the user's last session. Falls through to defaults
         // on nil / corrupted blob (see QueryPersistence.load).
@@ -88,12 +96,18 @@ public final class SearchViewModel: ObservableObject {
                     window: window
                 )
             } else {
+                // Cycle 8.42 — pass the user dictionary through so the FFI
+                // OR-expands aliases at query time (see
+                // `expand_query_with_user_aliases` in `mci-brain-ffi`).
+                let dict = userDictionaryLoader()
+                let aliasMap = dict.entries.isEmpty ? nil : dict.toAliasMap()
                 let opts = SearchOptions(
                     text: q,
                     limit: 50,
                     appFilter: filters.appFilter,
                     timeFromUs: window.fromUs,
-                    timeToUs: window.toUs
+                    timeToUs: window.toUs,
+                    userAliases: aliasMap
                 )
                 results = try await applyClientFilters(
                     to: reader.search(opts),
