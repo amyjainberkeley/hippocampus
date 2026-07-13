@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: TBD-private
 //
-// MainSwiftWiringTests — race-gate sentinel fail-close decision matrix.
+// MainSwiftWiringTests — race-gate sentinel fail-close decision matrix
+// + V2-P1 third-lift construction-graph wiring proof.
+//
+// ## History
 //
 // PR #264's H6 wire-up assertion tests (which read `main.swift` at test
 // time and asserted that `FocusedWindowStore` + `FocusTracker` are
@@ -12,18 +15,30 @@
 // `SCContentFilter(display:exceptingWindows:[focusedWindow])` is an
 // EXCLUDE filter, not an INCLUDE-ONLY filter — passing the focused
 // window as the `exceptingWindows` list excludes the only window we
-// want. The V2-P1 production wiring was reverted; V2-P1 will need a
-// redesign with the `includingWindows`-correct API before any second
-// lift can succeed (tracked: follow-on memo
-// `v2-p1-redesign-includingwindows`).
+// want. The V2-P1 production wiring was reverted.
 //
-// What remains: the §5.2 race-gate sentinel fail-close at
-// `SCStreamCaptureSession.swift` still encodes the
-// `installedFocusGeneration == 0` fail-close branch. That is a defensive
-// hardening that's correct regardless of whether the focused-window
-// machinery is wired in production. The matrix tests below pin the
-// pure-logic decision the race-gate predicate makes; the SCStream
-// callback itself remains `// UNVERIFIED — needs live macOS`.
+// The 2026-06-01 redesign memo (`docs/research/v2-p1-redesign-
+// architecture-2026-06-01.md`) rebound the design to the correct
+// `SCContentFilter(display:including:exceptingWindows:)` shape with a
+// non-empty include list (FORK 3 = B). Cycle 8.35 PR #20 landed the
+// scaffold factory (`SCContentFilterFactory.makeMultiWindowFilter`);
+// THIS PR (Phase 7 PR 13) wires that factory into the live capture
+// path via `SCStreamCaptureSession`. Per [[project-v2p1-unit-tests-
+// passed-but-never-wired]] discipline + redesign memo §2.3, the
+// construction-graph wiring at `main.swift` is MANDATORY and pinned
+// here by a grep-in-place assertion — a future refactor that drops the
+// wiring or reintroduces the cycle 8.27 antipattern fails CI before
+// merge.
+//
+// ## What remains (race-gate matrix)
+//
+// The §5.2 race-gate sentinel fail-close at `SCStreamCaptureSession.swift`
+// still encodes the `installedFocusGeneration == 0` fail-close branch.
+// That is a defensive hardening that's correct regardless of whether
+// the focused-window machinery is wired in production. The matrix
+// tests below pin the pure-logic decision the race-gate predicate
+// makes; the SCStream callback itself remains `// UNVERIFIED — needs
+// live macOS`.
 
 import Foundation
 import XCTest
@@ -84,6 +99,141 @@ final class MainSwiftWiringTests: XCTestCase {
 
     func test_race_gate_fails_closed_on_generation_mismatch() {
         XCTAssertTrue(Self.raceGateFailsClosed(installedGen: 7, observedGen: 8))
+    }
+
+    // MARK: - V2-P1 third-lift construction-graph wiring proof
+
+    /// Locate `main.swift` relative to this test file. `#filePath` is
+    /// the on-disk path of THIS test file at compile time; the test
+    /// walks up to the package root and points at the executable
+    /// target's `main.swift`. Any refactor that relocates `main.swift`
+    /// out of `Sources/MCICaptureHelper/main.swift` must update this
+    /// helper — a deliberate coupling per [[project-v2p1-unit-tests-
+    /// passed-but-never-wired]] discipline.
+    private static func readMainSwift() throws -> String {
+        // Tests/MCICaptureHelperKitTests/MainSwiftWiringTests.swift
+        //   → ../../..                                            = package root
+        //   → Sources/MCICaptureHelper/main.swift
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let packageRoot = testFileURL
+            .deletingLastPathComponent()   // MCICaptureHelperKitTests/
+            .deletingLastPathComponent()   // Tests/
+            .deletingLastPathComponent()   // package root
+        let mainSwiftURL = packageRoot
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("MCICaptureHelper")
+            .appendingPathComponent("main.swift")
+        return try String(contentsOf: mainSwiftURL, encoding: .utf8)
+    }
+
+    /// The wiring PR's mandatory grep-in-place assertion — pins the
+    /// construction-graph shape at `main.swift`. Redesign memo §2.3 +
+    /// §5.1 + [[project-v2p1-unit-tests-passed-but-never-wired]] make
+    /// this an MANDATORY gate on the wiring PR: without it, the
+    /// unit-tested factory could be shipped without a caller, exactly
+    /// the cycle 8.25 shape.
+    ///
+    /// The assertions are structural — the test greps the source text
+    /// for the specific construction-graph shape. A future refactor
+    /// that renames the store/tracker (e.g. to `FocusedWindowSetStore`
+    /// per redesign memo §2.1) MUST update this test in lockstep or CI
+    /// fails.
+    func test_main_swift_multi_window_filter_wiring() throws {
+        let src = try Self.readMainSwift()
+
+        // Positive assertion 1: `main.swift` constructs a
+        // `FocusedWindowStore`. Redesign memo §2.3 + §5.1 wiring
+        // shape.
+        XCTAssertTrue(
+            src.contains("FocusedWindowStore()"),
+            "main.swift MUST construct a FocusedWindowStore (redesign memo §2.3 wiring)."
+        )
+
+        // Positive assertion 2: `main.swift` constructs a `FocusTracker`
+        // and passes the store to it. Redesign memo §2.3 wiring shape.
+        XCTAssertTrue(
+            src.contains("FocusTracker(store: focusedWindowStore)"),
+            "main.swift MUST construct a FocusTracker(store: focusedWindowStore)."
+        )
+
+        // Positive assertion 3: both the store and the tracker are
+        // passed into `SCStreamCaptureSession`. The literal argument
+        // labels are the pinned interface.
+        XCTAssertTrue(
+            src.contains("focusedWindowStore: focusedWindowStore"),
+            "main.swift MUST pass focusedWindowStore into SCStreamCaptureSession."
+        )
+        XCTAssertTrue(
+            src.contains("focusTracker: focusTracker"),
+            "main.swift MUST pass focusTracker into SCStreamCaptureSession."
+        )
+
+        // Negative assertion 1: `main.swift` MUST NOT reintroduce the
+        // cycle 8.27 antipattern `exceptingWindows: [focusedWindow]`.
+        // Redesign memo §2.3 + §5.2 [[project-v2p1-exceptingwindows-
+        // misuse]] lesson: FORK 3 = B binds `including:` with a
+        // non-empty list, never `exceptingWindows:` with the focused
+        // window.
+        XCTAssertFalse(
+            src.contains("exceptingWindows: [focusedWindow]"),
+            "main.swift MUST NOT reintroduce the cycle 8.27 antipattern (exceptingWindows: [focusedWindow])."
+        )
+
+        // Negative assertion 2: `main.swift` MUST NOT construct
+        // `SCContentFilter(desktopIndependentWindow:)` — the single-
+        // window form REJECTED by FORK 3 = B CEO ratification.
+        XCTAssertFalse(
+            src.contains("desktopIndependentWindow:"),
+            "main.swift MUST NOT use SCContentFilter(desktopIndependentWindow:) — FORK 3 = B rejects single-window form."
+        )
+    }
+
+    /// Grep-in-place assertion on `SCStreamPipeline.swift` — the
+    /// factory (which `main.swift` now wires) MUST call
+    /// `SCContentFilter(display:including:exceptingWindows:)` with the
+    /// FORK 3 = B ratified `including:` labeled argument. Redesign
+    /// memo §2.4 regression-guard.
+    func test_content_filter_factory_uses_including_labeled_argument() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let packageRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let factoryURL = packageRoot
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("MCICaptureHelperKit")
+            .appendingPathComponent("Capture")
+            .appendingPathComponent("SCStreamPipeline.swift")
+        let src = try String(contentsOf: factoryURL, encoding: .utf8)
+
+        // Positive: the factory constructs
+        // `SCContentFilter(display:including:exceptingWindows:)` with
+        // the `including:` labeled argument (redesign memo §1.1
+        // BINDING API shape).
+        XCTAssertTrue(
+            src.contains("including: includingSet"),
+            "SCContentFilterFactory MUST call SCContentFilter(display:including:exceptingWindows:) with 'including:' labeled argument (FORK 3 = B)."
+        )
+
+        // Negative: the factory MUST NOT contain a call that passes
+        // the focused window via `exceptingWindows:` alone. Grep for
+        // the cycle 8.27 pattern.
+        XCTAssertFalse(
+            src.contains("exceptingWindows: [focusedWindow]"),
+            "SCContentFilterFactory MUST NOT contain the cycle 8.27 antipattern (exceptingWindows: [focusedWindow])."
+        )
+    }
+
+    /// Scope-fence guard — the wiring PR MUST NOT flip `killOcrEmit`.
+    /// M4 stays RE-ENGAGED (`killOcrEmit = true`) until Phase 7 PR 14
+    /// lands after Amy's live-Mac smoke passes (redesign memo §4 +
+    /// scaffold PR §5 audit row 7). This mirrors the scaffold PR's
+    /// scope-fence test.
+    func test_wiring_pr_does_not_flip_killOcrEmit() {
+        XCTAssertTrue(
+            CascadeTwiceOCREmitter.killOcrEmit,
+            "V2-P1 third-lift wiring PR MUST NOT flip killOcrEmit — that's Phase 7 PR 14."
+        )
     }
 
     func test_race_gate_fails_closed_on_observed_nil_when_installed_is_nonzero() {
