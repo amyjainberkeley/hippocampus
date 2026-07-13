@@ -1049,6 +1049,7 @@ dependencies = [
 name = "mci-brain-ffi"
 version = "0.0.1"
 dependencies = [
+ "getrandom 0.3.4",
  "mci-brain",
  "mci-core",
  "rusqlite",

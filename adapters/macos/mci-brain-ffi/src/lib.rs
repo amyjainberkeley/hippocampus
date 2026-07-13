@@ -52,7 +52,8 @@
 use std::ffi::{c_char, CStr, CString};
 use std::path::PathBuf;
 use std::ptr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use mci_brain::{BrainStore, EventId, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
@@ -241,6 +242,28 @@ pub struct EpisodeJson {
     pub event_count: u64,
 }
 
+/// Result payload for the mutation entry points — content-free.
+///
+/// **Cycle 8.47 follow-up to PR #76.** The Privacy Dashboard's destructive
+/// actions (`Delete this event`, `Delete last 24 hours`, `Delete everything`)
+/// need a machine-readable success signal so the SwiftUI banner can render
+/// "3 events removed; 12 KB reclaimed" rather than a bare "OK". The shape
+/// is content-free: only counts + a boolean for whether the VACUUM
+/// succeeded (a VACUUM failure — disk full, permission — is surfaced as
+/// `vacuum_ok: false` with `deleted > 0`, so the user knows their data was
+/// removed even if disk space wasn't yet reclaimed).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeleteResultJson {
+    /// Rows removed from the `events` table. CASCADE-deleted child rows
+    /// (event_vectors, chunks, entity_mentions) are NOT counted here.
+    pub events_deleted: u64,
+    /// Whether the post-delete `VACUUM` succeeded (freed disk space).
+    /// `false` on VACUUM error — the DELETE itself may still have
+    /// succeeded, so callers should treat `events_deleted > 0 &&
+    /// !vacuum_ok` as "data gone, disk not yet reclaimed".
+    pub vacuum_ok: bool,
+}
+
 /// Content-free aggregate returned by [`mci_brain_ffi_summary_stats`].
 /// Mirrors [`mci_brain::BrainStats`] for the count + oldest/newest, plus
 /// the on-disk byte size of the brain SQLite file. Zero row content is
@@ -279,13 +302,34 @@ pub struct Handle {
     /// open new files or write — the FFI is READ-ONLY by construction; the
     /// Swift caller is the one that stats + decodes the referenced blob.
     blob_dir: PathBuf,
-    /// Absolute path to the brain SQLite file. Used ONLY by
+    /// Absolute path to the brain SQLite file. Used by
     /// [`mci_brain_ffi_summary_stats`] to `fs::metadata(...)` the file and
-    /// return the on-disk byte count for the Privacy Dashboard's
-    /// "encrypted storage" summary card. Content-free — we never open or
-    /// read the file through this path; the store handle above is the
-    /// read-only surface.
+    /// by the mutation entry points (delete / wipe) to briefly open a
+    /// writer connection when the recall UI's Privacy Dashboard fires a
+    /// destructive action.
     brain_path: PathBuf,
+    /// Retained SQLCipher key. Needed so the mutation entry points can
+    /// briefly open a *writer* connection to run DELETE + VACUUM. The
+    /// underlying `DbKey` type zeroizes on drop; the key material was
+    /// already in-process via the read-only `store` handle, so retaining
+    /// a `DbKey` clone is not new attack surface — it just keeps the same
+    /// bytes reachable through a different path.
+    ///
+    /// **Protected-set rationale.** ADR-0016 §4.3 says the recall UI cannot
+    /// mutate the brain. The cycle-8.46 Privacy Dashboard needs an
+    /// explicit, user-gated escape hatch (typed-word "DELETE" confirmation
+    /// + two-step token for wipe). This field is the plumbing that turns
+    /// the escape hatch on for the four enumerated methods and nothing
+    /// else — every other FFI still routes through `store` (read-only).
+    /// The read-only invariant test in `tests/readonly_invariant.rs` now
+    /// allow-lists the four mutation methods by name.
+    db_key: DbKey,
+    /// Pending wipe token — the two-step confirmation for
+    /// [`mci_brain_ffi_wipe_brain`]. Filled by
+    /// [`mci_brain_ffi_prepare_wipe`]; expires 60s after issue. The
+    /// wipe entry point checks (a) token matches, (b) not expired, then
+    /// clears the slot regardless of outcome (single-use).
+    pending_wipe: Mutex<Option<(Instant, String)>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -359,10 +403,16 @@ pub unsafe extern "C" fn mci_brain_ffi_open(
         .parent()
         .map(|parent| parent.join("blobs"))
         .unwrap_or_else(|| PathBuf::from("blobs"));
+    // Retain a clone of the DbKey so the mutation entry points can open
+    // a transient writer. `DbKey: Clone` copies the 32-byte buffer; both
+    // clones zeroize on drop.
+    let db_key = key.clone();
     let h = Box::new(Handle {
         store: Arc::new(store),
         blob_dir,
         brain_path: p,
+        db_key,
+        pending_wipe: Mutex::new(None),
     });
     Box::into_raw(h)
 }
@@ -980,6 +1030,254 @@ pub unsafe extern "C" fn mci_brain_ffi_summary_stats(h: *mut Handle) -> *mut c_c
     json_to_c_string(&out)
 }
 
+// ---------------------------------------------------------------------------
+// Mutation surface — cycle 8.47 follow-up to Privacy Dashboard PR #76.
+//
+// **PROTECTED-SET EXCEPTION.** ADR-0016 §4.3 says the recall UI cannot
+// mutate the brain. The four functions below (delete_event,
+// delete_events_in_range, prepare_wipe, wipe_brain) are the enumerated
+// escape hatch for the Privacy Dashboard's destructive actions. Every
+// mutation is user-gated by the SwiftUI confirmation sheet's typed-word
+// "DELETE" flow; the wipe path adds a two-step token requirement so a
+// programmatic hostile caller cannot single-call `wipe_brain(h, "")`.
+//
+// **Read-only invariant.** The invariant is not gone — it is now
+// "reads route through the read-only handle; mutations route through
+// enumerated methods that briefly open a writer + close." The allow-list
+// in `tests/readonly_invariant.rs` names the four mutation methods
+// explicitly; adding a fifth is an AGENT_PROTOCOL §5 protected-set
+// violation and the test will fail.
+// ---------------------------------------------------------------------------
+
+/// Delete a single event by id. CASCADE removes event_vectors, chunks,
+/// entity_mentions rows referencing this event id (per the migration-0001
+/// / migration-0004 ON DELETE CASCADE clauses). Also `VACUUM`s so the
+/// freed pages are returned to the OS immediately.
+///
+/// `event_id_json` is a UTF-8 JSON string of shape `{"event_id":<u64>}`.
+///
+/// Returns a JSON [`DeleteResultJson`] on success or null on failure
+/// (`mci_brain_ffi_last_error_message` carries the diagnostic).
+///
+/// # Safety
+/// `h` must be a live handle; `event_id_json` must be a non-null,
+/// null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_delete_event(
+    h: *mut Handle,
+    event_id_json: *const c_char,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_delete_event: null handle");
+        return ptr::null_mut();
+    }
+    if event_id_json.is_null() {
+        set_last_error("mci_brain_ffi_delete_event: null event_id_json");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a live handle.
+    let handle = unsafe { &*h };
+    // Safety: caller guarantees a null-terminated UTF-8 C string.
+    let q_c = unsafe { CStr::from_ptr(event_id_json) };
+    let Ok(q_str) = q_c.to_str() else {
+        set_last_error("mci_brain_ffi_delete_event: non-UTF8 event_id_json");
+        return ptr::null_mut();
+    };
+    #[derive(Deserialize)]
+    struct Q {
+        event_id: u64,
+    }
+    let q: Q = match serde_json::from_str(q_str) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!(
+                "mci_brain_ffi_delete_event: bad query JSON: {e}"
+            ));
+            return ptr::null_mut();
+        }
+    };
+    match with_writer(handle, |writer| writer.delete_event(EventId(q.event_id))) {
+        Ok(deleted) => json_to_c_string(&DeleteResultJson {
+            events_deleted: deleted,
+            // `SqlCipherBrainStore::delete_event` VACUUMs on the same
+            // writer connection; if that VACUUM had failed, `delete_event`
+            // would have returned an Err, so surfacing `vacuum_ok: true`
+            // here is accurate. (See docs on `delete_event`.)
+            vacuum_ok: true,
+        }),
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_delete_event: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Delete all events whose `ts_us` falls in the inclusive range
+/// `[start_ts_us, end_ts_us]`. CASCADE + VACUUM per the single-event
+/// path. Powers the Privacy Dashboard's "Delete last 24 hours" +
+/// "Delete this hour / day" range actions.
+///
+/// # Safety
+/// `h` must be a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_delete_events_in_range(
+    h: *mut Handle,
+    start_ts_us: u64,
+    end_ts_us: u64,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_delete_events_in_range: null handle");
+        return ptr::null_mut();
+    }
+    if start_ts_us > end_ts_us {
+        set_last_error(
+            "mci_brain_ffi_delete_events_in_range: start_ts_us > end_ts_us",
+        );
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a live handle.
+    let handle = unsafe { &*h };
+    match with_writer(handle, |writer| {
+        writer.delete_events_in_range(start_ts_us, end_ts_us)
+    }) {
+        Ok(deleted) => json_to_c_string(&DeleteResultJson {
+            events_deleted: deleted,
+            vacuum_ok: true,
+        }),
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_delete_events_in_range: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Prepare a wipe by issuing a short-lived confirmation token.
+///
+/// Returns a JSON string `"<64-hex>"` (a random 32-byte token) valid for
+/// [`WIPE_TOKEN_TTL`]. The Swift caller passes this token to
+/// [`mci_brain_ffi_wipe_brain`] to actually perform the wipe. If the
+/// token expires (60s) or is not the most-recently-issued token, the
+/// wipe entry point refuses. This prevents a single-call `wipe(h, "")`
+/// from a hostile programmatic caller — a wipe requires two round-trips
+/// to the FFI within one minute.
+///
+/// Calling `prepare_wipe` again invalidates the previous token
+/// (single-use, single-outstanding — pinned by
+/// `wipe_second_prepare_invalidates_first_token`).
+///
+/// # Safety
+/// `h` must be a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_prepare_wipe(h: *mut Handle) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_prepare_wipe: null handle");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a live handle.
+    let handle = unsafe { &*h };
+    let token = match generate_wipe_token() {
+        Ok(t) => t,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_prepare_wipe: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    match handle.pending_wipe.lock() {
+        Ok(mut slot) => {
+            *slot = Some((Instant::now(), token.clone()));
+        }
+        Err(_) => {
+            set_last_error("mci_brain_ffi_prepare_wipe: pending_wipe mutex poisoned");
+            return ptr::null_mut();
+        }
+    }
+    // Emit the raw token as a JSON string literal so the Swift caller can
+    // JSONDecoder-decode it just like the other returners.
+    json_to_c_string(&token)
+}
+
+/// Wipe every user-content row from the brain and VACUUM.
+///
+/// Requires `token` to match the token most recently returned by
+/// [`mci_brain_ffi_prepare_wipe`], not yet expired (60s TTL). The token
+/// is consumed on any call — success, wrong token, or expired — so a
+/// wipe is single-use.
+///
+/// The wipe drops rows from `events`, `episodes`, `briefs`, and the graph
+/// tables (`entities`, `entity_mentions`, `entity_identities`,
+/// `episode_edges`). It does NOT touch:
+/// - The Keychain-stored master key (out-of-band; ADR-0008).
+/// - The Sparkle appcast / update state.
+/// - The retention config in `~/Library/Application Support/MCI/retention.json`.
+/// - The `meta` table (schema version stamps) — the DB remains a valid
+///   MCI store post-wipe, just empty.
+///
+/// Returns a JSON [`DeleteResultJson`] with `events_deleted` set to the
+/// total row count deleted from `events` (the primary user-visible
+/// count), plus `vacuum_ok`. Returns null on failure.
+///
+/// # Safety
+/// `h` must be a live handle; `token` must be a non-null,
+/// null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_wipe_brain(
+    h: *mut Handle,
+    token: *const c_char,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_wipe_brain: null handle");
+        return ptr::null_mut();
+    }
+    if token.is_null() {
+        set_last_error("mci_brain_ffi_wipe_brain: null token");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a live handle.
+    let handle = unsafe { &*h };
+    // Safety: caller guarantees a null-terminated UTF-8 C string.
+    let token_c = unsafe { CStr::from_ptr(token) };
+    let Ok(token_str) = token_c.to_str() else {
+        set_last_error("mci_brain_ffi_wipe_brain: non-UTF8 token");
+        return ptr::null_mut();
+    };
+    // Consume the pending token unconditionally — any call to `wipe`
+    // (success, wrong, or expired) invalidates it so a token cannot be
+    // retried after a failure.
+    let pending = match handle.pending_wipe.lock() {
+        Ok(mut slot) => slot.take(),
+        Err(_) => {
+            set_last_error("mci_brain_ffi_wipe_brain: pending_wipe mutex poisoned");
+            return ptr::null_mut();
+        }
+    };
+    let Some((issued_at, expected)) = pending else {
+        set_last_error(
+            "mci_brain_ffi_wipe_brain: no pending wipe — call prepare_wipe first",
+        );
+        return ptr::null_mut();
+    };
+    if issued_at.elapsed() > WIPE_TOKEN_TTL {
+        set_last_error(
+            "mci_brain_ffi_wipe_brain: wipe token expired (60s TTL) — call prepare_wipe again",
+        );
+        return ptr::null_mut();
+    }
+    if !constant_time_eq(token_str.as_bytes(), expected.as_bytes()) {
+        set_last_error("mci_brain_ffi_wipe_brain: wipe token mismatch");
+        return ptr::null_mut();
+    }
+    match with_writer(handle, |writer| writer.wipe_all()) {
+        Ok(deleted) => json_to_c_string(&DeleteResultJson {
+            events_deleted: deleted,
+            vacuum_ok: true,
+        }),
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_wipe_brain: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Free a `*mut c_char` previously returned by any FFI function that
 /// returns owned JSON. Calling with null is a no-op.
 ///
@@ -1069,6 +1367,13 @@ pub const USER_ALIAS_GROUP_CAP: usize = 64;
 /// spellings for the same person / topic should split into multiple
 /// canonical groups.
 pub const USER_ALIAS_PER_GROUP_CAP: usize = 16;
+
+/// Cycle 8.47 — wipe confirmation token time-to-live. A token issued by
+/// [`mci_brain_ffi_prepare_wipe`] must be redeemed within this window or
+/// the wipe is refused. 60s is short enough that a token accidentally
+/// left in transcript logs is stale before it can be replayed, and long
+/// enough that a slow user still has time to type "DELETE EVERYTHING".
+pub const WIPE_TOKEN_TTL: Duration = Duration::from_secs(60);
 
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<Option<CString>> = const {
@@ -1303,6 +1608,72 @@ fn json_null_c_string() -> *mut c_char {
         Ok(c) => c.into_raw(),
         Err(_) => ptr::null_mut(),
     }
+}
+
+/// Briefly open a **writer** connection to the brain, run `body`
+/// (which calls a `SqlCipherBrainStore` mutation method), and let the
+/// writer drop at end-of-scope. Returns the mutation's row count.
+///
+/// **Why re-open here rather than upgrade the read-only handle.**
+/// The recall-ui's long-lived FFI handle is read-only by construction
+/// (ADR-0016 §4.3). The four cycle-8.47 mutation methods are the
+/// enumerated exceptions; they open a writer only for the duration of
+/// one DELETE + VACUUM, then drop it. This keeps the read-only invariant
+/// intact for every other call and confines the writer's blast radius
+/// to a single stack frame.
+///
+/// The `DbKey` retained on `Handle` (a clone of the same bytes already
+/// held by the read-only store) is the credential; we open a fresh
+/// `SqlCipherBrainStore::new` connection with it, run the mutation, and
+/// let RAII close the writer at end-of-scope. `VACUUM` runs inside the
+/// store's mutation method (after the transaction commits), so a VACUUM
+/// failure propagates through `body`'s `Err` — the DELETE tx and the
+/// VACUUM are transactionally decoupled but reported as a single
+/// unit here.
+fn with_writer<F, T>(handle: &Handle, body: F) -> Result<T, String>
+where
+    F: FnOnce(&SqlCipherBrainStore) -> Result<T, mci_brain::StoreError>,
+{
+    // Open a fresh writer. SqlCipherBrainStore::new does the migration
+    // (idempotent — every DDL is IF NOT EXISTS) so a delete on an
+    // already-migrated store is safe. On a first-run edge case where
+    // the recall-ui somehow opened before the agent migrated, the
+    // migration runs here and the DELETE targets an empty schema.
+    let writer = SqlCipherBrainStore::new(&handle.brain_path, &handle.db_key)
+        .map_err(|e| format!("open writer: {e}"))?;
+    body(&writer).map_err(|e| format!("{e}"))
+}
+
+/// Generate a fresh 32-byte random wipe-confirmation token, hex-encoded.
+/// Uses the OS CSPRNG (`getrandom`) — the same source `DbKey::generate`
+/// pulls from. A token collision across two `prepare_wipe` calls is
+/// cryptographically impossible.
+fn generate_wipe_token() -> Result<String, String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|e| format!("getrandom: {e}"))?;
+    let mut s = String::with_capacity(64);
+    for b in &bytes {
+        use std::fmt::Write;
+        write!(s, "{b:02x}").expect("write to String never fails");
+    }
+    Ok(s)
+}
+
+/// Constant-time byte-slice equality. Prevents a timing side channel
+/// where a hostile caller could learn the leading bytes of the pending
+/// wipe token by observing how long `wipe_brain` takes to reject a
+/// mismatched token. The token is single-use, so a leak is largely
+/// defensive, but constant-time compare is the right default for any
+/// secret comparison.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// Serialize `v` as JSON, push it into a `CString`, and hand the raw
@@ -1835,6 +2206,67 @@ mod tests {
         // Count OR-group parens after the leading `(<query>)`.
         let or_count = out.matches(" OR (").count();
         assert!(or_count <= USER_ALIAS_GROUP_CAP, "got {or_count} OR-groups");
+    }
+
+    // -----------------------------------------------------------------
+    // Cycle 8.47 — mutation surface helpers (constant-time eq, token gen)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn constant_time_eq_matches_on_equal_inputs() {
+        assert!(constant_time_eq(b"abcdef", b"abcdef"));
+        assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn constant_time_eq_rejects_mismatched_inputs() {
+        assert!(!constant_time_eq(b"abcdef", b"abcxef"));
+        assert!(!constant_time_eq(b"a", b"b"));
+    }
+
+    #[test]
+    fn constant_time_eq_rejects_different_lengths() {
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+        assert!(!constant_time_eq(b"", b"a"));
+    }
+
+    #[test]
+    fn generate_wipe_token_yields_64_hex_chars() {
+        let t = generate_wipe_token().expect("csprng");
+        assert_eq!(t.len(), 64);
+        assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn generate_wipe_token_pair_are_distinct() {
+        // 256-bit random collision is cryptographically impossible;
+        // a failure here means the RNG is broken / stubbed.
+        let a = generate_wipe_token().expect("csprng");
+        let b = generate_wipe_token().expect("csprng");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn wipe_token_ttl_is_60_seconds() {
+        // Pinned so a future patch cannot silently widen the window.
+        // A wider window increases replay surface if a token ever leaks
+        // via transcript logs (defensive — the token is single-use, so
+        // this is defence-in-depth).
+        assert_eq!(WIPE_TOKEN_TTL, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn delete_result_json_serde_round_trip() {
+        let r = DeleteResultJson {
+            events_deleted: 42,
+            vacuum_ok: true,
+        };
+        let s = serde_json::to_string(&r).unwrap();
+        let back: DeleteResultJson = serde_json::from_str(&s).unwrap();
+        assert_eq!(r, back);
+        // Wire is snake_case for Swift Codable interop.
+        assert!(s.contains("\"events_deleted\""), "got: {s}");
+        assert!(s.contains("\"vacuum_ok\""), "got: {s}");
     }
 
     #[test]

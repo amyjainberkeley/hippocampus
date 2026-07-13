@@ -1092,6 +1092,139 @@ impl SqlCipherBrainStore {
             Err(IntegrityError::Corrupted(rows))
         }
     }
+
+    // ---------------------------------------------------------------
+    // Cycle 8.47 — Privacy Dashboard delete surface (PR #76 follow-up).
+    //
+    // These are the enumerated mutation entry points the FFI's
+    // `mci_brain_ffi_delete_event` / `_delete_events_in_range` /
+    // `_wipe_brain` methods call. They live on the writer-side store
+    // (`SqlCipherBrainStore::new` handle) so the FFI's read-only handle
+    // remains structurally incapable of writing. Every method:
+    //
+    //   1. Runs the DELETE inside a transaction.
+    //   2. Commits the transaction.
+    //   3. Runs `VACUUM` outside the transaction to reclaim disk pages.
+    //
+    // CASCADE cleanup (event_vectors, chunks, entity_mentions,
+    // episode_edges) is handled by the ON DELETE CASCADE clauses in
+    // migrations 0001 + 0004 + 0005; the methods below do not restate
+    // the child DELETEs.
+    // ---------------------------------------------------------------
+
+    /// Delete one event by id. Returns the number of `events` rows
+    /// deleted (0 or 1). `VACUUM`s after commit.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any driver failure (missing row is
+    /// NOT an error — it returns 0).
+    pub fn delete_event(&self, id: EventId) -> Result<u64, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin delete_event tx: {e}")))?;
+        let id_i = i64::try_from(id.0).unwrap_or(i64::MAX);
+        let n = tx
+            .execute("DELETE FROM events WHERE id = ?1", params![id_i])
+            .map_err(|e| StoreError::Backend(format!("DELETE events: {e}")))?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit delete_event tx: {e}")))?;
+        guard
+            .conn()
+            .execute_batch("VACUUM")
+            .map_err(|e| StoreError::Backend(format!("VACUUM after delete_event: {e}")))?;
+        Ok(n as u64)
+    }
+
+    /// Delete every event whose `ts_us` falls in the inclusive range
+    /// `[start_ts_us, end_ts_us]`. Returns the number of `events` rows
+    /// deleted. `VACUUM`s after commit.
+    ///
+    /// Powers the Privacy Dashboard's "Delete last 24 hours" range action.
+    /// The caller is expected to have already presented the typed-word
+    /// "DELETE" confirmation UI; this method does no additional gating.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any driver failure.
+    pub fn delete_events_in_range(
+        &self,
+        start_ts_us: u64,
+        end_ts_us: u64,
+    ) -> Result<u64, StoreError> {
+        if start_ts_us > end_ts_us {
+            return Err(StoreError::Backend(
+                "delete_events_in_range: start_ts_us > end_ts_us".into(),
+            ));
+        }
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin delete_range tx: {e}")))?;
+        let s_i = i64::try_from(start_ts_us).unwrap_or(i64::MAX);
+        let e_i = i64::try_from(end_ts_us).unwrap_or(i64::MAX);
+        let n = tx
+            .execute(
+                "DELETE FROM events WHERE ts_us >= ?1 AND ts_us <= ?2",
+                params![s_i, e_i],
+            )
+            .map_err(|e| StoreError::Backend(format!("DELETE events range: {e}")))?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit delete_range tx: {e}")))?;
+        guard
+            .conn()
+            .execute_batch("VACUUM")
+            .map_err(|e| StoreError::Backend(format!("VACUUM after delete_range: {e}")))?;
+        Ok(n as u64)
+    }
+
+    /// Wipe every user-content row from the brain. Returns the number of
+    /// `events` rows deleted (the primary user-visible count).
+    ///
+    /// Drops all rows from: `events`, `episodes`, `briefs`, `entities`,
+    /// `entity_mentions`, `entity_identities`, `episode_edges`.
+    /// Leaves the `meta` schema-version stamps intact so the DB remains
+    /// a valid MCI store, just empty. `VACUUM`s after commit.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any driver failure. The DELETEs are
+    /// wrapped in one transaction so a mid-wipe failure rolls back
+    /// atomically — the store is either fully wiped or unchanged, never
+    /// partially wiped.
+    pub fn wipe_all(&self) -> Result<u64, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin wipe_all tx: {e}")))?;
+        // Order: children with FK NOT ON DELETE CASCADE-safe first
+        // (briefs is FK-free; entity_* is a parent-child chain). Then
+        // events, then episodes. CASCADE covers event_vectors + chunks
+        // + entity_mentions (children of events / entities).
+        tx.execute("DELETE FROM briefs", [])
+            .map_err(|e| StoreError::Backend(format!("DELETE briefs: {e}")))?;
+        tx.execute("DELETE FROM episode_edges", [])
+            .map_err(|e| StoreError::Backend(format!("DELETE episode_edges: {e}")))?;
+        tx.execute("DELETE FROM entity_identities", [])
+            .map_err(|e| StoreError::Backend(format!("DELETE entity_identities: {e}")))?;
+        tx.execute("DELETE FROM entity_mentions", [])
+            .map_err(|e| StoreError::Backend(format!("DELETE entity_mentions: {e}")))?;
+        tx.execute("DELETE FROM entities", [])
+            .map_err(|e| StoreError::Backend(format!("DELETE entities: {e}")))?;
+        let n = tx
+            .execute("DELETE FROM events", [])
+            .map_err(|e| StoreError::Backend(format!("DELETE events: {e}")))?;
+        tx.execute("DELETE FROM episodes", [])
+            .map_err(|e| StoreError::Backend(format!("DELETE episodes: {e}")))?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit wipe_all tx: {e}")))?;
+        guard
+            .conn()
+            .execute_batch("VACUUM")
+            .map_err(|e| StoreError::Backend(format!("VACUUM after wipe_all: {e}")))?;
+        Ok(n as u64)
+    }
 }
 
 /// Typed outcome of [`SqlCipherBrainStore::verify_integrity_on_boot`].
