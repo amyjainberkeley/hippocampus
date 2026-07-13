@@ -4,13 +4,20 @@
 // This dashboard is the enterprise-grade trust artifact: it shows what
 // MCI has captured and gives the user delete + export controls.
 //
-// # Read-only + protected-set discipline
+// # Two-tier discipline (post cycle 8.47, PR #76 follow-up)
 //
 // Every read path goes through `BrainReader` (read-only by construction;
-// see `FFIBrainReader.swift`). Delete actions ship UI-only in this PR —
-// the mutation FFI is deferred to cycle 8.47 (requires ADR + CSO
-// sign-off). Confirming a delete surfaces a "Coming soon" banner rather
-// than writing to the brain.
+// see `FFIBrainReader.swift`). Destructive actions route through the
+// SEPARATE `PrivacyMutator` protocol — a passing-in `nil` (or a reader
+// that doesn't conform) disables the delete buttons entirely. This lets
+// stub / preview / test surfaces stay read-only-typed while the real
+// FFIBrainReader implements both.
+//
+// The wipe path is two-step: `prepareWipe()` returns a 60s-TTL token,
+// then `wipeBrain(token:)` fires. Any wipe call — success, wrong token,
+// expired — consumes the pending token, so a wipe cannot be replayed.
+// This defends against a hostile programmatic caller trying to single-call
+// `wipeBrain` from outside the UI flow.
 //
 // The pure filter / summary / confirmation logic lives in
 // `RecallUIKit/PrivacyDashboardModel.swift` so it has a headless test
@@ -22,15 +29,27 @@ import SwiftUI
 
 struct PrivacyDashboard: View {
     let reader: BrainReader
+    /// The mutator that actually performs deletes. When `nil`, the
+    /// destructive-action buttons stay visible but do nothing (preview /
+    /// stub surfaces). The executable target's launch path wires this
+    /// with the same `FFIBrainReader` instance the reader is backed by.
+    let mutator: PrivacyMutator?
 
     @State private var summary: SummaryStats? = nil
     @State private var events: [Hit] = []
     @State private var observedApps: [ObservedApp] = []
     @State private var filter: PrivacyDashboardFilter = .empty
     @State private var isLoading = true
+    @State private var isMutating = false
     @State private var errorMessage: String? = nil
     @State private var confirmation: DestructiveConfirmationBox? = nil
     @State private var banner: String? = nil
+
+    /// Convenience init for reader-only surfaces (preview / stub tests).
+    init(reader: BrainReader, mutator: PrivacyMutator? = nil) {
+        self.reader = reader
+        self.mutator = mutator
+    }
 
     var body: some View {
         ScrollView {
@@ -45,8 +64,15 @@ struct PrivacyDashboard: View {
                     },
                     onDeleteEverything: {
                         confirmation = DestructiveConfirmationBox(kind: .deleteEverything)
-                    }
+                    },
+                    isBusy: isMutating
                 )
+                if isMutating {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Working…").foregroundStyle(Color.brandFgMuted)
+                    }
+                }
                 if let banner {
                     Text(banner)
                         .font(.callout)
@@ -67,14 +93,47 @@ struct PrivacyDashboard: View {
             ConfirmDeleteSheet(kind: box.kind) { confirmed in
                 confirmation = nil
                 if confirmed {
-                    // Mutation FFI is deferred to cycle 8.47 — see the
-                    // file-header note. Surface the intent without writing.
-                    banner =
-                        "Coming soon (cycle 8.47) — delete requires a "
-                        + "protected-set mutation FFI + CSO sign-off."
+                    Task { await runDestructive(box.kind) }
                 }
             }
         }
+    }
+
+    /// Fire the destructive action for `kind`. Requires `mutator` to be
+    /// non-nil (the confirmation sheet only enables the Confirm button
+    /// when the mutator is present, but we guard here too as
+    /// defence-in-depth). Refreshes the dashboard on success.
+    @MainActor
+    private func runDestructive(_ kind: DestructivePrivacyAction) async {
+        guard let mutator else {
+            banner = "Delete unavailable — mutator not wired."
+            return
+        }
+        isMutating = true
+        errorMessage = nil
+        banner = nil
+        do {
+            let result: DeleteResult
+            switch kind {
+            case .deleteLast24h:
+                let now = Date().timeIntervalSince1970
+                let startUs = UInt64(max(0, (now - 24 * 3600)) * 1_000_000)
+                let endUs = UInt64(now * 1_000_000)
+                result = try await mutator.deleteEventsInRange(
+                    startTsUs: startUs, endTsUs: endUs
+                )
+            case .deleteEverything:
+                let token = try await mutator.prepareWipe()
+                result = try await mutator.wipeBrain(token: token)
+            }
+            banner =
+                "Removed \(result.eventsDeleted) events."
+                + (result.vacuumOk ? "" : " (disk space will reclaim on next VACUUM)")
+            await reloadAll()
+        } catch {
+            errorMessage = "Delete failed: \(error)"
+        }
+        isMutating = false
     }
 
     @MainActor
@@ -271,6 +330,10 @@ struct DestructiveActions: View {
     let onExport: () -> Void
     let onDeleteLast24h: () -> Void
     let onDeleteEverything: () -> Void
+    /// `true` while a delete/wipe is in flight — disables buttons so
+    /// a double-tap can't fire the confirmation sheet twice against
+    /// an in-progress mutation.
+    var isBusy: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -287,12 +350,15 @@ struct DestructiveActions: View {
                 Button("Export my data as JSON") { onExport() }
                     .buttonStyle(.bordered)
                     .tint(Color.brandMint)
+                    .disabled(isBusy)
                 Button("Delete last 24 hours") { onDeleteLast24h() }
                     .buttonStyle(.bordered)
                     .tint(Color.brandWarning)
+                    .disabled(isBusy)
                 Button("Delete everything") { onDeleteEverything() }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.brandError)
+                    .disabled(isBusy)
             }
         }
         .padding(16)

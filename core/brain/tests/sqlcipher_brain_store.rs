@@ -907,3 +907,100 @@ fn migration_0003_idempotent_on_second_open() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].tab_id, Some(42));
 }
+
+// ---------------------------------------------------------------------------
+// Cycle 8.47 — Privacy Dashboard delete surface (PR #76 follow-up).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn delete_event_removes_the_row_and_cascades_vectors() {
+    let (_dir, path) = tmp("delete_event.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).expect("open");
+
+    let id = store.put_event(&blank_event(100, "delete me")).unwrap();
+    store
+        .set_event_embedding(id, &axis_unit_vec(0))
+        .expect("embed");
+    let other = store.put_event(&blank_event(200, "keep me")).unwrap();
+    assert_eq!(store.stats().unwrap().event_count, 2);
+
+    let n = store.delete_event(id).expect("delete_event");
+    assert_eq!(n, 1);
+    assert_eq!(store.stats().unwrap().event_count, 1);
+    assert!(store.get_event(id).unwrap().is_none());
+    assert!(store.get_event(other).unwrap().is_some());
+}
+
+#[test]
+fn delete_event_returns_zero_for_missing_id() {
+    let (_dir, path) = tmp("delete_missing.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).expect("open");
+
+    let n = store.delete_event(EventId(9_999_999)).expect("delete");
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn delete_events_in_range_removes_only_events_in_window() {
+    let (_dir, path) = tmp("delete_range.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).expect("open");
+
+    store.put_event(&blank_event(100, "outside-left")).unwrap();
+    store.put_event(&blank_event(200, "inside-1")).unwrap();
+    store.put_event(&blank_event(250, "inside-2")).unwrap();
+    store.put_event(&blank_event(400, "outside-right")).unwrap();
+    assert_eq!(store.stats().unwrap().event_count, 4);
+
+    let n = store
+        .delete_events_in_range(150, 300)
+        .expect("delete_range");
+    assert_eq!(n, 2);
+    let remaining = store
+        .recent_events(10)
+        .expect("recent_events")
+        .into_iter()
+        .map(|e| e.ts_us)
+        .collect::<Vec<_>>();
+    assert_eq!(remaining, vec![400, 100]);
+}
+
+#[test]
+fn delete_events_in_range_rejects_inverted_window() {
+    let (_dir, path) = tmp("delete_range_bad.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).expect("open");
+    let err = store.delete_events_in_range(500, 100).unwrap_err();
+    assert!(matches!(err, StoreError::Backend(_)));
+}
+
+#[test]
+fn wipe_all_clears_events_and_leaves_meta_schema_intact() {
+    let (_dir, path) = tmp("wipe.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).expect("open");
+
+    store.put_event(&blank_event(100, "a")).unwrap();
+    store.put_event(&blank_event(200, "b")).unwrap();
+    store.put_event(&blank_event(300, "c")).unwrap();
+    assert_eq!(store.stats().unwrap().event_count, 3);
+
+    let n = store.wipe_all().expect("wipe_all");
+    assert_eq!(n, 3);
+    assert_eq!(store.stats().unwrap().event_count, 0);
+
+    // Schema still intact: put_event on a wiped store round-trips.
+    let id = store.put_event(&blank_event(1000, "reborn")).unwrap();
+    assert!(store.get_event(id).unwrap().is_some());
+}
+
+#[test]
+fn wipe_all_on_empty_store_returns_zero() {
+    let (_dir, path) = tmp("wipe_empty.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).expect("open");
+    let n = store.wipe_all().expect("wipe_all");
+    assert_eq!(n, 0);
+}

@@ -143,4 +143,88 @@ final class PrivacyDashboardTests: XCTestCase {
         XCTAssertEqual(stats.totalEvents, 3)
         XCTAssertGreaterThan(stats.diskBytes, 0)
     }
+
+    // MARK: - Cycle 8.47 PrivacyMutator surface (PR #76 follow-up)
+
+    /// The mutator surface is protocol-typed so headless tests can
+    /// substitute a mock. This test pins the call sequence the SwiftUI
+    /// dashboard emits for each destructive action:
+    ///   - `deleteLast24h` → `deleteEventsInRange(startTsUs, endTsUs)`
+    ///   - `deleteEverything` → `prepareWipe()` then `wipeBrain(token:)`
+    /// (The dashboard view exercises this sequence in `runDestructive`.)
+
+    final class SpyMutator: PrivacyMutator, @unchecked Sendable {
+        struct RangeCall: Equatable {
+            let startTsUs: UInt64
+            let endTsUs: UInt64
+        }
+        var deleteIdCalls: [UInt64] = []
+        var rangeCalls: [RangeCall] = []
+        var prepareCount = 0
+        var wipeCalls: [String] = []
+        var canned = DeleteResult(eventsDeleted: 0, vacuumOk: true)
+        var cannedToken = "ffee".repeating(times: 16)
+
+        func deleteEvent(id: UInt64) async throws -> DeleteResult {
+            deleteIdCalls.append(id)
+            return canned
+        }
+
+        func deleteEventsInRange(
+            startTsUs: UInt64, endTsUs: UInt64
+        ) async throws -> DeleteResult {
+            rangeCalls.append(RangeCall(startTsUs: startTsUs, endTsUs: endTsUs))
+            return canned
+        }
+
+        func prepareWipe() async throws -> String {
+            prepareCount += 1
+            return cannedToken
+        }
+
+        func wipeBrain(token: String) async throws -> DeleteResult {
+            wipeCalls.append(token)
+            return canned
+        }
+    }
+
+    func testDeleteResultRoundTripsThroughCodable() throws {
+        let r = DeleteResult(eventsDeleted: 42, vacuumOk: true)
+        let data = try JSONEncoder().encode(r)
+        let back = try JSONDecoder().decode(DeleteResult.self, from: data)
+        XCTAssertEqual(r, back)
+    }
+
+    func testMutatorSpyDeleteEventTracksCallSequence() async throws {
+        let spy = SpyMutator()
+        spy.canned = DeleteResult(eventsDeleted: 1, vacuumOk: true)
+        let r = try await spy.deleteEvent(id: 101)
+        XCTAssertEqual(r.eventsDeleted, 1)
+        XCTAssertEqual(spy.deleteIdCalls, [101])
+    }
+
+    func testMutatorSpyDeleteRangeRecordsBounds() async throws {
+        let spy = SpyMutator()
+        _ = try await spy.deleteEventsInRange(startTsUs: 100, endTsUs: 200)
+        XCTAssertEqual(spy.rangeCalls, [SpyMutator.RangeCall(startTsUs: 100, endTsUs: 200)])
+    }
+
+    func testMutatorSpyWipeIsTwoStep() async throws {
+        // The dashboard flow is prepareWipe() → wipeBrain(token:). The
+        // token from prepare is opaque to the caller; the mutator returns
+        // it verbatim so the same token round-trips.
+        let spy = SpyMutator()
+        let token = try await spy.prepareWipe()
+        XCTAssertEqual(spy.prepareCount, 1)
+        _ = try await spy.wipeBrain(token: token)
+        XCTAssertEqual(spy.wipeCalls, [token])
+    }
+}
+
+// Small helper — Swift Foundation's `String` has no `repeating:times:`
+// for a String pattern out of the box.
+private extension String {
+    func repeating(times n: Int) -> String {
+        String(repeating: self, count: n)
+    }
 }

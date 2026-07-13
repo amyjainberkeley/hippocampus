@@ -517,3 +517,111 @@ private struct SummaryStatsWire: Decodable {
     let newest_ts_us: UInt64?
     let disk_bytes: UInt64
 }
+
+// ---------------------------------------------------------------------------
+// Cycle 8.47 — Privacy Dashboard mutation surface (PR #76 follow-up).
+//
+// `FFIBrainReader` also conforms to `PrivacyMutator`. The Swift Privacy
+// Dashboard's destructive-action buttons call these methods AFTER the
+// typed-word confirmation sheet has been accepted. The four FFI calls
+// (`_delete_event`, `_delete_events_in_range`, `_prepare_wipe`,
+// `_wipe_brain`) are the enumerated escape hatch from the read-only
+// invariant — see `tests/readonly_invariant.rs` for the allow-list.
+// ---------------------------------------------------------------------------
+
+extension FFIBrainReader: PrivacyMutator {
+    public func deleteEvent(id: UInt64) async throws -> DeleteResult {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        let payload = DeleteEventPayload(event_id: id)
+        let queryJsonData = try JSONEncoder().encode(payload)
+        guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
+            throw BrainReaderError.decodeFailed("FFIBrainReader: non-UTF8 delete payload")
+        }
+        let rawJson: UnsafeMutablePointer<CChar>? = queryJsonString.withCString { q in
+            mci_brain_ffi_delete_event(h, q)
+        }
+        guard let rawJson else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeDeleteResult(rawJson)
+    }
+
+    public func deleteEventsInRange(
+        startTsUs: UInt64,
+        endTsUs: UInt64
+    ) async throws -> DeleteResult {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let rawJson = mci_brain_ffi_delete_events_in_range(h, startTsUs, endTsUs)
+        else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeDeleteResult(rawJson)
+    }
+
+    public func prepareWipe() async throws -> String {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let rawJson = mci_brain_ffi_prepare_wipe(h) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        // The FFI returns a JSON string literal — decode the outer quotes.
+        let s = String(cString: rawJson)
+        guard let data = s.data(using: .utf8) else {
+            throw BrainReaderError.decodeFailed("non-UTF8 wipe token")
+        }
+        do {
+            return try JSONDecoder().decode(String.self, from: data)
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader.prepareWipe: \(error)")
+        }
+    }
+
+    public func wipeBrain(token: String) async throws -> DeleteResult {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        let rawJson: UnsafeMutablePointer<CChar>? = token.withCString { t in
+            mci_brain_ffi_wipe_brain(h, t)
+        }
+        guard let rawJson else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeDeleteResult(rawJson)
+    }
+
+    private static func decodeDeleteResult(
+        _ raw: UnsafeMutablePointer<CChar>
+    ) throws -> DeleteResult {
+        let s = String(cString: raw)
+        guard let data = s.data(using: .utf8) else {
+            throw BrainReaderError.decodeFailed("non-UTF8 JSON from FFI (delete)")
+        }
+        do {
+            let wire = try JSONDecoder().decode(DeleteResultWire.self, from: data)
+            return DeleteResult(
+                eventsDeleted: wire.events_deleted,
+                vacuumOk: wire.vacuum_ok
+            )
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader.delete: \(error)")
+        }
+    }
+}
+
+private struct DeleteEventPayload: Encodable {
+    let event_id: UInt64
+}
+
+private struct DeleteResultWire: Decodable {
+    let events_deleted: UInt64
+    let vacuum_ok: Bool
+}

@@ -257,7 +257,12 @@ struct RootView: View {
                 .tag(RecallTab.settings)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
 
-            PrivacyDashboard(reader: reader)
+            // Cycle 8.47 (PR #76 follow-up): wire the mutator when the
+            // reader is FFI-backed so the destructive-action buttons
+            // route through the real delete pathway. StubBrainReader
+            // callers (preview / smoke) get a nil mutator and see
+            // disabled-behavior on delete.
+            PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
                 .tag(RecallTab.privacyDashboard)
                 .tabItem { Label("Privacy", systemImage: "lock.shield") }
         }

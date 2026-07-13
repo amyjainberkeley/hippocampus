@@ -260,6 +260,55 @@ public enum BrainReaderError: Error, Equatable {
     case decodeFailed(String)
 }
 
+/// Content-free result of a Privacy Dashboard destructive action.
+/// Mirrors the FFI's `DeleteResultJson`.
+public struct DeleteResult: Sendable, Equatable, Codable {
+    /// Rows removed from the `events` table (CASCADE children not counted).
+    public let eventsDeleted: UInt64
+    /// Whether the post-delete VACUUM succeeded. `false` here still means
+    /// the DELETE landed — disk-space reclamation may be pending.
+    public let vacuumOk: Bool
+
+    public init(eventsDeleted: UInt64, vacuumOk: Bool) {
+        self.eventsDeleted = eventsDeleted
+        self.vacuumOk = vacuumOk
+    }
+}
+
+/// Cycle 8.47 (PR #76 follow-up) — the *mutation* surface for the
+/// Privacy Dashboard's destructive actions. Kept SEPARATE from
+/// `BrainReader` so:
+///
+///   1. The read protocol stays read-only-by-type (a consumer that only
+///      needs reads takes `BrainReader`, not this).
+///   2. `StubBrainReader` (canned) can implement reads without pretending
+///      to support delete — headless tests that need delete supply their
+///      own mock `PrivacyMutator`.
+///   3. The FFI-only, gated escape hatch is easy to grep for and audit.
+///
+/// Every method here is user-gated by the SwiftUI confirmation flow in
+/// `PrivacyDashboard.swift`: typed-word "DELETE" (or "DELETE EVERYTHING")
+/// before any of these fire. The wipe path requires a two-step token
+/// dance (`prepareWipe` → `wipeBrain(token:)`) with a 60s expiry.
+public protocol PrivacyMutator: Sendable {
+    /// Delete one event by id.
+    func deleteEvent(id: UInt64) async throws -> DeleteResult
+
+    /// Delete every event with `ts_us` in `[startTsUs, endTsUs]`.
+    func deleteEventsInRange(
+        startTsUs: UInt64,
+        endTsUs: UInt64
+    ) async throws -> DeleteResult
+
+    /// Issue a wipe-confirmation token. Valid for 60 seconds; a second
+    /// `prepareWipe` invalidates the previous token.
+    func prepareWipe() async throws -> String
+
+    /// Wipe every user-content row. Requires the token returned by the
+    /// most-recent `prepareWipe`.
+    func wipeBrain(token: String) async throws -> DeleteResult
+}
+
 /// The full read surface the recall-ui consumes. No mutating methods.
 public protocol BrainReader: Sendable {
     func search(_ opts: SearchOptions) async throws -> [Hit]
