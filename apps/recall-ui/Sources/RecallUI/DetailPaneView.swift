@@ -50,6 +50,37 @@ struct DetailPaneView: View {
             }
             return .ignored
         }
+        .registerActionPanelCommands([
+            .init(
+                id: "hit.copySnippet",
+                title: "Copy Hit Snippet",
+                shortcut: "⌘C",
+                category: .hit
+            ) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(displayBody, forType: .string)
+            },
+            .init(
+                id: "hit.openInApp",
+                title: "Open in App",
+                shortcut: "⌘O",
+                category: .hit,
+                isEnabled: { hit.url.flatMap(URL.init(string:)) != nil }
+            ) {
+                if let u = hit.url, let url = URL(string: u) {
+                    NSWorkspace.shared.open(url)
+                }
+            },
+            .init(
+                id: "hit.showRelated",
+                title: "Show Related Hits",
+                shortcut: "⌘R",
+                category: .hit,
+                isEnabled: { !hit.linkedEventIds.isEmpty }
+            ) {
+                flyoutScope = .all(hitId: hit.id)
+            },
+        ])
     }
 
     private var header: some View {
