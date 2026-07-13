@@ -28,14 +28,9 @@ struct TimelineView: View {
     }
 
     private var emptyView: some View {
-        ContentUnavailableView(
-            "No events yet",
-            systemImage: "clock",
-            description: Text(
-                "Start using your Mac normally — Hippocampus is recording in the background."
-            )
-        )
-        .foregroundStyle(Color.brandFgSecondary)
+        // Cycle 8.49 polished empty state (audit-gap fix). Timeline with
+        // no events = fresh brain — reassuring, informative.
+        MCIEmptyState.noTimelineEvents()
     }
 
     private func errorView(_ err: String) -> some View {

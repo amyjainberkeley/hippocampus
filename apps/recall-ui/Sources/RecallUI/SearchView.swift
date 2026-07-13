@@ -109,12 +109,17 @@ struct SearchView: View {
             )
             .foregroundStyle(Color.brandFgSecondary)
         } else if viewModel.hits.isEmpty && !viewModel.isSearching {
-            ContentUnavailableView(
-                "No matches",
-                systemImage: "tray",
-                description: Text("Try different words or a broader query.")
-            )
-            .foregroundStyle(Color.brandFgSecondary)
+            // Cycle 8.49 polished empty state (audit-gap fix). Two
+            // variants: filter-only narrowed to nothing → "Clear
+            // filters" action; text query with no hits → broaden-terms
+            // + dictionary nudge.
+            if viewModel.query.isEmpty && viewModel.filters.anyActive {
+                MCIEmptyState.filterTooNarrow {
+                    viewModel.clear()
+                }
+            } else {
+                MCIEmptyState.noSearchHits(query: viewModel.query)
+            }
         } else if viewModel.isSearching && viewModel.hits.isEmpty {
             ShimmerLoadingView(isLoading: true)
         } else {

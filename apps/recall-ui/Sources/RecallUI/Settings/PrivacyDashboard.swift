@@ -58,7 +58,11 @@ struct PrivacyDashboard: View {
             VStack(alignment: .leading, spacing: MCI.Spacing.xl) {
                 PrivacySummaryCard(summary: summary, isLoading: isLoading)
                 FilterBar(filter: $filter, observedApps: observedApps)
-                EventList(events: filter.apply(to: events), isLoading: isLoading)
+                EventList(
+                    events: filter.apply(to: events),
+                    isLoading: isLoading,
+                    hasActiveFilter: filter != .empty
+                )
                 DestructiveActions(
                     onExport: { runExport() },
                     onDeleteLast24h: {
@@ -269,6 +273,11 @@ struct FilterBar: View {
 struct EventList: View {
     let events: [Hit]
     let isLoading: Bool
+    /// `true` when the dashboard filter is narrowing the pool — used to
+    /// distinguish "filter hides everything" (offer widen guidance) from
+    /// "brain is empty" (reassure on-privacy tone). Cycle 8.49
+    /// polished-empty-state audit-gap fix.
+    var hasActiveFilter: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -278,8 +287,8 @@ struct EventList: View {
             if isLoading && events.isEmpty {
                 Text("Loading…").foregroundStyle(Color.brandFgMuted)
             } else if events.isEmpty {
-                Text("Nothing captured in the current filter.")
-                    .foregroundStyle(Color.brandFgMuted)
+                MCIEmptyState.noPrivacyEvents(hasActiveFilter: hasActiveFilter)
+                    .frame(minHeight: 220)
             } else {
                 ForEach(events) { EventRow(hit: $0) }
             }

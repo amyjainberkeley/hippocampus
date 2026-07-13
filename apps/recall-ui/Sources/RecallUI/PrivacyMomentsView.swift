@@ -26,14 +26,8 @@ struct PrivacyMomentsView: View {
             } else if viewModel.isLoading && viewModel.moments.isEmpty {
                 ShimmerLoadingView(isLoading: true)
             } else if viewModel.moments.isEmpty {
-                ContentUnavailableView(
-                    "No privacy moments yet",
-                    systemImage: "eye.slash",
-                    description: Text(
-                        "Hippocampus hasn't redacted anything for this brain yet."
-                    )
-                )
-                .foregroundStyle(Color.brandFgSecondary)
+                // Cycle 8.49 polished empty state (audit-gap fix).
+                MCIEmptyState.noPrivacyMoments()
             } else {
                 List(viewModel.moments) { moment in
                     PrivacyMomentCard(moment: moment)
