@@ -33,6 +33,7 @@ LANES=(
     "swift-test-recall-ui|swift|test|swift test --package-path apps/recall-ui"
     "swift-test-onboarding|swift|test|swift test --package-path apps/onboarding"
     "bash-syntax|bash|lint|__bash_syntax_lane"
+    "changelog-sanity|bash|lint|__changelog_sanity_lane"
 )
 
 # ---- Usage -------------------------------------------------------------------
@@ -64,6 +65,7 @@ LANES
     swift-test-recall-ui  swift test in apps/recall-ui
     swift-test-onboarding swift test in apps/onboarding
     bash-syntax           bash -n across repo *.sh files
+    changelog-sanity      gen-changelog.sh --dry-run smoke
 
 BEHAVIOR
     - Each lane runs isolated; one failure does not abort the others.
@@ -95,6 +97,20 @@ __swift_fmt_lane() {
         apps/recall-ui/Sources \
         apps/onboarding/Sources \
         adapters/macos/MCICaptureHelper/Sources
+}
+
+__changelog_sanity_lane() {
+    # Build-hygiene: does gen-changelog.sh --dry-run complete cleanly?
+    # Non-blocking style — we only fail on a hard error, not on empty output.
+    if [[ ! -x scripts/gen-changelog.sh ]]; then
+        echo "[skip] scripts/gen-changelog.sh not present or not executable"
+        return 42
+    fi
+    if ! scripts/gen-changelog.sh --dry-run --since HEAD~20 >/dev/null 2>&1; then
+        # Fall back to full history if HEAD~20 does not exist yet (shallow clone).
+        scripts/gen-changelog.sh --dry-run >/dev/null
+    fi
+    echo "gen-changelog.sh --dry-run OK"
 }
 
 __bash_syntax_lane() {
