@@ -23,23 +23,30 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testAdvanceThroughAllSteps() {
         let vm = makeVM()
-        // V2-MCP-2 inserted `.mcpServers` between `.connectClaudeCode`
-        // and `.done`; the step count is now 12.
+        // Cycle 8.48 inserted `.primaryHotkey` between `.permissions`
+        // and `.allowlist`; the step count is now 13.
         let expected: [OnboardingStep] = [
-            .welcome, .howItWorks, .trust, .permissions, .allowlist,
-            .browserExtension, .livePreview, .retention,
+            .welcome, .howItWorks, .trust, .permissions, .primaryHotkey,
+            .allowlist, .browserExtension, .livePreview, .retention,
             .prepareBrain, .connectClaudeCode, .mcpServers, .done,
         ]
         for (i, step) in expected.enumerated() {
             XCTAssertEqual(vm.currentStep, step, "Step \(i)")
+            // PrimaryHotkeySlide gates advance on the live-try/skip
+            // funnel; simulate the Skip path so the walk continues.
+            if step == .primaryHotkey { vm.markHotkeyPracticed() }
             if i < expected.count - 1 { vm.advance() }
         }
     }
 
     func testAdvancePastDoneIsNoop() {
         let vm = makeVM()
-        // 12 steps total ⇒ advance 11 times reaches `.done`.
-        for _ in 0..<11 { vm.advance() }
+        // 13 steps total ⇒ advance 12 times reaches `.done` (with a
+        // Skip through the PrimaryHotkey gate at step 4).
+        for i in 0..<12 {
+            if i == 4 { vm.markHotkeyPracticed() }
+            vm.advance()
+        }
         XCTAssertEqual(vm.currentStep, .done)
         vm.advance()
         XCTAssertEqual(vm.currentStep, .done)
@@ -67,7 +74,10 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testCanAdvanceIsFalseAtDone() {
         let vm = makeVM()
-        for _ in 0..<11 { vm.advance() }
+        for i in 0..<12 {
+            if i == 4 { vm.markHotkeyPracticed() }
+            vm.advance()
+        }
         XCTAssertFalse(vm.canAdvance)
     }
 
@@ -77,8 +87,8 @@ final class OnboardingFlowViewModelTests: XCTestCase {
     }
 
     func testStepCountMatchesOnboardingStepEnum() {
-        // V2-MCP-2 added `.mcpServers` ⇒ 12 cases.
-        XCTAssertEqual(OnboardingStep.allCases.count, 12)
+        // Cycle 8.48 added `.primaryHotkey` ⇒ 13 cases.
+        XCTAssertEqual(OnboardingStep.allCases.count, 13)
     }
 
     func testStepLabelsAreNonEmpty() {
@@ -95,14 +105,19 @@ final class OnboardingFlowViewModelTests: XCTestCase {
 
     func testProgressAtDoneIsOne() {
         let vm = makeVM()
-        for _ in 0..<11 { vm.advance() }
+        for i in 0..<12 {
+            if i == 4 { vm.markHotkeyPracticed() }
+            vm.advance()
+        }
         XCTAssertEqual(vm.progress, 1.0, accuracy: 0.001)
     }
 
     func testProgressAtMidpoint() {
         let vm = makeVM()
-        vm.goTo(.browserExtension) // raw 5 out of allCases.count - 1 = 11
-        XCTAssertEqual(vm.progress, 5.0 / 11.0, accuracy: 0.001)
+        // Cycle 8.48: `.browserExtension` is now raw 6 out of
+        // allCases.count - 1 = 12 (was 5/11 before the insertion).
+        vm.goTo(.browserExtension)
+        XCTAssertEqual(vm.progress, 6.0 / 12.0, accuracy: 0.001)
     }
 
     // MARK: - Migration source (cycle 8.38 audit F4 / PR-2)

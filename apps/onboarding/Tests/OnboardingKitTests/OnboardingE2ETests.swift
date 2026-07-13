@@ -15,10 +15,10 @@ import XCTest
 /// + `canAdvance == false` at Permissions, `probeAutomation()` reflecting
 /// `.denied` after the browser-extension probe, etc.).
 ///
-/// Actual step order (per `OnboardingStep.swift`, 12 cases):
-///   welcome → howItWorks → trust → permissions → allowlist →
-///   browserExtension → livePreview → retention → prepareBrain →
-///   connectClaudeCode → mcpServers → done
+/// Actual step order (per `OnboardingStep.swift`, 13 cases):
+///   welcome → howItWorks → trust → permissions → primaryHotkey →
+///   allowlist → browserExtension → livePreview → retention →
+///   prepareBrain → connectClaudeCode → mcpServers → done
 @MainActor
 final class OnboardingE2ETests: XCTestCase {
 
@@ -27,9 +27,9 @@ final class OnboardingE2ETests: XCTestCase {
     /// step-count assertion at the bottom fails loudly if a future PR
     /// inserts a step without updating the e2e walk.
     private static let allSteps: [OnboardingStep] = [
-        .welcome, .howItWorks, .trust, .permissions, .allowlist,
-        .browserExtension, .livePreview, .retention, .prepareBrain,
-        .connectClaudeCode, .mcpServers, .done,
+        .welcome, .howItWorks, .trust, .permissions, .primaryHotkey,
+        .allowlist, .browserExtension, .livePreview, .retention,
+        .prepareBrain, .connectClaudeCode, .mcpServers, .done,
     ]
 
     // MARK: - Test 1: Happy path
@@ -58,6 +58,17 @@ final class OnboardingE2ETests: XCTestCase {
             if expected == .done {
                 XCTAssertFalse(vm.canAdvance, "canAdvance must be false at .done")
             } else {
+                if expected == .primaryHotkey {
+                    // Cycle 8.48 — the PrimaryHotkeySlide gates advance
+                    // on either a live ⇧⌘Space press OR the Skip
+                    // fallback; both funnel through
+                    // `markHotkeyPracticed()`. Simulate the Skip path.
+                    XCTAssertFalse(vm.canAdvance,
+                        "primaryHotkey must block advance until hotkeyPracticed flips")
+                    vm.markHotkeyPracticed()
+                    XCTAssertTrue(vm.hotkeyPracticed,
+                        "markHotkeyPracticed() must flip the flag")
+                }
                 XCTAssertTrue(vm.canAdvance, "canAdvance must be true at \(expected)")
                 vm.advance()
                 XCTAssertEqual(store.load(), Self.allSteps[idx + 1],
@@ -106,7 +117,10 @@ final class OnboardingE2ETests: XCTestCase {
         XCTAssertTrue(vm.canAdvance,
             "After reset-and-retry grants SR, advance must unblock")
         vm.advance()
-        XCTAssertEqual(vm.currentStep, .allowlist)
+        // Cycle 8.48 — next step after Permissions is now
+        // PrimaryHotkeySlide (was Allowlist). The user then either
+        // presses ⇧⌘Space or Skips before Allowlist becomes reachable.
+        XCTAssertEqual(vm.currentStep, .primaryHotkey)
     }
 
     // MARK: - Test 3: Resume-across-quit path
@@ -161,6 +175,7 @@ final class OnboardingE2ETests: XCTestCase {
         // the cold-start happy path.
         for (idx, expected) in Self.allSteps.enumerated() {
             XCTAssertEqual(vm.currentStep, expected, "Step \(idx)")
+            if expected == .primaryHotkey { vm.markHotkeyPracticed() }
             if expected != .done { vm.advance() }
         }
         XCTAssertEqual(vm.currentStep, .done)
