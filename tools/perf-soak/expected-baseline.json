@@ -1,0 +1,28 @@
+{
+  "$comment": "Pinned mci-agent warm-baseline for CRS G6 interim measurement. Source: docs/NIGHTLY_LOG.md line 578 (cycle 8.30 partial live sample, 2026-06-02): cpu_pct_micro=2516 (0.2516% of one core), rss_bytes=38715392 (~36.9 MB). This is the M4-ENGAGED posture (killOcrEmit=true per PR #266, cycle 8.28). Once V2-P1 M4-lift ships (PR #28 pending Amy's Mac), a second baseline row for the M4-LIFTED posture will be added. Drift envelope is ±3x — anything worse trips --strict (CI mode). The envelope is deliberately loose: a warm-agent baseline is noise-dominated and we care about class-shifts (0.25% → 5%), not micro-drift.",
+  "cycle_8_30_reference": {
+    "date": "2026-06-02",
+    "source": "docs/NIGHTLY_LOG.md line 578",
+    "cpu_pct_micro": 2516,
+    "rss_bytes": 38715392,
+    "posture": "M4-engaged (killOcrEmit=true)",
+    "note": "cycle 8.30 partial live sample from mci-agent --health-summary window=900"
+  },
+  "expected": {
+    "cpu_pct_p95": 0.25,
+    "rss_mb_p95": 37.0
+  },
+  "drift_envelope_multiplier": 3.0,
+  "slo": {
+    "steady_state": {
+      "cpu_pct_max": 15.0,
+      "rss_mb_max": 2048.0,
+      "source": "DESIGN.md G2 ratified 2026-05-31 (default tier)"
+    },
+    "performance_tier": {
+      "cpu_pct_max": 2.0,
+      "rss_mb_max": 250.0,
+      "source": "DESIGN.md G2 opt-in Performance tier via OnboardingTier"
+    }
+  }
+}
