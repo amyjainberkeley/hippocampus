@@ -560,6 +560,11 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
         // on-disk byte size. Uses `BrainStore::stats` + `fs::metadata` —
         // no row content is exposed.
         "mci_brain_ffi_summary_stats",
+        // V2-P13 (Phase D scaffold) — Rewind-style timeline strip surface
+        // (read-only). Returns downsampled TimelineEventJson rows for a
+        // time range; uses the same read-only handle as _recent_events
+        // and filters in Rust. No mutating call path.
+        "mci_brain_ffi_timeline_events",
         "mci_brain_ffi_string_free",
         "mci_brain_ffi_last_error_message",
     ];
@@ -590,6 +595,8 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
         mci_brain_ffi::mci_brain_ffi_brief_dates as *const (),
         mci_brain_ffi_events_by_ids as *const (),
         mci_brain_ffi::mci_brain_ffi_summary_stats as *const (),
+        // V2-P13 (Phase D scaffold) — timeline strip fetch surface.
+        mci_brain_ffi::mci_brain_ffi_timeline_events as *const (),
         mci_brain_ffi_string_free as *const (),
         mci_brain_ffi_last_error_message as *const (),
         // Cycle 8.47 mutation surface — explicitly enumerated.
@@ -600,8 +607,9 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     ];
     assert_eq!(
         allowed_reads.len(),
-        14,
-        "read-tier FFI surface size pinned at 14"
+        15,
+        "read-tier FFI surface size pinned at 15 \
+         (V2-P13 timeline scaffold added mci_brain_ffi_timeline_events)"
     );
     assert_eq!(
         allowed_mutations.len(),

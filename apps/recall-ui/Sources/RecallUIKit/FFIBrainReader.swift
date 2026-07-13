@@ -243,6 +243,40 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         }
     }
 
+    /// **V2-P13 (Phase D scaffold).** Fetch lightweight event summaries
+    /// for the Rewind-style timeline strip. Routes to
+    /// `mci_brain_ffi_timeline_events` — read-only, uses the same
+    /// long-lived handle. FFI enforces the 90-day window cap and the
+    /// per-call downsample.
+    public func timelineEvents(
+        startTsUs: UInt64,
+        endTsUs: UInt64,
+        resolution: TimelineResolution
+    ) async throws -> [TimelineEvent] {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        let payload = TimelineQueryPayload(
+            startTsUs: startTsUs,
+            endTsUs: endTsUs,
+            resolution: resolution.rawValue
+        )
+        let queryJsonData = try JSONEncoder().encode(payload)
+        guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
+            throw BrainReaderError.decodeFailed(
+                "FFIBrainReader: non-UTF8 timeline payload"
+            )
+        }
+        let rawJson: UnsafeMutablePointer<CChar>? = queryJsonString.withCString { q in
+            mci_brain_ffi_timeline_events(h, q)
+        }
+        guard let rawJson else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try Self.decodeTimelineEvents(rawJson)
+    }
+
     public func briefDates(limit: Int) async throws -> [String] {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
@@ -316,6 +350,22 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
             return wire.map { $0.toObservedApp() }
         } catch {
             throw BrainReaderError.decodeFailed("FFIBrainReader: \(error)")
+        }
+    }
+
+    /// **V2-P13.** Decode the FFI's `TimelineEventJson` array.
+    private static func decodeTimelineEvents(
+        _ raw: UnsafeMutablePointer<CChar>
+    ) throws -> [TimelineEvent] {
+        let s = String(cString: raw)
+        guard let data = s.data(using: .utf8) else {
+            throw BrainReaderError.decodeFailed("non-UTF8 JSON from FFI (timeline)")
+        }
+        do {
+            let wire = try JSONDecoder().decode([TimelineEventWire].self, from: data)
+            return wire.map { $0.toTimelineEvent() }
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader.timeline: \(error)")
         }
     }
 
@@ -507,6 +557,42 @@ private struct EpisodeWire: Decodable {
             tsStartUs: ts_start_us,
             tsEndUs: ts_end_us,
             eventCount: event_count
+        )
+    }
+}
+
+/// **V2-P13 (Phase D scaffold).** Encoder side of
+/// `mci_brain_ffi_timeline_events`. `resolution` is optional on the wire
+/// (`#[serde(default)]`); we always send it because the caller enum has
+/// a default.
+private struct TimelineQueryPayload: Encodable {
+    let startTsUs: UInt64
+    let endTsUs: UInt64
+    let resolution: String?
+
+    enum CodingKeys: String, CodingKey {
+        case startTsUs = "start_ts_us"
+        case endTsUs = "end_ts_us"
+        case resolution
+    }
+}
+
+/// **V2-P13.** Decoder side of `mci_brain_ffi_timeline_events`.
+/// Snake-case wire; converts to the public `TimelineEvent` on decode.
+private struct TimelineEventWire: Decodable {
+    let event_id: UInt64
+    let ts_us: UInt64
+    let app_bundle_id: String?
+    let snippet: String
+    let thumbnail_path: String?
+
+    func toTimelineEvent() -> TimelineEvent {
+        TimelineEvent(
+            eventId: event_id,
+            tsUs: ts_us,
+            appBundleId: app_bundle_id,
+            snippet: snippet,
+            thumbnailPath: thumbnail_path
         )
     }
 }

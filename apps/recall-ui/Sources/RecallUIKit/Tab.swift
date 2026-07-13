@@ -24,6 +24,12 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// export controls over their brain. Amy's directive 2026-07-13:
     /// "show the full control, no collection."
     case privacyDashboard = 7
+    /// **V2-P13 (Phase D scaffold)** — Rewind-style visual timeline
+    /// strip (⌘8). Horizontally-scrolling row of capture cards with
+    /// thumbnails + time markers. Distinct from `.timeline` (the flat
+    /// chronological list); the two coexist during Phase D scaffold and
+    /// may collapse into one tab in Phase D full impl (cycle 8.55+).
+    case timelineStrip = 8
 
     /// Map a deep-link `?tab=…` query value (case-insensitive) to a
     /// `RecallTab`. Returns `nil` for unknown values so callers can
@@ -39,6 +45,7 @@ public enum RecallTab: Int, Hashable, Sendable {
         case "brief":    return .brief
         case "settings": return .settings
         case "dashboard", "privacy-dashboard": return .privacyDashboard
+        case "timeline-strip", "strip": return .timelineStrip
         default:         return nil
         }
     }
