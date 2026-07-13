@@ -6,7 +6,7 @@
 import Foundation
 
 public struct ActionPanelCommand: Identifiable {
-    public enum Category: String, Sendable {
+    public enum Category: String, Sendable, CaseIterable {
         case search = "Search"
         case hit = "Hit"
         case app = "App"
@@ -17,6 +17,10 @@ public struct ActionPanelCommand: Identifiable {
     public let title: String
     public let shortcut: String
     public let category: Category
+    /// One-line description surfaced in the ⌘/ help sheet. Optional so
+    /// existing call sites keep compiling; empty renders as "—" in the
+    /// help sheet's description column.
+    public let description: String
     public let isEnabled: () -> Bool
     public let action: () -> Void
 
@@ -25,6 +29,7 @@ public struct ActionPanelCommand: Identifiable {
         title: String,
         shortcut: String,
         category: Category,
+        description: String = "",
         isEnabled: @escaping () -> Bool = { true },
         action: @escaping () -> Void
     ) {
@@ -32,6 +37,7 @@ public struct ActionPanelCommand: Identifiable {
         self.title = title
         self.shortcut = shortcut
         self.category = category
+        self.description = description
         self.isEnabled = isEnabled
         self.action = action
     }
@@ -45,6 +51,14 @@ public final class ActionPanelRegistry: ObservableObject {
     public static let shared = ActionPanelRegistry()
     @Published public private(set) var commands: [ActionPanelCommand] = []
     @Published public var isVisible: Bool = false
+    /// Whether the ⌘/ Keyboard Shortcuts help sheet is currently
+    /// presented. Kept on the registry (Single Source of Truth) so any
+    /// view can toggle it and the RootView's `.sheet` binding auto-fires.
+    @Published public var isHelpVisible: Bool = false
+    /// True while a ⌘R "refresh brain" pass is in-flight. Rendered as a
+    /// spinner in the SearchView's search field. Reset by
+    /// `endRefresh()`.
+    @Published public var isRefreshing: Bool = false
 
     public init() {}
 
@@ -60,6 +74,26 @@ public final class ActionPanelRegistry: ObservableObject {
     public func show() { isVisible = true }
     public func hide() { isVisible = false }
     public func toggle() { isVisible.toggle() }
+
+    public func showHelp() { isHelpVisible = true }
+    public func hideHelp() { isHelpVisible = false }
+
+    public func beginRefresh() { isRefreshing = true }
+    public func endRefresh() { isRefreshing = false }
+
+    /// Group the currently-registered commands by category, in the
+    /// canonical presentation order (Search → Hit → App → Debug) with
+    /// each group's commands sorted by title. Powers the ⌘/ help sheet
+    /// — kept here so the sheet's rendering is a pure function of the
+    /// registry (no hardcoded lists) and headless tests can pin the
+    /// grouping without spinning up SwiftUI.
+    public func groupedByCategory() -> [(category: ActionPanelCommand.Category, commands: [ActionPanelCommand])] {
+        let byCategory = Dictionary(grouping: commands) { $0.category }
+        return ActionPanelCommand.Category.allCases.compactMap { cat in
+            guard let cmds = byCategory[cat], !cmds.isEmpty else { return nil }
+            return (cat, cmds.sorted { $0.title < $1.title })
+        }
+    }
 }
 
 /// Substring-with-gaps fuzzy scorer. Every char of `query` must
