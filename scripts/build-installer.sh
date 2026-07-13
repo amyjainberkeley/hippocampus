@@ -219,6 +219,46 @@ if [[ ! -f "$NER_MODEL_PATH/model.mil" || ! -d "$NER_MODEL_PATH/weights" || ! -f
     exit 1
 fi
 
+# --- Completeness gate: refuse to ship a DMG missing the bundled Qwen3 brief-author ---
+#
+# Cycle 8.42 EnviousWispr peer-study finding (see
+# docs/research/2026-07-13-enviouswispr-peer-study.md §5). Mirror of the
+# embedder + NER gates above for the Qwen3-1.7B FP16 brief-author. build-app.sh
+# bundles Qwen3-1.7B-FP16.mlmodelc under Contents/Resources/Models/qwen3-1.7b-fp16/
+# and trips its OWN fail-loud gate — but `--skip-build` bypasses build-app.sh
+# entirely (same reason the embedder + NER gates are re-run here). Without this
+# check, `build-installer.sh --skip-build` over a `.app` assembled before the
+# Qwen3-bundling change — or one whose Qwen3 copy silently failed / was stripped
+# — would package + codesign + notarize a DMG whose daily-brief tab hangs at the
+# "Prepare your brain" slide on first-run (the exact EnviousWispr failure class
+# this cycle's fix closes). The model is a first-class bundled asset now (like
+# the embedder + NER), so its absence is a ship-blocker, not a warning.
+QWEN3_MODEL_PATH="$APP_PATH/Contents/Resources/Models/qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc"
+if [[ ! -d "$QWEN3_MODEL_PATH" ]]; then
+    echo "FATAL: Qwen3-1.7B-FP16.mlmodelc missing at:"
+    echo "         $QWEN3_MODEL_PATH"
+    echo ""
+    echo "Refusing to ship a DMG whose daily-brief author would silently fall"
+    echo "back to run_disabled_idle on first launch — the exact EnviousWispr"
+    echo "failure class the cycle 8.42 bundling change closes."
+    echo ""
+    echo "The Qwen3 model lives at <repo>/models/Qwen3-1.7B-FP16.{mlpackage,mlmodelc}"
+    echo "and is .gitignored (~3.4 GB compiled). For worktree builds, copy it"
+    echo "in from the primary checkout before re-running:"
+    echo ""
+    echo "  cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/"
+    echo ""
+    echo "Then re-run (without --skip-build): ./scripts/build-installer.sh"
+    exit 1
+fi
+# Structural completeness — same invariants as NER + embedder.
+if [[ ! -f "$QWEN3_MODEL_PATH/model.mil" || ! -d "$QWEN3_MODEL_PATH/weights" || ! -f "$QWEN3_MODEL_PATH/coremldata.bin" ]]; then
+    echo "FATAL: bundled Qwen3 model is structurally incomplete at:"
+    echo "         $QWEN3_MODEL_PATH"
+    echo "       (missing model.mil, weights/, or coremldata.bin). Refusing to ship."
+    exit 1
+fi
+
 # Launch-verify gate — FATAL.
 # Second invocation (build-app.sh runs it once on the just-built bundle).
 # Re-run here so --skip-build paths still trip the gate, and so the gate
