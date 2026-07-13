@@ -163,7 +163,26 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     /// and reads in production are pure load.
     nonisolated(unsafe) internal static var killOcrEmit: Bool = true
 
-    private let worker: VisionOCRWorker
+    /// M4-LIFT activator — the ONE production entry point that flips
+    /// `killOcrEmit` off at boot when the ADR-0031 §Status env-var
+    /// gate (`HIPPOCAMPUS_ENABLE_V2P1=1`) is set. Called exactly once
+    /// per helper process, from `main.swift`, immediately after
+    /// [`MciV2P1Gate.current`] resolves to `.enabled`.
+    ///
+    /// This method exists so the executable target (`MCICaptureHelper`)
+    /// can flip the internal `killOcrEmit` gate without loosening its
+    /// `internal` scope (the field stays `internal` so tests keep the
+    /// only other legitimate write path via `@testable import`). The
+    /// method name is verbose so a grep for the M4-lift runtime
+    /// activation lands here immediately.
+    ///
+    /// - Parameter enabled: `true` ⇒ flip `killOcrEmit = false` so the
+    ///   cascade-twice OCR-emit path is armed. `false` ⇒ engage the
+    ///   kill-switch (restore pre-M4-lift behavior). Callers that pass
+    ///   `false` here are exercising a rollback drill.
+    public static func activateM4Lift(enabled: Bool) {
+        Self.killOcrEmit = !enabled
+    }
     private let cascade: SuppressionCascade
     private let sink: any FrameSink
     private let sequence: FrameSequence

@@ -328,6 +328,22 @@ mci/
 | Phase 5 | ~80% | **Real semantic search SHIPPING-GRADE** (cycle 8.5). Arctic Embed S Core ML pipeline rewritten end-to-end: external Rust tokenization via HuggingFace tokenizers crate, FP16 weights, CLS-pool + L2-norm in graph, quality regression test 50/50 cosine sim ≥0.999. Brief author (Qwen3-1.7B) Rust backend complete but `.mlpackage` conversion blocked by coremltools op-coverage gap. Workspace server skeleton + crypto + enrollment tests done |
 | Phase 6 | ~75% | Browser ext working (Chromium MV3 + native messaging + PageContentEvent). Safari `.appex` still scaffold-only |
 | Phase 7 | ~75% | Hippocampus.app shell + Sparkle + LoginItems + DMG + rpath fix (cycle 8.5) + MCP auto-registration + Troubleshoot menu. Icon designer pass + real screenshots + Apple Dev ID signing still owed |
+
+#### M4 kill-switch — env-var-gated lift status
+
+The M4 cascade-twice OCR-emit kill-switch (`CascadeTwiceOCREmitter.killOcrEmit = true`, ADR-0031 §Status) has been engaged in production for 6+ cycles since the 2026-05-30 second-lift revert. Phase 7 PR 14 (this PR) ships the M4-lift **code path** but gates activation on an environment variable:
+
+- `HIPPOCAMPUS_ENABLE_V2P1=1` at helper boot ⇒ gate returns `.enabled`; the boot path overrides `captureEnabled = true` AND `killOcrEmit = false`. The V2-P1 capture pipeline runs live.
+- Env var unset / any other value ⇒ pre-M4-lift behavior preserved. Users on the shipping DMG see NO change.
+
+Rationale: the ratified V2-P1 third-lift discipline (`docs/research/v2-p1-third-lift-scaffold.md` §3) requires a live-Mac §7-equivalent smoke test on Amy's physical Mac (redesign memo §3.2 harnesses H6′–H10′) BEFORE the lift is ratified for public users. That test cannot be run by the fleet — it needs interactive human input. The env var is the interim: it lets Amy set the flag + build a local DMG + run the smoke test whenever she gets to her Mac, without ratifying a smoke-untested runtime for the shipping DMG.
+
+**Follow-up PR (post-smoke):** removes the env-var gate + makes V2-P1 the shipping default. Tracks against the ADR-0031 §Status third-lift condition-2 sign-off in `docs/audit/<date>-v2-p1-live-corpus.md`.
+
+Matched-pair implementation:
+- Swift helper: `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/MciV2P1Gate.swift` (reads env, exposes `.current` + `stateFor(env:)`, `stderrBreadcrumb(_:)`)
+- Rust agent: `apps/agent/src/v2p1_gate.rs` (reads env, appends `--capture` to helper argv when enabled)
+- Boot breadcrumb: `helper_health v2p1_gate=enabled|disabled` on stderr — grep `helper.stderr.log` to confirm state.
 | Phase 8 | Scaffolded | `adapters/windows/` crate (PR #124). Implementation post-v1.0 |
 | Phase 9 | Not started | iOS/Watch separate Xcode targets per ADR-0026. Post-v1.0 |
 
