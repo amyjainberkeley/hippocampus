@@ -31,6 +31,9 @@ use mci_agent::alias_resolver_worker;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::brief_worker;
 use mci_agent::consolidator_worker;
+use mci_agent::crash_recovery::{
+    acquire_lock, default_lock_path, release_lock, LockAcquireOutcome,
+};
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::episode_worker;
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
@@ -46,7 +49,7 @@ use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
 #[cfg(unix)]
 use mci_agent::user_allowlist::default_user_allowlist_path;
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
-use mci_brain::SqlCipherBrainStore;
+use mci_brain::{IntegrityError, IntegrityScheduler, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 
 const VERSION: &str = "0.0.3-phase1-cycle2-iter12";
@@ -386,9 +389,86 @@ async fn main() -> ExitCode {
                                 }
                             }
                             let key = DbKey::from_bytes(key_bytes);
+                            // Cycle 8.44 audit — breakage risk #3 wiring #3:
+                            // acquire the run-lock BEFORE opening the store
+                            // so a live sibling instance aborts us early
+                            // (ADR-0008 §1.4 "one file, one writer" — two
+                            // writers on the same SQLCipher DB corrupt the
+                            // store). A stale lock (unclean prior shutdown)
+                            // triggers an extra integrity check after open.
+                            let lock_path = default_lock_path();
+                            let unclean_prior_shutdown = match acquire_lock(&lock_path) {
+                                Ok(LockAcquireOutcome::CleanBoot) => false,
+                                Ok(LockAcquireOutcome::UncleanShutdown { stale_pid }) => {
+                                    eprintln!(
+                                        "mci-agent: unclean prior shutdown detected (stale pid {stale_pid}) — will run extra integrity_check",
+                                    );
+                                    true
+                                }
+                                Ok(LockAcquireOutcome::AnotherInstanceRunning { live_pid }) => {
+                                    eprintln!(
+                                        "mci-agent: another mci-agent instance is running (pid {live_pid}) — refusing to open store (ADR-0008 §1.4 one-writer invariant)",
+                                    );
+                                    return ExitCode::from(21);
+                                }
+                                Err(e) => {
+                                    eprintln!("mci-agent: crash_recovery::acquire_lock: {e}");
+                                    // Treat lock-file I/O failure as unclean
+                                    // — safer to run the extra check than
+                                    // to skip it.
+                                    true
+                                }
+                            };
                             match SqlCipherBrainStore::new(&db_path, &key) {
                                 Ok(store) => {
                                     let store = Arc::new(store);
+                                    // Cycle 8.44 audit — breakage risk #3
+                                    // wiring #1: verify SQLCipher integrity
+                                    // BEFORE serving any read/write. On
+                                    // failure the agent refuses to spawn
+                                    // ingest pumps or the MCP surface.
+                                    if let Err(e) = store.verify_integrity_on_boot() {
+                                        match &e {
+                                            IntegrityError::Corrupted(rows) => {
+                                                eprintln!(
+                                                    "mci-agent: brain integrity_check FAILED — refusing to serve. rows={rows:?}",
+                                                );
+                                            }
+                                            IntegrityError::Backend(msg) => {
+                                                eprintln!(
+                                                    "mci-agent: brain integrity_check backend error — refusing to serve. err={msg}",
+                                                );
+                                            }
+                                        }
+                                        // Emit a structured helper_health-adjacent
+                                        // line so the launchd log picks it up.
+                                        eprintln!(
+                                            "mci-agent: helper_health integrity_check_failed=true",
+                                        );
+                                        // Release the lock so a follow-up
+                                        // repair boot doesn't false-positive
+                                        // as "another instance running".
+                                        let _ = release_lock(&lock_path);
+                                        return ExitCode::from(22);
+                                    }
+                                    // Post-crash-recovery re-check (wiring #3):
+                                    // an unclean prior shutdown MAY have
+                                    // left the DB in a torn state that a
+                                    // single boot check misses if pages
+                                    // were half-written. Run a second pass;
+                                    // treat any failure the same as boot.
+                                    if unclean_prior_shutdown {
+                                        if let Err(e) = store.verify_integrity_on_boot() {
+                                            eprintln!(
+                                                "mci-agent: post-crash integrity_check FAILED — refusing to serve. err={e}",
+                                            );
+                                            eprintln!(
+                                                "mci-agent: helper_health integrity_check_failed=true (post-crash)",
+                                            );
+                                            let _ = release_lock(&lock_path);
+                                            return ExitCode::from(22);
+                                        }
+                                    }
                                     let embedder = load_embedder_backend();
                                     // V2-P5+ construction-graph wire: build
                                     // the sync BERT NER backend and inject it
@@ -707,6 +787,18 @@ async fn main() -> ExitCode {
                 }
             };
 
+            // Cycle 8.44 audit — breakage risk #3 wiring #2: start the
+            // weekly background integrity scheduler. Handle lives at
+            // this outer scope so it survives past the brain-open
+            // match arm; dropped at end-of-DrainStdin, which joins the
+            // background thread (mpsc shutdown signal → recv_timeout
+            // returns Disconnected → thread exits). Only meaningful
+            // when brain_pump is Some — otherwise the store isn't
+            // open and there's nothing to scan.
+            let _integrity_scheduler = brain_pump
+                .as_ref()
+                .map(|(_, store)| IntegrityScheduler::start_weekly(Arc::clone(store)));
+
             // Page-content socket listener — accepts PageContentEvent
             // wire frames from the native messaging host (Chromium) and
             // the container-app Safari inbox reader. Shares the store
@@ -750,6 +842,15 @@ async fn main() -> ExitCode {
             // Signal shutdown to idle-batch + episode workers.
             let _ = shutdown_tx.send(true);
 
+            // Cycle 8.44 audit — breakage risk #3 wiring #3: release
+            // the run-lock on clean shutdown. Absence of the file on
+            // next boot signals a clean prior exit; presence with a
+            // stale PID triggers the extra integrity check.
+            if brain_pump.is_some() {
+                if let Err(e) = release_lock(&default_lock_path()) {
+                    eprintln!("mci-agent: crash_recovery::release_lock: {e}");
+                }
+            }
             match drain_result {
                 Ok(stats) => {
                     eprintln!(
