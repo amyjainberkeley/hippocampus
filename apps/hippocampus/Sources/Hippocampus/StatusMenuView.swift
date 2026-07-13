@@ -194,23 +194,21 @@ struct StatusMenuView: View {
         }
     }
 
+    /// The single source of truth the header uses; matches the dot
+    /// baked into the menu-bar icon overlay so the two surfaces
+    /// always agree. See `MenuBarStatus.derive` for precedence rules.
+    private var menuBarStatus: MenuBarStatus {
+        MenuBarStatus.derive(from: supervisor.state)
+    }
+
     @ViewBuilder
     private var statusHeader: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(statusColor)
+                .fill(menuBarStatus.indicatorColor)
                 .frame(width: 8, height: 8)
             Text(supervisor.state.statusText)
                 .font(.headline)
-        }
-    }
-
-    private var statusColor: Color {
-        switch supervisor.state {
-        case .running: return .green
-        case .paused: return .yellow
-        case .crashed: return .red
-        default: return .secondary
         }
     }
 
