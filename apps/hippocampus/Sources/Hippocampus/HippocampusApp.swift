@@ -216,6 +216,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "first-launch quarantine outcome: \(String(describing: outcome), privacy: .public)"
         )
 
+        // Seed the bundled Qwen3-1.7B brief-author model from
+        // Contents/Resources/Models/qwen3-1.7b-fp16/ into
+        // ~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/ so the
+        // Rust runtime (`apps/agent/src/brief_worker.rs::default_model_dir`)
+        // finds the model at the same path it did before cycle 8.42's
+        // bundle-into-DMG fix. Idempotent — no-op if the user already has a
+        // copy at the destination (either from a prior seed OR from the
+        // pre-bundling HF-download path).
+        //
+        // Cycle 8.42, EnviousWispr peer-study §5 fix — see
+        // docs/research/2026-07-13-enviouswispr-peer-study.md. Prior to this
+        // change, first-run onboarding downloaded the model from HuggingFace
+        // with no fallback; a HF CDN throttle or 5xx (as EnviousWispr
+        // experienced 2026-07-05, killing multiple installs for ~45 min each)
+        // hung MCI's first-run at the "Prepare your brain" slide. Bundling
+        // the model into the DMG closes that outage class; the download
+        // path in `RealModelDownloader` is preserved as a fallback for any
+        // future "lite edition" DMG variant that ships without the model.
+        //
+        // We run this BEFORE `startSupervisorOrDeferUntilOnboarded()` so the
+        // supervisor's `mci-agent` spawn (which calls `qwen3_model_present`
+        // during brief-worker init) sees the seeded model on the very first
+        // launch — no restart, no reopen-menu required.
+        let seedOutcome = BriefModelPresence.seedBundledQwen3IfNeeded()
+        firstLaunchLogger.info(
+            "first-launch Qwen3 seed outcome: \(String(describing: seedOutcome), privacy: .public)"
+        )
+
         Task { @MainActor in
             self.installBrowserHostManifests()
             self.startSupervisorOrDeferUntilOnboarded()

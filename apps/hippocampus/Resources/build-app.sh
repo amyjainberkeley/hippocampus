@@ -352,6 +352,89 @@ if [[ "$NER_SOURCE_PRESENT" -eq 1 ]]; then
     echo "  bert-base-NER bundled OK → $NER_DEST"
 fi
 
+# --- Bundle Qwen3-1.7B-FP16 Core ML brief-author model (cycle 8.42) ---
+#
+# Cycle 8.42 EnviousWispr peer-study finding — see
+# docs/research/2026-07-13-enviouswispr-peer-study.md §5. Prior to this
+# change, Qwen3-1.7B (~2.5 GB tarball, ~3.4 GB extracted) was fetched
+# from HuggingFace at first-run via `RealModelDownloader.download()`
+# with no fallback. A HuggingFace CDN throttle / 5xx (as EnviousWispr
+# experienced 2026-07-05, killing multiple installs at 15-min hangs)
+# would hang MCI's first-run onboarding at the "Prepare your brain"
+# slide with the same failure mode. Baking the model into the DMG
+# eliminates the first-run network dependency entirely, matching the
+# pattern bert-base-NER + Arctic Embed S already use above.
+#
+# The compiled `.mlmodelc` lives at `$REPO_ROOT/models/Qwen3-1.7B-FP16
+# .mlmodelc/` and is .gitignored (~3.4 GB — far too big to checkin).
+# For worktree builds, copy it from the primary checkout before
+# running: `cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/`.
+#
+# At runtime the brief worker resolves the model from
+# `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/
+# Qwen3-1.7B-FP16.mlmodelc/` — see `apps/agent/src/brief_worker.rs
+# ::default_model_dir()`. `BriefModelPresence.seedBundledQwen3IfNeeded()`
+# copies the bundled model from Contents/Resources/Models/qwen3-1.7b-fp16/
+# into that Application Support path on first launch, so the Rust
+# runtime finds the model at the same path it did after the pre-fix
+# HF download — zero runtime resolution change. The network-fetch
+# code path in `RealModelDownloader` is preserved as a fallback for
+# any future "lite edition" DMG variant that ships without the model.
+QWEN3_MODEL_ID="qwen3-1.7b-fp16"
+QWEN3_BASENAME="Qwen3-1.7B-FP16.mlmodelc"
+QWEN3_PACKAGE="$REPO_ROOT/models/Qwen3-1.7B-FP16.mlpackage"
+QWEN3_COMPILED="$REPO_ROOT/models/$QWEN3_BASENAME"
+QWEN3_DEST_DIR="$RESOURCES/Models/$QWEN3_MODEL_ID"
+QWEN3_DEST="$QWEN3_DEST_DIR/$QWEN3_BASENAME"
+QWEN3_SOURCE_PRESENT=0
+
+if [[ -d "$QWEN3_COMPILED" ]]; then
+    echo "Bundling pre-compiled $QWEN3_BASENAME (~3.4 GB — this may take ~30s)"
+    QWEN3_SOURCE_PRESENT=1
+    mkdir -p "$QWEN3_DEST_DIR"
+    rm -rf "$QWEN3_DEST"
+    cp -R "$QWEN3_COMPILED" "$QWEN3_DEST_DIR/"
+elif [[ -d "$QWEN3_PACKAGE" ]]; then
+    echo "Compiling $QWEN3_BASENAME from .mlpackage"
+    QWEN3_SOURCE_PRESENT=1
+    mkdir -p "$QWEN3_DEST_DIR"
+    rm -rf "$QWEN3_DEST"
+    xcrun coremlcompiler compile "$QWEN3_PACKAGE" "$QWEN3_DEST_DIR"
+else
+    echo "WARNING: Qwen3-1.7B model not found at $QWEN3_COMPILED"
+    echo "  (nor $QWEN3_PACKAGE). Daily-brief generation will be DISABLED in"
+    echo "  this build; brief worker falls back to run_disabled_idle."
+    echo "  For the shipping / dogfood build the model MUST be bundled —"
+    echo "  copy it from the primary checkout before re-running:"
+    echo "    cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/"
+fi
+
+# Fail-loud Qwen3-model gate — FATAL.
+# Mirror of the NER gate above. Codified-WARNs-are-stops discipline
+# (cycle 8.25). If we attempted the copy/compile above, the compiled
+# model MUST be present in the bundle afterward. A silent cp failure
+# here would ship a DMG whose daily-brief tab hangs at the "Prepare
+# your brain" slide — the exact EnviousWispr failure class this fix
+# closes.
+if [[ "$QWEN3_SOURCE_PRESENT" -eq 1 ]]; then
+    if [[ ! -d "$QWEN3_DEST" ]]; then
+        echo "FATAL: $QWEN3_BASENAME missing at:"
+        echo "         $QWEN3_DEST"
+        echo "       after attempting to bundle it from the source model."
+        echo "       Refusing to ship a DMG whose daily-brief generation would silently"
+        echo "       fall back to run_disabled_idle on an installed app."
+        exit 1
+    fi
+    # Structural sanity: same .mlmodelc invariants as NER — model.mil,
+    # weights/, coremldata.bin. Weights blob is ~3.4 GB for Qwen3-1.7B FP16.
+    if [[ ! -f "$QWEN3_DEST/model.mil" || ! -d "$QWEN3_DEST/weights" || ! -f "$QWEN3_DEST/coremldata.bin" ]]; then
+        echo "FATAL: bundled $QWEN3_DEST is structurally incomplete"
+        echo "       (missing model.mil, weights/, or coremldata.bin). Refusing to ship."
+        exit 1
+    fi
+    echo "  Qwen3-1.7B bundled OK → $QWEN3_DEST"
+fi
+
 # --- Bundle the Chromium extension as a load-unpacked dir ---
 #
 # The Chrome / Arc / Brave / Edge extension at extensions/chromium/ is
