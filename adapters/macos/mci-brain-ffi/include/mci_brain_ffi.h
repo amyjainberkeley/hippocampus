@@ -67,6 +67,18 @@ char *mci_brain_ffi_recent_events(McibrainHandle *h, uint32_t limit);
  * (excess is truncated) to bound the per-call get_event loop. */
 char *mci_brain_ffi_events_by_ids(McibrainHandle *h, const char *query_json);
 
+/* V2-P13 (Phase D scaffold) — Return a lightweight event summary for a
+ * time range, downsampled to at most ~1000 rows per call.
+ *   query_json: {"start_ts_us":<u64>,"end_ts_us":<u64>,
+ *                "resolution":"minute|hour|day"?}
+ *   returns: JSON array of TimelineEventJson rows:
+ *     {"event_id":N,"ts_us":N,"app_bundle_id":"..?",
+ *      "snippet":"..","thumbnail_path":"..?"}
+ * Sorted by ts_us ASCENDING (left-to-right on the timeline strip). The
+ * FFI rejects windows wider than 90 days and returns NULL on error.
+ * Read-only: uses the same read-only handle as _recent_events. */
+char *mci_brain_ffi_timeline_events(McibrainHandle *h, const char *query_json);
+
 /* Fetch the `limit` most-recent privacy moments as a JSON array.
  * Each row carries ONLY {ts_us, app_bundle_id?, reason_code}.
  * NEVER OCR text / keyframe / windowTitle / url

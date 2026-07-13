@@ -253,6 +253,79 @@ public struct Episode: Sendable, Equatable, Identifiable, Codable {
     }
 }
 
+/// One row of the V2-P13 Rewind-style timeline strip — a lightweight
+/// event summary rendered as a card on the horizontal scroll strip.
+/// Deliberately smaller than `Hit`: no linked ids, no entities, no
+/// score. Deeper context is pulled via `fetchEventsByIds` when the user
+/// clicks a card. Mirrors the FFI's `TimelineEventJson`.
+public struct TimelineEvent: Sendable, Equatable, Identifiable, Codable {
+    public var id: UInt64 { eventId }
+    public let eventId: UInt64
+    /// Microseconds since UNIX epoch.
+    public let tsUs: UInt64
+    public let appBundleId: String?
+    /// Very short snippet (~80 chars) for the card's hover-preview.
+    public let snippet: String
+    /// Absolute filesystem path to the encrypted keyframe blob, or nil
+    /// for events without a keyframe. Same privacy invariant as
+    /// `Hit.thumbnailPath`.
+    public let thumbnailPath: String?
+
+    public init(
+        eventId: UInt64,
+        tsUs: UInt64,
+        appBundleId: String?,
+        snippet: String,
+        thumbnailPath: String? = nil
+    ) {
+        self.eventId = eventId
+        self.tsUs = tsUs
+        self.appBundleId = appBundleId
+        self.snippet = snippet
+        self.thumbnailPath = thumbnailPath
+    }
+
+    /// Convenience: file URL for the thumbnail, or nil when no path was
+    /// populated. No I/O.
+    public var thumbnailURL: URL? {
+        guard let p = thumbnailPath, !p.isEmpty else { return nil }
+        return URL(fileURLWithPath: p)
+    }
+}
+
+/// Rendering-resolution hint the V2-P13 timeline strip passes down to
+/// `timelineEvents`. The FFI uses this only to pick the downsample
+/// bucket when raw event density exceeds the per-call cap; the wire
+/// value is a lower-cased string ("minute" / "hour" / "day").
+public enum TimelineResolution: String, Sendable, Codable, CaseIterable {
+    case minute
+    case hour
+    case day
+
+    /// Human-friendly display label ("Day" / "Week" / "Month" in the
+    /// scaffold's toggle). Chosen so the label reads as *what the tab
+    /// shows*, not what bucket the sampler uses.
+    public var displayLabel: String {
+        switch self {
+        case .minute: return "Day"
+        case .hour: return "Week"
+        case .day: return "Month"
+        }
+    }
+
+    /// Default window span for this resolution when the view first
+    /// opens. Aligns with the display label: "Day" = 24 h, "Week" =
+    /// 7 days, "Month" = 30 days.
+    public var defaultWindowUs: UInt64 {
+        let hour: UInt64 = 3_600_000_000
+        switch self {
+        case .minute: return 24 * hour
+        case .hour: return 7 * 24 * hour
+        case .day: return 30 * 24 * hour
+        }
+    }
+}
+
 /// Errors the reader may surface to view models.
 public enum BrainReaderError: Error, Equatable {
     case openFailed(String)
@@ -352,6 +425,49 @@ public protocol BrainReader: Sendable {
     /// card ("MCI has captured X events across Y days, using Z MB of
     /// encrypted storage"). No row content is exposed.
     func summaryStats() async throws -> SummaryStats
+
+    /// **V2-P13 (Phase D scaffold).** Fetch lightweight event summaries
+    /// for the Rewind-style timeline strip. Returns rows in ASCENDING
+    /// `tsUs` order (left-to-right on the strip), downsampled by the
+    /// FFI to at most ~1000 rows regardless of raw density in the
+    /// window. Windows wider than 90 days are rejected at the FFI
+    /// boundary.
+    func timelineEvents(
+        startTsUs: UInt64,
+        endTsUs: UInt64,
+        resolution: TimelineResolution
+    ) async throws -> [TimelineEvent]
+}
+
+/// **V2-P13 (Phase D scaffold).** Default implementation of
+/// `timelineEvents` that projects existing `recentEvents(limit:)` rows
+/// into `TimelineEvent`s and filters by the requested window. Lets
+/// existing conformers (test doubles, older readers) work without
+/// modification; production `FFIBrainReader` overrides to route through
+/// the dedicated FFI entry point (with proper downsampling + hard cap).
+public extension BrainReader {
+    func timelineEvents(
+        startTsUs: UInt64,
+        endTsUs: UInt64,
+        resolution: TimelineResolution
+    ) async throws -> [TimelineEvent] {
+        // Pull a generous slice of recent events and filter to the window.
+        // This is the fallback path — sufficient for scaffolds + tests;
+        // real callers should be the `FFIBrainReader` override.
+        let hits = try await recentEvents(limit: 1000)
+        return hits
+            .filter { $0.tsUs >= startTsUs && $0.tsUs <= endTsUs }
+            .sorted { $0.tsUs < $1.tsUs }
+            .map { hit in
+                TimelineEvent(
+                    eventId: hit.eventId,
+                    tsUs: hit.tsUs,
+                    appBundleId: hit.appBundleId,
+                    snippet: String(hit.ocrTextSnippet.prefix(80)),
+                    thumbnailPath: hit.thumbnailPath
+                )
+            }
+    }
 }
 
 /// Content-free brain aggregate — mirrors the FFI's `SummaryStatsJson`.

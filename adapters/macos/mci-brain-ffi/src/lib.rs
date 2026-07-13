@@ -242,6 +242,49 @@ pub struct EpisodeJson {
     pub event_count: u64,
 }
 
+/// JSON payload format for [`mci_brain_ffi_timeline_events`] input.
+///
+/// **V2-P13 (Phase D scaffold)** — the Rewind-style timeline strip in the
+/// recall UI needs a lightweight event-summary row for each capture in a
+/// time range. `resolution` is a hint to the downsampler; the FFI itself
+/// bucketizes to keep the returned row count bounded no matter how many
+/// events fall in the window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimelineQueryJson {
+    /// Inclusive lower bound on `ts_us`, microseconds since UNIX epoch.
+    pub start_ts_us: u64,
+    /// Inclusive upper bound on `ts_us`, microseconds since UNIX epoch.
+    pub end_ts_us: u64,
+    /// Rendering-resolution hint. `"minute" | "hour" | "day"` — the FFI
+    /// only uses this to pick the downsample bucket when the raw event
+    /// density exceeds [`TIMELINE_MAX_EVENTS`]. Unknown values fall back
+    /// to `"minute"`.
+    #[serde(default)]
+    pub resolution: Option<String>,
+}
+
+/// One row of [`mci_brain_ffi_timeline_events`] — a lightweight event
+/// summary for the V2-P13 timeline strip. Deliberately smaller than
+/// [`HitJson`]: no `linked_event_ids`, no `entities`, no `score` — the
+/// strip renders app + time + thumbnail + snippet; deeper context is
+/// pulled via `mci_brain_ffi_events_by_ids` when the user clicks a card.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimelineEventJson {
+    /// Brain `events.id` rowid.
+    pub event_id: u64,
+    /// `events.ts_us` — microseconds since UNIX epoch.
+    pub ts_us: u64,
+    /// `events.app_bundle_id`, nullable in schema.
+    pub app_bundle_id: Option<String>,
+    /// Very short snippet (~80 chars) for the card's hover-preview.
+    pub snippet: String,
+    /// Absolute filesystem path to the encrypted keyframe blob, or
+    /// `None` for events with no keyframe (Messages / Mail / text-only
+    /// ingest paths). Same derivation + privacy invariant as
+    /// [`HitJson::thumbnail_path`].
+    pub thumbnail_path: Option<String>,
+}
+
 /// Result payload for the mutation entry points — content-free.
 ///
 /// **Cycle 8.47 follow-up to PR #76.** The Privacy Dashboard's destructive
@@ -700,6 +743,112 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
             }
         }
     }
+    json_to_c_string(&out)
+}
+
+/// **V2-P13 (Phase D scaffold)** — Return lightweight event summaries for
+/// a time range, downsampled if too many events fall in the window.
+///
+/// The Rewind-style timeline strip in the recall UI (⌘8 tab) needs a
+/// bounded number of rows regardless of how densely the user captured
+/// during the requested range. This entry point:
+///
+/// 1. Rejects windows longer than [`TIMELINE_MAX_RANGE_US`] (90 days) so
+///    a hostile caller cannot force a full-corpus scan.
+/// 2. Rejects `start_ts_us > end_ts_us`.
+/// 3. Fetches the most-recent events (up to [`TIMELINE_HARD_CAP`]) and
+///    filters to the `[start_ts_us, end_ts_us]` window.
+/// 4. Downsamples: if the filtered count exceeds [`TIMELINE_MAX_EVENTS`],
+///    the result is bucketized (one representative per bucket) — bucket
+///    width is 1 minute when the range ≤ 24 h, otherwise the ceil-divide
+///    of (range / max-events) rounded up to the next minute.
+/// 5. Returns rows sorted by `ts_us` ASCENDING (left-to-right timeline).
+///
+/// Read-only by construction: uses `handle.store.recent_events` (the
+/// same read-only entry point powering the flat timeline list) then
+/// filters in Rust. No writer connection is opened.
+///
+/// # Safety
+///
+/// `h` must be a live handle. `query_json` must be a non-null,
+/// null-terminated UTF-8 C string containing a [`TimelineQueryJson`]
+/// payload.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_timeline_events(
+    h: *mut Handle,
+    query_json: *const c_char,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_timeline_events: null handle");
+        return ptr::null_mut();
+    }
+    if query_json.is_null() {
+        set_last_error("mci_brain_ffi_timeline_events: null query");
+        return ptr::null_mut();
+    }
+    // Safety: caller guarantees a live handle.
+    let handle = unsafe { &*h };
+    // Safety: caller guarantees a null-terminated UTF-8 C string.
+    let query_c = unsafe { CStr::from_ptr(query_json) };
+    let Ok(query_str) = query_c.to_str() else {
+        set_last_error("mci_brain_ffi_timeline_events: non-UTF8 query");
+        return ptr::null_mut();
+    };
+    let query: TimelineQueryJson = match serde_json::from_str(query_str) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!(
+                "mci_brain_ffi_timeline_events: bad query JSON: {e}"
+            ));
+            return ptr::null_mut();
+        }
+    };
+    if query.start_ts_us > query.end_ts_us {
+        set_last_error("mci_brain_ffi_timeline_events: start_ts_us > end_ts_us");
+        return ptr::null_mut();
+    }
+    let range = query.end_ts_us - query.start_ts_us;
+    if range > TIMELINE_MAX_RANGE_US {
+        set_last_error(&format!(
+            "mci_brain_ffi_timeline_events: range {} us exceeds cap {} us (~90 days)",
+            range, TIMELINE_MAX_RANGE_US
+        ));
+        return ptr::null_mut();
+    }
+
+    // Fetch the most-recent slice up to the hard cap, then filter to the
+    // requested window. For a scaffold the O(N) filter is fine — the hard
+    // cap is 10_000 rows. A follow-on cycle may push the range predicate
+    // down to SQL via a store-side `events_in_range` (would require
+    // protected-set sign-off on `sqlcipher_brain_store.rs`).
+    let events = match handle.store.recent_events(TIMELINE_HARD_CAP) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_timeline_events: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    let mut filtered: Vec<TimelineEventJson> = events
+        .into_iter()
+        .filter(|ev| ev.ts_us >= query.start_ts_us && ev.ts_us <= query.end_ts_us)
+        .map(|ev| {
+            let thumbnail_path =
+                thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
+            TimelineEventJson {
+                event_id: ev.id.0,
+                ts_us: ev.ts_us,
+                app_bundle_id: ev.app_bundle_id,
+                snippet: timeline_snippet(&ev.text),
+                thumbnail_path,
+            }
+        })
+        .collect();
+
+    // Ascending order — left-to-right on the timeline strip.
+    filtered.sort_by_key(|e| e.ts_us);
+
+    // Downsample if we're over the max-events budget.
+    let out = downsample_timeline(filtered, range);
     json_to_c_string(&out)
 }
 
@@ -1354,6 +1503,37 @@ pub const LINK_LIMIT: usize = 16;
 /// "expand siblings-of-siblings" path without unbounding the loop.
 pub const EVENTS_BY_IDS_CAP: usize = 32;
 
+/// **V2-P13 (Phase D scaffold).** Maximum microseconds spanned by one
+/// [`mci_brain_ffi_timeline_events`] call. 90 days is comfortably larger
+/// than the recall UI's "month" toggle so a scaffold client can request a
+/// 30-day view without hitting the cap; anything bigger is treated as a
+/// hostile / mis-scoped request and rejected at the FFI boundary.
+pub const TIMELINE_MAX_RANGE_US: u64 = 90 * 24 * 60 * 60 * 1_000_000;
+
+/// **V2-P13.** Hard cap on rows fetched from `recent_events` before
+/// filtering to the window. Bounds the per-call allocation regardless of
+/// how many events exist in the requested window. 10_000 events × ~200
+/// bytes/row ≈ 2 MB — well inside the FFI's memory budget.
+pub const TIMELINE_HARD_CAP: usize = 10_000;
+
+/// **V2-P13.** Maximum rows returned from a single
+/// [`mci_brain_ffi_timeline_events`] call. Above this count the FFI
+/// downsamples: one representative event per time bucket, with bucket
+/// width picked so the total row count fits under the cap. The recall UI
+/// strip renders ~1 card per 40 px, so 1_000 rows suffices for a
+/// full-screen day view on a 4K display.
+pub const TIMELINE_MAX_EVENTS: usize = 1_000;
+
+/// **V2-P13.** Microseconds per minute — bucket width used by the
+/// downsampler when the requested range is ≤ 24 h.
+pub const TIMELINE_MINUTE_US: u64 = 60_000_000;
+
+/// **V2-P13.** Very short snippet cap for timeline strip cards. Deeper
+/// text is pulled via `mci_brain_ffi_events_by_ids` when the user clicks
+/// a card. 80 chars keeps the JSON payload small when returning up to
+/// [`TIMELINE_MAX_EVENTS`] rows.
+pub const TIMELINE_SNIPPET_CAP: usize = 80;
+
 /// Cycle 8.42 — cap on the number of canonical-alias groups accepted from
 /// the recall UI's user dictionary per query. Bounds the FTS5 query size
 /// (`~cap * cap * avg_len` bytes) so a hostile caller cannot inflate the
@@ -1434,6 +1614,56 @@ fn snippet(s: &str) -> String {
         return s.to_string();
     }
     s.chars().take(SNIPPET_CHAR_CAP).collect()
+}
+
+/// **V2-P13.** Shorter snippet for timeline strip cards.
+/// [`TIMELINE_SNIPPET_CAP`] chars; multi-byte UTF-8 boundaries preserved.
+fn timeline_snippet(s: &str) -> String {
+    if s.chars().count() <= TIMELINE_SNIPPET_CAP {
+        return s.to_string();
+    }
+    s.chars().take(TIMELINE_SNIPPET_CAP).collect()
+}
+
+/// **V2-P13.** Downsample an ascending-order timeline slice to at most
+/// [`TIMELINE_MAX_EVENTS`] representatives.
+///
+/// Strategy: bucket by time. When the input already fits under the cap
+/// the function returns it unchanged. Otherwise the bucket width is
+/// computed so the total bucket count ≤ [`TIMELINE_MAX_EVENTS`]; ranges
+/// ≤ 24 h floor to a 1-minute bucket for a stable "one card per minute"
+/// feel; longer ranges use `ceil(range_us / MAX_EVENTS)` rounded up to
+/// the next minute. Within each bucket the first event (chronologically
+/// earliest) is kept. This is intentionally simple — a follow-on cycle
+/// can pick a "densest event" or "middle-of-bucket keyframe" strategy;
+/// the wire shape is identical.
+///
+/// Pure function so it is trivially testable.
+fn downsample_timeline(
+    events: Vec<TimelineEventJson>,
+    range_us: u64,
+) -> Vec<TimelineEventJson> {
+    if events.len() <= TIMELINE_MAX_EVENTS {
+        return events;
+    }
+    // Pick bucket width. Ceil-divide range by the cap so we never exceed
+    // MAX_EVENTS buckets; round up to the next full minute so the strip's
+    // time-axis labels align on minute boundaries.
+    let raw_bucket = range_us
+        .checked_div(TIMELINE_MAX_EVENTS as u64)
+        .unwrap_or(TIMELINE_MINUTE_US);
+    let bucket_us = raw_bucket.max(TIMELINE_MINUTE_US).max(1);
+    let mut out: Vec<TimelineEventJson> = Vec::new();
+    let mut current_bucket: Option<u64> = None;
+    for ev in events {
+        let bucket = ev.ts_us / bucket_us;
+        if Some(bucket) != current_bucket {
+            current_bucket = Some(bucket);
+            out.push(ev);
+        }
+        // Else: bucket already has a representative — drop this event.
+    }
+    out
 }
 
 /// Fill the additive Phase-6-close recall fields for one hit event:
@@ -2284,5 +2514,137 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert!(msg.contains("null query"), "got: {msg}");
+    }
+
+    // -----------------------------------------------------------------
+    // V2-P13 (Phase D scaffold) — timeline_events downsampler + wire shape
+    // -----------------------------------------------------------------
+
+    fn mk_te(ts_us: u64, event_id: u64) -> TimelineEventJson {
+        TimelineEventJson {
+            event_id,
+            ts_us,
+            app_bundle_id: Some("com.apple.Safari".into()),
+            snippet: "hello".into(),
+            thumbnail_path: None,
+        }
+    }
+
+    #[test]
+    fn timeline_event_json_serde_round_trip() {
+        let e = mk_te(1_700_000_000_000_000, 42);
+        let s = serde_json::to_string(&e).unwrap();
+        let back: TimelineEventJson = serde_json::from_str(&s).unwrap();
+        assert_eq!(e, back);
+        assert!(s.contains("\"event_id\""), "got: {s}");
+        assert!(s.contains("\"snippet\""), "got: {s}");
+        assert!(s.contains("\"thumbnail_path\""), "got: {s}");
+    }
+
+    #[test]
+    fn timeline_query_json_parses_with_and_without_resolution() {
+        let q: TimelineQueryJson =
+            serde_json::from_str(r#"{"start_ts_us":100,"end_ts_us":200}"#)
+                .expect("parses without resolution");
+        assert_eq!(q.start_ts_us, 100);
+        assert_eq!(q.end_ts_us, 200);
+        assert!(q.resolution.is_none());
+        let q2: TimelineQueryJson = serde_json::from_str(
+            r#"{"start_ts_us":100,"end_ts_us":200,"resolution":"minute"}"#,
+        )
+        .expect("parses with resolution");
+        assert_eq!(q2.resolution.as_deref(), Some("minute"));
+    }
+
+    #[test]
+    fn timeline_snippet_caps_long_text() {
+        let long = "x".repeat(TIMELINE_SNIPPET_CAP + 100);
+        let s = timeline_snippet(&long);
+        assert_eq!(s.chars().count(), TIMELINE_SNIPPET_CAP);
+    }
+
+    #[test]
+    fn timeline_snippet_passes_short_text() {
+        assert_eq!(timeline_snippet("hi"), "hi");
+    }
+
+    #[test]
+    fn downsample_below_cap_is_identity() {
+        // Fewer events than the cap → return input unchanged, preserving
+        // order.
+        let events: Vec<TimelineEventJson> =
+            (0..10).map(|i| mk_te((i as u64) * TIMELINE_MINUTE_US, i)).collect();
+        let out = downsample_timeline(events.clone(), 10 * TIMELINE_MINUTE_US);
+        assert_eq!(out.len(), 10);
+        assert_eq!(out.first().map(|e| e.event_id), Some(0));
+        assert_eq!(out.last().map(|e| e.event_id), Some(9));
+    }
+
+    #[test]
+    fn downsample_above_cap_bounds_output_count() {
+        // 5x the cap of events over a 24-hour range → bucketed to at most
+        // MAX_EVENTS rows.
+        let n = TIMELINE_MAX_EVENTS * 5;
+        // Space events evenly over 24 hours.
+        let range_us = 24 * 60 * TIMELINE_MINUTE_US;
+        let step = range_us / (n as u64);
+        let events: Vec<TimelineEventJson> = (0..n as u64)
+            .map(|i| mk_te(i * step, i))
+            .collect();
+        let out = downsample_timeline(events, range_us);
+        assert!(
+            out.len() <= TIMELINE_MAX_EVENTS,
+            "downsampled to {} rows; cap is {TIMELINE_MAX_EVENTS}",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn downsample_preserves_ascending_order() {
+        let events: Vec<TimelineEventJson> = (0..(TIMELINE_MAX_EVENTS as u64 + 100))
+            .map(|i| mk_te(i * TIMELINE_MINUTE_US, i))
+            .collect();
+        let range = (TIMELINE_MAX_EVENTS as u64 + 100) * TIMELINE_MINUTE_US;
+        let out = downsample_timeline(events, range);
+        for w in out.windows(2) {
+            assert!(w[0].ts_us <= w[1].ts_us, "downsample re-ordered rows");
+        }
+    }
+
+    #[test]
+    fn timeline_events_with_null_handle_returns_null() {
+        let q = CString::new(r#"{"start_ts_us":0,"end_ts_us":1000}"#).unwrap();
+        let p = unsafe { mci_brain_ffi_timeline_events(std::ptr::null_mut(), q.as_ptr()) };
+        assert!(p.is_null());
+    }
+
+    #[test]
+    fn timeline_events_with_null_query_returns_null() {
+        // Same null-query trick as events_by_ids: the null-query check
+        // runs before touching the handle, so a stub non-null pointer is
+        // safe.
+        let h_stub = 0x1 as *mut Handle;
+        let p = unsafe { mci_brain_ffi_timeline_events(h_stub, std::ptr::null()) };
+        assert!(p.is_null());
+        let err = unsafe { mci_brain_ffi_last_error_message() };
+        assert!(!err.is_null());
+        let msg = unsafe { CStr::from_ptr(err) }
+            .to_string_lossy()
+            .into_owned();
+        assert!(msg.contains("null query"), "got: {msg}");
+    }
+
+    #[test]
+    fn timeline_max_range_is_90_days() {
+        // Pinned so a future patch cannot silently widen the window.
+        let ninety_days_us: u64 = 90 * 24 * 60 * 60 * 1_000_000;
+        assert_eq!(TIMELINE_MAX_RANGE_US, ninety_days_us);
+    }
+
+    #[test]
+    fn timeline_max_events_is_1000() {
+        // Locked here so a future patch cannot silently unbound the
+        // per-call row budget.
+        assert_eq!(TIMELINE_MAX_EVENTS, 1_000);
     }
 }

@@ -171,6 +171,17 @@ struct RootView: View {
             ) {
                 selectedTab = .timeline
             },
+            // V2-P13 (Phase D scaffold) — command-palette entry for the
+            // Rewind-style visual timeline strip.
+            .init(
+                id: "app.showTimelineStrip",
+                title: "Show Timeline Strip",
+                shortcut: "⌘8",
+                category: .app,
+                description: "Rewind-style visual timeline strip (scaffold; live data awaits V2-P1 M4 lift)."
+            ) {
+                selectedTab = .timelineStrip
+            },
             .init(
                 id: "app.openSettings",
                 title: "Open Settings",
@@ -341,6 +352,14 @@ struct RootView: View {
             PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
                 .tag(RecallTab.privacyDashboard)
                 .tabItem { Label("Privacy", systemImage: "lock.shield") }
+
+            // V2-P13 (Phase D scaffold): Rewind-style visual timeline
+            // strip. See ADR-0036. Live rendering awaits V2-P1 M4 lift
+            // + real captures; scaffold renders MCIEmptyState until
+            // then.
+            TimelineStripView(reader: reader)
+                .tag(RecallTab.timelineStrip)
+                .tabItem { Label("Strip", systemImage: "chart.bar.doc.horizontal") }
         }
         .padding(.top, 6)
         .background(Color.brandBgPrimary)
@@ -348,7 +367,7 @@ struct RootView: View {
         .onKeyPress(
             keys: [
                 .init("1"), .init("2"), .init("3"), .init("4"),
-                .init("5"), .init("6"), .init("7"),
+                .init("5"), .init("6"), .init("7"), .init("8"),
             ],
             phases: .down
         ) { press in
@@ -361,6 +380,8 @@ struct RootView: View {
             case KeyEquivalent("5"): selectedTab = .privacy
             case KeyEquivalent("6"): selectedTab = .settings
             case KeyEquivalent("7"): selectedTab = .privacyDashboard
+            // V2-P13 (Phase D scaffold) — ⌘8 = timeline strip tab.
+            case KeyEquivalent("8"): selectedTab = .timelineStrip
             default: return .ignored
             }
             return .handled
