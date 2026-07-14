@@ -100,7 +100,9 @@ public enum PrivacyDashboardSummary {
         isLoading: Bool = false
     ) -> String {
         guard let s = summary else {
-            return isLoading ? "Loading…" : "No brain data yet."
+            // Cycle 8.54 copy audit — "No brain data yet" was jargon;
+            // the new copy reads as normal English on a fresh install.
+            return isLoading ? "Loading…" : "No captures yet."
         }
         let bytes = ByteCountFormatter.string(
             fromByteCount: Int64(s.diskBytes), countStyle: .file
@@ -108,7 +110,7 @@ public enum PrivacyDashboardSummary {
         let days = s.daysCovered
         let dayLabel = days == 1 ? "1 day" : "\(days) days"
         return
-            "MCI has captured \(s.totalEvents) events across \(dayLabel), "
-            + "using \(bytes) of encrypted storage."
+            "Hippocampus has captured \(s.totalEvents) events across "
+            + "\(dayLabel), using \(bytes) of encrypted storage."
     }
 }

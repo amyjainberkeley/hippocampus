@@ -219,13 +219,16 @@ struct UserDictionaryEditor: View {
                 withAnimation { savedIndicator = false }
             }
         } catch UserDictionaryError.validationFailed(let msg) {
-            errorMessage = "Can't save: \(msg)"
+            // Cycle 8.54 copy audit — friendlier framing; the specific
+            // validation reason (msg) is preserved so the user knows
+            // which entry needs fixing.
+            errorMessage = UserFacingCopy.customNamesValidationFailed(msg)
         } catch UserDictionaryError.parseFailed(let msg) {
-            errorMessage = "Can't parse: \(msg)"
-        } catch UserDictionaryError.ioFailed(let msg) {
-            errorMessage = "Couldn't write to disk: \(msg)"
+            errorMessage = UserFacingCopy.customNamesParseFailed(msg)
+        } catch UserDictionaryError.ioFailed {
+            errorMessage = UserFacingCopy.customNamesWriteFailed
         } catch {
-            errorMessage = "Unexpected error: \(error)"
+            errorMessage = UserFacingCopy.unexpectedErrorGeneric
         }
     }
 

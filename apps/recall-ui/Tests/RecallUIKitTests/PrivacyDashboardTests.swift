@@ -46,7 +46,9 @@ final class PrivacyDashboardTests: XCTestCase {
         )
         let line = PrivacyDashboardSummary.line(summary: stats)
         // ByteCountFormatter is locale-dependent; assert the structure.
-        XCTAssertTrue(line.contains("MCI has captured 3 events"))
+        // Cycle 8.54 copy audit — "MCI has captured" → "Hippocampus
+        // has captured" (product name matches the landing page).
+        XCTAssertTrue(line.contains("Hippocampus has captured 3 events"))
         XCTAssertTrue(line.contains("across 1 day"))
         XCTAssertTrue(line.contains("of encrypted storage"))
     }
@@ -66,9 +68,12 @@ final class PrivacyDashboardTests: XCTestCase {
         XCTAssertEqual(
             PrivacyDashboardSummary.line(summary: nil, isLoading: true), "Loading…"
         )
+        // Cycle 8.54 copy audit — the previous "No brain data yet."
+        // string was replaced with plain-English "No captures yet."
+        // (see docs/design/copy-style-guide.md §3, "brain" is banned).
         XCTAssertEqual(
             PrivacyDashboardSummary.line(summary: nil, isLoading: false),
-            "No brain data yet."
+            "No captures yet."
         )
     }
 
