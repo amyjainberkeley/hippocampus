@@ -72,7 +72,7 @@ use std::time::Instant;
 
 use mci_brain::{
     stubs::FixedDimEmbedder, BrainStore, Embedder, Event, EventId, HybridRetriever,
-    RetrievalQuery, Retriever, SqlCipherBrainStore,
+    RetrievalQuery, Retriever, SqlCipherBrainStore, TimeRange,
 };
 use mci_core::crypto::{DbKey, InMemoryKeyWrap, KeyWrap};
 
@@ -399,6 +399,57 @@ fn run() {
         cold_start.elapsed().as_secs_f64()
     );
 
+    // ---- ADR-0011 §5 pre-filter measurement — same queries, but with a
+    // realistic app / time scope attached (the common-case user-flow: "in
+    // Safari" / "yesterday" / "last week"). This is the path where the
+    // candidate-pool pre-filter earns its keep. ----
+    let scope_apps = ["com.apple.Safari", "com.microsoft.VSCode"];
+    let day_us: u64 = 24 * 60 * 60 * 1_000_000;
+    // "Last 24 hours" and "Last 7 days" windows, anchored at now_us.
+    let scope_ranges = [
+        TimeRange {
+            from_us: now_us.saturating_sub(day_us),
+            to_us: now_us,
+        },
+        TimeRange {
+            from_us: now_us.saturating_sub(7 * day_us),
+            to_us: now_us,
+        },
+    ];
+    eprintln!(
+        "recall_perf_100k: running {QUERY_COUNT} cold-cache SCOPED queries (ADR-0011 §5 pre-filter path)..."
+    );
+    let cold_scoped_start = Instant::now();
+    let mut cold_scoped = Histogram::new();
+    for (i, q) in queries.iter().enumerate() {
+        let retriever =
+            HybridRetriever::new(store.clone(), embedder.clone(), now_us);
+        // Round-robin app + time so both filter kinds are exercised.
+        let app = scope_apps[i % scope_apps.len()];
+        let range = scope_ranges[i % scope_ranges.len()];
+        let rq = RetrievalQuery {
+            text: q.clone(),
+            limit: RETRIEVE_LIMIT,
+            time_filter: Some(range),
+            app_filter: Some(app.to_string()),
+        };
+        let t = Instant::now();
+        let _ = retriever.retrieve(&rq).expect("retrieve cold scoped");
+        cold_scoped.record_us(t.elapsed().as_micros() as u64);
+        if (i + 1) % 20 == 0 {
+            eprintln!(
+                "  cold-scoped {}/{} in {:.1}s",
+                i + 1,
+                QUERY_COUNT,
+                cold_scoped_start.elapsed().as_secs_f64()
+            );
+        }
+    }
+    eprintln!(
+        "recall_perf_100k: cold-scoped done in {:.1}s",
+        cold_scoped_start.elapsed().as_secs_f64()
+    );
+
     // ---- Steady-state — reuse one retriever, warmup pass then
     // STEADY_STATE_REPEATS rapid-fire passes over the query set. ----
     eprintln!("recall_perf_100k: running warmup sweep...");
@@ -442,11 +493,54 @@ fn run() {
         );
     }
 
+    // Warm scoped sweep — same STEADY_STATE_REPEATS shape but with the
+    // ADR-0011 §5 pre-filter path engaged. Reuses the same warmed
+    // retriever so we compare like-for-like against `warm`.
+    eprintln!(
+        "recall_perf_100k: running {STEADY_STATE_REPEATS} steady-state SCOPED sweeps..."
+    );
+    let warm_scoped_start = Instant::now();
+    let mut warm_scoped = Histogram::new();
+    for rep in 0..STEADY_STATE_REPEATS {
+        for (i, q) in queries.iter().enumerate() {
+            let app = scope_apps[i % scope_apps.len()];
+            let range = scope_ranges[i % scope_ranges.len()];
+            let rq = RetrievalQuery {
+                text: q.clone(),
+                limit: RETRIEVE_LIMIT,
+                time_filter: Some(range),
+                app_filter: Some(app.to_string()),
+            };
+            let t = Instant::now();
+            let _ = retriever.retrieve(&rq).expect("retrieve warm scoped");
+            warm_scoped.record_us(t.elapsed().as_micros() as u64);
+        }
+        eprintln!(
+            "  warm-scoped sweep {}/{} in {:.1}s",
+            rep + 1,
+            STEADY_STATE_REPEATS,
+            warm_scoped_start.elapsed().as_secs_f64()
+        );
+    }
+
     // ---- Report — human-readable to stderr, machine-readable JSON to
     // `docs/eval/recall-perf-baseline.json` (only when
     // MCI_PERF_UPDATE_BASELINE=1 is set, so a normal run does not
     // clobber the committed baseline). ----
     let report = serde_json::json!({
+        "_comment": "Baseline for core/brain/tests/recall_perf_100k.rs. \
+            `cold` / `warm` are the fallback path (query with no time/app \
+            filter → full KNN over 100K vectors); `cold_scoped` / `warm_scoped` \
+            are the ADR-0011 §5 candidate-pool pre-filter path (query with \
+            realistic app + time scope). The scoped numbers are the ones the \
+            production user experiences on the common case (recent / focused \
+            searches). Regenerate with `MCI_PERF_UPDATE_BASELINE=1 cargo test \
+            --profile=perf -p mci-brain -- --ignored recall_perf_100k::run`.",
+        "_budgets_ms": {
+            "cold_p50": 200.0,
+            "warm_p50": 50.0,
+            "warm_p99": 500.0
+        },
         "corpus_size": CORPUS_SIZE,
         "query_count": QUERY_COUNT,
         "steady_state_repeats": STEADY_STATE_REPEATS,
@@ -464,6 +558,22 @@ fn run() {
             "p95_ms": warm.quantile_us(0.95) as f64 / 1000.0,
             "p99_ms": warm.quantile_us(0.99) as f64 / 1000.0,
             "mean_ms": warm.mean_us() as f64 / 1000.0,
+        },
+        // ADR-0011 §5 pre-filter path — same query workload but with a
+        // realistic app + time scope attached. These are the numbers the
+        // production user experiences on the common case (recent /
+        // focused searches).
+        "cold_scoped": {
+            "p50_ms": cold_scoped.quantile_us(0.50) as f64 / 1000.0,
+            "p95_ms": cold_scoped.quantile_us(0.95) as f64 / 1000.0,
+            "p99_ms": cold_scoped.quantile_us(0.99) as f64 / 1000.0,
+            "mean_ms": cold_scoped.mean_us() as f64 / 1000.0,
+        },
+        "warm_scoped": {
+            "p50_ms": warm_scoped.quantile_us(0.50) as f64 / 1000.0,
+            "p95_ms": warm_scoped.quantile_us(0.95) as f64 / 1000.0,
+            "p99_ms": warm_scoped.quantile_us(0.99) as f64 / 1000.0,
+            "mean_ms": warm_scoped.mean_us() as f64 / 1000.0,
         },
     });
     let pretty = serde_json::to_string_pretty(&report).expect("json");

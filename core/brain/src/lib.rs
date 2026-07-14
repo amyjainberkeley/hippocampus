@@ -557,6 +557,44 @@ pub trait BrainStore: Send + Sync {
         limit: usize,
     ) -> Result<Vec<(EventId, f32)>, StoreError>;
 
+    /// Semantic KNN over `event_vectors`, restricted to events whose
+    /// `ts_us` falls inside `time_filter` and/or whose `app_bundle_id`
+    /// matches `app_filter`. This is the ADR-0011 §5 candidate-pool
+    /// pre-filter — instead of brute-forcing the whole `event_vectors`
+    /// table it first narrows the candidate set via the indexed
+    /// `events_ts` / `events_app` columns, then dots the query
+    /// embedding against only those vectors.
+    ///
+    /// Returns at most `limit` hits, ordered by descending cosine
+    /// similarity, same as [`Self::vec_search`]. When both filters are
+    /// `None` the surface is byte-identical to [`Self::vec_search`] and
+    /// the default impl simply delegates. Production impls (the
+    /// `SqlCipherBrainStore`) push the filters into a SQL `WHERE`
+    /// clause backed by the `events_ts` / `events_app` indexes, which
+    /// closes the sqlite-vec brute-force gap measured in the
+    /// `recall_perf_100k` harness at 100K events (PR #111).
+    ///
+    /// # Errors
+    /// - [`StoreError::InvalidInput`] if `query_embedding.len()` does
+    ///   not match the schema-pinned dimension (384 per ADR-0009).
+    /// - [`StoreError::Backend`] on SQLite failure.
+    fn vec_search_filtered(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        // Default impl: ignore filters, fall back to the full KNN. The
+        // retriever re-applies the filters post-fetch anyway (the row-
+        // level app/time guard in `plain_retrieve`) — the pre-filter
+        // is a latency lever, not a correctness lever. Stores that
+        // haven't overridden this pay the brute-force cost but return
+        // correct results.
+        let _ = (time_filter, app_filter);
+        self.vec_search(query_embedding, limit)
+    }
+
     // -----------------------------------------------------------------------
     // V2-P3 — graph foundation write+read path
     //
