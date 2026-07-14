@@ -115,6 +115,8 @@ pub use alias_resolver::{
 pub mod consolidator;
 pub use consolidator::{ConsolidatorConfig, DerivedEdge, EpisodeConsolidator, IdentityMentionSite};
 
+pub mod fts_sanitizer;
+
 pub mod retention_purger;
 mod sqlcipher_brain_store;
 

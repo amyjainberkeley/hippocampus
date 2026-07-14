@@ -1603,6 +1603,22 @@ impl crate::BrainStore for SqlCipherBrainStore {
         if limit == 0 {
             return Ok(Vec::new());
         }
+        // Pre-parse sanitization — see `fts_sanitizer` module docs.
+        // Without this, a raw user query containing `:` (URLs, emails,
+        // `key:value` shapes) triggers SQLite FTS5's `column:term`
+        // parser and bubbles a `row fts5: no such column: <token>`
+        // error up through the retriever (cycle 8.55 PR #111 panic).
+        // Clean keyword queries pass through byte-identical, so
+        // ranking / scoring for the common path is unaffected.
+        let sanitized = crate::fts_sanitizer::sanitize_fts5_query(query);
+        if sanitized.trim().is_empty() {
+            // All-whitespace or purely stripped input — nothing left
+            // to match. Treat as an empty pool (not an error) so a
+            // benign whitespace-only paste degrades to "zero hits"
+            // instead of the harsher `InvalidInput` panic on the
+            // raw-empty branch above.
+            return Ok(Vec::new());
+        }
         let guard = self.db.lock().expect("brain store mutex poisoned");
 
         // FTS5's `rank` virtual column is the auto-computed BM25 cost —
@@ -1623,7 +1639,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("prepare fts5: {e}")))?;
         let lim = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = stmt
-            .query_map(params![query, lim], |r| {
+            .query_map(params![sanitized, lim], |r| {
                 let row_id: i64 = r.get(0)?;
                 let rank: f64 = r.get(1)?;
                 Ok((row_id, rank))

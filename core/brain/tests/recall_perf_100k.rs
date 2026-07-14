@@ -125,9 +125,14 @@ const WORDS: &[&str] = &[
 ];
 
 /// Rare-entity pool (mixed persons / orgs / topics). 60% of events get one
-/// entity injected per the CRS memo's realistic-distribution row. Kept
-/// FTS5-safe: no `:` / `"` / `-` etc. so the raw query passes the tokenizer
-/// (production callers pre-sanitize; the harness sidesteps by construction).
+/// entity injected per the CRS memo's realistic-distribution row.
+///
+/// Historically kept FTS5-safe by construction (no `:` / `"` / `-`); the
+/// `fts_sanitizer` pass (cycle 8.55 URL-panic fix) now handles those
+/// metacharacters transparently, so URL / colon-token entities could be
+/// mixed into this pool without breaking the harness. The pool is left
+/// alphabetic for baseline stability — swap in URL entities in a follow-
+/// on perf cycle if the workload-mix analysis calls for it.
 const RARE_ENTITIES: &[&str] = &[
     "Alfredsson", "Braithwaite", "Corzelius", "Duszynski", "Elverum",
     "OperationChimera", "ProjectNarwhal", "gigaquark",
