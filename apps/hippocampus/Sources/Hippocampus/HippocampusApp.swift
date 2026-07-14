@@ -10,6 +10,7 @@ import AppKit
 struct HippocampusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var loginItemVM = LoginItemViewModel(service: SMLoginItemService())
+    @StateObject private var preferencesStore = PreferencesStore()
     private let updater = SparkleUpdaterService()
 
     var body: some Scene {
@@ -17,7 +18,8 @@ struct HippocampusApp: App {
             StatusMenuView(
                 supervisor: appDelegate.supervisor,
                 loginItemVM: loginItemVM,
-                updater: updater
+                updater: updater,
+                preferencesStore: preferencesStore
             )
             .task {
                 // Supervisor lifecycle (start / defer-until-onboarded)
@@ -38,6 +40,7 @@ struct HippocampusApp: App {
                 if loginItemVM.shouldPrompt {
                     loginItemVM.markPrompted()
                 }
+                configurePreferencesController()
             }
         } label: {
             MenuBarIcon(supervisor: appDelegate.supervisor)
@@ -69,6 +72,52 @@ struct HippocampusApp: App {
         for window in NSApp.windows where window.identifier?.rawValue == "model-download" {
             window.close()
         }
+    }
+
+    /// Wire the process-wide `PreferencesWindowController.shared` with
+    /// the dependencies it needs. Idempotent; safe on every menu open.
+    /// The controller only builds the NSPanel on first `show()` — this
+    /// merely stashes the store / VM / updater references + the
+    /// callbacks the About/Privacy/Advanced sections need to defer
+    /// back to the supervisor + recall-UI.
+    @MainActor
+    private func configurePreferencesController() {
+        #if canImport(AppKit)
+        let supervisor = appDelegate.supervisor
+        PreferencesWindowController.shared.configure(
+            store: preferencesStore,
+            loginItemVM: loginItemVM,
+            updater: updater,
+            dbPath: supervisor.dbPath.path,
+            onOpenRecallTab: { tab in
+                Task { @MainActor in
+                    supervisor.openRecallUI(initialTab: tab)
+                }
+            },
+            onOpenDenylistEditor: {
+                // Deep-link into the onboarding executable's denylist
+                // editor. `hippocampus://onboarding` re-opens the flow;
+                // a future PR will add a dedicated `?slide=denylist`
+                // route. For now the button lands the user on
+                // onboarding, from which they can navigate.
+                Task { @MainActor in
+                    _ = supervisor.openOnboarding()
+                }
+            },
+            onOpenAllowlistEditor: {
+                Task { @MainActor in
+                    _ = supervisor.openOnboarding()
+                }
+            },
+            onExportDebugBundle: {
+                // Open the logs folder as a debug-bundle proxy — a
+                // future PR will produce a proper .zip artefact.
+                let logDir = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Logs/MCI")
+                NSWorkspace.shared.open(logDir)
+            }
+        )
+        #endif
     }
 }
 
