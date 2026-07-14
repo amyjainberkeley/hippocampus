@@ -90,17 +90,21 @@ struct SearchView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let err = viewModel.errorMessage {
+        if viewModel.errorMessage != nil {
+            // Cycle 8.54 copy audit — never leak raw `\(error)` to the
+            // UI. The raw error stays in the view model for logging
+            // (Console + crash reports); users see plain English + a
+            // named next action.
             VStack(spacing: 16) {
                 ContentUnavailableView(
-                    "Couldn't open your brain",
+                    UserFacingCopy.memoryUnreachableTitle,
                     systemImage: "exclamationmark.triangle.fill",
-                    description: Text("Check that the helper is running.\n\(err)")
+                    description: Text(UserFacingCopy.memoryUnreachableBody)
                 )
                 .foregroundStyle(Color.brandError)
 
-                Button("Open Hippocampus.app") {
-                    let appPath = NSHomeDirectory() + "/Applications/MCICaptureHelper.app"
+                Button(UserFacingCopy.openHippocampusAction) {
+                    let appPath = NSHomeDirectory() + "/Applications/Hippocampus.app"
                     NSWorkspace.shared.open(URL(fileURLWithPath: appPath))
                 }
                 .buttonStyle(.bordered)

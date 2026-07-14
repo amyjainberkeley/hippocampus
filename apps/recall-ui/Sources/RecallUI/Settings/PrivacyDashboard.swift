@@ -175,7 +175,9 @@ struct PrivacyDashboard: View {
                 + (result.vacuumOk ? "" : " (disk space will reclaim on next VACUUM)")
             await reloadAll()
         } catch {
-            errorMessage = "Delete failed: \(error)"
+            // Cycle 8.54 copy audit — reassuring copy (nothing was
+            // removed) instead of leaking the raw `\(error)`.
+            errorMessage = UserFacingCopy.deleteFailedBanner
         }
         isMutating = false
     }
@@ -192,7 +194,8 @@ struct PrivacyDashboard: View {
             events = try await e
             observedApps = try await a
         } catch {
-            errorMessage = "Couldn't load dashboard: \(error)"
+            // Cycle 8.54 copy audit — plain-English, no raw error.
+            errorMessage = UserFacingCopy.dashboardLoadFailedBanner
         }
         // Refresh the audit slice too; every reload (initial + post-
         // destructive-action) should reflect the newest recorded lines.
@@ -208,7 +211,7 @@ struct PrivacyDashboard: View {
             let url = try AuditLog.shared.exportToDownloads()
             banner = "Exported activity log to \(url.path)."
         } catch {
-            errorMessage = "Export activity log failed: \(error)"
+            errorMessage = UserFacingCopy.auditExportFailedBanner
         }
     }
 
@@ -242,7 +245,7 @@ struct PrivacyDashboard: View {
                 auditEntries = AuditLog.shared.readRecent(count: 20)
             }
         } catch {
-            errorMessage = "Export failed: \(error)"
+            errorMessage = UserFacingCopy.exportFailedBanner
         }
     }
 }
@@ -258,7 +261,9 @@ struct PrivacySummaryCard: View {
             HStack {
                 Image(systemName: "lock.shield.fill")
                     .foregroundStyle(Color.brandMint)
-                Text("Your brain")
+                // Cycle 8.54 copy audit — "Your brain" → "Your memory";
+                // matches the copy style guide (§3) product-noun ruling.
+                Text("Your memory")
                     .font(.title2.bold())
                     .foregroundStyle(Color.brandFgPrimary)
                 Spacer()
@@ -461,20 +466,22 @@ private extension DestructivePrivacyAction {
     var title: String {
         switch self {
         case .deleteLast24h: return "Delete the last 24 hours?"
-        case .deleteEverything: return "Delete your entire brain?"
+        case .deleteEverything: return "Delete your entire memory?"
         }
     }
 
     var explanation: String {
+        // Cycle 8.54 copy audit — "brain" → "your memory". Same
+        // referent; user-facing product noun matches the landing page.
         switch self {
         case .deleteLast24h:
             return
                 "Every event captured in the last 24 hours will be removed "
-                + "from the brain. This cannot be undone."
+                + "from your memory. This cannot be undone."
         case .deleteEverything:
             return
                 "Every event, every episode, every brief will be removed "
-                + "from the brain. This cannot be undone."
+                + "from your memory. This cannot be undone."
         }
     }
 }

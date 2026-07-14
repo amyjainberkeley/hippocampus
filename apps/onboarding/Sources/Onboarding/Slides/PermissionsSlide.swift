@@ -230,7 +230,11 @@ struct PermissionsSlide: View {
                     Text("Still denied after reset.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.red)
-                    Text("Open System Settings → Privacy & Security → Screen Recording. Remove any entries titled \"MCICaptureHelper\" with a path that does NOT start with /Applications/Hippocampus.app/. Then quit Hippocampus and reopen it.")
+                    // Cycle 8.54 copy audit — pared down the engineer-
+                    // only "MCICaptureHelper" bundle-name leak; users
+                    // still get the concrete fix path (Settings pane +
+                    // relaunch) without the internal bundle jargon.
+                    Text("Open System Settings → Privacy & Security → Screen Recording. Remove any duplicate Hippocampus entries whose path is not in /Applications, then quit Hippocampus and reopen it.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }

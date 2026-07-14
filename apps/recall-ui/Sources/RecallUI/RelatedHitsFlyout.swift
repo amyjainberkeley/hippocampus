@@ -125,8 +125,12 @@ struct RelatedHitsFlyout: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .center)
-        case .failed(let msg):
-            Text(msg)
+        case .failed:
+            // Cycle 8.54 copy audit — raw `msg` was leaking FFI errors
+            // ("FFIBrainReader: handle already closed", SQLCipher codes)
+            // into the flyout. Plain-English + reassuring instead.
+            Text("Related memories couldn\u{2019}t load right now. "
+                 + "Try reopening this event.")
                 .font(.caption)
                 .foregroundStyle(Color.brandFgMuted)
                 .padding(12)

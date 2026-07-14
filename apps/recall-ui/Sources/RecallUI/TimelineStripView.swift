@@ -134,11 +134,14 @@ public struct TimelineStripView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let err = viewModel.errorMessage {
+        if viewModel.errorMessage != nil {
+            // Cycle 8.54 copy audit — never leak raw `\(error)` (SQLCipher
+            // codes, FFI strings). Reassuring body + inherent retry
+            // via `.task { await viewModel.reload() }`.
             ContentUnavailableView(
-                "Couldn't load your timeline",
+                UserFacingCopy.timelineLoadFailedTitle,
                 systemImage: "exclamationmark.triangle.fill",
-                description: Text(err)
+                description: Text(UserFacingCopy.loadFailedBody)
             )
             .foregroundStyle(MCI.Color.error)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -246,11 +249,14 @@ struct TimelineDetailPane: View {
         Group {
             if let hit = hit {
                 DetailPaneView(hit: hit, reader: reader)
-            } else if let err = errorMessage {
+            } else if errorMessage != nil {
+                // Cycle 8.54 copy audit — reassuring body; raw error
+                // stays in `errorMessage` for future logging but is
+                // not surfaced to the UI.
                 ContentUnavailableView(
-                    "Couldn't load event details",
+                    UserFacingCopy.eventDetailFailedTitle,
                     systemImage: "exclamationmark.triangle",
-                    description: Text(err)
+                    description: Text(UserFacingCopy.loadFailedBody)
                 )
             } else {
                 ProgressView().controlSize(.small)
@@ -262,7 +268,11 @@ struct TimelineDetailPane: View {
                 let hits = try await reader.fetchEventsByIds([event.eventId])
                 hit = hits.first
                 if hit == nil {
-                    errorMessage = "Event no longer in brain (may have been suppressed)."
+                    // Cycle 8.54 copy audit — plain-English (no "brain",
+                    // no "suppressed"). "Marked private" is the
+                    // user-visible synonym for our internal
+                    // "denylist / redaction" suppression path.
+                    errorMessage = UserFacingCopy.eventNoLongerAvailable
                 }
             } catch {
                 errorMessage = "\(error)"

@@ -160,7 +160,7 @@ public extension MCIEmptyState {
         MCIEmptyState(
             icon: "tray",
             title: "This memory is no longer available",
-            message: "It may have been deleted from your brain. "
+            message: "It may have been deleted, or marked private. "
                 + "Everything else is intact.",
             actionTitle: "Back to search",
             action: onBack
@@ -179,11 +179,14 @@ public extension MCIEmptyState {
                     + "captured events."
             )
         }
+        // Cycle 8.54 copy audit — "brain" → "memory". Same referent;
+        // matches the user-facing product noun the landing page uses.
         return MCIEmptyState(
             icon: "lock.shield",
-            title: "Your brain is empty",
-            message: "Everything MCI captures stays here, on this Mac, "
-                + "encrypted end-to-end. You are always in control."
+            title: "Your memory is empty",
+            message: "Everything Hippocampus captures stays here, on "
+                + "this Mac, encrypted end-to-end. You are always in "
+                + "control."
         )
     }
 

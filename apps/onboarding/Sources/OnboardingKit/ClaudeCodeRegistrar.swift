@@ -32,14 +32,18 @@ public enum ClaudeCodeRegistrarError: Error, Equatable {
     case nonZeroExit(code: Int32, stderr: String)
 
     public var message: String {
+        // Cycle 8.54 copy audit — user-facing messages no longer expose
+        // the internal `mci-agent` binary name, the search path, or a
+        // raw exit code. Detailed engineer strings (path, exit code)
+        // remain available via the associated values for logging.
         switch self {
-        case .agentNotFound(let path):
-            return "Couldn't find the mci-agent helper at \(path). Reinstall Hippocampus and try again."
-        case .launchFailed(let msg):
-            return "Couldn't launch mci-agent: \(msg)"
-        case .nonZeroExit(let code, let stderr):
+        case .agentNotFound:
+            return "Hippocampus can\u{2019}t find its Claude Code connector. Try reinstalling Hippocampus."
+        case .launchFailed:
+            return "Couldn\u{2019}t connect to Claude Code. Try again — if it keeps happening, use \u{201C}Send Feedback\u{201D} from the menu bar."
+        case .nonZeroExit(_, let stderr):
             return stderr.isEmpty
-                ? "mci-agent register-mcp exited with code \(code)"
+                ? "Couldn\u{2019}t connect to Claude Code. Try again — if it keeps happening, use \u{201C}Send Feedback\u{201D} from the menu bar."
                 : stderr
         }
     }

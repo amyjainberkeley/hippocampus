@@ -135,11 +135,15 @@ struct BriefView: View {
     }
 
     private func errorView(message: String) -> some View {
-        VStack(spacing: 12) {
+        // Cycle 8.54 copy audit — reassuring copy + Retry action;
+        // raw `message` no longer surfaced to the user (would leak
+        // FFI / SQLCipher jargon).
+        _ = message
+        return VStack(spacing: 12) {
             ContentUnavailableView(
-                "Couldn't load brief",
+                UserFacingCopy.briefLoadFailedTitle,
                 systemImage: "exclamationmark.triangle.fill",
-                description: Text(message)
+                description: Text(UserFacingCopy.loadFailedBody)
             )
             .foregroundStyle(Color.brandError)
 

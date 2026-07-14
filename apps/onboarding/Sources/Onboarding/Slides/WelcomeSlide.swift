@@ -42,9 +42,10 @@ struct WelcomeSlide: View {
                         icon: "eye.slash.fill",
                         text: "Passwords, secure fields, and DRM content are blocked at capture — not after."
                     )
+                    // Cycle 8.54 copy audit — "brain" → "memory".
                     bulletPoint(
                         icon: "key.fill",
-                        text: "Your brain is encrypted on disk. Only you hold the key."
+                        text: "Your memory is encrypted on disk. Only you hold the key."
                     )
                 }
                 .padding(.top, 8)

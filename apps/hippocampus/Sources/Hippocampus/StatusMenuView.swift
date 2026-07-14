@@ -377,7 +377,15 @@ struct StatusMenuView: View {
 
     private func connectToClaude() {
         guard let agentPath = supervisor.agentBinaryPath else {
-            showAlert(title: "Error", message: "mci-agent binary not found.")
+            // Cycle 8.54 copy audit — plain-English replacement for the
+            // engineer-only "mci-agent binary not found." Users have no
+            // context for what "mci-agent" is.
+            showAlert(
+                title: "Couldn\u{2019}t connect to Claude Code",
+                message:
+                    "Hippocampus can\u{2019}t find its Claude Code "
+                    + "connector. Try reinstalling Hippocampus."
+            )
             return
         }
         mcpRegistering = true
@@ -395,7 +403,15 @@ struct StatusMenuView: View {
             } catch {
                 await MainActor.run {
                     mcpRegistering = false
-                    showAlert(title: "Error", message: "Failed to run register-mcp: \(error.localizedDescription)")
+                    // Cycle 8.54 copy audit — user-facing title + no
+                    // "register-mcp" jargon leak.
+                    showAlert(
+                        title: "Couldn\u{2019}t connect to Claude Code",
+                        message:
+                            "Try again in a moment — if it keeps "
+                            + "happening, use \u{201C}Send Feedback\u{201D} "
+                            + "from the menu bar."
+                    )
                 }
                 return
             }
@@ -407,8 +423,19 @@ struct StatusMenuView: View {
                     let msg = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
                     showAlert(title: "Connected", message: msg.isEmpty ? "Hippocampus registered with Claude Code. Restart Claude Code to connect." : msg)
                 } else {
+                    // Cycle 8.54 copy audit — never surface raw
+                    // "exited with code -N" to the user. Stderr detail
+                    // is preserved for the technical case; on the
+                    // "no detail" path we swap in plain-English copy
+                    // instead of the exit-code leak.
                     let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    showAlert(title: "Error", message: detail.isEmpty ? "register-mcp exited with code \(proc.terminationStatus)" : detail)
+                    showAlert(
+                        title: "Couldn\u{2019}t connect to Claude Code",
+                        message: detail.isEmpty
+                            ? "Try again in a moment — if it keeps happening, "
+                              + "use \u{201C}Send Feedback\u{201D} from the menu bar."
+                            : detail
+                    )
                 }
             }
         }
@@ -427,7 +454,12 @@ struct StatusMenuView: View {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
-        alert.alertStyle = title == "Error" ? .warning : .informational
+        // Cycle 8.54 copy audit — the copy audit removed the raw
+        // "Error" title everywhere except this fallback. Warning
+        // styling still fires whenever the title contains "Couldn't"
+        // (our new user-facing failure convention).
+        alert.alertStyle = (title.contains("Couldn") || title == "Error")
+            ? .warning : .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
@@ -437,6 +469,12 @@ struct StatusMenuView: View {
     /// `HippocampusApp.configurePreferencesController` at launch; this
     /// call is idempotent — the controller lazily creates the NSPanel
     /// on first invocation and focuses the existing window thereafter.
+    ///
+    /// Note (cycle 8.54): PR #105 replaced the legacy `openAboutWindow`
+    /// NSAlert with a proper Preferences window; the About section lives
+    /// there. Copy-audit updates from PR #106 that targeted the removed
+    /// alert are moot — the About section already reads "memory" not
+    /// "brain" per the shared UserFacingCopy vocabulary.
     private func openPreferencesWindow() {
         #if canImport(AppKit)
         PreferencesWindowController.shared.show()

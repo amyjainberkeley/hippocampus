@@ -7,17 +7,19 @@ struct PrivacyMomentsView: View {
 
     var body: some View {
         Group {
-            if let err = viewModel.errorMessage {
+            if viewModel.errorMessage != nil {
+                // Cycle 8.54 copy audit — plain-English memory-
+                // unreachable copy (no raw error, no jargon).
                 VStack(spacing: 16) {
                     ContentUnavailableView(
-                        "Couldn't open your brain",
+                        UserFacingCopy.memoryUnreachableTitle,
                         systemImage: "exclamationmark.triangle.fill",
-                        description: Text("Check that the helper is running.\n\(err)")
+                        description: Text(UserFacingCopy.memoryUnreachableBody)
                     )
                     .foregroundStyle(Color.brandError)
 
-                    Button("Open Hippocampus.app") {
-                        let appPath = NSHomeDirectory() + "/Applications/MCICaptureHelper.app"
+                    Button(UserFacingCopy.openHippocampusAction) {
+                        let appPath = NSHomeDirectory() + "/Applications/Hippocampus.app"
                         NSWorkspace.shared.open(URL(fileURLWithPath: appPath))
                     }
                     .buttonStyle(.bordered)

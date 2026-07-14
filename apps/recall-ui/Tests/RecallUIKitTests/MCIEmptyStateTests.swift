@@ -85,7 +85,9 @@ final class MCIEmptyStateTests: XCTestCase {
     func testNoPrivacyEventsFreshVariant() {
         let s = MCIEmptyState.noPrivacyEvents(hasActiveFilter: false)
         XCTAssertEqual(s.icon, "lock.shield")
-        XCTAssertEqual(s.title, "Your brain is empty")
+        // Cycle 8.54 copy audit — "brain" → "memory" (see the copy
+        // style guide §3, product-noun ruling).
+        XCTAssertEqual(s.title, "Your memory is empty")
         XCTAssertTrue(s.message.contains("encrypted"))
         XCTAssertNil(s.action)
     }
