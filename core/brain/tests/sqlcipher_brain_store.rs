@@ -367,6 +367,109 @@ fn fts5_indexes_summary_window_title_and_url_columns() {
 }
 
 // ---------------------------------------------------------------------------
+// 7.5 fts5_search URL / email / colon-token sanitizer regression
+//     — cycle 8.55 PR #111 production panic: raw queries containing `:` or
+//       URL-like tokens caused `row fts5: no such column: <token>` and
+//       bubbled a `StoreError::Backend` up through the retriever. Fixed
+//       by `fts_sanitizer::sanitize_fts5_query` — verify no panic and
+//       correct hit behavior for each shape.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fts5_search_url_query_does_not_panic() {
+    let (_dir, path) = tmp("brain.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    let mut ev = blank_event(1, "abstract of the paper");
+    ev.url = Some("https://arxiv.org/abs/1234".into());
+    let id = store.put_event(&ev).expect("put");
+
+    // Raw URL query — this is the exact input that panicked pre-fix
+    // (`row fts5: no such column: https`). Post-sanitizer it must
+    // simply return the URL-containing event as a hit.
+    let hits = store
+        .fts5_search("https://arxiv.org/abs/1234", 10)
+        .expect("url query must not panic");
+    let hit_ids: Vec<EventId> = hits.iter().map(|(i, _)| *i).collect();
+    assert!(
+        hit_ids.contains(&id),
+        "URL-containing event must match its own URL query: {hits:?}"
+    );
+}
+
+#[test]
+fn fts5_search_email_query_does_not_panic() {
+    let (_dir, path) = tmp("brain.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    let mut ev = blank_event(1, "message from amy@newtandem.com about the release");
+    ev.summary = Some("email thread".into());
+    let id = store.put_event(&ev).expect("put");
+
+    let hits = store
+        .fts5_search("amy@newtandem.com", 10)
+        .expect("email query must not panic");
+    let hit_ids: Vec<EventId> = hits.iter().map(|(i, _)| *i).collect();
+    assert!(hit_ids.contains(&id), "email-containing event must match: {hits:?}");
+}
+
+#[test]
+fn fts5_search_colon_token_query_does_not_panic() {
+    let (_dir, path) = tmp("brain.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    let id = store
+        .put_event(&blank_event(1, "meeting at 14:30 with the team"))
+        .expect("put");
+
+    // `14:30` — FTS5 would parse `14` as a column name pre-fix.
+    let hits = store
+        .fts5_search("14:30", 10)
+        .expect("colon-token query must not panic");
+    let hit_ids: Vec<EventId> = hits.iter().map(|(i, _)| *i).collect();
+    assert!(hit_ids.contains(&id), "14:30-containing event must match: {hits:?}");
+}
+
+#[test]
+fn fts5_search_mixed_url_and_keywords_query_does_not_panic() {
+    let (_dir, path) = tmp("brain.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    // Row contains every non-URL keyword the query will search for
+    // (`find`, `the`, `article`, `about`) plus the URL — FTS5's
+    // default AND semantics then only need the phrase-tokenized URL
+    // terms to co-occur, which they do in the `url` column.
+    let mut ev = blank_event(1, "find the article about transformers arxiv");
+    ev.url = Some("https://arxiv.org/abs/1234".into());
+    let id = store.put_event(&ev).expect("put");
+
+    // Pre-fix behavior: this query panicked with "no such column:
+    // https". Post-fix the URL is phrase-wrapped, MATCH parses, and
+    // the row above scores as a hit.
+    let hits = store
+        .fts5_search("find the article about https://arxiv.org/abs/1234", 20)
+        .expect("mixed query must not panic");
+    let hit_ids: Vec<EventId> = hits.iter().map(|(i, _)| *i).collect();
+    assert!(
+        hit_ids.contains(&id),
+        "URL-and-keywords-containing event must match: {hits:?}"
+    );
+}
+
+#[test]
+fn fts5_search_whitespace_only_query_returns_empty_not_error() {
+    let (_dir, path) = tmp("brain.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+
+    // Pre-fix behavior was InvalidInput only on `""`; a whitespace
+    // payload from a mis-trimmed caller flowed to FTS5 raw. Post-fix
+    // the sanitizer collapses all-whitespace to empty, and the store
+    // returns `Ok(vec![])` rather than panicking or InvalidInput-ing.
+    let hits = store.fts5_search("   \t  ", 5).expect("whitespace ok");
+    assert!(hits.is_empty(), "whitespace-only query must yield zero hits");
+}
+
+// ---------------------------------------------------------------------------
 // 8. vec_search — cosine ranking holds; zero-limit empty
 // ---------------------------------------------------------------------------
 
