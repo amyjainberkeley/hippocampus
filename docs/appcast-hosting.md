@@ -423,3 +423,35 @@ Sparkle selects the eligible item with the highest `sparkle:version` (build
 number) regardless of document order; `sparkle-publish.sh` writes the most
 recently published item at the top of the channel as a readability convention
 only.
+
+## Signing pipeline validation (pre-Apple-Dev-cert dry-run)
+
+Apple Developer enrollment (`docs/OWNER_TASKS.md` §1) blocks a notarized DMG
+but NOT validation that our sign + notarize + staple *scripts* are correct.
+Two companion tools:
+
+- `scripts/check-signing-prereqs.sh` — inspects the local env (Xcode CLT,
+  `notarytool`, `stapler`, Developer ID certs, `Info.plist`, entitlements,
+  candidate DMGs). Reports blockers vs warnings.
+- `scripts/sign-dmg-dry-run.sh` — mounts an existing DMG, copies `.app` +
+  DMG to a writable staging area, runs Apple's notary preflight checks
+  (`codesign`, `spctl --assess`, hardened-runtime flag, secure timestamp,
+  TCC usage descriptions, `@rpath` scan, recursive embedded-Mach-O
+  verify). Defaults to ad-hoc identity `-` (available on every Mac, no
+  enrollment required); swap in `--identity 'Developer ID Application: ...'
+  --notarize` when the real cert lands to exercise the same code path.
+
+```bash
+./scripts/check-signing-prereqs.sh
+./scripts/sign-dmg-dry-run.sh dist/Hippocampus-0.1.0.dmg      # ad-hoc
+./scripts/sign-dmg-dry-run.sh \                                # real
+    --identity "Developer ID Application: Amy Jain (TEAMID)" \
+    --notarize dist/Hippocampus-0.1.0.dmg
+```
+
+Findings are PASS / FAIL / WARN. WARNs under ad-hoc are expected (`spctl`
+always rejects ad-hoc — that is the point of Developer ID). A FAIL under
+ad-hoc is a real pipeline bug (bundle structure, missing usage description,
+`@rpath` leak, unsigned framework). Exit: 0 pass · 1 fail · 2 bad input.
+`build-installer.sh` owns the canonical build + sign path; the dry-run is
+non-destructive (mounts read-only, signs against a copy).
