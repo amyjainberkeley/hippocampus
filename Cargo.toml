@@ -63,6 +63,16 @@ members = [
     # "macos")` so a Linux `cargo build --workspace` compiles it empty.
     # See `adapters/macos/mci-messages-reader/Cargo.toml` and ADR-0032.
     "adapters/macos/mci-messages-reader",
+    # macOS-only Rust adapters: Phase D deep-hook read paths for Calendar,
+    # Notes, and Reminders. SCAFFOLD ONLY — types + public API signatures,
+    # all reads return empty vecs. Wire-up (real EventKit / AppleScript
+    # reads + per-plugin cascade-equivalent + Automation TCC gate) is a
+    # CSO-gated PR in cycle 8.60+. Lib bodies gated `cfg(target_os =
+    # "macos")` so `cargo build --workspace` on Linux compiles them empty.
+    # See `docs/decisions/0037-deep-hook-plugins-calendar-notes-reminders-scaffold.md`.
+    "adapters/macos/mci-calendar-reader",
+    "adapters/macos/mci-notes-reader",
+    "adapters/macos/mci-reminders-reader",
     # Windows adapter: Windows.Graphics.Capture + UIA + Media Foundation.
     # Deps + lib body gated by `cfg(target_os = "windows")` so
     # `cargo build --workspace` on macOS/Linux compiles it as an empty

@@ -1080,6 +1080,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci-calendar-reader"
+version = "0.0.1"
+dependencies = [
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "mci-core"
 version = "0.0.1"
 dependencies = [
@@ -1180,6 +1188,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci-notes-reader"
+version = "0.0.1"
+dependencies = [
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "mci-perf-soak"
 version = "0.0.1"
 dependencies = [
@@ -1187,6 +1203,14 @@ dependencies = [
  "mci-brain",
  "mci-core",
  "tempfile",
+]
+
+[[package]]
+name = "mci-reminders-reader"
+version = "0.0.1"
+dependencies = [
+ "tempfile",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

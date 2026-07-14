@@ -1,0 +1,39 @@
+[package]
+name                   = "mci-calendar-reader"
+version                = "0.0.1"
+edition.workspace      = true
+rust-version.workspace = true
+publish.workspace      = true
+license.workspace      = true
+description            = "MCI macOS adapter: Calendar.app read path (EventKit deep-hook) — Phase D SCAFFOLD ONLY, no reads wired. See docs/decisions/0037-deep-hook-plugins-calendar-notes-reminders-scaffold.md."
+
+[lints]
+workspace = true
+
+# ---------------------------------------------------------------------------
+# Scope (Phase D — scaffold only, wire deferred to cycle 8.60+)
+# ---------------------------------------------------------------------------
+# This crate ships the Calendar.app deep-hook SURFACE (types + public API
+# shape) so the FORK 8 = A Tier2 entity-extraction pipeline can be reasoned
+# about end-to-end. It does NOT wire the actual EventKit read — that PR is
+# CSO-gated on the Automation TCC per-target surface (Calendar target) and
+# lands in cycle 8.60+.
+#
+# Public API:
+#   - read_events_since(ts) → Vec<CalendarEvent>       (returns empty vec)
+#   - watch_calendar()      → InboxWatcher stream stub (empty stream)
+#
+# It does NOT ingest, does NOT touch the brain, does NOT emit wire-level
+# CaptureEvents. The cascade-equivalent (per-plugin ADR-0032 §3(f) analogue)
+# is NOT built here; it lands in the wire-up PR.
+#
+# Lib body is gated `#![cfg(target_os = "macos")]`; on non-macOS targets
+# the crate compiles as an empty library so `cargo build --workspace` is
+# clean for Linux contributors. Same shape as mci-messages-reader /
+# mci-mail-reader.
+
+[dependencies]
+thiserror = "1"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+tempfile = "3.27.0"

@@ -17,9 +17,15 @@
 //   - Trigger `FullDiskAccessPermission.requestGrant()` when a deep-
 //     hook toggle flips ON for a known-deep-hookable bundle.
 //
-// Deep-hookable bundles (V2-P7/V2-P8b scope per ADR-0032 + §3(f)):
-//   - `com.apple.MobileSMS` (Messages.app — V2-P7).
-//   - `com.apple.mail` (Mail.app — V2-P8b).
+// Deep-hookable bundles:
+//   Wired (deep-hook toggle live):
+//     - `com.apple.MobileSMS` (Messages.app — V2-P7, ADR-0032 §2).
+//     - `com.apple.mail` (Mail.app — V2-P8b).
+//   Scaffold-only (deep-hook toggle visible but disabled, "Coming soon"
+//   tooltip — see ADR-0037):
+//     - `com.apple.iCal` (Calendar.app — Phase D wire-up cycle 8.60+).
+//     - `com.apple.Notes` (Notes.app — Phase D wire-up cycle 8.60+).
+//     - `com.apple.reminders` (Reminders.app — Phase D wire-up cycle 8.60+).
 //
 // Other bundles: deep-hook toggle is hidden (no plugin to enable).
 
@@ -38,9 +44,14 @@ public struct EditorRow: Sendable, Equatable, Identifiable, Hashable {
     public let bundleId: String
     public let displayName: String
     public var posture: AllowlistTogglePosture
-    /// Whether the deep-hook toggle should be visible (true only for
-    /// bundles V2-P7/V2-P8b have a plugin for).
+    /// Whether the deep-hook toggle should be visible (true for bundles
+    /// with a wired plugin OR a scaffold-only plugin).
     public let supportsDeepHook: Bool
+    /// True iff the deep-hook plugin is scaffold-only (surface exists but
+    /// no reads wired — the toggle is rendered disabled with the
+    /// [`deepHookScaffoldTooltip`](AllowlistEditorViewModel/deepHookScaffoldTooltip)
+    /// copy). Per ADR-0037 (Calendar / Notes / Reminders — Phase D).
+    public let deepHookScaffoldOnly: Bool
     /// True iff the bundle is in the CSO baseline (read-only — the
     /// user-layer cannot remove a baseline entry; UI shows the row
     /// as already-trusted).
@@ -51,12 +62,14 @@ public struct EditorRow: Sendable, Equatable, Identifiable, Hashable {
         displayName: String,
         posture: AllowlistTogglePosture,
         supportsDeepHook: Bool,
+        deepHookScaffoldOnly: Bool = false,
         isBaselineEntry: Bool
     ) {
         self.bundleId = bundleId
         self.displayName = displayName
         self.posture = posture
         self.supportsDeepHook = supportsDeepHook
+        self.deepHookScaffoldOnly = deepHookScaffoldOnly
         self.isBaselineEntry = isBaselineEntry
     }
 }
@@ -84,10 +97,36 @@ public final class AllowlistEditorViewModel: ObservableObject {
     private let fdaPermission: any FullDiskAccessPermission
     private let dateProvider: @Sendable () -> String
 
+    /// Bundles whose deep-hook plugin is wired end-to-end (toggle is live).
     public static let deepHookableBundles: Set<String> = [
         "com.apple.MobileSMS",
         "com.apple.mail",
     ]
+
+    /// Bundles whose deep-hook plugin is scaffold-only per ADR-0037 —
+    /// surface exists (the row appears with the deep-hook toggle
+    /// visible-but-disabled) but no reads are wired yet. Wire-up lands
+    /// cycle 8.60+ behind CSO sign-off (see ADR-0037 §3).
+    public static let deepHookScaffoldBundles: Set<String> = [
+        "com.apple.iCal",
+        "com.apple.Notes",
+        "com.apple.reminders",
+    ]
+
+    /// Tooltip copy for the disabled deep-hook toggle on scaffold-only
+    /// rows. Kept short to fit the AppKit tooltip cap while explaining
+    /// the deferred wire state honestly.
+    public static let deepHookScaffoldTooltip: String =
+        "Coming soon — deep-hook wire-up for this app is deferred to a later release " +
+        "(macOS Automation permission gate pending review). Capture-only is available today."
+
+    /// Whether the deep-hook toggle should be visible for the given bundle.
+    /// Union of the wired set and the scaffold-only set — both render the
+    /// toggle; only the wired set has it enabled + interactive.
+    public static func showsDeepHookToggle(bundleId: String) -> Bool {
+        deepHookableBundles.contains(bundleId)
+            || deepHookScaffoldBundles.contains(bundleId)
+    }
 
     public init(
         baselineStore: any AllowlistStore,
@@ -135,7 +174,8 @@ public final class AllowlistEditorViewModel: ObservableObject {
                     for: entry.bundleId
                 ),
                 posture: .captureOnly,
-                supportsDeepHook: Self.deepHookableBundles.contains(entry.bundleId),
+                supportsDeepHook: Self.showsDeepHookToggle(bundleId: entry.bundleId),
+                deepHookScaffoldOnly: Self.deepHookScaffoldBundles.contains(entry.bundleId),
                 isBaselineEntry: true
             ))
             seen.insert(entry.bundleId)
@@ -160,7 +200,8 @@ public final class AllowlistEditorViewModel: ObservableObject {
                 bundleId: app.bundleId,
                 displayName: app.displayName,
                 posture: posture,
-                supportsDeepHook: Self.deepHookableBundles.contains(app.bundleId),
+                supportsDeepHook: Self.showsDeepHookToggle(bundleId: app.bundleId),
+                deepHookScaffoldOnly: Self.deepHookScaffoldBundles.contains(app.bundleId),
                 isBaselineEntry: false
             ))
             seen.insert(app.bundleId)
@@ -185,7 +226,8 @@ public final class AllowlistEditorViewModel: ObservableObject {
                     for: entry.bundleId
                 ),
                 posture: posture,
-                supportsDeepHook: Self.deepHookableBundles.contains(entry.bundleId),
+                supportsDeepHook: Self.showsDeepHookToggle(bundleId: entry.bundleId),
+                deepHookScaffoldOnly: Self.deepHookScaffoldBundles.contains(entry.bundleId),
                 isBaselineEntry: false
             ))
             seen.insert(entry.bundleId)
@@ -208,8 +250,14 @@ public final class AllowlistEditorViewModel: ObservableObject {
         // Baseline rows are read-only.
         guard !row.isBaselineEntry else { return }
         // Deep-hook implies capture-on; refuse the contradictory state.
+        // Also refuse a scaffold-only deep-hook (per ADR-0037): the row is
+        // rendered with the toggle disabled and the tooltip explains why,
+        // but a stale call site could still try to flip it — clamp here
+        // so the model layer honours the same invariant as the UI.
         let safeNext: AllowlistTogglePosture
         if next == .captureAndDeepHook && !row.supportsDeepHook {
+            safeNext = .captureOnly
+        } else if next == .captureAndDeepHook && row.deepHookScaffoldOnly {
             safeNext = .captureOnly
         } else {
             safeNext = next
@@ -253,7 +301,8 @@ public final class AllowlistEditorViewModel: ObservableObject {
             bundleId: trimmed,
             displayName: trimmed,
             posture: .captureOnly,
-            supportsDeepHook: Self.deepHookableBundles.contains(trimmed),
+            supportsDeepHook: Self.showsDeepHookToggle(bundleId: trimmed),
+            deepHookScaffoldOnly: Self.deepHookScaffoldBundles.contains(trimmed),
             isBaselineEntry: false
         )
         rows.append(row)
