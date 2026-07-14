@@ -140,6 +140,10 @@ struct RootView: View {
     @State private var selectedTab: RecallTab
     @State private var searchFocusTrigger = false
     @ObservedObject private var actionPanelRegistry = ActionPanelRegistry.shared
+    // Cycle 8.54 — "What's new" release-notes modal. Coordinator owns
+    // the last-shown-version bookkeeping (UserDefaults) + the parsed
+    // release loaded from Contents/Resources/CHANGELOG.md.
+    @StateObject private var whatsNewCoord = WhatsNewCoordinator()
 
     init(reader: BrainReader, initialTab: RecallTab = .search) {
         self.reader = reader
@@ -274,6 +278,18 @@ struct RootView: View {
                 description: "Show every registered command and its shortcut."
             ) {
                 actionPanelRegistry.showHelp()
+            },
+            // Cycle 8.54 — "What's new" release-notes viewer. Fires the
+            // WhatsNewCoordinator's on-demand path (bypasses last-shown
+            // check) so the user can revisit the changelog any time.
+            .init(
+                id: "app.whatsNew",
+                title: "What's New",
+                shortcut: "⌘⇧N",
+                category: .app,
+                description: "Release notes for the version you're on (parses bundled CHANGELOG.md)."
+            ) {
+                whatsNewCoord.showOnDemand()
             },
             .init(
                 id: "app.showGlobalRecallPopup",
@@ -423,10 +439,29 @@ struct RootView: View {
             actionPanelRegistry.showHelp()
             return .handled
         }
+        .onKeyPress(.init("n"), phases: .down) { press in
+            // Cycle 8.54 — ⌘⇧N opens the "What's new" release notes.
+            // Guarded on the exact chord (Cmd + Shift, nothing else)
+            // so a bare ⌘N (New Search) still routes cleanly through
+            // the existing `app.newSearch` command.
+            guard press.modifiers == [.command, .shift] else { return .ignored }
+            whatsNewCoord.showOnDemand()
+            return .handled
+        }
         .registerActionPanelCommands(globalCommands, registry: actionPanelRegistry)
         .actionPanelHost(registry: actionPanelRegistry)
         .sheet(isPresented: $actionPanelRegistry.isHelpVisible) {
             KeyboardShortcutsSheet(registry: actionPanelRegistry)
+        }
+        .sheet(isPresented: $whatsNewCoord.isVisible) {
+            WhatsNewModal(coord: whatsNewCoord)
+        }
+        .task {
+            // Fire once per launch: if the current version is new
+            // (last-shown-version != current), show the modal. The
+            // coordinator no-ops on repeat launches at the same
+            // version, so this is safe to call on every boot.
+            whatsNewCoord.maybeShowOnBoot()
         }
     }
 }

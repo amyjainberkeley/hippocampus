@@ -61,4 +61,53 @@ final class BuildAppScriptTests: XCTestCase {
 
         XCTAssertNotEqual(process.terminationStatus, 0, "build-app.sh --bogus should exit nonzero")
     }
+
+    /// Cycle 8.54 — the CHANGELOG-bundling block must be present so
+    /// the recall-ui "What's new" modal has notes to render on the
+    /// user's Mac. Grep-level check keeps the gate visible even if
+    /// the copy is subsequently reordered inside the script.
+    func test_bundles_changelog_md() throws {
+        guard let path = scriptPath else {
+            throw XCTSkip("build-app.sh not found")
+        }
+        let script = try String(contentsOfFile: path, encoding: .utf8)
+        XCTAssertTrue(
+            script.contains("CHANGELOG_SRC="),
+            "build-app.sh should declare a CHANGELOG_SRC path"
+        )
+        XCTAssertTrue(
+            script.contains("$RESOURCES/CHANGELOG.md"),
+            "build-app.sh should copy CHANGELOG.md into Contents/Resources/"
+        )
+        XCTAssertTrue(
+            script.contains("FATAL: CHANGELOG.md missing"),
+            "build-app.sh should fail-loud when CHANGELOG.md is missing"
+        )
+    }
+
+    /// Static shellcheck-style sanity: the script must still parse
+    /// with `bash -n` after our edits. Catches copy-paste breakage.
+    func test_bash_syntax_check_passes() throws {
+        guard let path = scriptPath else {
+            throw XCTSkip("build-app.sh not found")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["-n", path]
+
+        let pipe = Pipe()
+        process.standardError = pipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let err = String(
+            data: pipe.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+        XCTAssertEqual(
+            process.terminationStatus, 0,
+            "bash -n on build-app.sh should be clean; got: \(err)"
+        )
+    }
 }
