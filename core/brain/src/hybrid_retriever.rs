@@ -389,9 +389,25 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             .store
             .fts5_search(&query.text, self.k_lex)
             .map_err(|e| RetrieveError::Backend(e.to_string()))?;
+        // ADR-0011 §5 candidate-pool pre-filter. When the query carries
+        // a time / app scope (either from the router — anchor window,
+        // extracted time range — or from the caller-supplied
+        // `RetrievalQuery::app_filter`), push those into the store so
+        // brute-force cosine walks only the in-scope vectors instead of
+        // the whole `event_vectors` table. Semantic ranks are otherwise
+        // unchanged: the pool narrowing is a subset of the row set the
+        // full-KNN would have scored, and the retriever's row-level
+        // app/time guard downstream is still authoritative. When both
+        // filters are `None` the store's default impl delegates to
+        // `vec_search` — byte-identical fallback (full KNN).
         let sem = self
             .store
-            .vec_search(&q_emb, self.k_sem)
+            .vec_search_filtered(
+                &q_emb,
+                self.k_sem,
+                time_filter,
+                query.app_filter.as_deref(),
+            )
             .map_err(|e| RetrieveError::Backend(e.to_string()))?;
 
         let lex_map: HashMap<EventId, f32> = lex.into_iter().collect();

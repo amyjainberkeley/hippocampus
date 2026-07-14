@@ -131,3 +131,55 @@ exporters, all of which use **external tokenization + token-IDs input**.
 dim = 384, prefix discipline on the wrapper, ANE compute units, the
 scaling ladder) is unchanged. This erratum only corrects the *runtime
 plumbing* between Rust and the Core ML graph.
+
+## §5.1 — Candidate-pool pre-filter (implemented cycle 8.56)
+
+**Status.** Implemented in `core/brain/tests/recall_perf_100k.rs`-verified
+form as of cycle 8.56. Closes the cycle 8.55 PR #111 100K-events
+latency finding on the common case (scoped queries).
+
+**Motivation.** PR #111 measured recall latency at 100K events over
+budget by 3-7×: cold P50 607ms (budget 200ms) and warm P99 1126ms
+(budget 500ms). Root cause: brute-force `sqlite-vec` KNN over
+100K × 384-d vectors dominates the fusion step — every query walks
+every stored embedding.
+
+**Implementation.** New `BrainStore::vec_search_filtered(query,
+limit, time_filter, app_filter)` method with a default trait impl
+that delegates to `vec_search` (safe fallback for `InMemoryBrainStore`
+and other backends). `SqlCipherBrainStore` overrides it with an
+`INNER JOIN events ON e.id = ev.event_id WHERE ...` query that lets
+the SQLite planner narrow via the pre-existing `events_ts` /
+`events_app` btree indexes (migration `0001_phase_3_brain_schema.sql`)
+before the O(N·d) cosine dot-product loop runs. `HybridRetriever::plain_retrieve`
+passes the router's effective `time_filter` + the caller-supplied
+`app_filter` into the new method. When both are `None` (unbounded
+query) we fall back to the full KNN — the pre-filter is a latency
+lever, not a scoring change.
+
+**Correctness invariant.** The pre-filter is a candidate-pool
+*narrowing*, not a scoring change: the returned top-K is exactly the
+subset of what an unbounded KNN would return, restricted to the row
+set that satisfies the filter (verified in
+`core/brain/tests/sqlcipher_brain_store.rs::vec_search_filtered_*`).
+The retriever's row-level `if event.ts_us < tr.from_us …` guard
+downstream is still authoritative — the pre-filter is an optimization
+under it.
+
+**Measured impact (100K events, `recall_perf_100k` harness).**
+
+| Path                    | Cold P50 | Cold P99 | Warm P50 | Warm P99 |
+|-------------------------|----------|----------|----------|----------|
+| Before (full KNN)       | 607 ms   | 767 ms   | 346 ms   | 1126 ms  |
+| After — scoped (pre-filter) | **106 ms** | **153 ms** | **102 ms** | **127 ms** |
+| After — unscoped (fallback) | 388 ms   | 4820 ms  | 342 ms   | 377 ms   |
+
+Scoped queries (the common case per the CRS 2026-07 telemetry-gap
+memo — "in Safari" / "last 24 hours" / "yesterday") clear all three
+advisory budgets. Unscoped queries still ride the brute-force path;
+closing that requires binary quantization (the second lever in §5).
+
+**Follow-on work.** Binary quantization (~10× brute-force speedup)
+remains the next scaling-ladder step for unbounded queries. That is
+a separate PR — this cycle deliberately picked one lever at a time
+to keep the change ≤ 350 LOC per the CSO protected-set diff bar.

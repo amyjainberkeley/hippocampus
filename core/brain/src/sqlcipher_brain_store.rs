@@ -53,7 +53,7 @@ use rusqlite::{params, params_from_iter};
 
 use crate::{
     BrainStats, ConsolidationWatermark, Event, EventId, EventRecord, IdentityMentionSite,
-    ResolutionWatermark, StoreError,
+    ResolutionWatermark, StoreError, TimeRange,
 };
 
 /// Phase 3 production `BrainStore`.
@@ -1704,6 +1704,121 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 // Mis-sized blob — skip rather than fail the whole query.
                 // The CRS Telemetry-Gap analyst would catch this as a
                 // schema regression; this branch is the run-time floor.
+                continue;
+            }
+            let Some(stored) = blob_to_embedding(&blob) else {
+                continue;
+            };
+            let dot: f32 = stored
+                .iter()
+                .zip(query_embedding.iter())
+                .map(|(a, b)| a * b)
+                .sum();
+            hits.push((EventId(u64::try_from(event_id).unwrap_or(0)), dot));
+        }
+        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        hits.truncate(limit);
+        Ok(hits)
+    }
+
+    /// ADR-0011 §5 candidate-pool pre-filter. Narrows the vector KNN to
+    /// the event ids that satisfy the caller-supplied time / app filter
+    /// **before** we do the O(N·d) cosine dot-product loop. On the 100K-
+    /// event perf harness (PR #111) the brute-force `vec_search` blows
+    /// the cold-P50 budget (200ms → 607ms) because it dots against every
+    /// `event_vectors` row; the two indexes `events_ts` and `events_app`
+    /// let SQLite narrow the pool to O(hundreds…thousands) rows in
+    /// microseconds, at which point the cosine loop fits inside budget.
+    ///
+    /// Correctness: the WHERE clause is a candidate-pool narrowing, NOT
+    /// a scoring change. When both filters are `None` this method is
+    /// byte-identical to `vec_search` (delegates to it directly). When
+    /// filters are set the returned top-k is a subset of what an
+    /// unbounded KNN would return followed by the same post-filter — the
+    /// retriever's row-level `if event.ts_us < tr.from_us ...` guard is
+    /// still authoritative for the app/time invariant.
+    fn vec_search_filtered(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        // Fast path: no filters → the default trait impl delegates to
+        // `vec_search`, but calling that here forces one extra vtable
+        // hop; skip it by delegating directly.
+        if time_filter.is_none() && app_filter.is_none() {
+            return self.vec_search(query_embedding, limit);
+        }
+        if query_embedding.len() != EMBEDDING_DIM {
+            return Err(StoreError::InvalidInput(format!(
+                "query embedding dimension must be {} (ADR-0009), got {}",
+                EMBEDDING_DIM,
+                query_embedding.len()
+            )));
+        }
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+
+        // Build the WHERE clause dynamically. Both `events_ts` and
+        // `events_app` are ordinary btree indexes (see migration 0001);
+        // SQLite's query planner picks the more selective one and the
+        // JOIN back to event_vectors on `event_id` uses the FK's implicit
+        // index. Positional params keep the prepared-statement cache
+        // hot across calls.
+        let mut sql = String::from(
+            "SELECT ev.event_id, ev.embedding \
+             FROM event_vectors ev \
+             INNER JOIN events e ON e.id = ev.event_id \
+             WHERE 1=1",
+        );
+        let mut param_idx: usize = 0;
+        if time_filter.is_some() {
+            sql.push_str(&format!(
+                " AND e.ts_us >= ?{} AND e.ts_us <= ?{}",
+                param_idx + 1,
+                param_idx + 2
+            ));
+            param_idx += 2;
+        }
+        if app_filter.is_some() {
+            sql.push_str(&format!(" AND e.app_bundle_id = ?{}", param_idx + 1));
+        }
+
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare vec_filtered: {e}")))?;
+
+        // Assemble param values as a homogeneous `Vec<Value>` — same
+        // pattern the graph reads use (`mention_match_for_events` in
+        // this file). Positional binds keep the prepared-statement
+        // cache hot across time-only / app-only / both-set call shapes.
+        let mut binds: Vec<Value> = Vec::with_capacity(3);
+        if let Some(tr) = time_filter {
+            binds.push(Value::Integer(i64::try_from(tr.from_us).unwrap_or(i64::MAX)));
+            binds.push(Value::Integer(i64::try_from(tr.to_us).unwrap_or(i64::MAX)));
+        }
+        if let Some(app) = app_filter {
+            binds.push(Value::Text(app.to_string()));
+        }
+
+        let rows = stmt
+            .query_map(params_from_iter(binds.iter()), |r| {
+                let event_id: i64 = r.get(0)?;
+                let blob: Vec<u8> = r.get(1)?;
+                Ok((event_id, blob))
+            })
+            .map_err(|e| StoreError::Backend(format!("query vec_filtered: {e}")))?;
+
+        let mut hits: Vec<(EventId, f32)> = Vec::new();
+        for r in rows {
+            let (event_id, blob) =
+                r.map_err(|e| StoreError::Backend(format!("row vec_filtered: {e}")))?;
+            if blob.len() != EMBEDDING_BYTES {
                 continue;
             }
             let Some(stored) = blob_to_embedding(&blob) else {
