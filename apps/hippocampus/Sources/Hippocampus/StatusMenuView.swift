@@ -6,8 +6,8 @@ struct StatusMenuView: View {
     @ObservedObject var supervisor: ProcessSupervisor
     @ObservedObject var loginItemVM: LoginItemViewModel
     let updater: SparkleUpdaterService
+    @ObservedObject var preferencesStore: PreferencesStore
 
-    @State private var showAbout = false
     @State private var crashReportOptedIn: Bool = false
     @State private var briefsEnabled: Bool = UserDefaults.standard.bool(forKey: "MCIBriefsEnabled")
     @State private var mcpRegistering = false
@@ -117,8 +117,7 @@ struct StatusMenuView: View {
                 .foregroundStyle(.secondary)
 
             Button("About Hippocampus") {
-                showAbout = true
-                openAboutWindow()
+                openPreferencesWindow()
             }
 
             // "Learn more" — public landing page. Cotypist parity: an
@@ -262,8 +261,8 @@ struct StatusMenuView: View {
         }
         .keyboardShortcut("t", modifiers: [.command])
 
-        Button("Preferences") {
-            openAboutWindow()
+        Button("Preferences…") {
+            openPreferencesWindow()
         }
         .keyboardShortcut(",", modifiers: [.command])
 
@@ -433,24 +432,15 @@ struct StatusMenuView: View {
         alert.runModal()
     }
 
-    private func openAboutWindow() {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
-        let dbPath = supervisor.dbPath.path
-
-        let alert = NSAlert()
-        alert.messageText = "Hippocampus"
-        alert.informativeText = """
-            Version \(version)
-
-            Your brain lives at:
-            \(dbPath)
-
-            Launch at Login: \(loginItemVM.isEnabled ? "ON" : "OFF")
-
-            Built by MCI — Memory Context Interface.
-            """
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+    /// Open (or focus) the comprehensive Preferences window bound to
+    /// the ⌘, shortcut. All dependencies were wired in
+    /// `HippocampusApp.configurePreferencesController` at launch; this
+    /// call is idempotent — the controller lazily creates the NSPanel
+    /// on first invocation and focuses the existing window thereafter.
+    private func openPreferencesWindow() {
+        #if canImport(AppKit)
+        PreferencesWindowController.shared.show()
+        #endif
     }
+
 }
