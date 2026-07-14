@@ -347,6 +347,15 @@ Matched-pair implementation:
 | Phase 8 | Scaffolded | `adapters/windows/` crate (PR #124). Implementation post-v1.0 |
 | Phase 9 | Not started | iOS/Watch separate Xcode targets per ADR-0026. Post-v1.0 |
 
+### Phase D — deep-hook coverage extension (v1.5-eligible)
+
+Phase D (~2026-08-16 → ~2026-09-13 per `docs/STATE.md`) extends the deep-hook set beyond Messages (V2-P7) + Mail (V2-P8) to Calendar, Notes, and Reminders — the load-bearing FORK 8 = A Tier2 entity-extraction sources (V2-P4 regex + V2-P5 Qwen NER + V2-P6 AliasResolver + `episode_edges`). Landing sequence:
+
+- **Scaffold PR (cycle 8.5x — this PR):** ships `adapters/macos/mci-calendar-reader`, `mci-notes-reader`, `mci-reminders-reader` with the public wire-format types + `read_events_since` stubs returning empty vecs. Onboarding UI shows the three rows with the deep-hook toggle disabled + a "Coming soon" tooltip. No reads wired.
+- **Wire-up PR (cycle 8.60+ — CSO-gated):** replaces the empty-vec stubs with real EventKit (Calendar + Reminders) / AppleScript (Notes) reads, authors the per-plugin cascade-equivalents in `core/brain/src/redaction/{calendar,notes,reminders}_plugin.rs`, adds the Automation TCC per-target permission cards, and flips the deep-hook toggles live. Gate list per ADR-0037 §3.
+
+See `docs/decisions/0037-deep-hook-plugins-calendar-notes-reminders-scaffold.md` for the full scaffold rationale + wire-format spec + CSO gate list.
+
 ---
 
 ## 16. Risks & Open Questions

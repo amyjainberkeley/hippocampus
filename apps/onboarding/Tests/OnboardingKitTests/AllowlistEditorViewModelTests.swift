@@ -260,4 +260,60 @@ final class AllowlistEditorViewModelTests: XCTestCase {
         let spotify = vm2.rows.first { $0.bundleId == "com.spotify.client" }
         XCTAssertEqual(spotify?.posture, .captureOnly)
     }
+
+    // MARK: - Phase D scaffold rows (ADR-0037)
+
+    func testScaffoldBundlesShowDeepHookToggleFlaggedScaffoldOnly() async {
+        let detected: [DetectedApp] = [
+            DetectedApp(bundleId: "com.apple.iCal", displayName: "Calendar"),
+            DetectedApp(bundleId: "com.apple.Notes", displayName: "Notes"),
+            DetectedApp(bundleId: "com.apple.reminders", displayName: "Reminders"),
+        ]
+        let (vm, _, _) = makeVM(detectedApps: detected)
+        await vm.load()
+
+        for bundle in ["com.apple.iCal", "com.apple.Notes", "com.apple.reminders"] {
+            let row = vm.rows.first { $0.bundleId == bundle }
+            XCTAssertNotNil(row, "\(bundle) row missing")
+            XCTAssertTrue(row?.supportsDeepHook == true,
+                          "\(bundle) must render the deep-hook toggle")
+            XCTAssertTrue(row?.deepHookScaffoldOnly == true,
+                          "\(bundle) toggle must be flagged scaffold-only")
+        }
+    }
+
+    func testWiredDeepHookBundlesAreNotScaffoldFlagged() async {
+        let (vm, _, _) = makeVM()
+        await vm.load()
+        let messages = vm.rows.first { $0.bundleId == "com.apple.MobileSMS" }
+        let mail = vm.rows.first { $0.bundleId == "com.apple.mail" }
+        XCTAssertEqual(messages?.deepHookScaffoldOnly, false)
+        XCTAssertEqual(mail?.deepHookScaffoldOnly, false)
+    }
+
+    func testScaffoldDeepHookTogglePosturesClampToCaptureOnly() async {
+        let detected: [DetectedApp] = [
+            DetectedApp(bundleId: "com.apple.iCal", displayName: "Calendar"),
+        ]
+        let (vm, _, fda) = makeVM(detectedApps: detected)
+        await vm.load()
+        // Attempt to flip to captureAndDeepHook — model must clamp to
+        // captureOnly (toggle is UI-disabled, but model layer honours
+        // the same invariant defensively).
+        await vm.setPosture(for: "com.apple.iCal", to: .captureAndDeepHook)
+        let cal = vm.rows.first { $0.bundleId == "com.apple.iCal" }
+        XCTAssertEqual(cal?.posture, .captureOnly)
+        // FDA must NOT have been requested (no wired plugin → no read
+        // path → no permission need yet).
+        let status = await fda.status()
+        XCTAssertEqual(status, .notRequested)
+    }
+
+    func testScaffoldTooltipIsSet() {
+        XCTAssertFalse(AllowlistEditorViewModel.deepHookScaffoldTooltip.isEmpty)
+        XCTAssertTrue(
+            AllowlistEditorViewModel.deepHookScaffoldTooltip.contains("Coming soon"),
+            "tooltip must signal deferred wire-up honestly"
+        )
+    }
 }

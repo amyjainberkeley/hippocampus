@@ -17,6 +17,12 @@ and never above the `CaptureSource` trait.
 - `mci-messages-reader/` — Rust deep-hook for `chat.db`
   (Messages.app). ADR-0032 plugin contract.
 - `mci-mail-reader/` — Rust deep-hook for `.emlx` maildir (Mail.app).
+- `mci-calendar-reader/` — **Phase D scaffold.** EventKit deep-hook
+  for Calendar.app. Empty-vec stub; wire-up cycle 8.60+. ADR-0037.
+- `mci-notes-reader/` — **Phase D scaffold.** AppleScript deep-hook
+  for Notes.app. Empty-vec stub; wire-up cycle 8.60+. ADR-0037.
+- `mci-reminders-reader/` — **Phase D scaffold.** EventKit deep-hook
+  for Reminders.app. Empty-vec stub; wire-up cycle 8.60+. ADR-0037.
 - `mci-embed-coreml/` — Core ML backend for the embedder
   (Arctic-Embed-S per ADR-0011).
 - `mci-coreml-bridge/` — Rust ↔ Core ML bridge crate (ADR-0033).
