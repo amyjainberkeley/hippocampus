@@ -116,3 +116,17 @@ missing_panics_doc      = "allow"
 # to mci-core only — benchmark code itself runs without debug assertions.
 [profile.bench.package.mci-core]
 debug-assertions = true
+
+# `perf` profile — release-tier optimization for `#[ignore]` perf harnesses
+# like `core/brain/tests/recall_perf_100k.rs`. Inherits `release` codegen
+# but keeps `debug-assertions = true` on mci-core (same reason as the
+# `[profile.bench.package.mci-core]` override above — the CSO tripwire in
+# `mci-core::crypto::key_wrap` refuses to compile without debug-assertions
+# when the `insecure-test-keywrap` dev-dep feature is on). Run:
+#
+#   cargo test --profile=perf -p mci-brain -- --ignored recall_perf_100k::run
+[profile.perf]
+inherits = "release"
+
+[profile.perf.package.mci-core]
+debug-assertions = true

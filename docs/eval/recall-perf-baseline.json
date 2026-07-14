@@ -1,0 +1,28 @@
+{
+  "_comment": "Baseline for core/brain/tests/recall_perf_100k.rs. Ground-truth captured on the initial run (2026-07-13) on an M-series MacBook Pro on battery. The harness uses the FixedDimEmbedder stub, so the numbers isolate store-side latency (SQLCipher + FTS5 + brute-force cosine over 100K 384-d vectors) rather than the production ANE embedder path. Regenerate with `scripts/perf-recall-100k.sh --update` on the reference machine; a future PR wires up a nightly diff-vs-baseline job.",
+  "_captured_at": "2026-07-13",
+  "_captured_on": "Apple M-series MacBook Pro, on-battery, cold shell",
+  "_notes": [
+    "Cold P50 607ms and warm P50 346ms reflect the brute-force sqlite-vec KNN over 100K vectors — the sqlite-vec scaling-ladder lever (ADR-0011 §5) is a candidate-pool pre-filter, which is not exercised here.",
+    "Warm P99 1126ms > warm P95 810ms shows the tail is dominated by a handful of queries (likely those hitting both the anchor-then-window router path AND the max-limit vec_search). The next perf iteration should log per-query latency to identify them.",
+    "Advisory budgets in the harness (cold P50 200ms / warm P50 50ms / warm P99 500ms) were set optimistically from ADR-0011 §7 and are all currently breached. The harness intentionally does NOT fail on breach — this file is the regression baseline; the next tuning PR should either move budgets or ship the pre-filter."
+  ],
+  "corpus_size": 100000,
+  "query_count": 100,
+  "steady_state_repeats": 3,
+  "retrieve_limit": 10,
+  "seed_seconds": 32.51,
+  "seed_events_per_sec": 3076,
+  "cold": {
+    "p50_ms": 607.4,
+    "p95_ms": 693.3,
+    "p99_ms": 767.4,
+    "mean_ms": 615.2
+  },
+  "warm": {
+    "p50_ms": 346.1,
+    "p95_ms": 809.6,
+    "p99_ms": 1125.6,
+    "mean_ms": 457.5
+  }
+}

@@ -58,6 +58,58 @@ enforces via `StubBriefAuthor`.
 No corpus (only 8 synthetic schema-demo cases with fake event IDs).
 No seed module (cycle 8.44+). No scorecard, no CI release gate.
 
+## Latency at scale
+
+Recall quality is one axis; **latency at 100K events** is the other.
+The extended-dictation cohort (CRS 2026-07 telemetry-gap G-perf memo,
+§3) is the load-bearing user story: a power user who has been running
+MCI for ~2 months hits the "does search still feel instant?" wall
+long before they hit the "are the right hits surfacing?" wall.
+
+The **`core/brain/tests/recall_perf_100k.rs`** integration test closes
+the gap. It seeds a fresh `SqlCipherBrainStore` with 100 000 synthetic
+events (realistic app / content-length / entity distribution), then
+runs a 100-query canonical workload measuring:
+
+- **Cold-cache**: one retriever construction per query, no state
+  amortization. Approximates "user just opened Recall."
+- **Steady-state**: shared retriever after a warmup pass, then five
+  rapid-fire sweeps of the query set. Approximates extended-dictation
+  UX where the retriever + FTS5 buffers stay hot.
+
+Emits P50 / P95 / P99 for each regime and compares against
+`docs/eval/recall-perf-baseline.json`. Advisory budgets recorded in
+the harness (do NOT fail the test — measurement, not assertion):
+
+| Regime | P50 budget | P99 budget |
+|---|---|---|
+| Cold-cache | < 200 ms | — |
+| Steady-state | < 50 ms | < 500 ms |
+
+Initial baseline captured 2026-07-13 (Apple M-series, on-battery,
+`FixedDimEmbedder` stub → store-side latency only) is well above
+these budgets:
+
+| Regime | P50 | P95 | P99 |
+|---|---|---|---|
+| Cold | 607 ms | 693 ms | 767 ms |
+| Warm | 346 ms | 810 ms | 1126 ms |
+
+Seed throughput at 100K events was ~3076 ev/s (32.5s total). The
+gap-to-budget is dominated by the brute-force `sqlite-vec` KNN over
+100K 384-d vectors; the ADR-0011 §5 pre-filter (shrink candidate pool
+via `time_filter` / `app_filter` before KNN) is the primary lever
+for the next tuning PR.
+
+Run: `cargo test --profile=perf -p mci-brain -- --ignored recall_perf_100k::run`
+(or the `scripts/perf-recall-100k.sh` wrapper). The test is `#[ignore]`
+by default because seed + workload runs in minutes, which would burn
+CI budget on every push. The regression detector belongs in a nightly
+job that diffs against the baseline JSON.
+
+To update the committed baseline after an intentional perf change:
+`MCI_PERF_UPDATE_BASELINE=1 cargo test --profile=perf -p mci-brain -- --ignored recall_perf_100k::run`.
+
 ## References
 
 - `docs/research/2026-07-13-enviouswispr-peer-study.md` §2.
