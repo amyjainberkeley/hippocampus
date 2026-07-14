@@ -176,6 +176,28 @@ if [[ -f "$KNOWN_SAFE" ]]; then
     cp "$KNOWN_SAFE" "$RESOURCES/known-safe-apps.toml"
 fi
 
+# Cycle 8.54 — bake CHANGELOG.md into the .app so the "What's new"
+# modal (recall-ui/WhatsNew/) can render release notes with zero
+# network access. Read at runtime by `WhatsNewCoordinator` via
+# `Bundle.main.url(forResource:"CHANGELOG",withExtension:"md")`.
+#
+# Fail-loud if missing — matches the Qwen3/NER model-bundling gates
+# above (codified-WARNs-are-stops discipline, cycle 8.25). Without
+# CHANGELOG.md the modal falls back to the "dev build" empty state
+# on every post-update launch, which defeats the "users see what
+# changed after Sparkle auto-updates" mission.
+CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
+if [[ -f "$CHANGELOG_SRC" ]]; then
+    cp "$CHANGELOG_SRC" "$RESOURCES/CHANGELOG.md"
+    echo "  CHANGELOG.md bundled OK → $RESOURCES/CHANGELOG.md"
+else
+    echo "FATAL: CHANGELOG.md missing at $CHANGELOG_SRC"
+    echo "       Run scripts/gen-changelog.sh (PR #96) before bundling."
+    echo "       Refusing to ship a DMG whose 'What's new' modal would fall"
+    echo "       back to the dev-build empty state on every post-update launch."
+    exit 1
+fi
+
 # Copy SwiftPM-generated resource bundle for HippocampusKit into
 # Contents/Resources/ (macOS-conventional location; codesign seals it as
 # part of the .app's signed-resource set). Bundle.module's primary lookup
