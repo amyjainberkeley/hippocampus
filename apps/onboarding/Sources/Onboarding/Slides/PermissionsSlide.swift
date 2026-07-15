@@ -36,14 +36,38 @@ struct PermissionsSlide: View {
 
     var body: some View {
         SlideContainer {
-            VStack(spacing: 24) {
+            VStack(spacing: OnboardingDesign.Space.xl) {
                 OnboardingTheme.title("macOS requires your permission")
 
-                Text("Frames are OCR'd in memory and discarded — only the extracted text and structured event metadata are stored.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 480)
+                // The Cotypist "neither stored nor sent" moment — turn the
+                // scariest ask (Screen Recording) into a reassurance. The
+                // claim is exact: frames are OCR'd in memory and discarded;
+                // only the extracted text is persisted, encrypted, locally.
+                ReassuranceBanner(
+                    systemImage: "eye.slash.fill",
+                    message: "Screen frames are OCR'd in memory and instantly discarded — the picture is never saved or sent anywhere. Only the extracted text stays, encrypted, on this Mac.",
+                    highlight: "never saved or sent anywhere"
+                )
+
+                // The Raycast "Ask anything" assurance strip — three short
+                // promises with a popover that spells each one out.
+                AssuranceRow(items: [
+                    AssuranceItem(
+                        icon: "desktopcomputer",
+                        title: "On-device",
+                        detail: "OCR and indexing run entirely on your Mac — no server ever sees your screen."
+                    ),
+                    AssuranceItem(
+                        icon: "icloud.slash",
+                        title: "No collection",
+                        detail: "Nothing is uploaded. Hippocampus makes zero network calls with your captured content."
+                    ),
+                    AssuranceItem(
+                        icon: "lock.fill",
+                        title: "Encrypted",
+                        detail: "The text index is sealed with a 256-bit key that never leaves this Mac."
+                    ),
+                ])
 
                 // Pre-flight overview (PR #44) — kept at the top so the
                 // user still sees the map of all upcoming asks before
@@ -93,7 +117,7 @@ struct PermissionsSlide: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Image(systemName: copy.icon)
-                    .foregroundStyle(OnboardingTheme.accentBlue)
+                    .foregroundStyle(OnboardingDesign.Palette.accent)
                     .font(.system(size: 18))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(copy.title)
@@ -124,15 +148,12 @@ struct PermissionsSlide: View {
                     } label: {
                         Label("Grant \(copy.shortName)", systemImage: "checkmark.shield")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(OnboardingTheme.accentBlue)
-                    .controlSize(.regular)
+                    .onboardingPrimary()
 
                     Button("Skip for now") {
                         flowVM.recordPermissionOutcome(surface, .skipped)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
+                    .onboardingSecondary()
                 }
             }
 
@@ -156,13 +177,11 @@ struct PermissionsSlide: View {
                     Button("Continue") {
                         flowVM.recordPermissionOutcome(surface, .granted)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .onboardingSecondary()
                 }
             }
         }
-        .padding(16)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .glassCard(padding: OnboardingDesign.Space.lg)
         .frame(maxWidth: 520)
     }
 
@@ -202,9 +221,7 @@ struct PermissionsSlide: View {
                             Label("Reset & retry", systemImage: "arrow.clockwise")
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(OnboardingTheme.accentBlue)
-                    .controlSize(.small)
+                    .onboardingPrimary()
                     .disabled(isResetting)
                 } else {
                     // AX / Automation / FDA are soft-fail — inline
@@ -213,16 +230,13 @@ struct PermissionsSlide: View {
                     Button("Continue") {
                         flowVM.recordPermissionOutcome(surface, .denied)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(OnboardingTheme.accentBlue)
-                    .controlSize(.small)
+                    .onboardingPrimary()
                 }
 
                 Button("Open Privacy Settings") {
                     openSettingsFor(surface: surface)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .onboardingSecondary()
             }
 
             if showResetFailedFallback && surface == .screenRecording {
@@ -240,8 +254,11 @@ struct PermissionsSlide: View {
                 }
             }
         }
-        .padding(12)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .padding(OnboardingDesign.Space.md)
+        .background(
+            OnboardingDesign.Palette.attention.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: OnboardingDesign.Radius.card)
+        )
     }
 
     // MARK: - Choreography-complete summary
@@ -271,8 +288,7 @@ struct PermissionsSlide: View {
                 }
             }
         }
-        .padding(14)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .glassCard(padding: OnboardingDesign.Space.md)
         .frame(maxWidth: 520)
     }
 
