@@ -10,25 +10,25 @@ struct AllowlistSlide: View {
     @EnvironmentObject var editorVM: AllowlistEditorViewModel
     @State private var customBundleId: String = ""
     @State private var customRationale: String = ""
-    @State private var showCustomSheet = false
 
     var body: some View {
         SlideContainer {
-            VStack(alignment: .leading, spacing: 18) {
-                OnboardingTheme.title("Which apps should Hippocampus remember?")
+            VStack(alignment: .leading, spacing: OnboardingDesign.Space.lg) {
+                SectionChip(text: "Trusted apps")
 
-                Text("Hippocampus only captures from apps you explicitly trust. The first set below is the always-on baseline that ships with the app; you can opt in additional apps yourself.")
-                    .font(.system(size: 13))
+                OnboardingDesign.TypeRamp.title("Which apps should Hippocampus remember?")
+
+                OnboardingDesign.TypeRamp.body("Hippocampus only captures from apps you explicitly trust. The first set below is the always-on baseline that ships with the app; you can opt in additional apps yourself.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 520, alignment: .leading)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
                         baselineSection
                         userSection
                         expertSection
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, OnboardingDesign.Space.sm)
                 }
             }
         }
@@ -38,34 +38,32 @@ struct AllowlistSlide: View {
     }
 
     private var baselineSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
             sectionHeader(
                 title: "Built-in trusted apps (\(baselineRows.count))",
                 subtitle: "These bundles ship in the signed app and have been reviewed by the security team. Read-only."
             )
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: OnboardingDesign.Space.xs) {
                 ForEach(baselineRows) { row in
                     rowSummaryView(row: row)
                 }
             }
-            .padding(12)
-            .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .glassCard(padding: OnboardingDesign.Space.md)
         }
     }
 
     private var userSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
             sectionHeader(
                 title: "Your additions (\(userRows.count))",
                 subtitle: "Running apps you can add to the allowlist. The cascade still gates each event the same way — passwords, secure-input, and unknown surfaces stay redacted."
             )
             if userRows.isEmpty {
-                Text("No additions yet. Toggle a running app below or use the expert UI to add a bundle by id.")
-                    .font(.system(size: 12))
+                OnboardingDesign.TypeRamp.caption("No additions yet. Toggle a running app below or use the expert UI to add a bundle by id.")
                     .foregroundStyle(.tertiary)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, OnboardingDesign.Space.sm)
             } else {
-                VStack(spacing: 6) {
+                VStack(spacing: OnboardingDesign.Space.sm - 2) {
                     ForEach(userRows) { row in
                         userRowEditor(row: row)
                     }
@@ -78,12 +76,12 @@ struct AllowlistSlide: View {
     }
 
     private var expertSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
             sectionHeader(
                 title: "Expert: add a bundle by id",
                 subtitle: "If the app you want isn't running right now, enter its bundle identifier (e.g. `com.spotify.client`)."
             )
-            HStack(spacing: 8) {
+            HStack(spacing: OnboardingDesign.Space.sm) {
                 TextField("com.example.app", text: $customBundleId)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 280)
@@ -99,73 +97,61 @@ struct AllowlistSlide: View {
                         customRationale = ""
                     }
                 }
-                .buttonStyle(.bordered)
+                .onboardingSecondary()
                 .disabled(customBundleId.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             TextField("Why? (optional note)", text: $customRationale)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 380)
             if let err = editorVM.lastError {
-                Text(errorString(err))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.red)
+                OnboardingDesign.TypeRamp.caption(errorString(err))
+                    .foregroundStyle(OnboardingDesign.Palette.danger)
             }
         }
-        .padding(12)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+        .glassCard(padding: OnboardingDesign.Space.md)
     }
 
     private var fdaHint: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.shield")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Full Disk Access requested")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Deep-hook plugins (Messages, Mail) need this. Confirm the grant in System Settings → Privacy & Security → Full Disk Access, then return here.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(10)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        IconTextRow(
+            icon: "exclamationmark.shield",
+            title: "Full Disk Access requested",
+            detail: "Deep-hook plugins (Messages, Mail) need this. Confirm the grant in System Settings → Privacy & Security → Full Disk Access, then return here.",
+            iconColor: OnboardingDesign.Palette.attention
+        )
+        .padding(OnboardingDesign.Space.md)
+        .background(
+            RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control, style: .continuous)
+                .fill(OnboardingDesign.Palette.attention.opacity(0.10))
+        )
     }
 
     // MARK: - Helpers
 
     private func sectionHeader(title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.xs / 2) {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
-            Text(subtitle)
-                .font(.system(size: 11))
+            OnboardingDesign.TypeRamp.footnote(subtitle)
                 .foregroundStyle(.secondary)
         }
     }
 
     private func rowSummaryView(row: EditorRow) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.displayName)
-                    .font(.system(size: 13, weight: .medium))
-                Text(row.bundleId)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-        }
+        IconTextRow(
+            icon: "checkmark.circle.fill",
+            title: row.displayName,
+            detail: row.bundleId,
+            iconColor: OnboardingDesign.Palette.success
+        )
     }
 
     @ViewBuilder
     private func userRowEditor(row: EditorRow) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: OnboardingDesign.Space.sm + 2) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.displayName)
                     .font(.system(size: 13, weight: .medium))
-                Text(row.bundleId)
-                    .font(.system(size: 10))
+                OnboardingDesign.TypeRamp.mono(row.bundleId)
                     .foregroundStyle(.tertiary)
             }
             Spacer()
@@ -189,8 +175,7 @@ struct AllowlistSlide: View {
             .help("Remove from user allowlist")
             .accessibilityLabel("Remove \(row.displayName) from allowlist")
         }
-        .padding(8)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .glassCard(padding: OnboardingDesign.Space.sm)
     }
 
     private func postureBinding(for row: EditorRow) -> Binding<AllowlistTogglePosture> {

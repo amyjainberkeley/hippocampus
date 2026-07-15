@@ -7,14 +7,17 @@ struct RetentionSlide: View {
 
     var body: some View {
         SlideContainer {
-            VStack(spacing: 24) {
-                OnboardingTheme.title("Retention and privacy")
+            VStack(spacing: OnboardingDesign.Space.xl) {
+                VStack(spacing: OnboardingDesign.Space.md) {
+                    SectionChip(text: "Retention")
+                    OnboardingDesign.TypeRamp.title("Retention and privacy")
+                        .multilineTextAlignment(.center)
+                }
 
-                Text("Choose how long Hippocampus keeps your memories. Deleted data is crypto-shredded — the encryption key for that segment is destroyed.")
-                    .font(.system(size: 14))
+                OnboardingDesign.TypeRamp.body("Choose how long Hippocampus keeps your memories. Deleted data is crypto-shredded — the encryption key for that segment is destroyed.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 500)
+                    .frame(maxWidth: OnboardingDesign.Width.prose)
 
                 retentionPicker
 
@@ -25,15 +28,15 @@ struct RetentionSlide: View {
     }
 
     private var retentionPicker: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 12) {
+        VStack(spacing: OnboardingDesign.Space.lg) {
+            HStack(spacing: OnboardingDesign.Space.md) {
                 retentionCard(.sevenDays)
                 retentionCard(.thirtyDays)
                 retentionCard(.forever)
             }
 
             if retentionVM.selectedPolicy == .custom {
-                VStack(spacing: 6) {
+                VStack(spacing: OnboardingDesign.Space.sm - 2) {
                     Text("Keep for \(retentionVM.customDays) days")
                         .font(.system(size: 14, weight: .medium))
                     Slider(
@@ -44,11 +47,11 @@ struct RetentionSlide: View {
                         in: 1...365,
                         step: 1
                     )
-                    .tint(OnboardingTheme.accentBlue)
+                    .tint(OnboardingDesign.Palette.accent)
                     HStack {
-                        Text("1 day").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        OnboardingDesign.TypeRamp.footnote("1 day").foregroundStyle(.tertiary)
                         Spacer()
-                        Text("365 days").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        OnboardingDesign.TypeRamp.footnote("365 days").foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -56,9 +59,7 @@ struct RetentionSlide: View {
             Button("Custom duration") {
                 retentionVM.selectedPolicy = .custom
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 13))
-            .foregroundStyle(OnboardingTheme.accentBlue)
+            .onboardingText(color: OnboardingDesign.Palette.accent)
             .opacity(retentionVM.selectedPolicy == .custom ? 0 : 1)
         }
         .frame(maxWidth: 420)
@@ -69,7 +70,7 @@ struct RetentionSlide: View {
         return Button {
             retentionVM.selectedPolicy = policy
         } label: {
-            VStack(spacing: 6) {
+            VStack(spacing: OnboardingDesign.Space.sm - 2) {
                 Text(policy.displayName)
                     .font(.system(size: 15, weight: .semibold))
                 if policy == .forever {
@@ -83,15 +84,15 @@ struct RetentionSlide: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(14)
+            .padding(OnboardingDesign.Space.lg - 2)
             .background(
-                selected ? OnboardingTheme.accentBlue.opacity(0.08) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 8)
+                selected ? OnboardingDesign.Palette.accentSoft : Color.clear,
+                in: RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control, style: .continuous)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control, style: .continuous)
                     .stroke(
-                        selected ? OnboardingTheme.accentBlue : Color.secondary.opacity(0.25),
+                        selected ? OnboardingDesign.Palette.accent : OnboardingDesign.Palette.hairline,
                         lineWidth: selected ? 2 : 1
                     )
             )
@@ -100,7 +101,7 @@ struct RetentionSlide: View {
     }
 
     private var blockedAppsPreview: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
             Text("Always blocked")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -110,12 +111,11 @@ struct RetentionSlide: View {
                 defaultBlockedList
             } else {
                 ForEach(Array(deniedApps)) { entry in
-                    HStack(spacing: 8) {
+                    HStack(spacing: OnboardingDesign.Space.sm) {
                         Image(systemName: "minus.circle.fill")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(OnboardingDesign.Palette.excluded)
                             .font(.system(size: 12))
-                        Text(entry.value)
-                            .font(.system(size: 12, design: .monospaced))
+                        OnboardingDesign.TypeRamp.mono(entry.value)
                         Spacer()
                         if entry.source == .csoRatified {
                             Image(systemName: "lock.fill")
@@ -126,13 +126,13 @@ struct RetentionSlide: View {
                 }
             }
         }
-        .padding(14)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(padding: OnboardingDesign.Space.md)
         .frame(maxWidth: 420)
     }
 
     private var defaultBlockedList: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.xs) {
             blockedRow("1Password")
             blockedRow("Chase Banking")
             blockedRow("Messages")
@@ -142,9 +142,9 @@ struct RetentionSlide: View {
     }
 
     private func blockedRow(_ name: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: OnboardingDesign.Space.sm) {
             Image(systemName: "minus.circle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(OnboardingDesign.Palette.excluded)
                 .font(.system(size: 12))
             Text(name)
                 .font(.system(size: 12))
