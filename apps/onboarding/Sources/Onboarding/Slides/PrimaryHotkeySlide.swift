@@ -26,12 +26,18 @@ import OnboardingKit
 struct PrimaryHotkeySlide: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @State private var monitor: Any?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         SlideContainer {
             VStack(spacing: 28) {
-                OnboardingTheme.title("Recall anything, from anywhere.")
-                OnboardingTheme.subtitle("Try it now — press ⇧⌘Space.")
+                VStack(spacing: OnboardingDesign.Space.sm) {
+                    OnboardingDesign.TypeRamp.hero("Recall anything, from anywhere.")
+                        .multilineTextAlignment(.center)
+                    OnboardingDesign.TypeRamp.body("Try it now — press ⇧⌘Space.")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                }
 
                 keyboardVisual
 
@@ -51,9 +57,7 @@ struct PrimaryHotkeySlide: View {
                         // unlocks — accessibility is non-negotiable.
                         flowVM.markHotkeyPracticed()
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
+                    .onboardingText()
                     .padding(.top, 4)
                 }
             }
@@ -82,19 +86,22 @@ struct PrimaryHotkeySlide: View {
                 .font(.system(size: wide ? 20 : 24, weight: .semibold, design: .rounded))
                 .frame(minWidth: wide ? 96 : 56, minHeight: 56)
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control)
                         .fill(highlighted
-                            ? OnboardingTheme.accentBlue.opacity(0.18)
+                            ? OnboardingDesign.Palette.accent.opacity(0.18)
                             : Color.secondary.opacity(0.08))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control)
                         .stroke(highlighted
-                            ? OnboardingTheme.accentBlue
+                            ? OnboardingDesign.Palette.accent
                             : Color.secondary.opacity(0.35),
                             lineWidth: highlighted ? 1.5 : 1)
                 )
-                .animation(.easeInOut(duration: 0.2), value: highlighted)
+                .animation(
+                    OnboardingDesign.Motion.resolve(OnboardingDesign.Motion.quick, reduceMotion: reduceMotion),
+                    value: highlighted
+                )
             Text(label)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
@@ -112,7 +119,7 @@ struct PrimaryHotkeySlide: View {
     private var successBadge: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(OnboardingTheme.accentBlue)
+                .foregroundStyle(OnboardingDesign.Palette.accent)
                 .font(.system(size: 18))
             Text("Nice — you'll use this every day.")
                 .font(.system(size: 13, weight: .medium))
@@ -120,10 +127,12 @@ struct PrimaryHotkeySlide: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(
-            OnboardingTheme.accentBlue.opacity(0.10),
-            in: RoundedRectangle(cornerRadius: 8)
+            OnboardingDesign.Palette.accent.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control)
         )
-        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+        .transition(
+            reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.95))
+        )
     }
 
     // MARK: - Hotkey monitor

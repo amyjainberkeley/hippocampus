@@ -6,15 +6,15 @@ struct PrepareBrainSlide: View {
 
     var body: some View {
         SlideContainer {
-            VStack(spacing: 28) {
-                OnboardingTheme.title("Preparing your brain")
+            VStack(spacing: OnboardingDesign.Space.xl) {
+                OnboardingDesign.TypeRamp.title("Preparing your brain")
+                    .multilineTextAlignment(.center)
 
                 keyGenerationSection
 
-                Divider()
-                    .padding(.horizontal, 40)
-
                 modelDownloadSection
+                    .glassCard(padding: OnboardingDesign.Space.lg)
+                    .frame(maxWidth: 460)
             }
         }
         .task {
@@ -36,8 +36,7 @@ struct PrepareBrainSlide: View {
                 }
                 Spacer()
             }
-            .padding(14)
-            .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            .glassCard(padding: OnboardingDesign.Space.md)
             .frame(maxWidth: 460)
         }
     }
@@ -117,14 +116,12 @@ struct PrepareBrainSlide: View {
                             systemImage: "arrow.down.circle"
                         )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
+                    .onboardingPrimary()
 
                     Button("Skip — enable later") {
                         prepareBrainVM.skipDownload()
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
+                    .onboardingSecondary()
                 }
 
                 Text("You can also enable Daily Briefs anytime from the menu-bar Hippocampus icon.")
@@ -137,7 +134,7 @@ struct PrepareBrainSlide: View {
         case .downloading:
             VStack(spacing: 6) {
                 ProgressView(value: prepareBrainVM.downloadProgress)
-                    .tint(OnboardingTheme.accentBlue)
+                    .tint(OnboardingDesign.Palette.accent)
                     .frame(maxWidth: 300)
                 HStack {
                     Text("\(Int(prepareBrainVM.downloadProgress * 100))%")
@@ -147,9 +144,7 @@ struct PrepareBrainSlide: View {
                     Button("Cancel") {
                         prepareBrainVM.cancelDownload()
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .onboardingText()
                 }
                 .frame(maxWidth: 300)
             }
@@ -175,8 +170,7 @@ struct PrepareBrainSlide: View {
                 Button("Retry") {
                     prepareBrainVM.startDownload()
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .onboardingSecondary()
             }
 
         case .skipped:

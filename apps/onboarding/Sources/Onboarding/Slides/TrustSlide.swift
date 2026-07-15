@@ -7,33 +7,37 @@ struct TrustSlide: View {
 
     var body: some View {
         SlideContainer {
-            VStack(spacing: 24) {
-                OnboardingTheme.title("Built for trust, not promises")
+            VStack(spacing: OnboardingDesign.Space.xl) {
+                VStack(spacing: OnboardingDesign.Space.md) {
+                    SectionChip(text: "Trust")
+                    OnboardingDesign.TypeRamp.title("Built for trust, not promises")
+                        .multilineTextAlignment(.center)
+                }
 
                 pipelineView
 
-                VStack(alignment: .leading, spacing: 8) {
-                    trustPoint(
+                VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
+                    IconTextRow(
                         icon: "key.fill",
-                        text: "256-bit key sealed on this Mac."
+                        title: "256-bit key sealed on this Mac."
                     )
                     Button("How is the key sealed?") {
                         showKeyWrapAudit = true
                     }
-                    .buttonStyle(.link)
-                    .font(.system(size: 12))
-                    .padding(.leading, 30)
+                    .onboardingText(color: OnboardingDesign.Palette.accent)
+                    .padding(.leading, 34)
                     .accessibilityIdentifier("TrustSlideInspectKeyWrap")
 
-                    trustPoint(
+                    IconTextRow(
                         icon: "shield.checkered",
-                        text: "Seven layers of protection filter what reaches your brain."
+                        title: "Seven layers of protection filter what reaches your brain."
                     )
-                    trustPoint(
+                    IconTextRow(
                         icon: "network.slash",
-                        text: "Zero network — your data never leaves this Mac."
+                        title: "Zero network — your data never leaves this Mac."
                     )
                 }
+                .glassCard(padding: OnboardingDesign.Space.lg)
 
                 cascadePreview
             }
@@ -71,15 +75,14 @@ struct TrustSlide: View {
             pipelineArrow
             pipelineStep(icon: "magnifyingglass", label: "Local\nSearch")
         }
-        .padding(16)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .glassCard(padding: OnboardingDesign.Space.lg)
     }
 
     private func pipelineStep(icon: String, label: String) -> some View {
         VStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 22))
-                .foregroundStyle(OnboardingTheme.accentBlue)
+                .foregroundStyle(OnboardingDesign.Palette.accent)
             Text(label)
                 .font(.system(size: 11, weight: .medium))
                 .multilineTextAlignment(.center)
@@ -105,7 +108,7 @@ struct TrustSlide: View {
                 HStack(spacing: 8) {
                     Text("§\(step.section)")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(OnboardingTheme.accentBlue)
+                        .foregroundStyle(OnboardingDesign.Palette.accent)
                         .frame(width: 22)
                     Text(step.label)
                         .font(.system(size: 12))
@@ -113,17 +116,6 @@ struct TrustSlide: View {
                 }
             }
         }
-        .padding(14)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func trustPoint(icon: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .frame(width: 20)
-                .foregroundStyle(OnboardingTheme.accentBlue)
-            Text(text)
-                .font(.system(size: 14))
-        }
+        .glassCard(padding: OnboardingDesign.Space.md)
     }
 }

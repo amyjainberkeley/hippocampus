@@ -7,16 +7,16 @@ struct DoneSlide: View {
 
     var body: some View {
         SlideContainer {
-            VStack(spacing: 24) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(.green)
-
-                OnboardingTheme.title("You're all set")
-
-                Text("Hippocampus is now watching for activity. Look for the menu-bar icon.")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
+            VStack(spacing: OnboardingDesign.Space.xl) {
+                HeroHeader(
+                    title: "You're all set",
+                    subtitle: "Hippocampus is now watching for activity. Look for the menu-bar icon.",
+                    titleStyle: .display
+                ) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 60))
+                        .foregroundStyle(OnboardingDesign.Palette.success)
+                }
 
                 summaryChecklist
 
@@ -26,7 +26,7 @@ struct DoneSlide: View {
     }
 
     private var summaryChecklist: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
             checkRow(
                 granted: flowVM.screenRecordingPermission.status == .granted,
                 label: "Screen Recording"
@@ -35,15 +35,14 @@ struct DoneSlide: View {
             checkRow(granted: true, label: "Retention policy set")
             modelCheckRow
         }
-        .padding(16)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
         .frame(maxWidth: 380)
+        .glassCard(padding: OnboardingDesign.Space.lg)
     }
 
     private func checkRow(granted: Bool, label: String) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: OnboardingDesign.Space.md) {
             Image(systemName: granted ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(granted ? .green : .secondary)
+                .foregroundStyle(granted ? OnboardingDesign.Palette.success : Color.secondary)
             Text(label)
                 .font(.system(size: 14))
             Spacer()
@@ -55,7 +54,7 @@ struct DoneSlide: View {
         if prepareBrainVM.modelDownloaded {
             checkRow(granted: true, label: "On-device LLM")
         } else {
-            HStack(spacing: 10) {
+            HStack(spacing: OnboardingDesign.Space.md) {
                 Image(systemName: "circle")
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
@@ -76,18 +75,11 @@ struct DoneSlide: View {
     // user at the always-present menu-bar entry point. If the hotkeys
     // ship (recall-UI audit PR-5), restore a shortcuts row *then*.
     private var menuBarHint: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "menubar.arrow.up.rectangle")
-                .foregroundStyle(OnboardingTheme.accentBlue)
-                .frame(width: 20)
-            Text(OnboardingCopy.doneMenuBarHint)
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.leading)
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+        IconTextRow(
+            icon: "menubar.arrow.up.rectangle",
+            title: OnboardingCopy.doneMenuBarHint
+        )
         .frame(maxWidth: 380)
+        .glassCard(padding: OnboardingDesign.Space.lg)
     }
 }
