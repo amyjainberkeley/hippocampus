@@ -4,6 +4,7 @@ import OnboardingKit
 struct LivePreviewSlide: View {
     @State private var visibleCount = 0
     @State private var animationTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let events = LivePreviewEvents.demo
 
@@ -17,14 +18,19 @@ struct LivePreviewSlide: View {
 
     var body: some View {
         SlideContainer {
-            VStack(spacing: 24) {
-                OnboardingTheme.title("What Hippocampus captures")
+            VStack(spacing: OnboardingDesign.Space.xl) {
+                VStack(spacing: OnboardingDesign.Space.md) {
+                    SectionChip(text: "Live Preview")
+                    OnboardingDesign.TypeRamp.title("What Hippocampus captures")
+                        .multilineTextAlignment(.center)
 
-                Text("A live preview of the capture pipeline. Sensitive apps are blocked automatically.")
-                    .font(.system(size: 14))
+                    OnboardingDesign.TypeRamp.body(
+                        "A live preview of the capture pipeline. Sensitive apps are blocked automatically."
+                    )
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 480)
+                }
 
                 eventStream
 
@@ -40,26 +46,29 @@ struct LivePreviewSlide: View {
             ForEach(events) { event in
                 if event.id < visibleCount {
                     eventRow(event)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(OnboardingDesign.Motion.entrance(reduceMotion: reduceMotion))
                 }
             }
         }
-        .padding(12)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+        .glassCard(padding: OnboardingDesign.Space.md)
         .frame(maxWidth: 500)
-        .animation(.easeInOut(duration: 0.4), value: visibleCount)
+        .animation(
+            OnboardingDesign.Motion.resolve(OnboardingDesign.Motion.gentle, reduceMotion: reduceMotion),
+            value: visibleCount
+        )
     }
 
     private func eventRow(_ event: LivePreviewEvent) -> some View {
-        HStack(spacing: 10) {
-            Text(event.time)
-                .font(.system(size: 11, design: .monospaced))
+        HStack(spacing: OnboardingDesign.Space.sm + 2) {
+            OnboardingDesign.TypeRamp.mono(event.time)
                 .foregroundStyle(.tertiary)
                 .frame(width: 65, alignment: .leading)
 
             Image(systemName: event.systemIcon)
                 .frame(width: 18)
-                .foregroundStyle(event.isBlocked ? .red : OnboardingTheme.accentBlue)
+                .foregroundStyle(event.isBlocked
+                                 ? OnboardingDesign.Palette.excluded
+                                 : OnboardingDesign.Palette.accent)
 
             Text(event.appName)
                 .font(.system(size: 13, weight: .medium))
@@ -67,24 +76,26 @@ struct LivePreviewSlide: View {
 
             Text(event.isBlocked ? "Blocked: \(event.detail)" : event.detail)
                 .font(.system(size: 12))
-                .foregroundStyle(event.isBlocked ? .red : .secondary)
+                .foregroundStyle(event.isBlocked ? OnboardingDesign.Palette.excluded : .secondary)
                 .lineLimit(1)
 
             Spacer()
 
             Image(systemName: event.isBlocked ? "xmark.circle.fill" : "checkmark.circle.fill")
-                .foregroundStyle(event.isBlocked ? .red : .green)
+                .foregroundStyle(event.isBlocked
+                                 ? OnboardingDesign.Palette.excluded
+                                 : OnboardingDesign.Palette.success)
                 .font(.system(size: 14))
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, OnboardingDesign.Space.xs + 2)
     }
 
     private var counterBar: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: OnboardingDesign.Space.lg) {
             Label("\(capturedCount) captured", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(OnboardingDesign.Palette.success)
             Label("\(blockedCount) blocked", systemImage: "xmark.circle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(OnboardingDesign.Palette.excluded)
         }
         .font(.system(size: 13, weight: .medium))
     }

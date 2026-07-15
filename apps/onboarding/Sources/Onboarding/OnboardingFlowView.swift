@@ -102,17 +102,37 @@ struct OnboardingFlowView: View {
                         .keyboardShortcut(.defaultAction)
                         .onboardingPrimary()
                 } else {
-                    Button(primaryLabel) { advance() }
-                        .keyboardShortcut(.defaultAction)
-                        .onboardingPrimary()
-                        .disabled(!flowVM.canAdvance)
-                        .opacity(flowVM.canAdvance ? 1 : 0.5)
+                    navPrimaryButton
                 }
             }
             .frame(width: 160, alignment: .trailing)
         }
         .padding(.horizontal, OnboardingDesign.Space.xxl)
         .padding(.vertical, OnboardingDesign.Space.lg)
+    }
+
+    /// Steps whose in-content action is the screen's real filled CTA (e.g.
+    /// PrepareBrain's "Download"). There, the nav "Continue" steps down to a
+    /// ghost so only one filled accent shows per screen (the one-CTA rule).
+    private var navPrimaryIsGhost: Bool {
+        flowVM.currentStep == .prepareBrain
+    }
+
+    @ViewBuilder
+    private var navPrimaryButton: some View {
+        if navPrimaryIsGhost {
+            Button(primaryLabel) { advance() }
+                .keyboardShortcut(.defaultAction)
+                .onboardingSecondary()
+                .disabled(!flowVM.canAdvance)
+                .opacity(flowVM.canAdvance ? 1 : 0.5)
+        } else {
+            Button(primaryLabel) { advance() }
+                .keyboardShortcut(.defaultAction)
+                .onboardingPrimary()
+                .disabled(!flowVM.canAdvance)
+                .opacity(flowVM.canAdvance ? 1 : 0.5)
+        }
     }
 
     /// Raycast labels its first step "Start Setup"; the rest are "Continue".

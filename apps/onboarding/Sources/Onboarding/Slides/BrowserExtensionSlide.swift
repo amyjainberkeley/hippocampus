@@ -17,24 +17,27 @@ struct BrowserExtensionSlide: View {
 
     var body: some View {
         SlideContainer {
-            VStack(spacing: 24) {
-                Image(systemName: "puzzlepiece.extension")
-                    .font(.system(size: 48))
-                    .foregroundStyle(OnboardingTheme.accentBlue)
+            VStack(spacing: OnboardingDesign.Space.xl) {
+                VStack(spacing: OnboardingDesign.Space.md) {
+                    Image(systemName: "puzzlepiece.extension")
+                        .font(.system(size: 48))
+                        .foregroundStyle(OnboardingDesign.Palette.accent)
 
-                OnboardingTheme.title("Get richer captures from your browser")
+                    SectionChip(text: "Browser")
 
-                Text("Install the Hippocampus extension to capture full page text — not just what's visible on screen. This makes search much richer.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 480)
+                    OnboardingDesign.TypeRamp.title("Get richer captures from your browser")
+                        .multilineTextAlignment(.center)
+
+                    OnboardingDesign.TypeRamp.body("Install the Hippocampus extension to capture full page text — not just what's visible on screen. This makes search much richer.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 480)
+                }
 
                 if extensionVM.hasBrowsers {
                     browserList
                 } else {
-                    Text("No supported browsers detected.")
-                        .font(.system(size: 14))
+                    OnboardingDesign.TypeRamp.body("No supported browsers detected.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -45,7 +48,7 @@ struct BrowserExtensionSlide: View {
     }
 
     private var browserList: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
             // Inline Automation-TCC warning for the Safari row.
             // Renders before the first click (info) or after a prior
             // denial (recovery). Explains WHY the OS dialog is about
@@ -57,7 +60,7 @@ struct BrowserExtensionSlide: View {
                     browserRow(row)
                 }
             }
-            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            .glassCard(padding: 0)
         }
         .frame(maxWidth: 480)
     }
@@ -65,7 +68,7 @@ struct BrowserExtensionSlide: View {
     @ViewBuilder
     private func browserRow(_ row: BrowserExtensionViewModel.BrowserRow) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: OnboardingDesign.Space.md) {
                 browserIcon(for: row.browser)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 2) {
@@ -82,12 +85,12 @@ struct BrowserExtensionSlide: View {
                 installButton(for: row.browser)
             }
             .padding(.vertical, 10)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, OnboardingDesign.Space.lg)
 
             if let instructions = row.installInstructions {
                 chromiumInstructions(instructions)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 12)
+                    .padding(.horizontal, OnboardingDesign.Space.lg)
+                    .padding(.bottom, OnboardingDesign.Space.md)
             }
         }
     }
@@ -110,7 +113,7 @@ struct BrowserExtensionSlide: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .tint(OnboardingTheme.accentBlue)
+        .tint(OnboardingDesign.Palette.accent)
     }
 
     /// Info callout pre-click OR recovery banner post-denial. Only
@@ -123,7 +126,7 @@ struct BrowserExtensionSlide: View {
         if hasSafari && status == .denied {
             calloutBanner(
                 icon: "exclamationmark.triangle.fill",
-                tint: .orange,
+                tint: OnboardingDesign.Palette.attention,
                 title: "Automation was denied",
                 body: "macOS won't re-prompt until you grant it in Settings, or reset the permission.",
                 showRecoveryActions: true
@@ -131,7 +134,7 @@ struct BrowserExtensionSlide: View {
         } else if hasSafari && status != .granted && !didAttemptSafariAutomation {
             calloutBanner(
                 icon: "info.circle.fill",
-                tint: OnboardingTheme.accentBlue,
+                tint: OnboardingDesign.Palette.accent,
                 title: "Safari asks for Automation",
                 body: "Safari asks for Automation because Hippocampus reads the active tab's URL and text — everything stays local. macOS will show a system dialog the first time you click \"Open Safari → Settings\".",
                 showRecoveryActions: false
@@ -146,19 +149,19 @@ struct BrowserExtensionSlide: View {
         body: String,
         showRecoveryActions: Bool
     ) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: OnboardingDesign.Space.sm) {
             Image(systemName: icon)
                 .foregroundStyle(tint)
                 .font(.system(size: 14))
                 .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: OnboardingDesign.Space.xs + 2) {
                 Text(title).font(.system(size: 12, weight: .semibold))
                 Text(body)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if showRecoveryActions {
-                    HStack(spacing: 8) {
+                    HStack(spacing: OnboardingDesign.Space.sm) {
                         Button("Reset & retry") {
                             Task {
                                 _ = await flowVM.automationPermission.resetAndRetry()
@@ -176,8 +179,15 @@ struct BrowserExtensionSlide: View {
                 }
             }
         }
-        .padding(10)
-        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .padding(OnboardingDesign.Space.md)
+        .background(
+            RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control, style: .continuous)
+                .fill(tint.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control, style: .continuous)
+                .stroke(tint.opacity(0.25), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -185,10 +195,10 @@ struct BrowserExtensionSlide: View {
         switch browser.kind {
         case .safari:
             Image(systemName: "safari")
-                .foregroundStyle(OnboardingTheme.accentBlue)
+                .foregroundStyle(OnboardingDesign.Palette.accent)
         case .chromium:
             Image(systemName: "globe")
-                .foregroundStyle(OnboardingTheme.accentBlue)
+                .foregroundStyle(OnboardingDesign.Palette.accent)
         }
     }
 
@@ -197,11 +207,11 @@ struct BrowserExtensionSlide: View {
         switch status {
         case .installed:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(OnboardingDesign.Palette.success)
                 .font(.system(size: 14))
         case .notInstalled:
             Image(systemName: "xmark.circle")
-                .foregroundStyle(.orange)
+                .foregroundStyle(OnboardingDesign.Palette.attention)
                 .font(.system(size: 14))
         case .unknown:
             // Distinguish "probe hasn't run yet" from "probe ran and
@@ -222,7 +232,7 @@ struct BrowserExtensionSlide: View {
     private func chromiumInstructions(
         _ instructions: BrowserExtensionViewModel.ChromiumInstallInstructions
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
             if instructions.didOpenBrowser {
                 Text("\(instructions.browserName) just opened to chrome://extensions and Finder is showing the unpacked extension folder. Three steps:")
                     .font(.system(size: 12))
@@ -231,11 +241,11 @@ struct BrowserExtensionSlide: View {
             } else {
                 Text("Couldn't auto-open \(instructions.browserName). Open it yourself, paste the URL, then drag the folder onto the page:")
                     .font(.system(size: 12))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(OnboardingDesign.Palette.attention)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: OnboardingDesign.Space.xs) {
                 instructionStep(number: "1", text: "In \(instructions.browserName), toggle Developer mode (top-right of chrome://extensions).")
                 instructionStep(number: "2", text: "Click Load unpacked.")
                 instructionStep(
@@ -247,8 +257,8 @@ struct BrowserExtensionSlide: View {
             }
 
             if let path = instructions.unpackedDirPath {
-                HStack(spacing: 8) {
-                    Text(path)
+                HStack(spacing: OnboardingDesign.Space.sm) {
+                    OnboardingDesign.TypeRamp.mono(path)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -261,7 +271,7 @@ struct BrowserExtensionSlide: View {
                         .buttonStyle(.borderless)
                         .controlSize(.small)
                 }
-                .padding(.top, 4)
+                .padding(.top, OnboardingDesign.Space.xs)
             }
 
             if !instructions.didOpenBrowser {
@@ -273,18 +283,18 @@ struct BrowserExtensionSlide: View {
                 .padding(.top, 2)
             }
         }
-        .padding(10)
+        .padding(OnboardingDesign.Space.md)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(OnboardingTheme.accentBlue.opacity(0.05))
+            RoundedRectangle(cornerRadius: OnboardingDesign.Radius.control, style: .continuous)
+                .fill(OnboardingDesign.Palette.accent.opacity(0.05))
         )
     }
 
     private func instructionStep(number: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: OnboardingDesign.Space.sm) {
             Text(number)
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(OnboardingTheme.accentBlue)
+                .foregroundStyle(OnboardingDesign.Palette.accent)
                 .frame(width: 14, alignment: .leading)
             Text(text)
                 .font(.system(size: 12))
