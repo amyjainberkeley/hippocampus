@@ -441,12 +441,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // `start()` on the same instance doesn't erroneously refuse to
         // bring up the SCStream (the detector + monitor will re-arm on
         // the next `start()`).
-        lock.lock()
-        pausedForScreenShare = false
-        lastPausedActor = nil
-        pausedForTCC = false
-        revokedSurfaces.removeAll()
-        lock.unlock()
+        lock.withLock {
+            pausedForScreenShare = false
+            lastPausedActor = nil
+            pausedForTCC = false
+            revokedSurfaces.removeAll()
+        }
     }
 
     // Locked critical sections live in non-async helpers: `NSLock` is
@@ -737,11 +737,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// the OS-touching `stopCapture()`; state-flag logic is headless-
     /// tested.
     public func pauseForScreenShare(actor: String?) async {
-        lock.lock()
-        if pausedForScreenShare { lock.unlock(); return }
-        pausedForScreenShare = true
-        lastPausedActor = actor
-        lock.unlock()
+        let early = lock.withLock { () -> Bool in
+            if pausedForScreenShare { return true }
+            pausedForScreenShare = true
+            lastPausedActor = actor
+            return false
+        }
+        if early { return }
 
         FileHandle.standardError.write(
             "mci-capture-helper: helper_health screen_share_active=true actor=\(actor ?? "unknown")\n"
@@ -760,12 +762,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     ///
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
     public func resumeFromScreenShare() async throws {
-        lock.lock()
-        if !pausedForScreenShare { lock.unlock(); return }
-        // Clear optimistically so `start()` doesn't recurse; restore on
-        // throw so the next detector cycle retries.
-        pausedForScreenShare = false
-        lock.unlock()
+        let early = lock.withLock { () -> Bool in
+            if !pausedForScreenShare { return true }
+            // Clear optimistically so `start()` doesn't recurse; restore on
+            // throw so the next detector cycle retries.
+            pausedForScreenShare = false
+            return false
+        }
+        if early { return }
 
         FileHandle.standardError.write(
             "mci-capture-helper: helper_health screen_share_active=false\n"
@@ -775,7 +779,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         do {
             try await bringUpSCStreamOnly()
         } catch {
-            lock.lock(); pausedForScreenShare = true; lock.unlock()
+            lock.withLock { pausedForScreenShare = true }
             FileHandle.standardError.write(
                 "mci-capture-helper: SCStream resume-from-pause failed (staying paused): \(error)\n"
                     .data(using: .utf8) ?? Data()
@@ -849,12 +853,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// the OS-touching `stopCapture()`; the state-flag logic is
     /// headless-tested.
     public func pauseForTCC(surface: TCCSurface) async {
-        lock.lock()
-        let alreadyRevoked = revokedSurfaces.contains(surface)
-        revokedSurfaces.insert(surface)
-        let wasPaused = pausedForTCC
-        pausedForTCC = true
-        lock.unlock()
+        let (alreadyRevoked, wasPaused) = lock.withLock { () -> (Bool, Bool) in
+            let alreadyRevoked = revokedSurfaces.contains(surface)
+            revokedSurfaces.insert(surface)
+            let wasPaused = pausedForTCC
+            pausedForTCC = true
+            return (alreadyRevoked, wasPaused)
+        }
 
         if alreadyRevoked { return }
 
@@ -886,11 +891,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     ///
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
     public func resumeFromTCC(surface: TCCSurface) async throws {
-        lock.lock()
-        revokedSurfaces.remove(surface)
-        let stillRevoked = !revokedSurfaces.isEmpty
-        let stillSharing = pausedForScreenShare
-        lock.unlock()
+        let (stillRevoked, stillSharing) = lock.withLock { () -> (Bool, Bool) in
+            revokedSurfaces.remove(surface)
+            let stillRevoked = !revokedSurfaces.isEmpty
+            let stillSharing = pausedForScreenShare
+            return (stillRevoked, stillSharing)
+        }
 
         FileHandle.standardError.write(
             TCCHelperHealth.line(
@@ -909,7 +915,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             return
         }
 
-        lock.lock(); pausedForTCC = false; lock.unlock()
+        lock.withLock { pausedForTCC = false }
 
         do {
             try await bringUpSCStreamOnly()
@@ -917,10 +923,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             // The OS hasn't caught up on the grant yet — go back to
             // paused so the next monitor tick can retry via the same
             // "granted debounced → resume" path.
-            lock.lock()
-            pausedForTCC = true
-            revokedSurfaces.insert(surface)
-            lock.unlock()
+            lock.withLock {
+                pausedForTCC = true
+                revokedSurfaces.insert(surface)
+            }
             FileHandle.standardError.write(
                 "mci-capture-helper: SCStream resume-from-TCC-\(surface.rawValue) failed (staying paused): \(error)\n"
                     .data(using: .utf8) ?? Data()

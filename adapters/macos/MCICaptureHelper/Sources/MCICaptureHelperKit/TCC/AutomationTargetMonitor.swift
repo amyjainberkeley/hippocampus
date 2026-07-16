@@ -233,19 +233,19 @@ public final class AutomationTargetMonitor: @unchecked Sendable {
     internal func tickOnce() async {
         var toEmit: [Transition] = []
         var observerSnapshot: (any Observer)?
-        lock.lock()
-        for bundle in targets {
-            // askUser: false — mission constraint. NEVER prompt on poll.
-            let sample = probe.status(forTargetBundle: bundle, askUser: false)
-            let old = published[bundle] ?? .unknown
-            if let t = decideTransition(bundle: bundle, old: old, sample: sample) {
-                published[bundle] = t.newStatus
-                grantRepeats[bundle] = 0
-                toEmit.append(t)
+        lock.withLock {
+            for bundle in targets {
+                // askUser: false — mission constraint. NEVER prompt on poll.
+                let sample = probe.status(forTargetBundle: bundle, askUser: false)
+                let old = published[bundle] ?? .unknown
+                if let t = decideTransition(bundle: bundle, old: old, sample: sample) {
+                    published[bundle] = t.newStatus
+                    grantRepeats[bundle] = 0
+                    toEmit.append(t)
+                }
             }
+            observerSnapshot = observer
         }
-        observerSnapshot = observer
-        lock.unlock()
 
         for t in toEmit {
             await observerSnapshot?.automationTargetDidTransition(t)

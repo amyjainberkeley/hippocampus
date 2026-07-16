@@ -271,21 +271,21 @@ public final class TCCStatusMonitor: @unchecked Sendable {
         // never blocks the poll loop's next tick.
         var toEmit: [Transition] = []
         var observerSnapshot: (any Observer)?
-        lock.lock()
-        for surface in surfaces {
-            let sample = probe.status(for: surface)
-            let old = published[surface] ?? .unknown
-            let transition = decideTransition(
-                surface: surface, old: old, sample: sample
-            )
-            if let t = transition {
-                published[surface] = t.newStatus
-                grantRepeats[surface] = 0
-                toEmit.append(t)
+        lock.withLock {
+            for surface in surfaces {
+                let sample = probe.status(for: surface)
+                let old = published[surface] ?? .unknown
+                let transition = decideTransition(
+                    surface: surface, old: old, sample: sample
+                )
+                if let t = transition {
+                    published[surface] = t.newStatus
+                    grantRepeats[surface] = 0
+                    toEmit.append(t)
+                }
             }
+            observerSnapshot = observer
         }
-        observerSnapshot = observer
-        lock.unlock()
 
         for t in toEmit {
             await observerSnapshot?.tccStatusDidTransition(t)

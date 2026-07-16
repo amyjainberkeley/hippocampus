@@ -90,9 +90,20 @@ public struct CoreGraphicsDisplayCaptureProbe: DisplayCaptureProbe {
         }
         var out: [(displayId: UInt32, reason: String)] = []
         for id in displays.prefix(Int(count)) {
-            if CGDisplayIsCaptured(id) != 0 {
-                out.append((UInt32(id), "CGDisplay"))
-            } else if CGDisplayIsInMirrorSet(id) != 0 {
+            // macOS-15 SDK migration (2026-07-15): `CGDisplayIsCaptured` was
+            // REMOVED ("No longer supported") with no drop-in replacement.
+            // Exclusive-capture / screen-recording detection now relies on
+            // the app-level probes (`SCShareableContentProbe` +
+            // `NSWorkspaceRunningAppProbe`) the detector fuses into its
+            // verdict. This probe keeps the mirror-set signal (AirPlay /
+            // Sidecar / hardware mirror), which is unaffected.
+            //
+            // *** CSO-REVIEW + LIVE-MAC-VALIDATE (screen-share is the top
+            // privacy invariant): confirm Zoom / Meet / Teams / AirPlay
+            // still trip auto-pause via the combined verdict on a real Mac
+            // BEFORE shipping. See docs/research/2026-07-15-app-build-
+            // blockers.md §C. ***
+            if CGDisplayIsInMirrorSet(id) != 0 {
                 // Sidecar / AirPlay / hardware-mirror all fold in here.
                 out.append((UInt32(id), "MirrorSet"))
             }
@@ -256,39 +267,38 @@ public final class ScreenShareDetector: @unchecked Sendable {
     /// Debounce state machine. Observer fires ONLY on state flips
     /// (or actor refreshes within an ongoing active state).
     internal func applyDebounced(verdict: RawVerdict) async {
-        let sampleToPublish: ScreenShareSample?
-        let observerSnapshot: (any Observer)?
-        lock.lock()
-        let candidate = ScreenShareSample(
-            isSharingActive: verdict.isSharingActive,
-            sharingActor: verdict.sharingActor
-        )
-        if candidate.isSharingActive == pendingSample.isSharingActive {
-            pendingRepeatCount += 1
-        } else {
-            pendingSample = candidate
-            pendingRepeatCount = 1
+        let (sampleToPublish, observerSnapshot): (ScreenShareSample?, (any Observer)?) = lock.withLock {
+            let candidate = ScreenShareSample(
+                isSharingActive: verdict.isSharingActive,
+                sharingActor: verdict.sharingActor
+            )
+            if candidate.isSharingActive == pendingSample.isSharingActive {
+                pendingRepeatCount += 1
+            } else {
+                pendingSample = candidate
+                pendingRepeatCount = 1
+            }
+            let sampleToPublish: ScreenShareSample?
+            // First sample sets pendingSample; second (repeatCount == 2)
+            // confirms — total 2 consecutive samples in agreement.
+            if pendingRepeatCount >= 2,
+               candidate.isSharingActive != publishedSample.isSharingActive
+            {
+                publishedSample = candidate
+                sampleToPublish = candidate
+            } else if pendingRepeatCount >= 2,
+                      candidate.isSharingActive,
+                      candidate.sharingActor != publishedSample.sharingActor
+            {
+                // Actor changed within an ongoing active state — refresh
+                // the pill without counting as a state flip.
+                publishedSample = candidate
+                sampleToPublish = candidate
+            } else {
+                sampleToPublish = nil
+            }
+            return (sampleToPublish, observer)
         }
-        // First sample sets pendingSample; second (repeatCount == 2)
-        // confirms — total 2 consecutive samples in agreement.
-        if pendingRepeatCount >= 2,
-           candidate.isSharingActive != publishedSample.isSharingActive
-        {
-            publishedSample = candidate
-            sampleToPublish = candidate
-        } else if pendingRepeatCount >= 2,
-                  candidate.isSharingActive,
-                  candidate.sharingActor != publishedSample.sharingActor
-        {
-            // Actor changed within an ongoing active state — refresh
-            // the pill without counting as a state flip.
-            publishedSample = candidate
-            sampleToPublish = candidate
-        } else {
-            sampleToPublish = nil
-        }
-        observerSnapshot = observer
-        lock.unlock()
 
         if let sample = sampleToPublish {
             await observerSnapshot?.screenShareDetectorDidTransition(to: sample)

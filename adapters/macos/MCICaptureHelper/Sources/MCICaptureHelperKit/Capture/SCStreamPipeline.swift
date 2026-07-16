@@ -386,15 +386,20 @@ public enum SCContentFilterFactory {
             throw SCStreamPipelineError.emptyIncludeSet
         }
         // The BINDING form per ADR-0031 §Status FORK 3 = B:
-        // `SCContentFilter(display:including:exceptingWindows:)` with a
-        // non-empty include list. `exceptingWindows:` stays empty —
-        // ADR-0013 §1 denylist is enforced via the selection helper's
-        // denylist-subtract path (redesign memo §1.3.1 step 4), NOT via
-        // `exceptingWindows:` (per the memo's "cleaner semantic" note).
+        // `SCContentFilter(display:including:)` with a non-empty *window*
+        // include list. ADR-0013 §1 denylist is enforced via the selection
+        // helper's denylist-subtract path (redesign memo §1.3.1 step 4).
+        //
+        // macOS-15 SDK migration (2026-07-15): the empty `exceptingWindows:`
+        // label made overload resolution bind to the *application*-include
+        // init `init(display:including applications:exceptingWindows:)`,
+        // which now expects `[SCRunningApplication]`. Dropping the empty
+        // `exceptingWindows:` selects the window-include init
+        // `init(display:including windows: [SCWindow])` — semantically
+        // identical (empty exception set == no exception).
         return SCContentFilter(
             display: display,
-            including: includingSet,
-            exceptingWindows: []
+            including: includingSet
         )
     }
 }
