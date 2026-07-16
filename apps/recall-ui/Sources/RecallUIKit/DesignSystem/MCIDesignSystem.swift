@@ -211,7 +211,7 @@ public extension MCI {
     /// pillow. `card` is the default; `modal` is used ONLY for the
     /// Action Panel + Global Recall popup, which float above app
     /// chrome. `none` is a token so a view can opt out explicitly.
-    struct Shadow {
+    struct Shadow: Sendable {
         public let color: SwiftUI.Color
         public let radius: CGFloat
         public let x: CGFloat

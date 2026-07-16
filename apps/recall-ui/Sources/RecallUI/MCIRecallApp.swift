@@ -55,7 +55,9 @@ struct MCIRecallApp: App {
     @NSApplicationDelegateAdaptor(MCIRecallAppDelegate.self) var appDelegate
 
     @MainActor
-    private static let reader: BrainReader = Self.makeReader()
+    // fileprivate (not private): MCIRecallAppDelegate (a separate type in this
+    // same file) reads MCIRecallApp.reader to wire the global-recall popup.
+    fileprivate static let reader: BrainReader = Self.makeReader()
 
     var body: some Scene {
         WindowGroup("Hippocampus Recall") {

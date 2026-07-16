@@ -226,6 +226,7 @@ private struct RelatedHitRow: View {
 // corpus without touching the FFI.
 // ---------------------------------------------------------------------------
 
+#if DEBUG  // Previews are dev-only tooling; excluded from release builds (the #Preview macro plugin ships with Xcode, not the CLI toolchain). macOS-15 SDK migration 2026-07-15.
 #Preview("Loaded — cross-app connections (all)") {
     let reader = StubBrainReader()
     // Hit 102 in the demo corpus links to 101 + 103 (audit §7 topology).
@@ -277,3 +278,4 @@ private struct RelatedHitRow: View {
     .padding()
     .background(Color.brandBgPrimary)
 }
+#endif
