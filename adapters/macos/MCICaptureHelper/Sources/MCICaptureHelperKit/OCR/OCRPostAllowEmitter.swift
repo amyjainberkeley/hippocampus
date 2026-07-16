@@ -183,6 +183,11 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     public static func activateM4Lift(enabled: Bool) {
         Self.killOcrEmit = !enabled
     }
+    // macOS-15 SDK migration (2026-07-15): restore the `worker` stored
+    // property. The initializer assigns `self.worker` and `processAfterAllow`
+    // calls `worker.submit(...)`, but the declaration had been dropped
+    // (an incomplete earlier refactor), so the file no longer compiled.
+    private let worker: VisionOCRWorker
     private let cascade: SuppressionCascade
     private let sink: any FrameSink
     private let sequence: FrameSequence

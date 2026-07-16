@@ -25,6 +25,14 @@
 import Darwin
 import Foundation
 
+// macOS-15 / Swift-6: `mach_task_self_` is an imported mutable global, and
+// the concurrency checker flags every read of it (the `nonisolated(unsafe)`
+// annotation on our own binding does not exempt reading the imported global
+// in its initializer). `task_self_trap()` is the Mach trap that returns the
+// same task-self port via a function call — not a mutable-global read — so it
+// satisfies the checker. The port is a stable process-wide constant.
+private let footprintMachTaskSelf: mach_port_t = task_self_trap()
+
 /// One footprint reading: instantaneous CPU + RSS at sample time.
 /// Both fields are content-free numeric counters.
 public struct FootprintReading: Sendable, Equatable {
@@ -110,7 +118,7 @@ public final class MachFootprintSampler: FootprintSampler, @unchecked Sendable {
         let kr = withUnsafeMutablePointer(to: &info) { ptr -> kern_return_t in
             ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { reboundPtr in
                 task_info(
-                    mach_task_self_,
+                    footprintMachTaskSelf,
                     task_flavor_t(MACH_TASK_BASIC_INFO),
                     reboundPtr,
                     &count
