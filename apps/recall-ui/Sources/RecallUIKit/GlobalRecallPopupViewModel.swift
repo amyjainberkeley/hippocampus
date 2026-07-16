@@ -60,7 +60,10 @@ public final class GlobalRecallPopupViewModel: ObservableObject {
 
     private let reader: BrainReader
     private var debounceCancellable: AnyCancellable?
-    private var inFlightTask: Task<Void, Never>?
+    // The in-flight search task is only ever cancelled, never awaited through
+    // this property, so its Success type is immaterial to usage — but it must
+    // match the task actually assigned (a Result-returning search) for Swift 6.
+    private var inFlightTask: Task<Result<[Hit], any Error>, Never>?
 
     public init(
         reader: BrainReader,

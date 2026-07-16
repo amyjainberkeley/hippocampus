@@ -352,7 +352,12 @@ public final class AuditLog: @unchecked Sendable {
     /// ISO-8601 in UTC with second precision. `Z` suffix keeps the log
     /// timezone-unambiguous — a security team reading `audit.log` on a
     /// different host doesn't need to know the user's local TZ.
-    public static let iso8601Formatter: ISO8601DateFormatter = {
+    ///
+    /// `nonisolated(unsafe)`: `ISO8601DateFormatter` is not `Sendable`, but
+    /// this instance is configured once and only ever read (`string(from:)`
+    /// is thread-safe on Foundation formatters). Swift 6 flags the shared
+    /// static defensively; the usage is safe.
+    nonisolated(unsafe) public static let iso8601Formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         f.timeZone = TimeZone(identifier: "UTC")

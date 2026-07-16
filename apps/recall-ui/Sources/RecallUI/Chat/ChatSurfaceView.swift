@@ -323,6 +323,7 @@ private struct MessageRow: View {
 
 // MARK: - Previews
 
+#if DEBUG  // Previews are dev-only tooling; excluded from release builds (the #Preview macro plugin ships with Xcode, not the CLI toolchain). macOS-15 SDK migration 2026-07-15.
 #Preview("Empty state") {
     ChatSurfaceView()
         .frame(width: 720, height: 480)
@@ -343,3 +344,4 @@ private struct MessageRow: View {
         .frame(width: 720, height: 480)
         .preferredColorScheme(.dark)
 }
+#endif
