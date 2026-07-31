@@ -34,7 +34,7 @@ use serde::Deserialize;
 /// The TOML file is bundled into the binary at compile time. Per
 /// ADR-0030 §3(b) `docs/research/sensitive-domains.toml` is the
 /// single source of truth; the Rust accessor reads from there only.
-const RAW_TOML: &str = include_str!("../../../../docs/research/sensitive-domains.toml");
+const RAW_TOML: &str = include_str!("sensitive-domains.toml");
 
 /// Lazily-initialized table. The `OnceLock<SensitiveDomainTable>` is
 /// populated on first call to [`matches_sensitive_domain`] (or any of

@@ -4,6 +4,15 @@ The ADR (Architecture Decision Record) archive. Every locked material
 decision has a numbered file here. Sequential, immutable once merged
 — supersede an old ADR with a new one, do not rewrite.
 
+> **A note on dead links.** Some ADRs cite internal working documents
+> (`docs/research/…`, `docs/business/…`, nightly logs, competitor notes)
+> that are not part of this repository. Those were operating notes, not
+> engineering artifacts, and they are not published. The ADRs themselves
+> are unedited, so the reasoning is intact even where a citation does not
+> resolve. Where a cited document was a real build input, such as the
+> redaction corpora and the sensitive-domain list, it lives in
+> `core/brain/fixtures/` and `core/brain/src/redaction/` instead.
+
 ## File naming
 
 `NNNN-kebab-slug.md`, zero-padded to 4 digits, monotonically

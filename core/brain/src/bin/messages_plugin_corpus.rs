@@ -29,7 +29,7 @@ use mci_brain::redaction::messages_plugin::{
     redact_messages_plugin_event, MessagesPluginConfig, MessagesPluginEvent,
 };
 
-const CORPUS_MD: &str = include_str!("../../../../docs/research/messages-plugin-test-corpus.md");
+const CORPUS_MD: &str = include_str!("../../fixtures/messages-plugin-test-corpus.md");
 
 #[derive(Debug, Clone)]
 struct Entry {
