@@ -30,7 +30,7 @@ use std::fmt::Write;
 
 use mci_brain::redaction::sms_otp::{redact_sms_shapes, TOKEN_BANK_NOTIFICATION, TOKEN_SMS_OTP};
 
-const CORPUS_MD: &str = include_str!("../../../../docs/research/sms-2fa-test-corpus-shapes.md");
+const CORPUS_MD: &str = include_str!("../../fixtures/sms-2fa-test-corpus-shapes.md");
 
 #[derive(Debug, Clone)]
 struct Entry {
