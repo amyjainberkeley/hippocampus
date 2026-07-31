@@ -1,8 +1,13 @@
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
 AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE in the .env file
 GitHub PAT: ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AB used by the CI
-Stripe key STRIPE_SECRET_KEY=sk_test_FIXTUREREMOVED in the test config
+Stripe key STRIPE_SECRET_KEY=sk_test_<24_OR_MORE_ALNUM> in the test config
 Bitcoin WIF: 5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ private key
 Multiple tokens: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c and AKIA1234567890ABCDEF
 Alice committed the JWT eyJabcdefgh.eyJabcdefgh.SflKxwRJSMeKK to the repo by mistake.
-Stripe sk_live_FIXTUREREMOVED leaked in the .env diff.
+Stripe sk_live_<24_OR_MORE_ALNUM> leaked in the .env diff.
+
+NOTE: Stripe key bodies are placeholders here, not literals. GitHub push
+protection matches the Stripe shape on pattern alone, with no checksum check,
+so a contiguous literal would block every push to this repo. This corpus
+documents text shapes and is not loaded by any test.

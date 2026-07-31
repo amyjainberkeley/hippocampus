@@ -273,7 +273,9 @@ fn token_shape_rows_never_carry_source_bytes() {
     // `entity_mentions.mention_text`.
     let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     let aws = "AKIAIOSFODNN7EXAMPLE";
-    let stripe = "sk_test_FIXTUREREMOVED";
+    // Split literal: GitHub push protection blocks any contiguous
+    // `sk_test_<24+ alnum>` on pattern alone. See tier1.rs `secrets` table.
+    let stripe = concat!("sk_", "test_EXAMPLENOTAREALKEY000000");
     let text = format!("secrets: jwt={jwt} aws={aws} stripe={stripe} end");
     let event = make_event(ts, &text);
     let eid = store.put_event(&event).expect("put_event");
