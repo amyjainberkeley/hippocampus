@@ -1,5 +1,12 @@
-env STRIPE_SECRET_KEY=sk_test_FIXTUREREMOVED
-publishable: pk_live_FIXTUREREMOVED
+env STRIPE_SECRET_KEY=sk_test_<24_OR_MORE_ALNUM>
+publishable: pk_live_<24_OR_MORE_ALNUM>
 restricted: rk_test_AaBbCcDdEeFfGgHhIiJjKkLlMm0123
 NEGATIVE: sk_dev_ is not a recognised mode.
 NEGATIVE: sk_test_short too short.
+
+NOTE: the sk_/pk_ lines carry a <24_OR_MORE_ALNUM> placeholder rather than a
+literal key body. GitHub push protection matches the Stripe pattern on shape
+alone, with no checksum check, so a contiguous literal here blocks every push
+to this repo even when the value is fabricated. The executable version of this
+case lives in tier1.rs as a split concat! literal. This file documents the
+shape and is not loaded by any test.
