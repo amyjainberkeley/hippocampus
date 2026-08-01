@@ -410,7 +410,10 @@ fn fts5_search_email_query_does_not_panic() {
         .fts5_search("amy@newtandem.com", 10)
         .expect("email query must not panic");
     let hit_ids: Vec<EventId> = hits.iter().map(|(i, _)| *i).collect();
-    assert!(hit_ids.contains(&id), "email-containing event must match: {hits:?}");
+    assert!(
+        hit_ids.contains(&id),
+        "email-containing event must match: {hits:?}"
+    );
 }
 
 #[test]
@@ -427,7 +430,10 @@ fn fts5_search_colon_token_query_does_not_panic() {
         .fts5_search("14:30", 10)
         .expect("colon-token query must not panic");
     let hit_ids: Vec<EventId> = hits.iter().map(|(i, _)| *i).collect();
-    assert!(hit_ids.contains(&id), "14:30-containing event must match: {hits:?}");
+    assert!(
+        hit_ids.contains(&id),
+        "14:30-containing event must match: {hits:?}"
+    );
 }
 
 #[test]
@@ -466,7 +472,10 @@ fn fts5_search_whitespace_only_query_returns_empty_not_error() {
     // the sanitizer collapses all-whitespace to empty, and the store
     // returns `Ok(vec![])` rather than panicking or InvalidInput-ing.
     let hits = store.fts5_search("   \t  ", 5).expect("whitespace ok");
-    assert!(hits.is_empty(), "whitespace-only query must yield zero hits");
+    assert!(
+        hits.is_empty(),
+        "whitespace-only query must yield zero hits"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -540,7 +549,8 @@ fn vec_search_filtered_no_filter_equals_vec_search() {
     let (_dir, path) = tmp("brain.sqlite");
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
     for i in 0..5 {
-        store.put_event(&ev_with_app((i + 1) as u64, "com.apple.Safari", i))
+        store
+            .put_event(&ev_with_app((i + 1) as u64, "com.apple.Safari", i))
             .expect("put");
     }
     let q = axis_unit_vec(0);
@@ -555,11 +565,15 @@ fn vec_search_filtered_time_range_matches_manual_subset() {
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
     // Events at ts = 100, 200, 300, 400, 500.
     for (i, ts) in [100_u64, 200, 300, 400, 500].iter().enumerate() {
-        store.put_event(&ev_with_app(*ts, "com.apple.Safari", i))
+        store
+            .put_event(&ev_with_app(*ts, "com.apple.Safari", i))
             .expect("put");
     }
     let q = axis_unit_vec(1);
-    let range = TimeRange { from_us: 150, to_us: 350 };
+    let range = TimeRange {
+        from_us: 150,
+        to_us: 350,
+    };
     let filtered = store
         .vec_search_filtered(&q, 10, Some(range), None)
         .expect("filt");
@@ -588,11 +602,21 @@ fn vec_search_filtered_app_filter_matches_manual_subset() {
     let (_dir, path) = tmp("brain.sqlite");
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
     // Interleave two apps across five events.
-    store.put_event(&ev_with_app(1, "com.apple.Safari", 0)).unwrap();
-    store.put_event(&ev_with_app(2, "com.microsoft.VSCode", 1)).unwrap();
-    store.put_event(&ev_with_app(3, "com.apple.Safari", 2)).unwrap();
-    store.put_event(&ev_with_app(4, "com.microsoft.VSCode", 3)).unwrap();
-    store.put_event(&ev_with_app(5, "com.apple.Safari", 4)).unwrap();
+    store
+        .put_event(&ev_with_app(1, "com.apple.Safari", 0))
+        .unwrap();
+    store
+        .put_event(&ev_with_app(2, "com.microsoft.VSCode", 1))
+        .unwrap();
+    store
+        .put_event(&ev_with_app(3, "com.apple.Safari", 2))
+        .unwrap();
+    store
+        .put_event(&ev_with_app(4, "com.microsoft.VSCode", 3))
+        .unwrap();
+    store
+        .put_event(&ev_with_app(5, "com.apple.Safari", 4))
+        .unwrap();
 
     let q = axis_unit_vec(0);
     let filtered = store
@@ -609,19 +633,30 @@ fn vec_search_filtered_app_filter_matches_manual_subset() {
 fn vec_search_filtered_both_filters_narrow_to_intersection() {
     let (_dir, path) = tmp("brain.sqlite");
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
-    store.put_event(&ev_with_app(100, "com.apple.Safari", 0)).unwrap();
-    store.put_event(&ev_with_app(200, "com.microsoft.VSCode", 1)).unwrap();
-    store.put_event(&ev_with_app(300, "com.apple.Safari", 2)).unwrap();
-    store.put_event(&ev_with_app(400, "com.apple.Safari", 3)).unwrap();
+    store
+        .put_event(&ev_with_app(100, "com.apple.Safari", 0))
+        .unwrap();
+    store
+        .put_event(&ev_with_app(200, "com.microsoft.VSCode", 1))
+        .unwrap();
+    store
+        .put_event(&ev_with_app(300, "com.apple.Safari", 2))
+        .unwrap();
+    store
+        .put_event(&ev_with_app(400, "com.apple.Safari", 3))
+        .unwrap();
 
     let q = axis_unit_vec(2);
-    let range = TimeRange { from_us: 150, to_us: 350 };
+    let range = TimeRange {
+        from_us: 150,
+        to_us: 350,
+    };
     let filtered = store
         .vec_search_filtered(&q, 10, Some(range), Some("com.apple.Safari"))
         .expect("filt");
     // Only ts=300 / Safari qualifies (axis 2).
     assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].0.0, 3, "single event at ts=300 app=Safari");
+    assert_eq!(filtered[0].0 .0, 3, "single event at ts=300 app=Safari");
     assert!((filtered[0].1 - 1.0).abs() < 1e-6, "perfect cosine match");
 }
 
@@ -629,14 +664,19 @@ fn vec_search_filtered_both_filters_narrow_to_intersection() {
 fn vec_search_filtered_empty_pool_returns_empty() {
     let (_dir, path) = tmp("brain.sqlite");
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
-    store.put_event(&ev_with_app(100, "com.apple.Safari", 0)).unwrap();
+    store
+        .put_event(&ev_with_app(100, "com.apple.Safari", 0))
+        .unwrap();
     let q = axis_unit_vec(0);
     // Range that intersects no event.
     let hits = store
         .vec_search_filtered(
             &q,
             10,
-            Some(TimeRange { from_us: 1_000, to_us: 2_000 }),
+            Some(TimeRange {
+                from_us: 1_000,
+                to_us: 2_000,
+            }),
             None,
         )
         .expect("filt");
@@ -1258,8 +1298,8 @@ fn retriever_prefilter_matches_full_knn_on_scored_topk() {
     // in <1s.
     let apps = ["com.apple.Safari", "com.microsoft.VSCode"];
     let words = [
-        "rust", "python", "memory", "capture", "brain", "search", "event",
-        "window", "debug", "test",
+        "rust", "python", "memory", "capture", "brain", "search", "event", "window", "debug",
+        "test",
     ];
     for i in 0..20_u64 {
         let text = format!("{} {}", words[(i as usize) % words.len()], "sample");
@@ -1269,11 +1309,7 @@ fn retriever_prefilter_matches_full_knn_on_scored_topk() {
         store.put_event(&ev).expect("put");
     }
 
-    let retriever = HybridRetriever::new(
-        store.clone(),
-        embedder.clone(),
-        30 * 1_000_000,
-    );
+    let retriever = HybridRetriever::new(store.clone(), embedder.clone(), 30 * 1_000_000);
 
     // Both queries carry the same app_filter — the retriever code path
     // that runs `vec_search_filtered` (with pre-filter) is the one under

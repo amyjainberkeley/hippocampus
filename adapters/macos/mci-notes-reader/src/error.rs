@@ -19,6 +19,8 @@ pub enum NotesReaderError {
     AccessDenied,
 
     /// The Phase D wire-up has not landed yet.
-    #[error("Notes reader is scaffold-only (Phase D). Wire-up deferred to cycle 8.60+ per ADR-0037.")]
+    #[error(
+        "Notes reader is scaffold-only (Phase D). Wire-up deferred to cycle 8.60+ per ADR-0037."
+    )]
     NotYetWired,
 }

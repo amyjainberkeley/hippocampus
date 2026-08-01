@@ -124,7 +124,9 @@ pub use retention_purger::{PurgeStats, RetentionConfig};
 pub use sqlcipher_brain_store::{IntegrityError, SqlCipherBrainStore};
 
 pub mod integrity_scheduler;
-pub use integrity_scheduler::{IntegrityScheduler, SchedulerClock, SchedulerHandle, SystemSchedulerClock};
+pub use integrity_scheduler::{
+    IntegrityScheduler, SchedulerClock, SchedulerHandle, SystemSchedulerClock,
+};
 
 // ---------------------------------------------------------------------------
 // Read-only views used by the agent-API loopback (P3.10b) and recall UI

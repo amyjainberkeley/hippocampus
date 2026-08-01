@@ -29,6 +29,8 @@ pub enum CalendarReaderError {
     /// an empty vec, so this variant is a placeholder for the wire-up
     /// PR — it lets consumers pattern-match on "reader is not wired"
     /// without depending on the vec-being-empty tell.
-    #[error("Calendar reader is scaffold-only (Phase D). Wire-up deferred to cycle 8.60+ per ADR-0037.")]
+    #[error(
+        "Calendar reader is scaffold-only (Phase D). Wire-up deferred to cycle 8.60+ per ADR-0037."
+    )]
     NotYetWired,
 }

@@ -402,12 +402,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         // `vec_search` — byte-identical fallback (full KNN).
         let sem = self
             .store
-            .vec_search_filtered(
-                &q_emb,
-                self.k_sem,
-                time_filter,
-                query.app_filter.as_deref(),
-            )
+            .vec_search_filtered(&q_emb, self.k_sem, time_filter, query.app_filter.as_deref())
             .map_err(|e| RetrieveError::Backend(e.to_string()))?;
 
         let lex_map: HashMap<EventId, f32> = lex.into_iter().collect();

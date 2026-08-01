@@ -620,8 +620,7 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
         .into_iter()
         .map(|ev| {
             let (entities, linked_event_ids) = enrich_hit(&handle.store, ev.id);
-            let thumbnail_path =
-                thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
+            let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             HitJson {
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
@@ -702,9 +701,7 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
     let query: EventsByIdsQueryJson = match serde_json::from_str(query_str) {
         Ok(v) => v,
         Err(e) => {
-            set_last_error(&format!(
-                "mci_brain_ffi_events_by_ids: bad query JSON: {e}"
-            ));
+            set_last_error(&format!("mci_brain_ffi_events_by_ids: bad query JSON: {e}"));
             return ptr::null_mut();
         }
     };
@@ -832,8 +829,7 @@ pub unsafe extern "C" fn mci_brain_ffi_timeline_events(
         .into_iter()
         .filter(|ev| ev.ts_us >= query.start_ts_us && ev.ts_us <= query.end_ts_us)
         .map(|ev| {
-            let thumbnail_path =
-                thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
+            let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             TimelineEventJson {
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
@@ -1239,9 +1235,7 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
     let q: Q = match serde_json::from_str(q_str) {
         Ok(v) => v,
         Err(e) => {
-            set_last_error(&format!(
-                "mci_brain_ffi_delete_event: bad query JSON: {e}"
-            ));
+            set_last_error(&format!("mci_brain_ffi_delete_event: bad query JSON: {e}"));
             return ptr::null_mut();
         }
     };
@@ -1279,9 +1273,7 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_events_in_range(
         return ptr::null_mut();
     }
     if start_ts_us > end_ts_us {
-        set_last_error(
-            "mci_brain_ffi_delete_events_in_range: start_ts_us > end_ts_us",
-        );
+        set_last_error("mci_brain_ffi_delete_events_in_range: start_ts_us > end_ts_us");
         return ptr::null_mut();
     }
     // Safety: caller guarantees a live handle.
@@ -1400,9 +1392,7 @@ pub unsafe extern "C" fn mci_brain_ffi_wipe_brain(
         }
     };
     let Some((issued_at, expected)) = pending else {
-        set_last_error(
-            "mci_brain_ffi_wipe_brain: no pending wipe — call prepare_wipe first",
-        );
+        set_last_error("mci_brain_ffi_wipe_brain: no pending wipe — call prepare_wipe first");
         return ptr::null_mut();
     };
     if issued_at.elapsed() > WIPE_TOKEN_TTL {
@@ -1639,10 +1629,7 @@ fn timeline_snippet(s: &str) -> String {
 /// the wire shape is identical.
 ///
 /// Pure function so it is trivially testable.
-fn downsample_timeline(
-    events: Vec<TimelineEventJson>,
-    range_us: u64,
-) -> Vec<TimelineEventJson> {
+fn downsample_timeline(events: Vec<TimelineEventJson>, range_us: u64) -> Vec<TimelineEventJson> {
     if events.len() <= TIMELINE_MAX_EVENTS {
         return events;
     }
@@ -1722,12 +1709,7 @@ fn thumbnail_path_for(blob_dir: &std::path::Path, keyframe_blob: Option<&str>) -
         return None;
     }
     let file = format!("{hex}.bin");
-    Some(
-        blob_dir
-            .join(file)
-            .to_string_lossy()
-            .into_owned(),
-    )
+    Some(blob_dir.join(file).to_string_lossy().into_owned())
 }
 
 /// Expand a raw user query with the caller's user-dictionary aliases
@@ -1769,7 +1751,12 @@ fn expand_query_with_user_aliases(
     // (OR is commutative in FTS5's boolean layer).
     for (canonical, alt_list) in aliases.iter().take(USER_ALIAS_GROUP_CAP) {
         let all_terms: Vec<&str> = std::iter::once(canonical.as_str())
-            .chain(alt_list.iter().map(String::as_str).take(USER_ALIAS_PER_GROUP_CAP))
+            .chain(
+                alt_list
+                    .iter()
+                    .map(String::as_str)
+                    .take(USER_ALIAS_PER_GROUP_CAP),
+            )
             .collect();
         // Fire only if the user's query mentions this group. Case-insensitive
         // substring match on any of the group's spellings.
@@ -2418,7 +2405,10 @@ mod tests {
         m.insert("Hippocampus".to_string(), vec!["MCI".into()]);
         let out = expand_query_with_user_aliases("AJ email", &m);
         assert!(out.contains("\"Amy Jain\""));
-        assert!(!out.contains("Hippocampus"), "leaked untouched group: {out}");
+        assert!(
+            !out.contains("Hippocampus"),
+            "leaked untouched group: {out}"
+        );
     }
 
     #[test]
@@ -2543,16 +2533,14 @@ mod tests {
 
     #[test]
     fn timeline_query_json_parses_with_and_without_resolution() {
-        let q: TimelineQueryJson =
-            serde_json::from_str(r#"{"start_ts_us":100,"end_ts_us":200}"#)
-                .expect("parses without resolution");
+        let q: TimelineQueryJson = serde_json::from_str(r#"{"start_ts_us":100,"end_ts_us":200}"#)
+            .expect("parses without resolution");
         assert_eq!(q.start_ts_us, 100);
         assert_eq!(q.end_ts_us, 200);
         assert!(q.resolution.is_none());
-        let q2: TimelineQueryJson = serde_json::from_str(
-            r#"{"start_ts_us":100,"end_ts_us":200,"resolution":"minute"}"#,
-        )
-        .expect("parses with resolution");
+        let q2: TimelineQueryJson =
+            serde_json::from_str(r#"{"start_ts_us":100,"end_ts_us":200,"resolution":"minute"}"#)
+                .expect("parses with resolution");
         assert_eq!(q2.resolution.as_deref(), Some("minute"));
     }
 
@@ -2572,8 +2560,9 @@ mod tests {
     fn downsample_below_cap_is_identity() {
         // Fewer events than the cap → return input unchanged, preserving
         // order.
-        let events: Vec<TimelineEventJson> =
-            (0..10).map(|i| mk_te((i as u64) * TIMELINE_MINUTE_US, i)).collect();
+        let events: Vec<TimelineEventJson> = (0..10)
+            .map(|i| mk_te((i as u64) * TIMELINE_MINUTE_US, i))
+            .collect();
         let out = downsample_timeline(events.clone(), 10 * TIMELINE_MINUTE_US);
         assert_eq!(out.len(), 10);
         assert_eq!(out.first().map(|e| e.event_id), Some(0));
@@ -2588,9 +2577,7 @@ mod tests {
         // Space events evenly over 24 hours.
         let range_us = 24 * 60 * TIMELINE_MINUTE_US;
         let step = range_us / (n as u64);
-        let events: Vec<TimelineEventJson> = (0..n as u64)
-            .map(|i| mk_te(i * step, i))
-            .collect();
+        let events: Vec<TimelineEventJson> = (0..n as u64).map(|i| mk_te(i * step, i)).collect();
         let out = downsample_timeline(events, range_us);
         assert!(
             out.len() <= TIMELINE_MAX_EVENTS,
