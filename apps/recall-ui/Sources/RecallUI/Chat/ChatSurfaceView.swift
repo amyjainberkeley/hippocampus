@@ -231,6 +231,7 @@ struct ChatSurfaceView: View {
                         sendEnabled ? MCI.Color.accent : MCI.Color.foregroundMuted
                     )
             }
+            .accessibilityLabel("Send message")
             .buttonStyle(.plain)
             .disabled(!sendEnabled)
             .help(sendEnabled
