@@ -35,18 +35,28 @@ final class ToastNotifierTests: XCTestCase {
     }
 
     func testBurstQueuesAndDrains() async throws {
+        // Wall-clock test, so the hold has to be longer than the gap
+        // between checks or the queue drains past the message being
+        // asserted. It used to hold each message 50ms and then sleep
+        // 120ms before checking, which is more than two holds per step:
+        // by the third check the whole queue had drained and the
+        // assertion saw nil.
+        //
+        // Hold 300ms and check every 400ms. Each check then lands in the
+        // middle of its message's window with ~100ms of slack on either
+        // side, which survives a loaded CI runner.
+        let hold = 0.3
+        let step: UInt64 = 400_000_000
         let n = freshNotifier()
-        n.notify("first", hold: 0.05)
-        n.notify("second", hold: 0.05)
-        n.notify("third", hold: 0.05)
+        n.notify("first", hold: hold)
+        n.notify("second", hold: hold)
+        n.notify("third", hold: hold)
         XCTAssertEqual(n.currentMessage, "first")
-        // First message clears after ~50ms; second should immediately
-        // take over on the next pump.
-        try await Task.sleep(nanoseconds: 120_000_000)
+        try await Task.sleep(nanoseconds: step)
         XCTAssertEqual(n.currentMessage, "second")
-        try await Task.sleep(nanoseconds: 120_000_000)
+        try await Task.sleep(nanoseconds: step)
         XCTAssertEqual(n.currentMessage, "third")
-        try await Task.sleep(nanoseconds: 120_000_000)
+        try await Task.sleep(nanoseconds: step)
         XCTAssertNil(n.currentMessage)
     }
 
