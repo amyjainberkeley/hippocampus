@@ -111,10 +111,8 @@ pub fn sanitize_fts5_query(raw: &str) -> String {
 /// possibly need sanitization? If not, the fast-path return above
 /// keeps clean queries byte-identical.
 fn needs_sanitization(s: &str) -> bool {
-    s.bytes().any(|b| matches!(
-        b,
-        b':' | b'@' | b'"' | b'(' | b')' | b'*' | b'^'
-    ))
+    s.bytes()
+        .any(|b| matches!(b, b':' | b'@' | b'"' | b'(' | b')' | b'*' | b'^'))
 }
 
 /// Does this individual whitespace-delimited token need phrase-wrapping?
@@ -144,7 +142,10 @@ fn token_needs_wrap(tok: &str) -> bool {
     }
     // Any FTS5 operator metacharacter — `"` `(` `)` `*` `^` would
     // otherwise be parsed as a phrase / group / prefix / near op.
-    if tok.bytes().any(|b| matches!(b, b'"' | b'(' | b')' | b'*' | b'^')) {
+    if tok
+        .bytes()
+        .any(|b| matches!(b, b'"' | b'(' | b')' | b'*' | b'^'))
+    {
         return true;
     }
     false
@@ -275,10 +276,7 @@ mod tests {
     fn keyvalue_colon_is_phrase_wrapped() {
         // `key:value` would be parsed by FTS5 as column `key`
         // matching `value` — panics if `key` is not a real column.
-        assert_eq!(
-            sanitize_fts5_query("timezone:PST"),
-            "\"timezone:PST\"",
-        );
+        assert_eq!(sanitize_fts5_query("timezone:PST"), "\"timezone:PST\"",);
     }
 
     #[test]
@@ -297,10 +295,7 @@ mod tests {
     fn embedded_double_quote_is_escaped() {
         // User pastes something with a literal `"` — must be doubled
         // inside the phrase wrapping (FTS5 escape convention).
-        assert_eq!(
-            sanitize_fts5_query("foo\"bar"),
-            "\"foo\"\"bar\"",
-        );
+        assert_eq!(sanitize_fts5_query("foo\"bar"), "\"foo\"\"bar\"",);
     }
 
     #[test]
@@ -329,10 +324,7 @@ mod tests {
     #[test]
     fn leading_and_trailing_whitespace_preserved_on_fast_path() {
         // Fast path — clean tokens, no metacharacters → byte-identical.
-        assert_eq!(
-            sanitize_fts5_query("  hello  world  "),
-            "  hello  world  "
-        );
+        assert_eq!(sanitize_fts5_query("  hello  world  "), "  hello  world  ");
     }
 
     #[test]
@@ -356,7 +348,10 @@ mod tests {
     #[test]
     fn html_entity_looking_input_does_not_break() {
         // `&amp;` — no FTS5 metachars, no colons, so pass-through.
-        assert_eq!(sanitize_fts5_query("hello &amp; world"), "hello &amp; world");
+        assert_eq!(
+            sanitize_fts5_query("hello &amp; world"),
+            "hello &amp; world"
+        );
     }
 
     #[test]

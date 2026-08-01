@@ -454,7 +454,14 @@ fn ffi_events_by_ids_resolves_seeded_ids_in_input_order() {
         let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
         let a = seed_event(&writer, 100, "com.apple.Safari", "S", "", "safari body");
         let b = seed_event(&writer, 200, "com.microsoft.VSCode", "V", "", "vscode body");
-        let c = seed_event(&writer, 300, "com.tinyspeck.slackmacgap", "Sl", "", "slack body");
+        let c = seed_event(
+            &writer,
+            300,
+            "com.tinyspeck.slackmacgap",
+            "Sl",
+            "",
+            "slack body",
+        );
         (a, b, c)
     };
     let path_c = CString::new(path.to_str().unwrap()).unwrap();
@@ -464,10 +471,7 @@ fn ffi_events_by_ids_resolves_seeded_ids_in_input_order() {
 
     // Ask for [c, a, b] plus a nonexistent id — result must be [c, a, b]
     // (order preserved, missing id dropped silently).
-    let query = format!(
-        r#"{{"ids":[{},{},{},9999999]}}"#,
-        c.0, a.0, b.0
-    );
+    let query = format!(r#"{{"ids":[{},{},{},9999999]}}"#, c.0, a.0, b.0);
     let query_c = CString::new(query).unwrap();
     let j = unsafe { mci_brain_ffi_events_by_ids(h, query_c.as_ptr()) };
     assert!(!j.is_null(), "events_by_ids must succeed");
@@ -476,7 +480,11 @@ fn ffi_events_by_ids_resolves_seeded_ids_in_input_order() {
     unsafe { mci_brain_ffi_string_free(j) };
 
     let ids: Vec<u64> = hits.iter().map(|h| h.event_id).collect();
-    assert_eq!(ids, vec![c.0, a.0, b.0], "order follows input; missing dropped");
+    assert_eq!(
+        ids,
+        vec![c.0, a.0, b.0],
+        "order follows input; missing dropped"
+    );
     // Each row must carry source="linked" so the UI can badge these rows
     // separately from ranked search results.
     for h in &hits {
@@ -649,8 +657,14 @@ fn ffi_delete_event_removes_the_row_and_leaves_others_intact() {
     let del_q = format!(r#"{{"event_id":{}}}"#, a.0);
     let del_c = CString::new(del_q).unwrap();
     let raw = unsafe { mci_brain_ffi_delete_event(h, del_c.as_ptr()) };
-    assert!(!raw.is_null(), "delete_event failed: {}", last_error_string());
-    let s = unsafe { CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+    assert!(
+        !raw.is_null(),
+        "delete_event failed: {}",
+        last_error_string()
+    );
+    let s = unsafe { CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .into_owned();
     unsafe { mci_brain_ffi_string_free(raw) };
     let result: DeleteResultJson = serde_json::from_str(&s).unwrap();
     assert_eq!(result.events_deleted, 1);
@@ -693,7 +707,9 @@ fn ffi_delete_events_in_range_scopes_to_the_ts_window() {
         "delete_range failed: {}",
         last_error_string()
     );
-    let s = unsafe { CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+    let s = unsafe { CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .into_owned();
     unsafe { mci_brain_ffi_string_free(raw) };
     let result: DeleteResultJson = serde_json::from_str(&s).unwrap();
     assert_eq!(result.events_deleted, 2);
@@ -736,8 +752,14 @@ fn ffi_wipe_brain_requires_valid_token() {
 
     // Case 2: wrong token after prepare, must refuse.
     let raw_tok = unsafe { mci_brain_ffi_prepare_wipe(h) };
-    assert!(!raw_tok.is_null(), "prepare failed: {}", last_error_string());
-    let tok_str = unsafe { CStr::from_ptr(raw_tok) }.to_string_lossy().into_owned();
+    assert!(
+        !raw_tok.is_null(),
+        "prepare failed: {}",
+        last_error_string()
+    );
+    let tok_str = unsafe { CStr::from_ptr(raw_tok) }
+        .to_string_lossy()
+        .into_owned();
     unsafe { mci_brain_ffi_string_free(raw_tok) };
     // Token is a JSON string literal ("<64-hex>"); strip surrounding quotes.
     let real_tok: String = serde_json::from_str(&tok_str).expect("valid JSON string");
@@ -788,7 +810,9 @@ fn ffi_wipe_brain_with_valid_token_clears_the_store() {
 
     // Prepare + wipe with the real token.
     let raw_tok = unsafe { mci_brain_ffi_prepare_wipe(h) };
-    let tok_str = unsafe { CStr::from_ptr(raw_tok) }.to_string_lossy().into_owned();
+    let tok_str = unsafe { CStr::from_ptr(raw_tok) }
+        .to_string_lossy()
+        .into_owned();
     unsafe { mci_brain_ffi_string_free(raw_tok) };
     let real_tok: String = serde_json::from_str(&tok_str).unwrap();
 
@@ -828,13 +852,17 @@ fn ffi_wipe_second_prepare_invalidates_first_token() {
     assert!(!h.is_null());
 
     let raw_t1 = unsafe { mci_brain_ffi_prepare_wipe(h) };
-    let t1_str = unsafe { CStr::from_ptr(raw_t1) }.to_string_lossy().into_owned();
+    let t1_str = unsafe { CStr::from_ptr(raw_t1) }
+        .to_string_lossy()
+        .into_owned();
     unsafe { mci_brain_ffi_string_free(raw_t1) };
     let t1: String = serde_json::from_str(&t1_str).unwrap();
 
     // Second prepare — issues a fresh token and drops the first.
     let raw_t2 = unsafe { mci_brain_ffi_prepare_wipe(h) };
-    let t2_str = unsafe { CStr::from_ptr(raw_t2) }.to_string_lossy().into_owned();
+    let t2_str = unsafe { CStr::from_ptr(raw_t2) }
+        .to_string_lossy()
+        .into_owned();
     unsafe { mci_brain_ffi_string_free(raw_t2) };
     let t2: String = serde_json::from_str(&t2_str).unwrap();
     assert_ne!(t1, t2, "two prepare calls must issue distinct tokens");

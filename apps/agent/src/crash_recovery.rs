@@ -88,9 +88,7 @@ pub fn acquire_lock(path: &Path) -> Result<LockAcquireOutcome, LockError> {
         None => LockAcquireOutcome::CleanBoot,
         Some(prev_pid) => {
             if pid_is_alive(prev_pid) {
-                return Ok(LockAcquireOutcome::AnotherInstanceRunning {
-                    live_pid: prev_pid,
-                });
+                return Ok(LockAcquireOutcome::AnotherInstanceRunning { live_pid: prev_pid });
             }
             LockAcquireOutcome::UncleanShutdown {
                 stale_pid: prev_pid,

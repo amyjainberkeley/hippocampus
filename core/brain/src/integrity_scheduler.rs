@@ -279,8 +279,11 @@ mod tests {
         let store = Arc::new(SqlCipherBrainStore::new(&path, &test_key()).expect("open"));
         // Real system clock but with a huge interval — the drop path
         // MUST unblock the recv_timeout immediately.
-        let handle =
-            IntegrityScheduler::start_with_clock(store, Duration::from_secs(3600), SystemSchedulerClock);
+        let handle = IntegrityScheduler::start_with_clock(
+            store,
+            Duration::from_secs(3600),
+            SystemSchedulerClock,
+        );
         let t0 = std::time::Instant::now();
         drop(handle);
         assert!(
@@ -317,7 +320,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         let stats = handle.shutdown().expect("stats");
         *SEEN.lock().unwrap() = stats.checks_ok;
-        assert!(stats.checks_ok >= 1, "expected at least one tick: {stats:?}");
+        assert!(
+            stats.checks_ok >= 1,
+            "expected at least one tick: {stats:?}"
+        );
         assert_eq!(
             stats.checks_corrupted, 0,
             "healthy DB must never report corrupted"

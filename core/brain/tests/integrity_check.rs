@@ -84,7 +84,10 @@ fn integrity_error_corrupted_display_preserves_rows() {
     let msg = format!("{err}");
     assert!(msg.contains("corrupted"), "display: {msg}");
     for row in &rows {
-        assert!(msg.contains(row), "display must preserve row {row:?}: {msg}");
+        assert!(
+            msg.contains(row),
+            "display must preserve row {row:?}: {msg}"
+        );
     }
 }
 

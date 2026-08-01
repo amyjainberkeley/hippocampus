@@ -1,9 +1,7 @@
 // Integration tests for the Phase D Notes scaffold.
 #![cfg(target_os = "macos")]
 
-use mci_notes_reader::{
-    read_events_since, read_notes_since, watch_notes, Note, NoteFolder,
-};
+use mci_notes_reader::{read_events_since, read_notes_since, watch_notes, Note, NoteFolder};
 
 #[test]
 fn read_notes_since_returns_empty_vec() {
