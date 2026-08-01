@@ -52,7 +52,7 @@ private final class RecordingAutomationObserver: AutomationTargetMonitor.Observe
     private var _transitions: [AutomationTargetMonitor.Transition] = []
 
     func automationTargetDidTransition(_ transition: AutomationTargetMonitor.Transition) async {
-        lock.lock(); _transitions.append(transition); lock.unlock()
+        lock.withLock { _transitions.append(transition) }
     }
 
     var transitions: [AutomationTargetMonitor.Transition] {

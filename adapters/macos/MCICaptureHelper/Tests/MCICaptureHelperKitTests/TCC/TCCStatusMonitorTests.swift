@@ -49,7 +49,7 @@ private final class RecordingObserver: TCCStatusMonitor.Observer, @unchecked Sen
     private var _transitions: [TCCStatusMonitor.Transition] = []
 
     func tccStatusDidTransition(_ transition: TCCStatusMonitor.Transition) async {
-        lock.lock(); _transitions.append(transition); lock.unlock()
+        lock.withLock { _transitions.append(transition) }
     }
 
     var transitions: [TCCStatusMonitor.Transition] {
