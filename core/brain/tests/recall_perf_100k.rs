@@ -71,8 +71,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mci_brain::{
-    stubs::FixedDimEmbedder, BrainStore, Embedder, Event, EventId, HybridRetriever,
-    RetrievalQuery, Retriever, SqlCipherBrainStore, TimeRange,
+    stubs::FixedDimEmbedder, BrainStore, Embedder, Event, EventId, HybridRetriever, RetrievalQuery,
+    Retriever, SqlCipherBrainStore, TimeRange,
 };
 use mci_core::crypto::{DbKey, InMemoryKeyWrap, KeyWrap};
 
@@ -105,23 +105,54 @@ const APP_DISTRIBUTION: &[(&str, u32)] = &[
 
 /// Realistic content-length buckets: (weight, min_words, max_words).
 /// short=40%, medium=40%, long=20%.
-const LENGTH_BUCKETS: &[(u32, usize, usize)] = &[
-    (40, 4, 15),
-    (40, 20, 80),
-    (20, 120, 400),
-];
+const LENGTH_BUCKETS: &[(u32, usize, usize)] = &[(40, 4, 15), (40, 20, 80), (20, 120, 400)];
 
 /// Vocabulary the synthetic content is drawn from. Small on purpose —
 /// FTS5 lexical hits should be dense enough to exercise the BM25 ranking
 /// path, but sparse enough that the entity-injection pass produces
 /// distinguishable rare vs. common entities.
 const WORDS: &[&str] = &[
-    "rust", "python", "memory", "capture", "brain", "search", "event",
-    "window", "browser", "code", "debug", "test", "deploy", "build",
-    "config", "parse", "token", "index", "query", "score", "latency",
-    "throughput", "profile", "trace", "log", "audit", "review", "commit",
-    "branch", "merge", "rebase", "diff", "author", "reviewer", "sprint",
-    "roadmap", "milestone", "release", "changelog", "issue", "ticket",
+    "rust",
+    "python",
+    "memory",
+    "capture",
+    "brain",
+    "search",
+    "event",
+    "window",
+    "browser",
+    "code",
+    "debug",
+    "test",
+    "deploy",
+    "build",
+    "config",
+    "parse",
+    "token",
+    "index",
+    "query",
+    "score",
+    "latency",
+    "throughput",
+    "profile",
+    "trace",
+    "log",
+    "audit",
+    "review",
+    "commit",
+    "branch",
+    "merge",
+    "rebase",
+    "diff",
+    "author",
+    "reviewer",
+    "sprint",
+    "roadmap",
+    "milestone",
+    "release",
+    "changelog",
+    "issue",
+    "ticket",
 ];
 
 /// Rare-entity pool (mixed persons / orgs / topics). 60% of events get one
@@ -134,15 +165,29 @@ const WORDS: &[&str] = &[
 /// alphabetic for baseline stability — swap in URL entities in a follow-
 /// on perf cycle if the workload-mix analysis calls for it.
 const RARE_ENTITIES: &[&str] = &[
-    "Alfredsson", "Braithwaite", "Corzelius", "Duszynski", "Elverum",
-    "OperationChimera", "ProjectNarwhal", "gigaquark",
-    "Framboise", "Ynglingsson",
+    "Alfredsson",
+    "Braithwaite",
+    "Corzelius",
+    "Duszynski",
+    "Elverum",
+    "OperationChimera",
+    "ProjectNarwhal",
+    "gigaquark",
+    "Framboise",
+    "Ynglingsson",
 ];
 
 /// Common-entity pool. Injected roughly 10x more often than rare entities.
 const COMMON_ENTITIES: &[&str] = &[
-    "Amy", "Dave", "Anthropic", "Rust", "Claude", "MCI",
-    "GitHub", "Slack", "VSCode",
+    "Amy",
+    "Dave",
+    "Anthropic",
+    "Rust",
+    "Claude",
+    "MCI",
+    "GitHub",
+    "Slack",
+    "VSCode",
 ];
 
 // ---------------------------------------------------------------------------
@@ -373,8 +418,7 @@ fn run() {
     let cold_start = Instant::now();
     let mut cold = Histogram::new();
     for (i, q) in queries.iter().enumerate() {
-        let retriever =
-            HybridRetriever::new(store.clone(), embedder.clone(), now_us);
+        let retriever = HybridRetriever::new(store.clone(), embedder.clone(), now_us);
         let rq = RetrievalQuery {
             text: q.clone(),
             limit: RETRIEVE_LIMIT,
@@ -422,8 +466,7 @@ fn run() {
     let cold_scoped_start = Instant::now();
     let mut cold_scoped = Histogram::new();
     for (i, q) in queries.iter().enumerate() {
-        let retriever =
-            HybridRetriever::new(store.clone(), embedder.clone(), now_us);
+        let retriever = HybridRetriever::new(store.clone(), embedder.clone(), now_us);
         // Round-robin app + time so both filter kinds are exercised.
         let app = scope_apps[i % scope_apps.len()];
         let range = scope_ranges[i % scope_ranges.len()];
@@ -468,9 +511,7 @@ fn run() {
         "recall_perf_100k: warmup done in {:.1}s",
         warmup_start.elapsed().as_secs_f64()
     );
-    eprintln!(
-        "recall_perf_100k: running {STEADY_STATE_REPEATS} steady-state sweeps..."
-    );
+    eprintln!("recall_perf_100k: running {STEADY_STATE_REPEATS} steady-state sweeps...");
     let warm_start = Instant::now();
     let mut warm = Histogram::new();
     for rep in 0..STEADY_STATE_REPEATS {
@@ -496,9 +537,7 @@ fn run() {
     // Warm scoped sweep — same STEADY_STATE_REPEATS shape but with the
     // ADR-0011 §5 pre-filter path engaged. Reuses the same warmed
     // retriever so we compare like-for-like against `warm`.
-    eprintln!(
-        "recall_perf_100k: running {STEADY_STATE_REPEATS} steady-state SCOPED sweeps..."
-    );
+    eprintln!("recall_perf_100k: running {STEADY_STATE_REPEATS} steady-state SCOPED sweeps...");
     let warm_scoped_start = Instant::now();
     let mut warm_scoped = Histogram::new();
     for rep in 0..STEADY_STATE_REPEATS {

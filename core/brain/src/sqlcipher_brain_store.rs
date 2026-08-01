@@ -1799,7 +1799,9 @@ impl crate::BrainStore for SqlCipherBrainStore {
         // cache hot across time-only / app-only / both-set call shapes.
         let mut binds: Vec<Value> = Vec::with_capacity(3);
         if let Some(tr) = time_filter {
-            binds.push(Value::Integer(i64::try_from(tr.from_us).unwrap_or(i64::MAX)));
+            binds.push(Value::Integer(
+                i64::try_from(tr.from_us).unwrap_or(i64::MAX),
+            ));
             binds.push(Value::Integer(i64::try_from(tr.to_us).unwrap_or(i64::MAX)));
         }
         if let Some(app) = app_filter {

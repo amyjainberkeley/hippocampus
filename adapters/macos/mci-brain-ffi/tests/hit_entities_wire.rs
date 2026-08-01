@@ -50,22 +50,20 @@ fn hit_json_round_trips_entities_and_linked_event_ids() {
         ocr_text_snippet: "Vector databases at scale ...".into(),
         source: "hybrid".into(),
         score: Some(0.87),
-        entities: vec![
-            "Anthropic".into(),
-            "vector databases".into(),
-            "MCP".into(),
-        ],
+        entities: vec!["Anthropic".into(), "vector databases".into(), "MCP".into()],
         linked_event_ids: vec![101, 202, 303, 404],
-        thumbnail_path: Some(
-            "/Users/x/Library/Application Support/MCI/blobs/deadbeef.bin".into(),
-        ),
+        thumbnail_path: Some("/Users/x/Library/Application Support/MCI/blobs/deadbeef.bin".into()),
     };
     let s = serde_json::to_string(&h).expect("serialize");
     let back: HitJson = serde_json::from_str(&s).expect("deserialize");
     assert_eq!(h, back, "HitJson serde round trip must be lossless");
     assert_eq!(back.entities.len(), 3);
     assert_eq!(back.linked_event_ids, vec![101, 202, 303, 404]);
-    assert!(back.thumbnail_path.as_deref().unwrap().ends_with("deadbeef.bin"));
+    assert!(back
+        .thumbnail_path
+        .as_deref()
+        .unwrap()
+        .ends_with("deadbeef.bin"));
 }
 
 /// Assert the exact `snake_case` wire the Swift `HitWire` decoder in
