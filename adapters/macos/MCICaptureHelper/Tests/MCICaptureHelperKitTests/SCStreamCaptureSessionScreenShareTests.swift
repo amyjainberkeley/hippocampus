@@ -99,9 +99,31 @@ final class SCStreamCaptureSessionScreenShareTests: XCTestCase {
     // The observer callback swallows the throw fire-and-forget; the
     // session's paused flag stays set so the next detector cycle can
     // retry.
-    func testObserverInactiveResumeAttemptFailsSafeInHeadless() async {
+    func testObserverInactiveResumeAttemptFailsSafeInHeadless() async throws {
         let session = ShareFixtures.makeSession()
         await session.pauseForScreenShare(actor: "us.zoom.xos")
+
+        // The branch under test only exists where SCStream bring-up fails,
+        // which is the headless case this test is named for. That was left
+        // implicit, so on a host that CAN bring a stream up the resume
+        // succeeds, the pause clears, and the assertion below fails for a
+        // reason that has nothing to do with the fail-safe.
+        //
+        // Probe the precondition directly instead of assuming it. On a
+        // throw, resumeFromScreenShare has already restored the paused flag.
+        var hostCanBringUpStream = false
+        do {
+            try await session.resumeFromScreenShare()
+            hostCanBringUpStream = true
+        } catch {
+            // Expected headless.
+        }
+        try XCTSkipIf(
+            hostCanBringUpStream,
+            "host brought up an SCStream; the resume-throw fail-safe is unreachable here"
+        )
+
+        // Pin the observer path: a throwing resume must not clear the pause.
         await session.screenShareDetectorDidTransition(
             to: ScreenShareSample(isSharingActive: false, sharingActor: nil)
         )
