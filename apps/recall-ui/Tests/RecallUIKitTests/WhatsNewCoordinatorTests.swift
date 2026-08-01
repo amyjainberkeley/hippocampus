@@ -17,22 +17,30 @@ final class WhatsNewCoordinatorTests: XCTestCase {
     private var suiteName: String!
 
     // The class is @MainActor, so these stored properties are main-actor
-    // isolated. XCTestCase declares the synchronous setUp()/tearDown() as
-    // nonisolated and an override cannot add isolation, so touching them
-    // from there is a Swift 6 error. The async variants inherit the class's
-    // isolation, which is the supported way to keep isolated state here.
-    override func setUp() async throws {
-        try await super.setUp()
-        suiteName = "WhatsNewCoordinatorTests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
+    // isolated, but XCTestCase declares setUp()/tearDown() as nonisolated
+    // and an override cannot add isolation.
+    //
+    // The async overrides look like the fix and are not: awaiting
+    // super.setUp() sends a non-Sendable XCTestCase across an isolation
+    // boundary, which Swift 6 rejects. XCTest runs these on the main thread
+    // for a synchronous test case, so assume the isolation instead. Same
+    // pattern as MCIRecallApp.swift.
+    override func setUp() {
+        super.setUp()
+        MainActor.assumeIsolated {
+            suiteName = "WhatsNewCoordinatorTests.\(UUID().uuidString)"
+            defaults = UserDefaults(suiteName: suiteName)!
+            defaults.removePersistentDomain(forName: suiteName)
+        }
     }
 
-    override func tearDown() async throws {
-        defaults.removePersistentDomain(forName: suiteName)
-        defaults = nil
-        suiteName = nil
-        try await super.tearDown()
+    override func tearDown() {
+        MainActor.assumeIsolated {
+            defaults.removePersistentDomain(forName: suiteName)
+            defaults = nil
+            suiteName = nil
+        }
+        super.tearDown()
     }
 
     // MARK: - shouldShow decision
