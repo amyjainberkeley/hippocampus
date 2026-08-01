@@ -223,16 +223,16 @@ public struct TimelineEventCard: View {
         .help(event.snippet)
     }
 
+    /// Both helpers live in `RecallUIKit.TimelineEventFormatting` so the
+    /// test target can reach them. Kept here as thin forwarders so call
+    /// sites in this view are unchanged.
     static func timeLabel(for tsUs: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(tsUs) / 1_000_000)
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f.string(from: date)
+        TimelineEventFormatting.timeLabel(for: tsUs)
     }
 
     /// `com.apple.Safari` → `Safari`. Falls back to the raw string.
     static func shortAppName(_ bundle: String) -> String {
-        bundle.split(separator: ".").last.map(String.init) ?? bundle
+        TimelineEventFormatting.shortAppName(bundle)
     }
 }
 

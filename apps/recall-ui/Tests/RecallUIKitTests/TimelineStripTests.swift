@@ -132,7 +132,7 @@ final class TimelineStripTests: XCTestCase {
     func testTimelineEventCardTimeLabelIsHhmm() {
         // 2025-05-31 00:00:00 UTC = 1748649600 seconds.
         let tsUs: UInt64 = 1_748_649_600 * 1_000_000
-        let label = TimelineEventCard.timeLabel(for: tsUs)
+        let label = TimelineEventFormatting.timeLabel(for: tsUs)
         // HH:mm shape.
         XCTAssertEqual(label.count, 5)
         XCTAssertEqual(label.dropFirst(2).first, ":")
@@ -141,9 +141,12 @@ final class TimelineStripTests: XCTestCase {
     @MainActor
     func testTimelineEventCardShortAppNameStripsReverseDns() {
         XCTAssertEqual(
-            TimelineEventCard.shortAppName("com.apple.Safari"),
+            TimelineEventFormatting.shortAppName("com.apple.Safari"),
             "Safari"
         )
-        XCTAssertEqual(TimelineEventCard.shortAppName("Firefox"), "Firefox")
+        XCTAssertEqual(
+            TimelineEventFormatting.shortAppName("Firefox"),
+            "Firefox"
+        )
     }
 }

@@ -16,18 +16,23 @@ final class WhatsNewCoordinatorTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    // The class is @MainActor, so these stored properties are main-actor
+    // isolated. XCTestCase declares the synchronous setUp()/tearDown() as
+    // nonisolated and an override cannot add isolation, so touching them
+    // from there is a Swift 6 error. The async variants inherit the class's
+    // isolation, which is the supported way to keep isolated state here.
+    override func setUp() async throws {
+        try await super.setUp()
         suiteName = "WhatsNewCoordinatorTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
         suiteName = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - shouldShow decision
