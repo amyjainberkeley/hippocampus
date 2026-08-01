@@ -50,7 +50,7 @@ private final class RecordingObserver: ScreenShareDetector.Observer, @unchecked 
     private var _samples: [ScreenShareSample] = []
 
     func screenShareDetectorDidTransition(to sample: ScreenShareSample) async {
-        lock.lock(); _samples.append(sample); lock.unlock()
+        lock.withLock { _samples.append(sample) }
     }
 
     var samples: [ScreenShareSample] {

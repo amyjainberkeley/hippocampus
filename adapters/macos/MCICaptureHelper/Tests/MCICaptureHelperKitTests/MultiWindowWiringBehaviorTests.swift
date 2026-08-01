@@ -203,7 +203,7 @@ final class SCStreamCaptureSessionWiringSurfaceTests: XCTestCase {
 /// Never-fires SecureEventInput probe. Same pattern as other test
 /// files in the suite (see `SCStreamPipelineTests`).
 private struct NeverSecureEventProbe: SecureEventInputProbe {
-    func isSecureEventInputActive() -> Bool { false }
+    func isSecureEventInputEnabled() -> Bool { false }
 }
 
 /// Never-fires AX subrole probe.
