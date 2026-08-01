@@ -49,7 +49,7 @@ private final class RecordingObserver: TCCStatusMonitor.Observer, @unchecked Sen
     private var _transitions: [TCCStatusMonitor.Transition] = []
 
     func tccStatusDidTransition(_ transition: TCCStatusMonitor.Transition) async {
-        lock.lock(); _transitions.append(transition); lock.unlock()
+        lock.withLock { _transitions.append(transition) }
     }
 
     var transitions: [TCCStatusMonitor.Transition] {
@@ -86,23 +86,33 @@ final class TCCStatusMonitorTests: XCTestCase {
     func testRevokeFiresImmediatelySingleSample() async {
         let observer = RecordingObserver()
         let probe = ScriptedProbe()
-        // seed reads .granted for all
-        probe.enqueue(.screenRecording, [.granted, .granted, .granted])
-        probe.enqueue(.accessibility, [.granted, .granted, .granted])
-        probe.enqueue(.fullDiskAccess, [.granted, .granted, .granted])
+        // The probe queue is FIFO and seedInitialSnapshot() consumes
+        // exactly one entry per surface, so seed exactly one. Queuing
+        // three left two stale .granted ahead of the .denied below, and
+        // the tick popped a stale .granted instead — no transition, and
+        // the test then indexed an empty array and crashed the process.
+        probe.enqueue(.screenRecording, [.granted])
+        // Accessibility + FDA get a second .granted so their tick pop is
+        // a same-state repeat (no fire) rather than an exhausted-queue
+        // .unknown.
+        probe.enqueue(.accessibility, [.granted, .granted])
+        probe.enqueue(.fullDiskAccess, [.granted, .granted])
         let monitor = TCCStatusMonitor(
             probe: probe, surfaces: allButAutomation, observer: observer
         )
         monitor.seedInitialSnapshot() // consumes 1 per surface
         // Now enqueue a single .denied for screenRecording
         probe.enqueue(.screenRecording, [.denied])
-        // Accessibility + FDA remain granted so their queue-pop returns
-        // the pre-seeded .granted; that's a same-state repeat (no fire).
         await monitor.tickOnce()
         XCTAssertEqual(observer.transitions.count, 1)
-        XCTAssertEqual(observer.transitions[0].surface, .screenRecording)
-        XCTAssertEqual(observer.transitions[0].oldStatus, .granted)
-        XCTAssertEqual(observer.transitions[0].newStatus, .denied)
+        // Guard rather than index blindly: a count mismatch should fail
+        // this one test, not abort the whole suite with a fatal error.
+        guard let t = observer.transitions.first else {
+            return XCTFail("expected one transition, got none")
+        }
+        XCTAssertEqual(t.surface, .screenRecording)
+        XCTAssertEqual(t.oldStatus, .granted)
+        XCTAssertEqual(t.newStatus, .denied)
         XCTAssertEqual(monitor.currentStatuses()[.screenRecording], .denied)
     }
 
