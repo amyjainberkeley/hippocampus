@@ -13,33 +13,33 @@ import XCTest
 @MainActor
 final class WhatsNewCoordinatorTests: XCTestCase {
 
-    private var defaults: UserDefaults!
-    private var suiteName: String!
-
-    // The class is @MainActor, so these stored properties are main-actor
-    // isolated, but XCTestCase declares setUp()/tearDown() as nonisolated
-    // and an override cannot add isolation.
+    // The class is @MainActor, so these would be main-actor isolated, but
+    // XCTestCase declares setUp()/tearDown() as nonisolated and an override
+    // cannot add isolation. Two fixes look right and are not:
     //
-    // The async overrides look like the fix and are not: awaiting
-    // super.setUp() sends a non-Sendable XCTestCase across an isolation
-    // boundary, which Swift 6 rejects. XCTest runs these on the main thread
-    // for a synchronous test case, so assume the isolation instead. Same
-    // pattern as MCIRecallApp.swift.
+    //   - async setUp()/tearDown() overrides: awaiting super sends a
+    //     non-Sendable XCTestCase across an isolation boundary.
+    //   - MainActor.assumeIsolated in the sync overrides: the closure is
+    //     main-actor isolated and still captures task-isolated self.
+    //
+    // Opting the two properties out is what actually holds. It is sound
+    // here because XCTest serializes setUp, the test body, and tearDown on
+    // one instance, so there is no concurrent access to race on. Same
+    // pattern as AuditLog.iso8601Formatter.
+    private nonisolated(unsafe) var defaults: UserDefaults!
+    private nonisolated(unsafe) var suiteName: String!
+
     override func setUp() {
         super.setUp()
-        MainActor.assumeIsolated {
-            suiteName = "WhatsNewCoordinatorTests.\(UUID().uuidString)"
-            defaults = UserDefaults(suiteName: suiteName)!
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        suiteName = "WhatsNewCoordinatorTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     override func tearDown() {
-        MainActor.assumeIsolated {
-            defaults.removePersistentDomain(forName: suiteName)
-            defaults = nil
-            suiteName = nil
-        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        suiteName = nil
         super.tearDown()
     }
 
