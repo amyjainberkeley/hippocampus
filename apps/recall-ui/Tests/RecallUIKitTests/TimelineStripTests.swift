@@ -6,6 +6,7 @@
 import XCTest
 @testable import RecallUIKit
 
+@MainActor
 final class TimelineStripTests: XCTestCase {
     func testTimelineEventRoundTripsThroughJson() throws {
         let e = TimelineEvent(

@@ -12,6 +12,7 @@ import XCTest
 
 @testable import RecallUIKit
 
+@MainActor
 final class MCIEmptyStateTests: XCTestCase {
 
     // MARK: - Structural invariants
