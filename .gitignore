@@ -75,3 +75,6 @@ models/*.log
 # perf-soak run artifacts (JSONL samples, agent stdout, device-id, health log).
 # Score cards from analyze.py are the shareable artifact; raw runs stay local.
 tools/perf-soak/out/
+
+# scripts/try-it.sh sandbox
+hippocampus-demo/
