@@ -58,6 +58,7 @@ Per BUNDLING.md §2 (Wave-17 corrected) and ADR-0011 erratum (2026-05-22).
 
 import argparse
 import logging
+import shutil
 import sys
 from pathlib import Path
 
@@ -371,6 +372,55 @@ def convert(
     else:
         total_size = out_p.stat().st_size
     log.info("Saved: %s (%.1f MB)", output_path, total_size / 1e6)
+
+    # Compile to .mlmodelc.
+    #
+    # This step used to be missing, and its absence was invisible until
+    # runtime: the Rust loader calls MLModel(contentsOf:), which refuses a
+    # raw .mlpackage with
+    #
+    #   Unable to load model: … Compile the model with Xcode or
+    #   MLModel.compileModel(at:)
+    #
+    # `load_backend_or_fallback` swallows that error and silently returns
+    # the zero-vector backend, so the only symptom was mcp-serve reporting
+    # `recall=lexical-only` forever with a perfectly good model on disk.
+    #
+    # `xcrun coremlcompiler` would do this but ships only with full Xcode.
+    # coremltools compiles on load and will hand us the path, which works
+    # on a Command Line Tools box too.
+    compiled_path = out_p.with_suffix(".mlmodelc")
+    log.info("Compiling to %s...", compiled_path)
+    try:
+        # Hold the MLModel in a named variable for the whole copy. The
+        # compiled directory lives in a temp dir owned by that object, so
+        # `ct.models.MLModel(...).get_compiled_model_path()` as a one-liner
+        # returns a path that is already deleted by the time copytree runs.
+        loaded_for_compile = ct.models.MLModel(output_path)
+        compiled_src = loaded_for_compile.get_compiled_model_path()
+        if compiled_path.exists():
+            shutil.rmtree(compiled_path)
+        shutil.copytree(compiled_src, compiled_path)
+        del loaded_for_compile
+        compiled_size = sum(
+            f.stat().st_size for f in compiled_path.rglob("*") if f.is_file()
+        )
+        log.info(
+            "Compiled: %s (%.1f MB) — this is the one the Rust loader wants.",
+            compiled_path,
+            compiled_size / 1e6,
+        )
+    except Exception as e:  # noqa: BLE001 - surface any compile failure verbatim
+        log.error(
+            "Compile to .mlmodelc FAILED: %s\n"
+            "The .mlpackage above is valid but the Rust loader cannot read it "
+            "directly. Point MCI_ARCTIC_MODEL_PATH at a .mlmodelc, or compile "
+            "manually with: xcrun coremlcompiler compile %s %s",
+            e,
+            output_path,
+            out_p.parent,
+        )
+        raise
 
     if verify:
         log.info("Verifying...")
