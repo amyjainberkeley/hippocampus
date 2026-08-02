@@ -82,6 +82,18 @@ enum Mode {
     McpServe {
         db_path: PathBuf,
     },
+    /// Embed every event that has no row in `event_vectors`.
+    ///
+    /// Closes the last gap in the semantic-recall path. The store has
+    /// always had the pieces (`unembedded_events` to find work,
+    /// `set_event_embedding` to write, `vec_search` + `HybridRetriever`
+    /// to read), but nothing drove the loop, so `event_vectors` stayed
+    /// empty and recall silently degraded to FTS5-only even on a machine
+    /// with a working embedder.
+    EmbedBackfill {
+        db_path: PathBuf,
+        batch_size: usize,
+    },
     /// Register Hippocampus as an MCP server in Claude Code's settings.
     RegisterMcp,
     /// Cycle 8.29 P0 #3 — empirical "is content reaching the brain
@@ -131,6 +143,11 @@ fn default_retention_json_path() -> PathBuf {
 
 const DEFAULT_STATS_WINDOW_SECONDS: u64 = 30;
 
+/// Events embedded per batch by `embed-backfill`. Small enough that a
+/// slow model reports progress often, large enough to amortize the
+/// per-call Core ML overhead.
+const DEFAULT_EMBED_BATCH_SIZE: usize = 32;
+
 fn parse_args(argv: &[String]) -> Args {
     // Two-pass: first scan resolves the mode flag, second scan binds
     // mode-specific options. Keeps `--window-seconds 600
@@ -143,6 +160,7 @@ fn parse_args(argv: &[String]) -> Args {
     let mut strict = false;
     let mut stats_source = String::new();
     let mut stats_since_seconds = DEFAULT_STATS_WINDOW_SECONDS;
+    let mut embed_batch_size = DEFAULT_EMBED_BATCH_SIZE;
 
     let mut i = 1;
     while i < argv.len() {
@@ -165,6 +183,13 @@ fn parse_args(argv: &[String]) -> Args {
             "mcp-serve" => mode_kind = ModeKind::McpServe,
             "register-mcp" => mode_kind = ModeKind::RegisterMcp,
             "stats" => mode_kind = ModeKind::Stats,
+            "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
+            "--batch-size" => {
+                if let Some(v) = argv.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
+                    embed_batch_size = v.max(1);
+                    i += 1;
+                }
+            }
             "--source" if i + 1 < argv.len() => {
                 stats_source = argv[i + 1].clone();
                 i += 1;
@@ -215,6 +240,10 @@ fn parse_args(argv: &[String]) -> Args {
             since_seconds: stats_since_seconds,
             db_path: resolved_db_path,
         },
+        ModeKind::EmbedBackfill => Mode::EmbedBackfill {
+            db_path: resolved_db_path,
+            batch_size: embed_batch_size,
+        },
     };
     Args {
         device_id_path,
@@ -232,6 +261,7 @@ enum ModeKind {
     McpServe,
     RegisterMcp,
     Stats,
+    EmbedBackfill,
 }
 
 fn print_usage() {
@@ -245,6 +275,9 @@ fn print_usage() {
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 embed-backfill             embed every event that has no vector yet, so\n\
+        \x20                            mci_recall runs hybrid instead of keyword-only.\n\
+        \x20                            Needs the ArcticEmbedS model; refuses without it.\n\
         \x20 stats --source SRC         count PageContentEvents from SRC in the last window\n\
         \x20                            (SRC = safari | chromium-native-host). Cycle 8.29\n\
         \x20                            P0 #3 — empirical onboarding probe.\n\
@@ -258,6 +291,7 @@ fn print_usage() {
         \x20                            ~/Library/Application Support/MCI/mci.sqlite\n\
         \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n\
         \x20 --since-seconds N          (with stats) lookback window. Default 30.\n\
+        \x20 --batch-size N             (with embed-backfill) events per batch. Default 32.\n\
         \x20 --strict                   (with --drain-stdin) exit non-zero if brain cannot\n\
         \x20                            be opened, instead of falling back to health-only.\n\
         \n\
@@ -876,6 +910,13 @@ async fn main() -> ExitCode {
                 ExitCode::from(14)
             }
         },
+        Mode::EmbedBackfill {
+            db_path,
+            batch_size,
+        } => match run_embed_backfill(&db_path, batch_size) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::McpServe { db_path } => match run_mcp_serve(db_path).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
@@ -1190,6 +1231,99 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
         eprintln!("mci-agent mcp-serve: stdio loop error: {e}");
         return Err(13);
     }
+    Ok(())
+}
+
+/// Embed every event that has no vector yet.
+///
+/// This is the loop that was missing. `event_vectors` stayed empty
+/// because nothing ever called `set_event_embedding`, which meant
+/// `HybridRetriever` had no semantic side to fuse and `mci_recall`
+/// quietly degraded to FTS5-only even where a real embedder existed.
+///
+/// Opened read-write via `SqlCipherBrainStore::new` (every other read
+/// surface uses `open_readonly`; this one has to write).
+///
+/// Refuses to run without a real embedder rather than writing zero
+/// vectors, because a zero vector matches every query at cosine 0 and
+/// would poison recall in a way that looks like a ranking bug.
+fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8> {
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!(
+            "mci-agent embed-backfill: MCI_DB_KEY_HEX not set and no dev.key found. \
+             See docs/claude-code-mcp-setup.md."
+        );
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent embed-backfill: MCI_DB_KEY_HEX must be 64 hex characters.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let (embedder, is_real) = load_embedder_backend();
+    if !is_real {
+        eprintln!(
+            "mci-agent embed-backfill: no real embedder available, refusing to run.\n\
+             \n\
+             Semantic recall needs the ArcticEmbedS Core ML model, which is ~33 MB\n\
+             and is not checked into the repository. Build it with:\n\
+             \n\
+               python3 -m venv .venv-ml && source .venv-ml/bin/activate\n\
+               pip install -r scripts/requirements-ml.txt\n\
+               python scripts/convert_embedder.py\n\
+             \n\
+             Until then recall works, but keyword-only. Nothing is broken;\n\
+             there is just no semantic half to fill in yet."
+        );
+        return Err(20);
+    }
+
+    let store = match SqlCipherBrainStore::new(db_path, &key) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "mci-agent embed-backfill: open brain at {}: {e}",
+                db_path.display()
+            );
+            return Err(12);
+        }
+    };
+
+    // Reuses the same read-embed-write sequence as the live-capture
+    // idle-batch worker, in its one-shot form. See `idle_batch`.
+    let stats = match mci_agent::idle_batch::backfill_until_drained(
+        &store,
+        embedder.as_ref(),
+        batch_size,
+        |s| {
+            eprintln!(
+                "mci-agent embed-backfill: {} embedded so far",
+                s.events_embedded
+            )
+        },
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("mci-agent embed-backfill: {e}");
+            return Err(13);
+        }
+    };
+
+    let skipped = stats.embed_errors + stats.store_errors;
+    if skipped > 0 {
+        eprintln!(
+            "mci-agent embed-backfill: done. {} embedded, {skipped} skipped \
+             ({} embed errors, {} store errors).",
+            stats.events_embedded, stats.embed_errors, stats.store_errors
+        );
+        return Err(22);
+    }
+    eprintln!(
+        "mci-agent embed-backfill: done. {} embedded in {} batch(es). \
+         Restart mcp-serve to pick up hybrid recall.",
+        stats.events_embedded, stats.batches_run
+    );
     Ok(())
 }
 

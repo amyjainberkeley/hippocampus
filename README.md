@@ -95,6 +95,67 @@ $ mci-brain export --format jsonl | head -1
 
 ---
 
+## Use it as your agent's memory
+
+This is the part that makes it a memory layer rather than a search box. Hippocampus speaks MCP over stdio, so Claude Code (or anything else that speaks MCP) can query what you saw.
+
+```bash
+mci-agent register-mcp     # writes the server into Claude Code's MCP settings
+```
+
+Or run it directly and talk JSON-RPC to it:
+
+```bash
+MCI_DB_KEY_HEX=$(cat hippocampus-demo/demo.key) \
+MCI_DB_PATH=$PWD/hippocampus-demo/demo.sqlite \
+  mci-agent mcp-serve
+```
+
+Five tools, described so a model knows when to reach for each:
+
+| Tool | What an agent uses it for |
+|---|---|
+| `mci_recall` | "That article about Rust I read yesterday." The main one. |
+| `mci_events_since` | "What happened in the last hour." Incremental polling. |
+| `mci_stats` | Counts and time range. Cheap way to check there is anything to search. |
+| `mci_episodes` | "What did I work on today," as stretches of focused activity. |
+| `mci_events_by_app` | "What sites did I visit," scoped to one app bundle id. |
+
+On startup it tells you which mode it is in, and this is the line to read:
+
+```
+mci-agent mcp-serve: ready on stdio. db=… recall=lexical-only (FTS5)
+```
+
+`lexical-only` means it found no embedder, so `mci_recall` is doing keyword matching. To get `hybrid (FTS5 + semantic)` you need the model and one backfill run, described next.
+
+### Turning on semantic recall
+
+Three things have to be true, and until recently the third was missing entirely.
+
+1. **A model.** ArcticEmbedS as Core ML, 33 MB, not in the repo because it does not belong in git:
+
+   ```bash
+   python3 -m venv .venv-ml && source .venv-ml/bin/activate
+   pip install -r scripts/requirements-ml.txt
+   python scripts/convert_embedder.py
+   ```
+
+2. **Vectors in the store.** Events are written without embeddings. Something has to go back and fill them in:
+
+   ```bash
+   mci-agent embed-backfill              # walks every event with no vector
+   mci-agent embed-backfill --batch-size 64
+   ```
+
+   It is idempotent, so running it twice is a no-op rather than an error, and it refuses to run without a real model rather than writing zero vectors. A zero vector matches every query equally, which would look like a ranking bug rather than a missing model.
+
+3. **Restart `mcp-serve`.** It picks the mode at startup. The line should now say `hybrid`.
+
+Honestly: I have not been able to run step 1 end to end myself, because the conversion needs Python 3.11 or 3.12 and a couple of gigabytes for torch. Steps 2 and 3 are tested. If step 1 fails for you, that is the least proven part of this repo and I would want to hear about it.
+
+---
+
 ## How it works
 
 Five steps. The interesting one is step 1.
@@ -151,7 +212,8 @@ Most projects bury this. It should be near the top, because it decides whether t
 | Piece | State |
 |---|---|
 | **Encrypted store + keyword search** | **Works, tested.** This is what `try-it.sh` exercises end to end. |
-| **Vector search + fusion ranking** | **Works, tested, but not in the CLI.** `hybrid_retriever.rs` fuses keyword and vector hits and weights them by recency. It is covered by the test suite and used by the app, but the read-only CLI does not load the embedder, so the demo does not show it. |
+| **MCP server** | **Works.** Five tools over stdio JSON-RPC, so an agent can query your memory. See below. |
+| **Vector search + fusion ranking** | **Works, tested, needs a model you build yourself.** The code path is complete and covered by tests. Turning it on needs the ArcticEmbedS Core ML model, which is 33 MB and is not in the repo, plus one run of `mci-agent embed-backfill`. Until then everything degrades to keyword-only. |
 | **On-device embeddings** | **Works.** Runs through Core ML with a regression test asserting the vectors still match a known-good reference. |
 | **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
 | **Reading Mail and Messages** | **Read-only.** Nothing is written to the brain until the per-source redaction path is finished. |
@@ -218,6 +280,16 @@ mci-brain recent --limit 5               # newest first
 mci-brain export --format jsonl          # take everything with you
 mci-brain export --format csv --out brain.csv
 mci-brain export --since 1785702779612697
+```
+
+The agent-facing side lives on `mci-agent`:
+
+```bash
+mci-agent mcp-serve                      # MCP server over stdio
+mci-agent register-mcp                   # add it to Claude Code
+mci-agent embed-backfill                 # fill in missing vectors
+mci-agent embed-backfill --batch-size 64
+mci-agent stats --source safari
 ```
 
 | Variable | What it does | Required |
