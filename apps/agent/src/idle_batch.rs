@@ -46,6 +46,73 @@ pub enum IdleBatchError {
     StoreRead(String),
 }
 
+/// Embed every un-embedded event, then return.
+///
+/// The one-shot sibling of [`run_idle_batch_worker`]. That worker is a
+/// long-running background service wired into the live-capture ingest
+/// path, so it never runs against a brain that already has events in it
+/// (and capture is off by default). This is the same read-embed-write
+/// sequence with the opposite lifecycle: drain the queue, report, exit.
+/// It backs `mci-agent embed-backfill`.
+///
+/// Synchronous on purpose. There is no concurrency to manage when the
+/// only job is to drain a queue once, and it keeps the function testable
+/// without a tokio runtime.
+///
+/// A per-event embed or store failure is counted and skipped rather than
+/// aborting: one malformed row must not strand every later event, and
+/// the next run re-fetches whatever is still missing. Only a store *read*
+/// failure is fatal, because at that point the queue cannot be trusted.
+///
+/// # Errors
+/// [`IdleBatchError::StoreRead`] if listing un-embedded events fails.
+pub fn backfill_until_drained(
+    store: &SqlCipherBrainStore,
+    embedder: &dyn Embedder,
+    batch_size: usize,
+    mut on_progress: impl FnMut(&RunStats),
+) -> Result<RunStats, IdleBatchError> {
+    let mut stats = RunStats {
+        events_embedded: 0,
+        batches_run: 0,
+        embed_errors: 0,
+        store_errors: 0,
+    };
+    let batch_size = batch_size.max(1);
+
+    loop {
+        let batch = store
+            .unembedded_events(batch_size)
+            .map_err(|e| IdleBatchError::StoreRead(e.to_string()))?;
+        if batch.is_empty() {
+            break;
+        }
+        stats.batches_run += 1;
+
+        for event in &batch {
+            // Embed the same text the FTS5 index sees, so a hit on one
+            // side refers to the same content on the other.
+            match embedder.embed_one(&event.text) {
+                Ok(vector) => match store.set_event_embedding(event.id, &vector) {
+                    Ok(()) => stats.events_embedded += 1,
+                    Err(_) => stats.store_errors += 1,
+                },
+                Err(_) => stats.embed_errors += 1,
+            }
+        }
+        on_progress(&stats);
+
+        // A batch where every event failed would otherwise spin forever:
+        // the rows stay un-embedded, so the next read returns the same
+        // ones. Stop and let the caller report it.
+        if stats.events_embedded == 0 && (stats.embed_errors + stats.store_errors) > 0 {
+            break;
+        }
+    }
+
+    Ok(stats)
+}
+
 /// Run the idle-batch embedding loop.
 ///
 /// Reads up to `batch_size` un-embedded events per cycle, embeds each
