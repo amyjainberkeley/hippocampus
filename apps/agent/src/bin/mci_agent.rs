@@ -1266,12 +1266,19 @@ fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<()
         eprintln!(
             "mci-agent embed-backfill: no real embedder available, refusing to run.\n\
              \n\
-             Semantic recall needs the ArcticEmbedS Core ML model, which is ~33 MB\n\
+             Semantic recall needs the ArcticEmbedS Core ML model. It is ~66 MB\n\
              and is not checked into the repository. Build it with:\n\
              \n\
-               python3 -m venv .venv-ml && source .venv-ml/bin/activate\n\
+               python3.11 -m venv .venv-ml && source .venv-ml/bin/activate\n\
                pip install -r scripts/requirements-ml.txt\n\
-               python scripts/convert_embedder.py\n\
+               python scripts/convert_embedder.py \\\n\
+                 --output models/ArcticEmbedS_INT8.mlpackage --verify\n\
+             \n\
+             That writes both a .mlpackage and a .mlmodelc. The loader needs\n\
+             the .mlmodelc; a raw .mlpackage cannot be opened at runtime.\n\
+             Point at it explicitly if it lives elsewhere:\n\
+             \n\
+               export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_INT8.mlmodelc\n\
              \n\
              Until then recall works, but keyword-only. Nothing is broken;\n\
              there is just no semantic half to fill in yet."

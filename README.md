@@ -131,28 +131,60 @@ mci-agent mcp-serve: ready on stdio. db=… recall=lexical-only (FTS5)
 
 ### Turning on semantic recall
 
-Three things have to be true, and until recently the third was missing entirely.
+Two commands. This whole path has been run end to end on a clean machine.
 
-1. **A model.** ArcticEmbedS as Core ML, 33 MB, not in the repo because it does not belong in git:
+**1. Build the model.** ArcticEmbedS as Core ML. About 66 MB, so it is not in the repo. Needs Python 3.11 or 3.12 (not 3.14, coremltools does not support it yet) and roughly 2 GB of disk for torch:
 
-   ```bash
-   python3 -m venv .venv-ml && source .venv-ml/bin/activate
-   pip install -r scripts/requirements-ml.txt
-   python scripts/convert_embedder.py
-   ```
+```bash
+python3.11 -m venv .venv-ml && source .venv-ml/bin/activate
+pip install -r scripts/requirements-ml.txt
+python scripts/convert_embedder.py \
+  --output models/ArcticEmbedS_INT8.mlpackage --verify
+```
 
-2. **Vectors in the store.** Events are written without embeddings. Something has to go back and fill them in:
+That writes two things: a `.mlpackage` and a compiled `.mlmodelc` beside it. **The `.mlmodelc` is the one that matters.** A raw `.mlpackage` cannot be opened at runtime; Core ML rejects it with "Compile the model with Xcode." The script now compiles it for you, which it did not always do, and that gap was invisible because the loader treats a failed load and a missing file identically.
 
-   ```bash
-   mci-agent embed-backfill              # walks every event with no vector
-   mci-agent embed-backfill --batch-size 64
-   ```
+**2. Fill in the vectors.** Events are stored without embeddings, so something has to go back over them:
 
-   It is idempotent, so running it twice is a no-op rather than an error, and it refuses to run without a real model rather than writing zero vectors. A zero vector matches every query equally, which would look like a ranking bug rather than a missing model.
+```bash
+mci-agent embed-backfill
+mci-agent embed-backfill --batch-size 64
+```
 
-3. **Restart `mcp-serve`.** It picks the mode at startup. The line should now say `hybrid`.
+Idempotent, so running it twice is a no-op rather than an error. It refuses to run without a working model instead of writing zero vectors, because a zero vector matches every query equally and would look like a ranking bug rather than a missing model.
 
-Honestly: I have not been able to run step 1 end to end myself, because the conversion needs Python 3.11 or 3.12 and a couple of gigabytes for torch. Steps 2 and 3 are tested. If step 1 fails for you, that is the least proven part of this repo and I would want to hear about it.
+Then restart `mcp-serve`. It picks the mode once at startup, and the line should now read:
+
+```
+recall=hybrid (FTS5 + semantic, ADR-0010 min-max CC)
+```
+
+If the model lives somewhere else, point at it:
+
+```bash
+export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_INT8.mlmodelc
+```
+
+### Does it actually help?
+
+Here is the same query against the same 20-event demo brain, once with keyword search and once with hybrid. None of the words in the query appear anywhere in the corpus:
+
+```console
+$ mci_recall "finding things by meaning rather than exact wording"
+
+# lexical-only
+0 hits
+
+# hybrid
+3 hits
+  score=0.645  Notion — MCI / Recall UI Spec
+  score=0.598  Snowflake Arctic Embed S — Hugging Face
+  score=0.594  sqlite-vec — A vector search SQLite extension
+```
+
+Keyword search cannot answer that question, because you did not use any of the words. That difference is the entire reason this project exists.
+
+One caveat from the run: on this machine the Neural Engine compile failed and Core ML fell back to CPU (`ANECCompile() FAILED`). It works and the vectors are correct, it is just not using the fast path. Embedding 20 events was instant either way; I have not measured it at a realistic corpus size.
 
 ---
 
@@ -213,7 +245,7 @@ Most projects bury this. It should be near the top, because it decides whether t
 |---|---|
 | **Encrypted store + keyword search** | **Works, tested.** This is what `try-it.sh` exercises end to end. |
 | **MCP server** | **Works.** Five tools over stdio JSON-RPC, so an agent can query your memory. See below. |
-| **Vector search + fusion ranking** | **Works, tested, needs a model you build yourself.** The code path is complete and covered by tests. Turning it on needs the ArcticEmbedS Core ML model, which is 33 MB and is not in the repo, plus one run of `mci-agent embed-backfill`. Until then everything degrades to keyword-only. |
+| **Semantic search + fusion ranking** | **Works, and I have run the whole path.** Build the model, run `mci-agent embed-backfill`, restart. Verified end to end on a clean machine: a query sharing no words with the corpus goes from 0 hits to 3 correct ones. The model is ~66 MB so you build it yourself; until you do, everything degrades to keyword-only and says so on startup. |
 | **On-device embeddings** | **Works.** Runs through Core ML with a regression test asserting the vectors still match a known-good reference. |
 | **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
 | **Reading Mail and Messages** | **Read-only.** Nothing is written to the brain until the per-source redaction path is finished. |
