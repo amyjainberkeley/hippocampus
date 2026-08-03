@@ -67,6 +67,60 @@ pub enum ConsolidatorWorkerError {
     Store(String),
 }
 
+/// One full consolidation pass, synchronously.
+///
+/// Reads the candidate mention sites, derives `shared_identity` edges from
+/// them, and reconciles `episode_edges` to exactly that set. This is the
+/// whole unit of work; [`run_consolidator_worker`] is a loop with a
+/// watermark check around it, and `mci-agent enrich` calls this directly.
+///
+/// Reconcile, not append: an edge is pruned when the identity membership it
+/// rested on disappears, because the alias resolver's leaf attachment is
+/// non-monotonic. Re-running on an unchanged store is a true no-op.
+///
+/// # Errors
+/// [`ConsolidatorWorkerError::Store`] if reading the candidate sites fails.
+/// A failing *write* is counted in `store_errors` rather than returned.
+pub fn consolidate_once(
+    store: &SqlCipherBrainStore,
+) -> Result<ConsolidatorStats, ConsolidatorWorkerError> {
+    let mut stats = ConsolidatorStats::default();
+    let consolidator = EpisodeConsolidator::default();
+
+    let sites = store
+        .consolidation_candidates()
+        .map_err(|e| ConsolidatorWorkerError::Store(e.to_string()))?;
+
+    let derived = consolidator.consolidate(&sites);
+    stats.edges_derived_last = u64::try_from(derived.len()).unwrap_or(u64::MAX);
+
+    let rows: Vec<EpisodeEdge> = derived
+        .iter()
+        .map(|d| EpisodeEdge {
+            id: EpisodeEdge::derive_shared_identity_id(
+                d.src_episode_id,
+                d.dst_episode_id,
+                &d.identity_id,
+            ),
+            src_episode_id: d.src_episode_id,
+            dst_episode_id: d.dst_episode_id,
+            edge_kind: EpisodeEdge::KIND_SHARED_IDENTITY.to_string(),
+            evidence_entity_ids: Some(evidence_json(d)),
+            ts_us: d.ts_us,
+        })
+        .collect();
+
+    match store.reconcile_episode_edges(EpisodeEdge::KIND_SHARED_IDENTITY, &rows) {
+        Ok(rstats) => {
+            stats.edges_written += rstats.inserted;
+            stats.edges_pruned += rstats.deleted;
+        }
+        Err(_) => stats.store_errors += 1,
+    }
+    stats.cycles_run = 1;
+    Ok(stats)
+}
+
 /// Run the episode-edge consolidator idle loop.
 ///
 /// Each cycle: read a cheap [`ConsolidationWatermark`]; if unchanged since
@@ -78,7 +132,6 @@ pub async fn run_consolidator_worker(
     idle_interval: std::time::Duration,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<ConsolidatorStats, ConsolidatorWorkerError> {
-    let consolidator = EpisodeConsolidator::default();
     let mut stats = ConsolidatorStats::default();
     let mut last_watermark: Option<ConsolidationWatermark> = None;
 
@@ -102,56 +155,17 @@ pub async fn run_consolidator_worker(
             }
         }
 
-        // Read the consolidation inputs in one blocking hop.
+        // One pass, off the async thread. The body lives in
+        // `consolidate_once` so the loop and `mci-agent enrich` cannot drift.
         let store_c = Arc::clone(&store);
-        let sites = tokio::task::spawn_blocking(move || store_c.consolidation_candidates())
+        let pass = tokio::task::spawn_blocking(move || consolidate_once(&store_c))
             .await
-            .map_err(|e| ConsolidatorWorkerError::Store(e.to_string()))?
-            .map_err(|e| ConsolidatorWorkerError::Store(e.to_string()))?;
+            .map_err(|e| ConsolidatorWorkerError::Store(e.to_string()))??;
 
-        let derived = consolidator.consolidate(&sites);
-        stats.edges_derived_last = u64::try_from(derived.len()).unwrap_or(u64::MAX);
-
-        // Materialize the content-stable `EpisodeEdge` rows. The PK folds
-        // the identity in (so two identities over one episode pair stay
-        // distinct) and `evidence_entity_ids` is the JSON array of the
-        // contributing member entity ids — faithful to the column's
-        // documented shape (migration 0004).
-        let rows: Vec<EpisodeEdge> = derived
-            .iter()
-            .map(|d| EpisodeEdge {
-                id: EpisodeEdge::derive_shared_identity_id(
-                    d.src_episode_id,
-                    d.dst_episode_id,
-                    &d.identity_id,
-                ),
-                src_episode_id: d.src_episode_id,
-                dst_episode_id: d.dst_episode_id,
-                edge_kind: EpisodeEdge::KIND_SHARED_IDENTITY.to_string(),
-                evidence_entity_ids: Some(evidence_json(d)),
-                ts_us: d.ts_us,
-            })
-            .collect();
-
-        // Reconcile (not append): prune any `shared_identity` edge no
-        // longer in the current derived set — the alias resolver's
-        // leaf-attachment is non-monotonic, so an edge can lose the
-        // membership it rested on. Re-running on an unchanged store is a
-        // true no-op (zero inserts, zero deletes).
-        let store_c = Arc::clone(&store);
-        let write = tokio::task::spawn_blocking(move || {
-            store_c.reconcile_episode_edges(EpisodeEdge::KIND_SHARED_IDENTITY, &rows)
-        })
-        .await
-        .map_err(|e| ConsolidatorWorkerError::Store(e.to_string()))?;
-
-        match write {
-            Ok(rstats) => {
-                stats.edges_written += rstats.inserted;
-                stats.edges_pruned += rstats.deleted;
-            }
-            Err(_) => stats.store_errors += 1,
-        }
+        stats.edges_written += pass.edges_written;
+        stats.edges_pruned += pass.edges_pruned;
+        stats.edges_derived_last = pass.edges_derived_last;
+        stats.store_errors += pass.store_errors;
         stats.cycles_run += 1;
         last_watermark = Some(watermark);
     }
