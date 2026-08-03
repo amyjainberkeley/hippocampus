@@ -184,7 +184,45 @@ $ mci_recall "finding things by meaning rather than exact wording"
 
 Keyword search cannot answer that question, because you did not use any of the words. That difference is the entire reason this project exists.
 
-One caveat from the run: on this machine the Neural Engine compile failed and Core ML fell back to CPU (`ANECCompile() FAILED`). It works and the vectors are correct, it is just not using the fast path. Embedding 20 events was instant either way; I have not measured it at a realistic corpus size.
+### On the Neural Engine message
+
+You will see this during conversion, and it is not a problem:
+
+```
+MILCompilerForANE error: failed to compile ANE model using ANEF.
+Error=_ANECompiler : ANECCompile() FAILED.
+```
+
+There is no Neural Engine residency for this BERT graph. It cannot run on the ANE, so Core ML tries, fails, and moves on. The Rust loader never goes down that path anyway: it pins compute units to CPU on purpose, which is a measured decision rather than a default. The rationale is written up in `adapters/macos/mci-embed-coreml/src/lib.rs` under the E5RT story, and it is worth reading if you are tempted to change it.
+
+Measured here, Apple Silicon, CPU-only pin:
+
+| | |
+|---|---|
+| Model load | ~340 ms, once at startup |
+| Per embed | ~18 ms |
+
+Embedding happens on an idle loop, not in front of your query, so 18 ms is not a number anyone will feel. CPU+GPU benchmarks faster (~1.9 ms in the notes in that file) and would be the thing to reach for if the embedder ever moved onto a hot path. It has not, so it stays on CPU.
+
+### How I know the vectors are right
+
+Loading is not the same as working. `adapters/macos/mci-embed-coreml/tests/quality.rs` embeds 50 fixture sentences through the Core ML model and compares each one against a Python FP32 reference generated from the original Hugging Face weights. The bar is cosine `>= 0.999` on every sentence.
+
+```bash
+python scripts/convert_embedder.py \
+  --output models/ArcticEmbedS_INT8.mlpackage --verify --fixtures
+cargo test -p mci-embed-coreml --test quality
+```
+
+```
+test cosine_similarity_matches_python_reference ... ok
+test output_is_l2_normalized ... ok
+test output_dimension_is_384 ... ok
+test empty_string_returns_valid_vector ... ok
+test truncation_long_input_does_not_crash ... ok
+```
+
+That test used to skip silently, because it needs a fixture file that was never committed. It runs now.
 
 ---
 

@@ -1,0 +1,50 @@
+Hello, world.
+The quick brown fox jumps over the lazy dog.
+MCI captures every screen and turns it into a private, encrypted brain.
+Snowflake Arctic Embed S is a 33M parameter sentence embedding model.
+Apple Silicon's Neural Engine runs Core ML models at sub-millisecond latency.
+Tokenization happens in Rust via the HuggingFace tokenizers crate.
+Core ML's MIL spec has no string operations.
+fn forward(&self, text: &str) -> Result<Vec<f32>, EmbedError>
+Vector dimension is 384, output is L2-normalized in the graph.
+Cosine similarity collapses to dot product on unit vectors.
+The first commit on a clean branch is always the most satisfying.
+What did I work on last Tuesday between 2pm and 4pm?
+Find every screenshot of the staging dashboard from last week.
+Recall surfaces structured context, not just pixels.
+Sensitive capture is a launch blocker, not a v1.1 follow-up.
+ADR-0011 pins the embedder to snowflake-arctic-embed-s.
+Phase 0 forks are ratified in docs/AGENT_QUESTIONS.md.
+Director-Brain owns the embedder + retriever code paths.
+Zero-knowledge invariant: the sync server never sees plaintext.
+Footprint SLO: <= 1-2% CPU and <= 250 MB RAM on an all-day session.
+End-to-end encryption + local SQLCipher = single-source-of-truth brain.
+Sqlite-vec is the only zero-knowledge-preserving vector store.
+Hybrid retrieval fuses FTS5 and semantic search via min-max CC.
+The episode boundary heuristic uses idle time, app switch, and URL change.
+OCR runs only on the foreground region to stay within the footprint SLO.
+Dedup hashes the OCR text before embedding to avoid wasted compute.
+The agent fleet's coherence depends on gbrain as shared memory.
+CEO + CRS forks are ratified the same day to avoid drift.
+Director-Brain's first task: prove the embedder quality on real corpus.
+Wave 17 corrects the architectural pivot from baked tokenization.
+Hippocampus.app is the daemon; mci-agent is the headless binary.
+Co-located: agent, capture helper, recall UI, all in one signed bundle.
+TCC permission for screen recording is granted once at first launch.
+Sparkle.framework handles auto-update with explicit user consent.
+Privacy denylist filters apps before capture, not after redaction.
+Incognito browser tabs are excluded from capture at the source.
+café ☕ — Unicode round-trip should be lossless through the tokenizer.
+naïve résumé déjà vu — diacritics must not change the embedding shape.
+你好世界 — multilingual content gracefully degrades but does not crash.
+🚀🧠🔒 — emoji tokens are valid input to the WordPiece tokenizer.
+
+ 
+a
+the the the the the the the the the the the the the the the the the the the the
+lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+How do I configure tokio's runtime to use the current-thread scheduler?
+Where in the codebase do we handle the embedder fallback to ZeroBackend?
+What did we decide about the Matryoshka 768->256 claim?
+Did the verification pass change any of the cited retrieval deltas?
+Represent this sentence for searching relevant passages: query prefix test.
