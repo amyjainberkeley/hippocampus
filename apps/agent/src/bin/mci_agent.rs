@@ -82,6 +82,15 @@ enum Mode {
     McpServe {
         db_path: PathBuf,
     },
+    /// Run every understanding stage over an existing brain.
+    ///
+    /// The five workers that turn events into entities, episodes and
+    /// identities were reachable only from the live-capture ingest path,
+    /// which ships off. On any brain filled another way they never ran.
+    Enrich {
+        db_path: PathBuf,
+        batch_size: usize,
+    },
     /// Embed every event that has no row in `event_vectors`.
     ///
     /// Closes the last gap in the semantic-recall path. The store has
@@ -184,6 +193,7 @@ fn parse_args(argv: &[String]) -> Args {
             "register-mcp" => mode_kind = ModeKind::RegisterMcp,
             "stats" => mode_kind = ModeKind::Stats,
             "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
+            "enrich" => mode_kind = ModeKind::Enrich,
             "--batch-size" => {
                 if let Some(v) = argv.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
                     embed_batch_size = v.max(1);
@@ -244,6 +254,10 @@ fn parse_args(argv: &[String]) -> Args {
             db_path: resolved_db_path,
             batch_size: embed_batch_size,
         },
+        ModeKind::Enrich => Mode::Enrich {
+            db_path: resolved_db_path,
+            batch_size: embed_batch_size,
+        },
     };
     Args {
         device_id_path,
@@ -262,6 +276,7 @@ enum ModeKind {
     RegisterMcp,
     Stats,
     EmbedBackfill,
+    Enrich,
 }
 
 fn print_usage() {
@@ -275,6 +290,9 @@ fn print_usage() {
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 enrich                     run every understanding stage over an existing\n\
+        \x20                            brain: extract entities, embed, segment episodes,\n\
+        \x20                            resolve identities, link related episodes.\n\
         \x20 embed-backfill             embed every event that has no vector yet, so\n\
         \x20                            mci_recall runs hybrid instead of keyword-only.\n\
         \x20                            Needs the ArcticEmbedS model; refuses without it.\n\
@@ -910,6 +928,13 @@ async fn main() -> ExitCode {
                 ExitCode::from(14)
             }
         },
+        Mode::Enrich {
+            db_path,
+            batch_size,
+        } => match run_enrich_cmd(&db_path, batch_size) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::EmbedBackfill {
             db_path,
             batch_size,
@@ -1230,6 +1255,73 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     if let Err(e) = serve_stdio(server, stdout).await {
         eprintln!("mci-agent mcp-serve: stdio loop error: {e}");
         return Err(13);
+    }
+    Ok(())
+}
+
+/// Run every understanding stage over an existing brain.
+///
+/// Opened read-write, unlike every other read surface: this writes
+/// entities, episodes, identities and edges derived from events already in
+/// the store. It writes no new events, so it cannot introduce content the
+/// capture cascade did not already allow.
+///
+/// The embedder is optional. Without one the embed stage is skipped with a
+/// note and everything else still runs, because entities, episodes and
+/// identities need no model.
+fn run_enrich_cmd(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8> {
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!("mci-agent enrich: MCI_DB_KEY_HEX not set and no dev.key found.");
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent enrich: MCI_DB_KEY_HEX must be 64 hex characters.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let store = match SqlCipherBrainStore::new(db_path, &key) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("mci-agent enrich: open brain at {}: {e}", db_path.display());
+            return Err(12);
+        }
+    };
+
+    let (embedder, is_real) = load_embedder_backend();
+    let embedder_ref: Option<&dyn mci_brain::Embedder> = if is_real {
+        Some(embedder.as_ref())
+    } else {
+        None
+    };
+
+    let stats =
+        match mci_agent::enrich::run_enrich(&store, embedder_ref, batch_size, |stage, msg| {
+            eprintln!("mci-agent enrich: [{}] {msg}", stage.label());
+        }) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("mci-agent enrich: {e}");
+                return Err(23);
+            }
+        };
+
+    eprintln!(
+        "mci-agent enrich: done. {} events scanned, {} mentions, {} embedded, \
+         {} events in {} episodes, {} identities, {} episode links.",
+        stats.events_scanned,
+        stats.mentions_written,
+        stats.embedded,
+        stats.events_segmented,
+        stats.episodes_created,
+        stats.identities,
+        stats.edges_written,
+    );
+    if !is_real {
+        eprintln!(
+            "mci-agent enrich: note — no embedder, so recall stays keyword-only. \
+             See `mci-agent embed-backfill` for how to build the model."
+        );
     }
     Ok(())
 }
