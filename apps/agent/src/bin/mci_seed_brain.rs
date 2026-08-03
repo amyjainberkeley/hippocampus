@@ -318,7 +318,22 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
             } else {
                 Some((*url).to_owned())
             },
-            text: (*text).to_owned(),
+            // Real ingest prepends this per ADR-0010 §1.3, and `events.text`
+            // is what Tier-1 extraction and FTS5 actually read. Without it
+            // the seed is unfaithful to the pipeline: the URL lives only in
+            // the `url` column, so `mci-agent enrich` finds no entities and
+            // looks broken on the demo brain. Uses the ingest path's own
+            // helper so the two cannot drift.
+            text: format!(
+                "{}{}",
+                mci_agent::brain_ingest::compose_context_header(
+                    Some(bundle),
+                    if title.is_empty() { None } else { Some(title) },
+                    if url.is_empty() { None } else { Some(url) },
+                    ts_us,
+                ),
+                text
+            ),
             summary: None,
             entities: None,
             episode_id: None,

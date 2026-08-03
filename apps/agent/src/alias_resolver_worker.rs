@@ -66,6 +66,67 @@ fn now_us() -> u64 {
         .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
+/// One full alias-resolution pass, synchronously.
+///
+/// Reads the resolver inputs, resolves them into identity clusters, and
+/// reconciles the store to exactly the resulting membership set. This is
+/// the whole unit of work; [`run_alias_resolver_worker`] is a loop with a
+/// watermark check around it, and `mci-agent enrich` calls this directly.
+///
+/// Reconcile, not append: a membership row the resolver no longer emits is
+/// pruned, because leaf attachment is non-monotonic and an entity can lose
+/// the cluster it rested on. Running this on an unchanged store is a true
+/// no-op, zero inserts and zero deletes, which is what makes it safe to
+/// call repeatedly.
+///
+/// # Errors
+/// [`AliasResolverWorkerError::Store`] if reading the resolver inputs fails.
+/// A failing *write* is counted in `store_errors` rather than returned, so
+/// one bad row cannot strand the rest of the pass.
+pub fn resolve_once(
+    store: &SqlCipherBrainStore,
+) -> Result<AliasResolverStats, AliasResolverWorkerError> {
+    let mut stats = AliasResolverStats::default();
+    let resolver = AliasResolver::default();
+
+    let entities = store
+        .list_resolvable_entities()
+        .map_err(|e| AliasResolverWorkerError::Store(e.to_string()))?;
+    let cooccurrences = store
+        .entity_cooccurrences()
+        .map_err(|e| AliasResolverWorkerError::Store(e.to_string()))?;
+
+    let clusters = resolver.resolve(&entities, &cooccurrences);
+    stats.identities_last = u64::try_from(clusters.len()).unwrap_or(u64::MAX);
+    let ts = now_us();
+
+    let rows: Vec<EntityIdentity> = clusters
+        .iter()
+        .flat_map(|identity| {
+            identity.members.iter().map(move |member| EntityIdentity {
+                id: EntityIdentity::derive_id(&identity.identity_id, &member.entity_id),
+                entity_id: member.entity_id.clone(),
+                identity_id: identity.identity_id.clone(),
+                identity_kind: identity.identity_kind.clone(),
+                identity_canonical_name: identity.canonical_name.clone(),
+                rule: member.rule.clone(),
+                confidence: member.confidence,
+                ts_us: ts,
+            })
+        })
+        .collect();
+
+    match store.reconcile_entity_identities(&rows) {
+        Ok(rstats) => {
+            stats.memberships_written += rstats.inserted;
+            stats.memberships_pruned += rstats.deleted;
+        }
+        Err(_) => stats.store_errors += 1,
+    }
+    stats.cycles_run = 1;
+    Ok(stats)
+}
+
 /// Run the alias-resolver idle loop.
 ///
 /// Each cycle: read a cheap [`ResolutionWatermark`]; if unchanged since
@@ -77,7 +138,6 @@ pub async fn run_alias_resolver_worker(
     idle_interval: std::time::Duration,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<AliasResolverStats, AliasResolverWorkerError> {
-    let resolver = AliasResolver::default();
     let mut stats = AliasResolverStats::default();
     let mut last_watermark: Option<ResolutionWatermark> = None;
 
@@ -101,56 +161,18 @@ pub async fn run_alias_resolver_worker(
             }
         }
 
-        // Read the resolver inputs in one blocking hop.
+        // One pass, off the async thread. The body lives in
+        // `resolve_once` so the loop and `mci-agent enrich` cannot drift.
         let store_c = Arc::clone(&store);
-        let (entities, cooccurrences) = tokio::task::spawn_blocking(move || {
-            let entities = store_c.list_resolvable_entities()?;
-            let cooccurrences = store_c.entity_cooccurrences()?;
-            Ok::<_, mci_brain::StoreError>((entities, cooccurrences))
-        })
-        .await
-        .map_err(|e| AliasResolverWorkerError::Store(e.to_string()))?
-        .map_err(|e| AliasResolverWorkerError::Store(e.to_string()))?;
+        let pass = tokio::task::spawn_blocking(move || resolve_once(&store_c))
+            .await
+            .map_err(|e| AliasResolverWorkerError::Store(e.to_string()))??;
 
-        let clusters = resolver.resolve(&entities, &cooccurrences);
-        let identities_last = u64::try_from(clusters.len()).unwrap_or(u64::MAX);
-        let ts = now_us();
-
-        // Materialize the FULL current membership set, then reconcile the
-        // store to exactly it — pruning any stale row the resolver no
-        // longer emits (the non-monotonic leaf case). Reconcile is
-        // idempotent: an unchanged re-run inserts and deletes nothing.
-        let rows: Vec<EntityIdentity> = clusters
-            .iter()
-            .flat_map(|identity| {
-                identity.members.iter().map(move |member| EntityIdentity {
-                    id: EntityIdentity::derive_id(&identity.identity_id, &member.entity_id),
-                    entity_id: member.entity_id.clone(),
-                    identity_id: identity.identity_id.clone(),
-                    identity_kind: identity.identity_kind.clone(),
-                    identity_canonical_name: identity.canonical_name.clone(),
-                    rule: member.rule.clone(),
-                    confidence: member.confidence,
-                    ts_us: ts,
-                })
-            })
-            .collect();
-
-        let store_c = Arc::clone(&store);
-        let reconcile =
-            tokio::task::spawn_blocking(move || store_c.reconcile_entity_identities(&rows))
-                .await
-                .map_err(|e| AliasResolverWorkerError::Store(e.to_string()))?;
-
-        match reconcile {
-            Ok(rstats) => {
-                stats.memberships_written += rstats.inserted;
-                stats.memberships_pruned += rstats.deleted;
-            }
-            Err(_) => stats.store_errors += 1,
-        }
+        stats.memberships_written += pass.memberships_written;
+        stats.memberships_pruned += pass.memberships_pruned;
+        stats.store_errors += pass.store_errors;
         stats.cycles_run += 1;
-        stats.identities_last = identities_last;
+        stats.identities_last = pass.identities_last;
         last_watermark = Some(watermark);
     }
 

@@ -36,11 +36,65 @@ pub enum EpisodeWorkerError {
     Store(String),
 }
 
+/// Segment every unsegmented event, then return.
+///
+/// The one-shot sibling of [`run_episode_worker`]: same read-segment-write
+/// sequence, opposite lifecycle. Drains the queue and exits instead of
+/// sleeping for more work. `mci-agent enrich` calls this.
+///
+/// # Errors
+/// [`EpisodeWorkerError::Store`] if reading unsegmented events, reading the
+/// last segmented event, or the segmenter's own writes fail.
+pub fn segment_until_drained(
+    store: &SqlCipherBrainStore,
+    segmenter: &dyn EpisodeSegmenter,
+    batch_size: usize,
+) -> Result<SegmentWorkerStats, EpisodeWorkerError> {
+    let mut stats = SegmentWorkerStats {
+        events_assigned: 0,
+        episodes_created: 0,
+        batches_run: 0,
+    };
+    let batch_size = batch_size.max(1);
+
+    loop {
+        let batch = store
+            .unsegmented_events(batch_size)
+            .map_err(|e| EpisodeWorkerError::Store(e.to_string()))?;
+        if batch.is_empty() {
+            break;
+        }
+
+        // Episodes are contiguous in time, so each batch needs the tail of
+        // the previous one to decide whether it continues that episode or
+        // starts a new one.
+        let last = store
+            .last_segmented_event()
+            .map_err(|e| EpisodeWorkerError::Store(e.to_string()))?;
+
+        let result = segmenter
+            .segment(&batch, last.as_ref(), store as &dyn EpisodeWriter)
+            .map_err(|e| EpisodeWorkerError::Store(e.to_string()))?;
+
+        // A batch that assigns nothing would otherwise spin forever: the
+        // same rows stay unsegmented and the next read returns them again.
+        if result.events_assigned == 0 {
+            break;
+        }
+
+        stats.events_assigned += result.events_assigned;
+        stats.episodes_created += result.episodes_created;
+        stats.batches_run += 1;
+    }
+
+    Ok(stats)
+}
+
 /// Run the episode-segmenter idle loop.
 ///
 /// Reads up to `batch_size` unsegmented events per cycle, fetches the
 /// last segmented event for continuity, runs the segmenter, sleeps
-/// `idle_interval` when queue is drained. Exits on shutdown.
+/// `idle_interval` when the queue is drained. Exits on shutdown.
 pub async fn run_episode_worker(
     store: Arc<SqlCipherBrainStore>,
     segmenter: Arc<dyn EpisodeSegmenter>,
