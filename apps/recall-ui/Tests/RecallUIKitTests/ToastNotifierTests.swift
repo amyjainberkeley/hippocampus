@@ -24,14 +24,37 @@ final class ToastNotifierTests: XCTestCase {
         XCTAssertEqual(n.currentMessage, "Brain refreshed")
     }
 
+    /// Wait until `condition` holds, or fail after `timeout`.
+    ///
+    /// These tests used to sleep a fixed amount and then assert, which
+    /// races the pump: each transition is a `Task.sleep` plus a hop back
+    /// to the main actor, and on a loaded CI runner that lands late.
+    /// Tuning the sleeps does not fix it, it just moves which test is
+    /// flaky, so wait for the state instead of guessing at the clock.
+    ///
+    /// Correctness is unchanged. A transition that never happens still
+    /// fails, it just takes `timeout` to say so instead of asserting on
+    /// whatever the value happened to be at one arbitrary instant.
+    private func waitUntil(
+        _ description: String,
+        timeout: TimeInterval = 5.0,
+        _ condition: () -> Bool
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 10_000_000) // 10 ms
+        }
+        XCTFail("timed out after \(timeout)s waiting for: \(description)")
+    }
+
     func testHoldThenClears() async throws {
         let n = freshNotifier()
         n.notify("Brain refreshed", hold: 0.05)
         XCTAssertEqual(n.currentMessage, "Brain refreshed")
-        // Wait past hold + a small buffer for the scheduled fade-out
-        // task to fire.
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertNil(n.currentMessage)
+        await waitUntil("the message to clear after its hold") {
+            n.currentMessage == nil
+        }
     }
 
     func testBurstQueuesAndDrains() async throws {
@@ -39,15 +62,13 @@ final class ToastNotifierTests: XCTestCase {
         n.notify("first", hold: 0.05)
         n.notify("second", hold: 0.05)
         n.notify("third", hold: 0.05)
+
+        // The first is presented synchronously by notify(); the rest are
+        // pumped as each hold expires. Order is the contract, not timing.
         XCTAssertEqual(n.currentMessage, "first")
-        // First message clears after ~50ms; second should immediately
-        // take over on the next pump.
-        try await Task.sleep(nanoseconds: 120_000_000)
-        XCTAssertEqual(n.currentMessage, "second")
-        try await Task.sleep(nanoseconds: 120_000_000)
-        XCTAssertEqual(n.currentMessage, "third")
-        try await Task.sleep(nanoseconds: 120_000_000)
-        XCTAssertNil(n.currentMessage)
+        await waitUntil("second to be presented") { n.currentMessage == "second" }
+        await waitUntil("third to be presented") { n.currentMessage == "third" }
+        await waitUntil("the queue to drain") { n.currentMessage == nil }
     }
 
     func testResetClearsQueueAndCurrent() {

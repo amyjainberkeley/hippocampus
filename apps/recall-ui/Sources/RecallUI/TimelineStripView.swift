@@ -10,71 +10,6 @@ import AppKit
 import RecallUIKit
 import SwiftUI
 
-/// V2-P13 scaffold. View model for the ⌘8 timeline-strip tab.
-@MainActor
-public final class TimelineStripViewModel: ObservableObject {
-    @Published public private(set) var events: [TimelineEvent] = []
-    @Published public private(set) var isLoading: Bool = false
-    @Published public private(set) var errorMessage: String?
-    @Published public var resolution: TimelineResolution = .minute
-    @Published public var selectedEventId: UInt64?
-
-    /// Right-edge of the visible window (defaults to "now"). Left edge
-    /// is derived by subtracting `resolution.defaultWindowUs`.
-    @Published public var anchorTsUs: UInt64
-
-    private let reader: BrainReader
-
-    public init(
-        reader: BrainReader,
-        anchorTsUs: UInt64 = UInt64(Date().timeIntervalSince1970 * 1_000_000)
-    ) {
-        self.reader = reader
-        self.anchorTsUs = anchorTsUs
-    }
-
-    public var windowStartTsUs: UInt64 {
-        anchorTsUs > resolution.defaultWindowUs
-            ? anchorTsUs - resolution.defaultWindowUs
-            : 0
-    }
-    public var windowEndTsUs: UInt64 { anchorTsUs }
-
-    public func reload() async {
-        isLoading = true
-        errorMessage = nil
-        defer { isLoading = false }
-        do {
-            events = try await reader.timelineEvents(
-                startTsUs: windowStartTsUs,
-                endTsUs: windowEndTsUs,
-                resolution: resolution
-            )
-        } catch {
-            events = []
-            errorMessage = "\(error)"
-        }
-    }
-
-    /// ⌘+ zoom-in — narrower window. No-op at the finest step.
-    public func zoomIn() {
-        switch resolution {
-        case .day: resolution = .hour
-        case .hour: resolution = .minute
-        case .minute: break
-        }
-    }
-
-    /// ⌘− zoom-out — wider window. No-op at the coarsest step.
-    public func zoomOut() {
-        switch resolution {
-        case .minute: resolution = .hour
-        case .hour: resolution = .day
-        case .day: break
-        }
-    }
-}
-
 /// V2-P13 scaffold. Horizontal timeline strip tab (⌘8).
 public struct TimelineStripView: View {
     @StateObject private var viewModel: TimelineStripViewModel
@@ -223,16 +158,16 @@ public struct TimelineEventCard: View {
         .help(event.snippet)
     }
 
+    /// Both helpers live in `RecallUIKit.TimelineEventFormatting` so the
+    /// test target can reach them. Kept here as thin forwarders so call
+    /// sites in this view are unchanged.
     static func timeLabel(for tsUs: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(tsUs) / 1_000_000)
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f.string(from: date)
+        TimelineEventFormatting.timeLabel(for: tsUs)
     }
 
     /// `com.apple.Safari` → `Safari`. Falls back to the raw string.
     static func shortAppName(_ bundle: String) -> String {
-        bundle.split(separator: ".").last.map(String.init) ?? bundle
+        TimelineEventFormatting.shortAppName(bundle)
     }
 }
 
