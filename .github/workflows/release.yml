@@ -125,15 +125,32 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
+      # `secrets` is not a valid context in a step-level `if:`. Using it
+      # makes the whole workflow file invalid, so every push failed
+      # instantly with "workflow file issue" even though this workflow
+      # only triggers on tags. Map the secret into `env` and test that,
+      # which is what the signing and notarization steps above already do.
+      - name: Map Sparkle key for conditional steps
+        id: sparkle
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -n "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SPARKLE_PRIVATE_KEY not set — skipping appcast publish."
+          fi
+
       - name: Publish appcast
-        if: secrets.SPARKLE_PRIVATE_KEY != ''
+        if: steps.sparkle.outputs.present == 'true'
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           scripts/publish-appcast.sh --hosting-mode ghpages
 
       - name: Deploy appcast to GitHub Pages
-        if: secrets.SPARKLE_PRIVATE_KEY != ''
+        if: steps.sparkle.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
