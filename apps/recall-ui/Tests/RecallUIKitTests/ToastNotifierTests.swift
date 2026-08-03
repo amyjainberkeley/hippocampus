@@ -24,40 +24,51 @@ final class ToastNotifierTests: XCTestCase {
         XCTAssertEqual(n.currentMessage, "Brain refreshed")
     }
 
+    /// Wait until `condition` holds, or fail after `timeout`.
+    ///
+    /// These tests used to sleep a fixed amount and then assert, which
+    /// races the pump: each transition is a `Task.sleep` plus a hop back
+    /// to the main actor, and on a loaded CI runner that lands late.
+    /// Tuning the sleeps does not fix it, it just moves which test is
+    /// flaky, so wait for the state instead of guessing at the clock.
+    ///
+    /// Correctness is unchanged. A transition that never happens still
+    /// fails, it just takes `timeout` to say so instead of asserting on
+    /// whatever the value happened to be at one arbitrary instant.
+    private func waitUntil(
+        _ description: String,
+        timeout: TimeInterval = 5.0,
+        _ condition: () -> Bool
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 10_000_000) // 10 ms
+        }
+        XCTFail("timed out after \(timeout)s waiting for: \(description)")
+    }
+
     func testHoldThenClears() async throws {
         let n = freshNotifier()
         n.notify("Brain refreshed", hold: 0.05)
         XCTAssertEqual(n.currentMessage, "Brain refreshed")
-        // Wait past hold + a small buffer for the scheduled fade-out
-        // task to fire.
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertNil(n.currentMessage)
+        await waitUntil("the message to clear after its hold") {
+            n.currentMessage == nil
+        }
     }
 
     func testBurstQueuesAndDrains() async throws {
-        // Wall-clock test, so the hold has to be longer than the gap
-        // between checks or the queue drains past the message being
-        // asserted. It used to hold each message 50ms and then sleep
-        // 120ms before checking, which is more than two holds per step:
-        // by the third check the whole queue had drained and the
-        // assertion saw nil.
-        //
-        // Hold 300ms and check every 400ms. Each check then lands in the
-        // middle of its message's window with ~100ms of slack on either
-        // side, which survives a loaded CI runner.
-        let hold = 0.3
-        let step: UInt64 = 400_000_000
         let n = freshNotifier()
-        n.notify("first", hold: hold)
-        n.notify("second", hold: hold)
-        n.notify("third", hold: hold)
+        n.notify("first", hold: 0.05)
+        n.notify("second", hold: 0.05)
+        n.notify("third", hold: 0.05)
+
+        // The first is presented synchronously by notify(); the rest are
+        // pumped as each hold expires. Order is the contract, not timing.
         XCTAssertEqual(n.currentMessage, "first")
-        try await Task.sleep(nanoseconds: step)
-        XCTAssertEqual(n.currentMessage, "second")
-        try await Task.sleep(nanoseconds: step)
-        XCTAssertEqual(n.currentMessage, "third")
-        try await Task.sleep(nanoseconds: step)
-        XCTAssertNil(n.currentMessage)
+        await waitUntil("second to be presented") { n.currentMessage == "second" }
+        await waitUntil("third to be presented") { n.currentMessage == "third" }
+        await waitUntil("the queue to drain") { n.currentMessage == nil }
     }
 
     func testResetClearsQueueAndCurrent() {
