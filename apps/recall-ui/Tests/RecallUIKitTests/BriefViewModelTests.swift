@@ -46,6 +46,10 @@ final class BriefViewModelTests: XCTestCase {
                 .prefix(max(0, limit))
                 .map(\.dateLocal))
         }
+        func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { [] }
+        func summaryStats() async throws -> SummaryStats {
+            SummaryStats(totalEvents: 0, oldestTsUs: nil, newestTsUs: nil, diskBytes: 0)
+        }
     }
 
     /// Reader that throws on every brief call. Used to pin the `.error`
@@ -62,6 +66,10 @@ final class BriefViewModelTests: XCTestCase {
         func briefForDate(_ dateLocal: String) async throws -> Brief? { throw Boom() }
         func latestBrief() async throws -> Brief? { throw Boom() }
         func briefDates(limit: Int) async throws -> [String] { throw Boom() }
+        func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { [] }
+        func summaryStats() async throws -> SummaryStats {
+            SummaryStats(totalEvents: 0, oldestTsUs: nil, newestTsUs: nil, diskBytes: 0)
+        }
     }
 
     // -------------------------------------------------------------------

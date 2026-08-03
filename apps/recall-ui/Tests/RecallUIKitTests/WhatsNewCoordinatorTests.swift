@@ -13,8 +13,21 @@ import XCTest
 @MainActor
 final class WhatsNewCoordinatorTests: XCTestCase {
 
-    private var defaults: UserDefaults!
-    private var suiteName: String!
+    // The class is @MainActor, so these would be main-actor isolated, but
+    // XCTestCase declares setUp()/tearDown() as nonisolated and an override
+    // cannot add isolation. Two fixes look right and are not:
+    //
+    //   - async setUp()/tearDown() overrides: awaiting super sends a
+    //     non-Sendable XCTestCase across an isolation boundary.
+    //   - MainActor.assumeIsolated in the sync overrides: the closure is
+    //     main-actor isolated and still captures task-isolated self.
+    //
+    // Opting the two properties out is what actually holds. It is sound
+    // here because XCTest serializes setUp, the test body, and tearDown on
+    // one instance, so there is no concurrent access to race on. Same
+    // pattern as AuditLog.iso8601Formatter.
+    private nonisolated(unsafe) var defaults: UserDefaults!
+    private nonisolated(unsafe) var suiteName: String!
 
     override func setUp() {
         super.setUp()

@@ -205,8 +205,13 @@ final class FormattersTests: XCTestCase {
     }
 
     func testRelativeTimeMinutesAgo() {
+        // Sit inside the bucket, not on its edge. relativeTime truncates
+        // with Int(diff / 60), so an offset of exactly -180 lands on the
+        // 3-minute boundary and a sub-microsecond rounding error in the
+        // Double -> UInt64 -> Double round trip is enough to make diff
+        // 179.9999, which truncates to "2 min ago". -200 is unambiguous.
         let now = Date()
-        let tsUs = UInt64(now.addingTimeInterval(-180).timeIntervalSince1970 * 1_000_000)
+        let tsUs = UInt64(now.addingTimeInterval(-200).timeIntervalSince1970 * 1_000_000)
         XCTAssertEqual(Formatters.relativeTime(usSinceEpoch: tsUs, now: now), "3 min ago")
     }
 

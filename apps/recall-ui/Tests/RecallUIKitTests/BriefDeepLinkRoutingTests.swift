@@ -25,9 +25,12 @@ final class BriefDeepLinkRoutingTests: XCTestCase {
 
     func testUnknownDeepLinkValuesReturnNil() {
         XCTAssertNil(RecallTab.from(deepLinkValue: ""))
-        XCTAssertNil(RecallTab.from(deepLinkValue: "settings"))
         XCTAssertNil(RecallTab.from(deepLinkValue: "nope"))
         XCTAssertNil(RecallTab.from(deepLinkValue: "0"))
+        // "settings" used to be listed here. It is a real tab now
+        // (RecallTab.settings, wired in Tab.swift), so asserting it routes
+        // to nil is wrong. This test never compiled, so nobody caught it.
+        XCTAssertEqual(RecallTab.from(deepLinkValue: "settings"), .settings)
     }
 
     // MARK: env-var name is stable

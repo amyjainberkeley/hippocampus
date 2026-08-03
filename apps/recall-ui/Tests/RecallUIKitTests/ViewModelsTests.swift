@@ -35,6 +35,15 @@ private struct FailingReader: BrainReader {
     func briefDates(limit: Int) async throws -> [String] {
         throw BrainReaderError.queryFailed("brief-dates boom")
     }
+    // Added when BrainReader grew these; the stub was never updated, so the
+    // conformance broke. `timelineEvents` is not listed because the protocol
+    // extension supplies a default.
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] {
+        throw BrainReaderError.queryFailed("fetch-by-ids boom")
+    }
+    func summaryStats() async throws -> SummaryStats {
+        throw BrainReaderError.queryFailed("summary-stats boom")
+    }
 }
 
 @MainActor
