@@ -82,6 +82,10 @@ enum Mode {
     McpServe {
         db_path: PathBuf,
     },
+    /// Explain why the brain is empty.
+    Doctor {
+        db_path: PathBuf,
+    },
     /// Run every understanding stage over an existing brain.
     ///
     /// The five workers that turn events into entities, episodes and
@@ -194,6 +198,7 @@ fn parse_args(argv: &[String]) -> Args {
             "stats" => mode_kind = ModeKind::Stats,
             "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
             "enrich" => mode_kind = ModeKind::Enrich,
+            "doctor" => mode_kind = ModeKind::Doctor,
             "--batch-size" => {
                 if let Some(v) = argv.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
                     embed_batch_size = v.max(1);
@@ -258,6 +263,9 @@ fn parse_args(argv: &[String]) -> Args {
             db_path: resolved_db_path,
             batch_size: embed_batch_size,
         },
+        ModeKind::Doctor => Mode::Doctor {
+            db_path: resolved_db_path,
+        },
     };
     Args {
         device_id_path,
@@ -277,6 +285,7 @@ enum ModeKind {
     Stats,
     EmbedBackfill,
     Enrich,
+    Doctor,
 }
 
 fn print_usage() {
@@ -290,6 +299,7 @@ fn print_usage() {
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 doctor                     say why the brain is empty and what to fix\n\
         \x20 enrich                     run every understanding stage over an existing\n\
         \x20                            brain: extract entities, embed, segment episodes,\n\
         \x20                            resolve identities, link related episodes.\n\
@@ -928,6 +938,10 @@ async fn main() -> ExitCode {
                 ExitCode::from(14)
             }
         },
+        Mode::Doctor { db_path } => match run_doctor_cmd(&db_path) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::Enrich {
             db_path,
             batch_size,
@@ -1255,6 +1269,46 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     if let Err(e) = serve_stdio(server, stdout).await {
         eprintln!("mci-agent mcp-serve: stdio loop error: {e}");
         return Err(13);
+    }
+    Ok(())
+}
+
+/// Print the diagnostic report.
+///
+/// Read-only: opens the brain with `open_readonly` and reads logs it
+/// already owns. Exits non-zero when something is blocking, so it can gate
+/// a script.
+fn run_doctor_cmd(db_path: &std::path::Path) -> Result<(), u8> {
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!(
+            "mci-agent doctor: MCI_DB_KEY_HEX not set and no dev.key found at\n  \
+             ~/Library/Application Support/MCI/dev.key\n\
+             Without the key the brain cannot be opened at all."
+        );
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent doctor: MCI_DB_KEY_HEX must be 64 hex characters.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let checks = match mci_agent::doctor::diagnose(db_path, &key) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("mci-agent doctor: {e}");
+            return Err(12);
+        }
+    };
+
+    println!("Hippocampus doctor — {}\n", db_path.display());
+    print!("{}", mci_agent::doctor::render(&checks));
+
+    let blocked = checks
+        .iter()
+        .any(|c| c.status == mci_agent::doctor::Status::Fail);
+    if blocked {
+        return Err(1);
     }
     Ok(())
 }
