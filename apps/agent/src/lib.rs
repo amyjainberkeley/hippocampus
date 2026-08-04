@@ -32,6 +32,7 @@ pub mod consolidator_worker;
 /// `mci_brain::integrity_scheduler` (weekly background check).
 pub mod crash_recovery;
 pub mod device_id;
+pub mod doctor;
 pub mod enrich;
 pub mod episode_worker;
 pub mod health_log;
