@@ -1,5 +1,0 @@
-private key (uncompressed): 5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ
-private key (compressed):    KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
-private key (compressed):    L1aW4aubDFB7yfras2S1mN3bqg9NgUgo3qYjgd9M7rFU73sVHnow
-NEGATIVE: 5SHORT not long enough.
-NEGATIVE: 4HueCGU... wrong leading character.

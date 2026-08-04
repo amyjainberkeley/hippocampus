@@ -1,8 +1,0 @@
-Alice Smith joined the standup at 9am to discuss the OAuth migration.
-Dr. Sarah Chen reviewed the V2-P5 dispatch memo this morning.
-Bob and Carol are co-leads on the Hippocampus brief author project.
-Met with Yuki Tanaka about Q3 hiring priorities.
-The retro was led by Marcus and Priya; notes in the team channel.
-@johndoe mentioned the footprint regression in the dogfood thread.
-Anil Patel from the Brain team flagged a cascade-discipline edge case.
-Lin and Wei from the Tokyo office are flying in next week.

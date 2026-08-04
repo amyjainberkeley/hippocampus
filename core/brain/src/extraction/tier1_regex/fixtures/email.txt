@@ -1,5 +1,0 @@
-Contact Jane.Doe@Example.com for access.
-support+ticket@subdomain.example.co.uk routes to a queue.
-NEGATIVE: @notanemail just a handle.
-NEGATIVE: foo@bar no TLD.
-NEGATIVE: foo@bar.x TLD too short.

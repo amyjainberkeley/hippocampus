@@ -1,5 +1,0 @@
-Loopback 127.0.0.1 and 10.0.0.42 inside the VPN.
-IPv6: 2001:0db8:85a3:0000:0000:8a2e:0370:7334 (full form).
-NEGATIVE: 999.0.0.1 — last octet illegal.
-NEGATIVE: 256.0.0.1 — over 255.
-NEGATIVE: fe80::1 — compressed form, Tier2.

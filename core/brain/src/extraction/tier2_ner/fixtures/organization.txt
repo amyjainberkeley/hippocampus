@@ -1,8 +1,0 @@
-Anthropic published the Claude 4 model card last week.
-Stripe Inc. announced a new pricing tier for the API platform.
-The Brain team merged V2-P4 Tier 1 regex extractor on 2026-06-01.
-Apple's Core ML team confirmed the INT8 palette plan for Q3.
-Microsoft Recall shipped the local-only re-architecture.
-Coordinating with the Recording team on the dedupe lift.
-The CRS published the Arxiv / OSS scout digest this morning.
-Got feedback from the COO on the positioning narrative.

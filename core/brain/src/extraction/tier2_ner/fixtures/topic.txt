@@ -1,8 +1,0 @@
-Discussed the footprint SLO regression in the dogfood thread.
-OAuth migration is blocked on the security review.
-Q3 hiring priorities and headcount allocation.
-The cascade discipline ratification needs CEO sign-off.
-Reviewing the briefs viewer redesign with the COO.
-Notarization pipeline broke on the 8.25 cycle reship.
-Token-shape REDACT discipline holds for V2-P5 by design.
-Idle-batch worker pattern documented in idle_batch.rs.

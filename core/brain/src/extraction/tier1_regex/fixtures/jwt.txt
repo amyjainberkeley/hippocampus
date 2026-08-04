@@ -1,4 +1,0 @@
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
-Use the token eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJ0ZXN0Ijp0cnVlfQ.bogus when calling /api/v1/whoami.
-NEGATIVE: a.b.c is not a JWT (no eyJ prefix and segments too short).
-NEGATIVE: eyJabc is not a JWT (no three-segment shape).

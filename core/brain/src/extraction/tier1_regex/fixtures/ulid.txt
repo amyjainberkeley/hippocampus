@@ -1,4 +1,0 @@
-entity:01HW5R8AB5K6NQ4D6X3RT9Y2VK from the graph index.
-mention:01HW5R8AB5K6NQ4D6X3RT9Y2VK paired with that entity.
-NEGATIVE: 01HW5R8AB5K6NQ4 — too short.
-NEGATIVE: 01HW5R8AB5K6NQ4D6X3RT9Y2I9 — contains 'I' (not in Crockford alphabet).

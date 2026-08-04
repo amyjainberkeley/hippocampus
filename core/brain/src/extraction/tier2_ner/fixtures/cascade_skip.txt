@@ -1,8 +1,0 @@
-Your verification code is [REDACTED:SMS_OTP] please confirm in the app.
-Bank notification: [REDACTED:BANK_NOTIFICATION] check the transaction.
-Sensitive URL: [REDACTED:SENSITIVE_DOMAIN_URL] redirected away.
-Multiple markers: [REDACTED:SMS_OTP] and [REDACTED:BANK_NOTIFICATION] both present.
-Alice received [REDACTED:SMS_OTP] from the bank earlier today.
-The cascade replaced phone digits with [REDACTED:SMS_OTP] before extraction.
-[REDACTED:SMS_OTP] at the start, content after.
-Content before [REDACTED:BANK_NOTIFICATION], more content after.

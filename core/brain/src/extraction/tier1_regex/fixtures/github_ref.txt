@@ -1,5 +1,0 @@
-Closes #244 and follows up on #277.
-(#42) bracketed.
-PR #1234 anchored to whitespace.
-NEGATIVE: abc#123 — no whitespace anchor → not captured.
-NEGATIVE: #12345678901 — over 8 digits → not a GitHub ref.

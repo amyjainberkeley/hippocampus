@@ -1,5 +1,0 @@
-Your one-time code is [REDACTED:SMS_OTP] (do not share).
-Bank notification: [REDACTED:BANK_NOTIFICATION] — confirm via app.
-URL: [REDACTED:SENSITIVE_DOMAIN_URL] suppressed by ADR-0030 §3(b).
-NEGATIVE: [redacted:foo] — case-sensitive prefix; not the cascade marker.
-NEGATIVE: REDACTED:NO_BRACKETS — markers always carry brackets.

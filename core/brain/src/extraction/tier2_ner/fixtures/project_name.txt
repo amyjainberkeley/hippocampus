@@ -1,8 +1,0 @@
-MCI cycle 8.30 dispatched V2-P5 Tier 2 Qwen NER extractor today.
-The V2-MCP-3 hybrid aggregator merged as PR #286.
-Working on the AliasResolver design for V2-P6 next cycle.
-The recall surface rewrite is gated on V2-P8 episode_edges.
-ADR-0028 Qwen3-1.7B brief authoring is the model decision.
-Phase 6 PR 9 covers Tier 2 NER; PR 10 is AliasResolver; PR 11 is episode edges.
-The 8.29 reship landed the Chromium installation P0 fix.
-Track 1 hard-rule catch-up shipped as PR #274.
