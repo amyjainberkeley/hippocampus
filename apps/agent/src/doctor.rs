@@ -82,13 +82,57 @@ fn tail_of(path: &Path, max_bytes: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&data[start..]).into_owned())
 }
 
-/// Is the V2-P1 capture gate on for *this* process?
+/// The env var name, as it appears verbatim inside a helper that reads it.
+const HELPER_GATE_SYMBOL: &[u8] = b"HIPPOCAMPUS_ENABLE_V2P1";
+
+/// Path to the installed helper binary.
+fn installed_helper_path() -> PathBuf {
+    PathBuf::from("/Applications/Hippocampus.app/Contents/MacOS/MCICaptureHelper")
+}
+
+/// Does a built helper actually contain the gate?
 ///
-/// The helper inherits its environment from whoever launched it, so the
-/// value here is the value the helper would see if it were launched the
-/// same way. That is the check that matters: a gate set in one terminal
-/// says nothing about an app launched from Finder.
+/// The env-var gate landed 2026-07-13. A helper built before that has no code
+/// path that reads it, so telling someone to set the variable is worse than
+/// saying nothing: they set it, nothing changes, and they conclude the product
+/// is broken rather than stale. Scanning the binary for the symbol is crude
+/// but exact, and it is the difference between "flip this switch" and "you
+/// need a newer build".
+///
+/// `None` when there is no installed helper, which must not be reported as
+/// stale: a machine that never had one should not be told to rebuild.
+fn helper_supports_gate(path: &Path) -> Option<bool> {
+    let data = std::fs::read(path).ok()?;
+    Some(
+        data.windows(HELPER_GATE_SYMBOL.len())
+            .any(|w| w == HELPER_GATE_SYMBOL),
+    )
+}
+
+/// Is the V2-P1 capture gate on, and can the installed helper even read it?
+///
+/// Two separate questions with very different answers. The helper inherits its
+/// environment from whoever launches it (`ProcessSupervisor` leaves
+/// `helper.environment` nil, which in Foundation means inherit), so setting the
+/// variable does reach it, but only if that binary was built after the gate
+/// existed.
 fn check_gate() -> Check {
+    let installed = installed_helper_path();
+    if helper_supports_gate(&installed) == Some(false) {
+        return Check::new(
+            "capture gate",
+            Status::Fail,
+            format!(
+                "the installed helper has no gate symbol, so it cannot emit at all ({})",
+                installed.display()
+            ),
+            "This build predates the env-var gate (added 2026-07-13), so no setting \
+             will make it capture. Build a current one:\n      \
+             swift build -c release --package-path adapters/macos/MCICaptureHelper\n    \
+             then run that binary with HIPPOCAMPUS_ENABLE_V2P1=1.",
+        );
+    }
+
     let on = std::env::var("HIPPOCAMPUS_ENABLE_V2P1").as_deref() == Ok("1");
     if on {
         Check::new(
@@ -102,8 +146,8 @@ fn check_gate() -> Check {
             "capture gate",
             Status::Fail,
             "HIPPOCAMPUS_ENABLE_V2P1 is not 1, so killOcrEmit stays true",
-            "Frames are captured and cascaded, then every OCR emit is dropped. \
-             Launch the app with the gate on:\n      \
+            "Frames get captured and cascaded, then every OCR emit is dropped. \
+             Launch with the gate on so the helper inherits it:\n      \
              HIPPOCAMPUS_ENABLE_V2P1=1 /Applications/Hippocampus.app/Contents/MacOS/Hippocampus",
         )
     }
@@ -359,6 +403,26 @@ mod tests {
             "mci-capture-helper: MCI_DB_KEY_HEX not set or invalid",
         ));
         assert_eq!(c.status, Status::Warn);
+    }
+
+    #[test]
+    fn a_helper_too_old_for_the_gate_is_detected() {
+        let dir = std::env::temp_dir().join("mci-doctor-gate-test");
+        std::fs::create_dir_all(&dir).expect("tmpdir");
+
+        let stale = dir.join("stale-helper");
+        std::fs::write(&stale, b"a binary built before the gate existed").expect("write");
+        assert_eq!(helper_supports_gate(&stale), Some(false));
+
+        let current = dir.join("current-helper");
+        std::fs::write(&current, b"...reads HIPPOCAMPUS_ENABLE_V2P1 at boot...").expect("write");
+        assert_eq!(helper_supports_gate(&current), Some(true));
+
+        // Absent is unknown, not stale. A machine that never installed the
+        // app must not be told to rebuild something it never had.
+        assert_eq!(helper_supports_gate(&dir.join("nope")), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
