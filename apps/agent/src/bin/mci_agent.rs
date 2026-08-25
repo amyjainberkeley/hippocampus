@@ -86,6 +86,20 @@ enum Mode {
     Doctor {
         db_path: PathBuf,
     },
+    /// Write one daily brief over an existing brain.
+    ///
+    /// The brief worker was reachable only from inside `--drain-stdin`,
+    /// the live-capture path, which ships off. On a brain filled any other
+    /// way it never fired, and there was no command that produced a brief.
+    Brief {
+        db_path: PathBuf,
+        /// `YYYY-MM-DD` local day to summarize. `None` = the last 24 h,
+        /// which is what the scheduled worker covers.
+        date: Option<String>,
+        /// Directory holding the Qwen3 `.mlmodelc`. `None` = the default
+        /// install location.
+        model_dir: Option<PathBuf>,
+    },
     /// Run every understanding stage over an existing brain.
     ///
     /// The five workers that turn events into entities, episodes and
@@ -174,6 +188,8 @@ fn parse_args(argv: &[String]) -> Args {
     let mut stats_source = String::new();
     let mut stats_since_seconds = DEFAULT_STATS_WINDOW_SECONDS;
     let mut embed_batch_size = DEFAULT_EMBED_BATCH_SIZE;
+    let mut brief_date: Option<String> = None;
+    let mut model_dir: Option<PathBuf> = None;
 
     let mut i = 1;
     while i < argv.len() {
@@ -199,6 +215,15 @@ fn parse_args(argv: &[String]) -> Args {
             "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
             "enrich" => mode_kind = ModeKind::Enrich,
             "doctor" => mode_kind = ModeKind::Doctor,
+            "brief" => mode_kind = ModeKind::Brief,
+            "--date" if i + 1 < argv.len() => {
+                brief_date = Some(argv[i + 1].clone());
+                i += 1;
+            }
+            "--model-dir" if i + 1 < argv.len() => {
+                model_dir = Some(PathBuf::from(&argv[i + 1]));
+                i += 1;
+            }
             "--batch-size" => {
                 if let Some(v) = argv.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
                     embed_batch_size = v.max(1);
@@ -266,6 +291,11 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::Doctor => Mode::Doctor {
             db_path: resolved_db_path,
         },
+        ModeKind::Brief => Mode::Brief {
+            db_path: resolved_db_path,
+            date: brief_date,
+            model_dir,
+        },
     };
     Args {
         device_id_path,
@@ -286,6 +316,7 @@ enum ModeKind {
     EmbedBackfill,
     Enrich,
     Doctor,
+    Brief,
 }
 
 fn print_usage() {
@@ -303,6 +334,12 @@ fn print_usage() {
         \x20 enrich                     run every understanding stage over an existing\n\
         \x20                            brain: extract entities, embed, segment episodes,\n\
         \x20                            resolve identities, link related episodes.\n\
+        \x20 brief                      write the daily brief for an existing brain, now,\n\
+        \x20                            instead of waiting for the 06:00 worker (which only\n\
+        \x20                            runs inside live capture). Needs the Qwen3 model;\n\
+        \x20                            refuses, loudly, without it. The brief is a DRAFT:\n\
+        \x20                            approving one takes a human, per ADR-0018.\n\
+        \x20                            Regenerating a date replaces that date's brief.\n\
         \x20 embed-backfill             embed every event that has no vector yet, so\n\
         \x20                            mci_recall runs hybrid instead of keyword-only.\n\
         \x20                            Needs the ArcticEmbedS model; refuses without it.\n\
@@ -320,6 +357,10 @@ fn print_usage() {
         \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n\
         \x20 --since-seconds N          (with stats) lookback window. Default 30.\n\
         \x20 --batch-size N             (with embed-backfill) events per batch. Default 32.\n\
+        \x20 --date YYYY-MM-DD          (with brief) summarize that local day. Default is\n\
+        \x20                            the last 24 hours, same window as the worker.\n\
+        \x20 --model-dir PATH           (with brief) where the Qwen3 .mlmodelc lives.\n\
+        \x20                            Default ~/Library/Application Support/MCI/Models\n\
         \x20 --strict                   (with --drain-stdin) exit non-zero if brain cannot\n\
         \x20                            be opened, instead of falling back to health-only.\n\
         \n\
@@ -335,6 +376,8 @@ fn print_usage() {
         \x20                            (skips HybridRetriever even if an embedder is\n\
         \x20                            available). Default fusion weights per ADR-0010:\n\
         \x20                            w_sem=0.5, w_lex=0.3, w_rec=0.15, w_src=0.05.\n\
+        \x20 MCI_BRIEFS_DISABLED        set to 1 to switch daily briefs off. The worker\n\
+        \x20                            idles; `brief` refuses and says so.\n\
         \x20 MCI_CRASH_REPORT_URL       HTTP endpoint for crash report uploads (e.g.\n\
         \x20                            http://127.0.0.1:3100/v1/crash-report).\n\
         \x20 MCI_CRASH_REPORT_OPTED_IN  set to 1 to enable crash report uploads.\n\
@@ -949,6 +992,14 @@ async fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
+        Mode::Brief {
+            db_path,
+            date,
+            model_dir,
+        } => match run_brief_cmd(&db_path, date.as_deref(), model_dir) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::EmbedBackfill {
             db_path,
             batch_size,
@@ -1380,6 +1431,147 @@ fn run_enrich_cmd(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8
     Ok(())
 }
 
+/// Write one daily brief over an existing brain.
+///
+/// # Why this exists
+///
+/// `spawn_brief_worker` is called from inside the `--drain-stdin` arm, so
+/// the only way to reach the brief pipeline was to be running live capture.
+/// Capture ships off (`HIPPOCAMPUS_ENABLE_V2P1`), so on a brain filled by
+/// the seeder, the Mail or Messages readers, or an import, the worker was
+/// never spawned at all and no command existed that produced a brief. The
+/// pipeline was finished and unreachable.
+///
+/// This calls `brief_worker::generate_brief_once` — the same function the
+/// scheduled worker calls, once, then exits.
+///
+/// # ADR-0018
+///
+/// The brief lands in `Draft`. There is deliberately no flag here that
+/// approves one: reaching `Approved` requires `lifecycle::advance` with an
+/// explicit human approver id, and no CLI argument can stand in for a
+/// person.
+fn run_brief_cmd(
+    db_path: &std::path::Path,
+    date: Option<&str>,
+    model_dir: Option<PathBuf>,
+) -> Result<(), u8> {
+    let model_dir = model_dir.unwrap_or_else(brief_worker::default_model_dir);
+
+    // Arguments before the world: a mistyped date gets the same answer on
+    // every machine, whatever else is missing.
+    let tz_offset = brief_worker::current_tz_offset_secs();
+    let now_us: u64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
+    let window = match date {
+        Some(d) => match brief_worker::BriefWindow::for_local_date(d, tz_offset) {
+            Some(w) => w,
+            None => {
+                eprintln!(
+                    "mci-agent brief: --date wants a real calendar date as YYYY-MM-DD, got '{d}'."
+                );
+                return Err(2);
+            }
+        },
+        None => brief_worker::BriefWindow::trailing_24h(now_us, tz_offset),
+    };
+
+    // Then the gate. Without an author nothing else matters, and a person
+    // whose model is missing should hear that instead of a key complaint.
+    let gate = brief_worker::brief_gate(&model_dir, brief_worker::briefs_disabled_via_env());
+    if gate != brief_worker::BriefGate::Open {
+        eprintln!(
+            "mci-agent brief: {}",
+            brief_worker::gate_block_message(gate, &model_dir)
+        );
+        return Err(21);
+    }
+
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!("mci-agent brief: MCI_DB_KEY_HEX not set and no dev.key found.");
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent brief: MCI_DB_KEY_HEX must be 64 hex characters.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    // Read-write: this writes a `briefs` row. It never touches `events`.
+    let store = match SqlCipherBrainStore::new(db_path, &key) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("mci-agent brief: open brain at {}: {e}", db_path.display());
+            return Err(12);
+        }
+    };
+
+    let topic = match date {
+        Some(d) => format!("Daily brief for {d}"),
+        None => "Daily brief".to_owned(),
+    };
+    let factory = qwen3_author_factory(&model_dir);
+
+    eprintln!(
+        "mci-agent brief: summarizing {} into a draft for {}",
+        match date {
+            Some(_) => "that local day",
+            None => "the last 24 hours",
+        },
+        window.date_local,
+    );
+
+    match brief_worker::generate_brief_once(&store, &factory, &topic, &window, now_us) {
+        Ok(brief_worker::BriefOutcome::Stored {
+            date_local,
+            word_count,
+            event_count,
+            id,
+            citation_violations,
+        }) => {
+            eprintln!(
+                "mci-agent brief: wrote draft id={id} for {date_local} \
+                 ({event_count} events, {word_count} words)."
+            );
+            if citation_violations > 0 {
+                eprintln!(
+                    "mci-agent brief: the tripwire found {citation_violations} citation \
+                     violation(s). The draft was still written — that is what review is \
+                     for — but approval stays blocked until they clear (ADR-0018 §4.2)."
+                );
+            }
+            eprintln!(
+                "mci-agent brief: state = Draft. Approving a brief takes a person, so \
+                 nothing here advances it (ADR-0018 §4.1). The row is in the `briefs` \
+                 table keyed on {date_local}, which is where the Recall UI's Brief tab \
+                 reads it from."
+            );
+            Ok(())
+        }
+        Ok(brief_worker::BriefOutcome::SkippedEmpty) => {
+            eprintln!(
+                "mci-agent brief: no events in {}, so there was nothing to summarize and \
+                 no brief was written.\n\
+                 \n\
+                 If you expected events there, `mci-agent doctor` says why the brain is \
+                 empty. If the brain has events from other days, name one with \
+                 `--date YYYY-MM-DD`.",
+                match date {
+                    Some(d) => format!("{d} (local)"),
+                    None => "the last 24 hours".to_owned(),
+                }
+            );
+            Err(22)
+        }
+        Err(e) => {
+            eprintln!("mci-agent brief: {e}");
+            Err(23)
+        }
+    }
+}
+
 /// Embed every event that has no vector yet.
 ///
 /// This is the loop that was missing. `event_vectors` stayed empty
@@ -1731,6 +1923,46 @@ fn load_ner_sync_backend() -> Option<Arc<dyn mci_brain::NerBackend>> {
     None
 }
 
+/// Build the production brief author: Qwen3-1.7B over Core ML, loaded
+/// lazily inside the factory so the ~500 MB working set is resident only
+/// while a brief is being written (ADR-0028 §6).
+///
+/// Path layout matches `ModelDownloadManager`'s unpack convention:
+/// `<model_dir>/<modelID>/<basename>/...`. Shared by the scheduled worker
+/// and `mci-agent brief` so the two cannot end up on different models.
+#[cfg(target_os = "macos")]
+fn qwen3_author_factory(model_dir: &std::path::Path) -> brief_worker::AuthorFactory {
+    use mci_brief::author::BriefAuthor;
+    use mci_brief::llama_author::LlamaBriefAuthor;
+    use mci_brief::llama_backend::LlamaBackend;
+
+    let model_subdir = model_dir.join(brief_worker::QWEN3_MODEL_ID);
+    let model_path = model_subdir.join(brief_worker::QWEN3_MODEL_BASENAME);
+    let tokenizer_dir = model_subdir;
+    Arc::new(move || {
+        let backend = mci_coreml_bridge::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir)
+            .map_err(|e| {
+                brief_worker::BriefWorkerError::Author(format!("Qwen3CoreMLBackend::open: {e}"))
+            })?;
+        let backend_arc: Arc<dyn LlamaBackend> = Arc::new(backend);
+        let author = LlamaBriefAuthor::new(backend_arc);
+        let boxed: Box<dyn BriefAuthor> = Box::new(author);
+        Ok(boxed)
+    })
+}
+
+/// Non-macOS: there is no Core ML, so there is no author. The factory
+/// exists so the `brief` command compiles everywhere and fails with a
+/// reason rather than being absent.
+#[cfg(not(target_os = "macos"))]
+fn qwen3_author_factory(_model_dir: &std::path::Path) -> brief_worker::AuthorFactory {
+    Arc::new(|| {
+        Err(brief_worker::BriefWorkerError::Author(
+            "brief generation runs Qwen3 through Core ML, which exists only on macOS".to_owned(),
+        ))
+    })
+}
+
 /// Spawn the daily-brief worker (ADR-0028). Selects between the
 /// production Qwen3 Core ML backend and the disabled-idle path based on
 /// `MCI_BRIEFS_DISABLED`, the presence of the model, and the host OS.
@@ -1739,10 +1971,6 @@ fn spawn_brief_worker(
     store: Arc<mci_brain::SqlCipherBrainStore>,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
-    use mci_brief::author::BriefAuthor;
-    use mci_brief::llama_author::LlamaBriefAuthor;
-    use mci_brief::llama_backend::LlamaBackend;
-
     if brief_worker::briefs_disabled_via_env() {
         tokio::spawn(async move {
             let stats = brief_worker::run_disabled_idle("MCI_BRIEFS_DISABLED=1", shutdown).await;
@@ -1767,22 +1995,7 @@ fn spawn_brief_worker(
         return;
     }
 
-    // Path layout matches `ModelDownloadManager`'s unpack convention:
-    // `<model_dir>/<modelID>/<basename>/...`. Both sides reference the
-    // same constants from `brief_worker` to keep the seam tight.
-    let model_subdir = model_dir.join(brief_worker::QWEN3_MODEL_ID);
-    let model_path = model_subdir.join(brief_worker::QWEN3_MODEL_BASENAME);
-    let tokenizer_dir = model_subdir.clone();
-    let factory: brief_worker::AuthorFactory = Arc::new(move || {
-        let backend = mci_coreml_bridge::Qwen3CoreMLBackend::open(&model_path, &tokenizer_dir)
-            .map_err(|e| {
-                brief_worker::BriefWorkerError::Author(format!("Qwen3CoreMLBackend::open: {e}"))
-            })?;
-        let backend_arc: Arc<dyn LlamaBackend> = Arc::new(backend);
-        let author = LlamaBriefAuthor::new(backend_arc);
-        let boxed: Box<dyn BriefAuthor> = Box::new(author);
-        Ok(boxed)
-    });
+    let factory = qwen3_author_factory(&model_dir);
 
     let tz_resolver: Arc<dyn Fn() -> i32 + Send + Sync> =
         Arc::new(brief_worker::current_tz_offset_secs);
