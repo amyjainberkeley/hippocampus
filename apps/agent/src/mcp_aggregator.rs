@@ -387,6 +387,28 @@ impl McpAggregator {
             .collect()
     }
 
+    /// Pre-populate one server's seen-set so a resource already in the
+    /// brain is not read and written a second time.
+    ///
+    /// The seen-set is in-memory and lives for one process lifetime,
+    /// which is the right cold-start posture for [`Self::run`]: the
+    /// long-running agent materializes a server's current resource list
+    /// once and then tracks it. It is the wrong posture for a command
+    /// that does one pass and exits, because every invocation would
+    /// start cold and duplicate every resource. `mci-agent mcp-sync`
+    /// seeds this from the store before calling
+    /// [`Self::reconcile_once`]; the loop does not call it, so its
+    /// documented behaviour is unchanged.
+    pub async fn seed_seen_resources(
+        &self,
+        server_name: &str,
+        uris: impl IntoIterator<Item = String>,
+    ) {
+        let mut state = self.state.lock().await;
+        let bk = state.per_server.entry(server_name.to_owned()).or_default();
+        bk.seen_resource_uris.extend(uris);
+    }
+
     /// Run the reconcile loop until `shutdown` flips to `true`.
     ///
     /// The loop:

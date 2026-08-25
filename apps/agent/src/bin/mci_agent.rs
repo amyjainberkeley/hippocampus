@@ -95,6 +95,14 @@ enum Mode {
         db_path: PathBuf,
         batch_size: usize,
     },
+    /// Pull every registered MCP server's resources into the brain, once.
+    ///
+    /// The V2-MCP-3 aggregator was constructed only inside the
+    /// `--drain-stdin` live-capture arm. Live capture ships off, so a
+    /// server registered in `mcp-servers.toml` never reached the brain.
+    McpSync {
+        db_path: PathBuf,
+    },
     /// Embed every event that has no row in `event_vectors`.
     ///
     /// Closes the last gap in the semantic-recall path. The store has
@@ -198,6 +206,7 @@ fn parse_args(argv: &[String]) -> Args {
             "stats" => mode_kind = ModeKind::Stats,
             "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
             "enrich" => mode_kind = ModeKind::Enrich,
+            "mcp-sync" => mode_kind = ModeKind::McpSync,
             "doctor" => mode_kind = ModeKind::Doctor,
             "--batch-size" => {
                 if let Some(v) = argv.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
@@ -263,6 +272,9 @@ fn parse_args(argv: &[String]) -> Args {
             db_path: resolved_db_path,
             batch_size: embed_batch_size,
         },
+        ModeKind::McpSync => Mode::McpSync {
+            db_path: resolved_db_path,
+        },
         ModeKind::Doctor => Mode::Doctor {
             db_path: resolved_db_path,
         },
@@ -285,6 +297,7 @@ enum ModeKind {
     Stats,
     EmbedBackfill,
     Enrich,
+    McpSync,
     Doctor,
 }
 
@@ -303,6 +316,10 @@ fn print_usage() {
         \x20 enrich                     run every understanding stage over an existing\n\
         \x20                            brain: extract entities, embed, segment episodes,\n\
         \x20                            resolve identities, link related episodes.\n\
+        \x20 mcp-sync                   pull resources from every MCP server registered in\n\
+        \x20                            ~/Library/Application Support/MCI/mcp-servers.toml\n\
+        \x20                            into the brain, once, then exit. Safe to re-run:\n\
+        \x20                            a resource already ingested is not written twice.\n\
         \x20 embed-backfill             embed every event that has no vector yet, so\n\
         \x20                            mci_recall runs hybrid instead of keyword-only.\n\
         \x20                            Needs the ArcticEmbedS model; refuses without it.\n\
@@ -949,6 +966,10 @@ async fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
+        Mode::McpSync { db_path } => match run_mcp_sync_cmd(&db_path).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::EmbedBackfill {
             db_path,
             batch_size,
@@ -1378,6 +1399,84 @@ fn run_enrich_cmd(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8
         );
     }
     Ok(())
+}
+
+/// Pull every registered MCP server's resources into the brain, once.
+///
+/// The aggregator that does this was reachable only from
+/// `--drain-stdin`, the live-capture ingest path, which ships off. So a
+/// user who registered an MCP server in `mcp-servers.toml` got nothing:
+/// the connector was built, tested, and never called.
+///
+/// Opened read-write, like `enrich` and `embed-backfill` and unlike the
+/// read surfaces: this writes events.
+///
+/// Exit codes:
+///   0 — a pass ran, or there was nothing configured to sync
+///   10 / 11 / 12 — brain key missing, malformed, or the store would not open
+///   24 — every registered server failed to connect
+///   25 — the config file exists but could not be trusted or parsed
+async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
+    use mci_agent::mcp_sync::{
+        default_config_path, no_config_guidance, no_servers_guidance, render_stats, run_mcp_sync,
+        SyncOutcome,
+    };
+
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!("mci-agent mcp-sync: MCI_DB_KEY_HEX not set and no dev.key found.");
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent mcp-sync: MCI_DB_KEY_HEX must be 64 hex characters.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let store = match SqlCipherBrainStore::new(db_path, &key) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            eprintln!(
+                "mci-agent mcp-sync: open brain at {}: {e}",
+                db_path.display()
+            );
+            return Err(12);
+        }
+    };
+
+    let config_path = default_config_path();
+    match run_mcp_sync(&config_path, store).await {
+        Ok(SyncOutcome::NoConfig { path }) => {
+            eprintln!("{}", no_config_guidance(&path));
+            Ok(())
+        }
+        Ok(SyncOutcome::NoServers { path }) => {
+            eprintln!("{}", no_servers_guidance(&path));
+            Ok(())
+        }
+        Ok(SyncOutcome::Ran(stats)) => {
+            eprintln!("mci-agent mcp-sync: done. {}", render_stats(&stats));
+            if stats.servers_failed > 0 && stats.servers_ok == 0 {
+                eprintln!(
+                    "mci-agent mcp-sync: every registered server failed to connect. \
+                     Check that each one is running and that its url in {} is right.",
+                    config_path.display()
+                );
+                return Err(24);
+            }
+            if stats.servers_failed > 0 {
+                eprintln!(
+                    "mci-agent mcp-sync: note — {} of {} server(s) could not be reached; \
+                     the rest were synced.",
+                    stats.servers_failed, stats.servers_contacted,
+                );
+            }
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("mci-agent mcp-sync: {e}");
+            Err(25)
+        }
+    }
 }
 
 /// Embed every event that has no vector yet.
