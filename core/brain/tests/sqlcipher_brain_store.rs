@@ -852,6 +852,74 @@ fn events_since_truncates_long_text_to_snippet_cap() {
     assert!(out[0].text_snippet.len() <= EventRecord::SNIPPET_MAX_CHARS);
 }
 
+// ---------------------------------------------------------------------------
+// distinct_urls_for_app — the durable already-ingested set `mci-agent
+// mcp-sync` rebuilds its dedupe from across process boundaries.
+// ---------------------------------------------------------------------------
+
+fn app_url_event(ts_us: u64, app: &str, url: Option<&str>) -> Event {
+    Event {
+        app_bundle_id: Some(app.into()),
+        url: url.map(str::to_owned),
+        ..blank_event(ts_us, "body")
+    }
+}
+
+#[test]
+fn distinct_urls_for_app_dedupes_and_scopes_to_one_bundle() {
+    let (_dir, path) = tmp("distinct_urls.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    // Two events for the same resource URI (a re-materialize), one for a
+    // second resource, and one belonging to a different source entirely.
+    store
+        .put_event(&app_url_event(10, "mcp:slack", Some("slack://c/1")))
+        .expect("put");
+    store
+        .put_event(&app_url_event(20, "mcp:slack", Some("slack://c/1")))
+        .expect("put");
+    store
+        .put_event(&app_url_event(30, "mcp:slack", Some("slack://c/2")))
+        .expect("put");
+    store
+        .put_event(&app_url_event(40, "mcp:notion", Some("notion://p/9")))
+        .expect("put");
+
+    let mut urls = store
+        .distinct_urls_for_app("mcp:slack")
+        .expect("distinct_urls_for_app");
+    urls.sort();
+    assert_eq!(
+        urls,
+        vec!["slack://c/1".to_owned(), "slack://c/2".to_owned()],
+        "one row per resource, scoped to the one source tag"
+    );
+}
+
+#[test]
+fn distinct_urls_for_app_skips_null_urls_and_unknown_apps() {
+    let (_dir, path) = tmp("distinct_urls_null.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    store
+        .put_event(&app_url_event(10, "mcp:svc", None))
+        .expect("put");
+    store
+        .put_event(&app_url_event(20, "mcp:svc", Some("svc://r")))
+        .expect("put");
+
+    assert_eq!(
+        store.distinct_urls_for_app("mcp:svc").expect("query"),
+        vec!["svc://r".to_owned()],
+        "a NULL url contributes nothing"
+    );
+    assert!(
+        store
+            .distinct_urls_for_app("mcp:never-registered")
+            .expect("query")
+            .is_empty(),
+        "an unknown bundle id is empty, not an error"
+    );
+}
+
 #[test]
 fn stats_on_empty_store_reports_zero_and_none() {
     let (_dir, path) = tmp("stats_empty.sqlite");

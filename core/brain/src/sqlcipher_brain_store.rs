@@ -886,6 +886,48 @@ impl SqlCipherBrainStore {
         Ok(out)
     }
 
+    /// Return every distinct non-null `url` belonging to events tagged
+    /// with exactly `app_bundle_id`. SELECT-only — no write side.
+    ///
+    /// The MCP one-shot sync (`mci-agent mcp-sync`) uses this to rebuild
+    /// its already-ingested set across process boundaries. The aggregator
+    /// dedupes resources through an in-memory set that lives for one
+    /// process lifetime, which is right for the long-running agent and
+    /// wrong for a command that runs once and exits: without a durable
+    /// signal the second run would re-read every resource and write a
+    /// duplicate event for each one. The aggregator stores the MCP
+    /// resource URI verbatim in `events.url`, so for an `mcp:<server>`
+    /// bundle id this URL set IS the already-ingested set.
+    ///
+    /// Uses the `events_app` index. `DISTINCT` is applied in `SQLite` so
+    /// a server with many events per resource still returns one row per
+    /// resource.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn distinct_urls_for_app(&self, app_bundle_id: &str) -> Result<Vec<String>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT DISTINCT url
+                 FROM events
+                 WHERE app_bundle_id = ?1
+                   AND url IS NOT NULL",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare distinct_urls_for_app: {e}")))?;
+        let rows = stmt
+            .query_map(params![app_bundle_id], |r| r.get::<_, String>(0))
+            .map_err(|e| StoreError::Backend(format!("query distinct_urls_for_app: {e}")))?;
+        let mut out: Vec<String> = Vec::new();
+        for r in rows {
+            out.push(
+                r.map_err(|e| StoreError::Backend(format!("row distinct_urls_for_app: {e}")))?,
+            );
+        }
+        Ok(out)
+    }
+
     /// Copy + defragment the encrypted brain to `dest` via `VACUUM INTO`.
     /// Output inherits this store's `SQLCipher` key.
     ///

@@ -224,6 +224,58 @@ test truncation_long_input_does_not_crash ... ok
 
 That test used to skip silently, because it needs a fixture file that was never committed. It runs now.
 
+### Pulling in your other MCP servers
+
+The other direction. Above, an agent asks Hippocampus what you saw. Here, Hippocampus asks your other MCP servers what they have and keeps it, so a search covers your screen and your connectors at once.
+
+```bash
+mci-agent mcp-sync
+```
+
+One pass over every server you registered, then it exits. Nothing runs in the background.
+
+Servers are registered in a file, one block each:
+
+```
+~/Library/Application Support/MCI/mcp-servers.toml
+```
+
+```toml
+[[server]]
+name = "my-server"                       # required, unique, [a-zA-Z0-9_-]
+url  = "http://127.0.0.1:7890/mcp"       # required, must be loopback
+# auth_header = "Bearer sk-..."          # optional, sent as Authorization
+# enabled = true                         # optional, defaults to true
+```
+
+The file has to be mode 0600 and owned by you, or it is refused rather than read, because `auth_header` can hold a real token:
+
+```bash
+mkdir -p ~/Library/Application\ Support/MCI
+touch ~/Library/Application\ Support/MCI/mcp-servers.toml
+chmod 600 ~/Library/Application\ Support/MCI/mcp-servers.toml
+```
+
+If the file does not exist, `mcp-sync` says so, prints the block above, and exits zero. Having no MCP servers is a normal state, not an error.
+
+Four things worth knowing about what it stores:
+
+- **The url must be loopback**, 127.0.0.1 or localhost. This project has no outbound network path and is not getting one to fetch your Notion pages. Run the server on your own machine.
+- **Every event it writes is tagged `mcp:<name>`** in `app_bundle_id`, so you can always tell a memory came from a connector rather than from your screen. `mci_events_by_app` scopes to it.
+- **Small resources are stored whole; large ones are stored as a pointer.** Anything over 512 KB becomes a `[CATALOG_ONLY ...]` row carrying the URI and metadata and none of the body. A 100 MB page should not quietly become 100 MB of brain.
+- **Re-running is a no-op.** A resource already ingested is not fetched or written a second time, so this is safe in a cron.
+
+The report is counts, not prose:
+
+```
+mci-agent mcp-sync: done. 1 server(s) contacted, 0 failed to connect,
+2 resource(s) discovered, 2 materialized, 0 cataloged, 2 event(s) written.
+```
+
+`event(s) written` is measured against the store before and after, so a second run says `0` rather than repeating the first run's number.
+
+**What I have and have not run.** The whole path is exercised end to end in `apps/agent/tests/mcp_sync.rs` against a local MCP server: registration, connect, read, write, tagging, the size split, and a re-run writing nothing. I have not pointed it at a third-party MCP server, so I cannot tell you how any particular one behaves.
+
 ---
 
 ## How it works
@@ -283,6 +335,7 @@ Most projects bury this. It should be near the top, because it decides whether t
 |---|---|
 | **Encrypted store + keyword search** | **Works, tested.** This is what `try-it.sh` exercises end to end. |
 | **MCP server** | **Works.** Five tools over stdio JSON-RPC, so an agent can query your memory. See below. |
+| **Pulling from other MCP servers** | **Works against a local server.** `mci-agent mcp-sync` reads what your registered servers offer and files it in the brain, tagged so you can tell it apart. Tested end to end against a loopback MCP server; not tested against any third-party one. |
 | **Semantic search + fusion ranking** | **Works, and I have run the whole path.** Build the model, run `mci-agent embed-backfill`, restart. Verified end to end on a clean machine: a query sharing no words with the corpus goes from 0 hits to 3 correct ones. The model is ~66 MB so you build it yourself; until you do, everything degrades to keyword-only and says so on startup. |
 | **On-device embeddings** | **Works.** Runs through Core ML with a regression test asserting the vectors still match a known-good reference. |
 | **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
@@ -357,10 +410,13 @@ The agent-facing side lives on `mci-agent`:
 ```bash
 mci-agent mcp-serve                      # MCP server over stdio
 mci-agent register-mcp                   # add it to Claude Code
+mci-agent mcp-sync                       # pull from your registered MCP servers
 mci-agent embed-backfill                 # fill in missing vectors
 mci-agent embed-backfill --batch-size 64
 mci-agent stats --source safari
 ```
+
+`mcp-sync` is the one command here that writes to the brain rather than reading it. It takes `--db-path` like the others, and falls back to `$MCI_DB_PATH`.
 
 | Variable | What it does | Required |
 |---|---|---|
