@@ -110,9 +110,25 @@ pub fn sanitize_fts5_query(raw: &str) -> String {
 /// Cheap pre-scan: does the input contain any character that could
 /// possibly need sanitization? If not, the fast-path return above
 /// keeps clean queries byte-identical.
+///
+/// This used to list a handful of operator characters. That was far too
+/// narrow: FTS5 accepts only alphanumerics and non-ASCII inside a
+/// bareword, and raises a syntax error on essentially every other ASCII
+/// punctuation mark. Thirty of the thirty-five ASCII punctuation
+/// characters fail, `?` and `'` among them, so `what did I do?` and
+/// `what's next` both errored out of recall entirely.
 fn needs_sanitization(s: &str) -> bool {
     s.bytes()
-        .any(|b| matches!(b, b':' | b'@' | b'"' | b'(' | b')' | b'*' | b'^'))
+        .any(|b| !is_bareword_byte(b) && !b.is_ascii_whitespace())
+}
+
+/// Bytes FTS5 will accept unquoted inside a bareword.
+///
+/// Alphanumerics, underscore, and anything non-ASCII (continuation and
+/// lead bytes of a multi-byte UTF-8 sequence are all >= 0x80, so accented
+/// and CJK text is left alone rather than being needlessly quoted).
+const fn is_bareword_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
 }
 
 /// Does this individual whitespace-delimited token need phrase-wrapping?
@@ -140,12 +156,19 @@ fn token_needs_wrap(tok: &str) -> bool {
     if tok.contains(':') {
         return true;
     }
-    // Any FTS5 operator metacharacter — `"` `(` `)` `*` `^` would
-    // otherwise be parsed as a phrase / group / prefix / near op.
-    if tok
-        .bytes()
-        .any(|b| matches!(b, b'"' | b'(' | b')' | b'*' | b'^'))
-    {
+    // Anything FTS5 will not accept in a bareword. This covers the
+    // operator metacharacters (`"` `(` `)` `*` `^`) that were listed
+    // here before, and also the ordinary punctuation that is far more
+    // common in a real question: `?` `!` `.` `,` `'` `-` `%` and the
+    // rest. Each of those is a syntax error to FTS5, not a no-op.
+    //
+    // Wrapping rather than stripping, because wrapping is what the rest
+    // of this module already does and it is the conservative choice: a
+    // wrapped token matches the terms it tokenizes into, in order, so
+    // `"what's"` finds `what s` adjacent and `"do?"` finds `do`. A token
+    // that tokenizes to nothing becomes an empty phrase, which FTS5
+    // ignores rather than treating as an unsatisfiable AND term.
+    if tok.bytes().any(|b| !is_bareword_byte(b)) {
         return true;
     }
     false
@@ -173,6 +196,81 @@ fn push_phrase_wrapped(out: &mut String, tok: &str) {
 mod tests {
     use super::*;
 
+    // --- the regression that made recall unusable ------------------
+    //
+    // Claude Code hands `mci_recall` whatever the user typed, and people
+    // type questions. Every one of these produced
+    // `fts5: syntax error near "?"` (or `'`, or `!`, ...) before the
+    // sanitizer covered the whole non-bareword set, which meant the tool
+    // returned an error rather than results for most real queries.
+
+    #[test]
+    fn a_trailing_question_mark_is_handled() {
+        assert_eq!(
+            sanitize_fts5_query("what did I do?"),
+            "what did I \"do?\"",
+            "a question ending in '?' is the single most common recall query"
+        );
+    }
+
+    #[test]
+    fn apostrophes_are_handled() {
+        assert_eq!(sanitize_fts5_query("what's next"), "\"what's\" next");
+        assert_eq!(sanitize_fts5_query("don't stop"), "\"don't\" stop");
+    }
+
+    #[test]
+    fn ordinary_sentence_punctuation_is_handled() {
+        for raw in [
+            "hi!",
+            "50% done",
+            "the end.",
+            "a, b",
+            "re-run it",
+            "cost is $5",
+            "a/b",
+            "why not; really",
+        ] {
+            let out = sanitize_fts5_query(raw);
+            assert!(
+                out.contains('"'),
+                "{raw:?} contains punctuation FTS5 rejects and must be wrapped, got {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn clean_queries_are_still_untouched() {
+        for raw in [
+            "hello world",
+            "screen capture",
+            "abc123 def_456",
+            "café über",
+        ] {
+            assert_eq!(
+                sanitize_fts5_query(raw),
+                raw,
+                "{raw:?} needs no sanitization and must pass through byte-identical"
+            );
+        }
+    }
+
+    #[test]
+    fn every_ascii_punctuation_mark_survives_a_round_trip() {
+        // Empirically, 30 of these 32 are a hard syntax error to FTS5 when
+        // left bare. Rather than encode which, assert the invariant that
+        // matters: after sanitization no token is left bare with one.
+        for c in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~".chars() {
+            let raw = format!("screen{c} capture");
+            let out = sanitize_fts5_query(&raw);
+            if c == '_' {
+                assert_eq!(out, raw, "'_' is a legal bareword byte");
+                continue;
+            }
+            assert!(out.starts_with('"'), "{raw:?} must be wrapped, got {out:?}");
+        }
+    }
+
     // --- fast-path: clean queries stay byte-identical ---------------
 
     #[test]
@@ -191,10 +289,16 @@ mod tests {
     }
 
     #[test]
-    fn hyphenated_token_passes_through() {
-        // Hyphens inside alphanumerics are fine — FTS5 tokenizes them
-        // as term separators but does not error.
-        assert_eq!(sanitize_fts5_query("state-of-the-art"), "state-of-the-art");
+    fn hyphenated_token_is_wrapped() {
+        // This test used to assert pass-through, on the belief that FTS5
+        // "tokenizes hyphens as separators but does not error". It does
+        // error: `state-of-the-art` raises `no such column: of`, because
+        // `-` introduces a column filter. The expectation was written
+        // from what the function did rather than from what FTS5 accepts.
+        assert_eq!(
+            sanitize_fts5_query("state-of-the-art"),
+            "\"state-of-the-art\""
+        );
     }
 
     #[test]
@@ -264,10 +368,11 @@ mod tests {
     }
 
     #[test]
-    fn bare_at_symbol_does_not_wrap() {
-        // "@ handle" (no domain side) is not email-ish — leave alone.
-        // FTS5 treats standalone `@` as a tokenizer boundary, no panic.
-        assert_eq!(sanitize_fts5_query("hello @ world"), "hello @ world");
+    fn bare_at_symbol_is_wrapped() {
+        // Previously asserted pass-through because a lone `@` is not
+        // email-ish. Being email-ish was never the question: FTS5 rejects
+        // a bare `@` outright with `syntax error near "@"`.
+        assert_eq!(sanitize_fts5_query("hello @ world"), "hello \"@\" world");
     }
 
     // --- colon cases: the panic trigger -----------------------------
@@ -346,11 +451,14 @@ mod tests {
     }
 
     #[test]
-    fn html_entity_looking_input_does_not_break() {
-        // `&amp;` — no FTS5 metachars, no colons, so pass-through.
+    fn html_entity_looking_input_is_wrapped() {
+        // `&` was not in the old metacharacter list, so this passed
+        // through and then failed with `syntax error near "&"`. "Not a
+        // metacharacter" and "legal in a bareword" are different sets,
+        // and only the second one matters.
         assert_eq!(
             sanitize_fts5_query("hello &amp; world"),
-            "hello &amp; world"
+            "hello \"&amp;\" world"
         );
     }
 
