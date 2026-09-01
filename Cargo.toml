@@ -6,9 +6,9 @@
 # Edition: 2021 (ADR-0005 — maximum compatibility for the SQLCipher / objc2 /
 # swift-bridge / sqlite-vec / Vision-FFI crate set).
 #
-# MSRV: pinned at 1.83.0 (stable at MCI Phase 0 init, 2026-05). Moves only on a
-# deliberate, documented bump. `rust-toolchain.toml` at the repo root pins the
-# same value so every dev + CI runner uses the same toolchain.
+# MSRV: 1.83.0 (stable at MCI Phase 0 init, 2026-05). Package compatibility
+# moves only on a deliberate, documented bump. `rust-toolchain.toml` separately
+# pins the exact compiler used by contributors and CI for reproducible gates.
 
 [workspace]
 resolver = "2"

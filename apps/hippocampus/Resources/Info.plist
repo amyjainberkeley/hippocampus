@@ -54,11 +54,9 @@
     <key>SUFeedURL</key>
     <string>https://amyjainberkeley.github.io/hippocampus/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>XRC6iJSDpOpPuA78CqB0vC6Lw1YUyZalLIXgyBCfG00=</string>
+    <string>JyMJvusOjdVeoHr5YsyTBywtaNtj5qtWGDH1Kxyi1ng=</string>
     <key>SUEnableSystemProfiling</key>
     <false/>
-    <key>SUEnableInstallerLauncher</key>
-    <true/>
     <key>SUEnableAutomaticChecks</key>
     <true/>
     <key>SUAutomaticallyUpdate</key>

@@ -128,24 +128,68 @@ fi
 # --- Detect notarytool credentials ---
 
 NOTARIZE=0
+NOTARY_PROFILE="notarytool-profile"
 if [[ "$SIGNING_MODE" == "developer-id" ]]; then
-    if xcrun notarytool history --keychain-profile "notarytool-profile" \
+    if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" \
         &>/dev/null; then
         NOTARIZE=1
         echo "Notarization: enabled (keychain profile found)"
-    elif [[ -n "${NOTARYTOOL_APPLE_ID:-}" && -n "${NOTARYTOOL_TEAM_ID:-}" && \
-            -n "${NOTARYTOOL_PASSWORD:-}" ]]; then
-        NOTARIZE=1
-        echo "Notarization: enabled (env credentials)"
     else
         if [[ "$BUILD_PROFILE" == "release" ]]; then
             echo "FATAL: Release installer requires notarization credentials" >&2
-            echo "Store keychain profile 'notarytool-profile' or provide all NOTARYTOOL credentials." >&2
+            echo "Store the Keychain profile '$NOTARY_PROFILE' before building." >&2
             exit 1
         fi
         echo "WARNING: Debug artifact will not be notarized because credentials are absent."
     fi
 fi
+
+notarize_and_record() {
+    local artifact="$1"
+    local label="$2"
+    local submission="$DIST_DIR/notary-${label}-submission.json"
+    local log="$DIST_DIR/notary-${label}-log.json"
+    local submit_status submission_id status
+
+    mkdir -p "$DIST_DIR"
+    rm -f "$submission" "$log"
+
+    set +e
+    xcrun notarytool submit "$artifact" --keychain-profile "$NOTARY_PROFILE" \
+        --wait --output-format json >"$submission"
+    submit_status=$?
+    set -e
+
+    read -r submission_id status < <(
+        python3 - "$submission" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        result = json.load(handle)
+except (OSError, ValueError, TypeError):
+    print("- -")
+else:
+    print(result.get("id", "-"), result.get("status", "-"))
+PY
+    )
+
+    if [[ "$submission_id" != "-" ]]; then
+        if ! xcrun notarytool log "$submission_id" "$log" \
+            --keychain-profile "$NOTARY_PROFILE"; then
+            echo "ERROR: Could not retrieve the $label notarization log." >&2
+            return 1
+        fi
+        echo "  Notarization $label submission: $submission_id"
+    fi
+
+    if [[ "$submit_status" -ne 0 || "$status" != "Accepted" ]]; then
+        echo "ERROR: $label notarization was not accepted (status: $status)." >&2
+        echo "  Review: $submission and $log" >&2
+        return 1
+    fi
+}
 
 # --- Extract version from Info.plist ---
 
@@ -469,17 +513,7 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
     rm -f "$APP_ZIP"
     /usr/bin/ditto -c -k --keepParent "$APP_PATH" "$APP_ZIP"
 
-    APP_NOTARY_ARGS=()
-    if xcrun notarytool history --keychain-profile "notarytool-profile" \
-        &>/dev/null; then
-        APP_NOTARY_ARGS+=(--keychain-profile "notarytool-profile")
-    else
-        APP_NOTARY_ARGS+=(--apple-id "$NOTARYTOOL_APPLE_ID")
-        APP_NOTARY_ARGS+=(--team-id "$NOTARYTOOL_TEAM_ID")
-        APP_NOTARY_ARGS+=(--password "$NOTARYTOOL_PASSWORD")
-    fi
-
-    if xcrun notarytool submit "$APP_ZIP" "${APP_NOTARY_ARGS[@]}" --wait; then
+    if notarize_and_record "$APP_ZIP" app; then
         xcrun stapler staple "$APP_PATH"
         echo "  .app notarized + stapled (ticket embedded in bundle)"
         # Verify the staple was attached + the .app is Gatekeeper-clean.
@@ -508,7 +542,6 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
     else
         echo ""
         echo "ERROR: .app notarization failed. App is signed but NOT notarized."
-        echo "  Check: xcrun notarytool log <submission-id> ${APP_NOTARY_ARGS[*]}"
         exit 1
     fi
 
@@ -719,17 +752,7 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
     echo ""
     echo "--- Submitting DMG for notarization ---"
 
-    NOTARY_ARGS=()
-    if xcrun notarytool history --keychain-profile "notarytool-profile" \
-        &>/dev/null; then
-        NOTARY_ARGS+=(--keychain-profile "notarytool-profile")
-    else
-        NOTARY_ARGS+=(--apple-id "$NOTARYTOOL_APPLE_ID")
-        NOTARY_ARGS+=(--team-id "$NOTARYTOOL_TEAM_ID")
-        NOTARY_ARGS+=(--password "$NOTARYTOOL_PASSWORD")
-    fi
-
-    if xcrun notarytool submit "$FINAL_DMG" "${NOTARY_ARGS[@]}" --wait; then
+    if notarize_and_record "$FINAL_DMG" dmg; then
         echo ""
         echo "--- Stapling notarization ticket ---"
         xcrun stapler staple "$FINAL_DMG"
@@ -740,7 +763,6 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
     else
         echo ""
         echo "ERROR: Notarization failed. DMG is signed but NOT notarized."
-        echo "  Check: xcrun notarytool log <submission-id> ${NOTARY_ARGS[*]}"
         exit 1
     fi
 fi

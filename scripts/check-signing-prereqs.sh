@@ -63,8 +63,6 @@ if xcrun --find notarytool &>/dev/null; then
     ok_ "notarytool present: $(xcrun --find notarytool)"
     if xcrun notarytool history --keychain-profile "notarytool-profile" &>/dev/null; then
         ok_ "keychain profile 'notarytool-profile' configured"
-    elif [[ -n "${NOTARYTOOL_APPLE_ID:-}" && -n "${NOTARYTOOL_TEAM_ID:-}" && -n "${NOTARYTOOL_PASSWORD:-}" ]]; then
-        ok_ "NOTARYTOOL_APPLE_ID / TEAM_ID / PASSWORD env vars set"
     else
         if [[ "$RELEASE_MODE" -eq 1 ]]; then
             block_ "no notary credentials; store Keychain profile 'notarytool-profile'"
