@@ -1,7 +1,7 @@
 //! Integration tests for the daily-brief FFI surface
 //! (`docs/design/brief-viewer-spec.md`).
 //!
-//! Each test stands up an ephemeral SQLCipher brain, seeds briefs via the
+//! Each test stands up an ephemeral `SQLCipher` brain, seeds briefs via the
 //! Rust writer, then re-opens through the FFI and exercises the three new
 //! READ-ONLY entry points + JSON-`null` semantics for "no brief on this
 //! date".
@@ -45,7 +45,7 @@ fn seed_brief(store: &SqlCipherBrainStore, date_local: &str, generated_ts_us: u6
         model_version: "1.0".into(),
         title: format!("Brief for {date_local}"),
         body: body.into(),
-        word_count: body.split_whitespace().count() as u32,
+        word_count: u32::try_from(body.split_whitespace().count()).expect("test brief word count"),
         source_event_count: 42,
     };
     store.put_brief(&row).expect("put_brief");

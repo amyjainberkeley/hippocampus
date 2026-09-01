@@ -32,7 +32,7 @@
 //! in Swift + a two-step token flow for wipe). They are named in the
 //! `ffi_exports_no_mutating_surface_beyond_allowlist` allow-list below;
 //! adding a fifth mutation method without extending the allow-list is
-//! an AGENT_PROTOCOL §5 protected-set violation and the test fails.
+//! an `AGENT_PROTOCOL` §5 protected-set violation and the test fails.
 
 use std::ffi::{CStr, CString};
 use std::path::PathBuf;
@@ -447,6 +447,7 @@ fn ffi_search_rejects_malformed_query_json() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[allow(clippy::many_single_char_names)]
 fn ffi_events_by_ids_resolves_seeded_ids_in_input_order() {
     let (_dir, path, raw_key) = make_test_db();
     let key = DbKey::from_bytes(raw_key);
@@ -631,6 +632,7 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[allow(clippy::many_single_char_names)]
 fn ffi_delete_event_removes_the_row_and_leaves_others_intact() {
     let (_dir, path, raw_key) = make_test_db();
     let (a, b) = {

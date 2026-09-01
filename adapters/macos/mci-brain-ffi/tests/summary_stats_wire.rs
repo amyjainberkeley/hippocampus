@@ -2,12 +2,12 @@
 //! payload. The Swift `SummaryStatsWire` in
 //! `apps/recall-ui/Sources/RecallUIKit/FFIBrainReader.swift` decodes the
 //! JSON emitted by [`mci_brain_ffi_summary_stats`] using the exact
-//! snake_case keys pinned below.
+//! `snake_case` keys pinned below.
 
 use mci_brain_ffi::SummaryStatsJson;
 
 /// A populated payload round-trips through `serde_json` and carries the
-/// expected snake_case keys.
+/// expected `snake_case` keys.
 #[test]
 fn summary_stats_json_round_trips_snake_case_keys() {
     let s = SummaryStatsJson {
@@ -26,8 +26,8 @@ fn summary_stats_json_round_trips_snake_case_keys() {
     assert_eq!(decoded, s);
 }
 
-/// Empty store shape: total_events = 0, oldest/newest = null,
-/// disk_bytes still emits (never null).
+/// Empty store shape: `total_events` = 0, oldest/newest = null,
+/// `disk_bytes` still emits (never null).
 #[test]
 fn summary_stats_json_empty_store_shape() {
     let s = SummaryStatsJson {

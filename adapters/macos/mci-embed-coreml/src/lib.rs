@@ -24,12 +24,12 @@
 //! so `coremltools` cannot convert a graph whose input is a `String` and
 //! whose first hidden layer is a tokenizer. CRS Arxiv/OSS scout
 //! (2026-05-22) verified this and the CEO ratified the pivot the same
-//! day. Industry-standard pattern (Apple ml-stable-diffusion, WhisperKit,
-//! HuggingFace's own exporters): tokenize on the host, pass token-IDs
+//! day. Industry-standard pattern (Apple ml-stable-diffusion, `WhisperKit`,
+//! `HuggingFace`'s own exporters): tokenize on the host, pass token-IDs
 //! into the graph.
 //!
 //! The Rust-side tokenizer lives in [`tokenizer`] and uses the
-//! HuggingFace `tokenizers` crate against the bundled
+//! `HuggingFace` `tokenizers` crate against the bundled
 //! `Snowflake/snowflake-arctic-embed-s` `tokenizer.json` (embedded in
 //! this crate's binary via `include_bytes!`). CLS-pool + L2-norm move
 //! INTO the Core ML graph so the embedding the Rust side receives is
@@ -454,7 +454,9 @@ impl EmbedderBackend for CoreMLBackend {
 #[allow(deprecated)]
 fn build_int32_multiarray_1xn(values: &[i32]) -> Result<Retained<MLMultiArray>, EmbedError> {
     let dim0 = NSNumber::new_i64(1);
-    let dim1 = NSNumber::new_i64(values.len() as i64);
+    let value_count = i64::try_from(values.len())
+        .map_err(|_| EmbedError::Backend("input tensor length exceeds Core ML limits".into()))?;
+    let dim1 = NSNumber::new_i64(value_count);
     let shape = NSArray::from_slice(&[&*dim0, &*dim1]);
 
     // SAFETY: `initWithShape:dataType:error:` allocates a fresh

@@ -1,15 +1,15 @@
-//! Rust-side WordPiece tokenizer for `snowflake-arctic-embed-s`.
+//! Rust-side `WordPiece` tokenizer for `snowflake-arctic-embed-s`.
 //!
 //! # Why this lives in Rust, not in the Core ML graph
 //!
 //! The Wave-17 erratum to ADR-0011 (CEO + CRS ratified 2026-05-22) records
-//! the architectural pivot here: **Core ML cannot express WordPiece
+//! the architectural pivot here: **Core ML cannot express `WordPiece`
 //! tokenization as tensor ops.** The MIL (Model Intermediate Language) spec
 //! has no string ops — `coremltools` will not convert a graph whose input
 //! is a `String` and whose first hidden layer is a tokenizer.
 //!
-//! The industry-standard pattern (Apple `ml-stable-diffusion`, WhisperKit,
-//! HuggingFace's own Core ML exporters) is **external tokenization +
+//! The industry-standard pattern (Apple `ml-stable-diffusion`, `WhisperKit`,
+//! `HuggingFace`'s own Core ML exporters) is **external tokenization +
 //! token-IDs input**: tokenize on the host in whatever native runtime
 //! makes sense (Rust here), pass `input_ids` + `attention_mask` Int32
 //! tensors to the Core ML graph, and let the graph handle every layer
@@ -17,7 +17,7 @@
 //!
 //! # Bundling
 //!
-//! `tokenizer.json` (~700 KB) is the HuggingFace WordPiece spec for
+//! `tokenizer.json` (~700 KB) is the `HuggingFace` `WordPiece` spec for
 //! `Snowflake/snowflake-arctic-embed-s`. It is committed at
 //! `adapters/macos/mci-embed-coreml/resources/tokenizer.json` and embedded
 //! into the binary at compile time via [`include_bytes!`]. Zero runtime
@@ -66,11 +66,11 @@ pub struct Encoded {
 }
 
 /// `tokenizer.json` for `Snowflake/snowflake-arctic-embed-s`, embedded
-/// at compile time. Verified upstream commit: HuggingFace
+/// at compile time. Verified upstream commit: `HuggingFace`
 /// `Snowflake/snowflake-arctic-embed-s` main, fetched 2026-05-22.
 const BUNDLED_TOKENIZER: &[u8] = include_bytes!("../resources/tokenizer.json");
 
-/// WordPiece tokenizer for `snowflake-arctic-embed-s`.
+/// `WordPiece` tokenizer for `snowflake-arctic-embed-s`.
 ///
 /// One instance is loaded at backend-open time and held inside
 /// [`crate::CoreMLBackend`] via `Arc`. Tokenization is stateless per
@@ -95,7 +95,7 @@ impl WordPieceTokenizer {
     /// # Errors
     ///
     /// [`TokenizerError::Load`] if the bundled bytes fail to parse as a
-    /// valid HuggingFace tokenizer spec. This is a compile-time-checked
+    /// valid `HuggingFace` tokenizer spec. This is a compile-time-checked
     /// resource, so a `Load` error here means a corrupted build artifact.
     pub fn load_bundled() -> Result<Arc<Self>, TokenizerError> {
         let tk = Tokenizer::from_bytes(BUNDLED_TOKENIZER)
@@ -112,7 +112,7 @@ impl WordPieceTokenizer {
     /// # Errors
     ///
     /// [`TokenizerError::Load`] if the file is unreadable or the bytes do
-    /// not parse as a valid HuggingFace tokenizer spec.
+    /// not parse as a valid `HuggingFace` tokenizer spec.
     pub fn load_from_file(path: &Path) -> Result<Arc<Self>, TokenizerError> {
         let bytes = std::fs::read(path)
             .map_err(|e| TokenizerError::Load(format!("read {}: {e}", path.display())))?;
