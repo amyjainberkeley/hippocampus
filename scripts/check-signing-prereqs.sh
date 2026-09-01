@@ -6,12 +6,14 @@ set -euo pipefail
 # to scripts/sign-dmg-dry-run.sh — run this FIRST; if it reports blockers, no
 # dry-run or real-signing pass will succeed.
 #
-# Usage: ./scripts/check-signing-prereqs.sh [--verbose]
+# Usage: ./scripts/check-signing-prereqs.sh [--release] [--verbose]
 # Exit codes: 0 = ready · 1 = blockers · 2 = bad arguments.
 
 VERBOSE=0
+RELEASE_MODE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --release) RELEASE_MODE=1; shift ;;
         --verbose|-v) VERBOSE=1; shift ;;
         --help|-h) grep '^# ' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "ERROR: unknown option: $1" >&2; exit 2 ;;
@@ -26,9 +28,14 @@ block_() { echo "  BLOCK $1"; BLOCK=$((BLOCK+1)); }
 
 echo "=== Signing prereq check ==="
 echo "Repo: $REPO_ROOT"
+if [[ "$RELEASE_MODE" -eq 1 ]]; then
+    echo "Mode: release (Developer ID + notarization required)"
+else
+    echo "Mode: development (ad-hoc signing allowed)"
+fi
 echo ""
 
-echo "[1/6] Xcode CLT + core tools"
+echo "[1/7] Xcode + core tools"
 for cmd in codesign spctl hdiutil security shasum; do
     if command -v "$cmd" &>/dev/null; then
         ok_ "$cmd: $(command -v "$cmd")"
@@ -37,8 +44,21 @@ for cmd in codesign spctl hdiutil security shasum; do
     fi
 done
 
+DEVELOPER_DIR=$(xcode-select -p 2>/dev/null || true)
+if [[ "$DEVELOPER_DIR" == */CommandLineTools ]]; then
+    if [[ "$RELEASE_MODE" -eq 1 ]]; then
+        block_ "full Xcode is not selected (active directory: $DEVELOPER_DIR)"
+    else
+        warn_ "full Xcode is not selected (active directory: $DEVELOPER_DIR)"
+    fi
+elif [[ -n "$DEVELOPER_DIR" ]] && xcodebuild -version &>/dev/null; then
+    ok_ "full Xcode selected: $DEVELOPER_DIR"
+else
+    block_ "no usable Xcode developer directory is selected"
+fi
+
 echo ""
-echo "[2/6] xcrun notarytool"
+echo "[2/7] xcrun notarytool"
 if xcrun --find notarytool &>/dev/null; then
     ok_ "notarytool present: $(xcrun --find notarytool)"
     if xcrun notarytool history --keychain-profile "notarytool-profile" &>/dev/null; then
@@ -46,15 +66,18 @@ if xcrun --find notarytool &>/dev/null; then
     elif [[ -n "${NOTARYTOOL_APPLE_ID:-}" && -n "${NOTARYTOOL_TEAM_ID:-}" && -n "${NOTARYTOOL_PASSWORD:-}" ]]; then
         ok_ "NOTARYTOOL_APPLE_ID / TEAM_ID / PASSWORD env vars set"
     else
-        warn_ "no notary credentials — --notarize path requires:"
-        warn_ "  xcrun notarytool store-credentials notarytool-profile"
+        if [[ "$RELEASE_MODE" -eq 1 ]]; then
+            block_ "no notary credentials; store Keychain profile 'notarytool-profile'"
+        else
+            warn_ "no notary credentials; release mode requires Keychain profile 'notarytool-profile'"
+        fi
     fi
 else
     block_ "xcrun notarytool missing — install Xcode CLT / Xcode.app"
 fi
 
 echo ""
-echo "[3/6] xcrun stapler"
+echo "[3/7] xcrun stapler"
 if xcrun --find stapler &>/dev/null; then
     ok_ "stapler present: $(xcrun --find stapler)"
 else
@@ -62,14 +85,17 @@ else
 fi
 
 echo ""
-echo "[4/6] Developer ID signing identities"
+echo "[4/7] Developer ID signing identities"
 IDENTITIES=$(security find-identity -v -p codesigning 2>/dev/null || echo "")
 if echo "$IDENTITIES" | grep -q "Developer ID Application"; then
     APP_CERT=$(echo "$IDENTITIES" | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
     ok_ "Developer ID Application: $APP_CERT"
 else
-    warn_ "no 'Developer ID Application' identity yet (Apple Dev pending)"
-    warn_ "  ad-hoc dry-run still works via --identity -"
+    if [[ "$RELEASE_MODE" -eq 1 ]]; then
+        block_ "no valid 'Developer ID Application' identity with private key"
+    else
+        warn_ "no valid 'Developer ID Application' identity; ad-hoc iteration remains available"
+    fi
 fi
 if echo "$IDENTITIES" | grep -q "Developer ID Installer"; then
     INS_CERT=$(echo "$IDENTITIES" | grep "Developer ID Installer" | head -1 | sed 's/.*"\(.*\)"/\1/')
@@ -80,7 +106,7 @@ fi
 [[ "$VERBOSE" -eq 1 ]] && echo "$IDENTITIES" | sed 's/^/    /'
 
 echo ""
-echo "[5/6] In-repo signing inputs"
+echo "[5/7] In-repo signing inputs"
 INFO_PLIST="$REPO_ROOT/apps/hippocampus/Resources/Info.plist"
 ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements"
 if [[ -f "$INFO_PLIST" ]]; then
@@ -97,7 +123,15 @@ else
 fi
 
 echo ""
-echo "[6/6] Candidate DMG artifacts"
+echo "[6/7] Installer brand identity"
+if "$REPO_ROOT/scripts/build-installer.sh" --verify-assets &>/dev/null; then
+    ok_ "installer assets match canonical AppIcon.icns"
+else
+    block_ "installer brand assets fail canonical identity verification"
+fi
+
+echo ""
+echo "[7/7] Candidate DMG artifacts"
 DMG_HITS=""
 if [[ -d "$REPO_ROOT/dist" ]]; then
     DMG_HITS=$(find "$REPO_ROOT/dist" -maxdepth 2 -name "Hippocampus-*.dmg" 2>/dev/null | head -3 || true)
@@ -121,9 +155,12 @@ if [[ "$BLOCK" -gt 0 ]]; then
     exit 1
 fi
 
-if [[ "$WARN" -eq 0 ]]; then
+if [[ "$WARN" -eq 0 && "$RELEASE_MODE" -eq 1 ]]; then
     echo ""
     echo "Environment is fully ready for real Developer ID signing + notarization."
+elif [[ "$RELEASE_MODE" -eq 1 ]]; then
+    echo ""
+    echo "Release prerequisites pass with non-blocking warnings listed above."
 else
     echo ""
     echo "Ad-hoc dry-run is available now:"
