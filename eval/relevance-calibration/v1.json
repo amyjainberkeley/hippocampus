@@ -94,6 +94,96 @@
       ]
     },
     {
+      "id": "fit-paint-color",
+      "split": "fit",
+      "query": "Which color was selected for the studio door?",
+      "supporting_documents": [
+        "Ultramarine was selected for the studio door.",
+        "The studio door was sanded before painting.",
+        "Three paint samples were viewed in daylight."
+      ],
+      "insufficient_documents": [
+        "One color was selected for the studio door.",
+        "The studio door was sanded before painting.",
+        "Three paint samples were viewed in daylight."
+      ]
+    },
+    {
+      "id": "fit-winter-room",
+      "split": "fit",
+      "query": "Which room held the citrus trees during winter?",
+      "supporting_documents": [
+        "The conservatory held the citrus trees during winter.",
+        "The trees received afternoon light through tall windows.",
+        "Their pots were moved indoors before the first frost."
+      ],
+      "insufficient_documents": [
+        "One room held the citrus trees during winter.",
+        "The trees received afternoon light through tall windows.",
+        "Their pots were moved indoors before the first frost."
+      ]
+    },
+    {
+      "id": "fit-river-bird",
+      "split": "fit",
+      "query": "Which bird nested beside the river path?",
+      "supporting_documents": [
+        "A kingfisher nested beside the river path.",
+        "The nest was hidden above the waterline.",
+        "Walkers kept to the opposite bank."
+      ],
+      "insufficient_documents": [
+        "A bird nested beside the river path.",
+        "The nest was hidden above the waterline.",
+        "Walkers kept to the opposite bank."
+      ]
+    },
+    {
+      "id": "fit-repair-tool",
+      "split": "fit",
+      "query": "What tool tightened the loose bicycle pedal?",
+      "supporting_documents": [
+        "A torque wrench tightened the loose bicycle pedal.",
+        "The pedal was checked again after a short ride.",
+        "The bicycle chain needed no adjustment."
+      ],
+      "insufficient_documents": [
+        "A tool tightened the loose bicycle pedal.",
+        "The pedal was checked again after a short ride.",
+        "The bicycle chain needed no adjustment."
+      ]
+    },
+    {
+      "id": "fit-bowl-material",
+      "split": "fit",
+      "query": "What material is the blue serving bowl made from?",
+      "supporting_documents": [
+        "The blue serving bowl is made from porcelain.",
+        "The bowl is kept on the upper kitchen shelf.",
+        "Its rim has a narrow white stripe."
+      ],
+      "insufficient_documents": [
+        "The blue serving bowl is made from a material chosen for durability.",
+        "The bowl is kept on the upper kitchen shelf.",
+        "Its rim has a narrow white stripe."
+      ]
+    },
+    {
+      "id": "fit-blanket-pattern",
+      "split": "fit",
+      "query": "Which pattern was woven into the guest-room blanket?",
+      "supporting_documents": [
+        "A basketweave pattern was woven into the guest-room blanket.",
+        "The blanket was finished before the cold weather arrived.",
+        "Matching yarn remains in the cedar chest."
+      ],
+      "insufficient_documents": [
+        "A pattern was woven into the guest-room blanket.",
+        "The blanket was finished before the cold weather arrived.",
+        "Matching yarn remains in the cedar chest."
+      ]
+    },
+    {
       "id": "calibration-finish",
       "split": "calibration",
       "query": "Which finish was chosen for the pantry shelves?",
@@ -181,6 +271,51 @@
         "Keon ordered tea with lunch.",
         "Lunch arrived before the drink cooled.",
         "The cafe served several different blends."
+      ]
+    },
+    {
+      "id": "calibration-route",
+      "split": "calibration",
+      "query": "Which route did Mara take to the harbor?",
+      "supporting_documents": [
+        "Mara took the coastal road to reach the harbor.",
+        "The coastal road remained open throughout the morning.",
+        "Mara arrived at the harbor before the market opened."
+      ],
+      "insufficient_documents": [
+        "Mara reached the harbor before the market opened.",
+        "Two roads remained open throughout the morning.",
+        "Traffic was light near the waterfront."
+      ]
+    },
+    {
+      "id": "calibration-container",
+      "split": "calibration",
+      "query": "What container holds the spare sewing needles?",
+      "supporting_documents": [
+        "The spare sewing needles are kept in a blue tin.",
+        "The tin sits inside the top drawer.",
+        "Thread and buttons are stored separately."
+      ],
+      "insufficient_documents": [
+        "The spare sewing needles were put away after use.",
+        "Several containers sit inside the top drawer.",
+        "Thread and buttons are stored separately."
+      ]
+    },
+    {
+      "id": "calibration-cause",
+      "split": "calibration",
+      "query": "What caused the porch bell to stop ringing?",
+      "supporting_documents": [
+        "The porch bell stopped ringing because its wire came loose.",
+        "It worked again after the wire was secured.",
+        "The button itself was undamaged."
+      ],
+      "insufficient_documents": [
+        "The porch bell stopped ringing during the afternoon.",
+        "It worked again after a short repair.",
+        "The button itself was undamaged."
       ]
     },
     {

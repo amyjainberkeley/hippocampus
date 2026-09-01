@@ -12,6 +12,8 @@ use std::collections::HashSet;
 /// One candidate's text and raw semantic score before query-local ranking.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EvidenceCandidate<'a> {
+    /// Stable candidate identity used as the final tie-break.
+    pub stable_id: u64,
     /// Candidate evidence text.
     pub text: &'a str,
     /// Raw query-document cosine from the embedding model.
@@ -31,16 +33,21 @@ pub struct EvidenceFeatures {
     pub document_coverage: f32,
     /// `1.0` when lexical and semantic retrieval agree on top-1, else `0.0`.
     pub lexical_semantic_agreement: f32,
+    /// Longest novel evidence term relative to the longest query term.
+    /// This domain-neutral specificity signal distinguishes a concrete
+    /// answer-bearing span from a placeholder that merely repeats the query.
+    pub novel_specificity: f32,
 }
 
 impl EvidenceFeatures {
-    const fn values(self) -> [f32; 5] {
+    const fn values(self) -> [f32; 6] {
         [
             self.raw_semantic_cosine,
             self.semantic_margin,
             self.query_coverage,
             self.document_coverage,
             self.lexical_semantic_agreement,
+            self.novel_specificity,
         ]
     }
 
@@ -51,14 +58,16 @@ impl EvidenceFeatures {
             && (0.0..=1.0).contains(&self.query_coverage)
             && (0.0..=1.0).contains(&self.document_coverage)
             && matches!(self.lexical_semantic_agreement, 0.0 | 1.0)
+            && (0.0..=1.0).contains(&self.novel_specificity)
     }
 }
 
 /// Extract the critic's fixed feature schema from a candidate set.
 ///
-/// The semantic top-1 is selected directly from raw cosine with input order as
-/// the deterministic tie-break. Lexical top-1 is selected by query coverage,
-/// then document coverage, then input order. No score is normalized against
+/// The semantic top-1 is selected directly from raw cosine with stable
+/// candidate identity as the deterministic tie-break. Lexical top-1 is
+/// selected by query coverage, then document coverage, then stable identity.
+/// No score is normalized against
 /// the current query's min/max, and no query words or answer categories are
 /// interpreted.
 #[must_use]
@@ -74,25 +83,23 @@ pub fn evidence_features_for_candidates(
         return None;
     }
 
-    let mut semantic_order: Vec<usize> = (0..candidates.len()).collect();
+    let mut semantic_order: Vec<&EvidenceCandidate<'_>> = candidates.iter().collect();
     semantic_order.sort_by(|left, right| {
-        candidates[*right]
+        right
             .raw_semantic_cosine
-            .total_cmp(&candidates[*left].raw_semantic_cosine)
-            .then_with(|| left.cmp(right))
+            .total_cmp(&left.raw_semantic_cosine)
+            .then_with(|| left.stable_id.cmp(&right.stable_id))
     });
-    let top_index = semantic_order[0];
-    let top = candidates[top_index];
+    let top = *semantic_order[0];
     let semantic_margin = semantic_order.get(1).map_or(0.0, |second| {
-        (top.raw_semantic_cosine - candidates[*second].raw_semantic_cosine).max(0.0)
+        (top.raw_semantic_cosine - second.raw_semantic_cosine).max(0.0)
     });
 
-    let mut lexical_order: Vec<(usize, f32, f32)> = candidates
+    let mut lexical_order: Vec<(&EvidenceCandidate<'_>, f32, f32)> = candidates
         .iter()
-        .enumerate()
-        .map(|(index, candidate)| {
+        .map(|candidate| {
             (
-                index,
+                candidate,
                 lexical_coverage(query, candidate.text),
                 lexical_coverage(candidate.text, query),
             )
@@ -103,16 +110,36 @@ pub fn evidence_features_for_candidates(
             .1
             .total_cmp(&left.1)
             .then_with(|| right.2.total_cmp(&left.2))
-            .then_with(|| left.0.cmp(&right.0))
+            .then_with(|| left.0.stable_id.cmp(&right.0.stable_id))
     });
 
     Some(EvidenceFeatures {
         raw_semantic_cosine: top.raw_semantic_cosine,
         semantic_margin,
-        query_coverage: lexical_coverage(query, top.text),
-        document_coverage: lexical_coverage(top.text, query),
-        lexical_semantic_agreement: f32::from(lexical_order[0].0 == top_index),
+        query_coverage: lexical_order[0].1,
+        document_coverage: lexical_order[0].2,
+        lexical_semantic_agreement: f32::from(lexical_order[0].0.stable_id == top.stable_id),
+        novel_specificity: novel_specificity(query, lexical_order[0].0.text),
     })
+}
+
+fn novel_specificity(query: &str, evidence: &str) -> f32 {
+    let query_terms = content_terms(query);
+    let longest_query = query_terms
+        .iter()
+        .map(|term| term.chars().count())
+        .max()
+        .unwrap_or(1);
+    let query_set: HashSet<&str> = query_terms.iter().map(String::as_str).collect();
+    let longest_novel = content_terms(evidence)
+        .iter()
+        .filter(|term| !query_set.contains(term.as_str()))
+        .map(|term| term.chars().count())
+        .max()
+        .unwrap_or(0);
+    #[allow(clippy::cast_precision_loss)]
+    let ratio = longest_novel as f32 / longest_query as f32;
+    ratio.clamp(0.0, 1.0)
 }
 
 fn lexical_coverage(query: &str, evidence: &str) -> f32 {
@@ -159,11 +186,11 @@ pub struct EvidenceSufficiencyPolicy {
     /// Positive-coverage target used for conformal threshold selection.
     pub target_positive_coverage: f32,
     /// Mean of each feature on the fit split.
-    pub means: [f32; 5],
+    pub means: [f32; 6],
     /// Standard deviation of each feature on the fit split.
-    pub scales: [f32; 5],
+    pub scales: [f32; 6],
     /// Logistic-regression weights fit only on the fit split.
-    pub weights: [f32; 5],
+    pub weights: [f32; 6],
     /// Logistic-regression intercept fit only on the fit split.
     pub intercept: f32,
     /// Frozen probability threshold selected only from positive calibration
@@ -207,20 +234,35 @@ impl EvidenceSufficiencyPolicy {
 /// Production policy. Values are replaced only by the independent calibration
 /// procedure documented in `eval/relevance-calibration/README.md`.
 pub const EVIDENCE_SUFFICIENCY_POLICY: EvidenceSufficiencyPolicy = EvidenceSufficiencyPolicy {
-    feature_schema_version: 1,
+    feature_schema_version: 2,
     calibration_dataset_id: "hippocampus-evidence-sufficiency-calibration-v1",
-    calibration_sha256: "4767463f1ca003c8f018aa6b375e4241db71ff982187b898bd2774f8adba2fbf",
+    calibration_sha256: "e18aba01ab344da3a1ee4ab58003e28bb86c041e99107b223073bfa7830ead5d",
     target_positive_coverage: 0.90,
-    means: [0.787_043_6, 0.170_410_74, 0.619_444_43, 0.400_892_85, 1.0],
-    scales: [
-        0.038_208_46,
-        0.057_695_847,
-        0.103_823_51,
-        0.086_070_59,
-        0.000_001,
+    means: [
+        0.787_920_8,
+        0.176_467_33,
+        0.767_361_1,
+        0.619_394_84,
+        1.0,
+        0.767_708_36,
     ],
-    weights: [0.868_549_6, 0.571_916_9, 0.266_064_58, -2.951_581_5, 0.0],
-    intercept: -0.085_427_48,
-    threshold: 0.000_002_363_062_6,
+    scales: [
+        0.045_413_61,
+        0.061_222_31,
+        0.180_115_64,
+        0.238_974_44,
+        0.000_001,
+        0.349_290_88,
+    ],
+    weights: [
+        -0.208_845_88,
+        -0.349_374_83,
+        -0.431_204_68,
+        0.479_562_28,
+        0.0,
+        0.999_120_7,
+    ],
+    intercept: -0.048_190_568,
+    threshold: 0.313_164_4,
     validation_qualified: false,
 };

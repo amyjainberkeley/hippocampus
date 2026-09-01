@@ -64,7 +64,35 @@ fn claim(
     attribution: Option<&str>,
     asserted_at_us: u64,
 ) -> MemoryClaim {
+    let source_event_id = evidence
+        .first()
+        .expect("evidence-backed claim helper requires a source")
+        .event_id;
+    claim_for_source(
+        source_event_id,
+        evidence,
+        object,
+        status,
+        supersedes,
+        scope,
+        attribution,
+        asserted_at_us,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn claim_for_source(
+    source_event_id: EventId,
+    evidence: Vec<EvidenceRef>,
+    object: &str,
+    status: ClaimStatus,
+    supersedes: Option<&MemoryClaim>,
+    scope: &str,
+    attribution: Option<&str>,
+    asserted_at_us: u64,
+) -> MemoryClaim {
     MemoryClaim::new(
+        source_event_id,
         "HIPP-201",
         "owner",
         object,
@@ -93,7 +121,8 @@ fn active_claim_requires_extant_source_identity_and_preserves_event_text() {
         .expect("event");
     let before = store.get_event(source).unwrap().unwrap().text;
 
-    let unsupported = claim(
+    let unsupported = claim_for_source(
+        source,
         Vec::new(),
         "Priya",
         ClaimStatus::Active,
@@ -137,7 +166,8 @@ fn active_claim_evidence_must_include_the_delta_source_event() {
 fn unsupported_model_statement_remains_proposed_and_outside_current_facts() {
     let (_dir, _path, _key, store) = store();
     let source = store.put_event(&event("model draft", 10)).unwrap();
-    let draft = claim(
+    let draft = claim_for_source(
+        source,
         Vec::new(),
         "Priya",
         ClaimStatus::Proposed,
@@ -159,7 +189,8 @@ fn explicit_transition_cannot_promote_a_proposed_claim_to_active() {
     let (_dir, _path, _key, store) = store();
     let source = store.put_event(&event("model draft", 10)).unwrap();
     let transition_source = store.put_event(&event("promotion attempt", 30)).unwrap();
-    let draft = claim(
+    let draft = claim_for_source(
+        source,
         Vec::new(),
         "Priya",
         ClaimStatus::Proposed,
@@ -316,6 +347,7 @@ fn backdated_correction_respects_transaction_and_valid_time_independently() {
     let old_event = store.put_event(&event("old assertion", 10)).unwrap();
     let correction_event = store.put_event(&event("later correction", 100)).unwrap();
     let old = MemoryClaim::new(
+        old_event,
         "fixture-subject",
         "fixture-property",
         "old-value",
@@ -333,6 +365,7 @@ fn backdated_correction_respects_transaction_and_valid_time_independently() {
     project_event(&store, &delta(old_event, 20, vec![old.clone()])).unwrap();
 
     let correction = MemoryClaim::new(
+        correction_event,
         "fixture-subject",
         "fixture-property",
         "corrected-value",
@@ -563,6 +596,7 @@ fn migration_upgrades_and_reopens_every_prior_brain_schema() {
             "memory_claims",
             "memory_claim_evidence",
             "memory_claim_transitions",
+            "memory_event_retractions",
         ] {
             let count: i64 = db
                 .conn()
@@ -734,4 +768,711 @@ fn expansion_walks_episode_entity_and_identity_within_hard_budgets() {
     assert_eq!(expansion.entity_ids, vec![entity.id]);
     assert_eq!(expansion.identity_ids, vec![identity_id]);
     assert!(!expansion.truncated);
+}
+
+#[test]
+fn forged_evidence_identity_is_rejected_without_persisting_any_memory_rows() {
+    let (_dir, path, key, store) = store();
+    let source = store.put_event(&event("source statement", 10)).unwrap();
+    let mut forged = evidence(source, "linear://original", "team/eng", 10);
+    forged.id.0 = "forged-evidence-id".into();
+    let forged_claim = claim(
+        vec![forged],
+        "Priya",
+        ClaimStatus::Active,
+        None,
+        "project/HIPP-201",
+        Some("Priya"),
+        20,
+    );
+
+    let error = project_event(&store, &delta(source, 20, vec![forged_claim]))
+        .expect_err("a caller-mutated evidence id must fail closed");
+    assert!(matches!(error, StoreError::InvalidInput(_)));
+    drop(store);
+
+    let db = raw_open(&path, &key).unwrap();
+    for table in ["memory_deltas", "memory_evidence", "memory_claims"] {
+        let count: i64 = db
+            .conn()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "transaction leaked a row into {table}");
+    }
+}
+
+#[test]
+fn same_evidence_id_with_different_payload_is_rejected_and_original_row_survives() {
+    let (_dir, path, key, store) = store();
+    let source = store.put_event(&event("source statement", 10)).unwrap();
+    let original = evidence(source, "linear://original", "team/eng", 10);
+    let original_claim = claim(
+        vec![original.clone()],
+        "Priya",
+        ClaimStatus::Active,
+        None,
+        "project/HIPP-201",
+        Some("Priya"),
+        20,
+    );
+    project_event(&store, &delta(source, 20, vec![original_claim.clone()])).unwrap();
+
+    let mut conflicting_evidence = original;
+    conflicting_evidence.source_locator = "linear://forged".into();
+    let conflicting_claim = claim(
+        vec![conflicting_evidence],
+        "Priya",
+        ClaimStatus::Active,
+        None,
+        "project/HIPP-201",
+        Some("Priya"),
+        20,
+    );
+    let error = project_event(&store, &delta(source, 20, vec![conflicting_claim]))
+        .expect_err("same evidence id with a new payload must not be ignored");
+    assert!(matches!(error, StoreError::InvalidInput(_)));
+    drop(store);
+
+    let db = raw_open(&path, &key).unwrap();
+    let (locator, links): (String, i64) = db
+        .conn()
+        .query_row(
+            "SELECT e.source_locator, COUNT(ce.evidence_id)
+             FROM memory_evidence e
+             LEFT JOIN memory_claim_evidence ce ON ce.evidence_id = e.id
+             GROUP BY e.id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(locator, "linear://original");
+    assert_eq!(links, 1);
+    assert_eq!(
+        db.conn()
+            .query_row("SELECT COUNT(*) FROM memory_claims", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn claim_identity_covers_confidence_status_and_evidence_independent_of_input_order() {
+    let (_dir, _path, _key, store) = store();
+    let first_event = store.put_event(&event("first source", 10)).unwrap();
+    let second_event = store.put_event(&event("second source", 11)).unwrap();
+    let first = evidence(first_event, "linear://first", "team/eng", 10);
+    let second = evidence(second_event, "linear://second", "team/eng", 11);
+    let base = MemoryClaim::new(
+        first_event,
+        "HIPP-201",
+        "owner",
+        "Priya",
+        "project/HIPP-201",
+        Some("Priya".into()),
+        0.95,
+        20,
+        20,
+        None,
+        "projector-v1",
+        ClaimStatus::Active,
+        None,
+        vec![first.clone(), second.clone()],
+    );
+    let reversed = MemoryClaim::new(
+        first_event,
+        "HIPP-201",
+        "owner",
+        "Priya",
+        "project/HIPP-201",
+        Some("Priya".into()),
+        0.95,
+        20,
+        20,
+        None,
+        "projector-v2",
+        ClaimStatus::Active,
+        None,
+        vec![second.clone(), first.clone()],
+    );
+    let changed_confidence = MemoryClaim::new(
+        first_event,
+        "HIPP-201",
+        "owner",
+        "Priya",
+        "project/HIPP-201",
+        Some("Priya".into()),
+        0.75,
+        20,
+        20,
+        None,
+        "projector-v1",
+        ClaimStatus::Active,
+        None,
+        vec![first.clone(), second.clone()],
+    );
+    let changed_status = MemoryClaim::new(
+        first_event,
+        "HIPP-201",
+        "owner",
+        "Priya",
+        "project/HIPP-201",
+        Some("Priya".into()),
+        0.95,
+        20,
+        20,
+        None,
+        "projector-v1",
+        ClaimStatus::Proposed,
+        None,
+        vec![first.clone(), second.clone()],
+    );
+    let changed_evidence = MemoryClaim::new(
+        first_event,
+        "HIPP-201",
+        "owner",
+        "Priya",
+        "project/HIPP-201",
+        Some("Priya".into()),
+        0.95,
+        20,
+        20,
+        None,
+        "projector-v1",
+        ClaimStatus::Active,
+        None,
+        vec![first],
+    );
+
+    assert_eq!(
+        base.id, reversed.id,
+        "input order and projector version are replay metadata"
+    );
+    assert_ne!(base.id, changed_confidence.id);
+    assert_ne!(base.id, changed_status.id);
+    assert_ne!(base.id, changed_evidence.id);
+}
+
+#[test]
+fn claim_identity_includes_source_event_even_without_evidence() {
+    let first = MemoryClaim::new(
+        EventId(41),
+        "HIPP-201",
+        "owner",
+        "Priya",
+        "project/HIPP-201",
+        Some("model".into()),
+        0.5,
+        20,
+        20,
+        None,
+        "projector-v1",
+        ClaimStatus::Proposed,
+        None,
+        Vec::new(),
+    );
+    let second = MemoryClaim::new(
+        EventId(42),
+        "HIPP-201",
+        "owner",
+        "Priya",
+        "project/HIPP-201",
+        Some("model".into()),
+        0.5,
+        20,
+        20,
+        None,
+        "projector-v1",
+        ClaimStatus::Proposed,
+        None,
+        Vec::new(),
+    );
+
+    assert_ne!(first.id, second.id);
+}
+
+#[test]
+fn claim_payload_mutation_after_construction_is_rejected_transactionally() {
+    let (_dir, _path, _key, store) = store();
+    let source = store.put_event(&event("source statement", 10)).unwrap();
+    let mut mutated = claim(
+        vec![evidence(source, "linear://source", "team/eng", 10)],
+        "Priya",
+        ClaimStatus::Active,
+        None,
+        "project/HIPP-201",
+        Some("Priya"),
+        20,
+    );
+    mutated.object = "Mallory".into();
+
+    assert!(matches!(
+        project_event(&store, &delta(source, 20, vec![mutated])),
+        Err(StoreError::InvalidInput(_))
+    ));
+    assert!(store.memory_claims_as_of(20, 20, 10).unwrap().is_empty());
+}
+
+#[test]
+fn persisted_same_claim_id_with_different_payload_is_rejected_without_overwrite() {
+    let (_dir, path, key, store) = store();
+    let source = store.put_event(&event("source statement", 10)).unwrap();
+    let original = claim(
+        vec![evidence(source, "linear://source", "team/eng", 10)],
+        "Priya",
+        ClaimStatus::Active,
+        None,
+        "project/HIPP-201",
+        Some("Priya"),
+        20,
+    );
+    let original_delta = delta(source, 20, vec![original.clone()]);
+    project_event(&store, &original_delta).unwrap();
+    drop(store);
+
+    let db = raw_open(&path, &key).unwrap();
+    db.conn()
+        .execute(
+            "UPDATE memory_claims SET object='Mallory' WHERE id=?1",
+            params![original.id.0],
+        )
+        .unwrap();
+    drop(db);
+
+    let reopened = SqlCipherBrainStore::new(&path, &key).unwrap();
+    let error = project_event(&reopened, &original_delta)
+        .expect_err("a persisted same-id/different-payload claim must fail closed");
+    assert!(matches!(error, StoreError::InvalidInput(_)));
+    drop(reopened);
+
+    let db = raw_open(&path, &key).unwrap();
+    let (object, claim_count): (String, i64) = db
+        .conn()
+        .query_row(
+            "SELECT object, (SELECT COUNT(*) FROM memory_claims) \
+               FROM memory_claims WHERE id=?1",
+            params![original.id.0],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        object, "Mallory",
+        "conflicting replay must not overwrite a row"
+    );
+    assert_eq!(
+        claim_count, 1,
+        "conflicting replay must not append a duplicate"
+    );
+}
+
+#[test]
+fn reversed_delta_replay_order_converges_to_the_same_persisted_projection() {
+    fn run(reverse: bool) -> Vec<(String, String, String, String)> {
+        let (_dir, path, key, store) = store();
+        let alice_event = store.put_event(&event("Alice owns HIPP-201", 10)).unwrap();
+        let priya_event = store.put_event(&event("Priya owns HIPP-201", 11)).unwrap();
+        let alice = claim(
+            vec![evidence(
+                alice_event,
+                "linear://HIPP-201/alice",
+                "team/eng",
+                10,
+            )],
+            "Alice",
+            ClaimStatus::Active,
+            None,
+            "project/HIPP-201",
+            Some("Alice"),
+            20,
+        );
+        let priya = claim(
+            vec![evidence(
+                priya_event,
+                "linear://HIPP-201/priya",
+                "team/eng",
+                11,
+            )],
+            "Priya",
+            ClaimStatus::Active,
+            None,
+            "project/HIPP-201",
+            Some("Priya"),
+            20,
+        );
+        let mut deltas = vec![
+            delta(alice_event, 20, vec![alice]),
+            delta(priya_event, 20, vec![priya]),
+        ];
+        if reverse {
+            deltas.reverse();
+        }
+        for projection in deltas {
+            project_event(&store, &projection).unwrap();
+        }
+        drop(store);
+
+        let db = raw_open(&path, &key).unwrap();
+        let mut statement = db
+            .conn()
+            .prepare(
+                "SELECT c.id, c.object, e.id, e.source_locator \
+                   FROM memory_claims c \
+                   JOIN memory_claim_evidence ce ON ce.claim_id=c.id \
+                   JOIN memory_evidence e ON e.id=ce.evidence_id \
+                  ORDER BY c.id, e.id",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    assert_eq!(run(false), run(true));
+}
+
+#[test]
+fn retract_before_project_is_durable_across_projector_replay() {
+    let (_dir, path, key, store) = store();
+    let source = store.put_event(&event("withdrawn source", 10)).unwrap();
+    let retraction_event = store.put_event(&event("withdrawal recorded", 30)).unwrap();
+    retract_event(
+        &store,
+        &MemoryRetraction::new(
+            source,
+            retraction_event,
+            40,
+            25,
+            "source withdrawn",
+            "projector-v1",
+        ),
+    )
+    .unwrap();
+
+    let active = claim(
+        vec![evidence(source, "linear://withdrawn", "team/eng", 10)],
+        "Priya",
+        ClaimStatus::Active,
+        None,
+        "project/HIPP-201",
+        Some("Priya"),
+        20,
+    );
+    let first = delta(source, 20, vec![active.clone()]);
+    project_event(&store, &first).unwrap();
+    assert_eq!(store.memory_claims_as_of(20, 30, 10).unwrap().len(), 1);
+    assert!(store.memory_claims_as_of(30, 50, 10).unwrap().is_empty());
+
+    let mut replay = first;
+    replay.projector_version = "projector-v2".into();
+    replay.claims[0].projector_version = "projector-v2".into();
+    project_event(&store, &replay).unwrap();
+    assert!(store.memory_claims_as_of(30, 50, 10).unwrap().is_empty());
+    let history = store.memory_claim_history(&active.id).unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .filter(|row| row.status == ClaimStatus::Retracted)
+            .count(),
+        1,
+        "replay must not duplicate or lose the durable retraction"
+    );
+    drop(store);
+
+    let db = raw_open(&path, &key).unwrap();
+    let ledger_count: i64 = db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM memory_event_retractions", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(ledger_count, 1);
+}
+
+fn project_terminal_claim(
+    status: ClaimStatus,
+    effective_at_us: u64,
+) -> (TempDir, SqlCipherBrainStore, MemoryClaim, EventId) {
+    let (dir, _path, _key, store) = store();
+    let source = store.put_event(&event("Alice owns HIPP-201", 10)).unwrap();
+    let transition_source = store.put_event(&event("terminal state", 30)).unwrap();
+    let original = claim(
+        vec![evidence(source, "linear://original", "team/eng", 10)],
+        "Alice",
+        ClaimStatus::Active,
+        None,
+        "project/HIPP-201",
+        Some("Alice"),
+        20,
+    );
+    project_event(&store, &delta(source, 20, vec![original.clone()])).unwrap();
+    let transition = ClaimTransition {
+        id: format!("terminal-{status:?}-{effective_at_us}"),
+        claim_id: original.id.clone(),
+        status,
+        asserted_at_us: 100,
+        effective_at_us,
+        reason: "terminal fixture".into(),
+        source_event_id: transition_source,
+        projector_version: "projector-v1".into(),
+    };
+    project_event(
+        &store,
+        &MemoryDelta::new(
+            transition_source,
+            100,
+            "projector-v1",
+            Vec::new(),
+            vec![transition],
+        ),
+    )
+    .unwrap();
+    (dir, store, original, transition_source)
+}
+
+#[test]
+fn corrections_reject_proposed_and_every_terminal_target_at_their_bitemporal_point() {
+    let (_dir, _path, _key, proposed_store) = store();
+    let proposed_source = proposed_store.put_event(&event("model draft", 10)).unwrap();
+    let correction_source = proposed_store.put_event(&event("correction", 30)).unwrap();
+    let proposed = claim_for_source(
+        proposed_source,
+        Vec::new(),
+        "Alice",
+        ClaimStatus::Proposed,
+        None,
+        "project/HIPP-201",
+        Some("model"),
+        20,
+    );
+    project_event(
+        &proposed_store,
+        &delta(proposed_source, 20, vec![proposed.clone()]),
+    )
+    .unwrap();
+    let correction = claim(
+        vec![evidence(
+            correction_source,
+            "linear://correction",
+            "team/eng",
+            30,
+        )],
+        "Priya",
+        ClaimStatus::Active,
+        Some(&proposed),
+        "project/HIPP-201",
+        Some("Priya"),
+        110,
+    );
+    assert!(matches!(
+        project_event(
+            &proposed_store,
+            &delta(correction_source, 110, vec![correction])
+        ),
+        Err(StoreError::InvalidInput(_))
+    ));
+
+    for status in [
+        ClaimStatus::Superseded,
+        ClaimStatus::Retracted,
+        ClaimStatus::Contradicted,
+    ] {
+        let (_dir, terminal_store, original, transition_source) =
+            project_terminal_claim(status, 30);
+        let correction_event = terminal_store.put_event(&event("new owner", 110)).unwrap();
+        let correction = MemoryClaim::new(
+            correction_event,
+            "HIPP-201",
+            "owner",
+            "Priya",
+            "project/HIPP-201",
+            Some("Priya".into()),
+            0.95,
+            110,
+            40,
+            None,
+            "projector-v1",
+            ClaimStatus::Active,
+            Some(original.id),
+            vec![evidence(
+                correction_event,
+                "linear://new-owner",
+                "team/eng",
+                110,
+            )],
+        );
+        let error = project_event(
+            &terminal_store,
+            &delta(correction_event, 110, vec![correction]),
+        )
+        .expect_err("terminal target must not be superseded again");
+        assert!(matches!(error, StoreError::InvalidInput(_)), "{status:?}");
+        assert!(terminal_store
+            .get_event(transition_source)
+            .unwrap()
+            .is_some());
+    }
+}
+
+#[test]
+fn backdated_terminal_transition_is_evaluated_at_correction_valid_time() {
+    let (_dir, terminal_store, original, _transition_source) =
+        project_terminal_claim(ClaimStatus::Contradicted, 30);
+    let correction_event = terminal_store
+        .put_event(&event("historical correction", 110))
+        .unwrap();
+    let historical = MemoryClaim::new(
+        correction_event,
+        "HIPP-201",
+        "owner",
+        "Priya",
+        "project/HIPP-201",
+        Some("Priya".into()),
+        0.95,
+        110,
+        25,
+        Some(29),
+        "projector-v1",
+        ClaimStatus::Active,
+        Some(original.id),
+        vec![evidence(
+            correction_event,
+            "linear://historical",
+            "team/eng",
+            110,
+        )],
+    );
+    project_event(
+        &terminal_store,
+        &delta(correction_event, 110, vec![historical]),
+    )
+    .expect("target was active before the backdated terminal transition became effective");
+}
+
+#[test]
+fn one_node_budget_skips_oversized_first_claim_and_admits_later_evidence() {
+    let (_dir, _path, _key, store) = store();
+    let large_event = store
+        .put_event(&event(
+            &std::iter::repeat_n("oversized", 100)
+                .collect::<Vec<_>>()
+                .join(" "),
+            10,
+        ))
+        .unwrap();
+    let small_event = store
+        .put_event(&event("small admissible evidence", 11))
+        .unwrap();
+    let small = claim(
+        vec![evidence(small_event, "linear://small", "team/eng", 11)],
+        "small",
+        ClaimStatus::Active,
+        None,
+        "project/HIPP-201",
+        Some("Priya"),
+        20,
+    );
+    let mut attempt = 0;
+    let large = loop {
+        let candidate = claim(
+            vec![evidence(
+                large_event,
+                &format!("linear://large/{attempt}"),
+                "team/eng",
+                10,
+            )],
+            &format!("large-{attempt}"),
+            ClaimStatus::Active,
+            None,
+            "project/HIPP-201",
+            Some("Priya"),
+            20,
+        );
+        if candidate.id < small.id {
+            break candidate;
+        }
+        attempt += 1;
+        assert!(
+            attempt < 10_000,
+            "could not construct deterministic hash order fixture"
+        );
+    };
+    project_event(&store, &delta(large_event, 20, vec![large.clone()])).unwrap();
+    project_event(&store, &delta(small_event, 20, vec![small.clone()])).unwrap();
+
+    let expanded = store
+        .expand_memory(
+            &[large.id, small.id.clone()],
+            ExpansionBudget {
+                max_nodes: 1,
+                max_edges: 1,
+                max_evidence: 1,
+                max_tokens: 8,
+            },
+        )
+        .unwrap();
+    assert_eq!(expanded.evidence.len(), 1);
+    assert_eq!(expanded.evidence[0].evidence.event_id, small_event);
+    assert_eq!(expanded.claim_ids, vec![small.id]);
+}
+
+#[test]
+fn migration_rejects_column_compatible_table_missing_constraints_and_keeps_v5_stamp() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("weak-memory-schema.sqlite");
+    let key = test_key();
+    create_prior_schema(&path, &key, 5);
+    {
+        let db = raw_open(&path, &key).unwrap();
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE memory_claims (
+                    id TEXT PRIMARY KEY,
+                    source_event_id INTEGER NOT NULL,
+                    subject TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    attribution TEXT,
+                    confidence REAL NOT NULL,
+                    asserted_at_us INTEGER NOT NULL,
+                    valid_from_us INTEGER NOT NULL,
+                    valid_to_us INTEGER,
+                    projector_version TEXT NOT NULL,
+                    initial_status TEXT NOT NULL,
+                    supersedes_claim_id TEXT
+                );",
+            )
+            .unwrap();
+    }
+
+    let error = match SqlCipherBrainStore::new(&path, &key) {
+        Ok(_) => panic!("structurally weak Task 5 table must be rejected"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, StoreError::Backend(_)));
+    let db = raw_open(&path, &key).unwrap();
+    let version: String = db
+        .conn()
+        .query_row(
+            "SELECT value FROM meta WHERE key='brain_schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, "5");
+    let retraction_table: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='memory_event_retractions'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retraction_table, 0, "failed migration must fully roll back");
 }

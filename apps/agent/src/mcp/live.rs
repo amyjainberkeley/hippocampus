@@ -35,12 +35,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mci_brain::graph::{Entity, EntityIdentity};
 use mci_brain::{
     BrainStats, BrainStore, EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId,
-    EventRecord, HybridRetriever, IdentityId, RetrievalQuery, Retriever, SqlCipherBrainStore,
-    StoreError,
+    EventRecord, HybridRetriever, IdentityId, NothingMatchedReason, RetrievalMatch,
+    RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, StoreError,
 };
 use mci_core::crypto::DbKey;
 
-use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit};
+use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 
 // ---------------------------------------------------------------------------
 // DynEmbedder — Sized wrapper for Arc<dyn Embedder>
@@ -295,15 +295,31 @@ impl LiveBrainReader {
     }
 
     /// FTS5-only recall (Embedder=None fallback).
-    fn recall_fts5_only(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError> {
+    fn recall_fts5_only(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<McpRecallOutcome, BrainReaderError> {
+        if limit == 0 {
+            return Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::ZeroLimit,
+            });
+        }
         let sanitized = sanitize_fts5_query(query);
         if sanitized.is_empty() {
-            return Ok(Vec::new());
+            return Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::NoCandidates,
+            });
         }
-        let raw = self
-            .store
-            .fts5_search(&sanitized, limit)
-            .map_err(|e| BrainReaderError::Backend(format!("fts5_search: {e}")))?;
+        let raw = match self.store.fts5_search(&sanitized, limit) {
+            Ok(raw) => raw,
+            Err(_) => {
+                return Ok(McpRecallOutcome::Degraded {
+                    degradation: mci_brain::RetrievalDegradation::LexicalUnavailable,
+                    related_context: Vec::new(),
+                })
+            }
+        };
 
         let mut out: Vec<McpHit> = Vec::with_capacity(raw.len());
         for (event_id, score) in raw {
@@ -329,7 +345,13 @@ impl LiveBrainReader {
                 linked_event_ids,
             });
         }
-        Ok(out)
+        if out.is_empty() {
+            Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::NoCandidates,
+            })
+        } else {
+            Ok(McpRecallOutcome::Matched { hits: out })
+        }
     }
 
     /// Hybrid recall via `HybridRetriever` (ADR-0010 min-max CC fusion).
@@ -342,7 +364,7 @@ impl LiveBrainReader {
         query: &str,
         limit: usize,
         embedder: &Arc<dyn Embedder>,
-    ) -> Result<Vec<McpHit>, BrainReaderError> {
+    ) -> Result<McpRecallOutcome, BrainReaderError> {
         #[allow(clippy::cast_possible_truncation)]
         let now_us = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -363,12 +385,33 @@ impl LiveBrainReader {
             app_filter: None,
         };
 
-        let hits = retriever
-            .retrieve(&rq)
+        let outcome = retriever
+            .retrieve_outcome(&rq)
             .map_err(|e| BrainReaderError::Backend(format!("hybrid retrieve: {e}")))?;
+        match outcome {
+            RetrievalOutcome::Matched { matches } => Ok(McpRecallOutcome::Matched {
+                hits: self.materialize_matches(matches)?,
+            }),
+            RetrievalOutcome::NothingMatched { reason } => {
+                Ok(McpRecallOutcome::NothingMatched { reason })
+            }
+            RetrievalOutcome::Degraded {
+                degradation,
+                fallback_matches,
+            } => Ok(McpRecallOutcome::Degraded {
+                degradation,
+                related_context: self.materialize_matches(fallback_matches)?,
+            }),
+        }
+    }
 
-        let mut out: Vec<McpHit> = Vec::with_capacity(hits.len());
-        for hit in hits {
+    fn materialize_matches(
+        &self,
+        matches: Vec<RetrievalMatch>,
+    ) -> Result<Vec<McpHit>, BrainReaderError> {
+        let mut out = Vec::with_capacity(matches.len());
+        for value in matches {
+            let hit = value.hit;
             let Some(event) = self
                 .store
                 .get_event(hit.event_id)
@@ -396,7 +439,7 @@ impl LiveBrainReader {
 }
 
 impl BrainReader for LiveBrainReader {
-    fn recall(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError> {
+    fn recall(&self, query: &str, limit: usize) -> Result<McpRecallOutcome, BrainReaderError> {
         if query.trim().is_empty() {
             return Err(BrainReaderError::InvalidInput("empty query".into()));
         }

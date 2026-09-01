@@ -22,12 +22,13 @@ use std::sync::{Arc, Mutex};
 
 use mci_agent::mcp::{
     serve_stdio, BrainReader, BrainReaderError, JsonRpcId, JsonRpcRequest, JsonRpcResponse,
-    LiveBrainReader, McpHit, Server, ToolName, INVALID_PARAMS, METHOD_NOT_FOUND, PARSE_ERROR,
+    LiveBrainReader, McpHit, McpRecallOutcome, Server, ToolName, INVALID_PARAMS, METHOD_NOT_FOUND,
+    PARSE_ERROR,
 };
 use mci_brain::stubs::FixedDimEmbedder;
 use mci_brain::{
     BrainStats, BrainStore, Embedder, EpisodeRecord, Event, EventId, EventRecord,
-    SqlCipherBrainStore,
+    NothingMatchedReason, RetrievalDegradation, SqlCipherBrainStore,
 };
 use mci_core::crypto::DbKey;
 
@@ -47,7 +48,7 @@ struct Invocations {
 
 #[derive(Clone)]
 struct StubBrainReader {
-    hits: Vec<McpHit>,
+    recall_outcome: Arc<Mutex<McpRecallOutcome>>,
     events: Vec<EventRecord>,
     stats_value: BrainStats,
     episode_records: Vec<EpisodeRecord>,
@@ -58,12 +59,14 @@ struct StubBrainReader {
 impl StubBrainReader {
     fn new() -> Self {
         Self {
-            hits: vec![sample_hit(
-                101,
-                1_000_000,
-                "hello world",
-                Some("https://example.com"),
-            )],
+            recall_outcome: Arc::new(Mutex::new(McpRecallOutcome::Matched {
+                hits: vec![sample_hit(
+                    101,
+                    1_000_000,
+                    "hello world",
+                    Some("https://example.com"),
+                )],
+            })),
             events: vec![
                 sample_record(200, 2_000_000, "first"),
                 sample_record(201, 3_000_000, "second"),
@@ -92,10 +95,14 @@ impl StubBrainReader {
     fn invocations(&self) -> Invocations {
         self.invocations.lock().unwrap().clone()
     }
+
+    fn set_recall_outcome(&self, outcome: McpRecallOutcome) {
+        *self.recall_outcome.lock().unwrap() = outcome;
+    }
 }
 
 impl BrainReader for StubBrainReader {
-    fn recall(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError> {
+    fn recall(&self, query: &str, limit: usize) -> Result<McpRecallOutcome, BrainReaderError> {
         self.invocations
             .lock()
             .unwrap()
@@ -104,7 +111,7 @@ impl BrainReader for StubBrainReader {
         if std::mem::replace(&mut *self.fail_next_recall.lock().unwrap(), false) {
             return Err(BrainReaderError::Backend("injected".into()));
         }
-        Ok(self.hits.clone())
+        Ok(self.recall_outcome.lock().unwrap().clone())
     }
 
     fn events_since(
@@ -284,6 +291,10 @@ fn tools_call_mci_recall_returns_canned_hits() {
         ))
         .expect("response");
     let result = resp.result.expect("result");
+    assert_eq!(
+        result.get("outcome").and_then(|value| value.as_str()),
+        Some("matched")
+    );
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())
@@ -300,6 +311,77 @@ fn tools_call_mci_recall_returns_canned_hits() {
     // Reader saw the call exactly once with the right args.
     let invs = stub.invocations();
     assert_eq!(invs.recall, vec![("hello".to_owned(), 5)]);
+}
+
+#[test]
+fn tools_call_mci_recall_serializes_nothing_matched_without_hits() {
+    let (server, stub) = server();
+    stub.set_recall_outcome(McpRecallOutcome::NothingMatched {
+        reason: NothingMatchedReason::EvidenceFloor,
+    });
+    let response = server
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_recall",
+                "arguments": {"query": "unsupported"}
+            })),
+        ))
+        .expect("response");
+    let result = response.result.expect("result");
+    assert_eq!(result["outcome"], "nothing_matched");
+    assert_eq!(result["reason"], "evidence_floor");
+    assert_eq!(result["hits"], serde_json::json!([]));
+    assert_eq!(result["related_context"], serde_json::json!([]));
+    let text: serde_json::Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text["outcome"], "nothing_matched");
+}
+
+#[test]
+fn tools_call_mci_recall_serializes_every_degradation_as_related_context_never_hits() {
+    for (degradation, expected) in [
+        (
+            RetrievalDegradation::EmbeddingsUnavailable,
+            "embeddings_unavailable",
+        ),
+        (
+            RetrievalDegradation::LexicalUnavailable,
+            "lexical_unavailable",
+        ),
+        (
+            RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+            "lexical_and_embeddings_unavailable",
+        ),
+        (
+            RetrievalDegradation::EvidenceSufficiencyUnqualified,
+            "evidence_sufficiency_unqualified",
+        ),
+    ] {
+        let (server, stub) = server();
+        stub.set_recall_outcome(McpRecallOutcome::Degraded {
+            degradation,
+            related_context: vec![sample_hit(101, 1_000_000, "related only", None)],
+        });
+        let response = server
+            .dispatch(req(
+                "tools/call",
+                Some(serde_json::json!({
+                    "name": "mci_recall",
+                    "arguments": {"query": "degraded"}
+                })),
+            ))
+            .expect("response");
+        let result = response.result.expect("result");
+        assert_eq!(result["outcome"], "degraded");
+        assert_eq!(result["degradation"], expected);
+        assert_eq!(result["hits"], serde_json::json!([]));
+        assert_eq!(result["related_context"].as_array().unwrap().len(), 1);
+        let text: serde_json::Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(text["degradation"], expected);
+        assert_eq!(text["hits"], serde_json::json!([]));
+    }
 }
 
 #[test]
@@ -820,10 +902,13 @@ fn mci_recall_with_embedder_calls_hybrid_retriever() {
         .expect("response");
 
     let result = resp.result.expect("result — hybrid recall must succeed");
+    assert_eq!(result["outcome"], "degraded");
+    assert_eq!(result["degradation"], "evidence_sufficiency_unqualified");
+    assert_eq!(result["hits"], serde_json::json!([]));
     let hits = result
-        .get("hits")
+        .get("related_context")
         .and_then(|v| v.as_array())
-        .expect("hits array");
+        .expect("degraded related context array");
     assert!(
         !hits.is_empty(),
         "hybrid retriever should return hits (lexical + semantic)"

@@ -83,26 +83,31 @@ impl EvidenceRef {
         observed_at_us: u64,
         content_hash: &str,
     ) -> Self {
-        let observed = observed_at_us.to_be_bytes();
-        let event = event_id.0.to_be_bytes();
-        let id = EvidenceId(stable_id(&[
-            b"evidence",
-            &event,
-            source_kind.as_bytes(),
-            source_locator.as_bytes(),
-            source_scope.as_bytes(),
-            &observed,
-            content_hash.as_bytes(),
-        ]));
-        Self {
-            id,
+        let mut value = Self {
+            id: EvidenceId(String::new()),
             event_id,
             source_kind: source_kind.to_owned(),
             source_locator: source_locator.to_owned(),
             source_scope: source_scope.to_owned(),
             observed_at_us,
             content_hash: content_hash.to_owned(),
-        }
+        };
+        value.id = value.derived_id();
+        value
+    }
+
+    pub(crate) fn derived_id(&self) -> EvidenceId {
+        let observed = self.observed_at_us.to_be_bytes();
+        let event = self.event_id.0.to_be_bytes();
+        EvidenceId(stable_id(&[
+            b"evidence",
+            &event,
+            self.source_kind.as_bytes(),
+            self.source_locator.as_bytes(),
+            self.source_scope.as_bytes(),
+            &observed,
+            self.content_hash.as_bytes(),
+        ]))
     }
 }
 
@@ -111,6 +116,8 @@ impl EvidenceRef {
 pub struct MemoryClaim {
     /// Content-stable claim identifier.
     pub id: MemoryClaimId,
+    /// Canonical event whose projection asserted this claim.
+    pub source_event_id: EventId,
     /// Entity or topic the statement is about.
     pub subject: String,
     /// Relation or property being asserted.
@@ -145,6 +152,7 @@ impl MemoryClaim {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
+        source_event_id: EventId,
         subject: &str,
         predicate: &str,
         object: &str,
@@ -161,24 +169,9 @@ impl MemoryClaim {
     ) -> Self {
         evidence.sort_by(|a, b| a.id.cmp(&b.id));
         evidence.dedup_by(|a, b| a.id == b.id);
-        let asserted = asserted_at_us.to_be_bytes();
-        let valid_from = valid_from_us.to_be_bytes();
-        let valid_to = valid_to_us.unwrap_or(u64::MAX).to_be_bytes();
-        let supersedes = supersedes_claim_id.as_ref().map_or("", |id| id.0.as_str());
-        let id = MemoryClaimId(stable_id(&[
-            b"claim",
-            subject.as_bytes(),
-            predicate.as_bytes(),
-            object.as_bytes(),
-            scope.as_bytes(),
-            attribution.as_deref().unwrap_or("").as_bytes(),
-            &asserted,
-            &valid_from,
-            &valid_to,
-            supersedes.as_bytes(),
-        ]));
-        Self {
-            id,
+        let mut value = Self {
+            id: MemoryClaimId(String::new()),
+            source_event_id,
             subject: subject.to_owned(),
             predicate: predicate.to_owned(),
             object: object.to_owned(),
@@ -192,7 +185,43 @@ impl MemoryClaim {
             status,
             supersedes_claim_id,
             evidence,
-        }
+        };
+        value.id = value.derived_id();
+        value
+    }
+
+    pub(crate) fn derived_id(&self) -> MemoryClaimId {
+        let source_event = self.source_event_id.0.to_be_bytes();
+        let asserted = self.asserted_at_us.to_be_bytes();
+        let valid_from = self.valid_from_us.to_be_bytes();
+        let valid_to = self.valid_to_us.unwrap_or(u64::MAX).to_be_bytes();
+        let confidence = self.confidence.to_bits().to_be_bytes();
+        let supersedes = self
+            .supersedes_claim_id
+            .as_ref()
+            .map_or("", |id| id.0.as_str());
+        let evidence_ids = self
+            .evidence
+            .iter()
+            .map(|evidence| evidence.id.0.as_str())
+            .collect::<Vec<_>>()
+            .join("\0");
+        MemoryClaimId(stable_id(&[
+            b"claim",
+            &source_event,
+            self.subject.as_bytes(),
+            self.predicate.as_bytes(),
+            self.object.as_bytes(),
+            self.scope.as_bytes(),
+            self.attribution.as_deref().unwrap_or("").as_bytes(),
+            &confidence,
+            &asserted,
+            &valid_from,
+            &valid_to,
+            self.status.as_str().as_bytes(),
+            supersedes.as_bytes(),
+            evidence_ids.as_bytes(),
+        ]))
     }
 }
 
@@ -225,33 +254,40 @@ impl MemoryDelta {
     ) -> Self {
         claims.sort_by(|a, b| a.id.cmp(&b.id));
         transitions.sort_by(|a, b| a.id.cmp(&b.id));
-        let source = source_event_id.0.to_be_bytes();
-        let asserted = asserted_at_us.to_be_bytes();
-        let claim_ids = claims
-            .iter()
-            .map(|c| c.id.0.as_str())
-            .collect::<Vec<_>>()
-            .join("\0");
-        let transition_ids = transitions
-            .iter()
-            .map(|t| t.id.as_str())
-            .collect::<Vec<_>>()
-            .join("\0");
-        let id = stable_id(&[
-            b"delta",
-            &source,
-            &asserted,
-            claim_ids.as_bytes(),
-            transition_ids.as_bytes(),
-        ]);
-        Self {
-            id,
+        let mut value = Self {
+            id: String::new(),
             source_event_id,
             asserted_at_us,
             projector_version: projector_version.to_owned(),
             claims,
             transitions,
-        }
+        };
+        value.id = value.derived_id();
+        value
+    }
+
+    pub(crate) fn derived_id(&self) -> String {
+        let source = self.source_event_id.0.to_be_bytes();
+        let asserted = self.asserted_at_us.to_be_bytes();
+        let claim_ids = self
+            .claims
+            .iter()
+            .map(|claim| claim.id.0.as_str())
+            .collect::<Vec<_>>()
+            .join("\0");
+        let transition_ids = self
+            .transitions
+            .iter()
+            .map(|transition| transition.id.as_str())
+            .collect::<Vec<_>>()
+            .join("\0");
+        stable_id(&[
+            b"delta",
+            &source,
+            &asserted,
+            claim_ids.as_bytes(),
+            transition_ids.as_bytes(),
+        ])
     }
 }
 
@@ -409,6 +445,21 @@ impl MemoryRetraction {
             reason: reason.to_owned(),
             projector_version: projector_version.to_owned(),
         }
+    }
+
+    pub(crate) fn derived_id(&self) -> String {
+        let target = self.target_event_id.0.to_be_bytes();
+        let source = self.retraction_event_id.0.to_be_bytes();
+        let asserted = self.asserted_at_us.to_be_bytes();
+        let effective = self.effective_at_us.to_be_bytes();
+        stable_id(&[
+            b"event-retraction",
+            &target,
+            &source,
+            &asserted,
+            &effective,
+            self.reason.as_bytes(),
+        ])
     }
 }
 

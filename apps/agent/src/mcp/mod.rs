@@ -59,7 +59,7 @@ pub mod live;
 pub mod server;
 pub mod tools;
 
-pub use brain_reader::{BrainReader, BrainReaderError, McpHit};
+pub use brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 pub use jsonrpc::{
     JsonRpcError, JsonRpcId, JsonRpcRequest, JsonRpcResponse, INVALID_PARAMS, INVALID_REQUEST,
     METHOD_NOT_FOUND, PARSE_ERROR,

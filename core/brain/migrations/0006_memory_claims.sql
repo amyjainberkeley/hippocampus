@@ -79,5 +79,17 @@ CREATE TABLE IF NOT EXISTS memory_claim_transitions (
 CREATE INDEX IF NOT EXISTS memory_claim_transitions_latest
     ON memory_claim_transitions(claim_id, asserted_at_us, effective_at_us, id);
 
-INSERT OR REPLACE INTO meta (key, value)
-    VALUES ('brain_schema_version', '6');
+CREATE TABLE IF NOT EXISTS memory_event_retractions (
+    id                  TEXT PRIMARY KEY,
+    target_event_id     INTEGER NOT NULL,
+    retraction_event_id INTEGER NOT NULL,
+    asserted_at_us      INTEGER NOT NULL,
+    effective_at_us     INTEGER NOT NULL,
+    reason              TEXT NOT NULL,
+    projector_version   TEXT NOT NULL,
+    FOREIGN KEY (target_event_id) REFERENCES events(id) ON DELETE RESTRICT,
+    FOREIGN KEY (retraction_event_id) REFERENCES events(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS memory_event_retractions_target
+    ON memory_event_retractions(target_event_id, asserted_at_us, effective_at_us, id);
