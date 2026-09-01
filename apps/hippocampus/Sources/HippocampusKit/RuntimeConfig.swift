@@ -50,16 +50,21 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
         let parent = path.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
 
-        var lines = existingLines()
-        let newLine = "\(key) = \(value)"
-
-        if let idx = lines.firstIndex(where: { $0.hasPrefix(key) }) {
-            lines[idx] = newLine
-        } else {
-            lines.append(newLine)
+        var updated: [String] = []
+        var replaced = false
+        for line in existingLines() {
+            guard Self.assignmentKey(in: line) == key else {
+                updated.append(line)
+                continue
+            }
+            if !replaced {
+                updated.append(Self.replacingBool(in: line, key: key, value: value))
+                replaced = true
+            }
         }
+        if !replaced { updated.append("\(key) = \(value)") }
 
-        let content = lines.joined(separator: "\n") + "\n"
+        let content = updated.joined(separator: "\n") + "\n"
         try content.write(to: path, atomically: true, encoding: .utf8)
 
         try FileManager.default.setAttributes(
@@ -72,23 +77,37 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
         guard let data = try? Data(contentsOf: path),
               let text = String(data: data, encoding: .utf8)
         else { return [] }
-        return text.split(separator: "\n", omittingEmptySubsequences: false)
-            .map(String.init)
-            .filter { !$0.isEmpty }
+        var lines = text.components(separatedBy: "\n")
+        if lines.last == "" { lines.removeLast() }
+        return lines
     }
 
     static func parseBool(key: String, in text: String) -> Bool {
-        for line in text.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("#") { continue }
-            let parts = trimmed.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let k = parts[0].trimmingCharacters(in: .whitespaces)
-            let v = parts[1].trimmingCharacters(in: .whitespaces)
-            if k == key {
-                return v == "true" || v == "1"
-            }
+        let assignments = text.components(separatedBy: "\n").filter {
+            assignmentKey(in: $0) == key
         }
-        return false
+        guard assignments.count == 1,
+              let equals = assignments[0].firstIndex(of: "=")
+        else { return false }
+        let rawValue = assignments[0][assignments[0].index(after: equals)...]
+            .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
+            .trimmingCharacters(in: .whitespaces)
+        return rawValue == "true" || rawValue == "1"
+    }
+
+    private static func assignmentKey(in line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
+              let equals = trimmed.firstIndex(of: "=")
+        else { return nil }
+        let key = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
+        guard !key.isEmpty else { return nil }
+        return key
+    }
+
+    private static func replacingBool(in line: String, key: String, value: Bool) -> String {
+        let leading = line.prefix { $0 == " " || $0 == "\t" }
+        let comment = line.firstIndex(of: "#").map { " " + line[$0...] } ?? ""
+        return "\(leading)\(key) = \(value)\(comment)"
     }
 }

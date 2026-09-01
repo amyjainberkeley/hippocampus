@@ -1,5 +1,33 @@
 // SPDX-License-Identifier: TBD-private
 import Foundation
+import Darwin
+
+public enum ChildProcessEnvironment {
+    public static let forbiddenInheritedNames = [
+        "MCI_DB_KEY_HEX",
+        "MCI_DB_KEY_FILE",
+        "MCI_DEVELOPMENT_FILE_KEY",
+        "HIPPOCAMPUS_ENABLE_V2P1",
+    ]
+
+    public static func scrubbingReusableKeys(
+        from baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = baseEnvironment
+        for name in forbiddenInheritedNames {
+            environment.removeValue(forKey: name)
+        }
+        return environment
+    }
+
+    public static func makeProcess(
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Process {
+        let process = Process()
+        process.environment = scrubbingReusableKeys(from: baseEnvironment)
+        return process
+    }
+}
 
 struct KeyCustodyCommandResult: Sendable, Equatable {
     let terminationStatus: Int32
@@ -8,6 +36,7 @@ struct KeyCustodyCommandResult: Sendable, Equatable {
 
 enum KeyCustodyCommandRunner {
     static let diagnosticLimit = 4_096
+    static let terminationGraceSeconds: TimeInterval = 0.25
 
     static func run(
         executableURL: URL,
@@ -17,11 +46,10 @@ enum KeyCustodyCommandRunner {
         let child = KeyCustodyChildControl()
 
         return try await withTaskCancellationHandler {
-            try await Task.detached(priority: .userInitiated) {
-                let process = Process()
+            let result = try await Task.detached(priority: .userInitiated) {
+                let process = ChildProcessEnvironment.makeProcess(baseEnvironment: environment)
                 process.executableURL = executableURL
                 process.arguments = arguments
-                process.environment = environment
 
                 let stderr = Pipe()
                 let diagnostic = BoundedDiagnostic(limit: diagnosticLimit)
@@ -42,17 +70,21 @@ enum KeyCustodyCommandRunner {
                     forWritingTo: URL(fileURLWithPath: "/dev/null")
                 )
                 process.standardError = stderr
+                child.install(process)
 
                 do {
+                    try child.checkCancellation()
                     try process.run()
+                    child.didLaunch(process)
                 } catch {
                     try? stderr.fileHandleForWriting.close()
                     try? stderr.fileHandleForReading.close()
                     drain.wait()
+                    child.clear(process)
+                    if child.wasCancelled { throw CancellationError() }
                     throw error
                 }
 
-                child.install(process)
                 try? stderr.fileHandleForWriting.close()
                 process.waitUntilExit()
                 drain.wait()
@@ -67,6 +99,8 @@ enum KeyCustodyCommandRunner {
                     diagnostic: diagnostic.string
                 )
             }.value
+            try Task.checkCancellation()
+            return result
         } onCancel: {
             child.cancel()
         }
@@ -101,25 +135,35 @@ private final class KeyCustodyChildControl: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
     private var cancelled = false
+    private var terminationScheduledPID: pid_t?
 
     var wasCancelled: Bool {
         lock.withLock { cancelled }
     }
 
     func install(_ process: Process) {
-        let shouldTerminate = lock.withLock {
+        lock.withLock {
             self.process = process
-            return cancelled
+            terminationScheduledPID = nil
         }
-        if shouldTerminate, process.isRunning {
-            process.terminate()
+    }
+
+    func checkCancellation() throws {
+        if wasCancelled { throw CancellationError() }
+    }
+
+    func didLaunch(_ process: Process) {
+        let shouldTerminate = lock.withLock {
+            cancelled && self.process === process
         }
+        if shouldTerminate { scheduleTermination(for: process) }
     }
 
     func clear(_ process: Process) {
         lock.withLock {
             if self.process === process {
                 self.process = nil
+                terminationScheduledPID = nil
             }
         }
     }
@@ -129,8 +173,31 @@ private final class KeyCustodyChildControl: @unchecked Sendable {
             cancelled = true
             return self.process
         }
-        if process?.isRunning == true {
-            process?.terminate()
+        if let process { scheduleTermination(for: process) }
+    }
+
+    private func scheduleTermination(for process: Process) {
+        let pid: pid_t? = lock.withLock {
+            guard self.process === process,
+                  process.isRunning,
+                  terminationScheduledPID != process.processIdentifier
+            else { return nil }
+            terminationScheduledPID = process.processIdentifier
+            return process.processIdentifier
+        }
+        guard let pid else { return }
+        kill(pid, SIGTERM)
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(
+            deadline: .now() + KeyCustodyCommandRunner.terminationGraceSeconds
+        ) { [weak self, weak process] in
+            guard let self, let process else { return }
+            let shouldKill = self.lock.withLock {
+                self.cancelled
+                    && self.process === process
+                    && self.terminationScheduledPID == pid
+                    && process.isRunning
+            }
+            if shouldKill { kill(pid, SIGKILL) }
         }
     }
 }

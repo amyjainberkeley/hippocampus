@@ -348,7 +348,7 @@ struct StatusMenuView: View {
         let services = ["ScreenCapture", "Accessibility", "SystemPolicyAllFiles"]
         var results: [String] = []
         for service in services {
-            let proc = Process()
+            let proc = ChildProcessEnvironment.makeProcess()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
             proc.arguments = ["reset", service]
             do {
@@ -364,7 +364,7 @@ struct StatusMenuView: View {
 
     private func quitAndRestart() {
         let bundlePath = Bundle.main.bundlePath
-        let task = Process()
+        let task = ChildProcessEnvironment.makeProcess()
         task.executableURL = URL(fileURLWithPath: "/bin/bash")
         task.arguments = ["-c", "sleep 1 && open \"\(bundlePath)\""]
         try? task.run()
@@ -389,10 +389,9 @@ struct StatusMenuView: View {
         let childEnvironment = supervisor.sanitizedChildEnvironment()
         mcpRegistering = true
         Task.detached {
-            let proc = Process()
+            let proc = ChildProcessEnvironment.makeProcess(baseEnvironment: childEnvironment)
             proc.executableURL = agentPath
             proc.arguments = ["register-mcp"]
-            proc.environment = childEnvironment
             let outPipe = Pipe()
             let errPipe = Pipe()
             proc.standardOutput = outPipe

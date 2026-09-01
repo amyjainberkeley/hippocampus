@@ -292,6 +292,101 @@ fn clean_install_generates_only_when_no_database_exists_and_rereads_keychain() {
 }
 
 #[test]
+fn no_database_missing_keychain_reuses_legacy_key_across_two_real_sqlcipher_launches() {
+    let temp = tempfile::tempdir().expect("temp pre-database legacy install");
+    let database = temp.path().join("mci.sqlite");
+    let legacy = temp.path().join("dev.key");
+    let legacy_key = "5a".repeat(32);
+    std::fs::write(&legacy, &legacy_key).expect("write pre-database legacy key");
+    let keychain = SharedKeychain::missing();
+    let generated_calls = Cell::new(0);
+
+    let first = initialize_database_key_with(
+        &keychain,
+        &keychain,
+        &SqlCipherDatabaseKeyValidator,
+        &KeychainKeyReference::default(),
+        &trusted_application_paths_fixture(),
+        &database,
+        &legacy,
+        || {
+            generated_calls.set(generated_calls.get() + 1);
+            Ok("c3".repeat(32))
+        },
+    )
+    .expect("legacy key should enter Keychain before the database is created");
+
+    assert_eq!(first, KeyInitializationOutcome::MigratedLegacyKey);
+    assert_eq!(generated_calls.get(), 0, "legacy state must never generate");
+    assert_eq!(keychain.value.borrow().as_ref(), Some(&legacy_key));
+    assert!(!legacy.exists(), "matching plaintext must be removed");
+
+    let key = DbKey::from_bytes([0x5a; 32]);
+    drop(SqlCipherBrainStore::new(&database, &key).expect("create real SQLCipher brain"));
+
+    let second = initialize_database_key_with(
+        &keychain,
+        &keychain,
+        &SqlCipherDatabaseKeyValidator,
+        &KeychainKeyReference::default(),
+        &trusted_application_paths_fixture(),
+        &database,
+        &legacy,
+        || panic!("second launch must never generate"),
+    )
+    .expect("second launch should open the real brain with the migrated key");
+
+    assert_eq!(second, KeyInitializationOutcome::AlreadyPresent);
+}
+
+#[test]
+fn no_database_existing_keychain_cleans_matching_legacy_across_two_real_sqlcipher_launches() {
+    let temp = tempfile::tempdir().expect("temp interrupted pre-database migration");
+    let database = temp.path().join("mci.sqlite");
+    let legacy = temp.path().join("dev.key");
+    let legacy_key = "6b".repeat(32);
+    std::fs::write(&legacy, &legacy_key).expect("write interrupted legacy key");
+    let keychain = FakeKeychainReader::with_default_key(&legacy_key);
+    let writer = FakeKeychainWriter::succeeding();
+
+    let first = initialize_database_key_with(
+        &keychain,
+        &writer,
+        &SqlCipherDatabaseKeyValidator,
+        &KeychainKeyReference::default(),
+        &trusted_application_paths_fixture(),
+        &database,
+        &legacy,
+        || panic!("existing Keychain item must never generate"),
+    )
+    .expect("matching interrupted migration should be finalized");
+
+    assert_eq!(
+        first,
+        KeyInitializationOutcome::CompletedInterruptedMigration
+    );
+    assert!(writer.writes.borrow().is_empty());
+    assert!(!legacy.exists(), "matching plaintext must be removed");
+
+    let key = DbKey::from_bytes([0x6b; 32]);
+    drop(SqlCipherBrainStore::new(&database, &key).expect("create real SQLCipher brain"));
+
+    let second = initialize_database_key_with(
+        &keychain,
+        &writer,
+        &SqlCipherDatabaseKeyValidator,
+        &KeychainKeyReference::default(),
+        &trusted_application_paths_fixture(),
+        &database,
+        &legacy,
+        || panic!("second launch must never generate"),
+    )
+    .expect("second launch should open the real brain with the existing key");
+
+    assert_eq!(second, KeyInitializationOutcome::AlreadyPresent);
+}
+
+#[test]
 fn valid_legacy_upgrade_validates_adds_rereads_revalidates_and_removes_plaintext() {
     let (_temp, database, legacy) = existing_database_fixture();
     let legacy_key = "ab".repeat(32);

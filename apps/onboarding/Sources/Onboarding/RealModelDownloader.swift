@@ -104,7 +104,7 @@ actor RealModelDownloader: ModelDownloader {
         try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
 
         if urlStr.hasSuffix(".tar.gz") || urlStr.hasSuffix(".tgz") {
-            let proc = Process()
+            let proc = ChildProcessEnvironment.makeProcess()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
             proc.arguments = ["xzf", tempURL.path, "-C", modelDir.path]
             try proc.run()

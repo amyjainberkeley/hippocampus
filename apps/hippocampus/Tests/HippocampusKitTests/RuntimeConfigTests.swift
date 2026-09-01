@@ -113,7 +113,68 @@ final class RuntimeConfigTests: XCTestCase {
         XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "# k = true\nk = false"))
     }
 
-    func test_parseBool_takes_first_match() {
-        XCTAssertTrue(RuntimeConfig.parseBool(key: "k", in: "k = true\nk = false"))
+    func test_parseBool_fails_closed_on_duplicate_key() {
+        XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "k = true\nk = false"))
+        XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "k = true\nk = malformed"))
+    }
+
+    func test_formatted_capture_key_updates_exactly_and_survives_relaunch() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try """
+         capture_enabled = true # user capture preference
+        capture_enabled_backup = true
+        # capture_enabled = true
+        """.write(to: cfg.path, atomically: true, encoding: .utf8)
+
+        try cfg.setCaptureEnabled(false)
+        let relaunched = RuntimeConfig(path: cfg.path)
+        let content = try String(contentsOf: cfg.path, encoding: .utf8)
+
+        XCTAssertFalse(relaunched.captureEnabled)
+        XCTAssertTrue(content.contains(" capture_enabled = false # user capture preference"))
+        XCTAssertTrue(content.contains("capture_enabled_backup = true"))
+        XCTAssertTrue(content.contains("# capture_enabled = true"))
+    }
+
+    func test_capture_write_collapses_duplicate_exact_keys_deterministically() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try """
+        capture_enabled = true # keep this comment
+        # separator remains
+          capture_enabled = false # duplicate removed
+        capture_enabled_backup = true
+        """.write(to: cfg.path, atomically: true, encoding: .utf8)
+
+        XCTAssertFalse(cfg.captureEnabled, "ambiguous duplicate input must fail closed")
+        try cfg.setCaptureEnabled(true)
+        let content = try String(contentsOf: cfg.path, encoding: .utf8)
+        let exactAssignments = content.split(separator: "\n").filter {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("capture_enabled =")
+        }
+
+        XCTAssertEqual(exactAssignments.count, 1)
+        XCTAssertTrue(content.contains("capture_enabled = true # keep this comment"))
+        XCTAssertTrue(content.contains("# separator remains"))
+        XCTAssertTrue(content.contains("capture_enabled_backup = true"))
+        XCTAssertTrue(RuntimeConfig(path: cfg.path).captureEnabled)
+    }
+
+    func test_capture_on_to_off_round_trip_uses_one_key_after_each_relaunch() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        try cfg.setCaptureEnabled(true)
+        XCTAssertTrue(RuntimeConfig(path: cfg.path).captureEnabled)
+        try RuntimeConfig(path: cfg.path).setCaptureEnabled(false)
+        let relaunched = RuntimeConfig(path: cfg.path)
+        let content = try String(contentsOf: cfg.path, encoding: .utf8)
+
+        XCTAssertFalse(relaunched.captureEnabled)
+        XCTAssertEqual(
+            content.split(separator: "\n").filter { $0.hasPrefix("capture_enabled =") }.count,
+            1
+        )
     }
 }

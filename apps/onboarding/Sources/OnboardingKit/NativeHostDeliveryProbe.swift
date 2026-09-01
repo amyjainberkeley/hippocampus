@@ -41,7 +41,7 @@ public struct DefaultNativeHostDeliveryProbe: NativeHostDeliveryProbe {
 
     public func recentEventCount(source: String, withinSeconds: Int) -> Int? {
         guard let bin = mciAgentResolver() else { return nil }
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = bin
         proc.arguments = [
             "stats",

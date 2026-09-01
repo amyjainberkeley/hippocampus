@@ -15,15 +15,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         dbPath: URL,
         keyReference: KeychainKeyReference
     ) -> [String: String] {
-        var environment = baseEnvironment
-        for key in [
-            "MCI_DB_KEY_HEX",
-            "MCI_DB_KEY_FILE",
-            "MCI_DEVELOPMENT_FILE_KEY",
-            "HIPPOCAMPUS_ENABLE_V2P1",
-        ] {
-            environment.removeValue(forKey: key)
-        }
+        var environment = ChildProcessEnvironment.scrubbingReusableKeys(from: baseEnvironment)
         environment["MCI_DB_PATH"] = dbPath.path
         environment["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
         environment["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
@@ -95,6 +87,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var safariInboxReader: SafariInboxReader?
     private var currentKeyReference: KeychainKeyReference = .defaultDatabaseKey
     private var retryCount = 0
+    private var transitionGate = SupervisorTransitionGate()
+    private var pendingRetryGenerationID: String?
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -133,7 +127,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     public func start() {
         guard !state.isActive, state != .starting else { return }
-        retryTask?.cancel()
+        cancelPendingRetry()
         retryTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -145,13 +139,30 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     func startAndWaitForReadiness() async throws {
+        guard let transitionID = transitionGate.beginTransition() else {
+            throw SupervisorError.transitionInProgress
+        }
         retryCount = 0
-        try await startTopology(captureEnabled: runtimeConfig.captureEnabled, publishState: true)
+        do {
+            let generationID = try await startTopology(
+                captureEnabled: runtimeConfig.captureEnabled,
+                publishState: true
+            )
+            guard transitionGate.commit(
+                generationID: generationID,
+                transitionID: transitionID
+            ) else {
+                throw SupervisorError.transitionInProgress
+            }
+        } catch {
+            transitionGate.fail(transitionID: transitionID)
+            throw error
+        }
     }
 
     public func stop() {
-        retryTask?.cancel()
-        retryTask = nil
+        cancelPendingRetry()
+        transitionGate.reset()
         stopAncillaryServices()
         state = .stopped
         Task { @MainActor [topology] in
@@ -171,19 +182,33 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     public func applyCaptureEnabled(_ enabled: Bool) async throws {
         guard enabled != captureEnabled else { return }
+        cancelPendingRetry()
+        guard let transitionID = transitionGate.beginTransition() else {
+            throw SupervisorError.transitionInProgress
+        }
         let prior = captureEnabled
 
         do {
             try await topology.stop(timeout: 5)
             stopAncillaryServices()
         } catch {
+            transitionGate.fail(transitionID: transitionID)
             state = .crashed(reason: error.localizedDescription)
             throw error
         }
 
         do {
-            try await startTopology(captureEnabled: enabled, publishState: false)
+            let generationID = try await startTopology(
+                captureEnabled: enabled,
+                publishState: false
+            )
             try runtimeConfig.setCaptureEnabled(enabled)
+            guard transitionGate.commit(
+                generationID: generationID,
+                transitionID: transitionID
+            ) else {
+                throw SupervisorError.transitionInProgress
+            }
             captureEnabled = enabled
             state = .running
         } catch {
@@ -193,10 +218,20 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     try await topology.stop(timeout: 5)
                 }
                 stopAncillaryServices()
-                try await startTopology(captureEnabled: prior, publishState: false)
+                let rollbackGenerationID = try await startTopology(
+                    captureEnabled: prior,
+                    publishState: false
+                )
+                guard transitionGate.commit(
+                    generationID: rollbackGenerationID,
+                    transitionID: transitionID
+                ) else {
+                    throw SupervisorError.transitionInProgress
+                }
                 captureEnabled = prior
                 state = .running
             } catch {
+                transitionGate.fail(transitionID: transitionID)
                 captureEnabled = prior
                 state = .crashed(
                     reason: "Capture change failed and prior topology could not be restored: \(error.localizedDescription)"
@@ -206,7 +241,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
-    private func startTopology(captureEnabled requestedCapture: Bool, publishState: Bool) async throws {
+    private func startTopology(
+        captureEnabled requestedCapture: Bool,
+        publishState: Bool
+    ) async throws -> String {
         state = .starting
         guard let helperURL = locator.helperPath() else {
             try failStart(SupervisorError.binaryNotFound("MCICaptureHelper"))
@@ -224,7 +262,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 databaseURL: dbPath,
                 keyReference: reference
             )
-            _ = try keyStore.readKey()
+            _ = try await KeyStoreAccess.readValidatedKey(from: keyStore)
             currentKeyReference = reference
 
             let generation = try SupervisorProcessGeneration.make(
@@ -244,7 +282,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 plan: plan,
                 generation: generation,
                 onUnexpectedExit: { [weak self] label, status in
-                    self?.handleUnexpectedExit(label: label, status: status)
+                    self?.handleUnexpectedExit(
+                        generationID: generation.id,
+                        label: label,
+                        status: status
+                    )
                 }
             )
             try await topology.waitForReadiness(
@@ -258,6 +300,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             state = .running
             startHealthPolling()
             startSafariInboxReader()
+            return generation.id
         } catch {
             try? await topology.stop(timeout: 2)
             stopAncillaryServices()
@@ -271,26 +314,58 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         throw error
     }
 
-    private func handleUnexpectedExit(label: String, status: Int32) {
-        guard state != .stopped else { return }
+    private func handleUnexpectedExit(generationID: String, label: String, status: Int32) {
+        guard state != .stopped,
+              pendingRetryGenerationID == nil,
+              transitionGate.acceptsUnexpectedExit(generationID: generationID)
+        else { return }
         stopAncillaryServices()
         state = .crashed(reason: "\(label) exited (\(status))")
-        scheduleRetry()
+        pendingRetryGenerationID = generationID
+        scheduleRetry(expectedGenerationID: generationID)
     }
 
-    private func scheduleRetry() {
-        guard retryCount < Self.maxRetries else { return }
+    private func scheduleRetry(expectedGenerationID: String) {
+        guard retryCount < Self.maxRetries else {
+            pendingRetryGenerationID = nil
+            return
+        }
         retryCount += 1
         let delay = min(pow(2.0, Double(retryCount - 1)), Self.maxBackoff)
         retryTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled, let self else { return }
-            try? await self.topology.stop(timeout: 2)
-            try? await self.startTopology(
-                captureEnabled: self.runtimeConfig.captureEnabled,
-                publishState: true
-            )
+            guard !Task.isCancelled,
+                  let self,
+                  self.pendingRetryGenerationID == expectedGenerationID,
+                  self.transitionGate.canBeginRetry(
+                    expectedGenerationID: expectedGenerationID
+                  ),
+                  let transitionID = self.transitionGate.beginTransition()
+            else { return }
+            self.pendingRetryGenerationID = nil
+            do {
+                try await self.topology.stop(timeout: 2)
+                let generationID = try await self.startTopology(
+                    captureEnabled: self.runtimeConfig.captureEnabled,
+                    publishState: true
+                )
+                guard self.transitionGate.commit(
+                    generationID: generationID,
+                    transitionID: transitionID
+                ) else {
+                    throw SupervisorError.transitionInProgress
+                }
+            } catch {
+                self.transitionGate.fail(transitionID: transitionID)
+                self.state = .crashed(reason: error.localizedDescription)
+            }
         }
+    }
+
+    private func cancelPendingRetry() {
+        retryTask?.cancel()
+        retryTask = nil
+        pendingRetryGenerationID = nil
     }
 
     private func startSafariInboxReader() {
@@ -316,27 +391,27 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     public func openRecallUI(initialTab: String? = nil) {
         guard let recallPath = locator.recallUIPath() else { return }
-        let task = Process()
-        task.executableURL = recallPath
         var environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,
             dbPath: dbPath,
             keyReference: currentKeyReference
         )
         if let initialTab, !initialTab.isEmpty { environment["MCI_INITIAL_TAB"] = initialTab }
-        task.environment = environment
+        let task = ChildProcessEnvironment.makeProcess(baseEnvironment: environment)
+        task.executableURL = recallPath
         try? task.run()
     }
 
     public func openOnboarding() -> Bool {
         guard let path = locator.onboardingPath() else { return false }
-        let task = Process()
-        task.executableURL = path
-        task.environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
-            baseEnvironment: ProcessInfo.processInfo.environment,
-            dbPath: dbPath,
-            keyReference: currentKeyReference
+        let task = ChildProcessEnvironment.makeProcess(
+            baseEnvironment: ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+                baseEnvironment: ProcessInfo.processInfo.environment,
+                dbPath: dbPath,
+                keyReference: currentKeyReference
+            )
         )
+        task.executableURL = path
         try? task.run()
         return true
     }
@@ -373,10 +448,12 @@ extension ProcessSupervisor: CaptureSettingApplying {}
 
 enum SupervisorError: LocalizedError {
     case binaryNotFound(String)
+    case transitionInProgress
 
     var errorDescription: String? {
         switch self {
         case .binaryNotFound(let name): "\(name) binary not found"
+        case .transitionInProgress: "A supervisor reconfiguration is already in progress."
         }
     }
 }

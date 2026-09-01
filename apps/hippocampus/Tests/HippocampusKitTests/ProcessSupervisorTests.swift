@@ -77,6 +77,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
     var onReadinessWait: ((ProcessSupervisorLaunchPlan) -> Void)?
     private(set) var launchPlans: [ProcessSupervisorLaunchPlan] = []
     private(set) var generations: [SupervisorProcessGeneration] = []
+    private(set) var unexpectedExitCallbacks: [@MainActor @Sendable (String, Int32) -> Void] = []
     private(set) var stopCalls = 0
 
     func launch(
@@ -84,9 +85,9 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         generation: SupervisorProcessGeneration,
         onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
     ) throws {
-        _ = onUnexpectedExit
         launchPlans.append(plan)
         generations.append(generation)
+        unexpectedExitCallbacks.append(onUnexpectedExit)
         isRunning = true
     }
 
@@ -112,6 +113,10 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
 
     func setPaused(_ paused: Bool) throws {
         _ = paused
+    }
+
+    func fireUnexpectedExit(forLaunchAt index: Int, label: String = "helper", status: Int32 = 9) {
+        unexpectedExitCallbacks[index](label, status)
     }
 }
 
@@ -276,6 +281,31 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertFalse(supervisor.captureEnabled)
         XCTAssertFalse(config.captureEnabled)
         XCTAssertEqual(config.captureWrites, [])
+    }
+
+    func test_exit_callbacks_during_requested_start_and_rollback_are_suppressed() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [
+            .success(()),
+            .failure(TestError.denied),
+            .success(()),
+        ]
+        topology.stopResults = [.success(()), .success(())]
+        try await supervisor.startAndWaitForReadiness()
+        var callbackStates: [SupervisorState] = []
+        topology.onReadinessWait = { _ in
+            let launchIndex = topology.launchPlans.count - 1
+            guard launchIndex > 0 else { return }
+            topology.fireUnexpectedExit(forLaunchAt: launchIndex)
+            callbackStates.append(supervisor.state)
+        }
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+
+        XCTAssertEqual(callbackStates, [.starting, .starting])
+        XCTAssertEqual(topology.launchPlans.count, 3)
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertFalse(supervisor.captureEnabled)
     }
 
     func test_setting_is_persisted_only_after_expected_generation_is_ready() async throws {

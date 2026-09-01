@@ -7,6 +7,14 @@ public protocol KeyStore: Sendable {
     func writeKey(_ hex: String) throws
 }
 
+enum KeyStoreAccess {
+    static func readValidatedKey(from store: any KeyStore) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            try store.readKey()
+        }.value
+    }
+}
+
 public enum KeyStoreError: Error, Sendable, Equatable {
     case noKeyFound
     case accessDenied
