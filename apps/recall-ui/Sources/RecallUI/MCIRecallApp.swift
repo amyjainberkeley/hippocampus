@@ -67,7 +67,6 @@ struct MCIRecallApp: App {
             )
             .frame(minWidth: 720, minHeight: 480)
             .background(Color.brandBgPrimary)
-            .preferredColorScheme(.dark)
             .onOpenURL { url in
                 // `hippocampus://recall?popup=1` — invoked by the
                 // ⌘K Action Panel from other Hippocampus apps or a
@@ -139,7 +138,7 @@ struct MCIRecallApp: App {
 
 struct RootView: View {
     let reader: BrainReader
-    @State private var selectedTab: RecallTab
+    @State private var selection: MemoryWorkspaceSelection
     @State private var searchFocusTrigger = false
     @ObservedObject private var actionPanelRegistry = ActionPanelRegistry.shared
     // Cycle 8.54 — "What's new" release-notes modal. Coordinator owns
@@ -149,7 +148,7 @@ struct RootView: View {
 
     init(reader: BrainReader, initialTab: RecallTab = .search) {
         self.reader = reader
-        self._selectedTab = State(initialValue: initialTab)
+        self._selection = State(initialValue: MemoryWorkspaceSelection(initialTab: initialTab))
     }
 
     /// Global (non-contextual) commands. Registered once for the
@@ -165,7 +164,7 @@ struct RootView: View {
                 category: .search,
                 description: "Focus the search field and clear it."
             ) {
-                selectedTab = .search
+                selection = .search
                 searchFocusTrigger.toggle()
             },
             .init(
@@ -175,18 +174,7 @@ struct RootView: View {
                 category: .app,
                 description: "Switch to the timeline of recent events."
             ) {
-                selectedTab = .timeline
-            },
-            // V2-P13 (Phase D scaffold) — command-palette entry for the
-            // Rewind-style visual timeline strip.
-            .init(
-                id: "app.showTimelineStrip",
-                title: "Show Timeline Strip",
-                shortcut: "⌘8",
-                category: .app,
-                description: "Rewind-style visual timeline strip (scaffold; live data awaits V2-P1 M4 lift)."
-            ) {
-                selectedTab = .timelineStrip
+                selection = .timeline
             },
             .init(
                 id: "app.openSettings",
@@ -195,7 +183,7 @@ struct RootView: View {
                 category: .app,
                 description: "Open the settings and dictionary tab."
             ) {
-                selectedTab = .settings
+                selection = .settings
             },
             .init(
                 id: "app.openCustomNames",
@@ -204,18 +192,16 @@ struct RootView: View {
                 category: .app,
                 description: "Edit user-defined entity aliases."
             ) {
-                selectedTab = .settings
+                selection = .settings
             },
             .init(
-                id: "app.toggleDarkMode",
-                title: "Toggle Dark Mode",
+                id: "app.useSystemAppearance",
+                title: "Use System Appearance",
                 shortcut: "⌘⇧D",
                 category: .app,
-                description: "Recall UI is dark-locked today; reserved for future light mode."
+                description: "Recall follows the current macOS light or dark appearance."
             ) {
-                // No-op stub: recall UI is dark-locked today (see
-                // `preferredColorScheme(.dark)` in MCIRecallApp).
-                // Registered for discoverability per peer study §4.
+                ToastNotifier.shared.notify("Recall follows System Appearance")
             },
             .init(
                 id: "app.togglePlayback",
@@ -224,7 +210,7 @@ struct RootView: View {
                 category: .app,
                 description: "Play or pause the timeline scrubber."
             ) {
-                selectedTab = .timeline
+                selection = .timeline
             },
             .init(
                 id: "app.refreshBrain",
@@ -303,15 +289,6 @@ struct RootView: View {
                 GlobalRecallPopupController.shared.show()
             },
             .init(
-                id: "app.showChat",
-                title: "Show Chat",
-                shortcut: "⌘9",
-                category: .app,
-                description: "Preview the future chat-with-your-memory surface (ships in v1.5)."
-            ) {
-                selectedTab = .chat
-            },
-            .init(
                 id: "app.quit",
                 title: "Quit Hippocampus Recall",
                 shortcut: "⌘Q",
@@ -324,81 +301,19 @@ struct RootView: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            SearchView(
-                viewModel: SearchViewModel(reader: reader),
-                focusTrigger: searchFocusTrigger,
-                reader: reader
-            )
-            .tag(RecallTab.search)
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
-
-            TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
-                .tag(RecallTab.timeline)
-                .tabItem { Label("Timeline", systemImage: "clock") }
-
-            EpisodesView(viewModel: EpisodesViewModel(reader: reader))
-                .tag(RecallTab.episodes)
-                .tabItem { Label("Episodes", systemImage: "rectangle.stack") }
-
-            BriefView(
-                viewModel: BriefViewModel(
-                    reader: reader,
-                    isModelPresentProbe: {
-                        ModelPresenceProbe.isBriefModelInstalled()
-                    },
-                    hasFullDayCapture: true
-                ),
-                onRequestModelDownload: {
-                    // The recall-ui doesn't own the download UI (PR #134
-                    // lives in Hippocampus.app). Surface a hippocampus://
-                    // deep-link so the menu-bar app handles it.
-                    if let url = URL(string: "hippocampus://recall?tab=brief&download=1") {
-                        NSWorkspace.shared.open(url)
-                    }
+        MemoryWorkspaceView(
+            reader: reader,
+            selection: $selection,
+            searchFocusTrigger: searchFocusTrigger,
+            onRequestModelDownload: {
+                // The recall-ui doesn't own the download UI (PR #134
+                // lives in Hippocampus.app). Surface a hippocampus://
+                // deep-link so the menu-bar app handles it.
+                if let url = URL(string: "hippocampus://recall?tab=brief&download=1") {
+                    NSWorkspace.shared.open(url)
                 }
-            )
-            .tag(RecallTab.brief)
-            .tabItem { Label("Brief", systemImage: "doc.text") }
-
-            PrivacyMomentsView(
-                viewModel: PrivacyMomentsViewModel(reader: reader)
-            )
-            .tag(RecallTab.privacy)
-            .tabItem { Label("Privacy Moments", systemImage: "eye.slash") }
-
-            UserDictionaryEditor()
-                .tag(RecallTab.settings)
-                .tabItem { Label("Settings", systemImage: "gearshape") }
-
-            // Cycle 8.47 (PR #76 follow-up): wire the mutator when the
-            // reader is FFI-backed so the destructive-action buttons
-            // route through the real delete pathway. StubBrainReader
-            // callers (preview / smoke) get a nil mutator and see
-            // disabled-behavior on delete.
-            PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
-                .tag(RecallTab.privacyDashboard)
-                .tabItem { Label("Privacy", systemImage: "lock.shield") }
-
-            // V2-P13 (Phase D scaffold): Rewind-style visual timeline
-            // strip. See ADR-0036. Live rendering awaits V2-P1 M4 lift
-            // + real captures; scaffold renders MCIEmptyState until
-            // then.
-            TimelineStripView(reader: reader)
-                .tag(RecallTab.timelineStrip)
-                .tabItem { Label("Strip", systemImage: "chart.bar.doc.horizontal") }
-
-            // Cycle 8.52 — Chat surface STUB (⌘9). UI-only preview of the
-            // V2-P12 chat-with-your-memory experience per ADR-0035 (Proposed).
-            // No ML runtime loaded; replies are placeholder strings framed as
-            // "coming in v1.5" so the CEO can review the shape before
-            // ratifying ADR-0035.
-            ChatSurfaceView()
-                .tag(RecallTab.chat)
-                .tabItem {
-                    Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
-                }
-        }
+            }
+        )
         .padding(.top, 6)
         .background(Color.brandBgPrimary)
         .focusable()
@@ -411,29 +326,28 @@ struct RootView: View {
         ) { press in
             guard press.modifiers == .command else { return .ignored }
             switch press.key {
-            case KeyEquivalent("1"): selectedTab = .search
-            case KeyEquivalent("2"): selectedTab = .timeline
-            case KeyEquivalent("3"): selectedTab = .episodes
-            case KeyEquivalent("4"): selectedTab = .brief
-            case KeyEquivalent("5"): selectedTab = .privacy
-            case KeyEquivalent("6"): selectedTab = .settings
-            case KeyEquivalent("7"): selectedTab = .privacyDashboard
-            // V2-P13 (Phase D scaffold) — ⌘8 = timeline strip tab.
-            case KeyEquivalent("8"): selectedTab = .timelineStrip
-            case KeyEquivalent("9"): selectedTab = .chat
+            case KeyEquivalent("1"): selection = .now
+            case KeyEquivalent("2"): selection = .search
+            case KeyEquivalent("3"): selection = .timeline
+            case KeyEquivalent("4"): selection = .episodes
+            case KeyEquivalent("5"): selection = .briefs
+            case KeyEquivalent("6"): selection = .sources
+            case KeyEquivalent("7"): selection = .privacy
+            case KeyEquivalent("8"): selection = .settings
+            case KeyEquivalent("9"): selection = .now
             default: return .ignored
             }
             return .handled
         }
         .onKeyPress(.init("f"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
-            selectedTab = .search
+            selection = .search
             searchFocusTrigger.toggle()
             return .handled
         }
         .onKeyPress(.init("b"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
-            selectedTab = .brief
+            selection = .briefs
             return .handled
         }
         .onKeyPress(.init("/"), phases: .down) { press in

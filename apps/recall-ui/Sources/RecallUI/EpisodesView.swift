@@ -75,6 +75,7 @@ struct EpisodesView: View {
 
 private struct EpisodeCard: View {
     let episode: Episode
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -108,14 +109,17 @@ private struct EpisodeCard: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.brandCardBg)
+            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
+                .fill(isHovered ? Color.brandBgElevated : Color.brandCardBg)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
                 .stroke(Color.brandCardBorder, lineWidth: 0.5)
         )
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .animation(MCI.Motion.snap, value: isHovered)
     }
 
     private var displayApp: String {

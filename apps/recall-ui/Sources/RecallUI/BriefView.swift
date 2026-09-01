@@ -161,6 +161,7 @@ struct BriefView: View {
 
 struct DateSelectorBar: View {
     @ObservedObject var viewModel: BriefViewModel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         HStack(spacing: 12) {
@@ -198,6 +199,10 @@ struct DateSelectorBar: View {
             .accessibilityLabel("Next brief")
             .accessibilityHint("Show the brief for the following day")
         }
+        .padding(.vertical, MCI.Spacing.xs)
+        .padding(.horizontal, MCI.Spacing.s)
+        .background(reduceTransparency ? Color.brandBgSecondary : Color.brandBgElevated.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous))
     }
 
     /// "Friday, May 22, 2026"
