@@ -72,8 +72,12 @@ jobs:
           RELEASE_MODELS_URL: ${{ vars.RELEASE_MODELS_URL }}
           RELEASE_MODELS_SHA256: ${{ vars.RELEASE_MODELS_SHA256 }}
         run: |
-          curl --fail --location --retry 3 --proto '=https' +            "$RELEASE_MODELS_URL" --output "$RUNNER_TEMP/release-models.tar.gz"
-          scripts/prepare-release-models.sh +            --archive "$RUNNER_TEMP/release-models.tar.gz" +            --sha256 "$RELEASE_MODELS_SHA256" +            --output models
+          curl --fail --location --retry 3 --proto '=https' \
+            "$RELEASE_MODELS_URL" --output "$RUNNER_TEMP/release-models.tar.gz"
+          scripts/prepare-release-models.sh \
+            --archive "$RUNNER_TEMP/release-models.tar.gz" \
+            --sha256 "$RELEASE_MODELS_SHA256" \
+            --output models
 
       - name: Build all binaries
         run: |
@@ -94,8 +98,13 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           printf '%s' "$APPLE_CERTIFICATE_P12" | base64 --decode >"$RUNNER_TEMP/certificate.p12"
-          security import "$RUNNER_TEMP/certificate.p12" +            -k "$KEYCHAIN_PATH" +            -P "$APPLE_CERTIFICATE_PASSWORD" +            -T /usr/bin/codesign +            -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple:,codesign: +            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
       - name: Store notarytool credentials
@@ -104,7 +113,10 @@ jobs:
           NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
           NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
         run: |
-          xcrun notarytool store-credentials notarytool-profile +            --apple-id "$NOTARYTOOL_APPLE_ID" +            --team-id "$NOTARYTOOL_TEAM_ID" +            --password "$NOTARYTOOL_PASSWORD"
+          xcrun notarytool store-credentials notarytool-profile \
+            --apple-id "$NOTARYTOOL_APPLE_ID" \
+            --team-id "$NOTARYTOOL_TEAM_ID" \
+            --password "$NOTARYTOOL_PASSWORD"
 
       - name: Require Developer ID
         id: detect-identity
@@ -122,7 +134,9 @@ jobs:
         run: |
           umask 077
           printf '%s' "$SPARKLE_PRIVATE_KEY" >"$RUNNER_TEMP/sparkle-private.key"
-          scripts/verify-sparkle-keypair.sh +            --private-key "$RUNNER_TEMP/sparkle-private.key" +            --info-plist apps/hippocampus/Resources/Info.plist
+          scripts/verify-sparkle-keypair.sh \
+            --private-key "$RUNNER_TEMP/sparkle-private.key" \
+            --info-plist apps/hippocampus/Resources/Info.plist
 
       - name: Build signed and notarized DMG
         env:
@@ -154,11 +168,18 @@ jobs:
         run: |
           DMG="dist/Hippocampus-${GITHUB_REF_NAME#v}.dmg"
           DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$DMG")"
-          scripts/publish-appcast.sh +            --dmg "$DMG" +            --download-url "$DOWNLOAD_URL" +            --appcast dist/appcast.xml +            --dist dist
+          scripts/publish-appcast.sh \
+            --dmg "$DMG" \
+            --download-url "$DOWNLOAD_URL" \
+            --appcast dist/appcast.xml \
+            --dist dist
 
       - name: Verify staged release identity
         run: |
-          scripts/verify-release-identity.sh --phase staged +            --tag "$GITHUB_REF_NAME" +            --dmg "dist/Hippocampus-${GITHUB_REF_NAME#v}.dmg" +            --appcast dist/appcast.xml
+          scripts/verify-release-identity.sh --phase staged \
+            --tag "$GITHUB_REF_NAME" \
+            --dmg "dist/Hippocampus-${GITHUB_REF_NAME#v}.dmg" \
+            --appcast dist/appcast.xml
 
       - name: Create draft GitHub release
         uses: softprops/action-gh-release@v2
