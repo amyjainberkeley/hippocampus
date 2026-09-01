@@ -8,10 +8,17 @@ on:
       - '.github/workflows/publish-release.yml'
       - 'apps/hippocampus/Resources/Info.plist'
       - 'apps/hippocampus/Resources/build-app.sh'
+      - 'apps/hippocampus/Package.swift'
       - 'apps/hippocampus/Package.resolved'
+      - 'NOTICE'
+      - 'third_party/licenses/TOMLKit-0.6.0-LICENSE.txt'
+      - 'third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt'
+      - 'third_party/licenses/toml-license-manifest.json'
       - 'scripts/build-installer.sh'
       - 'scripts/*release*'
       - 'scripts/*sparkle*'
+      - 'scripts/test-toml-license-contract.sh'
+      - 'scripts/verify-toml-license-contract.py'
       - 'scripts/test-task-2-product-truth.sh'
       - 'assets/installer/EULA.rtf'
       - 'assets/installer/sla.r'
@@ -34,10 +41,17 @@ on:
       - '.github/workflows/publish-release.yml'
       - 'apps/hippocampus/Resources/Info.plist'
       - 'apps/hippocampus/Resources/build-app.sh'
+      - 'apps/hippocampus/Package.swift'
       - 'apps/hippocampus/Package.resolved'
+      - 'NOTICE'
+      - 'third_party/licenses/TOMLKit-0.6.0-LICENSE.txt'
+      - 'third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt'
+      - 'third_party/licenses/toml-license-manifest.json'
       - 'scripts/build-installer.sh'
       - 'scripts/*release*'
       - 'scripts/*sparkle*'
+      - 'scripts/test-toml-license-contract.sh'
+      - 'scripts/verify-toml-license-contract.py'
       - 'scripts/test-task-2-product-truth.sh'
       - 'assets/installer/EULA.rtf'
       - 'assets/installer/sla.r'
@@ -66,6 +80,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: scripts/test-release-contract.sh
+      - run: scripts/test-toml-license-contract.sh
       - run: scripts/test-task-2-product-truth.sh
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh
