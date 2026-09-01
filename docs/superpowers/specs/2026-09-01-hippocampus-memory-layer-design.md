@@ -23,6 +23,7 @@ The primary promise is: **resume any project, with any agent, from evidence in u
 
 - Versioned source-backed claims for decisions, commitments, changed facts, people, projects, and open loops.
 - Retractions and corrections propagate through episodes, briefs, context packets, and retrieval.
+- A conversational or model-authored statement cannot become durable fact unless it preserves its source identity, scope, and evidence anchor. Unsupported inferences remain explicitly proposed rather than current.
 - Query planning uses deterministic filters and FTS first, vectors as candidate generation, bounded graph expansion, and evidence budgets.
 - Retrieval returns a typed outcome: `matched`, `nothingMatched`, or `degraded`; weak evidence is never presented as certainty.
 - Optional browser and local-file enrichers use the same evidence and deletion contracts.
@@ -47,6 +48,8 @@ Hippocampus uses seven explicit layers:
 7. **Retrieval planner:** query intent, filters, FTS candidates, semantic candidates, temporal and graph expansion, evidence packing, and abstention.
 
 Raw evidence is canonical. Derived memory never overwrites evidence. Contradictions coexist. Human corrections append a superseding claim. Deleting evidence removes blobs and causes every dependent derivative to be retracted or rebuilt.
+
+Durable writes are governed separately from conversational output. Projection must prevent status promotion, attribution removal, and scope broadening: a suggestion cannot silently become a fact, a quoted claim cannot lose its speaker, and a project-scoped observation cannot become a global user trait. Retrieval defaults to current claims but preserves superseded and contradictory claims in an auditable evidence view.
 
 Episodes have a deterministic measured tier before any model participates: application, site, start/end, dwell, input volume, transition reason, coverage gap, and evidence pointers. Model-authored labels and interpretations live only in the versioned inferred tier. The same evidence window must always compile to the same measured episode.
 
@@ -160,5 +163,7 @@ Lexical and production hybrid arms are reported separately. A missing model or p
 - Native design and navigation follow Apple's Liquid Glass overview, adoption guide, and sidebar HIG: https://developer.apple.com/documentation/TechnologyOverviews/liquid-glass, https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass, https://developer.apple.com/design/human-interface-guidelines/sidebars
 - Capture uses Apple's ScreenCaptureKit contract and is constrained by multimodal routing and memory-safety research: https://developer.apple.com/documentation/screencapturekit, https://arxiv.org/abs/2606.07402, https://arxiv.org/abs/2603.11768
 - Memory hierarchy and retrieval planning are supported by MemoryOS, LongMemEval-V2, and temporal graph memory work: https://arxiv.org/abs/2506.06326, https://arxiv.org/abs/2605.12493, https://arxiv.org/abs/2501.13956
+- Lean, provenance-tagged retrieval and bitemporal contradiction handling are supported by Engram, MOSAIC, and TOKI: https://arxiv.org/abs/2606.09900, https://arxiv.org/abs/2607.16211, https://arxiv.org/abs/2606.06240
+- Durable-write governance is additionally constrained by the persistent-sycophancy benchmark, which isolates status promotion, attribution removal, and scope broadening at the memory commit boundary: https://arxiv.org/abs/2607.10526
 - Deterministic activity compilation, selective screenshot retention, and lifecycle-level evaluation are supported by Activity Frames, MementoGUI, and WorldMemArena: https://arxiv.org/abs/2608.05784, https://arxiv.org/abs/2605.18652, https://arxiv.org/abs/2605.29341
-- Product interaction choices are triangulated against HeyClicky's official product and changelog, screenpipe's open capture platform, and Obsidian's local ownership model: https://www.hiclicky.com/, https://www.heyclicky.com/changelog, https://screenpipe.com/, https://obsidian.md/privacy
+- Product interaction choices are triangulated against HeyClicky's official product and changelog, screenpipe's open capture platform, and Obsidian's local ownership model: https://www.heyclicky.com/, https://www.heyclicky.com/changelog, https://screenpipe.com/, https://obsidian.md/privacy
