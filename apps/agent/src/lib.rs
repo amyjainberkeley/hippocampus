@@ -23,6 +23,8 @@ pub mod bench_longmemeval;
 pub mod brain_cli;
 pub mod brain_ingest;
 pub mod brief_worker;
+/// Reusable environment scrubbing for agent-owned child processes.
+pub mod child_command_environment;
 pub mod consolidator_worker;
 /// Cycle 8.44 audit — lock-file-based unclean-shutdown detection.
 /// On boot, [`crash_recovery::acquire_lock`] returns a

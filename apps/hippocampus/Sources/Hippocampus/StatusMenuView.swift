@@ -7,6 +7,7 @@ struct StatusMenuView: View {
     @ObservedObject var loginItemVM: LoginItemViewModel
     let updater: SparkleUpdaterService
     @ObservedObject var preferencesStore: PreferencesStore
+    let onRequestRestart: () -> Void
 
     @State private var crashReportOptedIn: Bool = false
     @State private var briefsEnabled: Bool = UserDefaults.standard.bool(forKey: "MCIBriefsEnabled")
@@ -132,7 +133,6 @@ struct StatusMenuView: View {
             }
 
             Button("Quit Hippocampus") {
-                supervisor.stop()
                 NSApp.terminate(nil)
             }
             .keyboardShortcut("q")
@@ -145,15 +145,10 @@ struct StatusMenuView: View {
         }
         .sheet(isPresented: $showKeyWrapAudit) {
             KeyWrapAuditView(
-                initialReport: currentKeyWrapReport(),
-                reverify: { currentKeyWrapReport() },
+                store: .defaultDatabaseKey,
                 onClose: { showKeyWrapAudit = false }
             )
         }
-    }
-
-    private func currentKeyWrapReport() -> KeyWrapAuditReport {
-        KeyWrapAuditor.inspectKeychain(KeychainKeyStore.defaultDatabaseKey)
     }
 
     @ViewBuilder
@@ -363,14 +358,7 @@ struct StatusMenuView: View {
     }
 
     private func quitAndRestart() {
-        let bundlePath = Bundle.main.bundlePath
-        let task = ChildProcessEnvironment.makeProcess()
-        task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = ["-c", "sleep 1 && open \"\(bundlePath)\""]
-        try? task.run()
-
-        supervisor.stop()
-        NSApp.terminate(nil)
+        onRequestRestart()
     }
 
     private func connectToClaude() {

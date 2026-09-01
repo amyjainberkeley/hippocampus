@@ -75,6 +75,8 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
     var stopResults: [Result<Void, Error>] = []
     var isRunning = false
     var onReadinessWait: ((ProcessSupervisorLaunchPlan) -> Void)?
+    var onStop: (() -> Void)?
+    var stopDelay: Duration?
     private(set) var launchPlans: [ProcessSupervisorLaunchPlan] = []
     private(set) var generations: [SupervisorProcessGeneration] = []
     private(set) var unexpectedExitCallbacks: [@MainActor @Sendable (String, Int32) -> Void] = []
@@ -84,7 +86,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         plan: ProcessSupervisorLaunchPlan,
         generation: SupervisorProcessGeneration,
         onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
-    ) throws {
+    ) async throws {
         launchPlans.append(plan)
         generations.append(generation)
         unexpectedExitCallbacks.append(onUnexpectedExit)
@@ -105,6 +107,8 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
     func stop(timeout: TimeInterval) async throws {
         _ = timeout
         stopCalls += 1
+        onStop?()
+        if let stopDelay { try? await Task.sleep(for: stopDelay) }
         if !stopResults.isEmpty {
             try stopResults.removeFirst().get()
         }
@@ -257,6 +261,48 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertFalse(config.captureEnabled)
         guard case .crashed = supervisor.state else {
             return XCTFail("partial stop must be visible, got \(supervisor.state)")
+        }
+    }
+
+    func test_verified_shutdown_publishes_stopped_only_after_topology_stop_returns() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        topology.onStop = {
+            XCTAssertEqual(supervisor.state, .running)
+            XCTAssertTrue(topology.isRunning)
+        }
+
+        try await supervisor.shutdownAndWait()
+
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertFalse(topology.isRunning)
+    }
+
+    func test_concurrent_verified_shutdown_callers_share_one_stop() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        topology.stopDelay = .milliseconds(75)
+
+        async let first: Void = supervisor.shutdownAndWait()
+        async let second: Void = supervisor.shutdownAndWait()
+        _ = try await (first, second)
+
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertEqual(supervisor.state, .stopped)
+    }
+
+    func test_failed_verified_shutdown_never_claims_stopped() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        topology.stopResults = [.failure(TestError.partialStop)]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.shutdownAndWait())
+
+        guard case .crashed = supervisor.state else {
+            return XCTFail("failed shutdown must stay visible, got \(supervisor.state)")
         }
     }
 

@@ -19,7 +19,8 @@ struct HippocampusApp: App {
                 supervisor: appDelegate.supervisor,
                 loginItemVM: loginItemVM,
                 updater: updater,
-                preferencesStore: preferencesStore
+                preferencesStore: preferencesStore,
+                onRequestRestart: { appDelegate.requestRestart() }
             )
             .task {
                 // Supervisor lifecycle (start / defer-until-onboarded)
@@ -179,6 +180,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// tailing across those transitions).
     private let tccNotifier = TCCRevokedNotifier()
     private var tccStderrTail: TCCHelperStderrTail?
+    private enum TerminationIntent: Equatable {
+        case quit
+        case restart
+    }
+    private var terminationIntent: TerminationIntent = .quit
+    private var terminationTask: Task<Void, Never>?
+    private var terminationWasVerified = false
+    private var didCleanUpLifecycle = false
 
     override init() {
         // `ProcessSupervisor.init` is `@MainActor`; this class is too
@@ -197,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hard fail-fast for Intel / Rosetta hosts. Hippocampus's local-AI
-        // path (Core ML brief-author + embeddings + Neural Engine) is
+        // path (Core ML brief-author + CPU-pinned embeddings) is
         // Apple Silicon-only; on Intel it silently degrades or crashes.
         // Cycle 8.44 product-readiness audit polish gap. See
         // `MciBootGuards.hostIsAppleSilicon()` for the host-CPU check
@@ -371,9 +380,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "Hippocampus requires Apple Silicon"
         alert.informativeText = """
-            This Mac appears to use an Intel processor. Hippocampus uses \
-            the Apple Silicon Neural Engine for local AI (Core ML). \
-            Intel Macs are not supported.
+            This Mac appears to use an Intel processor. Hippocampus's \
+            bundled local models and native components currently support \
+            Apple Silicon only. Intel Macs are not supported.
 
             Learn more at https://hippocampus-swart.vercel.app
             """
@@ -382,11 +391,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    func requestRestart() {
+        terminationIntent = .restart
+        NSApp.terminate(nil)
+    }
+
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        if terminationWasVerified { return .terminateNow }
+        if terminationTask != nil { return .terminateLater }
+
+        terminationTask = Task { @MainActor [weak self] in
+            guard let self else {
+                sender.reply(toApplicationShouldTerminate: false)
+                return
+            }
+            do {
+                try await self.supervisor.shutdownAndWait()
+                if self.terminationIntent == .restart {
+                    try self.launchRestartAfterExit()
+                }
+                self.cleanUpLifecycle()
+                self.terminationWasVerified = true
+                sender.reply(toApplicationShouldTerminate: true)
+            } catch {
+                self.terminationTask = nil
+                self.terminationIntent = .quit
+                let alert = NSAlert()
+                alert.messageText = "Hippocampus could not quit safely"
+                alert.informativeText = "A capture process is still running. Hippocampus will stay open so you can try again.\n\n\(error.localizedDescription)"
+                alert.alertStyle = .critical
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                sender.reply(toApplicationShouldTerminate: false)
+            }
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        cleanUpLifecycle()
+    }
+
+    private func cleanUpLifecycle() {
+        guard !didCleanUpLifecycle else { return }
+        didCleanUpLifecycle = true
         cancelSentinelWatcher()
         tccStderrTail?.stop()
         tccStderrTail = nil
-        supervisor.stop()
+    }
+
+    private func launchRestartAfterExit() throws {
+        let task = ChildProcessEnvironment.makeProcess()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = [
+            "-c",
+            "sleep 1; exec /usr/bin/open \"$1\"",
+            "hippocampus-restart",
+            Bundle.main.bundlePath,
+        ]
+        try task.run()
     }
 
     /// Defensive override against AppKit's default "terminate after
@@ -426,9 +491,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///   - Any future SwiftUI window or sheet attached to the menu.
     ///
     /// Returning `false` here makes the app's lifecycle explicit:
-    /// the app only quits via the "Quit Hippocampus" menu item
-    /// (`supervisor.stop()` + `NSApp.terminate(nil)`) or
-    /// `applicationWillTerminate` from the OS. The menu-bar status
+    /// the app only quits through AppKit's terminate-later lifecycle,
+    /// which awaits verified helper + agent shutdown before replying.
+    /// The menu-bar status
     /// item is the entire product surface on the user's machine —
     /// losing the main process means losing the product, even though
     /// the helper + agent keep recording.

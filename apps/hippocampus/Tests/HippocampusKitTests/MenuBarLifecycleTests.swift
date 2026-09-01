@@ -53,6 +53,19 @@ final class MenuBarLifecycleTests: XCTestCase {
 
     // MARK: - applicationShouldTerminateAfterLastWindowClosed
 
+    func test_AppDelegate_defers_termination_until_verified_shutdown_replies() throws {
+        guard let path = appDelegateSourcePath else {
+            throw XCTSkip("HippocampusApp.swift not found at expected repo location")
+        }
+        let content = try String(contentsOfFile: path, encoding: .utf8)
+
+        XCTAssertTrue(content.contains("func applicationShouldTerminate("))
+        XCTAssertTrue(content.contains("return .terminateLater"))
+        XCTAssertTrue(content.contains("try await self.supervisor.shutdownAndWait()"))
+        XCTAssertTrue(content.contains("reply(toApplicationShouldTerminate: true)"))
+        XCTAssertFalse(content.contains("applicationWillTerminate(_ notification: Notification) {\n        supervisor.stop()"))
+    }
+
     /// `AppDelegate` MUST declare the override.
     ///
     /// AppKit's default is `true` — that is the bug. Removing the

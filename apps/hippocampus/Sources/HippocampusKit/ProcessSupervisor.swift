@@ -89,6 +89,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var retryCount = 0
     private var transitionGate = SupervisorTransitionGate()
     private var pendingRetryGenerationID: String?
+    private var shutdownTask: Task<Void, Error>?
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -126,7 +127,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func start() {
-        guard !state.isActive, state != .starting else { return }
+        guard shutdownTask == nil, !state.isActive, state != .starting else { return }
         cancelPendingRetry()
         retryTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -139,6 +140,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     func startAndWaitForReadiness() async throws {
+        guard shutdownTask == nil else { throw SupervisorError.transitionInProgress }
         guard let transitionID = transitionGate.beginTransition() else {
             throw SupervisorError.transitionInProgress
         }
@@ -161,12 +163,44 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func stop() {
-        cancelPendingRetry()
-        transitionGate.reset()
-        stopAncillaryServices()
-        state = .stopped
-        Task { @MainActor [topology] in
-            try? await topology.stop(timeout: 2)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.shutdownAndWait()
+            } catch {
+                self.logger.error("supervisor: verified stop failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Stop helper and agent completely before publishing `.stopped`.
+    /// Concurrent callers await the same shutdown operation.
+    public func shutdownAndWait(timeout: TimeInterval = 2) async throws {
+        if let shutdownTask {
+            try await shutdownTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.cancelPendingRetry()
+            self.transitionGate.reset()
+            do {
+                try await self.topology.stop(timeout: timeout)
+                self.stopAncillaryServices()
+                self.state = .stopped
+            } catch {
+                self.state = .crashed(reason: error.localizedDescription)
+                throw error
+            }
+        }
+        shutdownTask = task
+        do {
+            try await task.value
+            shutdownTask = nil
+        } catch {
+            shutdownTask = nil
+            throw error
         }
     }
 
@@ -181,6 +215,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func applyCaptureEnabled(_ enabled: Bool) async throws {
+        guard shutdownTask == nil else { throw SupervisorError.transitionInProgress }
         guard enabled != captureEnabled else { return }
         cancelPendingRetry()
         guard let transitionID = transitionGate.beginTransition() else {
@@ -278,7 +313,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 crashReportOptedIn: runtimeConfig.crashReportOptedIn,
                 generation: generation
             )
-            try topology.launch(
+            try await topology.launch(
                 plan: plan,
                 generation: generation,
                 onUnexpectedExit: { [weak self] label, status in

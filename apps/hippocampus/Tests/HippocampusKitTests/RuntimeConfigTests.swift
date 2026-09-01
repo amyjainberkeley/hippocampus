@@ -100,13 +100,33 @@ final class RuntimeConfigTests: XCTestCase {
 
     func test_parseBool_true_values() {
         XCTAssertTrue(RuntimeConfig.parseBool(key: "k", in: "k = true"))
-        XCTAssertTrue(RuntimeConfig.parseBool(key: "k", in: "k = 1"))
     }
 
     func test_parseBool_false_values() {
         XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "k = false"))
+        XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "k = 1"))
         XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "k = 0"))
         XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: ""))
+    }
+
+    func test_parseBool_rejects_non_boolean_toml_values() {
+        for value in ["\"true\"", "'true'", "[true]", "{ value = true }", "tru", "true false"] {
+            XCTAssertFalse(
+                RuntimeConfig.parseBool(key: "capture_enabled", in: "capture_enabled = \(value)"),
+                "invalid TOML boolean must fail closed: \(value)"
+            )
+        }
+        XCTAssertFalse(RuntimeConfig.parseBool(
+            key: "capture_enabled",
+            in: "\"capture_enabled\" trailing = true"
+        ))
+    }
+
+    func test_table_local_capture_key_is_not_root_capture_authority() {
+        XCTAssertFalse(RuntimeConfig.parseBool(
+            key: "capture_enabled",
+            in: "[capture]\ncapture_enabled = true"
+        ))
     }
 
     func test_parseBool_ignores_comments() {
@@ -116,6 +136,17 @@ final class RuntimeConfigTests: XCTestCase {
     func test_parseBool_fails_closed_on_duplicate_key() {
         XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "k = true\nk = false"))
         XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "k = true\nk = malformed"))
+        XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "k = true\n\"k\" = false"))
+        XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "'k' = true\nk = false"))
+    }
+
+    func test_invalid_numeric_capture_authority_stays_off_after_relaunch() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "capture_enabled = 1\n".write(to: cfg.path, atomically: true, encoding: .utf8)
+
+        XCTAssertFalse(cfg.captureEnabled)
+        XCTAssertFalse(RuntimeConfig(path: cfg.path).captureEnabled)
     }
 
     func test_formatted_capture_key_updates_exactly_and_survives_relaunch() throws {
@@ -161,6 +192,31 @@ final class RuntimeConfigTests: XCTestCase {
         XCTAssertTrue(RuntimeConfig(path: cfg.path).captureEnabled)
     }
 
+    func test_capture_write_collapses_bare_and_quoted_semantic_duplicates() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try """
+        "capture_enabled" = true # preserve first comment
+        capture_enabled = false
+        'capture_enabled' = true
+        capture_enabled_backup = true
+        """.write(to: cfg.path, atomically: true, encoding: .utf8)
+
+        XCTAssertFalse(cfg.captureEnabled)
+        try cfg.setCaptureEnabled(false)
+        let content = try String(contentsOf: cfg.path, encoding: .utf8)
+
+        XCTAssertEqual(
+            content.split(separator: "\n").filter {
+                RuntimeConfig.assignmentKey(in: String($0)) == "capture_enabled"
+            }.count,
+            1
+        )
+        XCTAssertTrue(content.contains("capture_enabled = false # preserve first comment"))
+        XCTAssertTrue(content.contains("capture_enabled_backup = true"))
+        XCTAssertFalse(RuntimeConfig(path: cfg.path).captureEnabled)
+    }
+
     func test_capture_on_to_off_round_trip_uses_one_key_after_each_relaunch() throws {
         let (cfg, dir) = try tmpConfig()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -176,5 +232,23 @@ final class RuntimeConfigTests: XCTestCase {
             content.split(separator: "\n").filter { $0.hasPrefix("capture_enabled =") }.count,
             1
         )
+    }
+
+    func test_capture_write_inserts_root_key_before_existing_tables() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try """
+        title = "preferences"
+        [capture]
+        capture_enabled = true
+        """.write(to: cfg.path, atomically: true, encoding: .utf8)
+
+        XCTAssertFalse(cfg.captureEnabled)
+        try cfg.setCaptureEnabled(true)
+        let content = try String(contentsOf: cfg.path, encoding: .utf8)
+
+        XCTAssertTrue(content.contains("title = \"preferences\"\ncapture_enabled = true\n[capture]"))
+        XCTAssertTrue(RuntimeConfig(path: cfg.path).captureEnabled)
+        XCTAssertTrue(content.contains("[capture]\ncapture_enabled = true"))
     }
 }

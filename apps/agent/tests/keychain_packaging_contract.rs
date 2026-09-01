@@ -88,7 +88,15 @@ fn installer_requires_stable_identity_for_release_artifacts() {
     );
     assert!(!installer.contains("falling back to ad-hoc"));
 
-    assert!(docs.contains("Stable Developer ID signing is required for release"));
+    let normalized_docs = docs
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    assert!(normalized_docs.contains("developer id signed"));
+    assert!(normalized_docs.contains("required for release"));
+    assert!(normalized_docs.contains("development-only ad-hoc"));
+    assert!(normalized_docs.contains("never a release artifact"));
     assert!(docs.contains("--debug --development-ad-hoc"));
     assert!(!docs.contains("Ad-hoc (default when no cert present)"));
 }
