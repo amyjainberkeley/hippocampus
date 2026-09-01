@@ -46,12 +46,22 @@ final class ProcessSupervisorTests: XCTestCase {
 
     private func makeSupervisor(
         locator: FakeBinaryLocator? = nil,
-        keyStore: FakeKeyStore? = nil
+        keyStore: FakeKeyStore? = nil,
+        runtimeConfig: RuntimeConfig = RuntimeConfig()
     ) -> (ProcessSupervisor, FakeBinaryLocator, FakeKeyStore) {
         let loc = locator ?? FakeBinaryLocator()
         let ks = keyStore ?? FakeKeyStore()
-        let sup = ProcessSupervisor(locator: loc, keyStore: ks)
+        let sup = ProcessSupervisor(locator: loc, keyStore: ks, runtimeConfig: runtimeConfig)
         return (sup, loc, ks)
+    }
+
+    private func tmpRuntimeConfig(captureEnabled: Bool) throws -> (RuntimeConfig, URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("supervisor-runtime-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let cfg = RuntimeConfig(path: dir.appendingPathComponent("runtime.toml"))
+        try cfg.setCaptureEnabled(captureEnabled)
+        return (cfg, dir)
     }
 
     // MARK: - Start / State
@@ -96,6 +106,54 @@ final class ProcessSupervisorTests: XCTestCase {
 
         sup.stop()
         XCTAssertEqual(sup.state, .stopped)
+    }
+
+    func test_launch_plan_omits_capture_when_capture_is_disabled() {
+        let plan = ProcessSupervisorLaunchPlan.make(
+            helperURL: URL(fileURLWithPath: "/bin/cat"),
+            agentURL: URL(fileURLWithPath: "/bin/cat"),
+            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey,
+            knownSafeAppsURL: nil,
+            captureEnabled: false,
+            crashReportOptedIn: false,
+            baseEnvironment: [:]
+        )
+
+        XCTAssertFalse(plan.helperArguments.contains("--capture"))
+    }
+
+    func test_launch_plan_includes_capture_when_capture_is_enabled() {
+        let plan = ProcessSupervisorLaunchPlan.make(
+            helperURL: URL(fileURLWithPath: "/bin/cat"),
+            agentURL: URL(fileURLWithPath: "/bin/cat"),
+            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey,
+            knownSafeAppsURL: nil,
+            captureEnabled: true,
+            crashReportOptedIn: false,
+            baseEnvironment: [:]
+        )
+
+        XCTAssertTrue(plan.helperArguments.contains("--capture"))
+    }
+
+    func test_launch_plan_passes_keychain_reference_without_database_key() {
+        let plan = ProcessSupervisorLaunchPlan.make(
+            helperURL: URL(fileURLWithPath: "/bin/cat"),
+            agentURL: URL(fileURLWithPath: "/bin/cat"),
+            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey,
+            knownSafeAppsURL: nil,
+            captureEnabled: false,
+            crashReportOptedIn: true,
+            baseEnvironment: ["MCI_DB_KEY_HEX": String(repeating: "a", count: 64)]
+        )
+
+        XCTAssertNil(plan.agentEnvironment["MCI_DB_KEY_HEX"])
+        XCTAssertEqual(plan.agentEnvironment["MCI_DB_KEYCHAIN_SERVICE"], KeychainKeyStore.defaultService)
+        XCTAssertEqual(plan.agentEnvironment["MCI_DB_KEYCHAIN_ACCOUNT"], KeychainKeyStore.defaultAccount)
+        XCTAssertEqual(plan.agentEnvironment["MCI_CRASH_REPORT_OPTED_IN"], "1")
     }
 
     // MARK: - Pause

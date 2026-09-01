@@ -42,6 +42,7 @@ pub mod health_pump;
 pub mod health_summary;
 pub mod idle_batch;
 pub mod import_sessions;
+pub mod key_resolver;
 #[cfg(target_os = "macos")]
 pub mod mail_ingest;
 pub mod mcp;

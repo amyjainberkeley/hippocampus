@@ -98,6 +98,8 @@ struct PreferencesRootView: View {
     let onOpenDenylistEditor: () -> Void
     let onOpenAllowlistEditor: () -> Void
     let onExportDebugBundle: () -> Void
+    private let runtimeConfig = RuntimeConfig()
+    @State private var captureEnabled = RuntimeConfig().captureEnabled
 
     var body: some View {
         VStack(spacing: 0) {
@@ -168,11 +170,16 @@ struct PreferencesRootView: View {
 
             Divider()
 
-            Toggle("Screen recording enabled", isOn: Binding(
-                get: { !UserPauseController.shared.isPaused },
-                set: { on in UserPauseController.shared.setPaused(!on) }
+            Toggle("Capture screen activity", isOn: Binding(
+                get: { captureEnabled },
+                set: { on in
+                    captureEnabled = on
+                    try? runtimeConfig.setCaptureEnabled(on)
+                }
             ))
-            Text("Same as menu-bar Pause. When off, the helper is suspended (SIGSTOP).")
+            Text(captureEnabled
+                 ? "On means the next supervisor start may request screen access."
+                 : "Off means no screen access. The helper starts without capture.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
 
