@@ -49,10 +49,10 @@ jobs:
     name: MCICaptureHelper tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Cache SwiftPM .build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: adapters/macos/MCICaptureHelper/.build
           key: swift-helper-${{ runner.os }}-${{ hashFiles('adapters/macos/MCICaptureHelper/Package.resolved') }}
@@ -64,10 +64,10 @@ jobs:
     name: recall-ui tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Cache cargo + SwiftPM .build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -89,7 +89,7 @@ jobs:
     name: Installer script smoke test
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Syntax check build-installer.sh
         run: bash -n scripts/build-installer.sh
