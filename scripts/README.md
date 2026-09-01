@@ -83,7 +83,7 @@ dist/Hippocampus-0.1.0.dmg.sha256  # SHA-256 checksum sidecar
 The DMG background, EULA, and SLA resources are generated from source files. Committed versions are ready to use; regenerate only when sources change.
 
 ```bash
-# Background (1280x800 Retina PNG from brand colors + hippocampus SVG glyph)
+# Background (1280x800 Retina PNG from the canonical light brand system)
 python3 assets/installer/generate-background.py
 
 # EULA.rtf + sla.r (from docs/legal/terms-of-service.md)
@@ -97,7 +97,7 @@ Both generators are pure Python stdlib (no Pillow, no external deps). The build 
 
 | Asset | Source | Generator |
 |---|---|---|
-| `assets/installer/background.png` | `assets/branding/colors.json` + `hippocampus-icon.svg` | `generate-background.py` |
+| `assets/installer/background.png` | `assets/branding/colors.json` + layered-memory mark | `generate-background.py` |
 | `assets/installer/EULA.rtf` | `docs/legal/terms-of-service.md` | `generate-eula.py` |
 | `assets/installer/sla.r` | `docs/legal/terms-of-service.md` | `generate-eula.py` |
 | `assets/installer/volume-icon.icns` | `assets/branding/AppIcon.icns` | manual copy |
