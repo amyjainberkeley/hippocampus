@@ -33,6 +33,11 @@ LANES=(
     "swift-test-recall-ui|swift|test|swift test --package-path apps/recall-ui"
     "swift-test-onboarding|swift|test|swift test --package-path apps/onboarding"
     "bash-syntax|bash|lint|__bash_syntax_lane"
+    "release-contract|bash|lint|scripts/test-release-contract.sh"
+    "release-identity-fixtures|bash|test|scripts/test-release-identity.sh"
+    "release-model-fixtures|bash|test|scripts/test-prepare-release-models.sh"
+    "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
+    "sparkle-keypair-fixtures|bash|test|scripts/test-sparkle-keypair.sh"
     "changelog-sanity|bash|lint|__changelog_sanity_lane"
 )
 
@@ -65,6 +70,11 @@ LANES
     swift-test-recall-ui  swift test in apps/recall-ui
     swift-test-onboarding swift test in apps/onboarding
     bash-syntax           bash -n across repo *.sh files
+    release-contract      release graph and artifact identity contract
+    release-identity-fixtures release tag, DMG, checksum, and appcast fixtures
+    release-model-fixtures immutable model archive integrity fixtures
+    sparkle-keygen-fixtures bundled Sparkle CLI contract fixture
+    sparkle-keypair-fixtures Ed25519 private/public matching fixtures
     changelog-sanity      gen-changelog.sh --dry-run smoke
 
 BEHAVIOR

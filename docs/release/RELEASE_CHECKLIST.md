@@ -40,6 +40,11 @@ Run on a quiet host and retain command logs:
 ```bash
 ./scripts/check.sh
 ./scripts/test-swift-package.sh
+./scripts/test-release-contract.sh
+./scripts/test-release-identity.sh
+./scripts/test-prepare-release-models.sh
+./scripts/test-sparkle-keygen.sh
+./scripts/test-sparkle-keypair.sh
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -83,6 +88,8 @@ Complete `OWNER_SIGNING.md`, then verify:
 - [ ] `codesign --verify --deep --strict` passes.
 - [ ] `syspolicy_check distribution` passes where available.
 - [ ] The app and outer DMG are notarized as required by the release pipeline.
+- [ ] `codesign --verify --strict` passes on the outer DMG and Gatekeeper
+      accepts it with `--type open --context context:primary-signature`.
 - [ ] `stapler validate` passes for every stapled artifact.
 - [ ] Gatekeeper accepts a freshly downloaded/quarantined copy on a second Mac.
 - [ ] DMG checksum sidecar verifies.
@@ -94,6 +101,11 @@ Complete `OWNER_SIGNING.md`, then verify:
 
 - [ ] Review the notary log even when Apple returns Accepted.
 - [ ] Create a draft release first; inspect artifacts before making it public.
-- [ ] Publish the DMG and appcast only after every gate above is checked.
+- [ ] The tag workflow creates only the draft and performs no Pages deployment
+      or release promotion.
+- [ ] Run the separate `Publish inspected release and appcast` workflow only
+      after every gate above is checked; enter the exact tag and `PUBLISH`.
+- [ ] GitHub Pages serves the same URL committed in `SUFeedURL` after the
+      release asset is public.
 - [ ] Record release commit, checksum, notarization submission ID, and smoke-test
       machine/OS in the release record. Never record secret values.

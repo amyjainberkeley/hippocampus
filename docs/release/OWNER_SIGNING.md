@@ -93,7 +93,9 @@ xcrun notarytool history --keychain-profile notarytool-profile
 ## 4. Create The Sparkle Update Key Once
 
 Hippocampus uses Sparkle EdDSA signatures independently of Apple code signing.
-Run the repository key helper interactively:
+Run the repository helper interactively. It uses Sparkle's named Keychain
+account `ai.hippocampus.release`, exports the private seed to a mode-0600 file
+for owner backup/CI, and writes the public key separately:
 
 ```bash
 ./scripts/sparkle-keygen.sh
@@ -103,6 +105,14 @@ Keep the private key in the password manager or CI secret store. Put only the
 matching public key in `SUPublicEDKey` in
 `apps/hippocampus/Resources/Info.plist`. A placeholder or mismatched pair must
 block publication.
+
+Verify the pair before adding the CI secret:
+
+```bash
+./scripts/verify-sparkle-keypair.sh \
+  --private-key ~/.hippocampus-sparkle-private.key \
+  --info-plist apps/hippocampus/Resources/Info.plist
+```
 
 ## 5. Configure GitHub Actions Secrets
 
@@ -121,7 +131,44 @@ Use the narrowest repository/environment access available. Never print these
 values, include them in build artifacts, or pass them to Hippocampus child
 processes.
 
-## 6. Verify Without Publishing
+## 6. Configure The Immutable Model Bundle
+
+The three release models are intentionally not checked into git. A clean tag
+runner therefore requires one HTTPS tar archive whose top-level `models/`
+directory contains complete compiled bundles for Arctic Embed S, BERT NER, and
+Qwen3. Configure these repository variables:
+
+| Variable | Purpose |
+|---|---|
+| `RELEASE_MODELS_URL` | Immutable HTTPS URL for the owner-controlled model tar archive |
+| `RELEASE_MODELS_SHA256` | Exact lowercase SHA-256 of that archive |
+
+Create the archive without AppleDouble metadata where possible and calculate
+the digest from the final bytes:
+
+```bash
+COPYFILE_DISABLE=1 tar -czf release-models-v1.tar.gz models
+shasum -a 256 release-models-v1.tar.gz
+./scripts/prepare-release-models.sh \
+  --archive release-models-v1.tar.gz \
+  --sha256 '<digest>' \
+  --output /tmp/hippocampus-release-models-check
+```
+
+The current owner still needs to choose and provision the immutable HTTPS
+hosting location. Until both variables point to real bytes, a clean release is
+correctly blocked.
+
+## 7. Configure GitHub Pages Publication
+
+In repository Settings > Pages, select **GitHub Actions** as the source. The
+shipped feed URL is
+`https://amyjainberkeley.github.io/hippocampus/appcast.xml`. Configure the
+`github-pages` environment with an owner approval rule where the repository
+plan supports required reviewers. Publication still requires the manual
+workflow input `PUBLISH` even without that optional platform rule.
+
+## 8. Verify Without Publishing
 
 From the repository root:
 

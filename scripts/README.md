@@ -9,7 +9,8 @@ Produces a distributable `Hippocampus-<version>.dmg` installer image. Supports t
 1. **Developer ID signed** — required for release because the file-Keychain ACL trusts stable executable identities.
 2. **Development-only ad-hoc** — available only with `--debug --development-ad-hoc`; never a release artifact.
 
-Stable Developer ID signing is required for release. Notarization is added when credentials are available.
+Stable Developer ID signing and notarization are both required for a release.
+Missing credentials fail closed before the app is assembled.
 
 ### Prerequisites
 
@@ -68,8 +69,8 @@ DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" ./scripts/build-inst
 | Developer ID identity | `notarytool-profile` stored? | Result |
 |---|---|---|
 | Missing | — | Release fails closed |
-| Yes | No | Developer ID sign, skip notarization |
-| Yes | Yes | Developer ID sign + notarize + staple |
+| Yes | No | Release fails closed |
+| Yes | Yes | App and outer DMG signed, notarized, stapled, and verified |
 
 An ad-hoc artifact requires the explicit `--debug --development-ad-hoc` pair and is suitable only for disposable local development. Its unstable identity is not a Keychain ACL upgrade contract.
 
@@ -141,8 +142,8 @@ With a Developer ID + notarization, no warning appears.
 shasum -a 256 -c dist/Hippocampus-0.1.0.dmg.sha256
 
 # Verify Gatekeeper acceptance (Developer ID builds)
-spctl --assess --verbose Hippocampus.app
-# Expected: "Hippocampus.app: accepted"
+spctl --assess --type open --context context:primary-signature \
+  --verbose dist/Hippocampus-0.1.0.dmg
 
 # Verify notarization staple
 stapler validate dist/Hippocampus-0.1.0.dmg
@@ -155,11 +156,15 @@ codesign -dv --verbose=4 Hippocampus.app
 ### CI/CD release workflow
 
 Tagged pushes (`v*`) trigger `.github/workflows/release.yml` which:
-1. Builds all binaries (Swift + Rust)
-2. Imports Developer ID cert from `APPLE_CERTIFICATE_P12` secret
-3. Stores notarytool credentials from `NOTARYTOOL_*` secrets
-4. Runs `build-installer.sh` (auto-detects identity)
-5. Uploads DMG + SHA-256 as draft GitHub Release artifacts
+1. Freezes tag, bundle, changelog, feed, and model identity.
+2. Reconstructs the hash-pinned model archive and builds every Swift/Rust binary.
+3. Imports Developer ID, notarization, and matching Sparkle credentials.
+4. Signs, notarizes, staples, and verifies the app and outer DMG.
+5. Signs and verifies the staged appcast.
+6. Uploads the DMG, checksum, and appcast to a draft GitHub release only.
+
+The separate owner-triggered `.github/workflows/publish-release.yml` promotes
+the inspected draft and then deploys its appcast through GitHub Pages.
 
 Required GitHub secrets for signed releases:
 
@@ -170,8 +175,16 @@ Required GitHub secrets for signed releases:
 | `NOTARYTOOL_APPLE_ID` | Apple ID email for notarization |
 | `NOTARYTOOL_TEAM_ID` | Apple Developer Team ID |
 | `NOTARYTOOL_PASSWORD` | App-Specific Password for notarization |
+| `SPARKLE_PRIVATE_KEY` | Sparkle private seed matching `SUPublicEDKey` |
 
-If the Developer ID secret is absent, release packaging fails closed instead of producing an ad-hoc DMG.
+Required repository variables:
+
+| Variable | Description |
+|---|---|
+| `RELEASE_MODELS_URL` | Immutable HTTPS model-archive URL |
+| `RELEASE_MODELS_SHA256` | Exact SHA-256 for that archive |
+
+If any credential or model variable is absent, release packaging fails closed.
 
 ---
 

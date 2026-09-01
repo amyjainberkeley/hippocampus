@@ -10,7 +10,7 @@ set -euo pipefail
 # Options:
 #   --dmg PATH        Path to DMG (default: auto-detect dist/Hippocampus-*.dmg)
 #   --download-url U  Base URL for DMG downloads (default: from --hosting-mode)
-#   --hosting-mode M  "ghpages" or "s3" (default: ghpages)
+#   --hosting-mode M  "github-releases" or "s3" (default: github-releases)
 #   --appcast PATH    Existing appcast.xml to merge into (default: dist/appcast.xml)
 #   --dist DIR        Output directory (default: dist/)
 #   --help            Show this help
@@ -20,7 +20,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 DMG_PATH=""
 DOWNLOAD_URL=""
-HOSTING_MODE="ghpages"
+HOSTING_MODE="github-releases"
 APPCAST_PATH=""
 DIST_DIR="$REPO_ROOT/dist"
 
@@ -33,7 +33,7 @@ Sign a Hippocampus DMG and generate/merge appcast.xml.
 Options:
   --dmg PATH         Path to DMG (default: auto-detect dist/Hippocampus-*.dmg)
   --download-url U   Base URL for DMG downloads
-  --hosting-mode M   "ghpages" or "s3" (default: ghpages)
+  --hosting-mode M   "github-releases" or "s3" (default: github-releases)
   --appcast PATH     Existing appcast.xml to merge into (default: dist/appcast.xml)
   --dist DIR         Output directory (default: dist/)
   --help             Show this help
@@ -86,7 +86,7 @@ echo "DMG:     $DMG_PATH"
 DMG_BASENAME=$(basename "$DMG_PATH" .dmg)
 VERSION="${DMG_BASENAME#Hippocampus-}"
 
-if [[ -z "$VERSION" ]]; then
+if [[ -z "$VERSION" || "$VERSION" == "$DMG_BASENAME" ]]; then
     echo "ERROR: Could not extract version from DMG filename: $DMG_BASENAME"
     exit 1
 fi
@@ -156,7 +156,7 @@ echo "Signer:  $SIGN_UPDATE"
 echo ""
 echo "--- Signing DMG with EdDSA ---"
 
-SIGN_OUTPUT=$(echo "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" "$DMG_PATH" -f -)
+SIGN_OUTPUT=$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" "$DMG_PATH" -f -)
 ED_SIGNATURE=$(echo "$SIGN_OUTPUT" | grep -o 'sparkle:edSignature="[^"]*"' | sed 's/sparkle:edSignature="//;s/"//' || true)
 
 if [[ -z "$ED_SIGNATURE" ]]; then
@@ -175,14 +175,14 @@ echo "Signature: ${ED_SIGNATURE:0:20}..."
 
 if [[ -z "$DOWNLOAD_URL" ]]; then
     case "$HOSTING_MODE" in
-        ghpages)
-            DOWNLOAD_URL="https://amyjainberkeley.github.io/hippocampus-appcast/$(basename "$DMG_PATH")"
+        github-releases)
+            DOWNLOAD_URL="https://github.com/amyjainberkeley/hippocampus/releases/download/v${VERSION}/$(basename "$DMG_PATH")"
             ;;
         s3)
             DOWNLOAD_URL="https://releases.hippocampus.ai/$(basename "$DMG_PATH")"
             ;;
         *)
-            echo "ERROR: Unknown hosting mode: $HOSTING_MODE (use ghpages or s3)"
+            echo "ERROR: Unknown hosting mode: $HOSTING_MODE (use github-releases or s3)"
             exit 1
             ;;
     esac
