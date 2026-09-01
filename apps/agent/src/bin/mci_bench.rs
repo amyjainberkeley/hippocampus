@@ -15,7 +15,7 @@ use mci_agent::bench_longmemeval::{
     absolute_quality_targets, best_threshold, compare_against_baseline,
     derive_regression_thresholds, evaluate_quality_gate, load_dataset, run_abstention_probe,
     run_instance, summarize, AbstentionSample, Arm, BaselineFile, Embedders, InstanceResult,
-    LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, Summary,
+    LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, ScratchRun, Summary,
 };
 
 fn usage() {
@@ -453,13 +453,14 @@ fn main() -> ExitCode {
     }
     ks.sort_unstable();
 
-    if let Err(e) = std::fs::create_dir_all(&workdir) {
-        eprintln!(
-            "mci-bench: cannot create workdir {}: {e}",
-            workdir.display()
-        );
-        return ExitCode::from(3);
-    }
+    let scratch_run = match ScratchRun::create(&workdir) {
+        Ok(run) => run,
+        Err(error) => {
+            eprintln!("mci-bench: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let workdir = scratch_run.path();
 
     eprint!("mci-bench: loading {} ... ", dataset_path.display());
     let raw = match std::fs::read_to_string(&dataset_path) {
@@ -608,7 +609,7 @@ fn main() -> ExitCode {
             match run_abstention_probe(
                 &dataset.instances[idx],
                 &foreign,
-                &workdir,
+                workdir,
                 embedders.as_ref().expect("abstention requires an embedder"),
             ) {
                 Ok(mut sample) => samples.append(&mut sample),
@@ -698,7 +699,7 @@ fn main() -> ExitCode {
         let mut arm_failures = 0usize;
 
         for (n, instance) in dataset.instances.iter().enumerate() {
-            match run_instance(instance, arm, &ks, &workdir, embedders.as_ref()) {
+            match run_instance(instance, arm, &ks, workdir, embedders.as_ref()) {
                 Ok(result) => results.push(result),
                 Err(error) => {
                     arm_failures += 1;
