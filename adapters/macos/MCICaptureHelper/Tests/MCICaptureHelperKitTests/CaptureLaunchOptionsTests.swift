@@ -38,6 +38,15 @@ final class CaptureLaunchOptionsTests: XCTestCase {
         )
     }
 
+    func test_legacy_environment_variable_alone_cannot_enable_capture() {
+        let options = CaptureLaunchOptions.parse(
+            ["mci-capture-helper"],
+            environment: ["HIPPOCAMPUS_ENABLE_V2P1": "1"]
+        )
+
+        XCTAssertFalse(options.captureEnabled)
+    }
+
     func test_capture_flag_position_independent() {
         XCTAssertTrue(
             CaptureLaunchOptions.parse(["--capture", "--heartbeat-seconds", "30"]).captureEnabled

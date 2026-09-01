@@ -3,15 +3,15 @@ set -euo pipefail
 
 # build-app.sh — Assemble Hippocampus.app bundle from pre-built binaries.
 #
-# This script bridges `swift build` (which only builds the Hippocampus
+# This script bridges SwiftPM (which only builds the Hippocampus
 # executable) with a working .app bundle (binaries copied in, Info.plist,
-# codesigned). Auto-detects Developer ID for stable CDHash; falls back
-# to ad-hoc when no Developer ID cert is present.
+# codesigned). Release assembly requires a stable Developer ID identity.
+# Ad-hoc signing is available only for an explicitly requested debug build.
 #
 # Prerequisites:
-#   1. swift build -c release   (in apps/hippocampus/)
-#   2. swift build -c release   (in adapters/macos/MCICaptureHelper/)
-#   3. swift build -c release   (in apps/recall-ui/)
+#   1. scripts/swift-package.sh build -c release --package-path apps/hippocampus
+#   2. scripts/swift-package.sh build -c release --package-path adapters/macos/MCICaptureHelper
+#   3. scripts/swift-package.sh build -c release --package-path apps/recall-ui
 #   4. cargo build --workspace --release
 #
 # Usage:
@@ -19,16 +19,17 @@ set -euo pipefail
 #
 # Dev iteration loop:
 #   1. Make changes to Sources/
-#   2. swift build                        (debug build, fast)
+#   2. scripts/swift-package.sh build --package-path apps/hippocampus
 #   3. ./Resources/build-app.sh --debug   (assembles from .build/debug/)
 #   4. open dist/Hippocampus.app          (test from Spotlight / Finder)
-#   5. To test release: swift build -c release && ./Resources/build-app.sh
+#   5. To test release, use the prerequisite commands above, then run this script.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PKG_DIR/../.." && pwd)"
 
 PROFILE="release"
+DEVELOPMENT_ADHOC=0
 DIST_DIR="$PKG_DIR/dist"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
 STATUS_SRC="$REPO_ROOT/docs/STATUS.md"
@@ -137,18 +138,21 @@ usage() {
     echo ""
     echo "Options:"
     echo "  --debug     Use debug builds instead of release"
+    echo "  --development-ad-hoc  Allow unstable ad-hoc signing with --debug only"
     echo "  --dist DIR  Output directory (default: apps/hippocampus/dist/)"
     echo "  --help      Show this help"
     echo ""
     echo "Prerequisites:"
-    echo "  swift build -c release   (in apps/hippocampus/)"
-    echo "  swift build -c release   (in adapters/macos/MCICaptureHelper/)"
+    echo "  scripts/swift-package.sh build -c release --package-path apps/hippocampus"
+    echo "  scripts/swift-package.sh build -c release --package-path adapters/macos/MCICaptureHelper"
+    echo "  scripts/swift-package.sh build -c release --package-path apps/recall-ui"
     echo "  cargo build --workspace --release"
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --debug) PROFILE="debug"; shift ;;
+        --development-ad-hoc) DEVELOPMENT_ADHOC=1; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
         --help|-h) usage; exit 0 ;;
         *) echo "Unknown option: $1"; usage; exit 1 ;;
@@ -235,8 +239,17 @@ fi
 
 if [[ -n "$DEVELOPER_ID" ]]; then
     SIGNING_MODE="developer-id"
-else
+elif [[ "$PROFILE" == "debug" && "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
     SIGNING_MODE="ad-hoc"
+elif [[ "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+    fatal \
+        "Ad-hoc signing is development-only and requires --debug" \
+        "Release assembly requires a stable Developer ID Application identity."
+else
+    fatal \
+        "Release assembly requires a stable Developer ID Application identity" \
+        "Install/select a Developer ID Application certificate, or use --debug --development-ad-hoc for a disposable local build." \
+        "Ad-hoc rebuilds do not preserve the file-Keychain SecAccess ACL across versions."
 fi
 
 echo "=== Hippocampus.app assembly ==="
@@ -323,7 +336,7 @@ if [[ -d "$HIPPOCAMPUS_KIT_BUNDLE" ]]; then
     ditto "$HIPPOCAMPUS_KIT_BUNDLE" "$RESOURCES/$KIT_BUNDLE_NAME"
 else
     echo "ERROR: HippocampusKit resource bundle not found at $HIPPOCAMPUS_KIT_BUNDLE"
-    echo "Run 'swift build -c $PROFILE' in apps/hippocampus/ first."
+    echo "Run scripts/swift-package.sh build -c $PROFILE --package-path apps/hippocampus first."
     exit 1
 fi
 # AppIcon.icns — referenced by Info.plist's CFBundleIconFile key.
@@ -366,7 +379,7 @@ if [[ -n "$SPARKLE_FRAMEWORK" && -d "$SPARKLE_FRAMEWORK" ]]; then
     ditto "$SPARKLE_FRAMEWORK" "$FRAMEWORKS/Sparkle.framework"
 else
     echo "WARNING: Sparkle.framework not found. Auto-update will not work."
-    echo "  Build with 'swift build -c $PROFILE' first to resolve the SPM dependency."
+    echo "  Build with scripts/swift-package.sh build -c $PROFILE --package-path apps/hippocampus first."
 fi
 
 # Add @executable_path/../Frameworks to rpath so dyld finds Sparkle.framework.
@@ -787,7 +800,7 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     codesign --verify --deep --strict "$APP"
     echo "  Signature valid."
 else
-    echo "Codesigning (ad-hoc)..."
+    echo "Codesigning (development-only ad-hoc)..."
     if [[ -d "$APPEX_BUNDLE" ]]; then
         codesign --force --sign - \
             --entitlements "$APPEX_ENTITLEMENTS" \

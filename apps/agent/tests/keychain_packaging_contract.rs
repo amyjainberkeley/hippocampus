@@ -44,7 +44,7 @@ fn packaging_places_and_signs_every_acl_consumer_before_sealing_the_app() {
         .rfind("if [[ \"$SIGNING_MODE\" == \"developer-id\" ]]")
         .expect("developer-id signing branch");
     let ad_hoc_start = script[developer_start..]
-        .find("\nelse\n    echo \"Codesigning (ad-hoc)...\"")
+        .find("\nelse\n    echo \"Codesigning (development-only ad-hoc)...\"")
         .map(|offset| developer_start + offset)
         .expect("ad-hoc signing branch");
     let branch_end = script[ad_hoc_start..]
@@ -59,10 +59,7 @@ fn packaging_places_and_signs_every_acl_consumer_before_sealing_the_app() {
             developer_branch.contains(&format!("$MACOS/{executable}")),
             "Developer ID branch must sign ACL consumer {executable}"
         );
-        assert!(
-            ad_hoc_branch.contains(&format!("$MACOS/{executable}")),
-            "ad-hoc branch must sign ACL consumer {executable}"
-        );
+        assert!(ad_hoc_branch.contains(&format!("$MACOS/{executable}")));
     }
     assert!(
         developer_branch
@@ -71,6 +68,100 @@ fn packaging_places_and_signs_every_acl_consumer_before_sealing_the_app() {
             >= 4
     );
     assert!(ad_hoc_branch.contains("codesign --force --deep --sign - \"$APP\""));
+    assert!(script.contains("--development-ad-hoc"));
+    assert!(script.contains("Ad-hoc signing is development-only and requires --debug"));
+    assert!(script.contains("Release assembly requires a stable Developer ID Application identity"));
+}
+
+#[test]
+fn installer_requires_stable_identity_for_release_artifacts() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let installer = std::fs::read_to_string(root.join("scripts/build-installer.sh"))
+        .expect("read build-installer.sh");
+    let docs =
+        std::fs::read_to_string(root.join("scripts/README.md")).expect("read scripts README");
+
+    assert!(installer.contains("--development-ad-hoc"));
+    assert!(installer.contains("Ad-hoc signing is development-only and requires --debug"));
+    assert!(
+        installer.contains("Release installer requires a stable Developer ID Application identity")
+    );
+    assert!(!installer.contains("falling back to ad-hoc"));
+
+    assert!(docs.contains("Stable Developer ID signing is required for release"));
+    assert!(docs.contains("--debug --development-ad-hoc"));
+    assert!(!docs.contains("Ad-hoc (default when no cert present)"));
+}
+
+#[test]
+fn recall_links_only_the_staged_archive_for_the_requested_profile() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let package = std::fs::read_to_string(root.join("apps/recall-ui/Package.swift"))
+        .expect("read Recall Package.swift");
+    let wrapper = std::fs::read_to_string(root.join("scripts/swift-package.sh"))
+        .expect("read SwiftPM wrapper");
+    let stage = std::fs::read_to_string(root.join("scripts/stage-recall-ffi.sh"))
+        .expect("read Recall FFI staging script");
+
+    assert!(!package.contains("../../target/debug"));
+    assert!(!package.contains("../../target/release"));
+    assert!(package.contains(".build/mci-brain-ffi/debug"));
+    assert!(package.contains(".build/mci-brain-ffi/release"));
+    assert!(package.contains(".when(configuration: .debug)"));
+    assert!(package.contains(".when(configuration: .release)"));
+    assert!(wrapper.contains("stage-recall-ffi.sh"));
+    assert!(stage.contains("cargo build --locked -p mci-brain-ffi"));
+    assert!(stage.contains("libmci_brain_ffi.a"));
+}
+
+#[test]
+fn packaged_consumers_have_a_two_version_stable_identity_check() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let verifier = std::fs::read_to_string(root.join("scripts/verify-keychain-acl-upgrade.sh"))
+        .expect("read two-version ACL verifier");
+
+    for executable in TRUSTED_EXECUTABLE_NAMES {
+        assert!(verifier.contains(executable));
+    }
+    assert!(verifier.contains("codesign -d -r-"));
+    assert!(verifier.contains("Signature=adhoc"));
+}
+
+#[test]
+fn shipped_consumers_and_children_use_reference_only_custody() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let brain = std::fs::read_to_string(root.join("apps/agent/src/bin/mci_brain.rs"))
+        .expect("read mci-brain");
+    let status = std::fs::read_to_string(
+        root.join("apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"),
+    )
+    .expect("read status menu");
+    let onboarding = std::fs::read_to_string(
+        root.join("apps/onboarding/Sources/Onboarding/LocalKeyGenerator.swift"),
+    )
+    .expect("read onboarding key preparer");
+
+    assert!(brain.contains("resolve_database_key()"));
+    assert!(brain.contains("MCI_DEVELOPMENT_FILE_KEY"));
+    assert!(status.contains("sanitizedChildEnvironment()"));
+    assert!(!status.contains("dev.key"));
+    assert!(onboarding.contains("ensure-key"));
+    assert!(!onboarding.contains("SecRandomCopyBytes"));
+    assert!(!onboarding.contains("dev.key"));
+}
+
+#[test]
+fn raw_key_demo_tools_require_the_explicit_development_gate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for path in [
+        "apps/agent/src/bin/mci_seed_brain.rs",
+        "apps/agent/src/bin/mci_seed_brief.rs",
+        "scripts/demo.sh",
+        "scripts/try-it.sh",
+    ] {
+        let source = std::fs::read_to_string(root.join(path)).expect("read development tool");
+        assert!(source.contains("MCI_DEVELOPMENT_FILE_KEY"), "{path}");
+    }
 }
 
 #[test]

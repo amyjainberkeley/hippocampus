@@ -25,6 +25,7 @@
 //! # Usage
 //!
 //! ```bash
+//! export MCI_DEVELOPMENT_FILE_KEY=1
 //! export MCI_DB_KEY_HEX=<64-hex>
 //! cargo run --release --bin mci-seed-brief -- \
 //!   --date 2026-05-22 \
@@ -222,7 +223,8 @@ fn print_usage() {
         \x20 --force                    overwrite an existing brief for this date\n\
         \n\
         Required env:\n\
-        \x20 MCI_DB_KEY_HEX             64-hex (32-byte) SQLCipher key — same value\n\
+        \x20 MCI_DEVELOPMENT_FILE_KEY   Must be exactly 1.\n\
+        \x20 MCI_DB_KEY_HEX             Development-only 64-hex SQLCipher key — same value\n\
         \x20                            you pass to mci-agent / the recall UI.\n"
     );
 }
@@ -252,6 +254,14 @@ fn main() -> ExitCode {
         }
         ParseOutcome::Run(a) => a,
     };
+
+    if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
+        eprintln!(
+            "mci-seed-brief: this development-only tool requires \
+             MCI_DEVELOPMENT_FILE_KEY=1."
+        );
+        return ExitCode::from(9);
+    }
 
     let Ok(key_hex) = std::env::var("MCI_DB_KEY_HEX") else {
         eprintln!(

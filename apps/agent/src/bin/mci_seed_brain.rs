@@ -32,9 +32,8 @@
 //! - The binary refuses to write into a non-empty brain unless the
 //!   operator passes `--force`. Default behaviour: never overwrite a
 //!   real-capture brain.
-//! - The `SQLCipher` key comes from `MCI_DB_KEY_HEX` (matches the
-//!   `mci-agent mcp-serve` convention so the same key reads back what
-//!   this binary writes).
+//! - Raw key input is accepted only when `MCI_DEVELOPMENT_FILE_KEY=1`.
+//!   This binary is a development fixture, never a production custody path.
 //! - Embeddings are intentionally `None` — lexical FTS5 search still
 //!   finds these rows; the idle-batch embedder (P3.8) can fill them
 //!   later. This avoids pulling in the Core ML runtime just to seed
@@ -43,6 +42,7 @@
 //! # Usage
 //!
 //! ```text
+//! export MCI_DEVELOPMENT_FILE_KEY=1
 //! export MCI_DB_KEY_HEX=$(openssl rand -hex 32)
 //! mkdir -p "$HOME/Library/Application Support/MCI"
 //! cargo run --release --bin mci-seed-brain
@@ -86,7 +86,8 @@ fn print_usage() {
         \n\
         Env:\n\
         \x20 MCI_DB_PATH                brain SQLCipher path\n\
-        \x20 MCI_DB_KEY_HEX             REQUIRED. 64-char hex SQLCipher key.\n\
+        \x20 MCI_DEVELOPMENT_FILE_KEY   REQUIRED. Must be exactly 1.\n\
+        \x20 MCI_DB_KEY_HEX             REQUIRED. Development-only 64-char hex key.\n\
         \x20                            Use the same key for `mci-agent mcp-serve`\n\
         \x20                            so reads see the seeded rows.\n"
     );
@@ -367,6 +368,14 @@ fn main() -> ExitCode {
         }
         ParseOutcome::Run(a) => a,
     };
+
+    if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
+        eprintln!(
+            "mci-seed-brain: this development-only tool requires \
+             MCI_DEVELOPMENT_FILE_KEY=1."
+        );
+        return ExitCode::from(9);
+    }
 
     let Ok(key_hex) = std::env::var("MCI_DB_KEY_HEX") else {
         eprintln!(

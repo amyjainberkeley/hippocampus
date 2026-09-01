@@ -32,14 +32,16 @@ what is listed here.
 
 ## Disabled Or Unverified Surfaces
 
-- Live screen capture is off by default. The current lift is a boot-time opt-in
-  via `HIPPOCAMPUS_ENABLE_V2P1=1`; all-day soak verification and release
-  ratification are still owed.
-- Task 2 is migrating default database-key custody from the legacy
-  `~/Library/Application Support/MCI/dev.key` file to the macOS Keychain item
-  with service `ai.hippocampus.brain` and account `database-key-v1`. That task
-  is under repair; end-to-end migration and clean-install release verification
-  are pending, so the Keychain path is not yet accepted as shipped.
+- Live screen capture is off by default. The persisted Preferences setting is
+  the only authority; enable is committed only after the expected helper
+  generation resolves Keychain custody and reports successful stream startup.
+  All-day soak verification and release ratification are still owed.
+- Task 2 implements default custody in the non-synchronizable macOS file-
+  Keychain item with service `ai.hippocampus.brain` and account
+  `database-key-v1`. Existing databases migrate only after the exact legacy
+  key opens the database read-only; plaintext is removed only after add,
+  re-read, and post-add validation. Clean-install and two-version signed-bundle
+  owner verification are still pending acceptance gates.
 - Delete is local row deletion plus `VACUUM`. Crypto-shredded range deletion is
   still design intent, not current behavior.
 - Multi-device sync, clean-install release verification, and Windows remain
@@ -55,6 +57,8 @@ what is listed here.
   can change.
 - Task 2 key migration and Task 3 benchmark reviews must pass before either is
   described as accepted release behavior.
+- Release bundles require stable Developer ID Application signing. Ad-hoc
+  assembly is debug-only and is not upgrade-safe for the file-Keychain ACL.
 - Release docs and product copy must continue to avoid Secure Enclave, Neural
   Engine, sqlite-vec runtime, zero-knowledge sync, or crypto-shred claims until
   those paths are actually shipped.

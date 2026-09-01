@@ -19,7 +19,7 @@ struct TrustSlide: View {
                 VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
                     IconTextRow(
                         icon: "key.fill",
-                        title: "256-bit key sealed on this Mac."
+                        title: "256-bit key custody uses macOS Keychain."
                     )
                     Button("How is the key sealed?") {
                         showKeyWrapAudit = true
@@ -64,7 +64,7 @@ struct TrustSlide: View {
     }
 
     private func currentReport() -> KeyWrapAuditReport {
-        KeyWrapAuditor.inspectFile(at: DefaultKeyWrapLocation.devKeyURL())
+        KeyWrapAuditor.keychainReferenceReport()
     }
 
     private var pipelineView: some View {

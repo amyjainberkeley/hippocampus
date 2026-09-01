@@ -10,7 +10,28 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
     public let agentArguments: [String]
     public let agentEnvironment: [String: String]
 
-    public static func make(
+    static func sanitizedEnvironment(
+        baseEnvironment: [String: String],
+        dbPath: URL,
+        keyReference: KeychainKeyReference
+    ) -> [String: String] {
+        var environment = baseEnvironment
+        for key in [
+            "MCI_DB_KEY_HEX",
+            "MCI_DB_KEY_FILE",
+            "MCI_DEVELOPMENT_FILE_KEY",
+            "HIPPOCAMPUS_ENABLE_V2P1",
+        ] {
+            environment.removeValue(forKey: key)
+        }
+        environment["MCI_DB_PATH"] = dbPath.path
+        environment["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
+        environment["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
+        environment["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
+        return environment
+    }
+
+    static func make(
         helperURL: URL,
         agentURL: URL,
         dbPath: URL,
@@ -18,41 +39,39 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         knownSafeAppsURL: URL?,
         captureEnabled: Bool,
         crashReportOptedIn: Bool,
+        generation: SupervisorProcessGeneration,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
     ) -> ProcessSupervisorLaunchPlan {
-        var helperArgs: [String] = []
-        if captureEnabled {
-            helperArgs.append("--capture")
-        }
-        helperArgs += ["--output", "/dev/stdout"]
+        precondition(generation.captureEnabled == captureEnabled)
+        var helperArguments = [
+            "--output", "/dev/stdout",
+            "--readiness-file", generation.readinessURL.path,
+            "--generation", generation.id,
+        ]
+        if captureEnabled { helperArguments.insert("--capture", at: 0) }
         if let knownSafeAppsURL {
-            helperArgs += ["--allowlist-path", knownSafeAppsURL.path]
+            helperArguments += ["--allowlist-path", knownSafeAppsURL.path]
         }
 
-        var childEnv = baseEnvironment
-        childEnv.removeValue(forKey: "MCI_DB_KEY_HEX")
-        childEnv["MCI_DB_PATH"] = dbPath.path
-        childEnv["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
-        childEnv["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
-        childEnv["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
-        if !captureEnabled {
-            childEnv.removeValue(forKey: "HIPPOCAMPUS_ENABLE_V2P1")
-        }
-
-        var agentEnv = childEnv
+        let childEnvironment = sanitizedEnvironment(
+            baseEnvironment: baseEnvironment,
+            dbPath: dbPath,
+            keyReference: keyReference
+        )
+        var agentEnvironment = childEnvironment
         if crashReportOptedIn {
-            agentEnv["MCI_CRASH_REPORT_OPTED_IN"] = "1"
+            agentEnvironment["MCI_CRASH_REPORT_OPTED_IN"] = "1"
         } else {
-            agentEnv.removeValue(forKey: "MCI_CRASH_REPORT_OPTED_IN")
+            agentEnvironment.removeValue(forKey: "MCI_CRASH_REPORT_OPTED_IN")
         }
 
         return ProcessSupervisorLaunchPlan(
             helperExecutableURL: helperURL,
-            helperArguments: helperArgs,
-            helperEnvironment: childEnv,
+            helperArguments: helperArguments,
+            helperEnvironment: childEnvironment,
             agentExecutableURL: agentURL,
             agentArguments: ["--drain-stdin", "--strict", "--db-path", dbPath.path],
-            agentEnvironment: agentEnv
+            agentEnvironment: agentEnvironment
         )
     }
 }
@@ -62,339 +81,215 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var state: SupervisorState = .idle
     @Published public private(set) var health: HealthSnapshot?
     @Published public private(set) var captureEnabled: Bool
-
-    /// The current TCC-revoked surface (if any). Populated by the
-    /// AppDelegate's `TCCHelperStderrTail` when the helper's stderr
-    /// emits a `helper_health tcc_revoked=<surface>` breadcrumb; cleared
-    /// on the matching `tcc_restored=<surface>`. Read by `MenuBarIcon`
-    /// + `StatusMenuView.menuBarStatus` and passed to
-    /// `MenuBarStatus.derive(tccRevokedSurface:)` so the icon flips to
-    /// the red-pill error state without the supervisor itself changing
-    /// state (the helper handles its own pause).
-    ///
-    /// Cycle 8.47 PR #80 pipeline follow-up.
     @Published public internal(set) var tccRevokedSurface: TCCRevokedReason?
 
     private let locator: BinaryLocator
     private let keyStore: KeyStore
-    private let runtimeConfig: RuntimeConfig
+    private let runtimeConfig: any RuntimeConfiguring
+    private let topology: any SupervisorTopologyControlling
+    private let keyCustodyPreparer: any KeyCustodyPreparing
+    private let readinessTimeout: TimeInterval
     private let logger = Logger(subsystem: "ai.hippocampus", category: "supervisor")
-
-    private var helperProcess: Process?
-    private var agentProcess: Process?
-    private var pipe: Pipe?
-    private var helperStderrHandle: FileHandle?
-    private var agentStderrHandle: FileHandle?
-    private var retryCount = 0
     private var retryTask: Task<Void, Never>?
     private var healthTimer: Timer?
-    private var currentKeyReference: KeychainKeyReference = .defaultDatabaseKey
     private var safariInboxReader: SafariInboxReader?
+    private var currentKeyReference: KeychainKeyReference = .defaultDatabaseKey
+    private var retryCount = 0
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
 
-    public init(locator: BinaryLocator, keyStore: KeyStore, runtimeConfig: RuntimeConfig = RuntimeConfig()) {
+    public convenience init(
+        locator: BinaryLocator,
+        keyStore: KeyStore,
+        runtimeConfig: any RuntimeConfiguring = RuntimeConfig()
+    ) {
+        self.init(
+            locator: locator,
+            keyStore: keyStore,
+            runtimeConfig: runtimeConfig,
+            topology: FoundationSupervisorTopology(),
+            keyCustodyPreparer: AgentKeyCustodyPreparer(),
+            readinessTimeout: 10
+        )
+    }
+
+    init(
+        locator: BinaryLocator,
+        keyStore: KeyStore,
+        runtimeConfig: any RuntimeConfiguring,
+        topology: any SupervisorTopologyControlling,
+        keyCustodyPreparer: any KeyCustodyPreparing,
+        readinessTimeout: TimeInterval
+    ) {
         self.locator = locator
         self.keyStore = keyStore
         self.runtimeConfig = runtimeConfig
+        self.topology = topology
+        self.keyCustodyPreparer = keyCustodyPreparer
+        self.readinessTimeout = readinessTimeout
         self.captureEnabled = runtimeConfig.captureEnabled
     }
 
     public func start() {
-        guard !state.isActive else { return }
-        state = .starting
-        retryCount = 0
-
-        do {
-            currentKeyReference = try ensureKey()
-            try spawnChildren(keyReference: currentKeyReference)
-            captureEnabled = runtimeConfig.captureEnabled
-            state = .running
-            startHealthPolling()
-            startSafariInboxReader()
-            logger.info("supervisor: started. helper PID \(self.helperProcess?.processIdentifier ?? -1), agent PID \(self.agentProcess?.processIdentifier ?? -1)")
-        } catch {
-            stop()
-            state = .crashed(reason: error.localizedDescription)
-            logger.error("supervisor: start failed: \(error.localizedDescription)")
+        guard !state.isActive, state != .starting else { return }
+        retryTask?.cancel()
+        retryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.startAndWaitForReadiness()
+            } catch {
+                self.logger.error("supervisor: verified start failed: \(error.localizedDescription)")
+            }
         }
     }
 
-    public func stop() {
-        safariInboxReader?.stop()
-        safariInboxReader = nil
+    func startAndWaitForReadiness() async throws {
+        retryCount = 0
+        try await startTopology(captureEnabled: runtimeConfig.captureEnabled, publishState: true)
+    }
 
+    public func stop() {
         retryTask?.cancel()
         retryTask = nil
-        healthTimer?.invalidate()
-        healthTimer = nil
-
-        terminateChild(helperProcess, label: "helper")
-        terminateChild(agentProcess, label: "agent")
-
-        helperProcess = nil
-        agentProcess = nil
-        pipe = nil
-
-        try? helperStderrHandle?.close()
-        try? agentStderrHandle?.close()
-        helperStderrHandle = nil
-        agentStderrHandle = nil
-
+        stopAncillaryServices()
         state = .stopped
-        logger.info("supervisor: stopped")
+        Task { @MainActor [topology] in
+            try? await topology.stop(timeout: 2)
+        }
     }
 
     public func setPaused(_ paused: Bool) {
         guard state == .running || state == .paused else { return }
-        guard let helper = helperProcess, helper.isRunning else { return }
-
-        if paused {
-            // SIGSTOP preserves SCStream session — not killed.
-            // Limit: the OS may still deliver frames to the kernel
-            // buffer; they drain when resumed. Acceptable for this PR.
-            // TODO: IPC-based pause protocol (send "pause" message)
-            // when the helper supports it.
-            kill(helper.processIdentifier, SIGSTOP)
-            state = .paused
-            logger.info("supervisor: paused helper PID \(helper.processIdentifier) via SIGSTOP")
-        } else {
-            kill(helper.processIdentifier, SIGCONT)
-            state = .running
-            logger.info("supervisor: resumed helper PID \(helper.processIdentifier) via SIGCONT")
-        }
-    }
-
-    public func openRecallUI(initialTab: String? = nil) {
-        guard let recallPath = locator.recallUIPath() else {
-            logger.warning("supervisor: recall-ui binary not found")
-            return
-        }
-        let task = Process()
-        task.executableURL = recallPath
-        var env = ProcessInfo.processInfo.environment
-        env.removeValue(forKey: "MCI_DB_KEY_HEX")
-        let keyReference = (keyStore as? FileKeyStore)?.keychainReference
-            ?? (keyStore as? KeychainKeyStore)?.reference
-            ?? .defaultDatabaseKey
-        env["MCI_DB_PATH"] = dbPath.path
-        env["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
-        env["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
-        env["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
-        // Deep-link tab hint per the Brief Viewer spec
-        // (`hippocampus://recall?tab=brief`). The recall-ui reads
-        // `MCI_INITIAL_TAB` at launch and selects the matching tab.
-        if let tab = initialTab, !tab.isEmpty {
-            env["MCI_INITIAL_TAB"] = tab
-        }
-        task.environment = env
-        try? task.run()
-    }
-
-    public func openOnboarding() -> Bool {
-        guard let onboardingPath = locator.onboardingPath() else {
-            return false
-        }
-        let task = Process()
-        task.executableURL = onboardingPath
-        var env = ProcessInfo.processInfo.environment
-        env.removeValue(forKey: "MCI_DB_KEY_HEX")
-        task.environment = env
-        try? task.run()
-        return true
-    }
-
-    public var hasOnboarding: Bool {
-        locator.onboardingPath() != nil
-    }
-
-    public var agentBinaryPath: URL? {
-        locator.agentPath()
-    }
-
-    public var dbPath: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/MCI/mci.sqlite")
-    }
-
-    public var devKeyPath: String {
-        if let fileStore = keyStore as? FileKeyStore {
-            if let ref = fileStore.keychainReference {
-                return "Keychain service=\(ref.service) account=\(ref.account)"
-            }
-            return fileStore.path.path
-        }
-        if let ref = (keyStore as? KeychainKeyStore)?.reference {
-            return "Keychain service=\(ref.service) account=\(ref.account)"
-        }
-        return "unknown"
-    }
-
-    // MARK: - Private
-
-    private func ensureKey() throws -> KeychainKeyReference {
         do {
-            _ = try keyStore.readKey()
-        } catch KeyStoreError.noKeyFound {
-            let hex = try FileKeyStore.generateHexKey()
-            try keyStore.writeKey(hex)
-            logger.info("supervisor: generated new database key in configured key store")
+            try topology.setPaused(paused)
+            state = paused ? .paused : .running
+        } catch {
+            state = .crashed(reason: error.localizedDescription)
         }
-        return (keyStore as? FileKeyStore)?.keychainReference
-            ?? (keyStore as? KeychainKeyStore)?.reference
-            ?? .defaultDatabaseKey
     }
 
-    private func spawnChildren(keyReference: KeychainKeyReference) throws {
+    public func applyCaptureEnabled(_ enabled: Bool) async throws {
+        guard enabled != captureEnabled else { return }
+        let prior = captureEnabled
+
+        do {
+            try await topology.stop(timeout: 5)
+            stopAncillaryServices()
+        } catch {
+            state = .crashed(reason: error.localizedDescription)
+            throw error
+        }
+
+        do {
+            try await startTopology(captureEnabled: enabled, publishState: false)
+            try runtimeConfig.setCaptureEnabled(enabled)
+            captureEnabled = enabled
+            state = .running
+        } catch {
+            let requestedError = error
+            do {
+                if topology.isRunning {
+                    try await topology.stop(timeout: 5)
+                }
+                stopAncillaryServices()
+                try await startTopology(captureEnabled: prior, publishState: false)
+                captureEnabled = prior
+                state = .running
+            } catch {
+                captureEnabled = prior
+                state = .crashed(
+                    reason: "Capture change failed and prior topology could not be restored: \(error.localizedDescription)"
+                )
+            }
+            throw requestedError
+        }
+    }
+
+    private func startTopology(captureEnabled requestedCapture: Bool, publishState: Bool) async throws {
+        state = .starting
         guard let helperURL = locator.helperPath() else {
-            throw SupervisorError.binaryNotFound("MCICaptureHelper")
+            try failStart(SupervisorError.binaryNotFound("MCICaptureHelper"))
         }
         guard let agentURL = locator.agentPath() else {
-            throw SupervisorError.binaryNotFound("mci-agent")
+            try failStart(SupervisorError.binaryNotFound("mci-agent"))
         }
 
-        let bridgePipe = Pipe()
-        self.pipe = bridgePipe
+        let reference = (keyStore as? FileKeyStore)?.keychainReference
+            ?? (keyStore as? KeychainKeyStore)?.reference
+            ?? .defaultDatabaseKey
+        do {
+            try await keyCustodyPreparer.prepare(
+                agentURL: agentURL,
+                databaseURL: dbPath,
+                keyReference: reference
+            )
+            _ = try keyStore.readKey()
+            currentKeyReference = reference
 
-        // Stderr log rotation
-        let logDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/MCI")
-        let helperStderrLog = LogRotator(path: logDir.appendingPathComponent("helper.stderr.log"))
-        let agentStderrLog = LogRotator(path: logDir.appendingPathComponent("agent.stderr.log"))
-        let hStderr = try helperStderrLog.fileHandle()
-        let aStderr = try agentStderrLog.fileHandle()
-        self.helperStderrHandle = hStderr
-        self.agentStderrHandle = aStderr
-
-        let plan = ProcessSupervisorLaunchPlan.make(
-            helperURL: helperURL,
-            agentURL: agentURL,
-            dbPath: dbPath,
-            keyReference: keyReference,
-            knownSafeAppsURL: locator.knownSafeAppsPath(),
-            captureEnabled: runtimeConfig.captureEnabled,
-            crashReportOptedIn: runtimeConfig.crashReportOptedIn
-        )
-
-        // Spawn helper
-        let helper = Process()
-        helper.executableURL = plan.helperExecutableURL
-        helper.arguments = plan.helperArguments
-        helper.environment = plan.helperEnvironment
-        helper.standardOutput = bridgePipe
-        helper.standardError = hStderr
-        helper.terminationHandler = { [weak self] proc in
-            Task { @MainActor in
-                self?.handleChildExit(proc, label: "helper")
+            let generation = try SupervisorProcessGeneration.make(
+                captureEnabled: requestedCapture
+            )
+            let plan = ProcessSupervisorLaunchPlan.make(
+                helperURL: helperURL,
+                agentURL: agentURL,
+                dbPath: dbPath,
+                keyReference: reference,
+                knownSafeAppsURL: locator.knownSafeAppsPath(),
+                captureEnabled: requestedCapture,
+                crashReportOptedIn: runtimeConfig.crashReportOptedIn,
+                generation: generation
+            )
+            try topology.launch(
+                plan: plan,
+                generation: generation,
+                onUnexpectedExit: { [weak self] label, status in
+                    self?.handleUnexpectedExit(label: label, status: status)
+                }
+            )
+            try await topology.waitForReadiness(
+                generation: generation,
+                timeout: readinessTimeout
+            )
+            guard topology.isRunning else {
+                throw SupervisorProcessRuntimeError.invalidReadiness
             }
+            if publishState { self.captureEnabled = requestedCapture }
+            state = .running
+            startHealthPolling()
+            startSafariInboxReader()
+        } catch {
+            try? await topology.stop(timeout: 2)
+            stopAncillaryServices()
+            state = .crashed(reason: error.localizedDescription)
+            throw error
         }
-
-        // Spawn agent
-        let agent = Process()
-        agent.executableURL = plan.agentExecutableURL
-        agent.arguments = plan.agentArguments
-        agent.standardInput = bridgePipe
-        agent.environment = plan.agentEnvironment
-        agent.standardError = aStderr
-        agent.terminationHandler = { [weak self] proc in
-            Task { @MainActor in
-                self?.handleChildExit(proc, label: "agent")
-            }
-        }
-
-        // Start helper FIRST so it begins writing to the pipe
-        try helper.run()
-        self.helperProcess = helper
-
-        try agent.run()
-        self.agentProcess = agent
     }
 
-    private func handleChildExit(_ process: Process, label: String) {
-        let code = process.terminationStatus
-        let reason = process.terminationReason
-        logger.warning("supervisor: \(label) exited. status=\(code), reason=\(reason.rawValue)")
+    private func failStart(_ error: Error) throws -> Never {
+        state = .crashed(reason: error.localizedDescription)
+        throw error
+    }
 
-        if state == .stopped { return }
-
-        stop()
-        state = .crashed(reason: "\(label) exited (\(code))")
-
+    private func handleUnexpectedExit(label: String, status: Int32) {
+        guard state != .stopped else { return }
+        stopAncillaryServices()
+        state = .crashed(reason: "\(label) exited (\(status))")
         scheduleRetry()
     }
 
     private func scheduleRetry() {
-        guard retryCount < Self.maxRetries else {
-            logger.error("supervisor: max retries (\(Self.maxRetries)) reached. Giving up.")
-            return
-        }
-
+        guard retryCount < Self.maxRetries else { return }
         retryCount += 1
         let delay = min(pow(2.0, Double(retryCount - 1)), Self.maxBackoff)
-        logger.info("supervisor: retry \(self.retryCount)/\(Self.maxRetries) in \(delay)s")
-
         retryTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            self?.start()
-        }
-    }
-
-    private func terminateChild(_ process: Process?, label: String) {
-        guard let proc = process, proc.isRunning else { return }
-
-        // If paused (SIGSTOP'd), resume first so it can receive SIGTERM
-        kill(proc.processIdentifier, SIGCONT)
-
-        proc.terminate()  // SIGTERM
-        logger.info("supervisor: sent SIGTERM to \(label) PID \(proc.processIdentifier)")
-
-        // 2s grace then SIGKILL
-        let pid = proc.processIdentifier
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
-            if proc.isRunning {
-                kill(pid, SIGKILL)
-            }
-        }
-    }
-
-    public var isCrashReportOptedIn: Bool {
-        runtimeConfig.crashReportOptedIn
-    }
-
-    public func setCrashReportOptedIn(_ value: Bool) {
-        try? runtimeConfig.setCrashReportOptedIn(value)
-    }
-
-    public func applyCaptureEnabled(_ enabled: Bool) async throws {
-        let priorSetting = captureEnabled
-        do {
-            try runtimeConfig.setCaptureEnabled(enabled)
-        } catch {
-            captureEnabled = priorSetting
-            throw error
-        }
-
-        guard state.isActive else {
-            captureEnabled = runtimeConfig.captureEnabled
-            return
-        }
-
-        do {
-            try await stopForCaptureReconfiguration()
-            start()
-            guard state == .running else {
-                throw SupervisorError.captureRestartFailed(state.statusText)
-            }
-            captureEnabled = enabled
-        } catch {
-            let helperStillRunning = helperProcess?.isRunning == true
-            if enabled || helperStillRunning {
-                try? runtimeConfig.setCaptureEnabled(helperStillRunning ? priorSetting : false)
-            }
-            captureEnabled = helperStillRunning ? priorSetting : false
-            throw error
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self else { return }
+            try? await self.topology.stop(timeout: 2)
+            try? await self.startTopology(
+                captureEnabled: self.runtimeConfig.captureEnabled,
+                publishState: true
+            )
         }
     }
 
@@ -402,41 +297,75 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let reader = SafariInboxReader()
         reader.start()
         safariInboxReader = reader
-        logger.info("supervisor: safari inbox reader started")
-    }
-
-    public var safariInboxStats: (forwarded: UInt64, droppedDenylist: UInt64, droppedSecret: UInt64, failedParse: UInt64)? {
-        guard let r = safariInboxReader else { return nil }
-        return (r.forwarded, r.droppedDenylist, r.droppedSecret, r.failedParse)
     }
 
     private func startHealthPolling() {
+        healthTimer?.invalidate()
         healthTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if let snapshot = HealthSnapshot.readFromLog() {
-                    self.health = snapshot
-                }
-            }
+            Task { @MainActor in self?.health = HealthSnapshot.readFromLog() }
         }
         health = HealthSnapshot.readFromLog()
     }
 
-    private func stopForCaptureReconfiguration() async throws {
-        let previousState = state
-        let helper = helperProcess
-        let agent = agentProcess
-        stop()
+    private func stopAncillaryServices() {
+        safariInboxReader?.stop()
+        safariInboxReader = nil
+        healthTimer?.invalidate()
+        healthTimer = nil
+    }
 
-        for _ in 0..<50 where helper?.isRunning == true || agent?.isRunning == true {
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-        guard helper?.isRunning != true, agent?.isRunning != true else {
-            helperProcess = helper
-            agentProcess = agent
-            state = previousState
-            throw SupervisorError.captureStopFailed
-        }
+    public func openRecallUI(initialTab: String? = nil) {
+        guard let recallPath = locator.recallUIPath() else { return }
+        let task = Process()
+        task.executableURL = recallPath
+        var environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+            baseEnvironment: ProcessInfo.processInfo.environment,
+            dbPath: dbPath,
+            keyReference: currentKeyReference
+        )
+        if let initialTab, !initialTab.isEmpty { environment["MCI_INITIAL_TAB"] = initialTab }
+        task.environment = environment
+        try? task.run()
+    }
+
+    public func openOnboarding() -> Bool {
+        guard let path = locator.onboardingPath() else { return false }
+        let task = Process()
+        task.executableURL = path
+        task.environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+            baseEnvironment: ProcessInfo.processInfo.environment,
+            dbPath: dbPath,
+            keyReference: currentKeyReference
+        )
+        try? task.run()
+        return true
+    }
+
+    public var hasOnboarding: Bool { locator.onboardingPath() != nil }
+    public var agentBinaryPath: URL? { locator.agentPath() }
+    public func sanitizedChildEnvironment() -> [String: String] {
+        ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+            baseEnvironment: ProcessInfo.processInfo.environment,
+            dbPath: dbPath,
+            keyReference: currentKeyReference
+        )
+    }
+    public var dbPath: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/MCI/mci.sqlite")
+    }
+    public var isCrashReportOptedIn: Bool { runtimeConfig.crashReportOptedIn }
+    public func setCrashReportOptedIn(_ value: Bool) {
+        try? runtimeConfig.setCrashReportOptedIn(value)
+    }
+    public var safariInboxStats: (
+        forwarded: UInt64,
+        droppedDenylist: UInt64,
+        droppedSecret: UInt64,
+        failedParse: UInt64
+    )? {
+        guard let reader = safariInboxReader else { return nil }
+        return (reader.forwarded, reader.droppedDenylist, reader.droppedSecret, reader.failedParse)
     }
 }
 
@@ -444,14 +373,10 @@ extension ProcessSupervisor: CaptureSettingApplying {}
 
 enum SupervisorError: LocalizedError {
     case binaryNotFound(String)
-    case captureStopFailed
-    case captureRestartFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .binaryNotFound(let name): return "\(name) binary not found"
-        case .captureStopFailed: return "Capture helper did not stop; the previous state remains active."
-        case .captureRestartFailed(let state): return "Capture setting could not be enforced: \(state)"
+        case .binaryNotFound(let name): "\(name) binary not found"
         }
     }
 }

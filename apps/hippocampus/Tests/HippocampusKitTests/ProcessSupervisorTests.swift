@@ -2,8 +2,6 @@
 import XCTest
 @testable import HippocampusKit
 
-// MARK: - Fakes
-
 final class FakeBinaryLocator: BinaryLocator, @unchecked Sendable {
     var helperURL: URL?
     var agentURL: URL?
@@ -23,269 +21,310 @@ final class FakeBinaryLocator: BinaryLocator, @unchecked Sendable {
 final class FakeKeyStore: KeyStore, @unchecked Sendable {
     var storedKey: String?
     var lastWrittenKey: String?
-    var writeError: Error?
 
     func readKey() throws -> String {
-        guard let key = storedKey else {
-            throw KeyStoreError.noKeyFound
-        }
-        return key
+        guard let storedKey else { throw KeyStoreError.noKeyFound }
+        return storedKey
     }
 
     func writeKey(_ hex: String) throws {
-        if let err = writeError { throw err }
         storedKey = hex
         lastWrittenKey = hex
     }
 }
 
-// MARK: - Tests
+final class FakeRuntimeConfig: RuntimeConfiguring, @unchecked Sendable {
+    var captureEnabled: Bool
+    var crashReportOptedIn = false
+    var captureWriteError: Error?
+    private(set) var captureWrites: [Bool] = []
+
+    init(captureEnabled: Bool) {
+        self.captureEnabled = captureEnabled
+    }
+
+    func setCaptureEnabled(_ value: Bool) throws {
+        captureWrites.append(value)
+        if let captureWriteError { throw captureWriteError }
+        captureEnabled = value
+    }
+
+    func setCrashReportOptedIn(_ value: Bool) throws {
+        crashReportOptedIn = value
+    }
+}
 
 @MainActor
-final class ProcessSupervisorTests: XCTestCase {
+final class FakeKeyCustodyPreparer: KeyCustodyPreparing {
+    var error: Error?
+    private(set) var calls: [(URL, URL, KeychainKeyReference)] = []
 
-    private func makeSupervisor(
-        locator: FakeBinaryLocator? = nil,
-        keyStore: FakeKeyStore? = nil,
-        runtimeConfig: RuntimeConfig = RuntimeConfig()
-    ) -> (ProcessSupervisor, FakeBinaryLocator, FakeKeyStore) {
-        let loc = locator ?? FakeBinaryLocator()
-        let ks = keyStore ?? FakeKeyStore()
-        let sup = ProcessSupervisor(locator: loc, keyStore: ks, runtimeConfig: runtimeConfig)
-        return (sup, loc, ks)
+    func prepare(
+        agentURL: URL,
+        databaseURL: URL,
+        keyReference: KeychainKeyReference
+    ) async throws {
+        calls.append((agentURL, databaseURL, keyReference))
+        if let error { throw error }
+    }
+}
+
+@MainActor
+final class FakeSupervisorTopology: SupervisorTopologyControlling {
+    var readinessResults: [Result<Void, Error>] = []
+    var stopResults: [Result<Void, Error>] = []
+    var isRunning = false
+    var onReadinessWait: ((ProcessSupervisorLaunchPlan) -> Void)?
+    private(set) var launchPlans: [ProcessSupervisorLaunchPlan] = []
+    private(set) var generations: [SupervisorProcessGeneration] = []
+    private(set) var stopCalls = 0
+
+    func launch(
+        plan: ProcessSupervisorLaunchPlan,
+        generation: SupervisorProcessGeneration,
+        onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
+    ) throws {
+        _ = onUnexpectedExit
+        launchPlans.append(plan)
+        generations.append(generation)
+        isRunning = true
     }
 
-    private func tmpRuntimeConfig(captureEnabled: Bool) throws -> (RuntimeConfig, URL) {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("supervisor-runtime-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let cfg = RuntimeConfig(path: dir.appendingPathComponent("runtime.toml"))
-        try cfg.setCaptureEnabled(captureEnabled)
-        return (cfg, dir)
-    }
-
-    // MARK: - Start / State
-
-    func test_start_without_binaries_crashes() {
-        let (sup, loc, ks) = makeSupervisor()
-        ks.storedKey = String(repeating: "ab", count: 32)
-
-        sup.start()
-
-        if case .crashed(let reason) = sup.state {
-            XCTAssertTrue(reason.contains("not found"), "Expected 'not found' in: \(reason)")
-        } else {
-            XCTFail("Expected .crashed, got \(sup.state)")
+    func waitForReadiness(
+        generation: SupervisorProcessGeneration,
+        timeout: TimeInterval
+    ) async throws {
+        _ = (generation, timeout)
+        onReadinessWait?(launchPlans.last!)
+        if !readinessResults.isEmpty {
+            try readinessResults.removeFirst().get()
         }
     }
 
-    func test_start_with_real_binaries_reaches_running() throws {
-        // Use /bin/cat as a stand-in — it reads stdin and writes to stdout.
-        let (sup, loc, ks) = makeSupervisor()
-        let catURL = URL(fileURLWithPath: "/bin/cat")
-        loc.helperURL = catURL
-        loc.agentURL = catURL
-        ks.storedKey = String(repeating: "ab", count: 32)
-
-        sup.start()
-
-        XCTAssertEqual(sup.state, .running)
-
-        sup.stop()
-        XCTAssertEqual(sup.state, .stopped)
+    func stop(timeout: TimeInterval) async throws {
+        _ = timeout
+        stopCalls += 1
+        if !stopResults.isEmpty {
+            try stopResults.removeFirst().get()
+        }
+        isRunning = false
     }
 
-    func test_stop_terminates_children() throws {
-        let (sup, loc, ks) = makeSupervisor()
-        loc.helperURL = URL(fileURLWithPath: "/bin/cat")
-        loc.agentURL = URL(fileURLWithPath: "/bin/cat")
-        ks.storedKey = String(repeating: "cd", count: 32)
+    func setPaused(_ paused: Bool) throws {
+        _ = paused
+    }
+}
 
-        sup.start()
-        XCTAssertEqual(sup.state, .running)
+@MainActor
+final class ProcessSupervisorTests: XCTestCase {
+    private enum TestError: LocalizedError {
+        case denied
+        case earlyExit
+        case timeout
+        case partialStop
+        case writeFailed
 
-        sup.stop()
-        XCTAssertEqual(sup.state, .stopped)
+        var errorDescription: String? { String(describing: self) }
     }
 
-    func test_launch_plan_omits_capture_when_capture_is_disabled() {
+    private func makeSupervisor(captureEnabled: Bool = false) -> (
+        ProcessSupervisor,
+        FakeBinaryLocator,
+        FakeKeyStore,
+        FakeRuntimeConfig,
+        FakeSupervisorTopology,
+        FakeKeyCustodyPreparer
+    ) {
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = "ab".repeat(32)
+        let config = FakeRuntimeConfig(captureEnabled: captureEnabled)
+        let topology = FakeSupervisorTopology()
+        let custody = FakeKeyCustodyPreparer()
+        let supervisor = ProcessSupervisor(
+            locator: locator,
+            keyStore: keyStore,
+            runtimeConfig: config,
+            topology: topology,
+            keyCustodyPreparer: custody,
+            readinessTimeout: 0.1
+        )
+        return (supervisor, locator, keyStore, config, topology, custody)
+    }
+
+    private func generation(captureEnabled: Bool = false) -> SupervisorProcessGeneration {
+        SupervisorProcessGeneration(
+            id: "generation-1",
+            readinessURL: URL(fileURLWithPath: "/tmp/generation-1.json"),
+            captureEnabled: captureEnabled
+        )
+    }
+
+    func test_launch_plan_uses_generation_receipt_and_single_capture_authority() {
+        let generation = generation(captureEnabled: false)
         let plan = ProcessSupervisorLaunchPlan.make(
-            helperURL: URL(fileURLWithPath: "/bin/cat"),
-            agentURL: URL(fileURLWithPath: "/bin/cat"),
+            helperURL: URL(fileURLWithPath: "/bundle/MCICaptureHelper"),
+            agentURL: URL(fileURLWithPath: "/bundle/mci-agent"),
             dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
             keyReference: .defaultDatabaseKey,
             knownSafeAppsURL: nil,
             captureEnabled: false,
             crashReportOptedIn: false,
-            baseEnvironment: [:]
+            generation: generation,
+            baseEnvironment: [
+                "MCI_DB_KEY_HEX": "ef".repeat(32),
+                "MCI_DEVELOPMENT_FILE_KEY": "1",
+                "HIPPOCAMPUS_ENABLE_V2P1": "1",
+            ]
         )
 
         XCTAssertFalse(plan.helperArguments.contains("--capture"))
+        XCTAssertTrue(plan.helperArguments.contains(generation.readinessURL.path))
+        XCTAssertTrue(plan.helperArguments.contains(generation.id))
+        for environment in [plan.helperEnvironment, plan.agentEnvironment] {
+            XCTAssertNil(environment["MCI_DB_KEY_HEX"])
+            XCTAssertNil(environment["MCI_DEVELOPMENT_FILE_KEY"])
+            XCTAssertNil(environment["HIPPOCAMPUS_ENABLE_V2P1"])
+        }
     }
 
-    func test_launch_plan_includes_capture_when_capture_is_enabled() {
+    func test_launch_plan_includes_capture_only_for_explicit_setting() {
+        let generation = generation(captureEnabled: true)
         let plan = ProcessSupervisorLaunchPlan.make(
-            helperURL: URL(fileURLWithPath: "/bin/cat"),
-            agentURL: URL(fileURLWithPath: "/bin/cat"),
+            helperURL: URL(fileURLWithPath: "/bundle/MCICaptureHelper"),
+            agentURL: URL(fileURLWithPath: "/bundle/mci-agent"),
             dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
             keyReference: .defaultDatabaseKey,
             knownSafeAppsURL: nil,
             captureEnabled: true,
             crashReportOptedIn: false,
+            generation: generation,
             baseEnvironment: [:]
         )
 
         XCTAssertTrue(plan.helperArguments.contains("--capture"))
     }
 
-    func test_launch_plan_passes_keychain_reference_without_database_key() {
-        let plan = ProcessSupervisorLaunchPlan.make(
-            helperURL: URL(fileURLWithPath: "/bin/cat"),
-            agentURL: URL(fileURLWithPath: "/bin/cat"),
-            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
-            keyReference: .defaultDatabaseKey,
-            knownSafeAppsURL: nil,
-            captureEnabled: false,
-            crashReportOptedIn: true,
-            baseEnvironment: ["MCI_DB_KEY_HEX": String(repeating: "a", count: 64)]
-        )
+    func test_startup_denial_never_reaches_running() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [.failure(TestError.denied)]
 
-        XCTAssertNil(plan.agentEnvironment["MCI_DB_KEY_HEX"])
-        XCTAssertNil(plan.helperEnvironment["MCI_DB_KEY_HEX"])
-        XCTAssertEqual(plan.helperEnvironment["MCI_DB_KEYCHAIN_SERVICE"], KeychainKeyStore.defaultService)
-        XCTAssertEqual(plan.helperEnvironment["MCI_DB_KEYCHAIN_ACCOUNT"], KeychainKeyStore.defaultAccount)
-        XCTAssertEqual(plan.helperEnvironment["MCI_DB_KEYCHAIN_STORAGE_MODEL"], KeychainKeyStore.storageModel)
-        XCTAssertEqual(plan.agentEnvironment["MCI_DB_KEYCHAIN_SERVICE"], KeychainKeyStore.defaultService)
-        XCTAssertEqual(plan.agentEnvironment["MCI_DB_KEYCHAIN_ACCOUNT"], KeychainKeyStore.defaultAccount)
-        XCTAssertEqual(plan.agentEnvironment["MCI_DB_KEYCHAIN_STORAGE_MODEL"], KeychainKeyStore.storageModel)
-        XCTAssertEqual(plan.agentEnvironment["MCI_CRASH_REPORT_OPTED_IN"], "1")
-    }
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
 
-    func test_explicit_capture_off_strips_legacy_environment_gate() {
-        let plan = ProcessSupervisorLaunchPlan.make(
-            helperURL: URL(fileURLWithPath: "/bin/cat"),
-            agentURL: URL(fileURLWithPath: "/bin/cat"),
-            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
-            keyReference: .defaultDatabaseKey,
-            knownSafeAppsURL: nil,
-            captureEnabled: false,
-            crashReportOptedIn: false,
-            baseEnvironment: ["HIPPOCAMPUS_ENABLE_V2P1": "1"]
-        )
-
-        XCTAssertNil(plan.helperEnvironment["HIPPOCAMPUS_ENABLE_V2P1"])
-        XCTAssertFalse(plan.helperArguments.contains("--capture"))
-    }
-
-    // MARK: - Pause
-
-    func test_pause_sends_sigstop_resume_sigcont() throws {
-        let (sup, loc, ks) = makeSupervisor()
-        // Use /bin/sleep as helper — it stays alive long enough to pause.
-        loc.helperURL = URL(fileURLWithPath: "/bin/sleep")
-        loc.agentURL = URL(fileURLWithPath: "/bin/cat")
-        ks.storedKey = String(repeating: "ef", count: 32)
-
-        sup.start()
-
-        // /bin/sleep needs an argument; the Process will start but may
-        // exit quickly. We're testing state transitions, not real capture.
-        // Use cat instead which blocks on stdin.
-        sup.stop()
-
-        // Redo with cat for both
-        loc.helperURL = URL(fileURLWithPath: "/bin/cat")
-        sup.start()
-        XCTAssertEqual(sup.state, .running)
-
-        sup.setPaused(true)
-        XCTAssertEqual(sup.state, .paused)
-
-        sup.setPaused(false)
-        XCTAssertEqual(sup.state, .running)
-
-        sup.stop()
-    }
-
-    // MARK: - Key Store
-
-    func test_key_generation_on_missing_key() throws {
-        let (sup, loc, ks) = makeSupervisor()
-        loc.helperURL = URL(fileURLWithPath: "/bin/cat")
-        loc.agentURL = URL(fileURLWithPath: "/bin/cat")
-        // No key stored — should generate one
-
-        sup.start()
-
-        XCTAssertNotNil(ks.lastWrittenKey)
-        XCTAssertEqual(ks.lastWrittenKey?.count, 64)
-        XCTAssertEqual(sup.state, .running)
-
-        sup.stop()
-    }
-
-    func test_key_store_persists_with_mode_600() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hippocampus-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let keyPath = tmpDir.appendingPathComponent("dev.key")
-        let store = FileKeyStore(path: keyPath)
-        let hex = try FileKeyStore.generateHexKey()
-
-        try store.writeKey(hex)
-
-        // Verify file exists and mode is 0600
-        let attrs = try FileManager.default.attributesOfItem(atPath: keyPath.path)
-        let perms = attrs[.posixPermissions] as? Int
-        XCTAssertEqual(perms, 0o600, "dev.key must be mode 0600 (owner-only rw)")
-
-        // Verify round-trip
-        let readBack = try store.readKey()
-        XCTAssertEqual(readBack, hex)
-    }
-
-    func test_key_store_rejects_invalid_length() {
-        let ks = FakeKeyStore()
-
-        let store = FileKeyStore(path: FileManager.default.temporaryDirectory.appendingPathComponent("bad.key"))
-        XCTAssertThrowsError(try store.writeKey("tooshort"))
-    }
-
-    // MARK: - Crash Backoff
-
-    func test_crash_state_on_child_exit() throws {
-        // Use /usr/bin/false — exits immediately with code 1
-        let (sup, loc, ks) = makeSupervisor()
-        loc.helperURL = URL(fileURLWithPath: "/usr/bin/false")
-        loc.agentURL = URL(fileURLWithPath: "/bin/cat")
-        ks.storedKey = String(repeating: "aa", count: 32)
-
-        sup.start()
-
-        // /usr/bin/false exits immediately; the termination handler
-        // fires asynchronously. Give it a moment.
-        let expectation = XCTestExpectation(description: "child exits")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            expectation.fulfill()
+        guard case .crashed(let reason) = supervisor.state else {
+            return XCTFail("expected visible error, got \(supervisor.state)")
         }
-        wait(for: [expectation], timeout: 3)
-
-        // State should be .crashed or already retrying → .starting/.running
-        let state = sup.state
-        let acceptable: Bool = {
-            switch state {
-            case .crashed, .starting, .running: return true
-            default: return false
-            }
-        }()
-        XCTAssertTrue(acceptable, "Expected crashed/retrying, got \(state)")
-
-        sup.stop()
+        XCTAssertTrue(reason.contains("denied"))
+        XCTAssertFalse(supervisor.captureEnabled)
     }
 
-    // MARK: - Health Snapshot
+    func test_helper_early_exit_never_reaches_running() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [.failure(TestError.earlyExit)]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+
+        XCTAssertNotEqual(supervisor.state, .running)
+        XCTAssertEqual(topology.stopCalls, 1)
+    }
+
+    func test_readiness_timeout_never_reaches_running() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [.failure(TestError.timeout)]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+
+        XCTAssertNotEqual(supervisor.state, .running)
+        XCTAssertFalse(supervisor.captureEnabled)
+    }
+
+    func test_partial_stop_leaves_visible_error_and_does_not_persist_requested_setting() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        topology.stopResults = [.failure(TestError.partialStop)]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+
+        XCTAssertEqual(config.captureWrites, [])
+        XCTAssertFalse(config.captureEnabled)
+        guard case .crashed = supervisor.state else {
+            return XCTFail("partial stop must be visible, got \(supervisor.state)")
+        }
+    }
+
+    func test_failed_enable_restarts_and_verifies_prior_topology_before_rollback() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [
+            .success(()),
+            .failure(TestError.denied),
+            .success(()),
+        ]
+        topology.stopResults = [.success(()), .success(())]
+        try await supervisor.startAndWaitForReadiness()
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+
+        XCTAssertEqual(
+            topology.launchPlans.map { $0.helperArguments.contains("--capture") },
+            [false, true, false]
+        )
+        XCTAssertEqual(Set(topology.generations.map(\.id)).count, 3)
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertFalse(config.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [])
+    }
+
+    func test_setting_is_persisted_only_after_expected_generation_is_ready() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(()), .success(())]
+        topology.stopResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        topology.onReadinessWait = { plan in
+            if plan.helperArguments.contains("--capture") {
+                XCTAssertFalse(config.captureEnabled)
+                XCTAssertEqual(config.captureWrites, [])
+            }
+        }
+
+        try await supervisor.applyCaptureEnabled(true)
+
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertTrue(config.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [true])
+    }
+
+    func test_persistence_failure_rolls_back_to_verified_prior_topology() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(()), .success(()), .success(())]
+        topology.stopResults = [.success(()), .success(())]
+        try await supervisor.startAndWaitForReadiness()
+        config.captureWriteError = TestError.writeFailed
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+
+        XCTAssertEqual(
+            topology.launchPlans.map { $0.helperArguments.contains("--capture") },
+            [false, true, false]
+        )
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertFalse(config.captureEnabled)
+    }
+
+    func test_start_runs_shared_key_custody_before_launch() async throws {
+        let (supervisor, _, _, _, topology, custody) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+
+        try await supervisor.startAndWaitForReadiness()
+
+        XCTAssertEqual(custody.calls.count, 1)
+        XCTAssertEqual(custody.calls[0].2, .defaultDatabaseKey)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+    }
 
     func test_health_snapshot_display_reports_processed_frames() {
         let snapshot = HealthSnapshot(
@@ -294,22 +333,25 @@ final class ProcessSupervisorTests: XCTestCase {
             lastCaptureTs: Date().addingTimeInterval(-60),
             lastUpdated: Date()
         )
-        let text = snapshot.displayText
-        XCTAssertTrue(text.contains("77 frames processed"), "Frames delivered: \(text)")
-        XCTAssertFalse(text.contains("events captured"), "Got: \(text)")
+        XCTAssertTrue(snapshot.displayText.contains("77 frames processed"))
+        XCTAssertFalse(snapshot.displayText.contains("events captured"))
     }
 
-    // MARK: - Onboarding detection
-
-    func test_has_onboarding_false_when_missing() {
-        let (sup, loc, _) = makeSupervisor()
-        loc.onboardingURL = nil
-        XCTAssertFalse(sup.hasOnboarding)
+    func test_has_onboarding_reflects_locator() {
+        let (supervisor, locator, _, _, _, _) = makeSupervisor()
+        XCTAssertFalse(supervisor.hasOnboarding)
+        locator.onboardingURL = URL(fileURLWithPath: "/bundle/onboarding")
+        XCTAssertTrue(supervisor.hasOnboarding)
     }
+}
 
-    func test_has_onboarding_true_when_present() {
-        let (sup, loc, _) = makeSupervisor()
-        loc.onboardingURL = URL(fileURLWithPath: "/bin/echo")
-        XCTAssertTrue(sup.hasOnboarding)
-    }
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("expected error", file: file, line: line)
+    } catch {}
 }

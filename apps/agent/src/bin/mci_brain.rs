@@ -20,9 +20,9 @@
 //!
 //! # Key resolution
 //!
-//!   MCI_DB_KEY_HEX env var — 64-char hex SQLCipher key. If unset, falls
-//!   back to ~/Library/Application Support/MCI/dev.key, which
-//!   `mci-agent init` writes.
+//!   Production resolves the file-Keychain service/account reference shared
+//!   by the signed Hippocampus executables. Raw/file keys require the explicit
+//!   `MCI_DEVELOPMENT_FILE_KEY=1` development gate.
 //!   --db-path PATH or MCI_DB_PATH env — brain file path.
 //!   Default: ~/Library/Application Support/MCI/mci.sqlite
 
@@ -34,18 +34,31 @@ use mci_agent::brain_cli;
 use mci_brain::{BrainStore, EventId, EventRecord, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 
-/// Read the key `mci-agent init` writes, if present and well-formed.
-///
-/// Same location and validation as the agent's copy. Length and charset are
-/// checked here so a truncated or edited file fails loudly at the key step
-/// rather than as a confusing "file is not a database" later.
-fn read_dev_key_hex() -> Option<String> {
+/// Resolve a raw or file key only for explicitly gated local development.
+fn development_key_hex() -> Option<String> {
+    if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
+        return None;
+    }
+    if let Ok(key) = std::env::var("MCI_DB_KEY_HEX") {
+        if mci_agent::key_resolver::is_valid_database_key(&key) {
+            return Some(key);
+        }
+    }
     let home = std::env::var("HOME").ok()?;
     let path = PathBuf::from(home).join("Library/Application Support/MCI/dev.key");
     std::fs::read_to_string(&path)
         .ok()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()))
+        .filter(|key| mci_agent::key_resolver::is_valid_database_key(key))
+}
+
+fn resolve_key_hex() -> Result<String, mci_agent::key_resolver::KeyResolutionError> {
+    match mci_agent::key_resolver::resolve_database_key() {
+        Ok(key) => Ok(key),
+        Err(missing @ mci_agent::key_resolver::KeyResolutionError::MissingKey { .. }) => {
+            development_key_hex().ok_or(missing)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -357,8 +370,10 @@ fn print_usage() {
         \n\
         Env:\n\
         \x20 MCI_DB_PATH                brain SQLCipher path\n\
-        \x20 MCI_DB_KEY_HEX             REQUIRED. 64-char hex SQLCipher key.\n\
-        \x20                            Same value used by `mci-agent mcp-serve`.\n"
+        \x20 MCI_DB_KEYCHAIN_SERVICE    content-free Keychain service reference\n\
+        \x20 MCI_DB_KEYCHAIN_ACCOUNT    content-free Keychain account reference\n\
+        \x20 MCI_DEVELOPMENT_FILE_KEY   set to 1 only for local development to allow\n\
+        \x20                            MCI_DB_KEY_HEX or Application Support/MCI/dev.key\n"
     );
 }
 
@@ -558,26 +573,19 @@ fn main() -> ExitCode {
         ParseOutcome::Run(a) => a,
     };
 
-    // Env var first, then the dev.key file `mci-agent init` writes. Without
-    // the file fallback, init finishes by telling you to run
-    // `mci-brain search`, and that command then fails on a fresh install
-    // because nothing exported the variable.
-    let Some(key_hex) = std::env::var("MCI_DB_KEY_HEX")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(read_dev_key_hex)
-    else {
-        eprintln!(
-            "mci-brain: no key. Set MCI_DB_KEY_HEX, or run `mci-agent init` \
-             to create one at ~/Library/Application Support/MCI/dev.key."
-        );
-        return ExitCode::from(10);
+    let key_hex = match resolve_key_hex() {
+        Ok(key) => key,
+        Err(error) => {
+            eprintln!(
+                "mci-brain: cannot resolve the database key from the macOS Keychain: {error}. \
+             Launch the bundled Hippocampus.app to initialize or unlock access. \
+             MCI_DEVELOPMENT_FILE_KEY=1 enables raw/file keys for development only."
+            );
+            return ExitCode::from(10);
+        }
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!(
-            "mci-brain: MCI_DB_KEY_HEX must be 64 lowercase-or-uppercase \
-             hex characters (32 bytes)."
-        );
+        eprintln!("mci-brain: database key must be exactly 64 ASCII hex characters.");
         return ExitCode::from(11);
     };
     let key = DbKey::from_bytes(key_bytes);

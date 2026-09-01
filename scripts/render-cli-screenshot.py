@@ -34,6 +34,7 @@ if not os.path.exists(KEY_FILE):
     sys.exit(1)
 
 env = os.environ.copy()
+env["MCI_DEVELOPMENT_FILE_KEY"] = "1"
 env["MCI_DB_KEY_HEX"] = open(KEY_FILE).read().strip()
 env["MCI_DB_PATH"] = DB_PATH
 

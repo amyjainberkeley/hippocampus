@@ -79,7 +79,7 @@ public enum KeyframeBlobEncoder {
     ///
     /// - Parameters:
     ///   - pixelBuffer: The retained CVPixelBuffer from the SCStream callback.
-    ///   - blobKeyMaterial: 32-byte DbKey read from `MCI_DB_KEY_HEX` env var.
+    ///   - blobKeyMaterial: 32-byte DbKey resolved from the shared Keychain reference.
     ///   - maxLongEdge: Target maximum dimension for the long edge (default 1280).
     ///   - jpegQuality: JPEG compression quality 0.0–1.0 (default 0.7).
     /// - Returns: `(sha256, ciphertext)` where `ciphertext` is the full

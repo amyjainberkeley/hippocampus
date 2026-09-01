@@ -187,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the main thread during the SwiftUI App init.
         self.supervisor = ProcessSupervisor(
             locator: BundleBinaryLocator(),
-            keyStore: FileKeyStore()
+            keyStore: KeychainKeyStore.defaultDatabaseKey
         )
         super.init()
     }

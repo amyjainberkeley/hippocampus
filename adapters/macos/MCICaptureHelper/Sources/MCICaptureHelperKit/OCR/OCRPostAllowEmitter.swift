@@ -164,10 +164,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     nonisolated(unsafe) internal static var killOcrEmit: Bool = true
 
     /// M4-LIFT activator — the ONE production entry point that flips
-    /// `killOcrEmit` off at boot when the ADR-0031 §Status env-var
-    /// gate (`HIPPOCAMPUS_ENABLE_V2P1=1`) is set. Called exactly once
-    /// per helper process, from `main.swift`, immediately after
-    /// [`MciV2P1Gate.current`] resolves to `.enabled`.
+    /// `killOcrEmit` from the explicit `--capture` argv decision. Called
+    /// exactly once per helper process from `main.swift`.
     ///
     /// This method exists so the executable target (`MCICaptureHelper`)
     /// can flip the internal `killOcrEmit` gate without loosening its
@@ -192,13 +190,12 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     private let sink: any FrameSink
     private let sequence: FrameSequence
     private let counters: HelperHealthCounters
-    /// P3.6.5: encrypted keyframe blob writer. `nil` when no DbKey
-    /// is available (MCI_DB_KEY_HEX not set) — OCREvents carry
-    /// `keyframeHash = [0; 32]` ("no blob"). CSO invariant: blob
+    /// P3.6.5: encrypted keyframe blob writer. Capture startup resolves the
+    /// database key from the shared file-Keychain reference. CSO invariant: blob
     /// writes happen ONLY on .allow paths (ADR-0016 §4.8).
     private let blobWriter: KeyframeBlobWriter?
     /// P3.6.5: 32-byte DbKey material for per-blob HKDF key derivation.
-    /// Read from `MCI_DB_KEY_HEX` at helper launch, never logged.
+    /// Resolved through Security.framework at helper launch, never logged.
     private let blobKeyMaterial: [UInt8]
 
     public init(

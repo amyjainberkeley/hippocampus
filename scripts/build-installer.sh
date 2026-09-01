@@ -9,6 +9,7 @@ set -euo pipefail
 # Options:
 #   --skip-build    Skip calling build-app.sh (assume .app already assembled)
 #   --debug         Use debug profile for build-app.sh
+#   --development-ad-hoc  Allow unstable ad-hoc signing with --debug only
 #   --dist DIR      Output directory (default: dist/)
 #   --verify-assets Verify canonical installer brand assets and exit
 #   --help          Show this help
@@ -24,6 +25,7 @@ SKIP_BUILD=0
 BUILD_PROFILE="release"
 DIST_DIR="$REPO_ROOT/dist"
 VERIFY_ASSETS_ONLY=0
+DEVELOPMENT_ADHOC=0
 
 usage() {
     cat <<EOF
@@ -34,13 +36,14 @@ Produce a distributable Hippocampus DMG installer.
 Options:
   --skip-build    Skip build-app.sh (assume .app is already assembled)
   --debug         Pass --debug to build-app.sh
+  --development-ad-hoc  Allow unstable ad-hoc signing with --debug only
   --dist DIR      Output directory (default: dist/)
   --verify-assets Verify canonical installer brand assets and exit
   --help          Show this help
 
 Prerequisites:
   - macOS with hdiutil (ships with Xcode CLT)
-  - Pre-built binaries (swift build + cargo build) unless --skip-build
+  - Pre-built binaries (scripts/swift-package.sh + cargo build) unless --skip-build
   - codesign (Xcode CLT)
 
 Output:
@@ -53,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --skip-build) SKIP_BUILD=1; shift ;;
         --debug) BUILD_PROFILE="debug"; shift ;;
+        --development-ad-hoc) DEVELOPMENT_ADHOC=1; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
         --verify-assets) VERIFY_ASSETS_ONLY=1; shift ;;
         --help|-h) usage; exit 0 ;;
@@ -109,9 +113,16 @@ fi
 if [[ -n "$DEVELOPER_ID" ]]; then
     echo "Developer ID: $DEVELOPER_ID"
     SIGNING_MODE="developer-id"
-else
-    echo "No Developer ID found — falling back to ad-hoc signing"
+elif [[ "$BUILD_PROFILE" == "debug" && "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+    echo "No Developer ID found - using development-only ad-hoc signing"
     SIGNING_MODE="ad-hoc"
+elif [[ "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+    echo "FATAL: Ad-hoc signing is development-only and requires --debug" >&2
+    exit 1
+else
+    echo "FATAL: Release installer requires a stable Developer ID Application identity" >&2
+    echo "Use --debug --development-ad-hoc only for a disposable local artifact." >&2
+    exit 1
 fi
 
 # --- Detect notarytool credentials ---
@@ -163,6 +174,9 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     BUILD_ARGS=()
     if [[ "$BUILD_PROFILE" == "debug" ]]; then
         BUILD_ARGS+=(--debug)
+    fi
+    if [[ "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+        BUILD_ARGS+=(--development-ad-hoc)
     fi
     # ${VAR[@]+"${VAR[@]}"} expands safely when array is empty under `set -u`.
     "$BUILD_APP" ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
@@ -304,7 +318,7 @@ else
     echo "WARNING: scripts/verify-app-launches.sh not found — skipping launch gate."
 fi
 
-# --- Step 2: Codesign (Developer ID or ad-hoc) ---
+# --- Step 2: Codesign (Developer ID or explicit debug-only ad-hoc) ---
 
 ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements"
 
@@ -423,7 +437,7 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     codesign --verify --deep --strict "$APP_PATH"
     echo "  Signature valid."
 else
-    echo "--- Ad-hoc codesigning (dev iteration) ---"
+    echo "--- Development-only ad-hoc codesigning ---"
     codesign --force --deep --sign - "$APP_PATH"
 fi
 

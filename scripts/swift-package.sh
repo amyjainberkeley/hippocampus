@@ -3,6 +3,49 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+stage_recall_archive_if_needed() {
+    local package_path="$PWD"
+    local configuration="debug"
+    local subcommand=""
+    local index argument
+
+    for ((index = 1; index <= $#; index++)); do
+        argument="${!index}"
+        case "$argument" in
+            build|test|run)
+                [[ -z "$subcommand" ]] && subcommand="$argument"
+                ;;
+            --package-path)
+                index=$((index + 1))
+                package_path="${!index}"
+                ;;
+            --package-path=*) package_path="${argument#*=}" ;;
+            -c|--configuration)
+                index=$((index + 1))
+                configuration="${!index}"
+                ;;
+            --configuration=*) configuration="${argument#*=}" ;;
+        esac
+    done
+
+    [[ -n "$subcommand" && -d "$package_path" ]] || return 0
+    package_path="$(cd "$package_path" && pwd -P)"
+    [[ "$package_path" == "$REPO_ROOT/apps/recall-ui" ]] || return 0
+    case "$configuration" in
+        debug|release) ;;
+        *)
+            printf 'swift-package.sh: unsupported Recall configuration %s\n' "$configuration" >&2
+            return 64
+            ;;
+    esac
+    "$SCRIPT_DIR/stage-recall-ffi.sh" "$configuration"
+}
+
+stage_recall_archive_if_needed "$@" || exit $?
+
 if ! SWIFT_BIN="$(xcrun --find swift 2>/dev/null)"; then
     printf 'swift-package.sh: unable to find swift with xcrun\n' >&2
     exit 1
