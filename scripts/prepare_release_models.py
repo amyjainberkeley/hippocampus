@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path, PurePosixPath
 import shutil
@@ -62,6 +63,16 @@ def validate_model(root: Path, model: str) -> None:
     require(any(path.is_file() for path in weights.rglob("*")), f"{model} has no weight files")
 
 
+def validate_qwen_tokenizer(root: Path) -> None:
+    tokenizer = root / "tokenizer.json"
+    require(tokenizer.is_file(), "Qwen tokenizer.json is missing")
+    try:
+        payload = json.loads(tokenizer.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
+        raise ModelArchiveError(f"Qwen tokenizer.json is invalid: {error}") from error
+    require(isinstance(payload, dict) and payload, "Qwen tokenizer.json must be a nonempty JSON object")
+
+
 def install(archive: Path, expected_sha: str, output: Path) -> None:
     require(archive.is_file(), f"model archive is missing: {archive}")
     require(len(expected_sha) == 64 and all(character in "0123456789abcdefABCDEF" for character in expected_sha), "--sha256 must be 64 hexadecimal characters")
@@ -102,6 +113,7 @@ def install(archive: Path, expected_sha: str, output: Path) -> None:
 
         for model in REQUIRED_MODELS:
             validate_model(temporary, model)
+        validate_qwen_tokenizer(temporary)
         os.rename(temporary, output)
     finally:
         if temporary.exists():

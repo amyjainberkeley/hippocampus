@@ -63,6 +63,7 @@ import sys
 from pathlib import Path
 
 MODEL_REPO = "Snowflake/snowflake-arctic-embed-s"
+MODEL_REVISION = "e596f507467533e48a2e17c007f0e1dacc837b33"
 OUTPUT_DIM = 384
 MAX_SEQ_LEN = 128
 
@@ -155,7 +156,7 @@ def _ensure_tokenizer_resource(quiet: bool = False) -> None:
         "Fix:\n"
         "  mkdir -p adapters/macos/mci-embed-coreml/resources\n"
         f"  curl -L -o {TOKENIZER_BUNDLED_PATH} \\\n"
-        f"    https://huggingface.co/{MODEL_REPO}/resolve/main/tokenizer.json\n",
+        f"    https://huggingface.co/{MODEL_REPO}/resolve/{MODEL_REVISION}/tokenizer.json\n",
         file=sys.stderr,
     )
     sys.exit(2)
@@ -184,7 +185,7 @@ def _write_fixtures(quiet: bool) -> None:
     FIXTURES_SENTENCES.write_text("\n".join(FIXTURE_SENTENCES) + "\n", encoding="utf-8")
 
     log.info("Loading sentence-transformers %s for FP32 reference...", MODEL_REPO)
-    st_model = SentenceTransformer(MODEL_REPO)
+    st_model = SentenceTransformer(MODEL_REPO, revision=MODEL_REVISION)
     # IMPORTANT: cap max_seq_length at MAX_SEQ_LEN (128) so the Python
     # reference uses the same truncation policy as the Rust runtime.
     # Without this, long inputs (e.g. Lorem Ipsum, full paragraphs)
@@ -261,8 +262,8 @@ def convert(
     log.info("Patched torch.Tensor.new_ones for coremltools compatibility.")
 
     log.info("Loading %s...", MODEL_REPO)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO)
-    model = AutoModel.from_pretrained(MODEL_REPO)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO, revision=MODEL_REVISION)
+    model = AutoModel.from_pretrained(MODEL_REPO, revision=MODEL_REVISION)
     model.eval()
 
     sample_text = "Represent this sentence for searching relevant passages: hello world"

@@ -52,10 +52,16 @@ public enum BriefModelPresence {
         modelID: String = qwen3ModelID,
         basename: String = qwen3Basename
     ) -> Bool {
-        let path = modelsDir
-            .appendingPathComponent(modelID)
-            .appendingPathComponent(basename)
-        return FileManager.default.fileExists(atPath: path.path)
+        let modelDirectory = modelsDir.appendingPathComponent(modelID)
+        let modelPath = modelDirectory.appendingPathComponent(basename)
+        let tokenizerPath = modelDirectory.appendingPathComponent("tokenizer.json")
+        var isModelDirectory: ObjCBool = false
+        return FileManager.default.fileExists(
+            atPath: modelPath.path,
+            isDirectory: &isModelDirectory
+        )
+            && isModelDirectory.boolValue
+            && FileManager.default.fileExists(atPath: tokenizerPath.path)
     }
 
     /// URL of the Qwen3 model that ships INSIDE the .app bundle at
@@ -78,7 +84,12 @@ public enum BriefModelPresence {
             .appendingPathComponent("Models")
             .appendingPathComponent(modelID)
             .appendingPathComponent(basename)
-        return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+        let tokenizer = candidate.deletingLastPathComponent()
+            .appendingPathComponent("tokenizer.json")
+        return FileManager.default.fileExists(atPath: candidate.path)
+            && FileManager.default.fileExists(atPath: tokenizer.path)
+            ? candidate
+            : nil
     }
 
     /// Outcome of `seedBundledQwen3IfNeeded()`. Reported for observability;
@@ -128,7 +139,8 @@ public enum BriefModelPresence {
     ) -> SeedOutcome {
         let destDir = modelsDir.appendingPathComponent(modelID)
         let destModel = destDir.appendingPathComponent(basename)
-        if fileManager.fileExists(atPath: destModel.path) {
+        let destTokenizer = destDir.appendingPathComponent("tokenizer.json")
+        if isQwen3Installed(modelsDir: modelsDir, modelID: modelID, basename: basename) {
             return .alreadyPresent
         }
         guard let bundledURL = bundledQwen3URL(
@@ -136,6 +148,8 @@ public enum BriefModelPresence {
         ) else {
             return .noBundle
         }
+        let bundledTokenizer = bundledURL.deletingLastPathComponent()
+            .appendingPathComponent("tokenizer.json")
         do {
             try fileManager.createDirectory(
                 at: destDir, withIntermediateDirectories: true
@@ -144,10 +158,19 @@ public enum BriefModelPresence {
             // Application Support both live on the boot volume in every
             // supported deployment. `linkItem` falls back to failing if the
             // volumes differ; on that failure we `copyItem` instead.
-            do {
-                try fileManager.linkItem(at: bundledURL, to: destModel)
-            } catch {
-                try fileManager.copyItem(at: bundledURL, to: destModel)
+            if !fileManager.fileExists(atPath: destModel.path) {
+                do {
+                    try fileManager.linkItem(at: bundledURL, to: destModel)
+                } catch {
+                    try fileManager.copyItem(at: bundledURL, to: destModel)
+                }
+            }
+            if !fileManager.fileExists(atPath: destTokenizer.path) {
+                do {
+                    try fileManager.linkItem(at: bundledTokenizer, to: destTokenizer)
+                } catch {
+                    try fileManager.copyItem(at: bundledTokenizer, to: destTokenizer)
+                }
             }
             // Set the legacy UserDefaults flag so pre-cycle-8.14 consumers
             // that still read it see a consistent state. Real gating uses

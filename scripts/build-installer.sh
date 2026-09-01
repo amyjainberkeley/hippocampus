@@ -325,6 +325,7 @@ fi
 # this cycle's fix closes). The model is a first-class bundled asset now (like
 # the embedder + NER), so its absence is a ship-blocker, not a warning.
 QWEN3_MODEL_PATH="$APP_PATH/Contents/Resources/Models/qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc"
+QWEN3_TOKENIZER_PATH="$APP_PATH/Contents/Resources/Models/qwen3-1.7b-fp16/tokenizer.json"
 if [[ ! -d "$QWEN3_MODEL_PATH" ]]; then
     echo "FATAL: Qwen3-1.7B-FP16.mlmodelc missing at:"
     echo "         $QWEN3_MODEL_PATH"
@@ -347,6 +348,21 @@ if [[ ! -f "$QWEN3_MODEL_PATH/model.mil" || ! -d "$QWEN3_MODEL_PATH/weights" || 
     echo "FATAL: bundled Qwen3 model is structurally incomplete at:"
     echo "         $QWEN3_MODEL_PATH"
     echo "       (missing model.mil, weights/, or coremldata.bin). Refusing to ship."
+    exit 1
+fi
+if [[ ! -f "$QWEN3_TOKENIZER_PATH" ]] || ! python3 - "$QWEN3_TOKENIZER_PATH" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+if not isinstance(payload, dict) or not payload:
+    raise SystemExit("tokenizer.json must be a nonempty JSON object")
+PY
+then
+    echo "FATAL: Qwen tokenizer.json is missing or invalid at:"
+    echo "         $QWEN3_TOKENIZER_PATH"
+    echo "       Refusing to ship an app whose daily brief backend cannot load."
     exit 1
 fi
 

@@ -297,6 +297,15 @@ struct PreferencesRootView: View {
 
             Divider()
 
+            if let noticeURL = Bundle.main.url(forResource: "NOTICE", withExtension: "txt") {
+                Button("Third-party licenses") {
+                    #if canImport(AppKit)
+                    NSWorkspace.shared.open(noticeURL)
+                    #endif
+                }
+                .buttonStyle(.link)
+            }
+
             ForEach(Self.aboutLinks, id: \.label) { link in
                 Button(link.label) {
                     if let u = URL(string: link.url) {
@@ -316,7 +325,6 @@ struct PreferencesRootView: View {
     private static let aboutLinks: [(label: String, url: String)] = [
         ("Privacy policy", "https://hippocampus-swart.vercel.app/privacy"),
         ("Terms of service", "https://hippocampus-swart.vercel.app/terms"),
-        ("Third-party licenses", "https://hippocampus-swart.vercel.app/licenses"),
         ("Report an issue on GitHub", "https://github.com/amyjainberkeley/hippocampus/issues"),
         ("Send feedback (email)",
          "mailto:hippocampus@amyjainberkeley.com?subject=Hippocampus%20feedback"),
