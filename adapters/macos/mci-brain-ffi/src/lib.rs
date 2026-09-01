@@ -289,7 +289,7 @@ pub struct TimelineEventJson {
 ///
 /// **Cycle 8.47 follow-up to PR #76.** The Privacy Dashboard's destructive
 /// actions (`Delete this event`, `Delete last 24 hours`, `Delete everything`)
-/// need a machine-readable success signal so the SwiftUI banner can render
+/// need a machine-readable success signal so the `SwiftUI` banner can render
 /// "3 events removed; 12 KB reclaimed" rather than a bare "OK". The shape
 /// is content-free: only counts + a boolean for whether the VACUUM
 /// succeeded (a VACUUM failure — disk full, permission — is surfaced as
@@ -298,7 +298,7 @@ pub struct TimelineEventJson {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeleteResultJson {
     /// Rows removed from the `events` table. CASCADE-deleted child rows
-    /// (event_vectors, chunks, entity_mentions) are NOT counted here.
+    /// (`event_vectors`, `chunks`, `entity_mentions`) are NOT counted here.
     pub events_deleted: u64,
     /// Whether the post-delete `VACUUM` succeeded (freed disk space).
     /// `false` on VACUUM error — the DELETE itself may still have
@@ -309,7 +309,7 @@ pub struct DeleteResultJson {
 
 /// Content-free aggregate returned by [`mci_brain_ffi_summary_stats`].
 /// Mirrors [`mci_brain::BrainStats`] for the count + oldest/newest, plus
-/// the on-disk byte size of the brain SQLite file. Zero row content is
+/// the on-disk byte size of the brain `SQLite` file. Zero row content is
 /// exposed — this is the payload for the Privacy Dashboard's "MCI has
 /// captured X events across Y days, using Z MB of encrypted storage"
 /// summary card. Amy's directive (2026-07-13): "show the full control,
@@ -324,7 +324,7 @@ pub struct SummaryStatsJson {
     /// Largest `events.ts_us` in microseconds since epoch, or `None` on
     /// an empty store.
     pub newest_ts_us: Option<u64>,
-    /// On-disk byte count of the SQLCipher `.sqlite` file. `0` if the
+    /// On-disk byte count of the `SQLCipher` `.sqlite` file. `0` if the
     /// file cannot be stat'd (should never happen since the FFI is
     /// holding an open handle to it, but graceful fallback).
     pub disk_bytes: u64,
@@ -345,13 +345,13 @@ pub struct Handle {
     /// open new files or write — the FFI is READ-ONLY by construction; the
     /// Swift caller is the one that stats + decodes the referenced blob.
     blob_dir: PathBuf,
-    /// Absolute path to the brain SQLite file. Used by
+    /// Absolute path to the brain `SQLite` file. Used by
     /// [`mci_brain_ffi_summary_stats`] to `fs::metadata(...)` the file and
     /// by the mutation entry points (delete / wipe) to briefly open a
     /// writer connection when the recall UI's Privacy Dashboard fires a
     /// destructive action.
     brain_path: PathBuf,
-    /// Retained SQLCipher key. Needed so the mutation entry points can
+    /// Retained `SQLCipher` key. Needed so the mutation entry points can
     /// briefly open a *writer* connection to run DELETE + VACUUM. The
     /// underlying `DbKey` type zeroizes on drop; the key material was
     /// already in-process via the read-only `store` handle, so retaining
@@ -362,10 +362,11 @@ pub struct Handle {
     /// mutate the brain. The cycle-8.46 Privacy Dashboard needs an
     /// explicit, user-gated escape hatch (typed-word "DELETE" confirmation
     /// + two-step token for wipe). This field is the plumbing that turns
-    /// the escape hatch on for the four enumerated methods and nothing
-    /// else — every other FFI still routes through `store` (read-only).
-    /// The read-only invariant test in `tests/readonly_invariant.rs` now
-    /// allow-lists the four mutation methods by name.
+    ///
+    /// The escape hatch is available only to the four enumerated methods;
+    /// every other FFI still routes through `store` (read-only). The
+    /// read-only invariant test in `tests/readonly_invariant.rs` allow-lists
+    /// the four mutation methods by name.
     db_key: DbKey,
     /// Pending wipe token — the two-step confirmation for
     /// [`mci_brain_ffi_wipe_brain`]. Filled by
@@ -444,8 +445,7 @@ pub unsafe extern "C" fn mci_brain_ffi_open(
     // brain into Application Support).
     let blob_dir = p
         .parent()
-        .map(|parent| parent.join("blobs"))
-        .unwrap_or_else(|| PathBuf::from("blobs"));
+        .map_or_else(|| PathBuf::from("blobs"), |parent| parent.join("blobs"));
     // Retain a clone of the DbKey so the mutation entry points can open
     // a transient writer. `DbKey: Clone` copies the 32-byte buffer; both
     // clones zeroize on drop.
@@ -807,8 +807,7 @@ pub unsafe extern "C" fn mci_brain_ffi_timeline_events(
     let range = query.end_ts_us - query.start_ts_us;
     if range > TIMELINE_MAX_RANGE_US {
         set_last_error(&format!(
-            "mci_brain_ffi_timeline_events: range {} us exceeds cap {} us (~90 days)",
-            range, TIMELINE_MAX_RANGE_US
+            "mci_brain_ffi_timeline_events: range {range} us exceeds cap {TIMELINE_MAX_RANGE_US} us (~90 days)"
         ));
         return ptr::null_mut();
     }
@@ -1000,7 +999,7 @@ pub unsafe extern "C" fn mci_brain_ffi_list_episodes(h: *mut Handle, limit: u32)
 // ---------------------------------------------------------------------------
 
 /// JSON value type for one daily brief row. Mirrors [`mci_brain::BriefRow`]
-/// with snake_case keys for Swift `Codable` interop.
+/// with `snake_case` keys for Swift `Codable` interop.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BriefJson {
     /// Stable `briefs.id` rowid.
@@ -1128,7 +1127,7 @@ pub unsafe extern "C" fn mci_brain_ffi_brief_dates(h: *mut Handle, limit: u32) -
 
 /// Content-free aggregate summary for the Privacy Dashboard's top card.
 /// Returns a JSON object of [`SummaryStatsJson`] on success — total event
-/// count, oldest/newest ts, and the on-disk byte size of the SQLCipher
+/// count, oldest/newest ts, and the on-disk byte size of the `SQLCipher`
 /// brain file. NO event content, no bundle-id list, no window titles.
 ///
 /// The `disk_bytes` field is the `fs::metadata(brain_path).len()` of the
@@ -1163,9 +1162,7 @@ pub unsafe extern "C" fn mci_brain_ffi_summary_stats(h: *mut Handle) -> *mut c_c
     // Best-effort disk size. A missing/unreadable brain file falls back to
     // 0 — the dashboard's summary card shows "0 MB" which is honest under
     // that (impossible) failure mode rather than a full-screen error.
-    let disk_bytes = std::fs::metadata(&handle.brain_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let disk_bytes = std::fs::metadata(&handle.brain_path).map_or(0, |metadata| metadata.len());
     let out = SummaryStatsJson {
         total_events: stats.event_count,
         oldest_ts_us: stats.oldest_ts_us,
@@ -1194,8 +1191,8 @@ pub unsafe extern "C" fn mci_brain_ffi_summary_stats(h: *mut Handle) -> *mut c_c
 // violation and the test will fail.
 // ---------------------------------------------------------------------------
 
-/// Delete a single event by id. CASCADE removes event_vectors, chunks,
-/// entity_mentions rows referencing this event id (per the migration-0001
+/// Delete a single event by id. CASCADE removes `event_vectors`, `chunks`,
+/// `entity_mentions` rows referencing this event id (per the migration-0001
 /// / migration-0004 ON DELETE CASCADE clauses). Also `VACUUM`s so the
 /// freed pages are returned to the OS immediately.
 ///
@@ -1212,6 +1209,11 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
     h: *mut Handle,
     event_id_json: *const c_char,
 ) -> *mut c_char {
+    #[derive(Deserialize)]
+    struct Query {
+        event_id: u64,
+    }
+
     if h.is_null() {
         set_last_error("mci_brain_ffi_delete_event: null handle");
         return ptr::null_mut();
@@ -1228,11 +1230,7 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
         set_last_error("mci_brain_ffi_delete_event: non-UTF8 event_id_json");
         return ptr::null_mut();
     };
-    #[derive(Deserialize)]
-    struct Q {
-        event_id: u64,
-    }
-    let q: Q = match serde_json::from_str(q_str) {
+    let q: Query = match serde_json::from_str(q_str) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_delete_event: bad query JSON: {e}"));
@@ -1323,15 +1321,11 @@ pub unsafe extern "C" fn mci_brain_ffi_prepare_wipe(h: *mut Handle) -> *mut c_ch
             return ptr::null_mut();
         }
     };
-    match handle.pending_wipe.lock() {
-        Ok(mut slot) => {
-            *slot = Some((Instant::now(), token.clone()));
-        }
-        Err(_) => {
-            set_last_error("mci_brain_ffi_prepare_wipe: pending_wipe mutex poisoned");
-            return ptr::null_mut();
-        }
-    }
+    let Ok(mut slot) = handle.pending_wipe.lock() else {
+        set_last_error("mci_brain_ffi_prepare_wipe: pending_wipe mutex poisoned");
+        return ptr::null_mut();
+    };
+    *slot = Some((Instant::now(), token.clone()));
     // Emit the raw token as a JSON string literal so the Swift caller can
     // JSONDecoder-decode it just like the other returners.
     json_to_c_string(&token)
@@ -1384,13 +1378,11 @@ pub unsafe extern "C" fn mci_brain_ffi_wipe_brain(
     // Consume the pending token unconditionally — any call to `wipe`
     // (success, wrong, or expired) invalidates it so a token cannot be
     // retried after a failure.
-    let pending = match handle.pending_wipe.lock() {
-        Ok(mut slot) => slot.take(),
-        Err(_) => {
-            set_last_error("mci_brain_ffi_wipe_brain: pending_wipe mutex poisoned");
-            return ptr::null_mut();
-        }
+    let Ok(mut slot) = handle.pending_wipe.lock() else {
+        set_last_error("mci_brain_ffi_wipe_brain: pending_wipe mutex poisoned");
+        return ptr::null_mut();
     };
+    let pending = slot.take();
     let Some((issued_at, expected)) = pending else {
         set_last_error("mci_brain_ffi_wipe_brain: no pending wipe — call prepare_wipe first");
         return ptr::null_mut();
@@ -1405,7 +1397,7 @@ pub unsafe extern "C" fn mci_brain_ffi_wipe_brain(
         set_last_error("mci_brain_ffi_wipe_brain: wipe token mismatch");
         return ptr::null_mut();
     }
-    match with_writer(handle, |writer| writer.wipe_all()) {
+    match with_writer(handle, SqlCipherBrainStore::wipe_all) {
         Ok(deleted) => json_to_c_string(&DeleteResultJson {
             events_deleted: deleted,
             vacuum_ok: true,
@@ -1502,7 +1494,7 @@ pub const TIMELINE_MAX_RANGE_US: u64 = 90 * 24 * 60 * 60 * 1_000_000;
 
 /// **V2-P13.** Hard cap on rows fetched from `recent_events` before
 /// filtering to the window. Bounds the per-call allocation regardless of
-/// how many events exist in the requested window. 10_000 events × ~200
+/// how many events exist in the requested window. `10_000` events × ~200
 /// bytes/row ≈ 2 MB — well inside the FFI's memory budget.
 pub const TIMELINE_HARD_CAP: usize = 10_000;
 
@@ -1510,7 +1502,7 @@ pub const TIMELINE_HARD_CAP: usize = 10_000;
 /// [`mci_brain_ffi_timeline_events`] call. Above this count the FFI
 /// downsamples: one representative event per time bucket, with bucket
 /// width picked so the total row count fits under the cap. The recall UI
-/// strip renders ~1 card per 40 px, so 1_000 rows suffices for a
+/// strip renders ~1 card per 40 px, so `1_000` rows suffices for a
 /// full-screen day view on a 4K display.
 pub const TIMELINE_MAX_EVENTS: usize = 1_000;
 
@@ -2140,7 +2132,9 @@ mod tests {
         let dir = std::path::Path::new("/tmp/mci/blobs");
         let p = thumbnail_path_for(dir, Some(&hex)).expect("expected path");
         assert!(p.starts_with("/tmp/mci/blobs/"));
-        assert!(p.ends_with(".bin"));
+        assert!(std::path::Path::new(&p)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("bin")));
     }
 
     #[test]
@@ -2571,9 +2565,8 @@ mod tests {
     fn downsample_below_cap_is_identity() {
         // Fewer events than the cap → return input unchanged, preserving
         // order.
-        let events: Vec<TimelineEventJson> = (0..10)
-            .map(|i| mk_te((i as u64) * TIMELINE_MINUTE_US, i))
-            .collect();
+        let events: Vec<TimelineEventJson> =
+            (0..10).map(|i| mk_te(i * TIMELINE_MINUTE_US, i)).collect();
         let out = downsample_timeline(events.clone(), 10 * TIMELINE_MINUTE_US);
         assert_eq!(out.len(), 10);
         assert_eq!(out.first().map(|e| e.event_id), Some(0));

@@ -18,9 +18,9 @@
 //! - **Input:** `"attention_mask"`, `MultiArray` `Int32` `[1, SEQ_LEN]`
 //! - **Output:** `"logits"`, `MultiArray` `Float16` `[1, SEQ_LEN, VOCAB]`
 //!
-//! SEQ_LEN is fixed at conversion time (default 2048). The model is
+//! `SEQ_LEN` is fixed at conversion time (default 2048). The model is
 //! stateless; the Rust side pads shorter sequences and constructs an
-//! attention_mask (1 = real token, 0 = padding).
+//! `attention_mask` (1 = real token, 0 = padding).
 
 use std::path::Path;
 
@@ -40,7 +40,7 @@ const DEFAULT_SEQ_LEN: usize = 2048;
 /// the prose itself.
 const DEFAULT_TEMPERATURE: f32 = 0.3;
 const DEFAULT_TOP_P: f32 = 0.9;
-/// HuggingFace `generate()` default. Penalizes tokens that have
+/// `HuggingFace` `generate()` default. Penalizes tokens that have
 /// recently appeared by dividing their logit (or multiplying if
 /// negative) by this factor. Critical for INT4-palettized 1.7B-class
 /// models whose output otherwise collapses into 4-token repetitive
@@ -53,6 +53,7 @@ const REPETITION_WINDOW: usize = 64;
 
 /// Map a generic [`CoreMLError`] into the brief-author error surface,
 /// preserving the human-readable message.
+#[allow(clippy::needless_pass_by_value)]
 fn map_coreml(err: CoreMLError) -> GenerateError {
     GenerateError::Backend(err.to_string())
 }
@@ -115,7 +116,7 @@ impl Qwen3CoreMLBackend {
 
     /// Run a single forward pass on the given token IDs.
     ///
-    /// Pads `input_ids` to `self.seq_len` and supplies an attention_mask.
+    /// Pads `input_ids` to `self.seq_len` and supplies an `attention_mask`.
     /// Returns logits for the last real token position.
     ///
     /// # Why `attention_mask = [1; seq_len]` (all-ones), not partial
@@ -366,7 +367,7 @@ fn argmax(logits: &[f32]) -> i32 {
 /// NOT cryptographic — fine for text generation diversity.
 fn simple_random_f32() -> f32 {
     use std::sync::atomic::{AtomicU64, Ordering};
-    static STATE: AtomicU64 = AtomicU64::new(0x5DEE_CE66_D_u64);
+    static STATE: AtomicU64 = AtomicU64::new(0x0005_DEEC_E66D_u64);
     let mut s = STATE.load(Ordering::Relaxed);
     s ^= s << 13;
     s ^= s >> 7;
@@ -395,6 +396,7 @@ pub fn try_load_qwen3_backend(
 
 /// Load the best available backend: Qwen3 Core ML if the model exists,
 /// otherwise the stub.
+#[must_use]
 pub fn load_backend_or_stub(
     model_path: &Path,
     tokenizer_dir: &Path,
@@ -459,7 +461,7 @@ mod tests {
     fn sample_token_returns_valid_index() {
         let logits = vec![1.0; 100];
         let token = sample_token(&logits, 1.0, 0.9);
-        assert!(token >= 0 && token < 100);
+        assert!((0..100).contains(&token));
     }
 
     #[test]

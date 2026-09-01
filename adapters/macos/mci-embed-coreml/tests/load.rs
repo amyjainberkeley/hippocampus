@@ -49,15 +49,12 @@ fn load_empty_path_is_invalid_input() {
 fn embedder_model_path() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir.join("../../..").canonicalize().ok()?;
-    for c in [
+    [
         repo_root.join("models/ArcticEmbedS_INT8.mlmodelc"),
         repo_root.join("models/ArcticEmbedS_INT8.mlpackage"),
-    ] {
-        if c.exists() {
-            return Some(c);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|candidate| candidate.exists())
 }
 
 /// PRODUCTION-PATH smoke: the exact loader the live agent uses

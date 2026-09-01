@@ -10,7 +10,7 @@
 //!
 //! - [`crate::qwen3`] — Qwen3-1.7B brief generation (autoregressive,
 //!   `input_ids` + `attention_mask` → last-position `logits`).
-//! - (V2-P5+) a GLiNER NER shim lands on top of this wrapper in a later
+//! - (V2-P5+) a `GLiNER` NER shim lands on top of this wrapper in a later
 //!   phase of the same spike: multi-tensor IO + a span-grid decoder.
 //!
 //! This is the generic core introduced by the Path-A refactor
@@ -189,7 +189,7 @@ impl CoreMLModel {
     ///
     /// Returns a [`Prediction`] from which named output features can be
     /// read with [`Prediction::multi_array`]. Any number of inputs is
-    /// supported (Qwen3 passes two; GLiNER passes six), which is the
+    /// supported (Qwen3 passes two; `GLiNER` passes six), which is the
     /// whole point of the Path-A generic core.
     pub fn predict(&self, inputs: &[(&str, &MLMultiArray)]) -> Result<Prediction, CoreMLError> {
         let keys: Vec<Retained<NSString>> = inputs
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn f16_to_f32_converts_common_values() {
-        assert_eq!(f16_to_f32(0x0000), 0.0);
+        assert_eq!(f16_to_f32(0x0000).to_bits(), 0.0_f32.to_bits());
         assert!((f16_to_f32(0x3C00) - 1.0).abs() < 1e-6);
         assert!((f16_to_f32(0xBC00) - (-1.0)).abs() < 1e-6);
         assert!((f16_to_f32(0x3800) - 0.5).abs() < 1e-6);

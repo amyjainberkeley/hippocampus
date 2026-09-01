@@ -45,12 +45,7 @@ fn model_path() -> Option<PathBuf> {
         repo_root.join("models/ArcticEmbedS_INT8.mlmodelc"),
         repo_root.join("models/ArcticEmbedS_INT8.mlpackage"),
     ];
-    for c in candidates {
-        if c.exists() {
-            return Some(c);
-        }
-    }
-    None
+    candidates.into_iter().find(|candidate| candidate.exists())
 }
 
 fn reference_path() -> Option<PathBuf> {
@@ -263,13 +258,13 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (na * nb)
 }
 
-/// Minimal NumPy `.npy` v1.0 / v2.0 reader, restricted to the exact
+/// Minimal `NumPy` `.npy` v1.0 / v2.0 reader, restricted to the exact
 /// shape we expect: `dtype=float32`, C-order, 2-D `[rows, 384]`.
 ///
 /// Format reference: <https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html>
 ///
 /// We only handle the v1.0 / v2.0 little-endian `'<f4'` / `'|f4'` /
-/// `'<f4'` dtype string, fortran_order=False, exactly two shape dims.
+/// `'<f4'` dtype string, `fortran_order=False`, exactly two shape dims.
 /// Anything else is an error — the orchestrator produces the file with
 /// `numpy.save`, which always writes a layout we can read.
 fn read_npy_f32_2d(path: &std::path::Path) -> Result<Vec<Vec<f32>>, String> {

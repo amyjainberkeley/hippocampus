@@ -17,7 +17,7 @@
 //!   shim (ADR-0028) implementing
 //!   `mci_brief::llama_backend::LlamaBackend`.
 //! - [`tokenizer`] — Qwen3 byte-level BPE, used by [`qwen3`].
-//! - (V2-P5+) a GLiNER NER shim lands on top of [`model`] in a later
+//! - (V2-P5+) a `GLiNER` NER shim lands on top of [`model`] in a later
 //!   phase of the same spike.
 //!
 //! # Adapter-below-the-seam
