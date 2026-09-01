@@ -20,6 +20,7 @@ BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
 INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
 CANONICAL_APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
+GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
 
 SKIP_BUILD=0
 BUILD_PROFILE="release"
@@ -81,10 +82,19 @@ verify_brand_assets() {
     fi
 }
 
+verify_legal_assets() {
+    if [[ ! -f "$GENERATE_EULA" ]]; then
+        echo "ERROR: Legal artifact generator not found at $GENERATE_EULA" >&2
+        return 1
+    fi
+    python3 "$GENERATE_EULA" --check
+}
+
 verify_brand_assets
+verify_legal_assets
 
 if [[ "$VERIFY_ASSETS_ONLY" -eq 1 ]]; then
-    echo "Installer brand assets match the canonical app identity."
+    echo "Installer brand and legal assets match their canonical sources."
     exit 0
 fi
 
@@ -591,14 +601,9 @@ if [[ ! -f "$BACKGROUND_PNG" ]]; then
     fi
 fi
 
-# Regenerate EULA / SLA resources if missing
+# Legal artifacts were verified against their source before any release work.
 EULA_RTF="$INSTALLER_ASSETS/EULA.rtf"
 SLA_R="$INSTALLER_ASSETS/sla.r"
-GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
-if [[ ! -f "$EULA_RTF" || ! -f "$SLA_R" ]] && [[ -f "$GENERATE_EULA" ]]; then
-    echo "Generating EULA.rtf + sla.r from terms-of-service.md..."
-    python3 "$GENERATE_EULA"
-fi
 
 # Create .background directory (hidden in DMG)
 if [[ -f "$BACKGROUND_PNG" ]]; then

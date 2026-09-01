@@ -180,14 +180,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// tailing across those transitions).
     private let tccNotifier = TCCRevokedNotifier()
     private var tccStderrTail: TCCHelperStderrTail?
-    private enum TerminationIntent: Equatable {
-        case quit
-        case restart
-    }
-    private var terminationIntent: TerminationIntent = .quit
+    private var terminationIntent: ApplicationTerminationIntent = .quit
     private var terminationTask: Task<Void, Never>?
-    private var terminationWasVerified = false
     private var didCleanUpLifecycle = false
+    private lazy var terminationCoordinator = ApplicationTerminationCoordinator(
+        supervisor: supervisor,
+        restartLauncher: DelayedApplicationRestartLauncher(
+            bundlePath: Bundle.main.bundlePath
+        ),
+        cleanup: { [weak self] in self?.cleanUpLifecycle() },
+        onFailure: { [weak self] error in self?.presentShutdownFailure(error) }
+    )
 
     override init() {
         // `ProcessSupervisor.init` is `@MainActor`; this class is too
@@ -399,7 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(
         _ sender: NSApplication
     ) -> NSApplication.TerminateReply {
-        if terminationWasVerified { return .terminateNow }
+        if terminationCoordinator.hasVerifiedShutdown { return .terminateNow }
         if terminationTask != nil { return .terminateLater }
 
         terminationTask = Task { @MainActor [weak self] in
@@ -407,24 +410,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sender.reply(toApplicationShouldTerminate: false)
                 return
             }
-            do {
-                try await self.supervisor.shutdownAndWait()
-                if self.terminationIntent == .restart {
-                    try self.launchRestartAfterExit()
-                }
-                self.cleanUpLifecycle()
-                self.terminationWasVerified = true
-                sender.reply(toApplicationShouldTerminate: true)
-            } catch {
+            let didTerminate = await self.terminationCoordinator.terminate(
+                intent: self.terminationIntent,
+                reply: { sender.reply(toApplicationShouldTerminate: $0) }
+            )
+            if !didTerminate {
                 self.terminationTask = nil
                 self.terminationIntent = .quit
-                let alert = NSAlert()
-                alert.messageText = "Hippocampus could not quit safely"
-                alert.informativeText = "A capture process is still running. Hippocampus will stay open so you can try again.\n\n\(error.localizedDescription)"
-                alert.alertStyle = .critical
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-                sender.reply(toApplicationShouldTerminate: false)
             }
         }
         return .terminateLater
@@ -442,16 +434,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tccStderrTail = nil
     }
 
-    private func launchRestartAfterExit() throws {
-        let task = ChildProcessEnvironment.makeProcess()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = [
-            "-c",
-            "sleep 1; exec /usr/bin/open \"$1\"",
-            "hippocampus-restart",
-            Bundle.main.bundlePath,
-        ]
-        try task.run()
+    private func presentShutdownFailure(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Hippocampus could not quit safely"
+        alert.informativeText = "A capture process is still running. Hippocampus will stay open so you can try again.\n\n\(error.localizedDescription)"
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     /// Defensive override against AppKit's default "terminate after

@@ -1,4 +1,5 @@
 import Foundation
+import HippocampusKit
 
 @main
 struct RuntimeConfigBehavior {
@@ -34,6 +35,23 @@ struct RuntimeConfigBehavior {
             !RuntimeConfig.parseBool(key: "capture_enabled", in: "capture_enabled = true\n\"capture_enabled\" = false"),
             "quoted and bare semantic duplicates must fail closed"
         )
+        for malformedDocument in [
+            "capture_enabled = true\n[unterminated",
+            "capture_enabled = true\nunrelated =",
+            "capture_enabled = true\nunrelated = [1, 2",
+        ] {
+            precondition(
+                !RuntimeConfig.parseBool(key: "capture_enabled", in: malformedDocument),
+                "malformed whole document authorized capture: \(malformedDocument)"
+            )
+        }
+        precondition(
+            !RuntimeConfig.parseBool(
+                key: "capture_enabled",
+                in: "capture_enabled = true\n\"\\u0063apture_enabled\" = false"
+            ),
+            "escaped semantic duplicate authorized capture"
+        )
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("hippocampus-runtime-config-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -48,23 +66,42 @@ struct RuntimeConfigBehavior {
 
         let config = RuntimeConfig(path: path)
         precondition(!config.captureEnabled, "duplicate input must fail closed")
-        try config.setCaptureEnabled(false)
-
-        let relaunched = RuntimeConfig(path: path)
-        let content = try String(contentsOf: path, encoding: .utf8)
-        let exactAssignments = content.split(separator: "\n").filter {
-            let trimmed = $0.trimmingCharacters(in: .whitespaces)
-            return trimmed.hasPrefix("capture_enabled =")
-        }
-        precondition(!relaunched.captureEnabled, "capture must remain off after relaunch")
-        precondition(exactAssignments.count == 1, "duplicates must collapse")
-        precondition(content.contains("capture_enabled_backup = true"), "prefix sibling lost")
-        precondition(content.contains("# capture_enabled = true"), "comment lost")
-        precondition(content.contains("# user preference"), "inline comment lost")
+        let duplicateInput = try String(contentsOf: path, encoding: .utf8)
+        do {
+            try config.setCaptureEnabled(false)
+            preconditionFailure("duplicate document write must be rejected")
+        } catch {}
+        let duplicateAfterRejectedWrite = try String(contentsOf: path, encoding: .utf8)
+        precondition(
+            duplicateAfterRejectedWrite == duplicateInput,
+            "rejected duplicate document was mutated"
+        )
+        precondition(!RuntimeConfig(path: path).captureEnabled, "capture must remain off after relaunch")
 
         try "capture_enabled = 1\n".write(to: path, atomically: true, encoding: .utf8)
         precondition(!RuntimeConfig(path: path).captureEnabled, "numeric authority must stay off")
         precondition(!RuntimeConfig(path: path).captureEnabled, "numeric authority changed on relaunch")
+        do {
+            try RuntimeConfig(path: path).setCaptureEnabled(false)
+            preconditionFailure("wrong-typed authority write must be rejected")
+        } catch {}
+        let wrongTypedAfterRejectedWrite = try String(contentsOf: path, encoding: .utf8)
+        precondition(
+            wrongTypedAfterRejectedWrite == "capture_enabled = 1\n",
+            "rejected wrong-typed authority was mutated"
+        )
+
+        let escapedDuplicate = "capture_enabled = true\n\"\\u0063apture_enabled\" = false\n"
+        try escapedDuplicate.write(to: path, atomically: true, encoding: .utf8)
+        do {
+            try RuntimeConfig(path: path).setCaptureEnabled(false)
+            preconditionFailure("escaped semantic duplicate write must be rejected")
+        } catch {}
+        let escapedDuplicateAfterRejectedWrite = try String(contentsOf: path, encoding: .utf8)
+        precondition(
+            escapedDuplicateAfterRejectedWrite == escapedDuplicate,
+            "rejected escaped semantic duplicate was mutated"
+        )
 
         try """
         "capture_enabled" = true # first semantic assignment
@@ -73,16 +110,30 @@ struct RuntimeConfigBehavior {
         capture_enabled_backup = true
         """.write(to: path, atomically: true, encoding: .utf8)
         precondition(!RuntimeConfig(path: path).captureEnabled, "semantic duplicates must fail closed")
-        try RuntimeConfig(path: path).setCaptureEnabled(false)
-        let collapsed = try String(contentsOf: path, encoding: .utf8)
+        let semanticDuplicateInput = try String(contentsOf: path, encoding: .utf8)
+        do {
+            try RuntimeConfig(path: path).setCaptureEnabled(false)
+            preconditionFailure("semantic duplicate write must be rejected")
+        } catch {}
+        let semanticDuplicateAfterRejectedWrite = try String(contentsOf: path, encoding: .utf8)
         precondition(
-            collapsed.split(separator: "\n").filter {
-                RuntimeConfig.assignmentKey(in: String($0)) == "capture_enabled"
-            }.count == 1,
-            "semantic duplicates must collapse"
+            semanticDuplicateAfterRejectedWrite == semanticDuplicateInput,
+            "rejected semantic duplicate document was mutated"
         )
-        precondition(collapsed.contains("capture_enabled_backup = true"), "prefix sibling lost")
-        precondition(!RuntimeConfig(path: path).captureEnabled, "collapsed relaunch must remain off")
+        precondition(!RuntimeConfig(path: path).captureEnabled, "duplicate relaunch must remain off")
+
+        let malformed = "capture_enabled = true\nunrelated = [1, 2\n"
+        try malformed.write(to: path, atomically: true, encoding: .utf8)
+        do {
+            try RuntimeConfig(path: path).setCaptureEnabled(false)
+            preconditionFailure("malformed whole document write must be rejected")
+        } catch {}
+        let malformedAfterRejectedWrite = try String(contentsOf: path, encoding: .utf8)
+        precondition(
+            malformedAfterRejectedWrite == malformed,
+            "rejected malformed document was mutated"
+        )
+        precondition(!RuntimeConfig(path: path).captureEnabled, "malformed relaunch must remain off")
 
         try "[capture]\ncapture_enabled = true\n".write(
             to: path,

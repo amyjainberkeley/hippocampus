@@ -3,11 +3,9 @@ import Foundation
 
 /// Boot-time hardware architecture guard.
 ///
-/// Hippocampus's local-AI stack (Core ML brief-author, on-device
-/// embeddings, Neural Engine inference) is Apple Silicon-only by
-/// design. On Intel Macs — including Rosetta-translated launches on
-/// otherwise-unsupported machines — Core ML backends silently degrade
-/// or crash. Cycle 8.44 product-readiness audit flagged this as a
+/// Hippocampus's local-AI stack (CPU-pinned Core ML brief author and
+/// embeddings plus Apple-Silicon-native components) currently supports
+/// Apple Silicon only. Cycle 8.44 product-readiness audit flagged this as a
 /// cheap high-leverage fail-fast: hard block at boot with a clear
 /// NSAlert rather than let the user hit a mid-session crash.
 ///

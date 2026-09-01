@@ -17,8 +17,8 @@ enum SupervisorProcessShutdownError: LocalizedError, Equatable {
 /// Completion means each tracked Foundation process has exited and its PID no
 /// longer resolves in the process table.
 @MainActor
-enum SupervisorProcessShutdown {
-    static func stop(
+package enum SupervisorProcessShutdown {
+    package static func stop(
         processes: [Process],
         termTimeout: TimeInterval,
         killTimeout: TimeInterval = 1
@@ -47,7 +47,7 @@ enum SupervisorProcessShutdown {
         }
     }
 
-    static func pidIsAlive(_ pid: pid_t) -> Bool {
+    package static func pidIsAlive(_ pid: pid_t) -> Bool {
         guard pid > 0 else { return false }
         if Darwin.kill(pid, 0) == 0 { return true }
         return errno == EPERM

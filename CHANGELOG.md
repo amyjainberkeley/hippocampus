@@ -17,6 +17,7 @@ commits are intentionally omitted from release notes.
 
 - Pause or resume capture and configure app and URL exclusions before content enters the memory pipeline.
 - Manage local retention, export, and deletion controls for SQLCipher-backed memory storage.
+- Retention removes expired database rows and compacts local storage; it does not claim range-key erasure.
 
 ### Integrations
 
@@ -26,6 +27,7 @@ commits are intentionally omitted from release notes.
 ### Preview limitations
 
 - Live capture remains off by default until the user enables the persisted capture setting. Each change is accepted only after generation-bound helper readiness; physical-Mac TCC and sustained-capture verification are still pending.
+- Runtime capture preferences are accepted only after whole-document TOML validation; malformed syntax, wrong types, and duplicate semantic keys fail closed.
 - Quit and Quit-and-Restart now wait for verified helper and agent shutdown, escalating from TERM to KILL when needed, before the app exits or relaunches.
 - Legacy `dev.key` custody migrates add-only into the macOS file Keychain and removes plaintext only after validation. Cross-version Developer ID ACL continuity for Hippocampus, the capture helper, the agent, and Recall remains an owner release gate.
 - The Key Wrap Audit reports whether the item is readable without treating that read as proof of its access-control object. ACL inspection and signed cross-version continuity remain release gates.

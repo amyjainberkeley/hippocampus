@@ -140,6 +140,51 @@ final class RuntimeConfigTests: XCTestCase {
         XCTAssertFalse(RuntimeConfig.parseBool(key: "k", in: "'k' = true\nk = false"))
     }
 
+    func test_parseBool_fails_closed_when_any_part_of_document_is_malformed() {
+        for document in [
+            "capture_enabled = true\n[unterminated",
+            "capture_enabled = true\nunrelated =",
+            "capture_enabled = true\nunrelated = [1, 2",
+        ] {
+            XCTAssertFalse(
+                RuntimeConfig.parseBool(key: "capture_enabled", in: document),
+                "partial parsing must never authorize capture: \(document)"
+            )
+        }
+    }
+
+    func test_parseBool_fails_closed_on_escaped_semantic_duplicate() {
+        XCTAssertFalse(RuntimeConfig.parseBool(
+            key: "capture_enabled",
+            in: "capture_enabled = true\n\"\\u0063apture_enabled\" = false"
+        ))
+    }
+
+    func test_write_rejects_malformed_document_without_mutating_it() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let malformed = "capture_enabled = true\nunrelated = [1, 2\n"
+        try malformed.write(to: cfg.path, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try cfg.setCaptureEnabled(false))
+        XCTAssertEqual(try String(contentsOf: cfg.path, encoding: .utf8), malformed)
+        XCTAssertFalse(RuntimeConfig(path: cfg.path).captureEnabled)
+    }
+
+    func test_write_rejects_wrong_type_and_escaped_duplicate_without_mutation() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for invalid in [
+            "capture_enabled = 1\n",
+            "capture_enabled = true\n\"\\u0063apture_enabled\" = false\n",
+        ] {
+            try invalid.write(to: cfg.path, atomically: true, encoding: .utf8)
+            XCTAssertThrowsError(try cfg.setCaptureEnabled(false))
+            XCTAssertEqual(try String(contentsOf: cfg.path, encoding: .utf8), invalid)
+            XCTAssertFalse(RuntimeConfig(path: cfg.path).captureEnabled)
+        }
+    }
+
     func test_invalid_numeric_capture_authority_stays_off_after_relaunch() throws {
         let (cfg, dir) = try tmpConfig()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -168,7 +213,23 @@ final class RuntimeConfigTests: XCTestCase {
         XCTAssertTrue(content.contains("# capture_enabled = true"))
     }
 
-    func test_capture_write_collapses_duplicate_exact_keys_deterministically() throws {
+    func test_escaped_root_key_updates_after_full_parse_and_survives_relaunch() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "\"\\u0063apture_enabled\" = true # escaped key\n".write(
+            to: cfg.path,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try cfg.setCaptureEnabled(false)
+        let content = try String(contentsOf: cfg.path, encoding: .utf8)
+
+        XCTAssertEqual(content, "capture_enabled = false # escaped key\n")
+        XCTAssertFalse(RuntimeConfig(path: cfg.path).captureEnabled)
+    }
+
+    func test_capture_write_rejects_duplicate_exact_keys_without_mutation() throws {
         let (cfg, dir) = try tmpConfig()
         defer { try? FileManager.default.removeItem(at: dir) }
         try """
@@ -179,20 +240,13 @@ final class RuntimeConfigTests: XCTestCase {
         """.write(to: cfg.path, atomically: true, encoding: .utf8)
 
         XCTAssertFalse(cfg.captureEnabled, "ambiguous duplicate input must fail closed")
-        try cfg.setCaptureEnabled(true)
-        let content = try String(contentsOf: cfg.path, encoding: .utf8)
-        let exactAssignments = content.split(separator: "\n").filter {
-            $0.trimmingCharacters(in: .whitespaces).hasPrefix("capture_enabled =")
-        }
-
-        XCTAssertEqual(exactAssignments.count, 1)
-        XCTAssertTrue(content.contains("capture_enabled = true # keep this comment"))
-        XCTAssertTrue(content.contains("# separator remains"))
-        XCTAssertTrue(content.contains("capture_enabled_backup = true"))
-        XCTAssertTrue(RuntimeConfig(path: cfg.path).captureEnabled)
+        let original = try String(contentsOf: cfg.path, encoding: .utf8)
+        XCTAssertThrowsError(try cfg.setCaptureEnabled(true))
+        XCTAssertEqual(try String(contentsOf: cfg.path, encoding: .utf8), original)
+        XCTAssertFalse(RuntimeConfig(path: cfg.path).captureEnabled)
     }
 
-    func test_capture_write_collapses_bare_and_quoted_semantic_duplicates() throws {
+    func test_capture_write_rejects_semantic_duplicates_without_mutation() throws {
         let (cfg, dir) = try tmpConfig()
         defer { try? FileManager.default.removeItem(at: dir) }
         try """
@@ -203,17 +257,9 @@ final class RuntimeConfigTests: XCTestCase {
         """.write(to: cfg.path, atomically: true, encoding: .utf8)
 
         XCTAssertFalse(cfg.captureEnabled)
-        try cfg.setCaptureEnabled(false)
-        let content = try String(contentsOf: cfg.path, encoding: .utf8)
-
-        XCTAssertEqual(
-            content.split(separator: "\n").filter {
-                RuntimeConfig.assignmentKey(in: String($0)) == "capture_enabled"
-            }.count,
-            1
-        )
-        XCTAssertTrue(content.contains("capture_enabled = false # preserve first comment"))
-        XCTAssertTrue(content.contains("capture_enabled_backup = true"))
+        let original = try String(contentsOf: cfg.path, encoding: .utf8)
+        XCTAssertThrowsError(try cfg.setCaptureEnabled(false))
+        XCTAssertEqual(try String(contentsOf: cfg.path, encoding: .utf8), original)
         XCTAssertFalse(RuntimeConfig(path: cfg.path).captureEnabled)
     }
 

@@ -2,7 +2,7 @@
 import Foundation
 import Darwin
 
-struct SupervisorProcessGeneration: Sendable, Equatable {
+package struct SupervisorProcessGeneration: Sendable, Equatable {
     let id: String
     let readinessURL: URL
     let captureEnabled: Bool
@@ -46,7 +46,7 @@ enum SupervisorProcessRuntimeError: LocalizedError, Equatable {
 }
 
 @MainActor
-protocol KeyCustodyPreparing: AnyObject {
+package protocol KeyCustodyPreparing: AnyObject {
     func prepare(
         agentURL: URL,
         databaseURL: URL,
@@ -80,7 +80,7 @@ final class AgentKeyCustodyPreparer: KeyCustodyPreparing {
 }
 
 @MainActor
-protocol SupervisorTopologyControlling: AnyObject {
+package protocol SupervisorTopologyControlling: AnyObject {
     var isRunning: Bool { get }
     func launch(
         plan: ProcessSupervisorLaunchPlan,

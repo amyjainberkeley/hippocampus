@@ -146,6 +146,8 @@ require_pattern "$INFO_PLIST" 'https://amyjainberkeley\.github\.io/hippocampus/a
     'shipped Sparkle feed matches the publication target'
 require_pattern "$INSTALLER" 'Release installer requires notarization credentials' \
     'release installer fails closed without notarization credentials'
+require_literal "$INSTALLER" 'python3 "$GENERATE_EULA" --check' \
+    'release assembly fails closed on legal source or artifact drift'
 require_pattern "$INSTALLER" 'codesign --timestamp --sign "\$DEVELOPER_ID" "\$FINAL_DMG"' \
     'installer signs the outer DMG with Developer ID before notarization'
 require_pattern "$INSTALLER" 'codesign --verify --strict.*"\$FINAL_DMG"' \
@@ -194,6 +196,8 @@ for script in test-release-contract.sh test-release-identity.sh \
     require_literal "$RELEASE_CI" "scripts/$script" \
         "release CI runs $script"
 done
+require_literal "$RELEASE_CI" 'scripts/test-task-2-product-truth.sh' \
+    'release CI runs the legal drift and product-truth contract'
 for release_input in .github/workflows/publish-release.yml scripts/build-installer.sh \
     apps/hippocampus/Resources/build-app.sh apps/hippocampus/Package.resolved \
     CHANGELOG.md docs/STATUS.md rust-toolchain.toml; do

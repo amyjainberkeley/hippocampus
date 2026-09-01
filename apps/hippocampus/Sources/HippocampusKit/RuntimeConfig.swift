@@ -1,11 +1,32 @@
 // SPDX-License-Identifier: TBD-private
 import Foundation
+import TOMLKit
 
 public protocol RuntimeConfiguring: Sendable {
     var crashReportOptedIn: Bool { get }
     var captureEnabled: Bool { get }
     func setCrashReportOptedIn(_ value: Bool) throws
     func setCaptureEnabled(_ value: Bool) throws
+}
+
+public enum RuntimeConfigError: LocalizedError, Equatable {
+    case invalidUTF8
+    case invalidDocument
+    case invalidBooleanValue(String)
+    case invalidEmittedDocument
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidUTF8:
+            "runtime.toml is not valid UTF-8."
+        case .invalidDocument:
+            "runtime.toml is not a valid, unambiguous TOML document."
+        case .invalidBooleanValue(let key):
+            "The root \(key) value must be a TOML boolean."
+        case .invalidEmittedDocument:
+            "The updated runtime configuration did not pass TOML validation."
+        }
+    }
 }
 
 /// Reads/writes `~/.config/hippocampus/runtime.toml`.
@@ -40,9 +61,7 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
     }
 
     private func boolValue(for key: String) -> Bool {
-        guard let data = try? Data(contentsOf: path),
-              let text = String(data: data, encoding: .utf8)
-        else { return false }
+        guard let text = try? existingText(), !text.isEmpty else { return false }
         return Self.parseBool(key: key, in: text)
     }
 
@@ -50,10 +69,21 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
         let parent = path.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
 
+        let original = try existingText()
+        let parsed: TOMLTable
+        do {
+            parsed = try TOMLTable(string: original)
+        } catch {
+            throw RuntimeConfigError.invalidDocument
+        }
+        if let existing = parsed[key], existing.bool == nil {
+            throw RuntimeConfigError.invalidBooleanValue(key)
+        }
+
         var updated: [String] = []
         var replaced = false
         var inRootTable = true
-        for line in existingLines() {
+        for line in Self.lines(in: original) {
             if inRootTable, Self.isTableHeader(line) {
                 if !replaced {
                     updated.append("\(key) = \(value)")
@@ -73,6 +103,16 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
         if !replaced { updated.append("\(key) = \(value)") }
 
         let content = updated.joined(separator: "\n") + "\n"
+        do {
+            let reparsed = try TOMLTable(string: content)
+            guard reparsed[key]?.bool == value else {
+                throw RuntimeConfigError.invalidEmittedDocument
+            }
+        } catch let error as RuntimeConfigError {
+            throw error
+        } catch {
+            throw RuntimeConfigError.invalidEmittedDocument
+        }
         try content.write(to: path, atomically: true, encoding: .utf8)
 
         try FileManager.default.setAttributes(
@@ -81,77 +121,46 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
         )
     }
 
-    private func existingLines() -> [String] {
-        guard let data = try? Data(contentsOf: path),
-              let text = String(data: data, encoding: .utf8)
-        else { return [] }
+    private func existingText() throws -> String {
+        guard FileManager.default.fileExists(atPath: path.path) else { return "" }
+        let data = try Data(contentsOf: path)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw RuntimeConfigError.invalidUTF8
+        }
+        return text
+    }
+
+    private static func lines(in text: String) -> [String] {
         var lines = text.components(separatedBy: "\n")
         if lines.last == "" { lines.removeLast() }
         return lines
     }
 
-    static func parseBool(key: String, in text: String) -> Bool {
-        var assignments: [String] = []
-        for line in text.components(separatedBy: "\n") {
-            if isTableHeader(line) { break }
-            if assignmentKey(in: line) == key { assignments.append(line) }
-        }
-        guard assignments.count == 1,
-              let value = tomlBooleanValue(in: assignments[0])
-        else { return false }
-        return value
+    package static func parseBool(key: String, in text: String) -> Bool {
+        guard let table = try? TOMLTable(string: text) else { return false }
+        return table[key]?.bool ?? false
     }
 
-    /// Deliberately narrow TOML key grammar for the two runtime booleans.
-    /// Bare, basic-quoted, and literal-quoted exact keys are recognized so
-    /// semantically duplicate spellings cannot create a second authority.
-    static func assignmentKey(in line: String) -> String? {
+    /// This lexical helper runs only after TOMLKit validates the full document.
+    /// Parsing the key probe with the same conforming parser lets the editor
+    /// recognize quoted Unicode escapes without becoming a second authority.
+    private static func assignmentKey(in line: String) -> String? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
-
-        if let quote = trimmed.first, quote == "\"" || quote == "'" {
-            let contentStart = trimmed.index(after: trimmed.startIndex)
-            guard let closing = trimmed[contentStart...].firstIndex(of: quote) else {
-                return nil
-            }
-            let key = String(trimmed[contentStart..<closing])
-            guard isRuntimeKey(key) else { return key }
-            let suffix = trimmed[trimmed.index(after: closing)...]
-                .trimmingCharacters(in: .whitespaces)
-            // Return the semantic key even for malformed exact assignments;
-            // reads then fail closed and writes replace the bad authority.
-            guard suffix.isEmpty || suffix.hasPrefix("=") else { return key }
-            return key
+        guard let equals = equalsAfterKey(in: line) else { return nil }
+        let rawKey = line[..<equals].trimmingCharacters(in: .whitespaces)
+        guard !rawKey.isEmpty,
+              let probe = try? TOMLTable(string: "\(rawKey) = true")
+        else { return nil }
+        return ["capture_enabled", "crash_report_opted_in"].first {
+            probe[$0]?.bool == true
         }
-
-        let keyEnd = trimmed.firstIndex { character in
-            character == "=" || character == " " || character == "\t"
-        } ?? trimmed.endIndex
-        let key = String(trimmed[..<keyEnd])
-        guard !key.isEmpty else { return nil }
-        return key
     }
 
     private static func replacingBool(in line: String, key: String, value: Bool) -> String {
         let leading = line.prefix { $0 == " " || $0 == "\t" }
         let comment = commentStart(in: line).map { " " + line[$0...] } ?? ""
         return "\(leading)\(key) = \(value)\(comment)"
-    }
-
-    private static func tomlBooleanValue(in line: String) -> Bool? {
-        guard let key = assignmentKey(in: line),
-              let equals = equalsAfterKey(in: line),
-              isValidKeySyntax(String(line[..<equals]), key: key)
-        else { return nil }
-        let valueStart = line.index(after: equals)
-        let valueAndComment = String(line[valueStart...])
-        let valueEnd = commentStart(in: valueAndComment) ?? valueAndComment.endIndex
-        let rawValue = valueAndComment[..<valueEnd].trimmingCharacters(in: .whitespaces)
-        switch rawValue {
-        case "true": return true
-        case "false": return false
-        default: return nil
-        }
     }
 
     private static func equalsAfterKey(in line: String) -> String.Index? {
@@ -200,15 +209,6 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
             }
         }
         return nil
-    }
-
-    private static func isRuntimeKey(_ key: String) -> Bool {
-        key == "capture_enabled" || key == "crash_report_opted_in"
-    }
-
-    private static func isValidKeySyntax(_ rawKey: String, key: String) -> Bool {
-        let trimmed = rawKey.trimmingCharacters(in: .whitespaces)
-        return trimmed == key || trimmed == "\"\(key)\"" || trimmed == "'\(key)'"
     }
 
     private static func isTableHeader(_ line: String) -> Bool {
