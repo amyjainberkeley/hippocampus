@@ -279,8 +279,11 @@ private struct FilmstripCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-            HitThumbnail(url: hit.thumbnailURL)
-                .frame(width: 76, height: 48)
+            EvidenceThumbnail(
+                url: hit.thumbnailURL,
+                size: CGSize(width: 76, height: 48),
+                maxPixelSize: 192
+            )
             Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
                 .font(MCI.Font.mono)
                 .foregroundStyle(Color.brandMint)

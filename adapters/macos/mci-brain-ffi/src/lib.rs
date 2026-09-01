@@ -1623,10 +1623,9 @@ fn timeline_snippet(s: &str) -> String {
 /// computed so the total bucket count ≤ [`TIMELINE_MAX_EVENTS`]; ranges
 /// ≤ 24 h floor to a 1-minute bucket for a stable "one card per minute"
 /// feel; longer ranges use `ceil(range_us / MAX_EVENTS)` rounded up to
-/// the next minute. Within each bucket the first event (chronologically
-/// earliest) is kept. This is intentionally simple — a follow-on cycle
-/// can pick a "densest event" or "middle-of-bucket keyframe" strategy;
-/// the wire shape is identical.
+/// the next minute. Within each bucket the first event carrying a keyframe
+/// is preferred; when none has one, the chronologically earliest event is
+/// kept. This makes the bounded timeline visual without changing its wire.
 ///
 /// Pure function so it is trivially testable.
 fn downsample_timeline(events: Vec<TimelineEventJson>, range_us: u64) -> Vec<TimelineEventJson> {
@@ -1647,8 +1646,15 @@ fn downsample_timeline(events: Vec<TimelineEventJson>, range_us: u64) -> Vec<Tim
         if Some(bucket) != current_bucket {
             current_bucket = Some(bucket);
             out.push(ev);
+        } else if ev.thumbnail_path.is_some()
+            && out
+                .last()
+                .is_some_and(|selected| selected.thumbnail_path.is_none())
+        {
+            if let Some(selected) = out.last_mut() {
+                *selected = ev;
+            }
         }
-        // Else: bucket already has a representative — drop this event.
     }
     out
 }
@@ -1683,8 +1689,8 @@ fn enrich_hit(store: &SqlCipherBrainStore, event_id: EventId) -> (Vec<String>, V
 }
 
 /// Resolve `Event.keyframe_blob` (sha256 hex, `None` when no keyframe was
-/// captured) into the absolute filesystem path the Swift `HitThumbnail`
-/// view opens. Convention: `<blob_dir>/<hex>.bin` per the P3.6.5
+/// captured) into the absolute filesystem path the Swift authenticated
+/// thumbnail provider validates. Convention: `<blob_dir>/<hex>.bin` per the P3.6.5
 /// `KeyframeBlobWriter` on-disk layout.
 ///
 /// Read-only: no file I/O — the FFI never stats or opens the referenced
@@ -1705,7 +1711,11 @@ fn thumbnail_path_for(blob_dir: &std::path::Path, keyframe_blob: Option<&str>) -
     // of the expected length. Prevents a hostile stored value (e.g. a
     // filesystem-escape like "../../etc/passwd") from being handed to
     // Swift as an "absolute path". SHA256 = 64 hex chars.
-    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
         return None;
     }
     let file = format!("{hex}.bin");
@@ -2154,6 +2164,7 @@ mod tests {
         let dir = std::path::Path::new("/tmp/mci/blobs");
         assert_eq!(thumbnail_path_for(dir, Some(&"a".repeat(63))), None);
         assert_eq!(thumbnail_path_for(dir, Some("../etc/passwd")), None);
+        assert_eq!(thumbnail_path_for(dir, Some(&"A".repeat(64))), None);
         assert_eq!(
             thumbnail_path_for(dir, Some(&format!("{}../..", "a".repeat(58)))),
             None
@@ -2596,6 +2607,27 @@ mod tests {
         for w in out.windows(2) {
             assert!(w[0].ts_us <= w[1].ts_us, "downsample re-ordered rows");
         }
+    }
+
+    #[test]
+    fn downsample_prefers_first_keyframe_in_each_bucket() {
+        let mut events = vec![mk_te(0, 1)];
+        let mut keyframed = mk_te(1, 2);
+        keyframed.thumbnail_path = Some("/blobs/frame.bin".into());
+        events.push(keyframed);
+        events.extend(
+            (2..=(TIMELINE_MAX_EVENTS as u64 + 1)).map(|i| mk_te(i * TIMELINE_MINUTE_US, i + 1)),
+        );
+
+        let range = (TIMELINE_MAX_EVENTS as u64 + 2) * TIMELINE_MINUTE_US;
+        let out = downsample_timeline(events, range);
+
+        assert_eq!(out.first().map(|event| event.event_id), Some(2));
+        assert_eq!(
+            out.first()
+                .and_then(|event| event.thumbnail_path.as_deref()),
+            Some("/blobs/frame.bin")
+        );
     }
 
     #[test]

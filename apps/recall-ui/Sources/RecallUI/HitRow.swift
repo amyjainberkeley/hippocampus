@@ -6,14 +6,9 @@
 // linked_event_ids end-to-end. Chip taps DO NOT open the flyout — that
 // wiring lives in PR-3 (`RelatedHitsFlyout` in `DetailPaneView`).
 //
-// Cycle 8.35 PR-4: adds an optional `HitThumbnail` view to the LEFT
-// of the text stack. Loaded lazily from `hit.thumbnailURL`; if the URL
-// is nil OR the file doesn't decode as an image, falls back to a
-// muted-color SF Symbol placeholder. Thumbnails apply a defense-in-
-// depth 1-pt blur + 15% desaturation so the UI is recognizable but
-// not a security-camera stream — this is a hard-coded posture, NOT a
-// feature flag (see the audit-doc PR-4 spec + the CSO note in the
-// PR body). Sized 64x40 pt (~16:10) with rounded corners.
+// Keyframes use the shared authenticated `EvidenceThumbnail` renderer.
+// Invalid, missing, escaped, oversized, or tampered blobs fail closed to
+// a neutral placeholder rather than being opened directly by AppKit.
 
 import RecallUIKit
 import SwiftUI
@@ -27,7 +22,11 @@ struct HitRow: View {
         // stack, 8pt inline. The pre-refactor magic numbers matched
         // the grid already; naming them makes it audit-safe.
         HStack(alignment: .top, spacing: MCI.Spacing.m - 2) {
-            HitThumbnail(url: hit.thumbnailURL)
+            EvidenceThumbnail(
+                url: hit.thumbnailURL,
+                size: CGSize(width: 64, height: 40),
+                maxPixelSize: 160
+            )
             VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: MCI.Spacing.s) {
                     Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
@@ -74,108 +73,6 @@ struct HitRow: View {
             }
         }
         .padding(.vertical, MCI.Spacing.s - 2)
-    }
-}
-
-/// Fixed-size keyframe preview at the left of `HitRow`. Sized 64x40 pt
-/// (roughly 16:10 downsample of a widescreen keyframe) with rounded
-/// corners. Loads lazily — the file is opened at most once per row
-/// appearance via a `.task` block, and any failure (nil URL, missing
-/// file, undecodable bytes) falls through to the muted placeholder.
-///
-/// Privacy posture (audit-doc §PR-4, hard-coded per the PR brief):
-///  - 1-pt Gaussian blur so a passerby cannot read on-screen text.
-///  - 15% desaturation so highly-saturated brand chrome (e.g. a
-///    Slack red-dot ping) doesn't yell across the room.
-/// These are NOT feature-flagged. The whole point of the pass is
-/// defense-in-depth against over-shoulder viewing; a toggle would let
-/// a user quietly turn it off (and then forget), so we make it the
-/// only mode.
-///
-/// Accessibility: nil URL renders as "no thumbnail available"; loaded
-/// image is a decorative element (the surrounding hit text carries the
-/// semantic content), so the image itself is `.accessibilityHidden`.
-struct HitThumbnail: View {
-    let url: URL?
-    @State private var image: NSImage?
-
-    /// Visible thumbnail size in points (audit-doc §PR-4).
-    private static let width: CGFloat = 64
-    private static let height: CGFloat = 40
-    /// Hard-coded privacy posture. See the type-level doc.
-    private static let blurRadius: CGFloat = 1
-    private static let saturation: Double = 0.85
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: Self.width, height: Self.height)
-                    .clipped()
-                    .blur(radius: Self.blurRadius)
-                    .saturation(Self.saturation)
-                    .accessibilityHidden(true)
-            } else {
-                placeholder
-            }
-        }
-        .frame(width: Self.width, height: Self.height)
-        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.xs, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MCI.Radius.xs, style: .continuous)
-                .stroke(Color.brandCardBorder, lineWidth: 0.5)
-        )
-        .task(id: url) {
-            image = HitThumbnail.load(url: url)
-        }
-    }
-
-    private var placeholder: some View {
-        // Muted-color SF Symbol on the brand card background. Not a
-        // "missing image" red-X — we don't want the UI to look broken
-        // for the (currently common) case where the event predates the
-        // P3.6.5 blob writer, or the ingest was text-only (Mail, Slack).
-        ZStack {
-            Color.brandCardBg
-            Image(systemName: "photo")
-                .foregroundStyle(Color.brandFgMuted)
-                .font(.system(size: 14))
-        }
-        .accessibilityLabel("no thumbnail available")
-    }
-
-    /// Off-main-actor loader. Nil URL, missing file, or undecodable
-    /// bytes all return nil — the view falls back to the placeholder.
-    ///
-    /// On-disk blobs (P3.6.5, `KeyframeBlobWriter`) are AES-GCM-256
-    /// sealed under an HKDF-derived per-blob key. As of cycle 8.47 the
-    /// on-disk layout is `salt(16) || sealed box`, so decryption from
-    /// disk bytes alone is now cryptographically well-defined — see
-    /// `KeyframeBlobEncoder.decrypt(blob:blobKeyMaterial:)`.
-    ///
-    /// This loader currently STILL returns nil for encrypted blobs
-    /// because the DbKey plumb-through into the recall-ui process is a
-    /// separate PR (needs a helper-XPC / Keychain read path so the
-    /// recall UI can obtain the key material without violating the
-    /// key-custody model in ADR-0008 §5). Until then real-capture rows
-    /// render the muted placeholder — same graceful-degradation UX as
-    /// pre-cycle-8.47.
-    ///
-    /// Blobs written under the buggy pre-cycle-8.47 code path
-    /// (SHA256(plaintext) as HKDF salt) are UNRECOVERABLE by
-    /// construction: their bytes-on-disk do not carry the salt that
-    /// was used to derive the key. Once the DbKey plumb lands, those
-    /// blobs will also return nil from `decrypt` (AES-GCM tag failure)
-    /// and render the same placeholder — no user-visible regression.
-    static func load(url: URL?) -> NSImage? {
-        guard let url else { return nil }
-        // FileManager check avoids a spammy warning when the blob is
-        // missing (common when a user deletes the blobs dir out of
-        // band, or on a legacy brain).
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return NSImage(contentsOf: url)
     }
 }
 
