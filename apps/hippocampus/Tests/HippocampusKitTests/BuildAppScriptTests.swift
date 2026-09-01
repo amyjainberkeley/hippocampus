@@ -2,6 +2,19 @@
 import XCTest
 
 final class BuildAppScriptTests: XCTestCase {
+    private enum ChangelogFixture {
+        case currentRelease
+        case unreleasedOnly
+    }
+
+    private enum StatusAuditFixture: Equatable {
+        case valid
+        case missingSHA
+        case missingCommit
+        case stale
+        case nonAncestor
+    }
+
     private struct ScriptFixture {
         let repoRoot: URL
         let scriptURL: URL
@@ -45,12 +58,23 @@ final class BuildAppScriptTests: XCTestCase {
             .appendingPathComponent("models.json")
     }
 
+    private func repositoryRoot() -> URL? {
+        guard let path = scriptPath else { return nil }
+        return URL(fileURLWithPath: path)
+            .deletingLastPathComponent()  // Resources/
+            .deletingLastPathComponent()  // hippocampus/
+            .deletingLastPathComponent()  // apps/
+            .deletingLastPathComponent()  // repository root
+    }
+
     private func makeFixture(
         includeChangelog: Bool = true,
         includeManifest: Bool = true,
         includeEmbedder: Bool = false,
         includeNER: Bool = false,
-        includeQwen: Bool = false
+        includeQwen: Bool = false,
+        changelog: ChangelogFixture = .currentRelease,
+        statusAudit: StatusAuditFixture = .valid
     ) throws -> ScriptFixture {
         guard let scriptPath else {
             throw XCTSkip("build-app.sh not found at expected source-tree location")
@@ -93,20 +117,36 @@ final class BuildAppScriptTests: XCTestCase {
         try writeFile(repoRoot.appendingPathComponent("assets/branding/statusbar-icon@3x.png"))
 
         if includeChangelog {
-            try writeFile(
-                repoRoot.appendingPathComponent("CHANGELOG.md"),
-                contents: """
+            let contents: String
+            switch changelog {
+            case .currentRelease:
+                contents = """
                 # Changelog
 
                 All notable changes to Hippocampus.
 
-                ## [Unreleased] - 2026-09-01
+                ## [Unreleased]
 
-                ### Features
+                ## [0.1.0] - 2026-09-01
+
+                ### Highlights
 
                 - fixture release notes
                 """
-            )
+            case .unreleasedOnly:
+                contents = """
+                # Changelog
+
+                All notable changes to Hippocampus.
+
+                ## [Unreleased]
+
+                ### Highlights
+
+                - future fixture note
+                """
+            }
+            try writeFile(repoRoot.appendingPathComponent("CHANGELOG.md"), contents: contents)
         }
 
         if includeManifest {
@@ -124,7 +164,7 @@ final class BuildAppScriptTests: XCTestCase {
         if includeEmbedder {
             try makeModelDirectory(
                 at: repoRoot.appendingPathComponent("models/ArcticEmbedS_INT8.mlmodelc"),
-                requireStructure: false
+                requireStructure: true
             )
         }
 
@@ -142,7 +182,85 @@ final class BuildAppScriptTests: XCTestCase {
             )
         }
 
+        try initializeFixtureRepository(at: repoRoot, statusAudit: statusAudit)
+
         return ScriptFixture(repoRoot: repoRoot, scriptURL: scriptURL)
+    }
+
+    private func initializeFixtureRepository(
+        at repoRoot: URL,
+        statusAudit: StatusAuditFixture
+    ) throws {
+        try runGit(["init", "-q"], in: repoRoot)
+        try runGit(["config", "user.name", "Fixture User"], in: repoRoot)
+        try runGit(["config", "user.email", "fixture@example.invalid"], in: repoRoot)
+        try runGit(["add", "."], in: repoRoot)
+        try runGit(["commit", "-q", "-m", "fixture baseline"], in: repoRoot)
+
+        let baselineSHA = try gitHead(in: repoRoot)
+        var auditSHA = baselineSHA
+
+        if statusAudit == .missingCommit {
+            auditSHA = String(repeating: "0", count: 40)
+        }
+
+        if statusAudit == .nonAncestor {
+            try runGit(["checkout", "-q", "-b", "audit-side"], in: repoRoot)
+            try writeFile(repoRoot.appendingPathComponent("audit-side.txt"), contents: "side\n")
+            try runGit(["add", "audit-side.txt"], in: repoRoot)
+            try runGit(["commit", "-q", "-m", "side audit"], in: repoRoot)
+            auditSHA = try gitHead(in: repoRoot)
+            try runGit(
+                ["checkout", "-q", "-b", "fixture-main", baselineSHA],
+                in: repoRoot
+            )
+        }
+
+        let statusContents: String
+        if statusAudit == .missingSHA {
+            statusContents = "# Hippocampus Status\n\nAudit baseline is missing.\n"
+        } else {
+            statusContents = """
+            # Hippocampus Status
+
+            Audited code baseline: `\(auditSHA)`
+
+            Release builds allow at most 3 commits after this baseline.
+            """
+        }
+        try writeFile(repoRoot.appendingPathComponent("docs/STATUS.md"), contents: statusContents)
+        try runGit(["add", "docs/STATUS.md"], in: repoRoot)
+        try runGit(["commit", "-q", "-m", "document status"], in: repoRoot)
+
+        if statusAudit == .stale {
+            for index in 1...3 {
+                let path = "stale-\(index).txt"
+                try writeFile(repoRoot.appendingPathComponent(path), contents: "\(index)\n")
+                try runGit(["add", path], in: repoRoot)
+                try runGit(
+                    ["commit", "-q", "-m", "advance \(index)"],
+                    in: repoRoot
+                )
+            }
+        }
+    }
+
+    private func gitHead(in directory: URL) throws -> String {
+        let result = try runGit(["rev-parse", "HEAD"], in: directory)
+        return result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @discardableResult
+    private func runGit(_ arguments: [String], in directory: URL) throws -> ScriptRunResult {
+        let result = try runCommand("/usr/bin/git", arguments, in: directory)
+        guard result.status == 0 else {
+            throw NSError(
+                domain: "BuildAppScriptTests",
+                code: Int(result.status),
+                userInfo: [NSLocalizedDescriptionKey: result.output]
+            )
+        }
+        return result
     }
 
     private func writeFile(_ url: URL, contents: String = "") throws {
@@ -165,15 +283,29 @@ final class BuildAppScriptTests: XCTestCase {
     }
 
     private func runFixture(_ fixture: ScriptFixture) throws -> ScriptRunResult {
+        var fixtureEnvironment = ProcessInfo.processInfo.environment
+        fixtureEnvironment["DEVELOPER_ID"] = "Test Identity"
+        try runCommand(
+            "/bin/bash",
+            [fixture.scriptURL.path],
+            in: fixture.repoRoot,
+            environment: fixtureEnvironment
+        )
+    }
+
+    private func runCommand(
+        _ executable: String,
+        _ arguments: [String],
+        in directory: URL? = nil,
+        environment: [String: String]? = nil
+    ) throws -> ScriptRunResult {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [fixture.scriptURL.path]
-        process.currentDirectoryURL = fixture.repoRoot
-        process.environment = [
-            "HOME": fixture.repoRoot.path,
-            "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
-            "DEVELOPER_ID": "Test Identity"
-        ]
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        if let environment {
+            process.environment = environment
+        }
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -243,6 +375,129 @@ final class BuildAppScriptTests: XCTestCase {
         XCTAssertTrue(
             result.output.contains("scripts/gen-changelog.sh"),
             "missing changelog must name the reconstruction command, got: \(result.output)"
+        )
+    }
+
+    func test_changelog_without_current_bundle_version_exits_with_release_note_message() throws {
+        let fixture = try makeFixture(changelog: .unreleasedOnly)
+        let result = try runFixture(fixture)
+        XCTAssertTrue(
+            result.status != 0,
+            "an Unreleased-only changelog must fail the build, got: \(result.output)"
+        )
+        XCTAssertTrue(
+            result.output.contains("FATAL: CHANGELOG.md has no nonempty 0.1.0 release"),
+            "expected current-version changelog failure, got: \(result.output)"
+        )
+    }
+
+    func test_repository_changelog_resolves_current_bundle_version_with_actual_parser() throws {
+        guard let repoRoot = repositoryRoot() else {
+            throw XCTSkip("repository root not found from build-app.sh")
+        }
+        guard let infoPlistURL = infoPlistPath() else {
+            throw XCTSkip("Info.plist not found next to build-app.sh")
+        }
+
+        let plistData = try Data(contentsOf: infoPlistURL)
+        guard let plist = try PropertyListSerialization.propertyList(
+            from: plistData,
+            options: [],
+            format: nil
+        ) as? [String: Any],
+            let version = plist["CFBundleShortVersionString"] as? String
+        else {
+            XCTFail("Info.plist has no CFBundleShortVersionString")
+            return
+        }
+
+        let parserURL = repoRoot.appendingPathComponent(
+            "apps/recall-ui/Sources/RecallUIKit/ChangelogParser.swift"
+        )
+        let changelogURL = repoRoot.appendingPathComponent("CHANGELOG.md")
+        let probeRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChangelogParserProbe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: probeRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: probeRoot) }
+
+        let mainURL = probeRoot.appendingPathComponent("main.swift")
+        let executableURL = probeRoot.appendingPathComponent("changelog-probe")
+        try writeFile(
+            mainURL,
+            contents: """
+            import Darwin
+            import Foundation
+
+            let version = CommandLine.arguments[1]
+            let source = try String(contentsOfFile: CommandLine.arguments[2], encoding: .utf8)
+            if let release = ChangelogParser.release(forVersion: version, in: source), !release.isEmpty {
+                print("resolved \\(release.version)")
+            } else {
+                fputs("no nonempty release for \\(version)\\n", stderr)
+                exit(1)
+            }
+            """
+        )
+
+        let compile = try runCommand(
+            "/usr/bin/xcrun",
+            ["swiftc", parserURL.path, mainURL.path, "-o", executableURL.path],
+            in: repoRoot
+        )
+        XCTAssertEqual(compile.status, 0, "parser probe failed to compile: \(compile.output)")
+        guard compile.status == 0 else { return }
+
+        let probe = try runCommand(
+            executableURL.path,
+            [version, changelogURL.path],
+            in: repoRoot
+        )
+        XCTAssertEqual(
+            probe.status,
+            0,
+            "current bundle version \(version) did not resolve to nonempty notes: \(probe.output)"
+        )
+    }
+
+    func test_missing_status_audit_sha_exits_with_status_message() throws {
+        let fixture = try makeFixture(statusAudit: .missingSHA)
+        let result = try runFixture(fixture)
+        XCTAssertTrue(result.status != 0, "missing status audit SHA must fail: \(result.output)")
+        XCTAssertTrue(
+            result.output.contains("FATAL: docs/STATUS.md has no audited code baseline SHA"),
+            "expected missing status SHA failure, got: \(result.output)"
+        )
+    }
+
+    func test_status_audit_sha_missing_from_clone_exits_with_status_message() throws {
+        let fixture = try makeFixture(statusAudit: .missingCommit)
+        let result = try runFixture(fixture)
+        XCTAssertTrue(result.status != 0, "unknown status audit SHA must fail: \(result.output)")
+        XCTAssertTrue(
+            result.output.contains(
+                "FATAL: docs/STATUS.md audit baseline does not exist: 0000000000000000000000000000000000000000"
+            ),
+            "expected nonexistent status SHA failure, got: \(result.output)"
+        )
+    }
+
+    func test_stale_status_audit_sha_exits_with_refresh_message() throws {
+        let fixture = try makeFixture(statusAudit: .stale)
+        let result = try runFixture(fixture)
+        XCTAssertTrue(result.status != 0, "stale status audit SHA must fail: \(result.output)")
+        XCTAssertTrue(
+            result.output.contains("FATAL: docs/STATUS.md audit baseline is 4 commits behind HEAD; maximum is 3"),
+            "expected stale status SHA failure, got: \(result.output)"
+        )
+    }
+
+    func test_non_ancestor_status_audit_sha_exits_with_status_message() throws {
+        let fixture = try makeFixture(statusAudit: .nonAncestor)
+        let result = try runFixture(fixture)
+        XCTAssertTrue(result.status != 0, "non-ancestor status audit SHA must fail: \(result.output)")
+        XCTAssertTrue(
+            result.output.contains("FATAL: docs/STATUS.md audit baseline is not an ancestor of HEAD"),
+            "expected non-ancestor status SHA failure, got: \(result.output)"
         )
     }
 

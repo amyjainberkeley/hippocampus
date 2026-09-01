@@ -31,7 +31,9 @@ REPO_ROOT="$(cd "$PKG_DIR/../.." && pwd)"
 PROFILE="release"
 DIST_DIR="$PKG_DIR/dist"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
+STATUS_SRC="$REPO_ROOT/docs/STATUS.md"
 MODELS_MANIFEST_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
+STATUS_AUDIT_MAX_COMMITS=3
 
 fatal() {
     echo "FATAL: $1"
@@ -41,6 +43,90 @@ fatal() {
         shift
     done
     exit 1
+}
+
+validate_changelog_release() {
+    local version="$1"
+
+    if ! python3 - "$CHANGELOG_SRC" "$version" <<'PY'
+import re
+import sys
+
+path, wanted_version = sys.argv[1:]
+header = re.compile(r"^## \[([^]]+)\]")
+found_release = False
+in_release = False
+in_section = False
+has_item = False
+
+with open(path, encoding="utf-8") as changelog:
+    for raw_line in changelog:
+        line = raw_line.strip()
+        match = header.match(line)
+        if match:
+            if in_release:
+                break
+            in_release = match.group(1).casefold() == wanted_version.casefold()
+            found_release = found_release or in_release
+            in_section = False
+            continue
+        if not in_release:
+            continue
+        if line.startswith("### "):
+            in_section = True
+            continue
+        if in_section and (line.startswith("- ") or line.startswith("* ")):
+            if line[2:].strip():
+                has_item = True
+                break
+
+sys.exit(0 if found_release and has_item else 1)
+PY
+    then
+        fatal \
+            "CHANGELOG.md has no nonempty $version release" \
+            "Add a curated ## [$version] section with at least one section and user-facing bullet." \
+            "Refusing to ship a bundle that opens What's New to an empty state."
+    fi
+}
+
+validate_status_audit() {
+    if [[ ! -f "$STATUS_SRC" ]]; then
+        fatal \
+            "docs/STATUS.md missing at $STATUS_SRC" \
+            "Restore the canonical release-status document before building."
+    fi
+
+    local audit_sha
+    audit_sha=$(sed -nE 's/^Audited code baseline: `([0-9a-fA-F]{7,40})`.*$/\1/p' "$STATUS_SRC" | head -1)
+    if [[ -z "$audit_sha" ]]; then
+        fatal \
+            "docs/STATUS.md has no audited code baseline SHA" \
+            'Add: Audited code baseline: `<git-sha>`'
+    fi
+
+    if ! git -C "$REPO_ROOT" rev-parse --verify "$audit_sha^{commit}" >/dev/null 2>&1; then
+        fatal \
+            "docs/STATUS.md audit baseline does not exist: $audit_sha" \
+            "Stamp STATUS.md against a commit available in this clone."
+    fi
+
+    if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$audit_sha" HEAD; then
+        fatal \
+            "docs/STATUS.md audit baseline is not an ancestor of HEAD" \
+            "Recorded baseline: $audit_sha" \
+            "Refresh STATUS.md against the current branch before building."
+    fi
+
+    local audit_distance
+    audit_distance=$(git -C "$REPO_ROOT" rev-list --count "$audit_sha"..HEAD)
+    if (( audit_distance > STATUS_AUDIT_MAX_COMMITS )); then
+        fatal \
+            "docs/STATUS.md audit baseline is $audit_distance commits behind HEAD; maximum is $STATUS_AUDIT_MAX_COMMITS" \
+            "Refresh the status claims and stamp the immediate pre-documentation code baseline."
+    fi
+
+    echo "  docs/STATUS.md audit baseline OK ($audit_sha, $audit_distance commit(s) behind HEAD)"
 }
 
 usage() {
@@ -176,6 +262,15 @@ if [[ ! -f "$CHANGELOG_SRC" ]]; then
         "Run: ./scripts/gen-changelog.sh --output CHANGELOG.md" \
         "Refusing to ship a bundle whose What's New release notes have no committed source."
 fi
+
+BUNDLE_SHORT_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST" 2>/dev/null || true)
+if [[ -z "$BUNDLE_SHORT_VERSION" ]]; then
+    fatal \
+        "CFBundleShortVersionString missing from $INFO_PLIST" \
+        "Refusing to validate What's New against an unknown bundle version."
+fi
+validate_changelog_release "$BUNDLE_SHORT_VERSION"
+validate_status_audit
 
 if [[ ! -f "$MODELS_MANIFEST_SRC" ]]; then
     fatal \
