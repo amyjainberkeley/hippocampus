@@ -75,6 +75,7 @@ import tempfile
 from pathlib import Path
 
 MODEL_REPO = "Qwen/Qwen3-1.7B"
+MODEL_REVISION = "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
 DEFAULT_SEQ_LEN = 2048
 
 log = logging.getLogger("convert_brief_model")
@@ -358,13 +359,18 @@ def convert(
     _patch_torch_for_coremltools()
 
     log.info("Loading %s with attn_implementation='eager'...", MODEL_REPO)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        MODEL_REPO,
+        revision=MODEL_REVISION,
+        trust_remote_code=True,
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         log.info("pad_token_id not set, using eos_token_id (%d)", tokenizer.pad_token_id)
 
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_REPO,
+        revision=MODEL_REVISION,
         torch_dtype=torch.float16,
         trust_remote_code=True,
         attn_implementation="eager",

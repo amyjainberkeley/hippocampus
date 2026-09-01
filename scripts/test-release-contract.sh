@@ -10,6 +10,13 @@ CHECK="$REPO_ROOT/scripts/check.sh"
 INFO_PLIST="$REPO_ROOT/apps/hippocampus/Resources/Info.plist"
 RELEASE_CI="$REPO_ROOT/.github/workflows/release-contract.yml"
 INSTALLER="$REPO_ROOT/scripts/build-installer.sh"
+BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
+BRIEF_PRESENCE="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/BriefModelPresence.swift"
+CONVERT_EMBEDDER="$REPO_ROOT/scripts/convert_embedder.py"
+CONVERT_NER="$REPO_ROOT/scripts/convert_ner.py"
+CONVERT_BRIEF="$REPO_ROOT/scripts/convert_brief_model.py"
+PREFERENCES="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
+NOTICE="$REPO_ROOT/NOTICE"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -153,6 +160,32 @@ require_pattern "$INSTALLER" 'notary-\$\{label\}-submission\.json' \
     'installer retains non-secret notarization provenance'
 reject_pattern "$INSTALLER" 'NOTARYTOOL_PASSWORD|NOTARY_ARGS\[\*\]|APP_NOTARY_ARGS\[\*\]' \
     'installer never accepts or renders raw notarization passwords'
+require_literal "$BUILD_APP" 'QWEN3_TOKENIZER="$REPO_ROOT/models/tokenizer.json"' \
+    'app assembly requires the Qwen tokenizer produced by conversion'
+require_literal "$BUILD_APP" 'QWEN3_TOKENIZER_DEST="$QWEN3_DEST_DIR/tokenizer.json"' \
+    'app assembly places the tokenizer beside the Qwen model'
+require_literal "$INSTALLER" 'QWEN3_TOKENIZER_PATH="$APP_PATH/Contents/Resources/Models/qwen3-1.7b-fp16/tokenizer.json"' \
+    'installer verifies the tokenizer at the runtime path'
+require_literal "$BRIEF_PRESENCE" '.appendingPathComponent("tokenizer.json")' \
+    'runtime readiness and first-launch seed include the Qwen tokenizer'
+require_literal "$CONVERT_EMBEDDER" 'MODEL_REVISION = "e596f507467533e48a2e17c007f0e1dacc837b33"' \
+    'embedder conversion pins the reviewed upstream revision'
+require_literal "$CONVERT_NER" 'DEFAULT_MODEL = "dslim/bert-base-NER"' \
+    'NER reconstruction builds the bundle the release names'
+require_literal "$CONVERT_NER" 'DEFAULT_REVISION = "d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc"' \
+    'NER conversion pins the reviewed upstream revision'
+require_literal "$CONVERT_BRIEF" 'MODEL_REVISION = "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"' \
+    'brief-model conversion pins the reviewed upstream revision'
+require_literal "$BUILD_APP" 'NOTICE_SRC="$REPO_ROOT/NOTICE"' \
+    'app assembly treats third-party notices as a release input'
+require_literal "$BUILD_APP" 'cp "$NOTICE_SRC" "$RESOURCES/NOTICE.txt"' \
+    'app assembly bundles third-party notices for offline access'
+require_literal "$PREFERENCES" 'Bundle.main.url(forResource: "NOTICE", withExtension: "txt")' \
+    'About opens the bundled third-party notices without a network dependency'
+reject_pattern "$PREFERENCES" 'hippocampus-swart\.vercel\.app/licenses' \
+    'About does not point license disclosure at an unshipped 404 page'
+reject_pattern "$NOTICE" 'imposes no condition' \
+    'model notice does not make an unverified Reuters derivative-rights conclusion'
 require_pattern "$CHECK" 'release-contract\|bash\|lint\|scripts/test-release-contract\.sh' \
     'the unified local gate runs the release contract'
 for script in test-release-contract.sh test-release-identity.sh \

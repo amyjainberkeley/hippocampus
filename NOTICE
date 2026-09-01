@@ -60,18 +60,20 @@ Snowflake Arctic Embed S
     Apache-2.0
     https://huggingface.co/Snowflake/snowflake-arctic-embed-s
 
-    Redistributed here as a Core ML derivative
-    (`ArcticEmbedS_INT8.mlmodelc`), converted with coremltools. Used
-    for the semantic half of hybrid recall.
+    Redistributed here as a Core ML derivative. The current FP16 artifact
+    retains the legacy filename `ArcticEmbedS_INT8.mlmodelc` for runtime
+    compatibility. Used for the semantic half of hybrid recall.
 
 dslim/bert-base-NER
     Copyright (c) David S. Lim
     MIT
     https://huggingface.co/dslim/bert-base-NER
 
-    Redistributed as `bert_base_NER_INT8.mlmodelc`. Fine-tuned on
-    CoNLL-2003, whose underlying Reuters corpus imposes no condition
-    that transfers to the released weights.
+    Redistributed as `bert_base_NER_INT8.mlmodelc`. The upstream model is
+    published under MIT and was fine-tuned on CoNLL-2003 Reuters material.
+    Public redistribution remains gated on an explicit legal review of the
+    dataset terms; this notice does not infer derivative rights from the
+    model-card license alone.
 
 Qwen3-1.7B
     Copyright (c) Alibaba Cloud

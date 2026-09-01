@@ -32,6 +32,7 @@ PROFILE="release"
 DEVELOPMENT_ADHOC=0
 DIST_DIR="$PKG_DIR/dist"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
+NOTICE_SRC="$REPO_ROOT/NOTICE"
 STATUS_SRC="$REPO_ROOT/docs/STATUS.md"
 MODELS_MANIFEST_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
 KEYCHAIN_CONTRACT_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/keychain-sharing-contract.json"
@@ -277,6 +278,12 @@ if [[ ! -f "$CHANGELOG_SRC" ]]; then
         "Refusing to ship a bundle whose What's New release notes have no committed source."
 fi
 
+if [[ ! -f "$NOTICE_SRC" ]]; then
+    fatal \
+        "NOTICE missing at $NOTICE_SRC" \
+        "Restore the committed third-party and model attribution before building."
+fi
+
 BUNDLE_SHORT_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST" 2>/dev/null || true)
 if [[ -z "$BUNDLE_SHORT_VERSION" ]]; then
     fatal \
@@ -317,9 +324,11 @@ if [[ -f "$KNOWN_SAFE" ]]; then
     cp "$KNOWN_SAFE" "$RESOURCES/known-safe-apps.toml"
 fi
 cp "$CHANGELOG_SRC" "$RESOURCES/CHANGELOG.md"
+cp "$NOTICE_SRC" "$RESOURCES/NOTICE.txt"
 cp "$MODELS_MANIFEST_SRC" "$RESOURCES/models.json"
 cp "$KEYCHAIN_CONTRACT_SRC" "$RESOURCES/keychain-sharing-contract.json"
 echo "  CHANGELOG.md bundled OK → $RESOURCES/CHANGELOG.md"
+echo "  NOTICE.txt bundled OK → $RESOURCES/NOTICE.txt"
 echo "  models.json bundled OK → $RESOURCES/models.json"
 
 # Copy SwiftPM-generated resource bundle for HippocampusKit into
@@ -541,8 +550,10 @@ QWEN3_MODEL_ID="qwen3-1.7b-fp16"
 QWEN3_BASENAME="Qwen3-1.7B-FP16.mlmodelc"
 QWEN3_PACKAGE="$REPO_ROOT/models/Qwen3-1.7B-FP16.mlpackage"
 QWEN3_COMPILED="$REPO_ROOT/models/$QWEN3_BASENAME"
+QWEN3_TOKENIZER="$REPO_ROOT/models/tokenizer.json"
 QWEN3_DEST_DIR="$RESOURCES/Models/$QWEN3_MODEL_ID"
 QWEN3_DEST="$QWEN3_DEST_DIR/$QWEN3_BASENAME"
+QWEN3_TOKENIZER_DEST="$QWEN3_DEST_DIR/tokenizer.json"
 QWEN3_SOURCE_PRESENT=0
 QWEN3_DOWNLOAD_URL="$(
     python3 - "$MODELS_MANIFEST_SRC" <<'PY'
@@ -559,6 +570,13 @@ for model in manifest.get("models", []):
 PY
 )"
 QWEN3_DOWNLOAD_CMD="mkdir -p models && curl -L \"$QWEN3_DOWNLOAD_URL\" -o /tmp/Qwen3-1.7B-FP16.mlmodelc.tar.gz && tar -xzf /tmp/Qwen3-1.7B-FP16.mlmodelc.tar.gz -C models"
+
+if [[ ! -f "$QWEN3_TOKENIZER" ]]; then
+    fatal \
+        "Qwen tokenizer.json missing at $QWEN3_TOKENIZER" \
+        "Run: python scripts/convert_brief_model.py --output models/Qwen3-1.7B-FP16.mlpackage --verify" \
+        "Or reconstruct the immutable release archive, which must include models/tokenizer.json."
+fi
 
 if [[ -d "$QWEN3_COMPILED" ]]; then
     echo "Bundling pre-compiled $QWEN3_BASENAME (~3.4 GB — this may take ~30s)"
@@ -601,6 +619,21 @@ if [[ "$QWEN3_SOURCE_PRESENT" -eq 1 ]]; then
         echo "FATAL: bundled $QWEN3_DEST is structurally incomplete"
         echo "       (missing model.mil, weights/, or coremldata.bin). Refusing to ship."
         exit 1
+    fi
+    cp "$QWEN3_TOKENIZER" "$QWEN3_TOKENIZER_DEST"
+    if ! python3 - "$QWEN3_TOKENIZER_DEST" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+if not isinstance(payload, dict) or not payload:
+    raise SystemExit("tokenizer.json must be a nonempty JSON object")
+PY
+    then
+        fatal \
+            "bundled Qwen tokenizer is invalid at $QWEN3_TOKENIZER_DEST" \
+            "Re-run scripts/convert_brief_model.py from the pinned model revision."
     fi
     echo "  Qwen3-1.7B bundled OK → $QWEN3_DEST"
 fi
