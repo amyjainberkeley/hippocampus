@@ -82,6 +82,11 @@ enum Mode {
     McpServe {
         db_path: PathBuf,
     },
+    /// Import Claude Code session transcripts into the brain.
+    ImportSessions {
+        db_path: PathBuf,
+        root: PathBuf,
+    },
     /// Explain why the brain is empty.
     Doctor {
         db_path: PathBuf,
@@ -174,6 +179,7 @@ fn parse_args(argv: &[String]) -> Args {
     let mut stats_source = String::new();
     let mut stats_since_seconds = DEFAULT_STATS_WINDOW_SECONDS;
     let mut embed_batch_size = DEFAULT_EMBED_BATCH_SIZE;
+    let mut transcript_root: Option<PathBuf> = None;
 
     let mut i = 1;
     while i < argv.len() {
@@ -199,6 +205,13 @@ fn parse_args(argv: &[String]) -> Args {
             "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
             "enrich" => mode_kind = ModeKind::Enrich,
             "doctor" => mode_kind = ModeKind::Doctor,
+            "import-sessions" => mode_kind = ModeKind::ImportSessions,
+            "--transcript-root" => {
+                if let Some(v) = argv.get(i + 1) {
+                    transcript_root = Some(PathBuf::from(v));
+                    i += 1;
+                }
+            }
             "--batch-size" => {
                 if let Some(v) = argv.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
                     embed_batch_size = v.max(1);
@@ -266,6 +279,11 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::Doctor => Mode::Doctor {
             db_path: resolved_db_path,
         },
+        ModeKind::ImportSessions => Mode::ImportSessions {
+            db_path: resolved_db_path,
+            root: transcript_root
+                .unwrap_or_else(mci_agent::import_sessions::default_transcript_root),
+        },
     };
     Args {
         device_id_path,
@@ -286,6 +304,7 @@ enum ModeKind {
     EmbedBackfill,
     Enrich,
     Doctor,
+    ImportSessions,
 }
 
 fn print_usage() {
@@ -299,6 +318,8 @@ fn print_usage() {
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 import-sessions            import Claude Code transcripts from\n\
+        \x20                            ~/.claude/projects into the brain\n\
         \x20 doctor                     say why the brain is empty and what to fix\n\
         \x20 enrich                     run every understanding stage over an existing\n\
         \x20                            brain: extract entities, embed, segment episodes,\n\
@@ -938,6 +959,10 @@ async fn main() -> ExitCode {
                 ExitCode::from(14)
             }
         },
+        Mode::ImportSessions { db_path, root } => match run_import_sessions_cmd(&db_path, &root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::Doctor { db_path } => match run_doctor_cmd(&db_path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
@@ -1270,6 +1295,62 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
         eprintln!("mci-agent mcp-serve: stdio loop error: {e}");
         return Err(13);
     }
+    Ok(())
+}
+
+/// Import Claude Code session transcripts.
+///
+/// Opened read-write: this writes events. It reads only transcripts the user
+/// already has on disk, and indexes only the conversation text, never tool
+/// output or model reasoning.
+fn run_import_sessions_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!("mci-agent import-sessions: MCI_DB_KEY_HEX not set and no dev.key found.");
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent import-sessions: MCI_DB_KEY_HEX must be 64 hex characters.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let store = match SqlCipherBrainStore::new(db_path, &key) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "mci-agent import-sessions: open brain at {}: {e}",
+                db_path.display()
+            );
+            return Err(12);
+        }
+    };
+
+    eprintln!("mci-agent import-sessions: reading {}", root.display());
+    let stats = match mci_agent::import_sessions::import_sessions(&store, root, |s| {
+        if s.files_scanned % 10 == 0 {
+            eprintln!(
+                "mci-agent import-sessions: {} files, {} events",
+                s.files_scanned, s.events_written
+            );
+        }
+    }) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("mci-agent import-sessions: {e}");
+            return Err(24);
+        }
+    };
+
+    eprintln!(
+        "mci-agent import-sessions: done. {} files, {} records, {} events written \
+         ({} had no conversation text, {} malformed lines).",
+        stats.files_scanned,
+        stats.records_read,
+        stats.events_written,
+        stats.skipped_no_text,
+        stats.malformed_lines,
+    );
+    eprintln!("mci-agent import-sessions: next, run `mci-agent enrich`.");
     Ok(())
 }
 
