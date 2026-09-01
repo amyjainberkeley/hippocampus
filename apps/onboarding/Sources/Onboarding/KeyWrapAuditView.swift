@@ -166,8 +166,6 @@ struct KeyWrapAuditView: View {
 
     private func runReveal() {
         switch report.reveal {
-        case .showInFinder(let url):
-            NSWorkspace.shared.activateFileViewerSelecting([url])
         case .showInKeychainAccess:
             let keychain = URL(fileURLWithPath: "/Applications/Utilities/Keychain Access.app")
             NSWorkspace.shared.open(keychain)
@@ -179,7 +177,6 @@ struct KeyWrapAuditView: View {
     private var severityIcon: String {
         switch report.severity {
         case .production: "lock.shield.fill"
-        case .interim: "lock.fill"
         case .devOnly: "exclamationmark.octagon.fill"
         }
     }
@@ -187,7 +184,6 @@ struct KeyWrapAuditView: View {
     private var severityColor: Color {
         switch report.severity {
         case .production: .green
-        case .interim: .blue
         case .devOnly: .red
         }
     }
@@ -195,14 +191,12 @@ struct KeyWrapAuditView: View {
     private var severityLabel: String {
         switch report.severity {
         case .production: "Production"
-        case .interim: "Interim"
         case .devOnly: "DEV ONLY"
         }
     }
 
     private var revealButtonLabel: String? {
         switch report.reveal {
-        case .showInFinder: "Show in Finder"
         case .showInKeychainAccess: "Show me in Keychain Access"
         case .none: nil
         }
@@ -210,7 +204,6 @@ struct KeyWrapAuditView: View {
 
     private var revealIcon: String {
         switch report.reveal {
-        case .showInFinder: "folder"
         case .showInKeychainAccess: "key.viewfinder"
         case .none: "questionmark"
         }

@@ -1,49 +1,64 @@
 import Foundation
 import OnboardingKit
-import Security
 
+/// Delegates database-key preparation to the bundled ACL-trusted agent.
 struct LocalKeyGenerator: KeyGenerator, Sendable {
-    private let keyPath: URL
-
-    init(directory: URL? = nil) {
-        let dir = directory ?? FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("MCI")
-        self.keyPath = dir.appendingPathComponent("dev.key")
-    }
-
     func keyExists() async -> Bool {
-        FileManager.default.fileExists(atPath: keyPath.path)
+        // Onboarding is deliberately absent from the Keychain item's ACL, so it
+        // cannot probe custody directly. `generateKey` is an idempotent ensure.
+        false
     }
 
     func generateKey() async throws {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        let status = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
-        guard status == errSecSuccess else {
-            throw KeyGenerationError.randomFailed
+        guard let executable = Bundle.main.executableURL else {
+            throw KeyGenerationError.invalidBundle
+        }
+        let agentURL = executable.deletingLastPathComponent().appendingPathComponent("mci-agent")
+        guard FileManager.default.isExecutableFile(atPath: agentURL.path) else {
+            throw KeyGenerationError.missingAgent
         }
 
-        let hex = bytes.map { String(format: "%02x", $0) }.joined()
+        let databaseURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/MCI/mci.sqlite")
+        var environment = ProcessInfo.processInfo.environment
+        for name in [
+            "MCI_DB_KEY_HEX",
+            "MCI_DB_KEY_FILE",
+            "MCI_DEVELOPMENT_FILE_KEY",
+            "HIPPOCAMPUS_ENABLE_V2P1",
+        ] {
+            environment.removeValue(forKey: name)
+        }
+        environment["MCI_DB_PATH"] = databaseURL.path
+        environment["MCI_DB_KEYCHAIN_SERVICE"] = "ai.hippocampus.brain"
+        environment["MCI_DB_KEYCHAIN_ACCOUNT"] = "database-key-v1"
+        environment["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = "file-keychain-acl-v1"
 
-        let parent = keyPath.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-
-        let data = Data(hex.utf8)
-        try data.write(to: keyPath, options: .atomic)
-
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: keyPath.path
-        )
+        let process = Process()
+        process.executableURL = agentURL
+        process.arguments = ["ensure-key", "--db-path", databaseURL.path]
+        process.environment = environment
+        process.standardOutput = FileHandle(forWritingAtPath: "/dev/null")
+        let stderr = Pipe()
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw KeyGenerationError.agentFailed(process.terminationStatus)
+        }
     }
 }
 
 enum KeyGenerationError: LocalizedError {
-    case randomFailed
+    case invalidBundle
+    case missingAgent
+    case agentFailed(Int32)
 
     var errorDescription: String? {
         switch self {
-        case .randomFailed: "Failed to generate secure random bytes"
+        case .invalidBundle: "Hippocampus cannot verify the onboarding bundle."
+        case .missingAgent: "Hippocampus cannot find its database-key service."
+        case .agentFailed(let status): "Database-key preparation failed (\(status))."
         }
     }
 }

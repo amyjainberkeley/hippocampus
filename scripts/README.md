@@ -4,11 +4,12 @@ Build and packaging scripts for MCI / Hippocampus.
 
 ## build-installer.sh
 
-Produces a distributable `Hippocampus-<version>.dmg` installer image. Supports three modes:
+Produces a distributable `Hippocampus-<version>.dmg` installer image. Supports two signing modes:
 
-1. **Ad-hoc** (default when no cert present) — works for dev iteration, Gatekeeper warns on launch.
-2. **Developer ID signed** — hardened runtime + timestamp, passes Gatekeeper.
-3. **Developer ID signed + notarized** — Apple-verified, no warnings at all.
+1. **Developer ID signed** — required for release because the file-Keychain ACL trusts stable executable identities.
+2. **Development-only ad-hoc** — available only with `--debug --development-ad-hoc`; never a release artifact.
+
+Stable Developer ID signing is required for release. Notarization is added when credentials are available.
 
 ### Prerequisites
 
@@ -16,8 +17,9 @@ Produces a distributable `Hippocampus-<version>.dmg` installer image. Supports t
 - Xcode Command Line Tools (`xcode-select --install`)
   - Provides: `hdiutil`, `codesign`, `SetFile`, `xcrun notarytool`
 - Pre-built binaries:
-  - `swift build -c release` in `apps/hippocampus/`
-  - `swift build -c release` in `adapters/macos/MCICaptureHelper/`
+  - `scripts/swift-package.sh build -c release --package-path apps/hippocampus`
+  - `scripts/swift-package.sh build -c release --package-path adapters/macos/MCICaptureHelper`
+  - `scripts/swift-package.sh build -c release --package-path apps/recall-ui`
   - `cargo build --workspace --release`
 
 ### Apple Developer ID enrollment (one-time)
@@ -54,8 +56,8 @@ DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" ./scripts/build-inst
 # Skip build-app.sh (if .app is already assembled)
 ./scripts/build-installer.sh --skip-build
 
-# Debug profile
-./scripts/build-installer.sh --debug
+# Disposable local debug artifact with unstable ad-hoc identity
+./scripts/build-installer.sh --debug --development-ad-hoc
 
 # Custom output directory
 ./scripts/build-installer.sh --dist /tmp/release
@@ -63,11 +65,13 @@ DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" ./scripts/build-inst
 
 ### Signing behavior
 
-| Keychain has Developer ID cert? | `notarytool-profile` stored? | Result |
+| Developer ID identity | `notarytool-profile` stored? | Result |
 |---|---|---|
-| No | — | Ad-hoc sign (Gatekeeper warns) |
+| Missing | — | Release fails closed |
 | Yes | No | Developer ID sign, skip notarization |
 | Yes | Yes | Developer ID sign + notarize + staple |
+
+An ad-hoc artifact requires the explicit `--debug --development-ad-hoc` pair and is suitable only for disposable local development. Its unstable identity is not a Keychain ACL upgrade contract.
 
 The script also accepts env vars `NOTARYTOOL_APPLE_ID`, `NOTARYTOOL_TEAM_ID`, `NOTARYTOOL_PASSWORD` as an alternative to the keychain profile (used in CI).
 
@@ -167,7 +171,7 @@ Required GitHub secrets for signed releases:
 | `NOTARYTOOL_TEAM_ID` | Apple Developer Team ID |
 | `NOTARYTOOL_PASSWORD` | App-Specific Password for notarization |
 
-If secrets are absent, the workflow still runs but produces an ad-hoc signed DMG.
+If the Developer ID secret is absent, release packaging fails closed instead of producing an ad-hoc DMG.
 
 ---
 
@@ -179,7 +183,7 @@ Reproducible E2E pitch demo for Hippocampus / MCI. Automates the full demo pipel
 
 - macOS with Xcode Command Line Tools
 - Rust toolchain (`cargo`)
-- Swift toolchain (`swift build`)
+- Swift toolchain (invoked through `scripts/swift-package.sh`)
 - `openssl` (ships with macOS)
 
 ### Subcommands
@@ -188,7 +192,7 @@ Reproducible E2E pitch demo for Hippocampus / MCI. Automates the full demo pipel
 |---|---|
 | `clean` | Kill all MCI processes, delete demo brain + WAL/SHM files, archive logs to `/tmp` |
 | `seed` | Generate ephemeral SQLCipher key at `/tmp/mci-demo-key.hex` (mode 0600), run `mci-seed-brain` to write 20 synthetic events |
-| `boot` | Build Hippocampus.app via `build-app.sh`, embed Sparkle.framework, add `@executable_path/../Frameworks` rpath, ad-hoc codesign, launch |
+| `boot` | Build Hippocampus.app via `build-app.sh`, requiring the stable Developer ID release identity, then launch |
 | `query` | Run `mci-brain` CLI: stats, recent, search "snowflake", search "Cure53", search "zero-knowledge", show event 1 |
 | `mcp-demo` | Send JSON-RPC 2.0 requests (initialize, tools/list, mci_recall, mci_stats) to `mci-agent mcp-serve` via stdin pipe |
 | `screenshot` | Interactive `screencapture -w` for Hippocampus menu-bar and Recall UI windows; saves to `dist/demo-screenshots/` |

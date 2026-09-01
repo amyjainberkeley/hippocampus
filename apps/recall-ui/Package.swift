@@ -23,16 +23,12 @@
 //
 // # Build precondition
 //
-// The CMciBrainFFI target's modulemap links `libmci_brain_ffi.a`. That
-// static library is produced by Cargo at workspace `target/<profile>/`,
-// NOT by SwiftPM. Before `swift build` / `swift test`:
+// The CMciBrainFFI target's modulemap links `libmci_brain_ffi.a`. Use the
+// repository wrapper for every build/test so Cargo's matching profile is
+// staged into this package before SwiftPM links:
 //
-//     cargo build -p mci-brain-ffi              # debug
-//     cargo build -p mci-brain-ffi --release    # release
-//
-// The `linkerSettings` below add `-L../../target/debug` (and
-// `-L../../target/release`) so the linker can find the static lib. Paths
-// are relative to this package directory (`apps/recall-ui/`).
+//     ../../scripts/swift-package.sh build --package-path .
+//     ../../scripts/swift-package.sh build -c release --package-path .
 //
 // Targets:
 //   - `recall-ui` (executable) — the @main App with the SwiftUI scenes.
@@ -70,13 +66,14 @@ let package = Package(
                 .enableExperimentalFeature("StrictConcurrency"),
             ],
             linkerSettings: [
-                // Cargo writes libmci_brain_ffi.a to <workspace>/target/<profile>.
-                // Both -L paths are listed so debug and release builds find it
-                // (SwiftPM doesn't expose configuration-conditional unsafeFlags
-                // for linkerSettings before sw-tools 6.0; both are inert when
-                // empty so this is safe).
-                .unsafeFlags(["-L../../target/debug"]),
-                .unsafeFlags(["-L../../target/release"]),
+                .unsafeFlags(
+                    ["-L.build/mci-brain-ffi/debug"],
+                    .when(configuration: .debug)
+                ),
+                .unsafeFlags(
+                    ["-L.build/mci-brain-ffi/release"],
+                    .when(configuration: .release)
+                ),
             ]
         ),
         .target(
@@ -87,8 +84,14 @@ let package = Package(
                 .enableExperimentalFeature("StrictConcurrency"),
             ],
             linkerSettings: [
-                .unsafeFlags(["-L../../target/debug"]),
-                .unsafeFlags(["-L../../target/release"]),
+                .unsafeFlags(
+                    ["-L.build/mci-brain-ffi/debug"],
+                    .when(configuration: .debug)
+                ),
+                .unsafeFlags(
+                    ["-L.build/mci-brain-ffi/release"],
+                    .when(configuration: .release)
+                ),
                 .linkedFramework("Security"),
             ]
         ),
@@ -97,8 +100,14 @@ let package = Package(
             dependencies: ["RecallUIKit"],
             path: "Tests/RecallUIKitTests",
             linkerSettings: [
-                .unsafeFlags(["-L../../target/debug"]),
-                .unsafeFlags(["-L../../target/release"]),
+                .unsafeFlags(
+                    ["-L.build/mci-brain-ffi/debug"],
+                    .when(configuration: .debug)
+                ),
+                .unsafeFlags(
+                    ["-L.build/mci-brain-ffi/release"],
+                    .when(configuration: .release)
+                ),
             ]
         ),
     ]

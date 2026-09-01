@@ -206,7 +206,7 @@ MCI captures the most sensitive possible data stream. Trust is the product; this
 - **Plaintext in an MCI same-user-accessible process while running** (per ADR-0012). MCI is an all-day daemon; any other process running as the same user is, by default, able to read its memory and IPC channels via standard OS APIs. This is exactly how Microsoft Recall's 2025/26 redesign failed (`AIXHost.exe` unprotected-process leak, TotalRecall Reloaded, CSO Online 2026-04-16). The at-rest model alone is insufficient — see §10 process-hardening.
 
 ### 9.2 Encryption
-- **At rest (device, ADR-0008):** the SQLite store + blob store are encrypted with SQLCipher. The target-state key custody is a **Secure-Enclave-gated, biometric-access-controlled, non-exportable, `ThisDeviceOnly`** Keychain item on macOS (TPM + DPAPI-NG analog on Windows). The current branch is migrating the legacy local `dev.key` path to Keychain service `ai.hippocampus.brain`, account `database-key-v1`; Task 2 repair and end-to-end release verification remain pending, so this is not yet accepted as shipped behavior.
+- **At rest (device, ADR-0008):** the SQLite store + blob store are encrypted with SQLCipher. Current macOS custody uses a non-synchronizable generic-password item in the file-based Keychain: service `ai.hippocampus.brain`, account `database-key-v1`, with a `SecAccess` / `SecTrustedApplication` ACL for the four bundled consumers. This is not a Secure Enclave, biometric, access-group, or non-exportable-key claim. Durable releases require stable Developer ID designated requirements; clean-install and two-version owner verification remain release gates.
 - **Cloud (transport, ADR-0012):** **client-side encryption before upload** under a per-device Secure-Enclave-backed keypair + a shared user master key bootstrapped via **device-to-device authenticated enrollment** (existing device cross-signs new device's key; PAKE-style exchange over the sync transport; server never vouches). For single-device users, an opt-in **HSM-rate-limited recovery vault that self-destructs after N=10 failed attempts** (Apple ADP / WhatsApp Encrypted Backups envelope) provides catastrophic-loss recovery.
 - **Hash-chained delta log (ADR-0012).** The sync log is append-only and **hash-chained end-to-end** to defend against rollback, truncation, and key-substitution (Backendal et al., CRYPTO 2024 + ACM CCS 2024 companion). Clients verify the chain on every sync round.
 - **Searchable Symmetric Encryption is an explicit non-goal** (ADR-0012). Search runs on-device against a decrypted-in-memory index; SSE would add the known leakage-abuse exposure for zero functional gain.
@@ -326,28 +326,16 @@ mci/
 | Phase 1 | ✅ COMPLETE | Capture spine + sensitive-surface suppression. G2.1 preliminary pass; G2.2 4h soak still owed |
 | Phase 2 | ✅ COMPLETE | Context join — all providers + wiring landed |
 | Phase 3 | ✅ CLOSED (cycle 7) | OCR + brain landed. Current delete behavior is direct row deletion plus `VACUUM`, not crypto-shredded range deletion. |
-| Phase 4 | ~95% | Retention purger + onboarding scaffold landed. The `dev.key` to Keychain service/account migration is under Task 2 repair and has not passed end-to-end release verification; live capture remains default-off. |
+| Phase 4 | ~95% | Retention purger + onboarding scaffold landed. Task 2 implements validated `dev.key` migration into the file-Keychain ACL item and removes plaintext after successful revalidation. Signed clean-install and upgrade verification remain owner gates; live capture remains default-off. |
 | Phase 5 | ~80% | Semantic search works with the CPU-pinned Core ML embedder and Rust cosine scan over stored vectors. Task 3 committed a synthetic retrieval baseline at `docs/eval/work-memory-baseline.json`: lexical matched 7/21 answerable cases and abstained 3/3 times; hybrid matched 21/21 but produced 3/3 false positives. Generation is unmeasured, and Task 3 review is pending. |
 | Phase 6 | ~75% | Browser extension path works. Mail and Messages deep-hook ingest can persist allowed rows, but those paths are still gated behind explicit allowlists / FDA rather than the default demo flow. |
 | Phase 7 | ~75% | Hippocampus.app shell + Sparkle + LoginItems + DMG + rpath fix landed. Apple Developer ID signing and release verification are still owed. |
 | Phase 8 | Scaffolded | `adapters/windows/` crate (PR #124). Implementation post-v1.0 |
 | Phase 9 | Not started | iOS/Watch separate Xcode targets per ADR-0026. Post-v1.0 |
 
-#### M4 kill-switch — env-var-gated lift status
+#### Capture authority and readiness
 
-The M4 cascade-twice OCR-emit kill-switch (`CascadeTwiceOCREmitter.killOcrEmit = true`, ADR-0031 §Status) has been engaged in production for 6+ cycles since the 2026-05-30 second-lift revert. Phase 7 PR 14 (this PR) ships the M4-lift **code path** but gates activation on an environment variable:
-
-- `HIPPOCAMPUS_ENABLE_V2P1=1` at helper boot ⇒ gate returns `.enabled`; the boot path overrides `captureEnabled = true` AND `killOcrEmit = false`. The V2-P1 capture pipeline runs live.
-- Env var unset / any other value ⇒ pre-M4-lift behavior preserved. Shipping builds stay default-off and do not construct the live capture path.
-
-Rationale: the ratified V2-P1 third-lift discipline (`docs/research/v2-p1-third-lift-scaffold.md` §3) requires a live-Mac §7-equivalent smoke test on Amy's physical Mac (redesign memo §3.2 harnesses H6′–H10′) BEFORE the lift is ratified for public users. That test cannot be run by the fleet — it needs interactive human input. The env var is the interim: it lets Amy set the flag + build a local DMG + run the smoke test whenever she gets to her Mac, without ratifying a smoke-untested runtime for the shipping DMG.
-
-**Follow-up PR (post-smoke):** removes the env-var gate + makes V2-P1 the shipping default. Tracks against the ADR-0031 §Status third-lift condition-2 sign-off in `docs/audit/<date>-v2-p1-live-corpus.md`.
-
-Matched-pair implementation:
-- Swift helper: `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/MciV2P1Gate.swift` (reads env, exposes `.current` + `stateFor(env:)`, `stderrBreadcrumb(_:)`)
-- Rust agent: `apps/agent/src/v2p1_gate.rs` (reads env, appends `--capture` to helper argv when enabled)
-- Boot breadcrumb: `helper_health v2p1_gate=enabled|disabled` on stderr — grep `helper.stderr.log` to confirm state.
+Live capture defaults off. The persisted `capture_enabled` preference is the only authority: the app supervisor translates it to explicit `--capture` argv, strips legacy gate and raw-key variables from child environments, and commits UI/config state only after a generation-bound readiness receipt. The helper publishes that receipt only after Keychain resolution and successful `SCStream.startCapture`; startup errors exit nonzero. A failed preference transition either restarts and verifies the prior topology or leaves a visible closed/error state.
 
 ### Phase D — deep-hook coverage extension (v1.5-eligible)
 

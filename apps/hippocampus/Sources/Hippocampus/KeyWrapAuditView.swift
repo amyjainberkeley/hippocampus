@@ -6,8 +6,8 @@ import HippocampusKit
 /// SwiftUI panel for the read-only "Inspect Key Wrap" surface.
 ///
 /// Renders a `KeyWrapAuditReport` and lets the user (a) re-verify the
-/// wrap by re-running the inspector and (b) jump to Finder or
-/// Keychain Access for an OS-level second opinion. Content-free —
+/// wrap by re-running the inspector and (b) jump to Keychain Access
+/// for an OS-level second opinion. Content-free —
 /// the panel never displays key bytes, store contents, or any brain
 /// data. (DOGFOOD_V1 #28.)
 struct KeyWrapAuditView: View {
@@ -175,8 +175,6 @@ struct KeyWrapAuditView: View {
 
     private func runReveal() {
         switch report.reveal {
-        case .showInFinder(let url):
-            NSWorkspace.shared.activateFileViewerSelecting([url])
         case .showInKeychainAccess:
             let keychain = URL(fileURLWithPath: "/Applications/Utilities/Keychain Access.app")
             NSWorkspace.shared.open(keychain)
@@ -190,7 +188,6 @@ struct KeyWrapAuditView: View {
     private var severityIcon: String {
         switch report.severity {
         case .production: "lock.shield.fill"
-        case .interim: "lock.fill"
         case .devOnly: "exclamationmark.octagon.fill"
         }
     }
@@ -198,7 +195,6 @@ struct KeyWrapAuditView: View {
     private var severityColor: Color {
         switch report.severity {
         case .production: .green
-        case .interim: .blue
         case .devOnly: .red
         }
     }
@@ -206,14 +202,12 @@ struct KeyWrapAuditView: View {
     private var severityLabel: String {
         switch report.severity {
         case .production: "Production"
-        case .interim: "Interim"
         case .devOnly: "DEV ONLY"
         }
     }
 
     private var revealButtonLabel: String? {
         switch report.reveal {
-        case .showInFinder: "Show in Finder"
         case .showInKeychainAccess: "Show me in Keychain Access"
         case .none: nil
         }
@@ -221,7 +215,6 @@ struct KeyWrapAuditView: View {
 
     private var revealIcon: String {
         switch report.reveal {
-        case .showInFinder: "folder"
         case .showInKeychainAccess: "key.viewfinder"
         case .none: "questionmark"
         }

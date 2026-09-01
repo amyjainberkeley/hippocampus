@@ -6,10 +6,14 @@
 //! configuration or passed to child processes.
 
 use std::collections::BTreeMap;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use thiserror::Error;
+
+use mci_brain::SqlCipherBrainStore;
+use mci_core::crypto::DbKey;
 
 /// Keychain service for the production SQLCipher key.
 pub const DEFAULT_KEYCHAIN_SERVICE: &str = "ai.hippocampus.brain";
@@ -130,6 +134,53 @@ pub enum KeyResolutionError {
         /// Content-free random-source error.
         reason: String,
     },
+    /// The existing database path could not be inspected safely.
+    #[error("cannot inspect existing database path {path}: {reason}")]
+    DatabasePathCheckFailed {
+        /// Database path whose existence could not be established.
+        path: PathBuf,
+        /// Content-free filesystem error.
+        reason: String,
+    },
+    /// An existing database has no readable legacy migration key.
+    #[error(
+        "existing database requires legacy key migration, but {path} could not be read: {reason}"
+    )]
+    LegacyKeyReadFailed {
+        /// Legacy migration input path.
+        path: PathBuf,
+        /// Content-free filesystem error.
+        reason: String,
+    },
+    /// The legacy migration input is not exactly 64 ASCII hex characters.
+    #[error("legacy dev.key must be exactly 64 ASCII hex characters")]
+    InvalidLegacyKey,
+    /// A candidate key could not open and query the existing SQLCipher schema.
+    #[error("database key did not open the existing brain read-only")]
+    DatabaseValidationFailed,
+    /// The mandatory read after an add or duplicate race failed.
+    #[error("database key was added or raced, but the Keychain re-read failed: {source}")]
+    PostAddReadFailed {
+        /// Typed Keychain read failure, retained without collapsing denied/locked/missing.
+        source: Box<KeyResolutionError>,
+    },
+    /// The re-read Keychain key could not open the existing database.
+    #[error("re-read Keychain key did not open the existing brain read-only: {source}")]
+    PostAddValidationFailed {
+        /// Content-free read-only database validation error.
+        source: Box<KeyResolutionError>,
+    },
+    /// The Keychain migration was validated, but the legacy plaintext remained.
+    #[error("validated Keychain migration could not remove legacy key at {path}: {reason}")]
+    LegacyKeyRemovalFailed {
+        /// Legacy plaintext path that could not be removed.
+        path: PathBuf,
+        /// Content-free filesystem error.
+        reason: String,
+    },
+    /// An interrupted migration left a different valid legacy key beside the item.
+    #[error("legacy dev.key does not match the validated Keychain database key")]
+    LegacyKeyMismatch,
 }
 
 /// Injectable read surface used by production and tests.
@@ -152,6 +203,64 @@ pub trait KeychainWriter {
         secret: &str,
         trusted_application_paths: &[PathBuf],
     ) -> Result<(), KeyResolutionError>;
+}
+
+/// Injectable read-only proof that a key opens the expected brain schema.
+pub trait DatabaseKeyValidator {
+    /// Open `database_path` read-only with `key` and query the expected schema.
+    fn validate_existing_database(
+        &self,
+        database_path: &Path,
+        key: &str,
+    ) -> Result<(), KeyResolutionError>;
+}
+
+/// Injectable finalizer for deleting a successfully migrated legacy key.
+pub trait LegacyKeyRemover {
+    /// Remove the legacy plaintext after Keychain and database validation.
+    fn remove(&self, path: &Path) -> std::io::Result<()>;
+}
+
+/// Production legacy-key finalizer.
+pub struct SystemLegacyKeyRemover;
+
+impl LegacyKeyRemover for SystemLegacyKeyRemover {
+    fn remove(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+}
+
+/// Production read-only SQLCipher validator used by app startup and CLI init.
+pub struct SqlCipherDatabaseKeyValidator;
+
+impl DatabaseKeyValidator for SqlCipherDatabaseKeyValidator {
+    fn validate_existing_database(
+        &self,
+        database_path: &Path,
+        key_hex: &str,
+    ) -> Result<(), KeyResolutionError> {
+        let bytes = decode_hex_key(key_hex).ok_or(KeyResolutionError::DatabaseValidationFailed)?;
+        let key = DbKey::from_bytes(bytes);
+        let store = SqlCipherBrainStore::open_readonly(database_path, &key)
+            .map_err(|_| KeyResolutionError::DatabaseValidationFailed)?;
+        store
+            .stats()
+            .map(|_| ())
+            .map_err(|_| KeyResolutionError::DatabaseValidationFailed)
+    }
+}
+
+fn decode_hex_key(value: &str) -> Option<[u8; 32]> {
+    if !is_valid_database_key(value) {
+        return None;
+    }
+    let mut bytes = [0u8; 32];
+    for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
+        let high = (chunk[0] as char).to_digit(16)? as u8;
+        let low = (chunk[1] as char).to_digit(16)? as u8;
+        bytes[index] = (high << 4) | low;
+    }
+    Some(bytes)
 }
 
 /// Native reader for the current user's file-based, non-sync Keychain.
@@ -227,6 +336,12 @@ pub enum KeyInitializationOutcome {
     AlreadyPresent,
     /// A new ACL-protected item was added after a proven not-found read.
     Created,
+    /// An existing brain's exact legacy key was imported and revalidated.
+    MigratedLegacyKey,
+    /// Another process won the add race; its item was re-read and validated.
+    ConcurrentItemValidated,
+    /// A prior add succeeded; restart revalidated custody and removed plaintext.
+    CompletedInterruptedMigration,
 }
 
 /// Resolve and validate the production database key.
@@ -249,40 +364,168 @@ pub fn resolve_database_key_with_reader<R: KeychainReader>(
 }
 
 /// Initialize only after a typed not-found result. All other reads fail closed.
-pub fn initialize_database_key_with<R, W, G>(
+pub fn initialize_database_key_with<R, W, V, G>(
     reader: &R,
     writer: &W,
+    validator: &V,
     reference: &KeychainKeyReference,
     trusted_application_paths: &[PathBuf],
+    database_path: &Path,
+    legacy_key_path: &Path,
     generate: G,
 ) -> Result<KeyInitializationOutcome, KeyResolutionError>
 where
     R: KeychainReader,
     W: KeychainWriter,
+    V: DatabaseKeyValidator,
     G: FnOnce() -> Result<String, KeyResolutionError>,
 {
+    initialize_database_key_with_remover(
+        reader,
+        writer,
+        validator,
+        &SystemLegacyKeyRemover,
+        reference,
+        trusted_application_paths,
+        database_path,
+        legacy_key_path,
+        generate,
+    )
+}
+
+/// Initialize with an injectable legacy-key finalizer for failure-path tests.
+pub fn initialize_database_key_with_remover<R, W, V, D, G>(
+    reader: &R,
+    writer: &W,
+    validator: &V,
+    remover: &D,
+    reference: &KeychainKeyReference,
+    trusted_application_paths: &[PathBuf],
+    database_path: &Path,
+    legacy_key_path: &Path,
+    generate: G,
+) -> Result<KeyInitializationOutcome, KeyResolutionError>
+where
+    R: KeychainReader,
+    W: KeychainWriter,
+    V: DatabaseKeyValidator,
+    D: LegacyKeyRemover,
+    G: FnOnce() -> Result<String, KeyResolutionError>,
+{
+    let database_exists = match std::fs::metadata(database_path) {
+        Ok(_) => true,
+        Err(error) if error.kind() == ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(KeyResolutionError::DatabasePathCheckFailed {
+                path: database_path.to_path_buf(),
+                reason: error.to_string(),
+            });
+        }
+    };
+
     match resolve_database_key_with_reader(reader, reference) {
-        Ok(_) => Ok(KeyInitializationOutcome::AlreadyPresent),
+        Ok(key) => {
+            if database_exists {
+                validator.validate_existing_database(database_path, &key)?;
+                match std::fs::metadata(legacy_key_path) {
+                    Ok(_) => {
+                        let legacy = read_legacy_key(legacy_key_path)?;
+                        validator.validate_existing_database(database_path, &legacy)?;
+                        if legacy != key {
+                            return Err(KeyResolutionError::LegacyKeyMismatch);
+                        }
+                        remove_legacy_key(remover, legacy_key_path)?;
+                        return Ok(KeyInitializationOutcome::CompletedInterruptedMigration);
+                    }
+                    Err(error) if error.kind() == ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(KeyResolutionError::LegacyKeyReadFailed {
+                            path: legacy_key_path.to_path_buf(),
+                            reason: error.to_string(),
+                        });
+                    }
+                }
+            }
+            Ok(KeyInitializationOutcome::AlreadyPresent)
+        }
         Err(KeyResolutionError::MissingKey { .. }) => {
             if trusted_application_paths.is_empty() {
                 return Err(KeyResolutionError::AclUnavailable {
                     reason: "trusted executable list is empty".to_owned(),
                 });
             }
-            let generated = generate()?;
-            if !is_valid_database_key(&generated) {
-                return Err(KeyResolutionError::InvalidKey);
-            }
-            writer.add_generic_password(
+
+            let candidate = if database_exists {
+                let legacy = read_legacy_key(legacy_key_path)?;
+                validator.validate_existing_database(database_path, &legacy)?;
+                legacy
+            } else {
+                let generated = generate()?;
+                if !is_valid_database_key(&generated) {
+                    return Err(KeyResolutionError::InvalidKey);
+                }
+                generated
+            };
+
+            let raced = match writer.add_generic_password(
                 &reference.service,
                 &reference.account,
-                &generated,
+                &candidate,
                 trusted_application_paths,
-            )?;
-            Ok(KeyInitializationOutcome::Created)
+            ) {
+                Ok(()) => false,
+                Err(KeyResolutionError::KeyAlreadyExists) => true,
+                Err(error) => return Err(error),
+            };
+
+            let reread = resolve_database_key_with_reader(reader, reference).map_err(|source| {
+                KeyResolutionError::PostAddReadFailed {
+                    source: Box::new(source),
+                }
+            })?;
+            if database_exists {
+                validator
+                    .validate_existing_database(database_path, &reread)
+                    .map_err(|source| KeyResolutionError::PostAddValidationFailed {
+                        source: Box::new(source),
+                    })?;
+                remove_legacy_key(remover, legacy_key_path)?;
+            }
+
+            if raced {
+                Ok(KeyInitializationOutcome::ConcurrentItemValidated)
+            } else if database_exists {
+                Ok(KeyInitializationOutcome::MigratedLegacyKey)
+            } else {
+                Ok(KeyInitializationOutcome::Created)
+            }
         }
         Err(error) => Err(error),
     }
+}
+
+fn read_legacy_key(path: &Path) -> Result<String, KeyResolutionError> {
+    let bytes = std::fs::read(path).map_err(|error| KeyResolutionError::LegacyKeyReadFailed {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    })?;
+    let key = String::from_utf8(bytes).map_err(|_| KeyResolutionError::InvalidLegacyKey)?;
+    if !is_valid_database_key(&key) {
+        return Err(KeyResolutionError::InvalidLegacyKey);
+    }
+    Ok(key)
+}
+
+fn remove_legacy_key<D: LegacyKeyRemover>(
+    remover: &D,
+    path: &Path,
+) -> Result<(), KeyResolutionError> {
+    remover
+        .remove(path)
+        .map_err(|error| KeyResolutionError::LegacyKeyRemovalFailed {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        })
 }
 
 /// True for an exact 32-byte key encoded as 64 ASCII hexadecimal digits.

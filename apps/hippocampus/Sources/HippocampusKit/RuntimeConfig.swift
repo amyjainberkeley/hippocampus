@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: TBD-private
 import Foundation
 
+public protocol RuntimeConfiguring: Sendable {
+    var crashReportOptedIn: Bool { get }
+    var captureEnabled: Bool { get }
+    func setCrashReportOptedIn(_ value: Bool) throws
+    func setCaptureEnabled(_ value: Bool) throws
+}
+
 /// Reads/writes `~/.config/hippocampus/runtime.toml`.
 ///
 /// CSO: mode 0644 — non-sensitive settings (capture gate and crash-report opt-in).
 /// Capture changes are enforced by the supervisor through a child restart;
 /// this value itself remains a simple atomic on-disk preference.
-public struct RuntimeConfig: Sendable {
+public struct RuntimeConfig: RuntimeConfiguring, Sendable {
     public let path: URL
 
     public init(path: URL? = nil) {

@@ -92,6 +92,10 @@ enum Mode {
         db_path: PathBuf,
         root: PathBuf,
     },
+    /// Ensure the production Keychain item exists without importing data.
+    EnsureKey {
+        db_path: PathBuf,
+    },
     /// Import Claude Code session transcripts into the brain.
     ImportSessions {
         db_path: PathBuf,
@@ -259,6 +263,7 @@ fn parse_args(argv: &[String]) -> Args {
             }
             "import-sessions" => mode_kind = ModeKind::ImportSessions,
             "init" => mode_kind = ModeKind::Init,
+            "ensure-key" => mode_kind = ModeKind::EnsureKey,
             "--transcript-root" => {
                 if let Some(v) = argv.get(i + 1) {
                     transcript_root = Some(PathBuf::from(v));
@@ -372,6 +377,9 @@ fn parse_args(argv: &[String]) -> Args {
                 .clone()
                 .unwrap_or_else(mci_agent::import_sessions::default_transcript_root),
         },
+        ModeKind::EnsureKey => Mode::EnsureKey {
+            db_path: resolved_db_path,
+        },
         ModeKind::ImportSessions => Mode::ImportSessions {
             db_path: resolved_db_path,
             root: transcript_root
@@ -401,6 +409,7 @@ enum ModeKind {
     Brief,
     ImportSessions,
     Init,
+    EnsureKey,
     UnknownCommand,
 }
 
@@ -418,6 +427,8 @@ fn print_usage() {
         \x20 init                       one-command setup: make a key, import your\n\
         \x20                            Claude Code history, index it, and register\n\
         \x20                            with Claude Code as an MCP server\n\
+        \x20 ensure-key                 initialize or validate the bundled macOS\n\
+        \x20                            Keychain item without importing data\n\
         \x20 import-sessions            import Claude Code transcripts from\n\
         \x20                            ~/.claude/projects into the brain\n\
         \x20 doctor                     say why the brain is empty and what to fix\n\
@@ -1085,6 +1096,10 @@ async fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
+        Mode::EnsureKey { db_path } => match run_ensure_key_cmd(&db_path) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::ImportSessions { db_path, root } => match run_import_sessions_cmd(&db_path, &root) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
@@ -1256,14 +1271,11 @@ fn read_dev_key_hex() -> Option<String> {
     let path = PathBuf::from(home).join("Library/Application Support/MCI/dev.key");
     std::fs::read_to_string(&path)
         .ok()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()))
+        .filter(|s| key_resolver::is_valid_database_key(s))
 }
 
 fn development_key_fallback_enabled() -> bool {
     std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() == Ok("1")
-        || (cfg!(debug_assertions)
-            && std::env::vars_os().any(|(k, _)| k.to_string_lossy().starts_with("CARGO_BIN_EXE_")))
 }
 
 /// Resolve the brain key from Keychain. Raw/file keys are development-only
@@ -1576,6 +1588,81 @@ impl key_resolver::KeychainWriter for NativeKeychainWriter {
     }
 }
 
+fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
+    let home = match std::env::var("HOME") {
+        Ok(home) => PathBuf::from(home),
+        Err(_) => {
+            eprintln!("hippocampus ensure-key: HOME is not set.");
+            return Err(30);
+        }
+    };
+    let support = home.join("Library/Application Support/MCI");
+    if let Err(error) = std::fs::create_dir_all(&support) {
+        eprintln!(
+            "hippocampus ensure-key: create {}: {error}",
+            support.display()
+        );
+        return Err(31);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let contract =
+            key_resolver::KeychainAclContract::from_current_executable().map_err(|error| {
+                eprintln!("hippocampus ensure-key: {error}. Launch the bundled Hippocampus.app.");
+                33
+            })?;
+        let outcome = key_resolver::initialize_database_key_with(
+            &key_resolver::SystemKeychainReader,
+            &NativeKeychainWriter,
+            &key_resolver::SqlCipherDatabaseKeyValidator,
+            &key_resolver::KeychainKeyReference::default(),
+            &contract.trusted_application_paths,
+            db_path,
+            &support.join("dev.key"),
+            || {
+                let mut bytes = [0u8; 32];
+                getrandom::fill(&mut bytes).map_err(|error| {
+                    key_resolver::KeyResolutionError::GenerationFailure {
+                        reason: error.to_string(),
+                    }
+                })?;
+                Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+            },
+        )
+        .map_err(|error| {
+            eprintln!("hippocampus ensure-key: database key unchanged: {error}");
+            33
+        })?;
+
+        match outcome {
+            key_resolver::KeyInitializationOutcome::AlreadyPresent => {
+                println!("  key      existing Keychain item validated")
+            }
+            key_resolver::KeyInitializationOutcome::Created => {
+                println!("  key      created in macOS Keychain with bundled-executable ACL")
+            }
+            key_resolver::KeyInitializationOutcome::MigratedLegacyKey => {
+                println!("  key      legacy database key migrated and validated")
+            }
+            key_resolver::KeyInitializationOutcome::ConcurrentItemValidated => {
+                println!("  key      concurrent Keychain item re-read and validated")
+            }
+            key_resolver::KeyInitializationOutcome::CompletedInterruptedMigration => {
+                println!("  key      interrupted legacy migration completed and plaintext removed")
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = db_path;
+        eprintln!("hippocampus ensure-key: production Keychain initialization requires macOS");
+        Err(33)
+    }
+}
+
 /// One-command setup.
 ///
 /// Chains what a new user would otherwise do by hand: make a key, import
@@ -1586,65 +1673,9 @@ impl key_resolver::KeychainWriter for NativeKeychainWriter {
 /// Safe to re-run. It never overwrites an existing key, because doing so
 /// would make an existing brain permanently unreadable.
 fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
-    let home = match std::env::var("HOME") {
-        Ok(h) => PathBuf::from(h),
-        Err(_) => {
-            eprintln!("hippocampus init: HOME is not set.");
-            return Err(30);
-        }
-    };
-    let support = home.join("Library/Application Support/MCI");
-    if let Err(e) = std::fs::create_dir_all(&support) {
-        eprintln!("hippocampus init: create {}: {e}", support.display());
-        return Err(31);
-    }
-
-    // 1. Key. Creation is add-only and only a typed item-not-found result
-    // reaches it. The bundle contract supplies the exact signed executables
-    // for the file-Keychain SecAccess ACL.
-    #[cfg(target_os = "macos")]
-    {
-        let contract = match key_resolver::KeychainAclContract::from_current_executable() {
-            Ok(contract) => contract,
-            Err(error) => {
-                eprintln!("hippocampus init: {error}. Launch the bundled Hippocampus.app.");
-                return Err(33);
-            }
-        };
-        let outcome = key_resolver::initialize_database_key_with(
-            &key_resolver::SystemKeychainReader,
-            &NativeKeychainWriter,
-            &key_resolver::KeychainKeyReference::default(),
-            &contract.trusted_application_paths,
-            || {
-                let mut bytes = [0u8; 32];
-                getrandom::fill(&mut bytes).map_err(|error| {
-                    key_resolver::KeyResolutionError::GenerationFailure {
-                        reason: error.to_string(),
-                    }
-                })?;
-                Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-            },
-        );
-        match outcome {
-            Ok(key_resolver::KeyInitializationOutcome::AlreadyPresent) => {
-                println!("  key      already present in Keychain, leaving it alone");
-            }
-            Ok(key_resolver::KeyInitializationOutcome::Created) => {
-                println!("  key      created in macOS Keychain with bundled-executable ACL");
-            }
-            Err(error) => {
-                eprintln!("hippocampus init: database key unchanged: {error}");
-                return Err(33);
-            }
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        eprintln!("hippocampus init: production Keychain initialization requires macOS");
-        return Err(33);
-    }
+    // 1. Key. This is the same migration/validation path the app runs before
+    // starting capture, so CLI initialization cannot fork custody behavior.
+    run_ensure_key_cmd(db_path)?;
 
     // 2. Import. Missing transcripts is not an error: plenty of people have
     // never run Claude Code, and they should still get a working install.
@@ -1781,8 +1812,8 @@ fn run_enrich_cmd(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8
 ///
 /// `spawn_brief_worker` is called from inside the `--drain-stdin` arm, so
 /// the only way to reach the brief pipeline was to be running live capture.
-/// Capture ships off (`HIPPOCAMPUS_ENABLE_V2P1`), so on a brain filled by
-/// the seeder, the Mail or Messages readers, or an import, the worker was
+/// Capture can be disabled in app preferences, so on a brain filled by the
+/// seeder, the Mail or Messages readers, or an import, the worker was
 /// never spawned at all and no command existed that produced a brief. The
 /// pipeline was finished and unreachable.
 ///

@@ -4,18 +4,16 @@
 //!
 //! An install of Hippocampus captured 52,457 frames over 27 hours and wrote
 //! zero events. Nothing in the product said why. Finding the answer took
-//! reading 5.8 MB of helper logs, cross-referencing a Swift kill-switch, and
-//! knowing that `v2p1_gate=disabled` on one log line meant every OCR emit was
-//! a no-op.
+//! reading 5.8 MB of helper logs and cross-referencing capture startup state.
 //!
 //! Three independent things were wrong at once, and each failed silently:
-//! the V2-P1 gate was off, Screen Recording TCC had been declined, and the
-//! helper had no DB key. A user who hits any of them sees the same thing: an
+//! capture was off, Screen Recording TCC had been declined, and the helper had
+//! no DB key. A user who hits any of them sees the same thing: an
 //! app that looks like it is running and a memory that stays empty.
 //!
 //! `doctor` reads the same evidence and says it in one screen. It is
 //! deliberately read-only and dependency-free: it opens the brain read-only,
-//! reads env vars, and greps logs it already owns.
+//! and greps logs it already owns.
 
 use std::path::{Path, PathBuf};
 
@@ -80,77 +78,6 @@ fn tail_of(path: &Path, max_bytes: usize) -> Option<String> {
     let data = std::fs::read(path).ok()?;
     let start = data.len().saturating_sub(max_bytes);
     Some(String::from_utf8_lossy(&data[start..]).into_owned())
-}
-
-/// The env var name, as it appears verbatim inside a helper that reads it.
-const HELPER_GATE_SYMBOL: &[u8] = b"HIPPOCAMPUS_ENABLE_V2P1";
-
-/// Path to the installed helper binary.
-fn installed_helper_path() -> PathBuf {
-    PathBuf::from("/Applications/Hippocampus.app/Contents/MacOS/MCICaptureHelper")
-}
-
-/// Does a built helper actually contain the gate?
-///
-/// The env-var gate landed 2026-07-13. A helper built before that has no code
-/// path that reads it, so telling someone to set the variable is worse than
-/// saying nothing: they set it, nothing changes, and they conclude the product
-/// is broken rather than stale. Scanning the binary for the symbol is crude
-/// but exact, and it is the difference between "flip this switch" and "you
-/// need a newer build".
-///
-/// `None` when there is no installed helper, which must not be reported as
-/// stale: a machine that never had one should not be told to rebuild.
-fn helper_supports_gate(path: &Path) -> Option<bool> {
-    let data = std::fs::read(path).ok()?;
-    Some(
-        data.windows(HELPER_GATE_SYMBOL.len())
-            .any(|w| w == HELPER_GATE_SYMBOL),
-    )
-}
-
-/// Is the V2-P1 capture gate on, and can the installed helper even read it?
-///
-/// Two separate questions with very different answers. The helper inherits its
-/// environment from whoever launches it (`ProcessSupervisor` leaves
-/// `helper.environment` nil, which in Foundation means inherit), so setting the
-/// variable does reach it, but only if that binary was built after the gate
-/// existed.
-fn check_gate() -> Check {
-    let installed = installed_helper_path();
-    if helper_supports_gate(&installed) == Some(false) {
-        return Check::new(
-            "capture gate",
-            Status::Fail,
-            format!(
-                "the installed helper has no gate symbol, so it cannot emit at all ({})",
-                installed.display()
-            ),
-            "This build predates the env-var gate (added 2026-07-13), so no setting \
-             will make it capture. Build a current one:\n      \
-             swift build -c release --package-path adapters/macos/MCICaptureHelper\n    \
-             then run that binary with HIPPOCAMPUS_ENABLE_V2P1=1.",
-        );
-    }
-
-    let on = std::env::var("HIPPOCAMPUS_ENABLE_V2P1").as_deref() == Ok("1");
-    if on {
-        Check::new(
-            "capture gate",
-            Status::Pass,
-            "HIPPOCAMPUS_ENABLE_V2P1=1, OCR emit is armed",
-            "",
-        )
-    } else {
-        Check::new(
-            "capture gate",
-            Status::Fail,
-            "HIPPOCAMPUS_ENABLE_V2P1 is not 1, so killOcrEmit stays true",
-            "Frames get captured and cascaded, then every OCR emit is dropped. \
-             Launch with the gate on so the helper inherits it:\n      \
-             HIPPOCAMPUS_ENABLE_V2P1=1 /Applications/Hippocampus.app/Contents/MacOS/Hippocampus",
-        )
-    }
 }
 
 /// Did ScreenCaptureKit report a TCC refusal in the helper log?
@@ -297,7 +224,6 @@ pub fn diagnose(db_path: &Path, key: &DbKey) -> Result<Vec<Check>, String> {
 
     Ok(vec![
         check_events(&stats),
-        check_gate(),
         check_screen_recording(log_ref),
         check_helper_key(log_ref),
         check_embedder(),
@@ -401,26 +327,6 @@ mod tests {
             "mci-capture-helper: database key unavailable from Keychain",
         ));
         assert_eq!(c.status, Status::Fail);
-    }
-
-    #[test]
-    fn a_helper_too_old_for_the_gate_is_detected() {
-        let dir = std::env::temp_dir().join("mci-doctor-gate-test");
-        std::fs::create_dir_all(&dir).expect("tmpdir");
-
-        let stale = dir.join("stale-helper");
-        std::fs::write(&stale, b"a binary built before the gate existed").expect("write");
-        assert_eq!(helper_supports_gate(&stale), Some(false));
-
-        let current = dir.join("current-helper");
-        std::fs::write(&current, b"...reads HIPPOCAMPUS_ENABLE_V2P1 at boot...").expect("write");
-        assert_eq!(helper_supports_gate(&current), Some(true));
-
-        // Absent is unknown, not stale. A machine that never installed the
-        // app must not be told to rebuild something it never had.
-        assert_eq!(helper_supports_gate(&dir.join("nope")), None);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

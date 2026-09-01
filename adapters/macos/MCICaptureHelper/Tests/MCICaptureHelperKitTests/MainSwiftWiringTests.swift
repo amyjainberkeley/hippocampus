@@ -188,6 +188,21 @@ final class MainSwiftWiringTests: XCTestCase {
         )
     }
 
+    func test_main_swift_has_one_capture_authority_and_publishes_readiness_after_stream_start() throws {
+        let src = try Self.readMainSwift()
+
+        XCTAssertFalse(src.contains("HIPPOCAMPUS_ENABLE_V2P1"))
+        XCTAssertFalse(src.contains("MciV2P1Gate"))
+        guard let startRange = src.range(of: "try await captureSession.start()"),
+              let publishRange = src.range(of: "try readiness?.publish()")
+        else {
+            return XCTFail("main.swift must start capture and publish readiness")
+        }
+        XCTAssertLessThan(startRange.lowerBound, publishRange.lowerBound)
+        XCTAssertTrue(src.contains("exit(78)"), "Keychain startup failure must exit nonzero")
+        XCTAssertTrue(src.contains("exit(79)"), "SCStream startup failure must exit nonzero")
+    }
+
     /// Grep-in-place assertion on `SCStreamPipeline.swift` — the
     /// factory (which `main.swift` now wires) MUST call
     /// `SCContentFilter(display:including:exceptingWindows:)` with the

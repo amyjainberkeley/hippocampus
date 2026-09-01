@@ -20,7 +20,7 @@ It runs entirely on your machine. There is no server to trust, because there is 
 
 - Canonical shipped status lives in [docs/STATUS.md](docs/STATUS.md).
 - **Local by construction, not by policy.** Screen text is parsed on-device, embedded through Core ML with the current runtime pinned to CPU, and kept on your Mac. No API key is needed and nothing is sent anywhere.
-- **One local store, plus local blobs.** Rows, FTS, and stored vectors live in SQLCipher; keyframes stay as local blobs referenced from the database. Today delete is row removal plus `VACUUM`. The branch is migrating legacy `dev.key` custody to the macOS Keychain item `ai.hippocampus.brain` / `database-key-v1`, but Task 2 repair and end-to-end release verification are still pending.
+- **One local store, plus local blobs.** Rows, FTS, and stored vectors live in SQLCipher; keyframes stay as local blobs referenced from the database. Production database-key custody uses the non-synchronizable macOS file-Keychain item `ai.hippocampus.brain` / `database-key-v1` with a `SecAccess` ACL for the four stable Developer-ID-signed consumers. Legacy `dev.key` is migration input only and is removed after the Keychain value is re-read and proven against the existing database.
 - **Search the way you remember.** Keyword search for exact things like an error code, Rust-side cosine search for vague things like "that pricing discussion," fused into one ranked list when the embedder and backfill are present. (The CLI below exposes the keyword half. See [what works](#what-works-and-what-doesnt).)
 - **Blocked at the source.** Password prompts, private browsing, and DRM video are refused before a frame is ever encoded, not scrubbed afterwards.
 
@@ -42,7 +42,7 @@ Everything lands in `./hippocampus-demo/`. Your real brain is never touched, no 
 rm -rf ./hippocampus-demo
 ```
 
-That deletes the demo database and its demo key. The app path is slightly different today: the store is still SQLCipher, and the branch is migrating the legacy `~/Library/Application Support/MCI/dev.key` wrap to the macOS Keychain. That migration remains under repair and is not yet accepted as shipped behavior.
+That deletes the demo database and its demo key. The demo is explicitly development-only; the app uses the macOS file-Keychain reference and never puts its reusable key in product configuration or child environments.
 
 ---
 
@@ -107,6 +107,7 @@ mci-agent register-mcp     # writes the server into Claude Code's MCP settings
 Or run it directly and talk JSON-RPC to it:
 
 ```bash
+MCI_DEVELOPMENT_FILE_KEY=1 \
 MCI_DB_KEY_HEX=$(cat hippocampus-demo/demo.key) \
 MCI_DB_PATH=$PWD/hippocampus-demo/demo.sqlite \
   mci-agent mcp-serve
@@ -341,7 +342,7 @@ Most projects bury this. It should be near the top, because it decides whether t
 | **On-device embeddings** | **Works.** Runs through Core ML with the runtime pinned to CPU, with a regression test asserting the vectors still match a known-good reference. |
 | **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
 | **Reading Mail and Messages** | **Partly wired.** The agent-side deep-hook pumps can persist allowed Mail and Messages content into the brain after their cascade checks, but they are not part of the default demo flow and still depend on explicit allowlists / FDA. |
-| **Live screen capture** | **Built, unproven, ships OFF.** Shipping builds keep capture disabled unless you opt in at boot with `HIPPOCAMPUS_ENABLE_V2P1=1`; the all-day soak and release verification are still owed. |
+| **Live screen capture** | **Built, unproven, defaults OFF.** The persisted Preferences toggle is the only capture authority; enable commits only after a generation-bound helper readiness receipt. All-day soak and release verification are still owed. |
 | **Sync between machines** | **Skeleton.** The crypto is there. Proof that two devices converge is not. |
 | **Windows** | **Not started.** An empty crate with the right shape. |
 
@@ -359,7 +360,7 @@ The obvious question is how this differs from [mem0](https://github.com/mem0ai/m
 
 mem0 and supermemory are memory layers for agents. You hand them a conversation, a document, or a fact, and they store and retrieve it. The input is text you deliberately give them.
 
-Hippocampus's intended input is permitted screen context, which reaches the details you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once. In the current preview, live capture remains an explicit boot-time opt-in while release verification is pending.
+Hippocampus's intended input is permitted screen context, which reaches the details you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once. In the current preview, live capture remains an explicit persisted preference while release verification is pending.
 
 | | mem0 | supermemory | Hippocampus |
 |---|---|---|---|
@@ -388,7 +389,7 @@ The one-minute demo needs only Rust and openssl. Xcode is for building the menu-
 
 ## Commands
 
-Every command reads the brain at `$MCI_DB_PATH` using the key in `$MCI_DB_KEY_HEX`. The CLI opens the database read-only at the SQLite driver level, so it cannot corrupt or modify your brain no matter what you type.
+Production commands resolve the same content-free macOS Keychain service/account reference as the app. `mci-brain` opens the database read-only at the SQLite driver level. Raw or file keys are accepted only when `MCI_DEVELOPMENT_FILE_KEY=1` is set for an isolated local fixture such as `try-it.sh`.
 
 ```bash
 mci-brain stats                          # counts and time range
@@ -421,9 +422,10 @@ mci-agent stats --source safari
 
 | Variable | What it does | Required |
 |---|---|---|
-| `MCI_DB_KEY_HEX` | 64-character hex SQLCipher key | Yes |
 | `MCI_DB_PATH` | Path to the brain file | No, defaults to `~/Library/Application Support/MCI/mci.sqlite` |
-| `HIPPOCAMPUS_ENABLE_V2P1` | Boot-time opt-in for the unverified capture path | No, and leave it off until capture is verified |
+| `MCI_DB_KEYCHAIN_SERVICE` | Content-free Keychain service reference | No, defaults to `ai.hippocampus.brain` |
+| `MCI_DB_KEYCHAIN_ACCOUNT` | Content-free Keychain account reference | No, defaults to `database-key-v1` |
+| `MCI_DEVELOPMENT_FILE_KEY` | Enables raw/file keys for explicit local development only | No; never set in a production launch |
 
 ---
 
@@ -431,7 +433,7 @@ mci-agent stats --source safari
 
 The promise is "nothing leaves your machine," so here is what enforces it rather than my word for it.
 
-- **One encrypted local store** via SQLCipher, plus local keyframe blobs referenced from it. The branch is migrating the legacy owner-local `dev.key` wrap to Keychain service `ai.hippocampus.brain`, account `database-key-v1`; Task 2 repair and clean-install release verification are pending, so this is not yet an accepted shipping claim.
+- **One encrypted local store** via SQLCipher, plus local keyframe blobs referenced from it. Production consumers resolve Keychain service `ai.hippocampus.brain`, account `database-key-v1`, in the non-synchronizable file-Keychain domain. Durable releases require stable Developer ID designated requirements; ad-hoc bundles are disposable development artifacts.
 - **No separate vector service.** Today semantic recall does a Rust-side cosine scan over vectors stored in SQLCipher. The bundled sqlite-vec path is still deferred, so there is no extra vector daemon or cloud index to trust.
 - **Blocked at the source, not scrubbed after.** Password prompts, private browsing, and DRM surfaces are refused before a frame is encoded. Scrubbing afterwards means the data existed.
 - **A second layer for text.** Extracted text is checked for one-time codes, bank alerts, and API keys and refused. Tested against a synthetic corpus of 133 message shapes built from public security writeups, NIST guidance, and OWASP fixtures, in [core/brain/fixtures/](core/brain/fixtures/). Those fixtures contain no real messages.
@@ -466,7 +468,7 @@ cargo test --workspace       # everything
 
 **`try-it.sh` fails on the build step**. The first build compiles the whole workspace and needs a few minutes. If it fails outright, run `cargo build -p mci-agent --bins` on its own to see the real error.
 
-**`MCI_DB_KEY_HEX` errors**. The key must be exactly 64 hex characters (32 bytes). Generate one with `openssl rand -hex 32`. A wrong key does not produce a helpful error, it produces a file that will not open, because that is what encryption means.
+**Keychain access errors**. Launch the bundled Hippocampus app so custody can be initialized or migrated with the signed executable ACL. Missing, denied, locked, malformed, and generic read failures are distinct and fail closed. For isolated development fixtures only, set `MCI_DEVELOPMENT_FILE_KEY=1` and provide exactly 64 ASCII hex characters.
 
 **Search returns nothing**. Check `mci-brain stats` first. If it says `Events: 0`, the brain is empty and the seeder did not run. If there are events, your term is probably not in them; the demo corpus is about screen-capture and SQLite topics, so try `sqlite`, `embedding`, or `ScreenCaptureKit`.
 

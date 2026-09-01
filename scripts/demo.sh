@@ -32,7 +32,7 @@ APP_DIST="$REPO_ROOT/apps/hippocampus/dist"
 APP_PATH="$APP_DIST/Hippocampus.app"
 
 # macOS Tahoe (26.x) toolchain note (PR #95):
-# swift build may warn about deployment target vs SDK version.
+# SwiftPM may warn about deployment target vs SDK version.
 # Cosmetic only — build completes. cargo build works as-is.
 
 # ---------------------------------------------------------------------------
@@ -53,6 +53,7 @@ require_cmd() {
 
 load_key() {
     if [[ -f "$KEY_FILE" ]]; then
+        export MCI_DEVELOPMENT_FILE_KEY=1
         MCI_DB_KEY_HEX=$(cat "$KEY_FILE")
         export MCI_DB_KEY_HEX
     else
@@ -139,6 +140,7 @@ do_seed() {
     dim "  key: $KEY_FILE (mode 0600)"
 
     export MCI_DB_KEY_HEX
+    export MCI_DEVELOPMENT_FILE_KEY=1
     MCI_DB_KEY_HEX=$(cat "$KEY_FILE")
 
     mkdir -p "$MCI_DIR"
@@ -166,8 +168,8 @@ do_boot() {
     require_cmd install_name_tool
 
     echo "Building Swift + Rust binaries (release)..."
-    (cd "$REPO_ROOT/apps/hippocampus" && swift build -c release 2>&1 | tail -3)
-    (cd "$REPO_ROOT/adapters/macos/MCICaptureHelper" && swift build -c release 2>&1 | tail -3)
+    "$REPO_ROOT/scripts/swift-package.sh" build -c release --package-path "$REPO_ROOT/apps/hippocampus" 2>&1 | tail -3
+    "$REPO_ROOT/scripts/swift-package.sh" build -c release --package-path "$REPO_ROOT/adapters/macos/MCICaptureHelper" 2>&1 | tail -3
     cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --workspace --release 2>&1 | tail -3
 
     echo "Assembling Hippocampus.app via build-app.sh..."
@@ -399,7 +401,7 @@ do_screenshot_auto() {
     RECALL_UI="$REPO_ROOT/apps/recall-ui/.build/release/recall-ui"
     if [[ ! -f "$RECALL_UI" ]]; then
         dim "  RecallUI not built. Skipping."
-        dim "  Build: cd apps/recall-ui && swift build -c release"
+        dim "  Build: scripts/swift-package.sh build -c release --package-path apps/recall-ui"
     else
         "$RECALL_UI" &
         RECALL_PID=$!
@@ -429,7 +431,7 @@ do_screenshot_auto() {
     ONBOARDING="$REPO_ROOT/apps/onboarding/.build/release/onboarding"
     if [[ ! -f "$ONBOARDING" ]]; then
         dim "  Onboarding not built. Skipping."
-        dim "  Build: cd apps/onboarding && swift build -c release"
+        dim "  Build: scripts/swift-package.sh build -c release --package-path apps/onboarding"
     else
         "$ONBOARDING" &
         ONBOARD_PID=$!

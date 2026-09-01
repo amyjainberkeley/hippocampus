@@ -64,6 +64,7 @@ rm -f "$DB_PATH"
 chmod 600 "$KEY_FILE"
 export MCI_DB_KEY_HEX
 MCI_DB_KEY_HEX="$(cat "$KEY_FILE")"
+export MCI_DEVELOPMENT_FILE_KEY=1
 export MCI_DB_PATH="$DB_PATH"
 dim   "     $DB_PATH"
 dim   "     key: $KEY_FILE (0600, this sandbox only)"
@@ -93,6 +94,7 @@ cat <<EOF
 
 Keep going. Point the CLI at the same brain:
 
+  export MCI_DEVELOPMENT_FILE_KEY=1
   export MCI_DB_KEY_HEX=\$(cat "$KEY_FILE")
   export MCI_DB_PATH="$DB_PATH"
 

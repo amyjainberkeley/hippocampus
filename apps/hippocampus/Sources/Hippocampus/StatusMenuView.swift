@@ -153,9 +153,7 @@ struct StatusMenuView: View {
     }
 
     private func currentKeyWrapReport() -> KeyWrapAuditReport {
-        let keyURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/MCI/dev.key")
-        return KeyWrapAuditor.inspectFile(at: keyURL)
+        KeyWrapAuditor.inspectKeychain(KeychainKeyStore.defaultDatabaseKey)
     }
 
     @ViewBuilder
@@ -388,11 +386,13 @@ struct StatusMenuView: View {
             )
             return
         }
+        let childEnvironment = supervisor.sanitizedChildEnvironment()
         mcpRegistering = true
         Task.detached {
             let proc = Process()
             proc.executableURL = agentPath
             proc.arguments = ["register-mcp"]
+            proc.environment = childEnvironment
             let outPipe = Pipe()
             let errPipe = Pipe()
             proc.standardOutput = outPipe
