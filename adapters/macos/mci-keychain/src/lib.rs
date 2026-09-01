@@ -123,7 +123,7 @@ mod imp {
         });
         let query = CFDictionary::from_CFType_pairs(&pairs);
         let mut result: CFTypeRef = ptr::null();
-        let status = unsafe { SecItemCopyMatching(query.as_concrete_TypeRef(), &mut result) };
+        let status = unsafe { SecItemCopyMatching(query.as_concrete_TypeRef(), &raw mut result) };
         if status != errSecSuccess {
             return Err(Error::Status(status));
         }
@@ -154,11 +154,11 @@ mod imp {
                 .map_err(|_| Error::InvalidPath)?;
             let mut application = ptr::null_mut();
             let status =
-                unsafe { SecTrustedApplicationCreateFromPath(path.as_ptr(), &mut application) };
+                unsafe { SecTrustedApplicationCreateFromPath(path.as_ptr(), &raw mut application) };
             if status != errSecSuccess || application.is_null() {
                 return Err(Error::AclStatus(status));
             }
-            trusted.push(unsafe { CFType::wrap_under_create_rule(application as CFTypeRef) });
+            trusted.push(unsafe { CFType::wrap_under_create_rule(application.cast_const()) });
         }
 
         let trusted_array = CFArray::from_CFTypes(&trusted);
@@ -168,7 +168,7 @@ mod imp {
             SecAccessCreate(
                 descriptor.as_concrete_TypeRef(),
                 trusted_array.as_concrete_TypeRef(),
-                &mut access,
+                &raw mut access,
             )
         };
         if status != errSecSuccess || access.is_null() {
@@ -185,7 +185,7 @@ mod imp {
         pairs.push(unsafe {
             (
                 CFString::wrap_under_get_rule(kSecAttrAccess),
-                CFType::wrap_under_create_rule(access as CFTypeRef),
+                CFType::wrap_under_create_rule(access.cast_const()),
             )
         });
         let attributes = CFDictionary::from_CFType_pairs(&pairs);
