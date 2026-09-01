@@ -10,16 +10,20 @@ set -euo pipefail
 #   --skip-build    Skip calling build-app.sh (assume .app already assembled)
 #   --debug         Use debug profile for build-app.sh
 #   --dist DIR      Output directory (default: dist/)
+#   --verify-assets Verify canonical installer brand assets and exit
 #   --help          Show this help
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
 INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
+CANONICAL_APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
+VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
 
 SKIP_BUILD=0
 BUILD_PROFILE="release"
 DIST_DIR="$REPO_ROOT/dist"
+VERIFY_ASSETS_ONLY=0
 
 usage() {
     cat <<EOF
@@ -31,6 +35,7 @@ Options:
   --skip-build    Skip build-app.sh (assume .app is already assembled)
   --debug         Pass --debug to build-app.sh
   --dist DIR      Output directory (default: dist/)
+  --verify-assets Verify canonical installer brand assets and exit
   --help          Show this help
 
 Prerequisites:
@@ -49,10 +54,35 @@ while [[ $# -gt 0 ]]; do
         --skip-build) SKIP_BUILD=1; shift ;;
         --debug) BUILD_PROFILE="debug"; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
+        --verify-assets) VERIFY_ASSETS_ONLY=1; shift ;;
         --help|-h) usage; exit 0 ;;
         *) echo "ERROR: Unknown option: $1"; usage; exit 1 ;;
     esac
 done
+
+verify_brand_assets() {
+    if [[ ! -f "$CANONICAL_APP_ICON" ]]; then
+        echo "ERROR: Canonical app icon not found at $CANONICAL_APP_ICON" >&2
+        return 1
+    fi
+    if [[ ! -f "$VOLUME_ICON" ]]; then
+        echo "ERROR: Installer volume icon not found at $VOLUME_ICON" >&2
+        return 1
+    fi
+    if ! cmp -s "$CANONICAL_APP_ICON" "$VOLUME_ICON"; then
+        echo "ERROR: Installer volume icon differs from canonical AppIcon.icns" >&2
+        echo "Regenerate it with:" >&2
+        echo "  cp assets/branding/AppIcon.icns assets/installer/volume-icon.icns" >&2
+        return 1
+    fi
+}
+
+verify_brand_assets
+
+if [[ "$VERIFY_ASSETS_ONLY" -eq 1 ]]; then
+    echo "Installer brand assets match the canonical app identity."
+    exit 0
+fi
 
 # --- Pre-flight checks ---
 
@@ -479,11 +509,9 @@ echo "--- Staging DMG contents ---"
 cp -R "$APP_PATH" "$DMG_STAGING/Hippocampus.app"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-# Copy volume icon
-VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
-if [[ -f "$VOLUME_ICON" ]]; then
-    cp "$VOLUME_ICON" "$DMG_STAGING/.VolumeIcon.icns"
-fi
+# Stage the canonical app icon. The verified installer mirror exists to make
+# accidental brand drift visible in source control and CI.
+cp "$CANONICAL_APP_ICON" "$DMG_STAGING/.VolumeIcon.icns"
 
 # Regenerate background image if missing
 BACKGROUND_PNG="$INSTALLER_ASSETS/background.png"
