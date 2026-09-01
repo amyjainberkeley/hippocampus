@@ -82,6 +82,16 @@ enum Mode {
     McpServe {
         db_path: PathBuf,
     },
+    /// One-command setup: key, import, enrich, register.
+    Init {
+        db_path: PathBuf,
+        root: PathBuf,
+    },
+    /// Import Claude Code session transcripts into the brain.
+    ImportSessions {
+        db_path: PathBuf,
+        root: PathBuf,
+    },
     /// Explain why the brain is empty.
     Doctor {
         db_path: PathBuf,
@@ -182,6 +192,7 @@ fn parse_args(argv: &[String]) -> Args {
     let mut stats_source = String::new();
     let mut stats_since_seconds = DEFAULT_STATS_WINDOW_SECONDS;
     let mut embed_batch_size = DEFAULT_EMBED_BATCH_SIZE;
+    let mut transcript_root: Option<PathBuf> = None;
 
     let mut i = 1;
     while i < argv.len() {
@@ -208,6 +219,14 @@ fn parse_args(argv: &[String]) -> Args {
             "enrich" => mode_kind = ModeKind::Enrich,
             "mcp-sync" => mode_kind = ModeKind::McpSync,
             "doctor" => mode_kind = ModeKind::Doctor,
+            "import-sessions" => mode_kind = ModeKind::ImportSessions,
+            "init" => mode_kind = ModeKind::Init,
+            "--transcript-root" => {
+                if let Some(v) = argv.get(i + 1) {
+                    transcript_root = Some(PathBuf::from(v));
+                    i += 1;
+                }
+            }
             "--batch-size" => {
                 if let Some(v) = argv.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
                     embed_batch_size = v.max(1);
@@ -278,6 +297,17 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::Doctor => Mode::Doctor {
             db_path: resolved_db_path,
         },
+        ModeKind::Init => Mode::Init {
+            db_path: resolved_db_path.clone(),
+            root: transcript_root
+                .clone()
+                .unwrap_or_else(mci_agent::import_sessions::default_transcript_root),
+        },
+        ModeKind::ImportSessions => Mode::ImportSessions {
+            db_path: resolved_db_path,
+            root: transcript_root
+                .unwrap_or_else(mci_agent::import_sessions::default_transcript_root),
+        },
     };
     Args {
         device_id_path,
@@ -299,6 +329,8 @@ enum ModeKind {
     Enrich,
     McpSync,
     Doctor,
+    ImportSessions,
+    Init,
 }
 
 fn print_usage() {
@@ -312,6 +344,11 @@ fn print_usage() {
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 init                       one-command setup: make a key, import your\n\
+        \x20                            Claude Code history, index it, and register\n\
+        \x20                            with Claude Code as an MCP server\n\
+        \x20 import-sessions            import Claude Code transcripts from\n\
+        \x20                            ~/.claude/projects into the brain\n\
         \x20 doctor                     say why the brain is empty and what to fix\n\
         \x20 enrich                     run every understanding stage over an existing\n\
         \x20                            brain: extract entities, embed, segment episodes,\n\
@@ -955,6 +992,14 @@ async fn main() -> ExitCode {
                 ExitCode::from(14)
             }
         },
+        Mode::Init { db_path, root } => match run_init_cmd(&db_path, &root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::ImportSessions { db_path, root } => match run_import_sessions_cmd(&db_path, &root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::Doctor { db_path } => match run_doctor_cmd(&db_path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
@@ -1291,6 +1336,143 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
         eprintln!("mci-agent mcp-serve: stdio loop error: {e}");
         return Err(13);
     }
+    Ok(())
+}
+
+/// Import Claude Code session transcripts.
+///
+/// Opened read-write: this writes events. It reads only transcripts the user
+/// already has on disk, and indexes only the conversation text, never tool
+/// output or model reasoning.
+fn run_import_sessions_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!("mci-agent import-sessions: MCI_DB_KEY_HEX not set and no dev.key found.");
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent import-sessions: MCI_DB_KEY_HEX must be 64 hex characters.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let store = match SqlCipherBrainStore::new(db_path, &key) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "mci-agent import-sessions: open brain at {}: {e}",
+                db_path.display()
+            );
+            return Err(12);
+        }
+    };
+
+    eprintln!("mci-agent import-sessions: reading {}", root.display());
+    let stats = match mci_agent::import_sessions::import_sessions(&store, root, |s| {
+        if s.files_scanned % 10 == 0 {
+            eprintln!(
+                "mci-agent import-sessions: {} files, {} events",
+                s.files_scanned, s.events_written
+            );
+        }
+    }) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("mci-agent import-sessions: {e}");
+            return Err(24);
+        }
+    };
+
+    eprintln!(
+        "mci-agent import-sessions: done. {} files, {} records, {} events written \
+         ({} had no conversation text, {} malformed lines).",
+        stats.files_scanned,
+        stats.records_read,
+        stats.events_written,
+        stats.skipped_no_text,
+        stats.malformed_lines,
+    );
+    eprintln!("mci-agent import-sessions: next, run `mci-agent enrich`.");
+    Ok(())
+}
+
+/// One-command setup.
+///
+/// Chains what a new user would otherwise do by hand: make a key, import
+/// their Claude Code history, index it, and register as an MCP server. The
+/// point is that none of it needs an environment variable, because
+/// `resolve_key_hex` already falls back to the `dev.key` file this writes.
+///
+/// Safe to re-run. It never overwrites an existing key, because doing so
+/// would make an existing brain permanently unreadable.
+fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
+    let home = match std::env::var("HOME") {
+        Ok(h) => PathBuf::from(h),
+        Err(_) => {
+            eprintln!("hippocampus init: HOME is not set.");
+            return Err(30);
+        }
+    };
+    let support = home.join("Library/Application Support/MCI");
+    if let Err(e) = std::fs::create_dir_all(&support) {
+        eprintln!("hippocampus init: create {}: {e}", support.display());
+        return Err(31);
+    }
+
+    // 1. Key. Never regenerate over an existing one: the brain is encrypted
+    // with it, and a fresh key would orphan every event already stored.
+    let key_path = support.join("dev.key");
+    if read_dev_key_hex().is_some() {
+        println!("  key      already present, leaving it alone");
+    } else {
+        let mut bytes = [0u8; 32];
+        // Same OS CSPRNG mci-core uses for DbKey. No fallback: a weak key
+        // is worse than no key, so a failure here stops init.
+        if let Err(e) = getrandom::fill(&mut bytes) {
+            eprintln!("hippocampus init: OS CSPRNG failed, refusing to make a weak key: {e}");
+            return Err(32);
+        }
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        if let Err(e) = std::fs::write(&key_path, &hex) {
+            eprintln!("hippocampus init: write {}: {e}", key_path.display());
+            return Err(33);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        }
+        println!("  key      created at {} (0600)", key_path.display());
+    }
+
+    // 2. Import. Missing transcripts is not an error: plenty of people have
+    // never run Claude Code, and they should still get a working install.
+    if root.exists() {
+        match run_import_sessions_cmd(db_path, root) {
+            Ok(()) => {}
+            Err(code) => return Err(code),
+        }
+    } else {
+        println!(
+            "  import   skipped, no transcripts at {} (nothing to import yet)",
+            root.display()
+        );
+    }
+
+    // 3. Index.
+    if let Err(code) = run_enrich_cmd(db_path, DEFAULT_EMBED_BATCH_SIZE) {
+        return Err(code);
+    }
+
+    // 4. Register with Claude Code.
+    match register_mcp() {
+        Ok(()) => println!("  mcp      registered with Claude Code"),
+        Err(e) => println!("  mcp      not registered: {e}"),
+    }
+
+    println!("\nDone. Try it:\n");
+    println!("  mci-brain search \"some phrase you remember\"");
+    println!("\nOr restart Claude Code and ask it what you were working on.");
+    println!("Run `mci-agent doctor` if anything looks wrong.");
     Ok(())
 }
 
