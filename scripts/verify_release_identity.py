@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
@@ -18,6 +19,10 @@ import xml.etree.ElementTree as ET
 FEED_URL = "https://amyjainberkeley.github.io/hippocampus/appcast.xml"
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 VERSION_RE = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+STATUS_AUDIT_RE = re.compile(
+    r"^Audited code baseline: `([0-9a-fA-F]{7,40})`(?:\s.*)?$", re.MULTILINE
+)
+STATUS_AUDIT_MAX_COMMITS = 3
 
 
 class ReleaseIdentityError(RuntimeError):
@@ -63,6 +68,39 @@ def validate_changelog(path: Path, version: str) -> None:
     require(found_release and has_item, f"CHANGELOG.md has no nonempty [{version}] release")
 
 
+def git_output(root: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    require(completed.returncode == 0, f"git {' '.join(arguments)} failed for release provenance")
+    return completed.stdout.strip()
+
+
+def validate_status_audit(root: Path) -> None:
+    path = root / "docs/STATUS.md"
+    require(path.is_file(), f"docs/STATUS.md is missing: {path}")
+    match = STATUS_AUDIT_RE.search(path.read_text(encoding="utf-8"))
+    require(match is not None, "docs/STATUS.md has no audited code baseline SHA")
+    baseline = match.group(1)
+    resolved = git_output(root, "rev-parse", "--verify", f"{baseline}^{{commit}}")
+    ancestor = subprocess.run(
+        ["git", "-C", str(root), "merge-base", "--is-ancestor", resolved, "HEAD"],
+        check=False,
+    )
+    require(ancestor.returncode == 0, "docs/STATUS.md audit baseline is not an ancestor of HEAD")
+    distance_text = git_output(root, "rev-list", "--count", f"{resolved}..HEAD")
+    require(distance_text.isdigit(), "could not measure docs/STATUS.md audit distance")
+    distance = int(distance_text)
+    require(
+        distance <= STATUS_AUDIT_MAX_COMMITS,
+        "docs/STATUS.md audit baseline is "
+        f"{distance} commits behind HEAD; maximum is {STATUS_AUDIT_MAX_COMMITS}",
+    )
+
+
 def validate_prebuild(root: Path, tag: str) -> dict[str, str]:
     match = VERSION_RE.fullmatch(tag)
     require(match is not None, f"release tag must be strict vMAJOR.MINOR.PATCH, got {tag!r}")
@@ -88,11 +126,13 @@ def validate_prebuild(root: Path, tag: str) -> dict[str, str]:
         raise ReleaseIdentityError("SUPublicEDKey is not valid base64") from error
     require(len(decoded_public_key) == 32, "SUPublicEDKey must decode to 32 bytes")
     validate_changelog(root / "CHANGELOG.md", version)
+    validate_status_audit(root)
 
     return {
         "version": version,
         "build": build_number,
         "minimum_system": minimum_system,
+        "public_key": public_key,
     }
 
 
@@ -149,6 +189,26 @@ def validate_staged(
     except (binascii.Error, ValueError) as error:
         raise ReleaseIdentityError("appcast EdDSA signature is not valid base64") from error
     require(len(decoded_signature) == 64, "appcast EdDSA signature must decode to 64 bytes")
+    verifier = Path(__file__).with_name("verify-sparkle-signature.sh")
+    require(verifier.is_file(), f"Sparkle signature verifier is missing: {verifier}")
+    completed = subprocess.run(
+        [
+            str(verifier),
+            "--file",
+            str(dmg),
+            "--signature",
+            signature,
+            "--public-key",
+            identity["public_key"],
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    require(
+        completed.returncode == 0,
+        "appcast EdDSA signature does not authenticate the exact DMG bytes",
+    )
 
 
 def main() -> int:

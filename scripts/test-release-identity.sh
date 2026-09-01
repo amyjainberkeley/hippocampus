@@ -32,7 +32,7 @@ expect_fail() {
 
 make_fixture() {
     local root="$1"
-    mkdir -p "$root/apps/hippocampus/Resources" "$root/dist"
+    mkdir -p "$root/apps/hippocampus/Resources" "$root/dist" "$root/docs"
     cat >"$root/apps/hippocampus/Resources/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -41,7 +41,7 @@ make_fixture() {
 <key>CFBundleVersion</key><string>42</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>SUFeedURL</key><string>https://amyjainberkeley.github.io/hippocampus/appcast.xml</string>
-<key>SUPublicEDKey</key><string>11qYAYKxCrfVS/7TyWQHOg7hcvPaRiMlrwIaaPcHURo=</string>
+<key>SUPublicEDKey</key><string>11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=</string>
 </dict></plist>
 PLIST
     cat >"$root/CHANGELOG.md" <<'CHANGELOG'
@@ -53,6 +53,20 @@ PLIST
 
 - A source-backed memory release.
 CHANGELOG
+    git -C "$root" init -q
+    git -C "$root" config user.name 'Release Fixture'
+    git -C "$root" config user.email 'release-fixture@example.invalid'
+    git -C "$root" add apps CHANGELOG.md
+    git -C "$root" commit -qm 'fixture release inputs'
+    local baseline
+    baseline="$(git -C "$root" rev-parse HEAD)"
+    cat >"$root/docs/STATUS.md" <<STATUS
+# Hippocampus Status
+
+Audited code baseline: \`$baseline\`
+STATUS
+    git -C "$root" add docs/STATUS.md
+    git -C "$root" commit -qm 'fixture status audit'
 }
 
 ROOT="$TMP_ROOT/repo"
@@ -64,10 +78,17 @@ expect_fail 'prebuild rejects a tag that differs from the bundle version' \
 expect_pass 'prebuild accepts one coherent release identity' \
     "$VERIFY" --repo-root "$ROOT" --phase prebuild --tag v1.2.3
 
+for index in 1 2 3; do
+    git -C "$ROOT" commit --allow-empty -qm "stale fixture $index"
+done
+expect_fail 'prebuild rejects a status audit more than three commits behind' \
+    "$VERIFY" --repo-root "$ROOT" --phase prebuild --tag v1.2.3
+git -C "$ROOT" reset --hard -q HEAD~3
+
 DMG="$ROOT/dist/Hippocampus-1.2.3.dmg"
 printf 'synthetic signed disk image' >"$DMG"
 (cd "$ROOT/dist" && shasum -a 256 Hippocampus-1.2.3.dmg >Hippocampus-1.2.3.dmg.sha256)
-SIGNATURE="$(printf '%0128d' 0 | xxd -r -p | base64 | tr -d '\n')"
+SIGNATURE='IHZFOR4ggvM83HDgB8gsxbyIZZb/RCpIsRXmgC3xZ7TNPegZdJk0ZUk/ntDpkBYh9SPExcTf1IJOZe96gNc5Ag=='
 SIZE="$(stat -f%z "$DMG")"
 cat >"$ROOT/dist/appcast.xml" <<APPCAST
 <?xml version="1.0" encoding="utf-8"?>
@@ -85,6 +106,32 @@ APPCAST
 expect_pass 'staged verification accepts matching DMG, checksum, and appcast' \
     "$VERIFY" --repo-root "$ROOT" --phase staged --tag v1.2.3 \
     --dmg "$DMG" --appcast "$ROOT/dist/appcast.xml"
+
+ZERO_SIGNATURE="$(printf '%0128d' 0 | xxd -r -p | base64 | tr -d '\n')"
+sed -i '' "s|$SIGNATURE|$ZERO_SIGNATURE|" "$ROOT/dist/appcast.xml"
+expect_fail 'staged verification rejects a shape-valid zero signature' \
+    "$VERIFY" --repo-root "$ROOT" --phase staged --tag v1.2.3 \
+    --dmg "$DMG" --appcast "$ROOT/dist/appcast.xml"
+sed -i '' "s|$ZERO_SIGNATURE|$SIGNATURE|" "$ROOT/dist/appcast.xml"
+
+printf 'x' >>"$DMG"
+(cd "$ROOT/dist" && shasum -a 256 Hippocampus-1.2.3.dmg >Hippocampus-1.2.3.dmg.sha256)
+MUTATED_SIZE="$(stat -f%z "$DMG")"
+sed -i '' "s|length=\"$SIZE\"|length=\"$MUTATED_SIZE\"|" "$ROOT/dist/appcast.xml"
+expect_fail 'staged verification rejects a one-byte DMG mutation with a refreshed checksum' \
+    "$VERIFY" --repo-root "$ROOT" --phase staged --tag v1.2.3 \
+    --dmg "$DMG" --appcast "$ROOT/dist/appcast.xml"
+printf 'synthetic signed disk image' >"$DMG"
+(cd "$ROOT/dist" && shasum -a 256 Hippocampus-1.2.3.dmg >Hippocampus-1.2.3.dmg.sha256)
+sed -i '' "s|length=\"$MUTATED_SIZE\"|length=\"$SIZE\"|" "$ROOT/dist/appcast.xml"
+
+sed -i '' 's|11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=|' \
+    "$ROOT/apps/hippocampus/Resources/Info.plist"
+expect_fail 'staged verification rejects a mismatched public key' \
+    "$VERIFY" --repo-root "$ROOT" --phase staged --tag v1.2.3 \
+    --dmg "$DMG" --appcast "$ROOT/dist/appcast.xml"
+sed -i '' 's|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=|11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=|' \
+    "$ROOT/apps/hippocampus/Resources/Info.plist"
 
 sed -i '' 's|releases/download/v1.2.3|releases/download/v9.9.9|' "$ROOT/dist/appcast.xml"
 expect_fail 'staged verification rejects a mismatched enclosure URL' \

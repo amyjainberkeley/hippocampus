@@ -29,20 +29,23 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Require an inspected draft
+      - name: Resolve inspected release state
+        id: release-state
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true || {
-            echo "::error::$TAG is missing or is not a draft release"
-            exit 1
-          }
+          IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+          case "$IS_DRAFT" in
+            true|false) echo "is_draft=$IS_DRAFT" >>"$GITHUB_OUTPUT" ;;
+            *) echo "::error::$TAG is missing or returned an invalid release state"; exit 1 ;;
+          esac
 
       - name: Download and re-verify draft artifacts
         env:
@@ -65,14 +68,15 @@ jobs:
           cp inspected/appcast.xml public/appcast.xml
 
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - name: Stage private Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: public
 
       - name: Promote inspected GitHub release
+        if: steps.release-state.outputs.is_draft == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
@@ -80,4 +84,4 @@ jobs:
 
       - name: Deploy appcast after release promotion
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

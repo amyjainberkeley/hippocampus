@@ -1,9 +1,8 @@
-# Per ADR-0005. MSRV is `1.83` (set in workspace `Cargo.toml` `rust-version`).
-# Channel is `stable` for now so contributors don't fight a forced toolchain
-# download before CI is up. Once CI lands, pin to the exact `1.X.Y` that CI
-# runs against and treat MSRV bumps as deliberate, documented changes.
+# Per ADR-0005. MSRV remains `1.83` in workspace package metadata, while the
+# repository build and release toolchain is pinned independently. Update this
+# exact version only in a reviewed toolchain bump after fmt, Clippy, and tests.
 
 [toolchain]
-channel    = "stable"
+channel    = "1.96.0"
 components = ["rustfmt", "clippy"]
 profile    = "minimal"

@@ -96,6 +96,16 @@ require_pattern "$RELEASE" 'draft:[[:space:]]*true' \
     'tag workflow creates a draft release'
 reject_pattern "$RELEASE" '[+][[:space:]]{2,}' \
     'tag workflow shell commands contain no patch-marker argument corruption'
+require_pattern "$RELEASE" 'name:[[:space:]]*release-signing' \
+    'secret-bearing signing job uses the protected release-signing environment'
+require_pattern "$RELEASE" 'persist-credentials:[[:space:]]*false' \
+    'secret-bearing checkout does not persist a write credential'
+require_pattern "$RELEASE" 'actions/upload-artifact@[0-9a-f]{40}' \
+    'signing job hands verified artifacts to a separate draft job'
+require_pattern "$RELEASE" 'actions/download-artifact@[0-9a-f]{40}' \
+    'draft job consumes only verified artifacts'
+reject_pattern "$RELEASE" 'uses:[[:space:]]+[^#[:space:]]+@(v[0-9]+|stable)([[:space:]]|$)' \
+    'secret-bearing workflow pins every action to a full commit SHA'
 
 require_pattern "$PUBLISH" 'workflow_dispatch:' \
     'publication is an explicit owner-triggered workflow'
@@ -111,10 +121,18 @@ require_pattern "$PUBLISH" 'scripts/verify-release-identity\.sh --phase staged' 
     'publication re-verifies downloaded release identity'
 require_order "$PUBLISH" 'gh release edit.*--draft=false' 'actions/deploy-pages@' \
     'publication promotes the release before exposing the appcast'
+require_pattern "$PUBLISH" "if:[[:space:]]+steps\\.release-state\\.outputs\\.is_draft == 'true'" \
+    'publication promotes only while the inspected release is still a draft'
+reject_pattern "$PUBLISH" 'test "\$\(gh release view.*isDraft.*\)" = true' \
+    'publication can resume Pages deployment after an already-promoted release'
 reject_pattern "$PUBLISH" 'hippocampus-appcast|APPCAST_REPO_TOKEN|git push' \
     'publication has no sibling-repository credential dependency'
 reject_pattern "$PUBLISH" '[+][[:space:]]{2,}' \
     'publication shell commands contain no patch-marker argument corruption'
+require_pattern "$PUBLISH" 'persist-credentials:[[:space:]]*false' \
+    'publication checkout does not persist a write credential'
+reject_pattern "$PUBLISH" 'uses:[[:space:]]+[^#[:space:]]+@v[0-9]+([[:space:]]|$)' \
+    'publication workflow pins every action to a full commit SHA'
 
 require_pattern "$INFO_PLIST" 'https://amyjainberkeley\.github\.io/hippocampus/appcast\.xml' \
     'shipped Sparkle feed matches the publication target'
@@ -126,12 +144,26 @@ require_pattern "$INSTALLER" 'codesign --verify --strict.*"\$FINAL_DMG"' \
     'installer verifies the outer DMG signature'
 require_pattern "$INSTALLER" 'spctl --assess --type open --context context:primary-signature.*"\$FINAL_DMG"' \
     'installer runs the Gatekeeper disk-image assessment'
+require_pattern "$INSTALLER" '--wait --output-format json' \
+    'installer records structured notarization submission results'
+require_pattern "$INSTALLER" 'notarytool log' \
+    'installer retrieves Apple notarization logs'
+require_pattern "$INSTALLER" 'notary-\$\{label\}-submission\.json' \
+    'installer retains non-secret notarization provenance'
+reject_pattern "$INSTALLER" 'NOTARYTOOL_PASSWORD|NOTARY_ARGS\[\*\]|APP_NOTARY_ARGS\[\*\]' \
+    'installer never accepts or renders raw notarization passwords'
 require_pattern "$CHECK" 'release-contract\|bash\|lint\|scripts/test-release-contract\.sh' \
     'the unified local gate runs the release contract'
 for script in test-release-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-sparkle-keygen.sh test-sparkle-keypair.sh; do
     require_literal "$RELEASE_CI" "scripts/$script" \
         "release CI runs $script"
+done
+for release_input in .github/workflows/publish-release.yml scripts/build-installer.sh \
+    apps/hippocampus/Resources/build-app.sh apps/hippocampus/Package.resolved \
+    CHANGELOG.md docs/STATUS.md rust-toolchain.toml; do
+    require_literal "$RELEASE_CI" "'$release_input'" \
+        "release CI watches $release_input"
 done
 reject_pattern "$CARGO" 'continue-on-error:[[:space:]]*true' \
     'Clippy is a blocking CI gate'

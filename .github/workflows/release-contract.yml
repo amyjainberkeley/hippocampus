@@ -5,21 +5,35 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/release*.yml'
+      - '.github/workflows/publish-release.yml'
       - 'apps/hippocampus/Resources/Info.plist'
+      - 'apps/hippocampus/Resources/build-app.sh'
+      - 'apps/hippocampus/Package.resolved'
+      - 'scripts/build-installer.sh'
       - 'scripts/*release*'
       - 'scripts/*sparkle*'
       - 'scripts/check.sh'
+      - 'CHANGELOG.md'
+      - 'docs/STATUS.md'
       - 'docs/appcast-hosting.md'
       - 'docs/release/**'
+      - 'rust-toolchain.toml'
   pull_request:
     paths:
       - '.github/workflows/release*.yml'
+      - '.github/workflows/publish-release.yml'
       - 'apps/hippocampus/Resources/Info.plist'
+      - 'apps/hippocampus/Resources/build-app.sh'
+      - 'apps/hippocampus/Package.resolved'
+      - 'scripts/build-installer.sh'
       - 'scripts/*release*'
       - 'scripts/*sparkle*'
       - 'scripts/check.sh'
+      - 'CHANGELOG.md'
+      - 'docs/STATUS.md'
       - 'docs/appcast-hosting.md'
       - 'docs/release/**'
+      - 'rust-toolchain.toml'
 
 permissions:
   contents: read
@@ -28,7 +42,7 @@ jobs:
   contracts:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - run: scripts/test-release-contract.sh
@@ -40,8 +54,8 @@ jobs:
   workflows:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.x'
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
