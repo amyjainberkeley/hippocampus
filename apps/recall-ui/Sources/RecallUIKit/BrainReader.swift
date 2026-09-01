@@ -63,11 +63,8 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     /// before the P3.6.5 blob writer landed). Mirrors the FFI's
     /// `HitJson.thumbnail_path` (cycle 8.35 PR-4).
     ///
-    /// The path is opened by the `HitThumbnail` view in `HitRow`, which
-    /// applies a light blur + slight desaturation for defense-in-depth
-    /// against over-shoulder viewing. A missing file (stale hex,
-    /// user-deleted blob dir) falls back to the placeholder icon —
-    /// never a crash.
+    /// The path is authenticated and decrypted by `ThumbnailDataProvider`,
+    /// which returns only a bounded preview and fails closed for invalid data.
     ///
     /// **Privacy invariant.** A keyframe blob exists on disk ONLY for
     /// events that cleared cascade-twice (ADR-0016 §4.8). The brain-store

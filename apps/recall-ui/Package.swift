@@ -50,6 +50,9 @@ let package = Package(
         .executable(name: "recall-ui", targets: ["RecallUI"]),
         .library(name: "RecallUIKit", targets: ["RecallUIKit"]),
     ],
+    dependencies: [
+        .package(path: "../../adapters/macos/MCIKeyframeCodec"),
+    ],
     targets: [
         // System-library wrapper around the Rust FFI's C header + static lib.
         // The link directive in module.modulemap adds `-lmci_brain_ffi`; the
@@ -78,7 +81,10 @@ let package = Package(
         ),
         .target(
             name: "RecallUIKit",
-            dependencies: ["CMciBrainFFI"],
+            dependencies: [
+                "CMciBrainFFI",
+                .product(name: "MCIKeyframeCodec", package: "MCIKeyframeCodec"),
+            ],
             path: "Sources/RecallUIKit",
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
@@ -109,6 +115,14 @@ let package = Package(
                     .when(configuration: .release)
                 ),
             ]
+        ),
+        .executableTarget(
+            name: "ThumbnailProviderBehavior",
+            dependencies: [
+                "RecallUIKit",
+                .product(name: "MCIKeyframeCodec", package: "MCIKeyframeCodec"),
+            ],
+            path: "Tests/Fixtures"
         ),
     ]
 )

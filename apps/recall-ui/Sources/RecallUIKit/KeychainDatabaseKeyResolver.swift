@@ -145,6 +145,22 @@ public struct KeychainDatabaseKeyResolver: Sendable {
         }
         return hex
     }
+
+    public func resolveBytes(reference: KeychainDatabaseKeyReference) throws -> Data {
+        let hex = try resolveHex(reference: reference)
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(32)
+        var offset = hex.startIndex
+        for _ in 0 ..< 32 {
+            let end = hex.index(offset, offsetBy: 2)
+            guard let byte = UInt8(hex[offset ..< end], radix: 16) else {
+                throw KeychainDatabaseKeyError.malformed
+            }
+            bytes.append(byte)
+            offset = end
+        }
+        return Data(bytes)
+    }
 }
 
 public struct UnavailableBrainReader: BrainReader {

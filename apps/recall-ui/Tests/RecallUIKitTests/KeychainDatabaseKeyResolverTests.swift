@@ -25,6 +25,17 @@ final class KeychainDatabaseKeyResolverTests: XCTestCase {
         )
     }
 
+    func test_resolves_validated_hex_to_exact_key_bytes() throws {
+        let resolver = KeychainDatabaseKeyResolver(
+            client: FakeClient(result: .success(Data(String(repeating: "0a", count: 32).utf8)))
+        )
+
+        XCTAssertEqual(
+            try resolver.resolveBytes(reference: .defaultDatabaseKey),
+            Data(repeating: 0x0a, count: 32)
+        )
+    }
+
     func test_locked_keychain_is_distinct_from_missing_item() {
         let resolver = KeychainDatabaseKeyResolver(
             client: FakeClient(result: .failure(errSecInteractionNotAllowed))
