@@ -54,8 +54,8 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use mci_brain::{
-    BrainStore, Embedder, Event, EventChunker, EventId, HybridRetriever, RetrievalQuery, Retriever,
-    SqlCipherBrainStore,
+    lexical_retrieval_outcome, BrainStore, Embedder, Event, EventChunker, EventId, HybridRetriever,
+    RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore,
 };
 use mci_core::crypto::DbKey;
 
@@ -909,14 +909,16 @@ pub fn run_instance(
         // cosine, which would add uniform noise on top of the lexical
         // signal and make this arm measure something that is neither
         // lexical nor hybrid.
-        Arm::Lexical => crate::mcp::live::FtsSanitizingStore {
-            inner: Arc::clone(&store),
+        Arm::Lexical => {
+            let sanitizing = crate::mcp::live::FtsSanitizingStore {
+                inner: Arc::clone(&store),
+            };
+            typed_outcome_hits(
+                lexical_retrieval_outcome(&sanitizing, &query)
+                    .map_err(|e| format!("{}: lexical retrieve: {e}", inst.question_id))?,
+                &inst.question_id,
+            )?
         }
-        .fts5_search(&query.text, query.limit)
-        .map_err(|e| format!("{}: fts5: {e}", inst.question_id))?
-        .into_iter()
-        .map(|(id, score)| (id.0, f64::from(score)))
-        .collect(),
         Arm::Hybrid => {
             // The lexical arm needs no model, so the caller is allowed to
             // skip loading one entirely for a lexical-only run.
@@ -936,16 +938,14 @@ pub fn run_instance(
             let sanitizing = crate::mcp::live::FtsSanitizingStore {
                 inner: Arc::clone(&store),
             };
-            HybridRetriever::new(
+            let outcome = HybridRetriever::new(
                 Arc::new(sanitizing),
                 Arc::new(crate::mcp::live::DynEmbedder(q_emb)),
                 now_us,
             )
-            .retrieve(&query)
-            .map_err(|e| format!("{}: retrieve: {e}", inst.question_id))?
-            .into_iter()
-            .map(|h| (h.event_id.0, f64::from(h.score_combined)))
-            .collect()
+            .retrieve_outcome(&query)
+            .map_err(|e| format!("{}: retrieve: {e}", inst.question_id))?;
+            typed_outcome_hits(outcome, &inst.question_id)?
         }
     };
 
@@ -1048,6 +1048,22 @@ pub fn run_instance(
         latency_ms: started.elapsed().as_secs_f64() * 1000.0,
         index_size_bytes,
     })
+}
+
+fn typed_outcome_hits(
+    outcome: RetrievalOutcome,
+    question_id: &str,
+) -> Result<Vec<(u64, f64)>, String> {
+    match outcome {
+        RetrievalOutcome::Matched { matches } => Ok(matches
+            .into_iter()
+            .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
+            .collect()),
+        RetrievalOutcome::NothingMatched { .. } => Ok(Vec::new()),
+        RetrievalOutcome::Degraded { degradation, .. } => Err(format!(
+            "{question_id}: production retrieval degraded: {degradation:?}"
+        )),
+    }
 }
 
 fn provenance_available(hit: &RankedHit) -> bool {

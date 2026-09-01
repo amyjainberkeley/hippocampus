@@ -1,0 +1,558 @@
+{
+  "dataset_id": "hippocampus-evidence-sufficiency-calibration-v1",
+  "fixture_sha256": "4767463f1ca003c8f018aa6b375e4241db71ff982187b898bd2774f8adba2fbf",
+  "model_path": "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc",
+  "feature_schema_version": 1,
+  "feature_names": [
+    "raw_semantic_cosine",
+    "semantic_margin",
+    "query_coverage",
+    "document_coverage",
+    "lexical_semantic_agreement"
+  ],
+  "fit_procedure": "fixed logistic regression: 20000 full-batch iterations, learning_rate=0.02, l2=0.01",
+  "threshold_procedure": "lower positive split-conformal quantile; calibration negatives and validation labels do not select the threshold",
+  "target_positive_coverage": 0.9,
+  "means": [
+    0.7870435466368993,
+    0.17041073242823282,
+    0.6194444547096888,
+    0.4008928636709849,
+    1.0
+  ],
+  "scales": [
+    0.03820845993819882,
+    0.05769584525236047,
+    0.10382351095648168,
+    0.08607058767454791,
+    1e-6
+  ],
+  "weights": [
+    0.8685495660801209,
+    0.5719168870579202,
+    0.2660645935818998,
+    -2.9515814248499743,
+    0.0
+  ],
+  "intercept": -0.08542748040562667,
+  "threshold": 2.3632621998882204e-6,
+  "calibration": {
+    "positives": 6,
+    "negatives": 6,
+    "positive_coverage": 1.0,
+    "negative_false_positive_rate": 0.8333333333333334
+  },
+  "validation": {
+    "positives": 6,
+    "negatives": 6,
+    "positive_coverage": 0.6666666666666666,
+    "negative_false_positive_rate": 0.5
+  },
+  "validation_qualified": false,
+  "observations": [
+    {
+      "case_id": "fit-instrument",
+      "split": "fit",
+      "sufficient": true,
+      "features": [
+        0.8255641460418701,
+        0.18236267566680908,
+        0.6000000238418579,
+        0.4285714328289032,
+        1.0
+      ],
+      "score": 0.4774388159869413,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-instrument",
+      "split": "fit",
+      "sufficient": false,
+      "features": [
+        0.8248387575149536,
+        0.19362878799438477,
+        0.6000000238418579,
+        0.4285714328289032,
+        1.0
+      ],
+      "score": 0.5012202921100845,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-fabric",
+      "split": "fit",
+      "sufficient": true,
+      "features": [
+        0.7672862410545349,
+        0.163465678691864,
+        0.5,
+        0.3333333432674408,
+        1.0
+      ],
+      "score": 0.8033400573942729,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-fabric",
+      "split": "fit",
+      "sufficient": false,
+      "features": [
+        0.684131920337677,
+        0.13950902223587036,
+        0.5,
+        0.3333333432674408,
+        1.0
+      ],
+      "score": 0.32729963095466874,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-spice",
+      "split": "fit",
+      "sufficient": true,
+      "features": [
+        0.7608451843261719,
+        0.13783031702041626,
+        0.6000000238418579,
+        0.375,
+        1.0
+      ],
+      "score": 0.4586399556700495,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-spice",
+      "split": "fit",
+      "sufficient": false,
+      "features": [
+        0.8255499601364136,
+        0.28271132707595825,
+        0.800000011920929,
+        0.5,
+        1.0
+      ],
+      "score": 0.2625324898835422,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-hiding-place",
+      "split": "fit",
+      "sufficient": true,
+      "features": [
+        0.803373396396637,
+        0.24405449628829956,
+        0.75,
+        0.4285714328289032,
+        1.0
+      ],
+      "score": 0.5989719882272522,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-hiding-place",
+      "split": "fit",
+      "sufficient": false,
+      "features": [
+        0.7961091995239258,
+        0.23679029941558838,
+        0.75,
+        0.6000000238418579,
+        1.0
+      ],
+      "score": 0.0032863732074532434,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-cause",
+      "split": "fit",
+      "sufficient": true,
+      "features": [
+        0.7975900769233704,
+        0.12697017192840576,
+        0.5,
+        0.25,
+        1.0
+      ],
+      "score": 0.9899701885599893,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-cause",
+      "split": "fit",
+      "sufficient": false,
+      "features": [
+        0.7638653516769409,
+        0.07303398847579956,
+        0.5,
+        0.4000000059604645,
+        1.0
+      ],
+      "score": 0.13551554258211856,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-transport",
+      "split": "fit",
+      "sufficient": true,
+      "features": [
+        0.7869064807891846,
+        0.11676520109176636,
+        0.6666666865348816,
+        0.3333333432674408,
+        1.0
+      ],
+      "score": 0.8602650494423414,
+      "accepted": true
+    },
+    {
+      "case_id": "fit-transport",
+      "split": "fit",
+      "sufficient": false,
+      "features": [
+        0.8084618449211121,
+        0.1478068232536316,
+        0.6666666865348816,
+        0.4000000059604645,
+        1.0
+      ],
+      "score": 0.581520783237556,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-finish",
+      "split": "calibration",
+      "sufficient": true,
+      "features": [
+        0.8176377415657043,
+        0.0842248797416687,
+        1.0,
+        0.800000011920929,
+        1.0
+      ],
+      "score": 2.3632621998882204e-6,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-finish",
+      "split": "calibration",
+      "sufficient": false,
+      "features": [
+        0.8306716680526733,
+        0.16114050149917603,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "score": 7.1564080189666094e-9,
+      "accepted": false
+    },
+    {
+      "case_id": "calibration-trail",
+      "split": "calibration",
+      "sufficient": true,
+      "features": [
+        0.8030288219451904,
+        0.2050325870513916,
+        0.75,
+        0.4285714328289032,
+        1.0
+      ],
+      "score": 0.5016353552916911,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-trail",
+      "split": "calibration",
+      "sufficient": false,
+      "features": [
+        0.7991710901260376,
+        0.20117485523223877,
+        0.75,
+        0.5,
+        1.0
+      ],
+      "score": 0.07116954911775704,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-room",
+      "split": "calibration",
+      "sufficient": true,
+      "features": [
+        0.7632889151573181,
+        0.1290552020072937,
+        0.75,
+        0.6000000238418579,
+        1.0
+      ],
+      "score": 0.0005371574079244457,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-room",
+      "split": "calibration",
+      "sufficient": false,
+      "features": [
+        0.7590089440345764,
+        0.14428800344467163,
+        0.75,
+        0.75,
+        1.0
+      ],
+      "score": 3.309000240508109e-6,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-wood",
+      "split": "calibration",
+      "sufficient": true,
+      "features": [
+        0.8319404125213623,
+        0.22375738620758057,
+        0.800000011920929,
+        0.800000011920929,
+        1.0
+      ],
+      "score": 7.812804086820235e-6,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-wood",
+      "split": "calibration",
+      "sufficient": false,
+      "features": [
+        0.6814094185829163,
+        0.08705925941467285,
+        0.6000000238418579,
+        0.4285714328289032,
+        1.0
+      ],
+      "score": 0.013230414028461746,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-language",
+      "split": "calibration",
+      "sufficient": true,
+      "features": [
+        0.786917507648468,
+        0.2112637758255005,
+        0.6666666865348816,
+        0.6666666865348816,
+        1.0
+      ],
+      "score": 0.0001705376267427825,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-language",
+      "split": "calibration",
+      "sufficient": false,
+      "features": [
+        0.7265416383743286,
+        0.15088790655136108,
+        0.6666666865348816,
+        0.5,
+        1.0
+      ],
+      "score": 0.007161172999580367,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-tea",
+      "split": "calibration",
+      "sufficient": true,
+      "features": [
+        0.783004879951477,
+        0.14155614376068115,
+        0.75,
+        0.6000000238418579,
+        1.0
+      ],
+      "score": 0.0009514377931697951,
+      "accepted": true
+    },
+    {
+      "case_id": "calibration-tea",
+      "split": "calibration",
+      "sufficient": false,
+      "features": [
+        0.8195959329605103,
+        0.23276597261428833,
+        0.75,
+        0.75,
+        1.0
+      ],
+      "score": 0.00003152943278611719,
+      "accepted": true
+    },
+    {
+      "case_id": "validation-adhesive",
+      "split": "validation",
+      "sufficient": true,
+      "features": [
+        0.7684630155563354,
+        0.09811466932296753,
+        0.75,
+        0.6000000238418579,
+        1.0
+      ],
+      "score": 0.00044465512837283126,
+      "accepted": true
+    },
+    {
+      "case_id": "validation-adhesive",
+      "split": "validation",
+      "sufficient": false,
+      "features": [
+        0.7440334558486938,
+        0.15757369995117188,
+        0.75,
+        0.75,
+        1.0
+      ],
+      "score": 2.6856478438084423e-6,
+      "accepted": true
+    },
+    {
+      "case_id": "validation-entrance",
+      "split": "validation",
+      "sufficient": true,
+      "features": [
+        0.8164016604423523,
+        0.06208193302154541,
+        1.0,
+        0.8333333134651184,
+        1.0
+      ],
+      "score": 5.882326374498813e-7,
+      "accepted": false
+    },
+    {
+      "case_id": "validation-entrance",
+      "split": "validation",
+      "sufficient": false,
+      "features": [
+        0.8265173435211182,
+        0.12668699026107788,
+        1.0,
+        0.8333333134651184,
+        1.0
+      ],
+      "score": 1.404554301779418e-6,
+      "accepted": false
+    },
+    {
+      "case_id": "validation-flower",
+      "split": "validation",
+      "sufficient": true,
+      "features": [
+        0.7547887563705444,
+        0.04086798429489136,
+        0.75,
+        0.6000000238418579,
+        1.0
+      ],
+      "score": 0.0001847960858464386,
+      "accepted": true
+    },
+    {
+      "case_id": "validation-flower",
+      "split": "validation",
+      "sufficient": false,
+      "features": [
+        0.7927644848823547,
+        0.1528109908103943,
+        1.0,
+        0.800000011920929,
+        1.0
+      ],
+      "score": 2.6498289191026523e-6,
+      "accepted": true
+    },
+    {
+      "case_id": "validation-storage",
+      "split": "validation",
+      "sufficient": true,
+      "features": [
+        0.8569917678833008,
+        0.22337764501571655,
+        1.0,
+        0.6666666865348816,
+        1.0
+      ],
+      "score": 0.002217478635675517,
+      "accepted": true
+    },
+    {
+      "case_id": "validation-storage",
+      "split": "validation",
+      "sufficient": false,
+      "features": [
+        0.7845245599746704,
+        0.15091043710708618,
+        0.75,
+        0.5,
+        1.0
+      ],
+      "score": 0.03229371125643466,
+      "accepted": true
+    },
+    {
+      "case_id": "validation-bird",
+      "split": "validation",
+      "sufficient": true,
+      "features": [
+        0.747143566608429,
+        0.1919572949409485,
+        0.75,
+        0.6000000238418579,
+        1.0
+      ],
+      "score": 0.0006941198642755335,
+      "accepted": true
+    },
+    {
+      "case_id": "validation-bird",
+      "split": "validation",
+      "sufficient": false,
+      "features": [
+        0.8052288889884949,
+        0.2500426173210144,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "score": 9.68810733260244e-9,
+      "accepted": false
+    },
+    {
+      "case_id": "validation-pattern",
+      "split": "validation",
+      "sufficient": true,
+      "features": [
+        0.8046917915344238,
+        0.19890689849853516,
+        1.0,
+        0.8333333134651184,
+        1.0
+      ],
+      "score": 1.749749358786102e-6,
+      "accepted": false
+    },
+    {
+      "case_id": "validation-pattern",
+      "split": "validation",
+      "sufficient": false,
+      "features": [
+        0.8178613781929016,
+        0.21207648515701294,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "score": 8.861493844307416e-9,
+      "accepted": false
+    }
+  ]
+}
