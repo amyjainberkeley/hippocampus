@@ -48,16 +48,15 @@
 //! 64 MB it costs, and that is a finding worth having either way.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 use mci_brain::{
-    BrainStore, Event, EventId, HybridRetriever, RetrievalQuery, Retriever, SqlCipherBrainStore,
+    BrainStore, Embedder, Event, EventChunker, EventId, HybridRetriever, RetrievalQuery, Retriever,
+    SqlCipherBrainStore,
 };
 use mci_core::crypto::DbKey;
-
-use crate::idle_batch::backfill_until_drained;
 
 /// One LongMemEval instance: a question plus the haystack it hides in.
 #[derive(serde::Deserialize, Clone)]
@@ -194,10 +193,10 @@ pub struct InstanceResult {
     /// list, or `None` if no answer session was retrieved at all.
     pub first_hit_rank: Option<usize>,
     /// Fraction of this instance's answer sessions found within each k.
-    pub recall_at: BTreeMap<usize, f64>,
+    pub recall_at: BTreeMap<usize, Option<f64>>,
     /// Whether at least one correct result in the top k carries source
     /// anchors a person can inspect.
-    pub provenance_coverage_at: BTreeMap<usize, bool>,
+    pub provenance_coverage_at: BTreeMap<usize, Option<bool>>,
     /// How many sessions held the answer, for this question.
     pub answer_sessions: usize,
     /// Haystack size, so a score can be read against its difficulty.
@@ -221,20 +220,21 @@ pub struct Summary {
     pub instances: usize,
     /// Proportion of questions where at least one answer session appeared
     /// in the top k. This is the number a user feels: did it find it.
-    pub hit_rate_at: BTreeMap<usize, f64>,
+    pub hit_rate_at: BTreeMap<usize, Option<f64>>,
     /// Mean proportion of answer sessions recovered within top k. Stricter
     /// than hit rate, because most questions have more than one.
-    pub recall_at: BTreeMap<usize, f64>,
+    pub recall_at: BTreeMap<usize, Option<f64>>,
     /// Fraction of answerable questions where a correct top-k hit exposed
     /// enough source anchors to inspect.
-    pub provenance_coverage_at: BTreeMap<usize, f64>,
+    pub provenance_coverage_at: BTreeMap<usize, Option<f64>>,
     /// Fraction of unanswerable questions that still returned some top-k
     /// result. Lower is better.
-    pub false_positive_rate_at: BTreeMap<usize, f64>,
-    /// Answerable hit-rate minus unanswerable false-positive rate.
-    pub abstention_separation_at: BTreeMap<usize, f64>,
+    pub false_positive_rate_at: BTreeMap<usize, Option<f64>>,
+    /// Answerable hit-rate minus unanswerable false-positive rate
+    /// (Youden-style TPR - FPR). Undefined unless both denominators exist.
+    pub abstention_separation_at: BTreeMap<usize, Option<f64>>,
     /// Mean reciprocal rank of the first answer session.
-    pub mrr: f64,
+    pub mrr: Option<f64>,
     /// Answerable questions where no answer session was retrieved at any depth.
     pub complete_misses: usize,
     /// Counts by typed benchmark outcome.
@@ -255,11 +255,16 @@ pub struct Report {
     /// True only when every requested arm completed without dropped instances
     /// and any baseline check passed.
     pub complete: bool,
-    /// Path of the dataset this run read, recorded so a published number
-    /// can be traced to the exact file that produced it.
+    /// True only for a full, clean, canonical two-arm benchmark report.
+    pub publishable: bool,
+    /// True only when a publishable report also passes absolute quality.
+    pub launch_qualified: bool,
+    /// Repository-relative dataset path when the corpus belongs to this repo.
     pub dataset: String,
     /// Stable dataset identifier, used by the synthetic work-memory corpus.
     pub dataset_id: String,
+    /// SHA-256 of the exact dataset bytes consumed by this run.
+    pub dataset_checksum_sha256: String,
     /// Optional dataset description from the envelope format.
     pub dataset_description: Option<String>,
     /// One summary per arm, over every instance.
@@ -274,6 +279,10 @@ pub struct Report {
     pub failures: Vec<RunFailure>,
     /// Material-regression thresholds derived from this run's measured baseline.
     pub regression_thresholds: BTreeMap<String, RegressionThresholds>,
+    /// Product quality bars that do not move with a weak measured baseline.
+    pub absolute_quality_targets: BTreeMap<String, QualityTargets>,
+    /// Comparison against the absolute quality bars.
+    pub quality_gate: RegressionReport,
     /// Optional comparison of this run against a committed baseline file.
     pub regression: Option<RegressionReport>,
     /// Exact runtime environment captured for reproducibility.
@@ -383,10 +392,36 @@ pub struct RegressionThresholds {
 }
 
 #[allow(missing_docs)]
-#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct BaselineFile {
+    pub complete: bool,
+    pub publishable: bool,
+    pub dataset_id: String,
+    pub dataset_checksum_sha256: String,
+    #[serde(default)]
+    pub overall: Vec<BaselineArmSummary>,
     #[serde(default)]
     pub regression_thresholds: BTreeMap<String, RegressionThresholds>,
+    pub run: RunMetadata,
+}
+
+#[allow(missing_docs)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+pub struct BaselineArmSummary {
+    pub arm: String,
+    pub answerable_instances: usize,
+    pub unanswerable_instances: usize,
+}
+
+#[allow(missing_docs)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct QualityTargets {
+    pub hit_rate_at_5_min: f64,
+    pub recall_at_5_min: f64,
+    pub provenance_coverage_at_5_min: f64,
+    pub false_positive_rate_at_5_max: f64,
+    pub abstention_separation_at_5_min: f64,
+    pub mrr_min: f64,
 }
 
 #[allow(missing_docs)]
@@ -397,18 +432,32 @@ pub struct RegressionReport {
 }
 
 #[allow(missing_docs)]
-#[derive(serde::Serialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct RunMetadata {
     pub captured_at_utc: String,
     pub git_commit: String,
+    pub git_dirty_at_start: bool,
     pub branch: String,
-    pub os: String,
-    pub arch: String,
+    pub command: String,
+    pub arguments: Vec<String>,
+    pub rustc_version: String,
+    pub cargo_version: String,
+    pub os_name: String,
+    pub os_version: String,
+    pub os_build: String,
+    pub architecture: String,
+    pub hardware_model: Option<String>,
+    pub hardware_chip: Option<String>,
+    pub ram_bytes: Option<u64>,
+    pub compute_mode: String,
+    pub model_family: Option<String>,
     pub model_path: Option<String>,
+    pub model_checksum_sha256: Option<String>,
     pub requested_arms: Vec<String>,
     pub ks: Vec<usize>,
     pub limit: Option<usize>,
-    pub workdir: String,
+    pub original_instances: usize,
+    pub evaluated_instances: usize,
 }
 
 #[derive(Clone)]
@@ -487,6 +536,18 @@ fn validate_optional_axis(
 }
 
 fn validate_instance_shape(inst: &Instance) -> Result<(), String> {
+    if inst.question_id.is_empty()
+        || inst.question_id.len() > 256
+        || inst
+            .question_id
+            .chars()
+            .any(|ch| ch.is_control() || ch == '/' || ch == '\\')
+    {
+        return Err(format!(
+            "invalid question_id {:?}: ids must be 1-256 characters without path separators or control characters",
+            inst.question_id
+        ));
+    }
     let sessions = inst.haystack_sessions.len();
     if inst.haystack_dates.len() != sessions {
         return Err(format!(
@@ -513,6 +574,22 @@ fn validate_instance_shape(inst: &Instance) -> Result<(), String> {
     Ok(())
 }
 
+fn stable_id_hash(value: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn scratch_db_path(dir: &Path, prefix: &str, question_id: &str) -> std::path::PathBuf {
+    dir.join(format!(
+        "{prefix}-{:016x}.sqlite",
+        stable_id_hash(question_id)
+    ))
+}
+
 fn event_excerpt(text: &str) -> String {
     let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut excerpt = String::new();
@@ -522,9 +599,18 @@ fn event_excerpt(text: &str) -> String {
     excerpt
 }
 
+#[cfg(test)]
 fn seed_instance(
     inst: &Instance,
     db_path: &Path,
+) -> Result<(SqlCipherBrainStore, BTreeMap<u64, EventMeta>, usize), String> {
+    seed_instance_with_embedder(inst, db_path, None)
+}
+
+fn seed_instance_with_embedder(
+    inst: &Instance,
+    db_path: &Path,
+    document_embedder: Option<&dyn Embedder>,
 ) -> Result<(SqlCipherBrainStore, BTreeMap<u64, EventMeta>, usize), String> {
     validate_instance_shape(inst)?;
     let key = DbKey::from_bytes([0x5a; 32]);
@@ -532,6 +618,7 @@ fn seed_instance(
         .map_err(|e| format!("{}: open store: {e}", inst.question_id))?;
     let mut owner: BTreeMap<u64, EventMeta> = BTreeMap::new();
     let mut events_indexed = 0usize;
+    let chunker = EventChunker::default();
 
     for (si, session) in inst.haystack_sessions.iter().enumerate() {
         let sid = inst
@@ -566,16 +653,31 @@ fn seed_instance(
                 continue;
             }
             let ts_us = base_ts + (ti as u64) * 1_000_000;
-            let header =
-                format!("[app={app_bundle_id} | title={window_title} | url={url} | ts={ts_us}]\n");
+            let prepared = crate::brain_ingest::prepare_event_content(
+                &chunker,
+                Some(&app_bundle_id),
+                Some(&window_title),
+                Some(&url),
+                ts_us,
+                text,
+            )
+            .map_err(|e| format!("{}: prepare event: {e}", inst.question_id))?;
+            let embedding = match (document_embedder, prepared.embedding_input.as_deref()) {
+                (Some(embedder), Some(input)) if !input.is_empty() => Some(
+                    embedder
+                        .embed_one(input)
+                        .map_err(|e| format!("{}: embed: {e}", inst.question_id))?,
+                ),
+                _ => None,
+            };
             let event = Event {
                 id: EventId(0),
                 ts_us,
                 app_bundle_id: Some(app_bundle_id.clone()),
                 window_title: Some(window_title.clone()),
                 url: Some(url.clone()),
-                text: format!("{header}{text}"),
-                embedding: None,
+                text: prepared.stored_text,
+                embedding,
                 summary: None,
                 entities: None,
                 episode_id: None,
@@ -616,6 +718,8 @@ pub struct Embedders {
     /// Embeds the query, adding the model-card prefix (ADR-0011 §3).
     /// Using the document flavour here quietly degrades every result.
     pub query: Arc<dyn mci_brain::Embedder>,
+    /// Resolved model bundle used by the production loader.
+    pub model_path: PathBuf,
 }
 
 impl Embedders {
@@ -635,8 +739,29 @@ impl Embedders {
             );
         }
         let (query, _) = crate::embedder_load::load_query_embedder_backend();
-        Ok(Self { document, query })
+        let model_path = resolved_arctic_model_path().ok_or_else(|| {
+            "the Core ML embedder loaded but its resolved model path could not be identified"
+                .to_string()
+        })?;
+        Ok(Self {
+            document,
+            query,
+            model_path,
+        })
     }
+}
+
+#[cfg(target_os = "macos")]
+fn resolved_arctic_model_path() -> Option<PathBuf> {
+    crate::embedder_load::arctic_embed_s_model_candidates()
+        .into_iter()
+        .find(|path| path.exists())
+        .map(|path| path.canonicalize().unwrap_or(path))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn resolved_arctic_model_path() -> Option<PathBuf> {
+    None
 }
 
 /// Build one instance's brain, then run the question against it.
@@ -651,8 +776,23 @@ pub fn run_instance(
     embedders: Option<&Embedders>,
 ) -> Result<InstanceResult, String> {
     let started = Instant::now();
-    let db_path = dir.join(format!("{}.sqlite", inst.question_id));
-    let (store, owner, events_indexed) = seed_instance(inst, &db_path)?;
+    let db_path = scratch_db_path(dir, arm.label(), &inst.question_id);
+    let document_embedder = match arm {
+        Arm::Lexical => None,
+        Arm::Hybrid => Some(
+            embedders
+                .ok_or_else(|| {
+                    format!(
+                        "{}: the hybrid arm needs an embedder and none was given",
+                        inst.question_id
+                    )
+                })?
+                .document
+                .as_ref(),
+        ),
+    };
+    let (store, owner, events_indexed) =
+        seed_instance_with_embedder(inst, &db_path, document_embedder)?;
 
     let store = Arc::new(store);
     let now_us =
@@ -693,8 +833,6 @@ pub fn run_instance(
                     inst.question_id
                 )
             })?;
-            backfill_until_drained(store.as_ref(), embedders.document.as_ref(), 64, |_| {})
-                .map_err(|e| format!("{}: embed: {e}", inst.question_id))?;
             let q_emb = Arc::clone(&embedders.query);
             // Both wrappers are the ones `mcp-serve` uses. `DynEmbedder`
             // because `HybridRetriever<S, E>` needs `E: Sized`, and
@@ -762,14 +900,26 @@ pub fn run_instance(
             .take(k)
             .filter(|s| answers.iter().any(|a| a == s))
             .count();
-        let denom = answers.len().max(1);
-        recall_at.insert(k, found as f64 / denom as f64);
+        recall_at.insert(
+            k,
+            if is_unanswerable {
+                None
+            } else {
+                Some(found as f64 / answers.len() as f64)
+            },
+        );
         provenance_coverage_at.insert(
             k,
-            top_hits
-                .iter()
-                .take(k)
-                .any(|hit| hit.relevant && provenance_available(hit)),
+            if is_unanswerable {
+                None
+            } else {
+                Some(
+                    top_hits
+                        .iter()
+                        .take(k)
+                        .any(|hit| hit.relevant && provenance_available(hit)),
+                )
+            },
         );
     }
 
@@ -860,11 +1010,9 @@ pub fn run_abstention_probe(
     dir: &Path,
     embedders: &Embedders,
 ) -> Result<Vec<AbstentionSample>, String> {
-    let db_path = dir.join(format!("abst-{}.sqlite", inst.question_id));
-    let (store, _owner, _events_indexed) = seed_instance(inst, &db_path)?;
-
-    backfill_until_drained(&store, embedders.document.as_ref(), 64, |_| {})
-        .map_err(|e| format!("{}: embed: {e}", inst.question_id))?;
+    let db_path = scratch_db_path(dir, "abstention", &inst.question_id);
+    let (store, _owner, _events_indexed) =
+        seed_instance_with_embedder(inst, &db_path, Some(embedders.document.as_ref()))?;
     let q_emb = &embedders.query;
     let mut out = Vec::with_capacity(2);
     for (text, answerable) in [(inst.question.as_str(), true), (foreign_question, false)] {
@@ -998,19 +1146,19 @@ fn size_ceiling(value: f64) -> f64 {
     value * 1.35 + 4096.0
 }
 
-fn map_threshold_min(source: &BTreeMap<usize, f64>, k: usize, dest: &mut Option<f64>) {
-    *dest = source.get(&k).copied().map(threshold_floor);
+fn map_threshold_min(source: &BTreeMap<usize, Option<f64>>, k: usize, dest: &mut Option<f64>) {
+    *dest = source.get(&k).copied().flatten().map(threshold_floor);
 }
 
-fn map_threshold_max(source: &BTreeMap<usize, f64>, k: usize, dest: &mut Option<f64>) {
-    *dest = source.get(&k).copied().map(threshold_ceiling);
+fn map_threshold_max(source: &BTreeMap<usize, Option<f64>>, k: usize, dest: &mut Option<f64>) {
+    *dest = source.get(&k).copied().flatten().map(threshold_ceiling);
 }
 
 /// Derive material-regression thresholds from a measured baseline run.
 #[must_use]
 pub fn derive_regression_thresholds(summary: &Summary) -> RegressionThresholds {
     let mut out = RegressionThresholds {
-        mrr_min: Some(threshold_floor(summary.mrr)),
+        mrr_min: summary.mrr.map(threshold_floor),
         latency_p95_ms_max: Some(latency_ceiling(summary.latency_ms.p95)),
         index_size_p95_bytes_max: Some(size_ceiling(summary.index_size_bytes.p95)),
         ..RegressionThresholds::default()
@@ -1086,191 +1234,392 @@ pub fn derive_regression_thresholds(summary: &Summary) -> RegressionThresholds {
     out
 }
 
-fn compare_min(failures: &mut Vec<String>, arm: &str, label: &str, current: f64, min: Option<f64>) {
-    if let Some(min) = min {
-        if current + 1e-9 < min {
+fn compare_min(
+    failures: &mut Vec<String>,
+    arm: &str,
+    label: &str,
+    current: Option<f64>,
+    min: Option<f64>,
+) {
+    match (current, min) {
+        (Some(current), Some(min)) if current + 1e-9 < min => {
             failures.push(format!("{arm}: {label} {current:.3} < {min:.3}"));
         }
+        (None, Some(_)) => failures.push(format!("{arm}: {label} is undefined in current run")),
+        _ => {}
     }
 }
 
-fn compare_max(failures: &mut Vec<String>, arm: &str, label: &str, current: f64, max: Option<f64>) {
-    if let Some(max) = max {
-        if current - 1e-9 > max {
+fn compare_max(
+    failures: &mut Vec<String>,
+    arm: &str,
+    label: &str,
+    current: Option<f64>,
+    max: Option<f64>,
+) {
+    match (current, max) {
+        (Some(current), Some(max)) if current - 1e-9 > max => {
             failures.push(format!("{arm}: {label} {current:.3} > {max:.3}"));
+        }
+        (None, Some(_)) => failures.push(format!("{arm}: {label} is undefined in current run")),
+        _ => {}
+    }
+}
+
+fn map_value(map: &BTreeMap<usize, Option<f64>>, k: usize) -> Option<f64> {
+    map.get(&k).copied().flatten()
+}
+
+impl RegressionThresholds {
+    fn hit_min(&self, k: usize) -> Option<f64> {
+        match k {
+            1 => self.hit_rate_at_1_min,
+            3 => self.hit_rate_at_3_min,
+            5 => self.hit_rate_at_5_min,
+            10 => self.hit_rate_at_10_min,
+            _ => None,
+        }
+    }
+
+    fn recall_min(&self, k: usize) -> Option<f64> {
+        match k {
+            1 => self.recall_at_1_min,
+            3 => self.recall_at_3_min,
+            5 => self.recall_at_5_min,
+            10 => self.recall_at_10_min,
+            _ => None,
+        }
+    }
+
+    fn provenance_min(&self, k: usize) -> Option<f64> {
+        match k {
+            1 => self.provenance_coverage_at_1_min,
+            3 => self.provenance_coverage_at_3_min,
+            5 => self.provenance_coverage_at_5_min,
+            10 => self.provenance_coverage_at_10_min,
+            _ => None,
+        }
+    }
+
+    fn false_positive_max(&self, k: usize) -> Option<f64> {
+        match k {
+            1 => self.false_positive_rate_at_1_max,
+            3 => self.false_positive_rate_at_3_max,
+            5 => self.false_positive_rate_at_5_max,
+            10 => self.false_positive_rate_at_10_max,
+            _ => None,
+        }
+    }
+
+    fn separation_min(&self, k: usize) -> Option<f64> {
+        match k {
+            1 => self.abstention_separation_at_1_min,
+            3 => self.abstention_separation_at_3_min,
+            5 => self.abstention_separation_at_5_min,
+            10 => self.abstention_separation_at_10_min,
+            _ => None,
         }
     }
 }
 
-fn map_value(map: &BTreeMap<usize, f64>, k: usize) -> f64 {
-    map.get(&k).copied().unwrap_or(0.0)
+fn valid_git_commit(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-/// Compare measured summaries against a committed baseline.
+fn validate_threshold_shape(
+    failures: &mut Vec<String>,
+    arm: &BaselineArmSummary,
+    thresholds: &RegressionThresholds,
+    ks: &[usize],
+) {
+    for &k in ks {
+        if arm.answerable_instances > 0 {
+            for (label, value) in [
+                ("hit", thresholds.hit_min(k)),
+                ("recall", thresholds.recall_min(k)),
+                ("provenance", thresholds.provenance_min(k)),
+            ] {
+                if value.is_none() {
+                    failures.push(format!(
+                        "baseline arm {} is missing required {label}@{k} threshold",
+                        arm.arm
+                    ));
+                }
+            }
+        }
+        if arm.unanswerable_instances > 0 && thresholds.false_positive_max(k).is_none() {
+            failures.push(format!(
+                "baseline arm {} is missing required false_positive@{k} threshold",
+                arm.arm
+            ));
+        }
+        if arm.answerable_instances > 0
+            && arm.unanswerable_instances > 0
+            && thresholds.separation_min(k).is_none()
+        {
+            failures.push(format!(
+                "baseline arm {} is missing required abstention_separation@{k} threshold",
+                arm.arm
+            ));
+        }
+    }
+    if arm.answerable_instances > 0 && thresholds.mrr_min.is_none() {
+        failures.push(format!(
+            "baseline arm {} is missing required mrr threshold",
+            arm.arm
+        ));
+    }
+    if thresholds.latency_p95_ms_max.is_none() {
+        failures.push(format!(
+            "baseline arm {} is missing required latency threshold",
+            arm.arm
+        ));
+    }
+    if thresholds.index_size_p95_bytes_max.is_none() {
+        failures.push(format!(
+            "baseline arm {} is missing required index-size threshold",
+            arm.arm
+        ));
+    }
+}
+
+/// Compare measured summaries against a compatible committed baseline.
 #[must_use]
 pub fn compare_against_baseline(
     summaries: &[Summary],
-    baseline: &BTreeMap<String, RegressionThresholds>,
+    baseline: &BaselineFile,
+    dataset_id: &str,
+    dataset_checksum_sha256: &str,
+    run: &RunMetadata,
 ) -> RegressionReport {
     let mut failures = Vec::new();
-    for summary in summaries {
-        let Some(t) = baseline.get(&summary.arm) else {
+    if !baseline.complete {
+        failures.push("baseline is incomplete".to_string());
+    }
+    if !baseline.publishable {
+        failures.push("baseline is not publishable".to_string());
+    }
+    if baseline.dataset_id != dataset_id {
+        failures.push(format!(
+            "baseline dataset id {:?} does not match {:?}",
+            baseline.dataset_id, dataset_id
+        ));
+    }
+    if baseline.dataset_checksum_sha256 != dataset_checksum_sha256 {
+        failures.push("baseline dataset checksum does not match current dataset".to_string());
+    }
+    if baseline.run.ks != run.ks {
+        failures.push(format!(
+            "baseline k set {:?} does not match requested {:?}",
+            baseline.run.ks, run.ks
+        ));
+    }
+    if baseline.run.git_dirty_at_start {
+        failures.push("baseline code identity is dirty".to_string());
+    }
+    if !valid_git_commit(&baseline.run.git_commit) {
+        failures.push("baseline git_commit is not a full commit id".to_string());
+    }
+    if !valid_git_commit(&run.git_commit) {
+        failures.push("current git_commit is not a full commit id".to_string());
+    }
+
+    let required_arms: BTreeSet<&str> = run.requested_arms.iter().map(String::as_str).collect();
+    let baseline_requested: BTreeSet<&str> = baseline
+        .run
+        .requested_arms
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let baseline_summaries: BTreeMap<&str, &BaselineArmSummary> = baseline
+        .overall
+        .iter()
+        .map(|summary| (summary.arm.as_str(), summary))
+        .collect();
+    let current_summaries: BTreeMap<&str, &Summary> = summaries
+        .iter()
+        .map(|summary| (summary.arm.as_str(), summary))
+        .collect();
+
+    for arm in &required_arms {
+        if !baseline_requested.contains(arm) {
+            failures.push(format!("baseline run is missing requested arm {arm}"));
+        }
+        let Some(baseline_summary) = baseline_summaries.get(arm).copied() else {
+            failures.push(format!("baseline is missing requested arm {arm}"));
             continue;
         };
+        let Some(thresholds) = baseline.regression_thresholds.get(*arm) else {
+            failures.push(format!(
+                "baseline is missing requested arm {arm} regression thresholds"
+            ));
+            continue;
+        };
+        validate_threshold_shape(&mut failures, baseline_summary, thresholds, &run.ks);
+        if !current_summaries.contains_key(arm) {
+            failures.push(format!("current run is missing requested arm {arm}"));
+        }
+    }
+
+    if required_arms.contains("hybrid") {
+        if baseline.run.model_family != run.model_family {
+            failures.push("baseline model family does not match current model".to_string());
+        }
+        if baseline.run.model_checksum_sha256.is_none()
+            || baseline.run.model_checksum_sha256 != run.model_checksum_sha256
+        {
+            failures.push("baseline model checksum does not match current model".to_string());
+        }
+        if baseline.run.compute_mode != run.compute_mode {
+            failures.push("baseline compute mode does not match current run".to_string());
+        }
+    }
+
+    if !failures.is_empty() {
+        return RegressionReport {
+            passed: false,
+            failures,
+        };
+    }
+
+    for summary in summaries {
+        let thresholds = &baseline.regression_thresholds[&summary.arm];
+        for &k in &run.ks {
+            compare_min(
+                &mut failures,
+                &summary.arm,
+                &format!("hit@{k}"),
+                map_value(&summary.hit_rate_at, k),
+                thresholds.hit_min(k),
+            );
+            compare_min(
+                &mut failures,
+                &summary.arm,
+                &format!("recall@{k}"),
+                map_value(&summary.recall_at, k),
+                thresholds.recall_min(k),
+            );
+            compare_min(
+                &mut failures,
+                &summary.arm,
+                &format!("provenance@{k}"),
+                map_value(&summary.provenance_coverage_at, k),
+                thresholds.provenance_min(k),
+            );
+            compare_max(
+                &mut failures,
+                &summary.arm,
+                &format!("false_positive@{k}"),
+                map_value(&summary.false_positive_rate_at, k),
+                thresholds.false_positive_max(k),
+            );
+            compare_min(
+                &mut failures,
+                &summary.arm,
+                &format!("abstention_separation@{k}"),
+                map_value(&summary.abstention_separation_at, k),
+                thresholds.separation_min(k),
+            );
+        }
         compare_min(
             &mut failures,
             &summary.arm,
-            "hit@1",
-            map_value(&summary.hit_rate_at, 1),
-            t.hit_rate_at_1_min,
+            "mrr",
+            summary.mrr,
+            thresholds.mrr_min,
         );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "hit@3",
-            map_value(&summary.hit_rate_at, 3),
-            t.hit_rate_at_3_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "hit@5",
-            map_value(&summary.hit_rate_at, 5),
-            t.hit_rate_at_5_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "hit@10",
-            map_value(&summary.hit_rate_at, 10),
-            t.hit_rate_at_10_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "recall@1",
-            map_value(&summary.recall_at, 1),
-            t.recall_at_1_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "recall@3",
-            map_value(&summary.recall_at, 3),
-            t.recall_at_3_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "recall@5",
-            map_value(&summary.recall_at, 5),
-            t.recall_at_5_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "recall@10",
-            map_value(&summary.recall_at, 10),
-            t.recall_at_10_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "provenance@1",
-            map_value(&summary.provenance_coverage_at, 1),
-            t.provenance_coverage_at_1_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "provenance@3",
-            map_value(&summary.provenance_coverage_at, 3),
-            t.provenance_coverage_at_3_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "provenance@5",
-            map_value(&summary.provenance_coverage_at, 5),
-            t.provenance_coverage_at_5_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "provenance@10",
-            map_value(&summary.provenance_coverage_at, 10),
-            t.provenance_coverage_at_10_min,
-        );
-        compare_max(
-            &mut failures,
-            &summary.arm,
-            "false_positive@1",
-            map_value(&summary.false_positive_rate_at, 1),
-            t.false_positive_rate_at_1_max,
-        );
-        compare_max(
-            &mut failures,
-            &summary.arm,
-            "false_positive@3",
-            map_value(&summary.false_positive_rate_at, 3),
-            t.false_positive_rate_at_3_max,
-        );
-        compare_max(
-            &mut failures,
-            &summary.arm,
-            "false_positive@5",
-            map_value(&summary.false_positive_rate_at, 5),
-            t.false_positive_rate_at_5_max,
-        );
-        compare_max(
-            &mut failures,
-            &summary.arm,
-            "false_positive@10",
-            map_value(&summary.false_positive_rate_at, 10),
-            t.false_positive_rate_at_10_max,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "abstention_separation@1",
-            map_value(&summary.abstention_separation_at, 1),
-            t.abstention_separation_at_1_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "abstention_separation@3",
-            map_value(&summary.abstention_separation_at, 3),
-            t.abstention_separation_at_3_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "abstention_separation@5",
-            map_value(&summary.abstention_separation_at, 5),
-            t.abstention_separation_at_5_min,
-        );
-        compare_min(
-            &mut failures,
-            &summary.arm,
-            "abstention_separation@10",
-            map_value(&summary.abstention_separation_at, 10),
-            t.abstention_separation_at_10_min,
-        );
-        compare_min(&mut failures, &summary.arm, "mrr", summary.mrr, t.mrr_min);
         compare_max(
             &mut failures,
             &summary.arm,
             "latency_p95_ms",
-            summary.latency_ms.p95,
-            t.latency_p95_ms_max,
+            Some(summary.latency_ms.p95),
+            thresholds.latency_p95_ms_max,
         );
         compare_max(
             &mut failures,
             &summary.arm,
             "index_size_p95_bytes",
-            summary.index_size_bytes.p95,
-            t.index_size_p95_bytes_max,
+            Some(summary.index_size_bytes.p95),
+            thresholds.index_size_p95_bytes_max,
+        );
+    }
+    RegressionReport {
+        passed: failures.is_empty(),
+        failures,
+    }
+}
+
+/// Fixed product-quality targets, independent of any measured baseline.
+#[must_use]
+pub fn absolute_quality_targets() -> BTreeMap<String, QualityTargets> {
+    [(
+        "hybrid".to_string(),
+        QualityTargets {
+            hit_rate_at_5_min: 0.90,
+            recall_at_5_min: 0.90,
+            provenance_coverage_at_5_min: 0.90,
+            false_positive_rate_at_5_max: 0.10,
+            abstention_separation_at_5_min: 0.80,
+            mrr_min: 0.85,
+        },
+    )]
+    .into_iter()
+    .collect()
+}
+
+/// Evaluate fixed launch-quality targets against measured summaries.
+#[must_use]
+pub fn evaluate_quality_gate(
+    summaries: &[Summary],
+    targets: &BTreeMap<String, QualityTargets>,
+) -> RegressionReport {
+    let mut failures = Vec::new();
+    for (arm, target) in targets {
+        let Some(summary) = summaries.iter().find(|summary| &summary.arm == arm) else {
+            failures.push(format!("quality gate is missing required arm {arm}"));
+            continue;
+        };
+        compare_min(
+            &mut failures,
+            arm,
+            "absolute hit@5",
+            map_value(&summary.hit_rate_at, 5),
+            Some(target.hit_rate_at_5_min),
+        );
+        compare_min(
+            &mut failures,
+            arm,
+            "absolute recall@5",
+            map_value(&summary.recall_at, 5),
+            Some(target.recall_at_5_min),
+        );
+        compare_min(
+            &mut failures,
+            arm,
+            "absolute provenance@5",
+            map_value(&summary.provenance_coverage_at, 5),
+            Some(target.provenance_coverage_at_5_min),
+        );
+        compare_max(
+            &mut failures,
+            arm,
+            "absolute false_positive@5",
+            map_value(&summary.false_positive_rate_at, 5),
+            Some(target.false_positive_rate_at_5_max),
+        );
+        compare_min(
+            &mut failures,
+            arm,
+            "absolute abstention_separation@5",
+            map_value(&summary.abstention_separation_at, 5),
+            Some(target.abstention_separation_at_5_min),
+        );
+        compare_min(
+            &mut failures,
+            arm,
+            "absolute mrr",
+            summary.mrr,
+            Some(target.mrr_min),
         );
     }
     RegressionReport {
@@ -1285,16 +1634,8 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
     let n = results.len();
     let answerable: Vec<&InstanceResult> = results.iter().filter(|r| !r.unanswerable).collect();
     let unanswerable: Vec<&InstanceResult> = results.iter().filter(|r| r.unanswerable).collect();
-    let denom = if answerable.is_empty() {
-        1.0
-    } else {
-        answerable.len() as f64
-    };
-    let abstention_denom = if unanswerable.is_empty() {
-        1.0
-    } else {
-        unanswerable.len() as f64
-    };
+    let answerable_denom = (!answerable.is_empty()).then_some(answerable.len() as f64);
+    let unanswerable_denom = (!unanswerable.is_empty()).then_some(unanswerable.len() as f64);
 
     let mut hit_rate_at = BTreeMap::new();
     let mut recall_at = BTreeMap::new();
@@ -1306,31 +1647,48 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
             .iter()
             .filter(|r| r.first_hit_rank.is_some_and(|rank| rank <= k))
             .count();
-        hit_rate_at.insert(k, hits as f64 / denom);
+        let hit_rate = answerable_denom.map(|denom| hits as f64 / denom);
+        hit_rate_at.insert(k, hit_rate);
         let rec: f64 = answerable
             .iter()
-            .map(|r| r.recall_at.get(&k).copied().unwrap_or(0.0))
+            .map(|r| r.recall_at.get(&k).copied().flatten().unwrap_or(0.0))
             .sum();
-        recall_at.insert(k, rec / denom);
+        recall_at.insert(k, answerable_denom.map(|denom| rec / denom));
         let provenance_hits = answerable
             .iter()
-            .filter(|r| r.provenance_coverage_at.get(&k).copied().unwrap_or(false))
+            .filter(|r| {
+                r.provenance_coverage_at
+                    .get(&k)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(false)
+            })
             .count();
-        provenance_coverage_at.insert(k, provenance_hits as f64 / denom);
+        provenance_coverage_at.insert(
+            k,
+            answerable_denom.map(|denom| provenance_hits as f64 / denom),
+        );
         let false_positives = unanswerable
             .iter()
             .filter(|r| r.top_hits.iter().take(k).next().is_some())
             .count();
-        let fpr = false_positives as f64 / abstention_denom;
+        let fpr = unanswerable_denom.map(|denom| false_positives as f64 / denom);
         false_positive_rate_at.insert(k, fpr);
-        abstention_separation_at.insert(k, hit_rate_at.get(&k).copied().unwrap_or(0.0) - fpr);
+        abstention_separation_at.insert(
+            k,
+            hit_rate
+                .zip(fpr)
+                .map(|(answerable_tpr, unanswerable_fpr)| answerable_tpr - unanswerable_fpr),
+        );
     }
 
-    let mrr = answerable
-        .iter()
-        .map(|r| r.first_hit_rank.map_or(0.0, |rank| 1.0 / rank as f64))
-        .sum::<f64>()
-        / denom;
+    let mrr = answerable_denom.map(|denom| {
+        answerable
+            .iter()
+            .map(|r| r.first_hit_rank.map_or(0.0, |rank| 1.0 / rank as f64))
+            .sum::<f64>()
+            / denom
+    });
     let latency_ms = distribution(&results.iter().map(|r| r.latency_ms).collect::<Vec<_>>());
     let index_size_bytes = distribution(
         &results
@@ -1368,6 +1726,50 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn benchmark_seed_text_is_byte_identical_to_production_composition() {
+        let inst = Instance {
+            question_id: "header-parity".into(),
+            question_type: "exact_recall".into(),
+            question: "What did the production seeder store?".into(),
+            question_date: "2026/08/31 (Mon) 12:00".into(),
+            answer_session_ids: vec!["github://hippocampus/pull/431".into()],
+            haystack_dates: vec!["2026/08/31 (Mon) 11:00".into()],
+            haystack_session_ids: vec!["github://hippocampus/pull/431".into()],
+            haystack_sessions: vec![vec![Turn {
+                role: "assistant".into(),
+                content: "PR 431 introduced complete false.".into(),
+            }]],
+            haystack_app_ids: vec!["com.github.GitHubClient".into()],
+            haystack_window_titles: vec!["PR 431 benchmark honesty".into()],
+            haystack_urls: vec!["github://hippocampus/pull/431".into()],
+            tags: vec!["github".into()],
+            unanswerable: false,
+        };
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("seed.sqlite");
+        let (store, owner, _) = seed_instance(&inst, &db_path).expect("seed instance");
+        let event_id = EventId(*owner.keys().next().expect("seeded event id"));
+        let event = store
+            .get_event(event_id)
+            .expect("read seeded event")
+            .expect("seeded event");
+        let ts_us = parse_dataset_ts(&inst.haystack_dates[0]).expect("timestamp");
+        let expected = format!(
+            "{}{}",
+            crate::brain_ingest::compose_context_header(
+                Some("com.github.GitHubClient"),
+                Some("PR 431 benchmark honesty"),
+                Some("github://hippocampus/pull/431"),
+                ts_us,
+            ),
+            "PR 431 introduced complete false."
+        );
+
+        assert_eq!(event.text.as_bytes(), expected.as_bytes());
+    }
 
     #[test]
     fn best_threshold_finds_a_clean_split() {
@@ -1482,8 +1884,8 @@ mod tests {
                 Outcome::Missed
             },
             first_hit_rank: rank,
-            recall_at: [(5usize, rec)].into_iter().collect(),
-            provenance_coverage_at: [(5usize, rank.is_some())].into_iter().collect(),
+            recall_at: [(5usize, Some(rec))].into_iter().collect(),
+            provenance_coverage_at: [(5usize, Some(rank.is_some()))].into_iter().collect(),
             answer_sessions: 2,
             sessions_in_haystack: 50,
             events_indexed: 100,
@@ -1499,9 +1901,9 @@ mod tests {
         );
         assert_eq!(s.instances, 3);
         assert_eq!(s.complete_misses, 1);
-        assert!((s.hit_rate_at[&5] - 2.0 / 3.0).abs() < 1e-9);
-        assert!((s.recall_at[&5] - 0.5).abs() < 1e-9);
-        assert!((s.mrr - (1.0 + 1.0 / 3.0) / 3.0).abs() < 1e-9);
+        assert!((s.hit_rate_at[&5].expect("hit denominator") - 2.0 / 3.0).abs() < 1e-9);
+        assert!((s.recall_at[&5].expect("recall denominator") - 0.5).abs() < 1e-9);
+        assert!((s.mrr.expect("mrr denominator") - (1.0 + 1.0 / 3.0) / 3.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1525,15 +1927,15 @@ mod tests {
         };
         let s = summarize(std::slice::from_ref(&r), Arm::Hybrid, &[1, 5, 10]);
         assert!(
-            (s.hit_rate_at[&1] - 0.0).abs() < 1e-9,
+            (s.hit_rate_at[&1].expect("hit denominator") - 0.0).abs() < 1e-9,
             "rank 7 is not in top 1"
         );
         assert!(
-            (s.hit_rate_at[&5] - 0.0).abs() < 1e-9,
+            (s.hit_rate_at[&5].expect("hit denominator") - 0.0).abs() < 1e-9,
             "rank 7 is not in top 5"
         );
         assert!(
-            (s.hit_rate_at[&10] - 1.0).abs() < 1e-9,
+            (s.hit_rate_at[&10].expect("hit denominator") - 1.0).abs() < 1e-9,
             "rank 7 is in top 10"
         );
     }
@@ -1548,8 +1950,8 @@ mod tests {
             unanswerable: false,
             outcome: Outcome::Matched,
             first_hit_rank: Some(1),
-            recall_at: [(1usize, 1.0)].into_iter().collect(),
-            provenance_coverage_at: [(1usize, true)].into_iter().collect(),
+            recall_at: [(1usize, Some(1.0))].into_iter().collect(),
+            provenance_coverage_at: [(1usize, Some(true))].into_iter().collect(),
             answer_sessions: 1,
             sessions_in_haystack: 2,
             events_indexed: 2,
@@ -1575,8 +1977,8 @@ mod tests {
             unanswerable: true,
             outcome: Outcome::Abstained,
             first_hit_rank: None,
-            recall_at: [(1usize, 0.0)].into_iter().collect(),
-            provenance_coverage_at: [(1usize, false)].into_iter().collect(),
+            recall_at: [(1usize, None)].into_iter().collect(),
+            provenance_coverage_at: [(1usize, None)].into_iter().collect(),
             answer_sessions: 0,
             sessions_in_haystack: 1,
             events_indexed: 1,
@@ -1585,9 +1987,16 @@ mod tests {
             index_size_bytes: 2048,
         };
         let s = summarize(&[matched, abstained], Arm::Lexical, &[1]);
-        assert!((s.provenance_coverage_at[&1] - 1.0).abs() < 1e-9);
-        assert!(s.false_positive_rate_at[&1].abs() < 1e-9);
-        assert!((s.abstention_separation_at[&1] - 1.0).abs() < 1e-9);
+        assert!((s.provenance_coverage_at[&1].expect("provenance denominator") - 1.0).abs() < 1e-9);
+        assert!(
+            s.false_positive_rate_at[&1]
+                .expect("false-positive denominator")
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (s.abstention_separation_at[&1].expect("separation denominators") - 1.0).abs() < 1e-9
+        );
         assert_eq!(s.outcomes.matched, 1);
         assert_eq!(s.outcomes.abstained, 1);
     }

@@ -462,9 +462,9 @@
       "tags": ["github", "source_attribution", "provenance"]
     },
     {
-      "question_id": "unanswerable-vinyl-koala",
+      "question_id": "unanswerable-pr-431-approver",
       "question_type": "unanswerable",
-      "question": "vinyl koala nebula unlock code",
+      "question": "Who approved PR 431 after the rollback discussion?",
       "question_date": "2026/08/31 (Mon) 18:00",
       "answer_session_ids": [],
       "haystack_dates": ["2026/08/31 (Mon) 09:10", "2026/08/31 (Mon) 12:30"],
@@ -484,31 +484,31 @@
       "unanswerable": true
     },
     {
-      "question_id": "unanswerable-saffron-orbit",
+      "question_id": "unanswerable-benchmark-test-duration",
       "question_type": "unanswerable",
-      "question": "saffron orbit teapot checksum",
+      "question": "How long did the work_memory_bench test run take after the runner documentation changed?",
       "question_date": "2026/08/31 (Mon) 18:00",
       "answer_session_ids": [],
-      "haystack_dates": ["2026/08/30 (Sun) 15:10", "2026/08/31 (Mon) 13:00"],
-      "haystack_session_ids": ["browser://adr/0010-fusion", "file:///eval/work-memory/README.md"],
-      "haystack_app_ids": ["com.apple.Safari", "com.microsoft.VSCode"],
-      "haystack_window_titles": ["ADR 0010 fusion", "eval/work-memory README"],
-      "haystack_urls": ["browser://adr/0010-fusion", "file:///eval/work-memory/README.md"],
+      "haystack_dates": ["2026/08/31 (Mon) 10:30", "2026/08/31 (Mon) 13:00"],
+      "haystack_session_ids": ["terminal://zsh/session-14", "file:///eval/work-memory/README.md"],
+      "haystack_app_ids": ["com.apple.Terminal", "com.microsoft.VSCode"],
+      "haystack_window_titles": ["work-memory tests", "eval/work-memory README"],
+      "haystack_urls": ["terminal://zsh/session-14", "file:///eval/work-memory/README.md"],
       "haystack_sessions": [
         [
-          {"role": "assistant", "content": "ADR 0010 says vector similarity is a recall signal and not truth."}
+          {"role": "assistant", "content": "Terminal ran cargo test -p mci-agent --test work_memory_bench and all focused tests passed."}
         ],
         [
-          {"role": "assistant", "content": "The work-memory README explains the synthetic corpus."}
+          {"role": "assistant", "content": "The work-memory README documents the synthetic corpus and runner command."}
         ]
       ],
-      "tags": ["unanswerable", "browser", "files"],
+      "tags": ["unanswerable", "terminal", "files"],
       "unanswerable": true
     },
     {
-      "question_id": "unanswerable-marble-cactus",
+      "question_id": "unanswerable-hipp-201-due-date",
       "question_type": "unanswerable",
-      "question": "marble cactus moonbeam receipt",
+      "question": "What due date did Priya set for HIPP 201 after taking ownership?",
       "question_date": "2026/08/31 (Mon) 18:00",
       "answer_session_ids": [],
       "haystack_dates": ["2026/08/30 (Sun) 09:00", "2026/08/30 (Sun) 11:25"],

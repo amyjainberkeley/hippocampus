@@ -477,39 +477,20 @@ impl BrainIngestor for BrainPump {
             _ => return Ok(IngestOutcome::NotOcrEvent),
         };
 
-        // ADR-0010 §1.3 "key expansion" — prepend the per-event context
-        // header so the embedder sees the app/title/url tokens alongside
-        // the OCR body. The header is also persisted into events.text so
-        // FTS5 indexes those tokens inline (the events.app_bundle_id /
-        // window_title / url columns are also FTS5-indexed via
-        // events_fts, so the header is additive coverage, not new PII).
-        let header = compose_context_header(app.as_deref(), title.as_deref(), u.as_deref(), *ts_us);
-        let headered_text = if text.is_empty() {
-            String::new()
-        } else {
-            let mut s = String::with_capacity(header.len() + text.len());
-            s.push_str(&header);
-            s.push_str(&text);
-            s
-        };
+        let prepared = prepare_event_content(
+            self.chunker.as_ref(),
+            app.as_deref(),
+            title.as_deref(),
+            u.as_deref(),
+            *ts_us,
+            &text,
+        )?;
 
-        // ADR-0016 §1.2 — run the chunker on the headered text. For OCR-
-        // typical events (≤1500 word-tokens) the chunker returns a single
-        // chunk equal to the headered input; embedding it is the same
-        // thing as embedding `headered_text`. For long events the chunker
-        // splits on paragraph/sentence boundaries; we embed only the
-        // first chunk in this PR (it naturally carries the header) and
-        // persist the full headered text in `events.text` so FTS5
-        // indexes the whole content. Sub-chunk persistence to the
-        // `chunks` table is a follow-on; the table already exists in
-        // `migrations/0001_phase_3_brain_schema.sql`.
-        let chunks = self.chunker.chunk(&headered_text)?;
-        let embed_input: Option<&str> = chunks.first().map(String::as_str);
-
-        let embedding: Option<Vec<f32>> = match (&self.embedder, embed_input) {
-            (Some(e), Some(t)) if !t.is_empty() => Some(e.embed_one(t)?),
-            _ => None,
-        };
+        let embedding: Option<Vec<f32>> =
+            match (&self.embedder, prepared.embedding_input.as_deref()) {
+                (Some(e), Some(t)) if !t.is_empty() => Some(e.embed_one(t)?),
+                _ => None,
+            };
 
         let event = Event {
             id: EventId(0),
@@ -517,7 +498,7 @@ impl BrainIngestor for BrainPump {
             app_bundle_id: app,
             window_title: title,
             url: u,
-            text: headered_text,
+            text: prepared.stored_text,
             summary: None,
             entities: None,
             episode_id: None,
@@ -635,6 +616,51 @@ impl BrainIngestor for BrainPump {
     fn events_ingested_count(&self) -> u64 {
         self.counter.load(Ordering::Relaxed)
     }
+}
+
+/// Production-shaped event text and the exact chunk sent to the embedder.
+///
+/// `stored_text` is persisted in `events.text`, so FTS and extraction read
+/// these bytes. `embedding_input` is the first production chunk, matching
+/// [`BrainPump`] ingest behavior for long events.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedEventContent {
+    /// Header plus body, or an empty string when the body is empty.
+    pub stored_text: String,
+    /// First chunk selected for synchronous document embedding.
+    pub embedding_input: Option<String>,
+}
+
+/// Compose and chunk event content exactly as the production ingest path.
+///
+/// Keeping this operation shared prevents synthetic seeders and importers
+/// from drifting from the bytes consumed by FTS, entity extraction, and the
+/// document embedder.
+///
+/// # Errors
+/// Returns any error raised by the supplied production chunker.
+pub fn prepare_event_content(
+    chunker: &dyn Chunker,
+    app: Option<&str>,
+    title: Option<&str>,
+    url: Option<&str>,
+    ts_us: u64,
+    body: &str,
+) -> Result<PreparedEventContent, ChunkerError> {
+    let stored_text = if body.is_empty() {
+        String::new()
+    } else {
+        let header = compose_context_header(app, title, url, ts_us);
+        let mut text = String::with_capacity(header.len() + body.len());
+        text.push_str(&header);
+        text.push_str(body);
+        text
+    };
+    let embedding_input = chunker.chunk(&stored_text)?.into_iter().next();
+    Ok(PreparedEventContent {
+        stored_text,
+        embedding_input,
+    })
 }
 
 /// Compose the ADR-0010 §1.3 / ADR-0016 §1.2 per-event context header.

@@ -6,14 +6,16 @@
 //! adding weight to `mci-agent`.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_agent::bench_longmemeval::{
-    best_threshold, compare_against_baseline, derive_regression_thresholds, load_dataset,
-    run_abstention_probe, run_instance, summarize, AbstentionSample, Arm, BaselineFile, Embedders,
-    InstanceResult, LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, Summary,
+    absolute_quality_targets, best_threshold, compare_against_baseline,
+    derive_regression_thresholds, evaluate_quality_gate, load_dataset, run_abstention_probe,
+    run_instance, summarize, AbstentionSample, Arm, BaselineFile, Embedders, InstanceResult,
+    LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, Summary,
 };
 
 fn usage() {
@@ -30,6 +32,8 @@ fn usage() {
          \x20 --out PATH       write the full JSON report here\n\
          \x20 --baseline PATH  compare against committed regression thresholds\n\
          \x20 --workdir PATH   scratch for per-instance databases\n\
+         \x20 --allow-smoke    allow an intentional --limit smoke run to exit zero;\n\
+         \x20                  smoke reports remain incomplete and nonpublishable\n\
          \x20 --abstention N   instead of scoring retrieval, measure whether a\n\
          \x20                  relevance floor is possible: ask each of N brains\n\
          \x20                  its own question and a foreign one, and report the\n\
@@ -48,11 +52,33 @@ fn dataset_fallback_id(path: &Path) -> String {
         .to_string()
 }
 
-fn git_value(args: &[&str]) -> String {
-    match Command::new("git").args(args).output() {
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap_or_else(|_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+}
+
+fn command_value(program: &str, args: &[&str]) -> String {
+    match Command::new(program).args(args).output() {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => "unknown".to_string(),
     }
+}
+
+fn git_value(root: &Path, args: &[&str]) -> String {
+    match Command::new("git").current_dir(root).args(args).output() {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+fn git_dirty(root: &Path) -> bool {
+    Command::new("git")
+        .current_dir(root)
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .output()
+        .map_or(true, |out| !out.status.success() || !out.stdout.is_empty())
 }
 
 fn captured_at_utc() -> String {
@@ -68,18 +94,179 @@ fn captured_at_utc() -> String {
     }
 }
 
-fn run_metadata(ks: &[usize], limit: Option<usize>, workdir: &Path, arms: &[Arm]) -> RunMetadata {
+fn sysctl_value(name: &str) -> Option<String> {
+    let value = command_value("sysctl", &["-n", name]);
+    (value != "unknown" && !value.is_empty()).then_some(value)
+}
+
+fn sha256_bytes(bytes: &[u8]) -> Result<String, String> {
+    let mut child = Command::new("shasum")
+        .args(["-a", "256"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn shasum: {e}"))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| "shasum stdin unavailable".to_string())?
+        .write_all(bytes)
+        .map_err(|e| format!("write shasum input: {e}"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("wait for shasum: {e}"))?;
+    if !output.status.success() {
+        return Err("shasum failed".to_string());
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .map(str::to_string)
+        .ok_or_else(|| "shasum returned no digest".to_string())
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    sha256_bytes(&bytes)
+}
+
+fn collect_files(root: &Path, dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("read {}: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| format!("read directory entry: {e}"))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("inspect {}: {e}", path.display()))?;
+        if file_type.is_dir() {
+            collect_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            files.push(
+                path.strip_prefix(root)
+                    .map_err(|e| format!("relative model path: {e}"))?
+                    .to_path_buf(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn sha256_path(path: &Path) -> Result<String, String> {
+    if path.is_file() {
+        return sha256_file(path);
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "checksum target does not exist: {}",
+            path.display()
+        ));
+    }
+    let mut files = Vec::new();
+    collect_files(path, path, &mut files)?;
+    files.sort();
+    let mut manifest = Vec::new();
+    for relative in files {
+        let digest = sha256_file(&path.join(&relative))?;
+        manifest.extend_from_slice(relative.to_string_lossy().as_bytes());
+        manifest.push(0);
+        manifest.extend_from_slice(digest.as_bytes());
+        manifest.push(b'\n');
+    }
+    sha256_bytes(&manifest)
+}
+
+fn logical_path(path: &Path, root: &Path, role: &str) -> String {
+    let rooted = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let absolute = rooted.canonicalize().unwrap_or(rooted);
+    if let Ok(relative) = absolute.strip_prefix(root) {
+        return relative.to_string_lossy().to_string();
+    }
+    let basename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unnamed");
+    if role == "model" && absolute.starts_with("/Applications/Hippocampus.app/") {
+        return format!("installed-model://{basename}");
+    }
+    format!("external-{role}://{basename}")
+}
+
+fn normalized_arguments(argv: &[String], root: &Path) -> Vec<String> {
+    let mut normalized = Vec::new();
+    let mut index = 1usize;
+    while index < argv.len() {
+        let argument = &argv[index];
+        normalized.push(argument.clone());
+        let role = match argument.as_str() {
+            "--dataset" => Some("dataset"),
+            "--baseline" => Some("baseline"),
+            "--out" => Some("report"),
+            "--workdir" => Some("scratch"),
+            _ => None,
+        };
+        if let Some(role) = role {
+            if let Some(value) = argv.get(index + 1) {
+                normalized.push(logical_path(Path::new(value), root, role));
+                index += 2;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    normalized
+}
+
+fn report_path(path: &Path, root: &Path) -> String {
+    logical_path(path, root, "dataset")
+}
+
+fn run_metadata(
+    argv: &[String],
+    ks: &[usize],
+    limit: Option<usize>,
+    arms: &[Arm],
+    original_instances: usize,
+    evaluated_instances: usize,
+) -> RunMetadata {
+    let root = repo_root();
+    let uses_hybrid = arms.contains(&Arm::Hybrid);
+    let os_name = command_value("sw_vers", &["-productName"]);
     RunMetadata {
         captured_at_utc: captured_at_utc(),
-        git_commit: git_value(&["rev-parse", "HEAD"]),
-        branch: git_value(&["branch", "--show-current"]),
-        os: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
-        model_path: std::env::var("MCI_ARCTIC_MODEL_PATH").ok(),
+        git_commit: git_value(&root, &["rev-parse", "HEAD"]),
+        git_dirty_at_start: git_dirty(&root),
+        branch: git_value(&root, &["branch", "--show-current"]),
+        command: std::env::var("MCI_BENCH_COMMAND").unwrap_or_else(|_| "mci-bench".into()),
+        arguments: normalized_arguments(argv, &root),
+        rustc_version: command_value("rustc", &["--version"]),
+        cargo_version: command_value("cargo", &["--version"]),
+        os_name: if os_name == "unknown" {
+            std::env::consts::OS.to_string()
+        } else {
+            os_name
+        },
+        os_version: command_value("sw_vers", &["-productVersion"]),
+        os_build: command_value("sw_vers", &["-buildVersion"]),
+        architecture: command_value("uname", &["-m"]),
+        hardware_model: sysctl_value("hw.model"),
+        hardware_chip: sysctl_value("machdep.cpu.brand_string"),
+        ram_bytes: sysctl_value("hw.memsize").and_then(|value| value.parse().ok()),
+        compute_mode: if uses_hybrid {
+            "coreml_cpu_only".into()
+        } else {
+            "not_used".into()
+        },
+        model_family: uses_hybrid.then(|| "snowflake-arctic-embed-s-int8".into()),
+        model_path: None,
+        model_checksum_sha256: None,
         requested_arms: arms.iter().map(|arm| arm.label().to_string()).collect(),
         ks: ks.to_vec(),
         limit,
-        workdir: workdir.display().to_string(),
+        original_instances,
+        evaluated_instances,
     }
 }
 
@@ -89,23 +276,41 @@ fn write_report(path: &Path, report: &Report) -> Result<(), String> {
     std::fs::write(path, json).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
+fn percent(value: Option<f64>) -> String {
+    value.map_or_else(
+        || "   n/a".to_string(),
+        |value| format!("{:>6.1}%", 100.0 * value),
+    )
+}
+
+fn decimal(value: Option<f64>) -> String {
+    value.map_or_else(|| "n/a".to_string(), |value| format!("{value:.3}"))
+}
+
 fn print_summary(summary: &Summary, ks: &[usize], elapsed_secs: f64) {
     println!(
         "\n=== {} ===  ({} instances, {:.0}s)",
         summary.arm, summary.instances, elapsed_secs
     );
+    println!(
+        "  denominators answerable={} unanswerable={}",
+        summary.answerable_instances, summary.unanswerable_instances
+    );
+    println!("  hit/recall/MRR/provenance: answerable-only; fp: unanswerable-only");
+    println!("  abstention separation: answerable hit-rate - unanswerable FPR (TPR - FPR)");
     for &k in ks {
         println!(
-            "  hit@{k:<3} {:>6.1}%      recall@{k:<3} {:>6.1}%      provenance@{k:<3} {:>6.1}%      fp@{k:<3} {:>6.1}%",
-            100.0 * summary.hit_rate_at.get(&k).copied().unwrap_or(0.0),
-            100.0 * summary.recall_at.get(&k).copied().unwrap_or(0.0),
-            100.0 * summary.provenance_coverage_at.get(&k).copied().unwrap_or(0.0),
-            100.0 * summary.false_positive_rate_at.get(&k).copied().unwrap_or(0.0),
+            "  hit@{k:<3} {}      recall@{k:<3} {}      provenance@{k:<3} {}      fp@{k:<3} {}      separation@{k:<3} {}",
+            percent(summary.hit_rate_at.get(&k).copied().flatten()),
+            percent(summary.recall_at.get(&k).copied().flatten()),
+            percent(summary.provenance_coverage_at.get(&k).copied().flatten()),
+            percent(summary.false_positive_rate_at.get(&k).copied().flatten()),
+            decimal(summary.abstention_separation_at.get(&k).copied().flatten()),
         );
     }
     println!(
-        "  MRR      {:>6.3}       misses {}       outcomes matched={} missed={} abstained={} false_positive={}",
-        summary.mrr,
+        "  MRR      {:>6}       misses {}       outcomes matched={} missed={} abstained={} false_positive={}",
+        decimal(summary.mrr),
         summary.complete_misses,
         summary.outcomes.matched,
         summary.outcomes.missed,
@@ -176,6 +381,7 @@ fn main() -> ExitCode {
     let mut out: Option<PathBuf> = None;
     let mut workdir = std::env::temp_dir().join("mci-bench");
     let mut abstention: Option<usize> = None;
+    let mut allow_smoke = false;
 
     let mut i = 1;
     while i < argv.len() {
@@ -223,6 +429,7 @@ fn main() -> ExitCode {
                 workdir = PathBuf::from(&argv[i + 1]);
                 i += 1;
             }
+            "--allow-smoke" => allow_smoke = true,
             "-h" | "--help" => {
                 usage();
                 return ExitCode::SUCCESS;
@@ -262,6 +469,13 @@ fn main() -> ExitCode {
             return ExitCode::from(3);
         }
     };
+    let dataset_checksum_sha256 = match sha256_bytes(raw.as_bytes()) {
+        Ok(checksum) => checksum,
+        Err(error) => {
+            eprintln!("\nmci-bench: dataset checksum: {error}");
+            return ExitCode::from(3);
+        }
+    };
     let fallback_id = dataset_fallback_id(&dataset_path);
     let mut dataset: LoadedDataset = match load_dataset(&raw, &fallback_id) {
         Ok(dataset) => dataset,
@@ -270,21 +484,84 @@ fn main() -> ExitCode {
             return ExitCode::from(3);
         }
     };
+    let original_instances = dataset.instances.len();
     if let Some(n) = limit {
         dataset.instances.truncate(n);
     }
+    let evaluated_instances = dataset.instances.len();
+    let limited = evaluated_instances < original_instances;
     eprintln!("{} instances", dataset.instances.len());
 
-    let metadata = run_metadata(&ks, limit, &workdir, &arms);
+    let mut metadata = run_metadata(
+        &argv,
+        &ks,
+        limit,
+        &arms,
+        original_instances,
+        evaluated_instances,
+    );
+    let dataset_report_path = report_path(&dataset_path, &repo_root());
     let needs_embedder = abstention.is_some() || arms.contains(&Arm::Hybrid);
     let embedders = if needs_embedder {
         match Embedders::load() {
-            Ok(embedders) => Some(embedders),
+            Ok(embedders) => {
+                metadata.model_path =
+                    Some(logical_path(&embedders.model_path, &repo_root(), "model"));
+                metadata.model_checksum_sha256 = match sha256_path(&embedders.model_path) {
+                    Ok(checksum) => Some(checksum),
+                    Err(error) => {
+                        eprintln!("mci-bench: model checksum: {error}");
+                        None
+                    }
+                };
+                if metadata.model_checksum_sha256.is_none() {
+                    let error = "resolved Core ML model could not be checksummed".to_string();
+                    let quality_targets = absolute_quality_targets();
+                    let report = Report {
+                        complete: false,
+                        publishable: false,
+                        launch_qualified: false,
+                        dataset: dataset_report_path.clone(),
+                        dataset_id: dataset.dataset_id,
+                        dataset_checksum_sha256: dataset_checksum_sha256.clone(),
+                        dataset_description: dataset.description,
+                        overall: Vec::new(),
+                        by_type: BTreeMap::new(),
+                        by_tag: BTreeMap::new(),
+                        results: Vec::new(),
+                        failures: vec![RunFailure {
+                            arm: "hybrid".to_string(),
+                            question_id: None,
+                            error: error.clone(),
+                        }],
+                        regression_thresholds: BTreeMap::new(),
+                        absolute_quality_targets: quality_targets,
+                        quality_gate: RegressionReport {
+                            passed: false,
+                            failures: vec![error.clone()],
+                        },
+                        regression: None,
+                        run: Some(metadata),
+                    };
+                    if let Some(path) = out.as_deref() {
+                        if let Err(write_error) = write_report(path, &report) {
+                            eprintln!("mci-bench: {write_error}");
+                            return ExitCode::from(3);
+                        }
+                    }
+                    return ExitCode::from(4);
+                }
+                Some(embedders)
+            }
             Err(error) => {
+                let quality_targets = absolute_quality_targets();
                 let report = Report {
                     complete: false,
-                    dataset: dataset_path.display().to_string(),
+                    publishable: false,
+                    launch_qualified: false,
+                    dataset: dataset_report_path.clone(),
                     dataset_id: dataset.dataset_id,
+                    dataset_checksum_sha256: dataset_checksum_sha256.clone(),
                     dataset_description: dataset.description,
                     overall: Vec::new(),
                     by_type: BTreeMap::new(),
@@ -296,6 +573,11 @@ fn main() -> ExitCode {
                         error: error.clone(),
                     }],
                     regression_thresholds: BTreeMap::new(),
+                    absolute_quality_targets: quality_targets,
+                    quality_gate: RegressionReport {
+                        passed: false,
+                        failures: vec![error.clone()],
+                    },
                     regression: None,
                     run: Some(metadata),
                 };
@@ -410,7 +692,7 @@ fn main() -> ExitCode {
     let mut all_results = Vec::new();
     let mut failures = Vec::new();
 
-    for arm in arms {
+    for arm in arms.iter().copied() {
         let started = std::time::Instant::now();
         let mut results = Vec::new();
         let mut arm_failures = 0usize;
@@ -458,10 +740,12 @@ fn main() -> ExitCode {
         for (kind, typed_summary) in summarize_by_type(&results, arm, &ks) {
             let kmax = *ks.last().expect("ks non-empty");
             println!(
-                "    {kind:<28} n={:<4} hit@{kmax}={:>5.1}%  MRR={:.3}",
+                "    {kind:<28} n={:<4} answerable={:<3} unanswerable={:<3} hit@{kmax}={}  MRR={}",
                 typed_summary.instances,
-                100.0 * typed_summary.hit_rate_at.get(&kmax).copied().unwrap_or(0.0),
-                typed_summary.mrr
+                typed_summary.answerable_instances,
+                typed_summary.unanswerable_instances,
+                percent(typed_summary.hit_rate_at.get(&kmax).copied().flatten()),
+                decimal(typed_summary.mrr),
             );
             by_type.entry(kind).or_default().push(typed_summary);
         }
@@ -472,10 +756,12 @@ fn main() -> ExitCode {
             for (tag, tag_summary) in tag_summaries {
                 let kmax = *ks.last().expect("ks non-empty");
                 println!(
-                    "    {tag:<28} n={:<4} hit@{kmax}={:>5.1}%  MRR={:.3}",
+                    "    {tag:<28} n={:<4} answerable={:<3} unanswerable={:<3} hit@{kmax}={}  MRR={}",
                     tag_summary.instances,
-                    100.0 * tag_summary.hit_rate_at.get(&kmax).copied().unwrap_or(0.0),
-                    tag_summary.mrr
+                    tag_summary.answerable_instances,
+                    tag_summary.unanswerable_instances,
+                    percent(tag_summary.hit_rate_at.get(&kmax).copied().flatten()),
+                    decimal(tag_summary.mrr),
                 );
                 by_tag.entry(tag).or_default().push(tag_summary);
             }
@@ -493,29 +779,38 @@ fn main() -> ExitCode {
         Some(path) => match parse_baseline(path) {
             Ok(baseline) => Some(compare_against_baseline(
                 &overall,
-                &baseline.regression_thresholds,
+                &baseline,
+                &dataset.dataset_id,
+                &dataset_checksum_sha256,
+                &metadata,
             )),
-            Err(error) => {
-                failures.push(RunFailure {
-                    arm: "baseline".to_string(),
-                    question_id: None,
-                    error: error.clone(),
-                });
-                Some(RegressionReport {
-                    passed: false,
-                    failures: vec![error],
-                })
-            }
+            Err(error) => Some(RegressionReport {
+                passed: false,
+                failures: vec![error],
+            }),
         },
         None => None,
     };
     let regression_failed = regression.as_ref().is_some_and(|r| !r.passed);
-    let complete = failures.is_empty() && !regression_failed;
+    let complete = failures.is_empty() && !limited;
+    let canonical_arms = arms == [Arm::Lexical, Arm::Hybrid];
+    let canonical_ks = ks == [1, 3, 5, 10];
+    let canonical_scope = canonical_arms && canonical_ks && !limited;
+    let publishable = complete
+        && canonical_scope
+        && !metadata.git_dirty_at_start
+        && metadata.model_checksum_sha256.is_some();
+    let absolute_quality_targets = absolute_quality_targets();
+    let quality_gate = evaluate_quality_gate(&overall, &absolute_quality_targets);
+    let launch_qualified = publishable && quality_gate.passed;
 
     let report = Report {
         complete,
-        dataset: dataset_path.display().to_string(),
+        publishable,
+        launch_qualified,
+        dataset: dataset_report_path,
         dataset_id: dataset.dataset_id,
+        dataset_checksum_sha256,
         dataset_description: dataset.description,
         overall,
         by_type,
@@ -523,6 +818,8 @@ fn main() -> ExitCode {
         results: all_results,
         failures,
         regression_thresholds,
+        absolute_quality_targets,
+        quality_gate,
         regression,
         run: Some(metadata),
     };
@@ -535,9 +832,49 @@ fn main() -> ExitCode {
         eprintln!("mci-bench: report written to {}", path.display());
     }
 
-    if complete {
-        ExitCode::SUCCESS
+    if !complete {
+        if allow_smoke && limited && report.failures.is_empty() && !regression_failed {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(5)
+        }
+    } else if regression_failed {
+        ExitCode::from(6)
+    } else if canonical_scope && !report.quality_gate.passed {
+        ExitCode::from(7)
     } else {
-        ExitCode::from(5)
+        ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logical_paths_redact_external_model_and_user_paths() {
+        let root = Path::new("/checkout/hippocampus");
+        assert_eq!(
+            logical_path(
+                Path::new("/Users/alice/Models/ArcticEmbedS_INT8.mlmodelc"),
+                root,
+                "model"
+            ),
+            "external-model://ArcticEmbedS_INT8.mlmodelc"
+        );
+        assert_eq!(
+            logical_path(
+                Path::new(
+                    "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
+                ),
+                root,
+                "model"
+            ),
+            "installed-model://ArcticEmbedS_INT8.mlmodelc"
+        );
+        assert_eq!(
+            logical_path(Path::new("/Users/alice/tmp/report.json"), root, "report"),
+            "external-report://report.json"
+        );
     }
 }
