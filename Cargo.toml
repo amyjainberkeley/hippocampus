@@ -95,7 +95,7 @@ members = [
 edition      = "2021"
 rust-version = "1.83"
 publish      = false
-license      = "TBD-private"
+license      = "Apache-2.0"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
