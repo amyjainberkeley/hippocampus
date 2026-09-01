@@ -43,7 +43,7 @@ tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
 #
 # Maintainer: `madsmtm/objc2` on GitHub. Active monorepo for the entire
 # objc2 Apple-framework-bindings family. License: Zlib OR Apache-2.0 OR
-# MIT — compatible with MCI's TBD-private workspace license.
+# MIT — compatible with the workspace's Apache-2.0 license.
 #
 # CSO supply-chain audit OWED on this PR per ADR-0008 / ADR-0014 standing
 # rule for new dep additions. Net-new transitive crates (full enum):

@@ -22,7 +22,7 @@
 //! configured log path. In Phase-1 cycle 3 the stdin reader is
 //! replaced with the helper-child socket fd.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -119,6 +119,14 @@ enum Mode {
         db_path: PathBuf,
         batch_size: usize,
     },
+    /// Pull every registered MCP server's resources into the brain, once.
+    ///
+    /// The V2-MCP-3 aggregator was constructed only inside the
+    /// `--drain-stdin` live-capture arm. Live capture ships off, so a
+    /// server registered in `mcp-servers.toml` never reached the brain.
+    McpSync {
+        db_path: PathBuf,
+    },
     /// Embed every event that has no row in `event_vectors`.
     ///
     /// Closes the last gap in the semantic-recall path. The store has
@@ -131,8 +139,15 @@ enum Mode {
         db_path: PathBuf,
         batch_size: usize,
     },
+    /// A subcommand this build does not have. Carries the token so the
+    /// error can name it.
+    UnknownCommand {
+        name: String,
+    },
     /// Register Hippocampus as an MCP server in Claude Code's settings.
-    RegisterMcp,
+    RegisterMcp {
+        db_path: PathBuf,
+    },
     /// Cycle 8.29 P0 #3 — empirical "is content reaching the brain
     /// from `source`?" probe. Used by
     /// `OnboardingKit.RealBrowserDetector.checkExtensionInstalled` to
@@ -201,6 +216,7 @@ fn parse_args(argv: &[String]) -> Args {
     let mut brief_date: Option<String> = None;
     let mut model_dir: Option<PathBuf> = None;
     let mut transcript_root: Option<PathBuf> = None;
+    let mut unknown_command: Option<String> = None;
 
     let mut i = 1;
     while i < argv.len() {
@@ -225,6 +241,7 @@ fn parse_args(argv: &[String]) -> Args {
             "stats" => mode_kind = ModeKind::Stats,
             "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
             "enrich" => mode_kind = ModeKind::Enrich,
+            "mcp-sync" => mode_kind = ModeKind::McpSync,
             "doctor" => mode_kind = ModeKind::Doctor,
             "brief" => mode_kind = ModeKind::Brief,
             "--date" if i + 1 < argv.len() => {
@@ -271,10 +288,17 @@ fn parse_args(argv: &[String]) -> Args {
             }
             "-h" | "--help" => mode_kind = ModeKind::Help,
             "--version" => mode_kind = ModeKind::Version,
-            _ => {
-                // Unknown args silent for now (parity with the Swift
-                // helper's parser); cycle 3 tightens this.
+            // An unrecognised *flag* stays silent: the Swift host passes
+            // its own, and rejecting them would break the app whenever the
+            // two halves ship out of step. An unrecognised *subcommand* is
+            // a different thing entirely — it means the user typed a
+            // command this build does not have, and printing the usage
+            // text with exit 0 tells them it worked.
+            other if !other.starts_with('-') => {
+                mode_kind = ModeKind::UnknownCommand;
+                unknown_command = Some(other.to_owned());
             }
+            _ => {}
         }
         i += 1;
     }
@@ -293,7 +317,12 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::McpServe => Mode::McpServe {
             db_path: resolved_db_path.clone(),
         },
-        ModeKind::RegisterMcp => Mode::RegisterMcp,
+        ModeKind::UnknownCommand => Mode::UnknownCommand {
+            name: unknown_command.unwrap_or_default(),
+        },
+        ModeKind::RegisterMcp => Mode::RegisterMcp {
+            db_path: resolved_db_path,
+        },
         ModeKind::Stats => Mode::Stats {
             source: stats_source,
             since_seconds: stats_since_seconds,
@@ -306,6 +335,9 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::Enrich => Mode::Enrich {
             db_path: resolved_db_path,
             batch_size: embed_batch_size,
+        },
+        ModeKind::McpSync => Mode::McpSync {
+            db_path: resolved_db_path,
         },
         ModeKind::Doctor => Mode::Doctor {
             db_path: resolved_db_path,
@@ -345,10 +377,12 @@ enum ModeKind {
     Stats,
     EmbedBackfill,
     Enrich,
+    McpSync,
     Doctor,
     Brief,
     ImportSessions,
     Init,
+    UnknownCommand,
 }
 
 fn print_usage() {
@@ -377,6 +411,10 @@ fn print_usage() {
         \x20                            refuses, loudly, without it. The brief is a DRAFT:\n\
         \x20                            approving one takes a human, per ADR-0018.\n\
         \x20                            Regenerating a date replaces that date's brief.\n\
+        \x20 mcp-sync                   pull resources from every MCP server registered in\n\
+        \x20                            ~/Library/Application Support/MCI/mcp-servers.toml\n\
+        \x20                            into the brain, once, then exit. Safe to re-run:\n\
+        \x20                            a resource already ingested is not written twice.\n\
         \x20 embed-backfill             embed every event that has no vector yet, so\n\
         \x20                            mci_recall runs hybrid instead of keyword-only.\n\
         \x20                            Needs the ArcticEmbedS model; refuses without it.\n\
@@ -1011,7 +1049,12 @@ async fn main() -> ExitCode {
                 }
             }
         }
-        Mode::RegisterMcp => match register_mcp() {
+        Mode::UnknownCommand { name } => {
+            eprintln!("mci-agent: unknown command `{name}`.\n");
+            print_usage();
+            ExitCode::from(2)
+        }
+        Mode::RegisterMcp { db_path } => match register_mcp(&db_path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("mci-agent register-mcp: {e}");
@@ -1042,6 +1085,10 @@ async fn main() -> ExitCode {
             date,
             model_dir,
         } => match run_brief_cmd(&db_path, date.as_deref(), model_dir) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::McpSync { db_path } => match run_mcp_sync_cmd(&db_path).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
@@ -1206,10 +1253,20 @@ fn resolve_key_hex() -> Option<String> {
 /// (`~/.claude.json`). Merges the `hippocampus` entry under
 /// `mcpServers` without clobbering other servers. Includes an `env`
 /// block with `MCI_DB_KEY_HEX` when the dev.key file exists.
-fn register_mcp() -> Result<(), String> {
+/// Write the Hippocampus entry into Claude Code's `~/.claude.json`.
+///
+/// `db_path` is the brain this agent just resolved. It has to be recorded
+/// explicitly: `mcp-serve` otherwise falls back to the hardcoded default,
+/// so a user who imported into any other path would register a server that
+/// opens an empty (or absent) database and reports success while doing it.
+fn register_mcp(db_path: &Path) -> Result<(), String> {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve own binary path: {e}"))?;
     let exe_str = exe.to_str().ok_or("binary path is not valid UTF-8")?;
+    let db_str = db_path.to_str().ok_or("brain path is not valid UTF-8")?;
 
     let home = std::env::var("HOME").map_err(|_| "HOME not set")?;
     let settings_path = PathBuf::from(&home).join(".claude.json");
@@ -1224,18 +1281,20 @@ fn register_mcp() -> Result<(), String> {
     };
 
     let key_path = PathBuf::from(&home).join("Library/Application Support/MCI/dev.key");
-    let key_hex: Option<String> = std::fs::read_to_string(&key_path)
-        .ok()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()));
+    // Same resolution order the rest of the binary uses. Reading only
+    // `dev.key` here meant the env var the docs tell you to export was
+    // silently dropped from the registration.
+    let key_hex: Option<String> =
+        resolve_key_hex().filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()));
 
     let mut hippocampus_entry = serde_json::json!({
         "type": "stdio",
         "command": exe_str,
         "args": ["mcp-serve"]
     });
+    hippocampus_entry["env"] = serde_json::json!({"MCI_DB_PATH": db_str});
     if let Some(k) = &key_hex {
-        hippocampus_entry["env"] = serde_json::json!({"MCI_DB_KEY_HEX": k});
+        hippocampus_entry["env"]["MCI_DB_KEY_HEX"] = serde_json::json!(k);
     } else {
         eprintln!(
             "Note: brain key not yet generated at {}. Launch Hippocampus.app once to initialize, then re-run `mci-agent register-mcp`.",
@@ -1263,8 +1322,34 @@ fn register_mcp() -> Result<(), String> {
 
     let output =
         serde_json::to_string_pretty(&root).map_err(|e| format!("serialize settings: {e}"))?;
-    std::fs::write(&settings_path, output.as_bytes())
-        .map_err(|e| format!("write {}: {e}", settings_path.display()))?;
+    // Write through a sibling temp file and rename. `~/.claude.json` holds
+    // every MCP server and setting the user has; a truncated write from a
+    // full disk or a signal would take all of it, not just our entry.
+    // rename(2) within a directory is atomic, so the file is either the old
+    // one or the new one and never a prefix of the new one.
+    let tmp_path = settings_path.with_extension(format!("json.tmp-{}", std::process::id()));
+    std::fs::write(&tmp_path, output.as_bytes())
+        .map_err(|e| format!("write {}: {e}", tmp_path.display()))?;
+
+    // rename(2) replaces the destination's mode with the temp file's, and
+    // the temp file was just created under the process umask (0644 by
+    // default). Writing in place used to preserve whatever the user had
+    // set, so without this a `chmod 600 ~/.claude.json` would be silently
+    // widened back to world-readable — on a file that holds the brain key.
+    // Carry the old mode across; a file we are creating starts at 0600,
+    // because we are putting a key in it.
+    let mode = std::fs::metadata(&settings_path)
+        .map(|m| m.permissions().mode() & 0o777)
+        .unwrap_or(0o600);
+    if let Err(e) = std::fs::set_permissions(&tmp_path, Permissions::from_mode(mode)) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("set mode on {}: {e}", tmp_path.display()));
+    }
+
+    if let Err(e) = std::fs::rename(&tmp_path, &settings_path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("replace {}: {e}", settings_path.display()));
+    }
 
     println!("Hippocampus registered with Claude Code. Restart Claude Code to connect.");
     Ok(())
@@ -1494,7 +1579,7 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
     }
 
     // 4. Register with Claude Code.
-    match register_mcp() {
+    match register_mcp(db_path) {
         Ok(()) => println!("  mcp      registered with Claude Code"),
         Err(e) => println!("  mcp      not registered: {e}"),
     }
@@ -1750,6 +1835,84 @@ fn run_brief_cmd(
         Err(e) => {
             eprintln!("mci-agent brief: {e}");
             Err(23)
+        }
+    }
+}
+
+/// Pull every registered MCP server's resources into the brain, once.
+///
+/// The aggregator that does this was reachable only from
+/// `--drain-stdin`, the live-capture ingest path, which ships off. So a
+/// user who registered an MCP server in `mcp-servers.toml` got nothing:
+/// the connector was built, tested, and never called.
+///
+/// Opened read-write, like `enrich` and `embed-backfill` and unlike the
+/// read surfaces: this writes events.
+///
+/// Exit codes:
+///   0 — a pass ran, or there was nothing configured to sync
+///   10 / 11 / 12 — brain key missing, malformed, or the store would not open
+///   24 — every registered server failed to connect
+///   25 — the config file exists but could not be trusted or parsed
+async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
+    use mci_agent::mcp_sync::{
+        default_config_path, no_config_guidance, no_servers_guidance, render_stats, run_mcp_sync,
+        SyncOutcome,
+    };
+
+    let Some(key_hex) = resolve_key_hex() else {
+        eprintln!("mci-agent mcp-sync: MCI_DB_KEY_HEX not set and no dev.key found.");
+        return Err(10);
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent mcp-sync: MCI_DB_KEY_HEX must be 64 hex characters.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    let store = match SqlCipherBrainStore::new(db_path, &key) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            eprintln!(
+                "mci-agent mcp-sync: open brain at {}: {e}",
+                db_path.display()
+            );
+            return Err(12);
+        }
+    };
+
+    let config_path = default_config_path();
+    match run_mcp_sync(&config_path, store).await {
+        Ok(SyncOutcome::NoConfig { path }) => {
+            eprintln!("{}", no_config_guidance(&path));
+            Ok(())
+        }
+        Ok(SyncOutcome::NoServers { path }) => {
+            eprintln!("{}", no_servers_guidance(&path));
+            Ok(())
+        }
+        Ok(SyncOutcome::Ran(stats)) => {
+            eprintln!("mci-agent mcp-sync: done. {}", render_stats(&stats));
+            if stats.servers_failed > 0 && stats.servers_ok == 0 {
+                eprintln!(
+                    "mci-agent mcp-sync: every registered server failed to connect. \
+                     Check that each one is running and that its url in {} is right.",
+                    config_path.display()
+                );
+                return Err(24);
+            }
+            if stats.servers_failed > 0 {
+                eprintln!(
+                    "mci-agent mcp-sync: note — {} of {} server(s) could not be reached; \
+                     the rest were synced.",
+                    stats.servers_failed, stats.servers_contacted,
+                );
+            }
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("mci-agent mcp-sync: {e}");
+            Err(25)
         }
     }
 }

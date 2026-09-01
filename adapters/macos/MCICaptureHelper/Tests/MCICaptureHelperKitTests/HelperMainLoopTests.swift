@@ -284,32 +284,59 @@ final class HelperMainLoopTests: XCTestCase {
         }
     }
 
-    /// run() emits an immediate tick + then ticks every heartbeat.
-    /// Use a 50 ms heartbeat + cancel after ~120 ms — we should see
-    /// 3 frames (t=0, t=50, t=100). Allow ±1 for clock variance.
+    /// run() emits an immediate tick, then one every heartbeat.
+    ///
+    /// The previous form slept a fixed 120 ms and asserted the count it
+    /// happened to see. That is a race, not a test: on a loaded runner
+    /// 120 ms can elapse with a single tick delivered, which is exactly
+    /// how it failed. Lengthening the sleep would only move the flake.
+    ///
+    /// So the two properties are separated and each asserted in the
+    /// direction that a slow machine cannot break:
+    ///
+    ///   - "it repeats"  — wait for the third tick with a generous
+    ///     deadline. A slow runner takes longer and still passes; a loop
+    ///     that ticks once and stops still fails.
+    ///   - "it waits between ticks" — the third tick cannot arrive before
+    ///     two intervals have passed. A slow runner only makes elapsed
+    ///     larger, so this bound holds, and a busy-loop regression that
+    ///     ignores the interval trips it immediately.
     func testRunHeartbeatsAtConfiguredInterval() async throws {
+        let interval = Duration.milliseconds(50)
         let sink = RecordingFrameSink()
         let loop = HelperMainLoop(
             cascade: AllowEverythingCascade.make(),
             sink: sink,
-            heartbeatInterval: .milliseconds(50)
+            heartbeatInterval: interval
         )
-        let runTask = Task {
-            try await loop.run()
+
+        let started = ContinuousClock.now
+        let runTask = Task { try await loop.run() }
+        defer { runTask.cancel() }
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        var count = 0
+        while ContinuousClock.now < deadline {
+            count = await sink.count()
+            if count >= 3 { break }
+            try await Task.sleep(for: .milliseconds(5))
         }
-        try await Task.sleep(for: .milliseconds(120))
+        let elapsed = ContinuousClock.now - started
+
         runTask.cancel()
-        // Wait for the task to actually finish.
         _ = try? await runTask.value
 
-        let count = await sink.count()
         XCTAssertGreaterThanOrEqual(
-            count, 2,
-            "expected ≥2 ticks in 120 ms with 50 ms interval; got \(count)"
+            count, 3,
+            "the loop should keep ticking; saw \(count) tick(s) in 5s "
+                + "with a \(interval) heartbeat"
         )
-        XCTAssertLessThanOrEqual(
-            count, 4,
-            "expected ≤4 ticks in 120 ms with 50 ms interval; got \(count)"
+        // Ticks land at t=0, t=interval, t=2*interval. Allow one interval
+        // of slack for the polling granularity and clock coarseness.
+        XCTAssertGreaterThanOrEqual(
+            elapsed, interval,
+            "three ticks arrived in \(elapsed), faster than the configured "
+                + "\(interval) heartbeat allows — the interval is being ignored"
         )
     }
 }

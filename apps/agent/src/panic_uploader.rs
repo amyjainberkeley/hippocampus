@@ -46,6 +46,15 @@ pub enum UploadError {
     /// URL could not be parsed into host:port + path.
     #[error("invalid crash-report URL (must be http://host:port/path)")]
     InvalidUrl,
+    /// The configured host resolves somewhere other than this machine.
+    /// Refused: this transport is cleartext HTTP and the payload is a
+    /// panic message, so sending it off-box would leak it in the clear.
+    #[error("crash-report host `{0}` is not loopback; refusing to send off-box")]
+    NonLoopbackHost(String),
+    /// The host resolved to no address at all. Treated as a refusal
+    /// rather than a retry: an empty resolution cannot be proven local.
+    #[error("crash-report host `{0}` resolved to no address")]
+    UnresolvableHost(String),
 }
 
 /// Opt-in crash-report uploader configuration.
@@ -195,8 +204,32 @@ fn scrub_user_paths(s: &str) -> String {
     result
 }
 
-/// Minimal HTTP/1.1 POST over TCP. No TLS — sufficient for localhost
-/// and reverse-proxy deployments. Returns the HTTP status code.
+/// Accept a resolution only if **every** address is loopback.
+///
+/// Split out from `post_json` so the rule can be tested without opening a
+/// socket: the interesting cases are a public address (must refuse) and an
+/// address elsewhere in `127.0.0.0/8` (must accept), and connecting to the
+/// latter would just hang until the OS gives up.
+///
+/// All-or-nothing is deliberate. A name that resolves to both `127.0.0.1`
+/// and a public address is the classic DNS-rebinding shape, and picking the
+/// loopback one would let the other be reached on a later resolution.
+fn vet_loopback(
+    host_port: &str,
+    resolved: Vec<std::net::SocketAddr>,
+) -> Result<Vec<std::net::SocketAddr>, UploadError> {
+    if resolved.is_empty() {
+        return Err(UploadError::UnresolvableHost(host_port.to_string()));
+    }
+    if resolved.iter().any(|a| !a.ip().is_loopback()) {
+        return Err(UploadError::NonLoopbackHost(host_port.to_string()));
+    }
+    Ok(resolved)
+}
+
+/// Minimal HTTP/1.1 POST over TCP. No TLS, and therefore **loopback
+/// only** — a non-loopback host is refused before any bytes are sent.
+/// Returns the HTTP status code.
 async fn post_json(url: &str, body: &str) -> Result<u16, UploadError> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -207,7 +240,17 @@ async fn post_json(url: &str, body: &str) -> Result<u16, UploadError> {
         .map(|(h, p)| (h, format!("/{p}")))
         .unwrap_or((stripped, "/".to_string()));
 
-    let mut stream = TcpStream::connect(host_port).await?;
+    // Enforce what the comment above has always claimed. `post_json`
+    // speaks cleartext HTTP and its body is a panic message, so a
+    // non-loopback host would put user data on the wire unencrypted.
+    // Resolution happens here, immediately before connect, and the
+    // connection is made to a vetted address rather than to the name —
+    // re-resolving between check and connect is how this kind of guard
+    // usually gets bypassed.
+    let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host(host_port).await?.collect();
+    let vetted = vet_loopback(host_port, resolved)?;
+
+    let mut stream = TcpStream::connect(&vetted[..]).await?;
 
     let request = format!(
         "POST {path} HTTP/1.1\r\n\
@@ -519,5 +562,64 @@ mod tests {
         );
 
         server.await.unwrap();
+    }
+
+    /// The guard that makes "nothing leaves your machine" true for this
+    /// code path rather than merely intended.
+    #[test]
+    fn vet_loopback_refuses_a_public_address() {
+        let addrs = vec!["93.184.216.34:80".parse().unwrap()];
+        let err = vet_loopback("example.test:80", addrs).expect_err("must refuse");
+        assert!(
+            matches!(err, UploadError::NonLoopbackHost(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn vet_loopback_refuses_a_public_ipv6_address() {
+        let addrs = vec!["[2606:2800:220:1:248:1893:25c8:1946]:80".parse().unwrap()];
+        let err = vet_loopback("example.test:80", addrs).expect_err("must refuse");
+        assert!(
+            matches!(err, UploadError::NonLoopbackHost(_)),
+            "got {err:?}"
+        );
+    }
+
+    /// A name resolving to both loopback and a public address is the
+    /// DNS-rebinding shape. Refuse the whole set, not just the bad entry.
+    #[test]
+    fn vet_loopback_refuses_a_mixed_resolution() {
+        let addrs = vec![
+            "127.0.0.1:80".parse().unwrap(),
+            "93.184.216.34:80".parse().unwrap(),
+        ];
+        let err = vet_loopback("split.test:80", addrs).expect_err("must refuse");
+        assert!(
+            matches!(err, UploadError::NonLoopbackHost(_)),
+            "got {err:?}"
+        );
+    }
+
+    /// `127.0.0.0/8` is loopback in its entirety, not just `127.0.0.1`.
+    /// Rejecting the rest would break local reverse-proxy setups.
+    #[test]
+    fn vet_loopback_accepts_the_whole_v4_range_and_v6() {
+        for a in ["127.0.0.1:80", "127.9.9.9:80", "[::1]:80"] {
+            let addrs = vec![a.parse().unwrap()];
+            assert!(
+                vet_loopback("local.test:80", addrs).is_ok(),
+                "{a} is loopback and must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn vet_loopback_refuses_an_empty_resolution() {
+        let err = vet_loopback("nowhere.test:80", vec![]).expect_err("must refuse");
+        assert!(
+            matches!(err, UploadError::UnresolvableHost(_)),
+            "got {err:?}"
+        );
     }
 }

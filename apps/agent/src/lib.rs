@@ -57,6 +57,12 @@ pub mod mcp_aggregator;
 /// by the agent for the process lifetime; V2-MCP-3 aggregator (cycle
 /// 8.30, Director-Brain) consumes the registry without a re-init.
 pub mod mcp_client_supervisor;
+/// One-shot MCP sync. Drives [`mcp_aggregator`] for a single reconcile
+/// pass over every server in `mcp-servers.toml` and exits. The
+/// aggregator's only other caller lives inside the `--drain-stdin`
+/// live-capture arm, which ships off, so before this the connector
+/// path never ran for a real user.
+pub mod mcp_sync;
 #[cfg(target_os = "macos")]
 pub mod messages_ingest;
 pub mod page_content;
