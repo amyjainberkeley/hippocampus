@@ -15,6 +15,8 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+from release_models_manifest import ModelManifestError, load_and_validate
+
 
 FEED_URL = "https://amyjainberkeley.github.io/hippocampus/appcast.xml"
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
@@ -127,6 +129,10 @@ def validate_prebuild(root: Path, tag: str) -> dict[str, str]:
     require(len(decoded_public_key) == 32, "SUPublicEDKey must decode to 32 bytes")
     validate_changelog(root / "CHANGELOG.md", version)
     validate_status_audit(root)
+    try:
+        load_and_validate(root / "release-models.json", version)
+    except ModelManifestError as error:
+        raise ReleaseIdentityError(f"release model manifest is not ready: {error}") from error
 
     return {
         "version": version,

@@ -22,9 +22,11 @@ GitHub hosting is therefore a delivery surface, not a signing authority.
 The tag workflow verifies all of the following before it creates a draft:
 
 1. Tag, bundle version, build number, changelog, DMG filename, checksum,
-   appcast item, minimum macOS version, and GitHub Releases URL agree.
+   appcast item, status audit, tag-owned model manifest, minimum macOS version,
+   and GitHub Releases URL agree.
 2. The Sparkle private key derives the `SUPublicEDKey` committed in
-   `Info.plist`.
+   `Info.plist`, and that public key verifies the appcast signature over the
+   exact DMG bytes.
 3. The app and outer DMG pass signing, notarization-staple, and Gatekeeper
    checks.
 4. All required model bundles came from one immutable archive with the
@@ -34,10 +36,11 @@ The tag workflow verifies all of the following before it creates a draft:
 
 1. Complete [Owner Signing Setup](release/OWNER_SIGNING.md).
 2. In repository Settings > Pages, choose **GitHub Actions** as the source.
-3. Create or configure the `github-pages` environment. Require owner review
-   before deployment where the repository plan supports protected reviewers.
-4. Configure the release-model repository variables described in
-   `OWNER_SIGNING.md`.
+3. Create protected `release-signing` and `github-pages` environments. Require
+   owner review, prevent self-review, disable bypass where available, and
+   restrict the signing environment to release tags.
+4. Provision the immutable model archive and commit its URL/digest in
+   `release-models.json` as described in `OWNER_SIGNING.md`.
 5. Confirm `SUPublicEDKey` matches the CI secret without exposing either key:
 
    ```bash
@@ -66,6 +69,8 @@ GitHub release containing:
 - `Hippocampus-<version>.dmg`
 - `Hippocampus-<version>.dmg.sha256`
 - `appcast.xml`
+- `notary-app-{submission,log}.json`
+- `notary-dmg-{submission,log}.json`
 
 No public update feed changes during this workflow.
 
@@ -94,15 +99,16 @@ Run **Publish inspected release and appcast** from GitHub Actions with:
 
 The workflow:
 
-1. Requires the named release to still be a draft.
+1. Requires the named release to exist; it records whether it is still a draft.
 2. Downloads and independently re-verifies its checksum, identity, DMG
-   signature, notarization staple, and Gatekeeper assessment.
+   Sparkle signature, notarization staple, and Gatekeeper assessment.
 3. Uploads the appcast as a private Pages deployment artifact.
-4. Promotes the GitHub release.
+4. Promotes the GitHub release only when it is still a draft.
 5. Deploys `appcast.xml` only after promotion succeeds.
 
 That ordering means Sparkle never sees an update whose download asset is still
-private.
+private. If Pages fails after promotion, rerunning the same confirmed workflow
+reverifies the immutable public assets and resumes only the Pages deployment.
 
 ## Verify Public State
 
