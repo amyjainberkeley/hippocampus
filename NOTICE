@@ -1,0 +1,106 @@
+Hippocampus
+Copyright 2026 Amy Jain
+
+This product includes software developed by third parties. The
+components below are compiled or bundled into the distributed
+binaries, so their licenses require attribution in binary form —
+shipping the code without this file would not satisfy them.
+
+Nothing here is copyleft. There is no GPL, LGPL, AGPL, MPL, SSPL or
+BUSL component anywhere in the dependency graph.
+
+--------------------------------------------------------------------
+STATICALLY LINKED INTO THE RUST BINARIES
+--------------------------------------------------------------------
+
+SQLCipher
+    Copyright (c) 2008-2024 Zetetic LLC
+    BSD-3-Clause
+    https://github.com/sqlcipher/sqlcipher
+
+    Provides the page-level AES encryption for the brain database.
+    Compiled in via rusqlite's `bundled-sqlcipher-vendored-openssl`
+    feature. Note that SQLCipher's own license is BSD-3-Clause and is
+    NOT the MIT license of the `libsqlite3-sys` wrapper crate.
+
+OpenSSL 3.6.2
+    Copyright (c) 1998-2024 The OpenSSL Project
+    Apache-2.0
+    https://www.openssl.org/
+
+    Vendored by `openssl-src` and used solely as SQLCipher's AES
+    backend. It is not reached by any TLS client; no network code in
+    this project uses it. Version 3.x is Apache-2.0 and carries no
+    OpenSSL/SSLeay advertising clause.
+
+Oniguruma
+    Copyright (c) 2002-2023 K. Kosako and contributors
+    BSD-2-Clause
+    https://github.com/kkos/oniguruma
+
+    C regular-expression library, compiled in through the `onig`
+    feature of the `tokenizers` crate, which is used to tokenize text
+    for the embedding and NER models.
+
+tokenizers
+    Copyright (c) Hugging Face
+    Apache-2.0
+    https://github.com/huggingface/tokenizers
+
+The remaining Rust dependencies are MIT, Apache-2.0, BSD, ISC,
+Unicode-3.0 or Zlib. `cargo tree -e normal` over the macOS target
+resolves to 165 third-party crates plus this workspace's own.
+
+--------------------------------------------------------------------
+MODEL WEIGHTS BUNDLED IN THE APPLICATION
+--------------------------------------------------------------------
+
+Snowflake Arctic Embed S
+    Copyright (c) Snowflake Inc.
+    Apache-2.0
+    https://huggingface.co/Snowflake/snowflake-arctic-embed-s
+
+    Redistributed here as a Core ML derivative
+    (`ArcticEmbedS_INT8.mlmodelc`), converted with coremltools. Used
+    for the semantic half of hybrid recall.
+
+dslim/bert-base-NER
+    Copyright (c) David S. Lim
+    MIT
+    https://huggingface.co/dslim/bert-base-NER
+
+    Redistributed as `bert_base_NER_INT8.mlmodelc`. Fine-tuned on
+    CoNLL-2003, whose underlying Reuters corpus imposes no condition
+    that transfers to the released weights.
+
+Qwen3-1.7B
+    Copyright (c) Alibaba Cloud
+    Apache-2.0
+    https://huggingface.co/Qwen/Qwen3-1.7B
+
+    Redistributed as `Qwen3-1.7B-FP16.mlmodelc`, used for local
+    daily-brief generation.
+
+--------------------------------------------------------------------
+BUNDLED IN THE MACOS APPLICATION ONLY
+--------------------------------------------------------------------
+
+Sparkle 2.9.2
+    Copyright (c) 2006-2013 Andy Matuschak
+    Copyright (c) 2009-2013 Elgato Systems GmbH
+    Copyright (c) 2011-2014 Kornel Lesinski
+    Copyright (c) 2015-2017 Mayur Pawashe
+    MIT, with nested third-party components under their own terms
+    https://github.com/sparkle-project/Sparkle
+
+    The auto-updater. It is the only component in the product that
+    contacts a remote server, it is off by default, and it is the
+    reason the privacy statement says "the command-line tools make no
+    network requests" rather than making a claim about the whole app.
+    Sparkle is not present in the CLI distribution at all.
+
+--------------------------------------------------------------------
+
+Full license texts for every dependency can be regenerated with:
+
+    cargo install cargo-about && cargo about generate about.hbs
