@@ -56,6 +56,11 @@ fn stage_runner_fixture(
     fs::create_dir_all(dataset.parent().expect("dataset parent")).expect("dataset directory");
     fs::write(&dataset, "{}").expect("canonical dataset placeholder");
     fs::create_dir_all(root.join("docs/eval")).expect("baseline directory");
+    fs::write(
+        root.join("docs/eval/work-memory-baseline.json"),
+        serde_json::to_vec_pretty(&eligible_fake_baseline()).expect("serialize accepted baseline"),
+    )
+    .expect("write accepted baseline");
 
     let fake_report_path = root.join("fake-report.json");
     fs::write(
@@ -427,7 +432,7 @@ fn baseline_thresholds_allow_small_noise_but_fail_material_regressions() {
     )
     .expect("write baseline");
 
-    let (output, _) = run_bench(
+    let (output, report) = run_bench(
         dataset,
         &[
             "--baseline",
@@ -440,6 +445,10 @@ fn baseline_thresholds_allow_small_noise_but_fail_material_regressions() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(report["regression"]["passed"], Value::Bool(false));
+    assert_eq!(report["complete"], Value::Bool(false));
+    assert_eq!(report["publishable"], Value::Bool(false));
+    assert_eq!(report["launch_qualified"], Value::Bool(false));
 }
 
 #[test]
@@ -580,7 +589,6 @@ fn work_memory_runner_is_cwd_independent() {
     let output = Command::new(&script)
         .current_dir(dir.path())
         .env("MCI_BENCH_BIN", env!("CARGO_BIN_EXE_mci-bench"))
-        .arg("--no-baseline")
         .arg("--out")
         .arg(&report_path)
         .arg("--allow-smoke")
@@ -592,8 +600,8 @@ fn work_memory_runner_is_cwd_independent() {
         .expect("run work-memory runner from outside the repository");
 
     assert!(
-        output.status.success(),
-        "runner must work outside the repo; stdout={} stderr={}",
+        !output.status.success(),
+        "a one-case canonical smoke cannot satisfy the accepted baseline; stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -602,10 +610,82 @@ fn work_memory_runner_is_cwd_independent() {
             .expect("valid runner report");
     assert_eq!(report["complete"], Value::Bool(false));
     assert_eq!(report["publishable"], Value::Bool(false));
+    assert_eq!(report["regression"]["passed"], Value::Bool(false));
     assert_eq!(
         report["dataset"],
         Value::String("eval/work-memory/synthetic-v1.json".into())
     );
+}
+
+#[test]
+fn work_memory_runner_rejects_baseline_bypass_before_invoking_benchmark() {
+    let dir = tempdir().expect("tempdir");
+    let report = eligible_fake_baseline();
+    let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+        .env("MCI_FAKE_ARGS", &fake_args_path)
+        .arg("--no-baseline")
+        .output()
+        .expect("run forbidden baseline bypass");
+
+    assert!(!output.status.success());
+    assert!(
+        !fake_args_path.exists(),
+        "baseline bypass must be rejected before benchmark execution"
+    );
+}
+
+#[test]
+fn work_memory_runner_requires_the_accepted_baseline_file() {
+    let dir = tempdir().expect("tempdir");
+    let report = eligible_fake_baseline();
+    let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+    fs::remove_file(dir.path().join("docs/eval/work-memory-baseline.json"))
+        .expect("remove accepted baseline fixture");
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+        .env("MCI_FAKE_ARGS", &fake_args_path)
+        .output()
+        .expect("run without accepted baseline");
+
+    assert!(!output.status.success());
+    assert!(
+        !fake_args_path.exists(),
+        "missing baseline must fail before benchmark execution"
+    );
+}
+
+#[test]
+fn work_memory_runner_always_forwards_the_accepted_baseline() {
+    let dir = tempdir().expect("tempdir");
+    let report = eligible_fake_baseline();
+    let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+    let output_path = dir.path().join("report.json");
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+        .env("MCI_FAKE_ARGS", &fake_args_path)
+        .arg("--out")
+        .arg(&output_path)
+        .output()
+        .expect("run canonical runner");
+
+    assert!(output.status.success());
+    let args = fs::read_to_string(&fake_args_path).expect("captured benchmark arguments");
+    assert!(args.contains("--baseline"));
+    assert!(args.contains("docs/eval/work-memory-baseline.json"));
 }
 
 #[test]

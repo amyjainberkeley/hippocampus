@@ -153,6 +153,14 @@ fn validate_claim(
         return invalid("active claims require extant evidence");
     }
     if claim.status == ClaimStatus::Active
+        && claim
+            .attribution
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        return invalid("active claims require preserved attribution");
+    }
+    if claim.status == ClaimStatus::Active
         && !claim
             .evidence
             .iter()
@@ -161,8 +169,12 @@ fn validate_claim(
         return invalid("active claim evidence must include its delta source_event_id");
     }
     for evidence in &claim.evidence {
-        validate_evidence(evidence)?;
-        require_event(tx, evidence.event_id)?;
+        validate_evidence(tx, evidence)?;
+        if claim.status == ClaimStatus::Active
+            && !scope_is_same_or_narrower(&evidence.source_scope, &claim.scope)
+        {
+            return invalid("active claim scope exceeds its evidence source scope");
+        }
     }
 
     if let Some(previous_id) = &claim.supersedes_claim_id {
@@ -201,7 +213,7 @@ fn validate_claim(
     Ok(())
 }
 
-fn validate_evidence(evidence: &EvidenceRef) -> Result<(), StoreError> {
+fn validate_evidence(tx: &Transaction<'_>, evidence: &EvidenceRef) -> Result<(), StoreError> {
     if evidence.id != evidence.derived_id() {
         return invalid("memory evidence id does not match its immutable payload");
     }
@@ -213,6 +225,35 @@ fn validate_evidence(evidence: &EvidenceRef) -> Result<(), StoreError> {
     ] {
         validate_nonempty(name, value)?;
     }
+    let canonical: Option<(i64, Option<String>, Option<String>, String)> = tx
+        .query_row(
+            "SELECT ts_us, app_bundle_id, url, text FROM events WHERE id = ?1",
+            params![to_i64(evidence.event_id.0, "evidence event_id")?],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(db_error("read canonical evidence event"))?;
+    let Some((observed_at_us, app_bundle_id, url, text)) = canonical else {
+        return invalid("memory projection references a missing event");
+    };
+    let expected_observed_at_us = u64::try_from(observed_at_us)
+        .map_err(|_| StoreError::InvalidInput("canonical event timestamp is negative".into()))?;
+    let expected_locator = EvidenceRef::canonical_source_locator(evidence.event_id, url.as_deref());
+    let expected_scope =
+        EvidenceRef::canonical_source_scope(evidence.event_id, app_bundle_id.as_deref());
+    let expected_content_hash = EvidenceRef::canonical_content_hash(&text);
+    if evidence.source_locator != expected_locator {
+        return invalid("memory evidence locator does not match its canonical event");
+    }
+    if evidence.source_scope != expected_scope {
+        return invalid("memory evidence source scope does not match its canonical event");
+    }
+    if evidence.observed_at_us != expected_observed_at_us {
+        return invalid("memory evidence observation time does not match its canonical event");
+    }
+    if evidence.content_hash != expected_content_hash {
+        return invalid("memory evidence content hash does not match its canonical event");
+    }
     Ok(())
 }
 
@@ -221,6 +262,12 @@ fn validate_transition(
     delta: &MemoryDelta,
     value: &ClaimTransition,
 ) -> Result<(), StoreError> {
+    if value.id != value.derived_id() {
+        return invalid("claim transition id does not match its immutable payload");
+    }
+    if value.source_event_id != delta.source_event_id {
+        return invalid("claim transition source event does not match its delta");
+    }
     if read_claim(tx, &value.claim_id)?.is_none() {
         return invalid("claim transition references an unknown claim");
     }

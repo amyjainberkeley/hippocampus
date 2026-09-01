@@ -803,7 +803,7 @@ fn main() -> ExitCode {
         .iter()
         .map(|summary| (summary.arm.clone(), derive_regression_thresholds(summary)))
         .collect::<BTreeMap<_, _>>();
-    let regression = match baseline_path.as_deref() {
+    let mut regression = match baseline_path.as_deref() {
         Some(path) => match parse_baseline(path) {
             Ok(baseline) => Some(compare_against_baseline(
                 &overall,
@@ -819,8 +819,6 @@ fn main() -> ExitCode {
         },
         None => None,
     };
-    let regression_failed = regression.as_ref().is_some_and(|r| !r.passed);
-    let complete = failures.is_empty() && !limited;
     let canonical_scope = canonical_work_memory_scope(
         &dataset_report_path,
         &dataset.dataset_id,
@@ -830,6 +828,10 @@ fn main() -> ExitCode {
         &ks,
         limited,
     );
+    require_accepted_baseline(canonical_scope, &mut regression);
+    let regression_failed = regression.as_ref().is_some_and(|report| !report.passed);
+    let baseline_qualified = regression.as_ref().is_none_or(|report| report.passed);
+    let complete = failures.is_empty() && !limited && baseline_qualified;
     let publishable = complete
         && canonical_scope
         && !metadata.git_dirty_at_start
@@ -878,6 +880,17 @@ fn main() -> ExitCode {
         ExitCode::from(7)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn require_accepted_baseline(canonical_scope: bool, regression: &mut Option<RegressionReport>) {
+    if canonical_scope && regression.is_none() {
+        *regression = Some(RegressionReport {
+            passed: false,
+            failures: vec![
+                "canonical work-memory reports require the accepted baseline comparison".into(),
+            ],
+        });
     }
 }
 
@@ -964,6 +977,22 @@ mod tests {
             ),
             "noncanonical cutoffs are not publishable"
         );
+    }
+
+    #[test]
+    fn canonical_publication_scope_requires_the_accepted_baseline() {
+        let mut canonical_regression = None;
+        require_accepted_baseline(true, &mut canonical_regression);
+        let canonical_regression = canonical_regression.expect("failed regression report");
+        assert!(!canonical_regression.passed);
+        assert_eq!(
+            canonical_regression.failures,
+            ["canonical work-memory reports require the accepted baseline comparison"]
+        );
+
+        let mut noncanonical_regression = None;
+        require_accepted_baseline(false, &mut noncanonical_regression);
+        assert!(noncanonical_regression.is_none());
     }
 
     #[test]

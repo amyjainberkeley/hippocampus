@@ -3,8 +3,7 @@
 use sha2::{Digest, Sha256};
 
 use crate::episode_segmenter::EpisodeId;
-use crate::EventId;
-use crate::{EntityId, IdentityId};
+use crate::{EntityId, Event, EventId, IdentityId};
 
 /// Stable identifier for one evidence row.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -94,6 +93,44 @@ impl EvidenceRef {
         };
         value.id = value.derived_id();
         value
+    }
+
+    /// Construct evidence metadata from one canonical event row.
+    ///
+    /// The projector recomputes these fields from the stored event at commit
+    /// time; this helper lets external projectors produce the accepted shape
+    /// without duplicating the canonicalization contract.
+    #[must_use]
+    pub fn from_event(event_id: EventId, event: &Event, source_kind: &str) -> Self {
+        Self::new(
+            event_id,
+            source_kind,
+            &Self::canonical_source_locator(event_id, event.url.as_deref()),
+            &Self::canonical_source_scope(event_id, event.app_bundle_id.as_deref()),
+            event.ts_us,
+            &Self::canonical_content_hash(&event.text),
+        )
+    }
+
+    pub(crate) fn canonical_source_locator(event_id: EventId, url: Option<&str>) -> String {
+        url.filter(|value| !value.trim().is_empty())
+            .map_or_else(|| format!("event://{}", event_id.0), str::to_owned)
+    }
+
+    pub(crate) fn canonical_source_scope(event_id: EventId, app_bundle_id: Option<&str>) -> String {
+        app_bundle_id
+            .filter(|value| !value.trim().is_empty())
+            .map_or_else(
+                || format!("local/event/{}", event_id.0),
+                |value| format!("local/app/{}", value.replace('/', "%2F")),
+            )
+    }
+
+    pub(crate) fn canonical_content_hash(text: &str) -> String {
+        format!(
+            "sha256:{}",
+            stable_id(&[b"canonical-event-content-v1", text.as_bytes()])
+        )
     }
 
     pub(crate) fn derived_id(&self) -> EvidenceId {
@@ -313,7 +350,9 @@ pub struct ClaimTransition {
 }
 
 impl ClaimTransition {
-    pub(crate) fn new(
+    /// Construct a transition and derive its canonical payload identity.
+    #[must_use]
+    pub fn new(
         claim_id: MemoryClaimId,
         status: ClaimStatus,
         asserted_at_us: u64,
@@ -322,20 +361,8 @@ impl ClaimTransition {
         source_event_id: EventId,
         projector_version: &str,
     ) -> Self {
-        let asserted = asserted_at_us.to_be_bytes();
-        let effective = effective_at_us.to_be_bytes();
-        let source = source_event_id.0.to_be_bytes();
-        let id = stable_id(&[
-            b"transition",
-            claim_id.0.as_bytes(),
-            status.as_str().as_bytes(),
-            &asserted,
-            &effective,
-            reason.as_bytes(),
-            &source,
-        ]);
-        Self {
-            id,
+        let mut value = Self {
+            id: String::new(),
             claim_id,
             status,
             asserted_at_us,
@@ -343,7 +370,24 @@ impl ClaimTransition {
             reason: reason.to_owned(),
             source_event_id,
             projector_version: projector_version.to_owned(),
-        }
+        };
+        value.id = value.derived_id();
+        value
+    }
+
+    pub(crate) fn derived_id(&self) -> String {
+        let asserted = self.asserted_at_us.to_be_bytes();
+        let effective = self.effective_at_us.to_be_bytes();
+        let source = self.source_event_id.0.to_be_bytes();
+        stable_id(&[
+            b"transition",
+            self.claim_id.0.as_bytes(),
+            self.status.as_str().as_bytes(),
+            &asserted,
+            &effective,
+            self.reason.as_bytes(),
+            &source,
+        ])
     }
 }
 

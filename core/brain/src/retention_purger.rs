@@ -17,6 +17,7 @@
 //!   for the retention policy. The purger reads; never writes.
 //! - CSO sign-off required on any change per ADR-0017 §7.4.
 
+use crate::sqlcipher_brain_store::delete_projected_memory_for_events;
 use crate::{SqlCipherBrainStore, StoreError};
 use rusqlite::params;
 
@@ -93,6 +94,18 @@ pub fn purge_once(
         )
         .map_err(|e| StoreError::Backend(format!("count event_vectors for purge: {e}")))?;
 
+    let event_ids = {
+        let mut statement = tx
+            .prepare("SELECT id FROM events WHERE ts_us < ?1 ORDER BY id")
+            .map_err(|e| StoreError::Backend(format!("prepare purge event ids: {e}")))?;
+        let rows = statement
+            .query_map(params![cutoff_i64], |row| row.get::<_, i64>(0))
+            .map_err(|e| StoreError::Backend(format!("query purge event ids: {e}")))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| StoreError::Backend(format!("read purge event ids: {e}")))?
+    };
+    delete_projected_memory_for_events(&tx, &event_ids)?;
+
     // DELETE events. ON DELETE CASCADE auto-removes event_vectors + chunks.
     // FTS5 trigger (events_ad) auto-removes from events_fts.
     let events_deleted = tx
@@ -140,7 +153,7 @@ pub fn purge_once(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BrainStore, Event, EventId};
+    use crate::{project_event, BrainStore, ClaimStatus, Event, EventId, MemoryClaim, MemoryDelta};
     use mci_core::crypto::DbKey;
 
     fn temp_store() -> (SqlCipherBrainStore, tempfile::TempDir) {
@@ -203,6 +216,48 @@ mod tests {
         // Events at ts >= (60-30)*day_us = 30*day_us should remain.
         // That's events with i >= 50 (ts = 50 * 60*day/100 = 30*day).
         assert_eq!(remaining, 50);
+    }
+
+    #[test]
+    fn purge_removes_memory_projected_from_expired_events() {
+        let (store, _dir) = temp_store();
+        let day_us = 86_400_000_000_u64;
+        let now = 100 * day_us;
+        let source = store
+            .put_event(&make_event(now - 40 * day_us, "expired source"))
+            .unwrap();
+        let claim = MemoryClaim::new(
+            source,
+            "retention fixture",
+            "status",
+            "expired",
+            "local/test",
+            Some("model".into()),
+            0.5,
+            now - 39 * day_us,
+            now - 40 * day_us,
+            None,
+            "projector-v1",
+            ClaimStatus::Proposed,
+            None,
+            Vec::new(),
+        );
+        project_event(
+            &store,
+            &MemoryDelta::new(
+                source,
+                now - 39 * day_us,
+                "projector-v1",
+                vec![claim.clone()],
+                Vec::new(),
+            ),
+        )
+        .unwrap();
+
+        let stats = purge_once(&store, &RetentionConfig::Days(30), now).unwrap();
+
+        assert_eq!(stats.events_deleted, 1);
+        assert!(store.memory_claim_history(&claim.id).unwrap().is_empty());
     }
 
     #[test]

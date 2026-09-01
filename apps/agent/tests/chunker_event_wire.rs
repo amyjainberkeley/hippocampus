@@ -11,10 +11,10 @@
 //!    the on-disk encrypted `mci.sqlite`.
 //! 2. Every row carries the ADR-0010 §1.3 context header in
 //!    `events.text` (the prepend the chunker wire installed).
-//! 3. **`mci_recall`** (lexical FTS5 path via `LiveBrainReader`) returns
-//!    every seeded event when queried against its OCR body — proves the
-//!    `events_fts` trigger sync + recall round-trip works on real
-//!    chunker-wired writes.
+//! 3. **`mci_recall`** (lexical FTS5 path via `LiveBrainReader`) exposes
+//!    every seeded event as typed embeddings-unavailable related context —
+//!    proving the `events_fts` trigger sync + recall round-trip without
+//!    upgrading lexical fallback to authoritative hits.
 //! 4. **`vec_search`** (semantic side via `BrainStore`) returns the
 //!    matching event when queried with the embedding of the chunker's
 //!    first-chunk output — proves the embedding written at ingest is
@@ -50,11 +50,13 @@ use std::sync::Arc;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::device_id::{load_or_generate, DeviceId};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
-use mci_agent::mcp::{BrainReader, JsonRpcId, JsonRpcRequest, LiveBrainReader, Server};
+use mci_agent::mcp::{
+    BrainReader, JsonRpcId, JsonRpcRequest, LiveBrainReader, McpRecallOutcome, Server,
+};
 use mci_agent::runner::drain_to_log_with_brain;
 use mci_agent::wall_clock::SystemWallClock;
 use mci_brain::stubs::FixedDimEmbedder;
-use mci_brain::{BrainStore, Embedder, SqlCipherBrainStore};
+use mci_brain::{BrainStore, Embedder, RetrievalDegradation, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 use mci_core::ipc::wire::encode;
 use mci_core::ipc::Message;
@@ -130,7 +132,7 @@ fn req_call(name: &str, args: serde_json::Value) -> JsonRpcRequest {
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn n_synthetic_ocr_events_become_n_rows_and_recall_hits() {
+async fn n_synthetic_ocr_events_become_n_rows_and_typed_recall_context() {
     let (dir, db_path, key, store) = open_temp_store();
     let log = fresh_log(dir.path());
     let clock = SystemWallClock;
@@ -231,17 +233,24 @@ async fn n_synthetic_ocr_events_become_n_rows_and_recall_hits() {
         );
     }
 
-    // (4) `mci_recall` on each unique body token hits exactly that
-    // event. The FTS5 trigger sync on put_event must have indexed every
-    // row; if any was dropped we'd see zero hits.
+    // (4) With no query embedder installed, `mci_recall` keeps FTS5 rows
+    // as typed related context. The trigger sync on put_event must have
+    // indexed every row; if any was dropped we'd see empty context.
     for (_, ts_us, _, _, _, body) in &fixtures {
         let token = body.split_whitespace().next().expect("body has a token");
-        let hits = reader.recall(token, 10).expect("recall");
+        let outcome = reader.recall(token, 10).expect("recall");
+        let McpRecallOutcome::Degraded {
+            degradation: RetrievalDegradation::EmbeddingsUnavailable,
+            related_context,
+        } = outcome
+        else {
+            panic!("lexical-only recall must remain typed degraded");
+        };
         assert!(
-            !hits.is_empty(),
-            "FTS5 recall for token '{token}' returned zero hits"
+            !related_context.is_empty(),
+            "FTS5 recall for token '{token}' returned zero context rows"
         );
-        let matched = hits.iter().any(|h| h.record.ts_us == *ts_us);
+        let matched = related_context.iter().any(|hit| hit.record.ts_us == *ts_us);
         assert!(
             matched,
             "expected at least one hit at ts_us={ts_us} for token '{token}'"

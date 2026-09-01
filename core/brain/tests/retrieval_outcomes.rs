@@ -180,9 +180,9 @@ fn unqualified_production_critic_returns_named_degradation_with_ranked_fallback(
 }
 
 #[test]
-fn legacy_retrieve_preserves_ranked_search_when_evidence_critic_is_unqualified() {
+fn legacy_retrieve_rejects_unqualified_ranked_context() {
     let store = Arc::new(InMemoryBrainStore::new());
-    let event_id = store
+    store
         .put_event(&event(
             "The cedar chest is beside the window.",
             Some("file:///notes/room.txt"),
@@ -190,11 +190,11 @@ fn legacy_retrieve_preserves_ranked_search_when_evidence_critic_is_unqualified()
         .unwrap();
     let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20);
 
-    let hits = retriever
+    let error = retriever
         .retrieve(&query("Where is the cedar chest?"))
-        .unwrap();
+        .expect_err("legacy API must not erase typed degradation");
 
-    assert_eq!(hits[0].event_id, event_id);
+    assert!(error.to_string().contains("EvidenceSufficiencyUnqualified"));
 }
 
 #[test]
