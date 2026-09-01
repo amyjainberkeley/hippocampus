@@ -38,6 +38,7 @@ LANES=(
     "release-model-fixtures|bash|test|scripts/test-prepare-release-models.sh"
     "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
     "sparkle-keypair-fixtures|bash|test|scripts/test-sparkle-keypair.sh"
+    "key-custody-runner|bash|test|scripts/test-agent-key-custody-runner.sh"
     "changelog-sanity|bash|lint|__changelog_sanity_lane"
 )
 
@@ -75,6 +76,7 @@ LANES
     release-model-fixtures immutable model archive integrity fixtures
     sparkle-keygen-fixtures bundled Sparkle CLI contract fixture
     sparkle-keypair-fixtures Ed25519 private/public matching fixtures
+    key-custody-runner    nonblocking bounded child-process diagnostic fixture
     changelog-sanity      gen-changelog.sh --dry-run smoke
 
 BEHAVIOR

@@ -61,27 +61,19 @@ final class AgentKeyCustodyPreparer: KeyCustodyPreparing {
         databaseURL: URL,
         keyReference: KeychainKeyReference
     ) async throws {
-        let process = Process()
-        process.executableURL = agentURL
-        process.arguments = ["ensure-key", "--db-path", databaseURL.path]
-        process.environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
-            baseEnvironment: ProcessInfo.processInfo.environment,
-            dbPath: databaseURL,
-            keyReference: keyReference
+        let result = try await KeyCustodyCommandRunner.run(
+            executableURL: agentURL,
+            arguments: ["ensure-key", "--db-path", databaseURL.path],
+            environment: ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+                baseEnvironment: ProcessInfo.processInfo.environment,
+                dbPath: databaseURL,
+                keyReference: keyReference
+            )
         )
-        let stderr = Pipe()
-        process.standardOutput = FileHandle(forWritingAtPath: "/dev/null")
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let data = stderr.fileHandleForReading.readDataToEndOfFile().prefix(4096)
-            let detail = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                ?? "no diagnostic"
+        guard result.terminationStatus == 0 else {
             throw SupervisorProcessRuntimeError.keyPreparationFailed(
-                process.terminationStatus,
-                detail
+                result.terminationStatus,
+                result.diagnostic.isEmpty ? "no diagnostic" : result.diagnostic
             )
         }
     }
