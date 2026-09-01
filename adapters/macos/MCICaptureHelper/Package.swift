@@ -67,5 +67,10 @@ let package = Package(
             dependencies: ["MCICaptureHelperKit"],
             path: "Tests/Fixtures/Task4CaptureBehavior"
         ),
+        .executableTarget(
+            name: "Task4R1Behavior",
+            dependencies: ["MCICaptureHelperKit"],
+            path: "Tests/Fixtures/Task4R1Behavior"
+        ),
     ]
 )

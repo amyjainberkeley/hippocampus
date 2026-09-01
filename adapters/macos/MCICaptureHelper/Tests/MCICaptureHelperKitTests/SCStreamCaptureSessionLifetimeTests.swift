@@ -110,6 +110,7 @@ private enum LifetimeFixtures {
     /// Stub emitter that records calls but does no real work.
     private struct StubOCREmitter: OCRPostAllowEmitter {
         func processAfterAllow(tsUs _: UInt64, context _: WorkflowContext, input _: OCREngineInput) async {}
+        func stopAndDrain() async {}
     }
 
     /// Build a session WITH an OCR emitter wired — the P3.6.7 pattern.

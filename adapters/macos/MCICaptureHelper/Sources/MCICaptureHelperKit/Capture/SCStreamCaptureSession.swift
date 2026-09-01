@@ -437,7 +437,15 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         screenShareDetector?.stop()
         tccStatusMonitor?.stop()
         let s = takeStream()
-        try await s?.stopCapture()
+        let streamStopResult: Result<Void, Error>
+        do {
+            try await s?.stopCapture()
+            streamStopResult = .success(())
+        } catch {
+            streamStopResult = .failure(error)
+        }
+        await captureDispatcher.finishAndDrain()
+        await ocrPostAllowEmitter?.stopAndDrain()
         // No frames will arrive after `stopCapture()`; clear the §2
         // verdict so a subsequent `start()` begins from fail-safe.
         blackedRegionProbe?.reset()
@@ -451,6 +459,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             pausedForTCC = false
             revokedSurfaces.removeAll()
         }
+        try streamStopResult.get()
     }
 
     // Locked critical sections live in non-async helpers: `NSLock` is
@@ -995,13 +1004,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         guard let sample = Self.extractSynchronously(from: sampleBuffer) else { return }
         let callbackOrdinal = allocateCaptureOrdinal()
 
-        // ADR-0013 §2 pre-feed: stamp the latest blacked-region
-        // verdict from the synchronously-extracted 9×8 luminance grid
-        // BEFORE the cascade runs on this frame. O(72), well under
-        // the 100 µs/frame hot-path budget. The cascade reads back
-        // via `BlackedRegionProbe.hasBlackedRegion()` inside
-        // `SCStreamPipeline.process(...)`.
-        blackedRegionProbe?.update(grayscale: sample.grayscale)
+        // ADR-0013 §2: classify this frame's synchronously extracted 9×8
+        // luminance grid as a pure value. O(72), well under the hot-path
+        // budget; no shared probe state can bleed across queued frames.
+        let frameHasBlackedRegion = blackedRegionProbe.map { probe in
+            probe.classify(grayscale: sample.grayscale)
+        }
 
         // Roll the prior-dHash window — pure bookkeeping, not the
         // surface. The callback is synchronous so the lock is fine
@@ -1058,18 +1066,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             if installedGen == 0 || focusedSnapshot?.generation != installedGen {
                 let nowUsForRace = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
                 let raceBundle = focusedSnapshot?.focused?.bundleId ?? ""
-                // Build the surface lease + release the surface in the
-                // pipeline's emit helper. We construct the lease here
-                // (same shape as the normal path) so the IOSurface
-                // retain lifecycle is identical to a `.suppress` exit.
-                let raceReleaser: any SurfaceReleasing
-                if CMSampleBufferGetImageBuffer(sampleBuffer) != nil {
-                    // `// UNVERIFIED — needs live macOS; do not claim working`.
-                    raceReleaser = BorrowedNoRetainReleaser()
-                } else {
-                    raceReleaser = BorrowedNoRetainReleaser()
-                }
-                let raceLease = SurfaceLease(releaser: raceReleaser)
+                // The race gate runs before raw-pixel admission. Its
+                // tombstone owns no CVPixelBuffer or IOSurface retain.
+                let raceLease = SurfaceLease(releaser: BorrowedNoRetainReleaser())
                 // V2-P1 third-lift (Phase 7 PR 13 wiring): throttled
                 // stderr breadcrumb for `frames_focus_race_dropped`
                 // counter increments. Log the first drop + every 100
@@ -1089,13 +1088,19 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                     )
                 }
                 let pipeline = self.pipeline
-                Task.detached {
-                    try? await pipeline.emitFocusRaceDropped(
-                        tsUs: nowUsForRace,
-                        appBundle: raceBundle,
-                        lease: raceLease
-                    )
-                }
+                captureDispatcher.submit(
+                    captureOrdinal: callbackOrdinal,
+                    operation: {
+                        try? await pipeline.emitFocusRaceDropped(
+                            tsUs: nowUsForRace,
+                            appBundle: raceBundle,
+                            lease: raceLease
+                        )
+                    },
+                    onDrop: {
+                        raceLease.release()
+                    }
+                )
                 return
             }
         }
@@ -1125,6 +1130,35 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             )
         }
 
+        // Freeze every mutable pixel-time privacy signal while this callback
+        // still owns the frame. A later secure-input/AX/blacked-region change
+        // must never authorize these pixels. Disallowed frames are dispatched
+        // without obtaining or retaining their CVPixelBuffer.
+        let pipelineSnapshot = self.pipeline
+        let privacySnapshot = pipelineSnapshot.snapshotPixelPrivacy(
+            context: context,
+            hasBlackedRegion: frameHasBlackedRegion
+        )
+        if !privacySnapshot.permitsRawPixels {
+            let lease = SurfaceLease(releaser: BorrowedNoRetainReleaser())
+            captureDispatcher.submit(
+                captureOrdinal: callbackOrdinal,
+                operation: {
+                    _ = try? await pipelineSnapshot.process(
+                        frame: frame,
+                        context: context,
+                        nowUs: nowUs,
+                        lease: lease,
+                        privacySnapshot: privacySnapshot
+                    )
+                },
+                onDrop: {
+                    lease.release()
+                }
+            )
+            return
+        }
+
         // PR-2: retain the pixel buffer (⇒ its IOSurface) so a future
         // encoder (PR-3) can read it after the callback returns. The
         // retain is wrapped in a `SurfaceLease`, which the pipeline
@@ -1145,7 +1179,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // Build the OCR input in the callback's synchronous frame —
         // `OCREngineInput` is `@unchecked Sendable` (it documents the
         // single-owner-while-in-flight contract), so it crosses the
-        // `Task.detached` boundary into the cascade-twice path cleanly.
+        // owned dispatcher boundary into the cascade-twice path cleanly.
         // `nil` when the sample carries no pixel buffer; the OCR path
         // is then skipped (no OCREvent ever reaches the wire).
         let ocrInput: OCREngineInput?
@@ -1173,7 +1207,6 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let lease = SurfaceLease(releaser: releaser)
 
         // Only `Sendable` values are captured — NOT the sample buffer.
-        let pipeline = self.pipeline
         let ocrEmitter = self.ocrPostAllowEmitter
         captureDispatcher.submit(
             captureOrdinal: callbackOrdinal,
@@ -1184,12 +1217,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 // ask the retention coordinator to persist visual evidence.
                 // A `.suppress` decision emits a tombstone and never reaches
                 // encode — Amendment 1 §3(a)/(c) preserved by construction.
-                let outcome = try? await pipeline.process(
+                let outcome = try? await pipelineSnapshot.process(
                     frame: frame,
                     context: context,
                     nowUs: nowUs,
                     lease: lease,
-                    encoderInput: encoderInput
+                    encoderInput: encoderInput,
+                    privacySnapshot: privacySnapshot
                 )
                 // ADR-0016 P3.6 — cascade-twice. On `.encoded` (pixel-time
                 // cascade returned `.allow`), submit to OCR + run §6
@@ -1205,6 +1239,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                    let input = ocrInput
                 {
                     await emitter.processAfterAllow(
+                        captureOrdinal: callbackOrdinal,
                         tsUs: nowUs,
                         context: context,
                         input: input,

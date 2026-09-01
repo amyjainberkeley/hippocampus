@@ -58,6 +58,7 @@ enum KeyframeBlobStoreError: Error, Equatable {
     case syncFailed
     case publishFailed
     case verificationFailed
+    case cleanupFailed
 }
 
 protocol KeyframeBlobPersisting: Sendable {
@@ -124,7 +125,11 @@ struct AtomicKeyframeBlobStore: KeyframeBlobPersisting, Sendable {
             throw KeyframeBlobStoreError.publishFailed
         }
         guard Darwin.unlink(temporaryURL.path) == 0 else {
-            _ = Darwin.unlink(finalURL.path)
+            do {
+                try remove(blob)
+            } catch {
+                throw KeyframeBlobStoreError.cleanupFailed
+            }
             throw KeyframeBlobStoreError.publishFailed
         }
         temporaryExists = false
@@ -139,8 +144,11 @@ struct AtomicKeyframeBlobStore: KeyframeBlobPersisting, Sendable {
                 throw CancellationError()
             }
         } catch {
-            _ = Darwin.unlink(finalURL.path)
-            try? syncDirectory()
+            do {
+                try remove(blob)
+            } catch {
+                throw KeyframeBlobStoreError.cleanupFailed
+            }
             throw error
         }
     }
@@ -233,29 +241,30 @@ public protocol KeyframeRetaining: Sendable {
     func retain(
         input: KeyframePixelInput,
         candidate: KeyframeEvidenceCandidate
-    ) async -> KeyframeRetention?
+    ) async throws -> KeyframeRetention?
 
     func confirm(_ retention: KeyframeRetention) async
-    func discard(_ retention: KeyframeRetention) async
+    func discard(_ retention: KeyframeRetention) async throws
 }
 
 public actor KeyframeRetentionCoordinator: KeyframeRetaining {
-    public static let maximumPendingCommits = 4
+    public static let maximumPendingCommits = 1
+    public static let cleanupAttemptLimit = 3
 
     typealias Sealer = @Sendable (CVPixelBuffer, Data) -> KeyframeSealedBlob?
 
     private struct PendingCommit {
         let blob: KeyframeSealedBlob
         let candidate: KeyframeEvidenceCandidate
-        let previous: KeyframeEvidenceCandidate?
+        var cleanupRequired: Bool
     }
 
     private let policy: KeyframePolicy
     private let keyMaterial: Data
     private let store: any KeyframeBlobPersisting
     private let sealer: Sealer
-    private var previousRetained: KeyframeEvidenceCandidate?
-    private var pendingCommits: [String: PendingCommit] = [:]
+    private var previousConfirmed: KeyframeEvidenceCandidate?
+    private var pendingCommit: PendingCommit?
 
     public init(
         blobDirectory: URL,
@@ -290,9 +299,13 @@ public actor KeyframeRetentionCoordinator: KeyframeRetaining {
     public func retain(
         input: KeyframePixelInput,
         candidate: KeyframeEvidenceCandidate
-    ) -> KeyframeRetention? {
-        guard policy.decision(previous: previousRetained, current: candidate).shouldRetain,
-              pendingCommits.count < Self.maximumPendingCommits,
+    ) throws -> KeyframeRetention? {
+        if let pending = pendingCommit {
+            guard pending.cleanupRequired else { return nil }
+            try removeWithRetry(pending.blob)
+            pendingCommit = nil
+        }
+        guard policy.decision(previous: previousConfirmed, current: candidate).shouldRetain,
               !Task.isCancelled,
               let blob = sealer(input.pixelBuffer, keyMaterial),
               !Task.isCancelled
@@ -306,38 +319,62 @@ public actor KeyframeRetentionCoordinator: KeyframeRetaining {
             return nil
         }
         guard !Task.isCancelled else {
-            try? store.remove(blob)
+            try removeWithRetry(blob)
             return nil
         }
 
         let retention = KeyframeRetention(sealedBlob: blob)
-        pendingCommits[retention.lowercaseHexDigest] = PendingCommit(
+        pendingCommit = PendingCommit(
             blob: blob,
             candidate: candidate,
-            previous: previousRetained
+            cleanupRequired: false
         )
-        previousRetained = candidate
         return retention
     }
 
     public func confirm(_ retention: KeyframeRetention) {
-        pendingCommits.removeValue(forKey: retention.lowercaseHexDigest)
-    }
-
-    public func discard(_ retention: KeyframeRetention) {
-        guard let commit = pendingCommits.removeValue(
-            forKey: retention.lowercaseHexDigest
-        ) else {
+        guard let commit = pendingCommit,
+              commit.blob.lowercaseHexDigest == retention.lowercaseHexDigest,
+              !commit.cleanupRequired
+        else {
             return
         }
-        try? store.remove(commit.blob)
-        if previousRetained == commit.candidate {
-            previousRetained = commit.previous
+        previousConfirmed = commit.candidate
+        pendingCommit = nil
+    }
+
+    public func discard(_ retention: KeyframeRetention) throws {
+        guard let commit = pendingCommit,
+              commit.blob.lowercaseHexDigest == retention.lowercaseHexDigest
+        else {
+            return
+        }
+        do {
+            try removeWithRetry(commit.blob)
+            pendingCommit = nil
+        } catch {
+            var cleanupCommit = commit
+            cleanupCommit.cleanupRequired = true
+            pendingCommit = cleanupCommit
+            throw error
+        }
+    }
+
+    private func removeWithRetry(_ blob: KeyframeSealedBlob) throws {
+        for attempt in 1...Self.cleanupAttemptLimit {
+            do {
+                try store.remove(blob)
+                return
+            } catch {
+                if attempt == Self.cleanupAttemptLimit {
+                    throw KeyframeBlobStoreError.cleanupFailed
+                }
+            }
         }
     }
 
     func currentPreviousRetainedForTesting() -> KeyframeEvidenceCandidate? {
-        previousRetained
+        previousConfirmed
     }
 }
 

@@ -46,6 +46,34 @@ public enum SuppressionDecision: Sendable, Equatable {
     }
 }
 
+/// Immutable result of the first privacy gate for one captured frame.
+///
+/// The live callback creates this value before retaining or queuing the
+/// frame's pixel buffer. Secure-input and AX probes are sampled exactly once;
+/// queued work consumes `decision` instead of re-reading mutable process state.
+public struct PixelPrivacySnapshot: Sendable, Equatable {
+    public let hasBlackedRegion: Bool
+    public let secureEventInputEnabled: Bool
+    public let axSecureSubrole: Bool?
+    public let decision: SuppressionDecision
+
+    public var permitsRawPixels: Bool {
+        decision == .allow
+    }
+
+    init(
+        hasBlackedRegion: Bool,
+        secureEventInputEnabled: Bool,
+        axSecureSubrole: Bool?,
+        decision: SuppressionDecision
+    ) {
+        self.hasBlackedRegion = hasBlackedRegion
+        self.secureEventInputEnabled = secureEventInputEnabled
+        self.axSecureSubrole = axSecureSubrole
+        self.decision = decision
+    }
+}
+
 /// Cascade orchestrator.
 ///
 /// Initialize once per helper-process lifetime with the four probes +
@@ -104,7 +132,27 @@ public struct SuppressionCascade: Sendable {
     ///   (§6 OCR-time regex runs in `core/`, NOT here.)
     ///   §7 — fail-safe default: unknown classification ⇒ redact.
     public func decide(context: WorkflowContext) -> SuppressionDecision {
-        let decision = decideInternal(context: context)
+        snapshotPixelPrivacy(context: context).decision
+    }
+
+    /// Sample every mutable first-gate signal into a frame-bound value.
+    ///
+    /// `hasBlackedRegion` is supplied by the callback's current luminance
+    /// grid. Legacy callers may omit it, in which case the configured probe is
+    /// read immediately here and still frozen before asynchronous dispatch.
+    public func snapshotPixelPrivacy(
+        context: WorkflowContext,
+        hasBlackedRegion: Bool? = nil
+    ) -> PixelPrivacySnapshot {
+        let blacked = hasBlackedRegion ?? blackedRegion.hasBlackedRegion()
+        let secureInput = secureEventInput.isSecureEventInputEnabled()
+        let axResult = axSecureSubrole.focusedHasSecureSubrole()
+        let decision = decideInternal(
+            context: context,
+            hasBlackedRegion: blacked,
+            secureEventInputEnabled: secureInput,
+            axSecureSubrole: axResult
+        )
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 env-gated trace.
         // Content-free: bundle id (already cascade-attributed) +
         // decision enum + AX outcome enum. No window title / URL / OCR
@@ -115,13 +163,23 @@ public struct SuppressionCascade: Sendable {
             "cascade-decide",
             "bundle=\(context.appBundleId ?? "nil") decision=\(decision.traceLabel)"
         )
-        return decision
+        return PixelPrivacySnapshot(
+            hasBlackedRegion: blacked,
+            secureEventInputEnabled: secureInput,
+            axSecureSubrole: axResult,
+            decision: decision
+        )
     }
 
     /// Inner cascade — pulled out of `decide(context:)` so the
     /// MCI_OCR_TRACE emit can wrap exactly one decision per call
     /// without duplicating the trace at every early-return arm.
-    private func decideInternal(context: WorkflowContext) -> SuppressionDecision {
+    private func decideInternal(
+        context: WorkflowContext,
+        hasBlackedRegion: Bool,
+        secureEventInputEnabled: Bool,
+        axSecureSubrole: Bool?
+    ) -> SuppressionDecision {
         // §1 — source-level denylist (the load-bearing primitive).
         if let bundle = context.appBundleId, denylist.appIsDenied(bundleId: bundle) {
             return .suppress(reason: .denylistSource)
@@ -134,12 +192,12 @@ public struct SuppressionCascade: Sendable {
         }
 
         // §2 — OS-already-blacked-out region.
-        if blackedRegion.hasBlackedRegion() {
+        if hasBlackedRegion {
             return .suppress(reason: .osBlackedRegion)
         }
 
         // §3 — process-wide secure-input bit.
-        if secureEventInput.isSecureEventInputEnabled() {
+        if secureEventInputEnabled {
             return .suppress(reason: .secureEventInput)
         }
 
@@ -147,8 +205,7 @@ public struct SuppressionCascade: Sendable {
         // `nil` from the probe means "AX could not answer with reasonable
         // confidence" — that falls through to §7 (fail-safe) below, NOT
         // to allow.
-        let axResult = axSecureSubrole.focusedHasSecureSubrole()
-        if axResult == true {
+        if axSecureSubrole == true {
             return .suppress(reason: .axSecureSubrole)
         }
 
@@ -187,7 +244,7 @@ public struct SuppressionCascade: Sendable {
         // else redacts.
         let isKnownSafeApp = context.appBundleId.map(knownSafeAppBundles.contains) ?? false
 
-        switch (axResult, isKnownSafeApp) {
+        switch (axSecureSubrole, isKnownSafeApp) {
         case (false, true):
             // AX positively identified the focused element as non-secure,
             // AND the foreground app is on the curated known-safe list.

@@ -516,9 +516,9 @@ if captureOptions.captureEnabled {
         ),
         denylist: Denylist(entries: denylistEntries),
         policy: policy,
-        // Shared §2 probe instance: the session calls `update(...)`
-        // in the SCStreamOutput callback; the cascade (constructed
-        // above with this same probe) reads `hasBlackedRegion()`.
+        // Shared §2 classifier configuration. The session updates and reads
+        // it synchronously, then freezes the result with secure-input and AX
+        // state before any raw pixel buffer is retained or queued.
         blackedRegionProbe: blackedRegionProbe,
         // ADR-0015 §6 P2.5 — shared snapshot + composite URL provider.
         // The SCStream callback reads `contextSnapshot.currentSync()`
@@ -607,6 +607,18 @@ do {
 } catch {
     FileHandle.standardError.write("mci-capture-helper: loop error: \(error)\n".data(using: .utf8)!)
     exit(5)
+}
+
+if let captureRuntime {
+    do {
+        try await captureRuntime.session.stop()
+    } catch {
+        FileHandle.standardError.write(
+            "mci-capture-helper: capture drain failed during shutdown\n"
+                .data(using: .utf8)!
+        )
+    }
+    captureRuntime.contextProvider.stop()
 }
 
 // Defensive: ensure the optimizer cannot lift `captureSession` out
