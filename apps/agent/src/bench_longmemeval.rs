@@ -666,12 +666,26 @@ impl ScratchDatabase {
         &self.path
     }
 
-    fn footprint_bytes(&self) -> u64 {
-        sqlite_artifact_paths(&self.path)
-            .iter()
-            .filter_map(|path| std::fs::metadata(path).ok())
-            .map(|metadata| metadata.len())
-            .sum()
+    fn retrieval_footprint_bytes(&self, key: &DbKey) -> Result<u64, String> {
+        let db = mci_core::store::open_readonly(&self.path, key)
+            .map_err(|error| format!("open retrieval index for measurement: {error}"))?;
+        let bytes = db
+            .conn()
+            .query_row(
+                "SELECT COALESCE(SUM(pgsize), 0) \
+                   FROM dbstat \
+                  WHERE name IN ( \
+                        SELECT name \
+                          FROM sqlite_master \
+                         WHERE (tbl_name IN ('events', 'event_vectors', 'chunks') \
+                                AND type IN ('table', 'index')) \
+                            OR name GLOB 'events_fts*' \
+                  )",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("measure retrieval index pages: {error}"))?;
+        u64::try_from(bytes).map_err(|_| "retrieval index byte count was negative".to_string())
     }
 }
 
@@ -1029,7 +1043,7 @@ pub fn run_instance(
     };
 
     drop(store);
-    let index_size_bytes = database.footprint_bytes();
+    let index_size_bytes = database.retrieval_footprint_bytes(&DbKey::from_bytes([0x5a; 32]))?;
 
     Ok(InstanceResult {
         arm: arm.label().to_string(),
@@ -1892,6 +1906,54 @@ mod tests {
         );
 
         assert_eq!(event.text.as_bytes(), expected.as_bytes());
+    }
+
+    #[test]
+    fn retrieval_footprint_excludes_unrelated_projection_schema() {
+        let inst = Instance {
+            question_id: "retrieval-footprint".into(),
+            question_type: "exact_recall".into(),
+            question: "What was indexed?".into(),
+            question_date: "2026/08/31 (Mon) 12:00".into(),
+            answer_session_ids: vec!["files:///answer.txt".into()],
+            haystack_dates: vec!["2026/08/31 (Mon) 11:00".into()],
+            haystack_session_ids: vec!["files:///answer.txt".into()],
+            haystack_sessions: vec![vec![Turn {
+                role: "assistant".into(),
+                content: "The indexed answer is cobalt.".into(),
+            }]],
+            haystack_app_ids: Vec::new(),
+            haystack_window_titles: Vec::new(),
+            haystack_urls: Vec::new(),
+            tags: Vec::new(),
+            unanswerable: false,
+        };
+        let dir = tempdir().expect("tempdir");
+        let database = ScratchDatabase::new(dir.path().join("footprint.sqlite"));
+        let (store, _, _) = seed_instance(&inst, database.path()).expect("seed instance");
+        drop(store);
+        let key = DbKey::from_bytes([0x5a; 32]);
+        let before = database
+            .retrieval_footprint_bytes(&key)
+            .expect("measure retrieval footprint");
+
+        let mut db = mci_core::store::open(database.path(), &key).expect("open scratch store");
+        let tx = db.conn_mut().transaction().expect("start unrelated write");
+        tx.execute_batch(
+            "CREATE TABLE unrelated_projection(payload BLOB NOT NULL);\
+             INSERT INTO unrelated_projection(payload) VALUES (zeroblob(262144));",
+        )
+        .expect("write unrelated projection data");
+        tx.commit().expect("commit unrelated write");
+        drop(db);
+
+        let after = database
+            .retrieval_footprint_bytes(&key)
+            .expect("remeasure retrieval footprint");
+        assert_eq!(
+            after, before,
+            "projection-only schema growth must not count as retrieval-index growth"
+        );
     }
 
     #[test]

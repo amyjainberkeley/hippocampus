@@ -7,6 +7,56 @@ use mci_brain::{
     RetrievalQuery, Retriever, SourceQuality, EVIDENCE_SUFFICIENCY_POLICY,
 };
 
+struct CapabilityStore {
+    inner: InMemoryBrainStore,
+    lexical_available: bool,
+    vectors_available: bool,
+}
+
+impl CapabilityStore {
+    fn new(lexical_available: bool, vectors_available: bool) -> Self {
+        Self {
+            inner: InMemoryBrainStore::new(),
+            lexical_available,
+            vectors_available,
+        }
+    }
+}
+
+impl BrainStore for CapabilityStore {
+    fn put_event(&self, event: &Event) -> Result<EventId, mci_brain::StoreError> {
+        self.inner.put_event(event)
+    }
+
+    fn get_event(&self, id: EventId) -> Result<Option<Event>, mci_brain::StoreError> {
+        self.inner.get_event(id)
+    }
+
+    fn fts5_search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(EventId, f32)>, mci_brain::StoreError> {
+        if self.lexical_available {
+            self.inner.fts5_search(query, limit)
+        } else {
+            Err(mci_brain::StoreError::Backend("lexical offline".into()))
+        }
+    }
+
+    fn vec_search(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<(EventId, f32)>, mci_brain::StoreError> {
+        if self.vectors_available {
+            self.inner.vec_search(query_embedding, limit)
+        } else {
+            Err(mci_brain::StoreError::Backend("vectors offline".into()))
+        }
+    }
+}
+
 struct PerfectEmbedder;
 
 impl Embedder for PerfectEmbedder {
@@ -243,4 +293,92 @@ fn lexical_production_path_uses_the_same_typed_outcome_boundary() {
         lexical_retrieval_outcome(&store, &query("violet telescope archive")).unwrap(),
         RetrievalOutcome::NothingMatched { .. }
     ));
+}
+
+fn anchor_store(lexical_available: bool, vectors_available: bool) -> Arc<CapabilityStore> {
+    let store = Arc::new(CapabilityStore::new(lexical_available, vectors_available));
+    store
+        .put_event(&event(
+            "right before deployment the rollback switch was enabled",
+            Some("terminal://deploy"),
+        ))
+        .unwrap();
+    store
+}
+
+#[test]
+fn anchor_embedder_failure_is_named_and_keeps_safe_lexical_context() {
+    let retriever = HybridRetriever::new(anchor_store(true, true), Arc::new(FailingEmbedder), 20);
+    let outcome = retriever
+        .retrieve_outcome(&query("right before deployment"))
+        .unwrap();
+    let RetrievalOutcome::Degraded {
+        degradation,
+        fallback_matches,
+    } = outcome
+    else {
+        panic!("anchor embedder failure must be typed");
+    };
+    assert_eq!(degradation, RetrievalDegradation::EmbeddingsUnavailable);
+    assert_eq!(fallback_matches.len(), 1);
+}
+
+#[test]
+fn anchor_vector_failure_is_named_and_keeps_safe_lexical_context() {
+    let retriever = HybridRetriever::new(anchor_store(true, false), Arc::new(PerfectEmbedder), 20);
+    let outcome = retriever
+        .retrieve_outcome(&query("right before deployment"))
+        .unwrap();
+    let RetrievalOutcome::Degraded {
+        degradation,
+        fallback_matches,
+    } = outcome
+    else {
+        panic!("anchor vector failure must be typed");
+    };
+    assert_eq!(degradation, RetrievalDegradation::EmbeddingsUnavailable);
+    assert_eq!(fallback_matches.len(), 1);
+}
+
+#[test]
+fn anchor_lexical_failure_is_named_and_keeps_safe_semantic_context() {
+    let retriever = HybridRetriever::new(anchor_store(false, true), Arc::new(PerfectEmbedder), 20);
+    let outcome = retriever
+        .retrieve_outcome(&query("right before deployment"))
+        .unwrap();
+    let RetrievalOutcome::Degraded {
+        degradation,
+        fallback_matches,
+    } = outcome
+    else {
+        panic!("anchor lexical failure must be typed");
+    };
+    assert_eq!(degradation, RetrievalDegradation::LexicalUnavailable);
+    assert_eq!(fallback_matches.len(), 1);
+}
+
+#[test]
+fn anchor_combined_failure_is_explicit_and_has_no_fabricated_context() {
+    for embedder_fails in [false, true] {
+        let outcome = if embedder_fails {
+            HybridRetriever::new(anchor_store(false, true), Arc::new(FailingEmbedder), 20)
+                .retrieve_outcome(&query("right before deployment"))
+        } else {
+            HybridRetriever::new(anchor_store(false, false), Arc::new(PerfectEmbedder), 20)
+                .retrieve_outcome(&query("right before deployment"))
+        }
+        .unwrap();
+        let RetrievalOutcome::Degraded {
+            degradation,
+            fallback_matches,
+        } = outcome
+        else {
+            panic!("combined anchor failure must be typed");
+        };
+        assert_eq!(
+            degradation,
+            RetrievalDegradation::LexicalAndEmbeddingsUnavailable
+        );
+        assert!(fallback_matches.is_empty());
+    }
 }

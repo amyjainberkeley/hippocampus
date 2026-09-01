@@ -22,7 +22,7 @@ use std::sync::{
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
-use crate::mcp::brain_reader::{BrainReader, BrainReaderError};
+use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 use crate::mcp::jsonrpc::{
     JsonRpcId, JsonRpcRequest, JsonRpcResponse, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
     PARSE_ERROR, SERVER_ERROR_GENERIC,
@@ -287,38 +287,7 @@ impl Server {
             .clamp(1, MAX_RECALL_LIMIT);
 
         match self.reader.recall(&parsed.query, limit) {
-            Ok(hits) => {
-                let hits_json: Vec<serde_json::Value> = hits
-                    .iter()
-                    .map(|h| {
-                        serde_json::json!({
-                            "event_id": h.record.event_id.0,
-                            "ts_us": h.record.ts_us,
-                            "app_bundle_id": h.record.app_bundle_id,
-                            "window_title": h.record.window_title,
-                            "url": h.record.url,
-                            "text_snippet": h.record.text_snippet,
-                            "score": h.score,
-                            "entities": h.entities,
-                            "linked_event_ids": h.linked_event_ids,
-                        })
-                    })
-                    .collect();
-                JsonRpcResponse::ok(
-                    id,
-                    serde_json::json!({
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": serde_json::to_string(&hits_json)
-                                    .unwrap_or_else(|_| "[]".to_owned()),
-                            }
-                        ],
-                        "hits": hits_json,
-                        "isError": false,
-                    }),
-                )
-            }
+            Ok(outcome) => JsonRpcResponse::ok(id, recall_wire_result(outcome)),
             Err(e) => brain_err_to_response(id, &e),
         }
     }
@@ -522,6 +491,67 @@ impl Server {
             Err(e) => brain_err_to_response(id, &e),
         }
     }
+}
+
+fn hit_json(hit: &McpHit) -> serde_json::Value {
+    serde_json::json!({
+        "event_id": hit.record.event_id.0,
+        "ts_us": hit.record.ts_us,
+        "app_bundle_id": hit.record.app_bundle_id,
+        "window_title": hit.record.window_title,
+        "url": hit.record.url,
+        "text_snippet": hit.record.text_snippet,
+        "score": hit.score,
+        "entities": hit.entities,
+        "linked_event_ids": hit.linked_event_ids,
+    })
+}
+
+fn recall_wire_result(outcome: McpRecallOutcome) -> serde_json::Value {
+    let payload = match outcome {
+        McpRecallOutcome::Matched { hits } => serde_json::json!({
+            "outcome": "matched",
+            "hits": hits.iter().map(hit_json).collect::<Vec<_>>(),
+            "related_context": [],
+        }),
+        McpRecallOutcome::NothingMatched { reason } => serde_json::json!({
+            "outcome": "nothing_matched",
+            "reason": match reason {
+                mci_brain::NothingMatchedReason::NoCandidates => "no_candidates",
+                mci_brain::NothingMatchedReason::EvidenceFloor => "evidence_floor",
+                mci_brain::NothingMatchedReason::ZeroLimit => "zero_limit",
+            },
+            "hits": [],
+            "related_context": [],
+        }),
+        McpRecallOutcome::Degraded {
+            degradation,
+            related_context,
+        } => serde_json::json!({
+            "outcome": "degraded",
+            "degradation": match degradation {
+                mci_brain::RetrievalDegradation::EmbeddingsUnavailable => "embeddings_unavailable",
+                mci_brain::RetrievalDegradation::LexicalUnavailable => "lexical_unavailable",
+                mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable => "lexical_and_embeddings_unavailable",
+                mci_brain::RetrievalDegradation::EvidenceSufficiencyUnqualified => "evidence_sufficiency_unqualified",
+            },
+            "hits": [],
+            "related_context": related_context.iter().map(hit_json).collect::<Vec<_>>(),
+        }),
+    };
+    let text = serde_json::to_string(&payload).unwrap_or_else(|_| {
+        "{\"outcome\":\"degraded\",\"degradation\":\"serialization_failed\"}".to_owned()
+    });
+    let mut result = payload;
+    let object = result
+        .as_object_mut()
+        .expect("recall wire payload is always an object");
+    object.insert(
+        "content".into(),
+        serde_json::json!([{"type": "text", "text": text}]),
+    );
+    object.insert("isError".into(), serde_json::Value::Bool(false));
+    result
 }
 
 fn brain_err_to_response(id: JsonRpcId, e: &BrainReaderError) -> JsonRpcResponse {

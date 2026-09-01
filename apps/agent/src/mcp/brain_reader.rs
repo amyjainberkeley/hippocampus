@@ -5,7 +5,9 @@
 //! headless stub without exposing the test stub on the public mci-brain
 //! API.
 
-use mci_brain::{BrainStats, EpisodeRecord, EventRecord};
+use mci_brain::{
+    BrainStats, EpisodeRecord, EventRecord, NothingMatchedReason, RetrievalDegradation,
+};
 use thiserror::Error;
 
 /// Compact recall hit shape the MCP server returns. Strictly a superset of
@@ -38,6 +40,29 @@ pub struct McpHit {
     pub linked_event_ids: Vec<u64>,
 }
 
+/// Recall outcome preserved through the production reader and MCP wire.
+#[derive(Debug, Clone, PartialEq)]
+pub enum McpRecallOutcome {
+    /// Evidence passed the production sufficiency boundary.
+    Matched {
+        /// Evidence-backed rows safe to present as retrieval hits.
+        hits: Vec<McpHit>,
+    },
+    /// Retrieval completed normally but did not find supporting evidence.
+    NothingMatched {
+        /// Inspectable reason retrieval abstained.
+        reason: NothingMatchedReason,
+    },
+    /// A named capability was unavailable. Related context is inspectable,
+    /// but must never be serialized as supported hits.
+    Degraded {
+        /// Named unavailable or unqualified capability.
+        degradation: RetrievalDegradation,
+        /// Ranked rows offered only as related context.
+        related_context: Vec<McpHit>,
+    },
+}
+
 /// Errors a [`BrainReader`] may surface to the MCP dispatcher.
 #[derive(Debug, Error)]
 pub enum BrainReaderError {
@@ -63,7 +88,7 @@ pub trait BrainReader: Send + Sync {
     /// Lexical+(eventually-semantic) recall. P3.10b ships lexical-only
     /// FTS5; the Core ML embedder lands ahead of hybrid recall reaching
     /// this surface.
-    fn recall(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError>;
+    fn recall(&self, query: &str, limit: usize) -> Result<McpRecallOutcome, BrainReaderError>;
 
     /// Timeline cursor: events with `ts_us > since_ts_us`, ascending,
     /// capped at `limit`.

@@ -29,26 +29,17 @@ pub fn retract_event(
 pub(crate) fn apply_delta(tx: &Transaction<'_>, delta: &MemoryDelta) -> Result<(), StoreError> {
     require_event(tx, delta.source_event_id)?;
     validate_nonempty("projector_version", &delta.projector_version)?;
-
-    tx.execute(
-        "INSERT OR IGNORE INTO memory_deltas
-         (id, source_event_id, asserted_at_us, projector_version)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![
-            delta.id,
-            to_i64(delta.source_event_id.0, "source_event_id")?,
-            to_i64(delta.asserted_at_us, "asserted_at_us")?,
-            delta.projector_version,
-        ],
-    )
-    .map_err(db_error("insert memory delta"))?;
+    if delta.id != delta.derived_id() {
+        return invalid("memory delta id does not match its immutable payload");
+    }
+    insert_delta(tx, delta)?;
 
     for claim in &delta.claims {
         validate_claim(tx, delta, claim)?;
         for evidence in &claim.evidence {
             insert_evidence(tx, evidence)?;
         }
-        insert_claim(tx, delta.source_event_id, claim)?;
+        insert_claim(tx, claim)?;
         for evidence in &claim.evidence {
             tx.execute(
                 "INSERT OR IGNORE INTO memory_claim_evidence (claim_id, evidence_id)
@@ -57,6 +48,7 @@ pub(crate) fn apply_delta(tx: &Transaction<'_>, delta: &MemoryDelta) -> Result<(
             )
             .map_err(db_error("link claim evidence"))?;
         }
+        apply_recorded_retractions(tx, claim)?;
         if let Some(previous) = &claim.supersedes_claim_id {
             let transition = ClaimTransition::new(
                 previous.clone(),
@@ -85,6 +77,7 @@ pub(crate) fn apply_retraction(
     require_event(tx, retraction.retraction_event_id)?;
     validate_nonempty("retraction reason", &retraction.reason)?;
     validate_nonempty("projector_version", &retraction.projector_version)?;
+    insert_event_retraction(tx, retraction)?;
 
     let mut stmt = tx
         .prepare(
@@ -129,6 +122,12 @@ fn validate_claim(
     delta: &MemoryDelta,
     claim: &MemoryClaim,
 ) -> Result<(), StoreError> {
+    if claim.id != claim.derived_id() {
+        return invalid("memory claim id does not match its immutable payload");
+    }
+    if claim.source_event_id != delta.source_event_id {
+        return invalid("memory claim source event does not match its delta");
+    }
     for (name, value) in [
         ("subject", claim.subject.as_str()),
         ("predicate", claim.predicate.as_str()),
@@ -187,6 +186,13 @@ fn validate_claim(
         if claim.status != ClaimStatus::Active {
             return invalid("a superseding correction must be source-backed and active");
         }
+        if claim_status_as_of(tx, previous_id, claim.valid_from_us, delta.asserted_at_us)?
+            != Some(ClaimStatus::Active)
+        {
+            return invalid(
+                "a correction may supersede only a claim active at its bitemporal coordinates",
+            );
+        }
     }
 
     if claim.asserted_at_us != delta.asserted_at_us {
@@ -196,6 +202,9 @@ fn validate_claim(
 }
 
 fn validate_evidence(evidence: &EvidenceRef) -> Result<(), StoreError> {
+    if evidence.id != evidence.derived_id() {
+        return invalid("memory evidence id does not match its immutable payload");
+    }
     for (name, value) in [
         ("source_kind", evidence.source_kind.as_str()),
         ("source_locator", evidence.source_locator.as_str()),
@@ -227,54 +236,170 @@ fn validate_transition(
     Ok(())
 }
 
-fn insert_evidence(tx: &Transaction<'_>, value: &EvidenceRef) -> Result<(), StoreError> {
+fn insert_delta(tx: &Transaction<'_>, value: &MemoryDelta) -> Result<(), StoreError> {
+    let existing: Option<(i64, i64)> = tx
+        .query_row(
+            "SELECT source_event_id, asserted_at_us FROM memory_deltas WHERE id = ?1",
+            params![value.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(db_error("read memory delta identity"))?;
+    let expected = (
+        to_i64(value.source_event_id.0, "source_event_id")?,
+        to_i64(value.asserted_at_us, "asserted_at_us")?,
+    );
+    if let Some(existing) = existing {
+        return if existing == expected {
+            Ok(())
+        } else {
+            invalid("memory delta id conflicts with a different persisted payload")
+        };
+    }
     tx.execute(
-        "INSERT OR IGNORE INTO memory_evidence
+        "INSERT INTO memory_deltas
+         (id, source_event_id, asserted_at_us, projector_version)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![value.id, expected.0, expected.1, value.projector_version],
+    )
+    .map_err(db_error("insert memory delta"))?;
+    Ok(())
+}
+
+fn insert_evidence(tx: &Transaction<'_>, value: &EvidenceRef) -> Result<(), StoreError> {
+    type EvidencePayload = (i64, String, String, String, i64, String);
+    let existing: Option<EvidencePayload> = tx
+        .query_row(
+            "SELECT event_id, source_kind, source_locator, source_scope,
+                    observed_at_us, content_hash
+             FROM memory_evidence WHERE id = ?1",
+            params![value.id.0],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(db_error("read memory evidence identity"))?;
+    let expected = (
+        to_i64(value.event_id.0, "evidence event_id")?,
+        value.source_kind.clone(),
+        value.source_locator.clone(),
+        value.source_scope.clone(),
+        to_i64(value.observed_at_us, "observed_at_us")?,
+        value.content_hash.clone(),
+    );
+    if let Some(existing) = existing {
+        return if existing == expected {
+            Ok(())
+        } else {
+            invalid("memory evidence id conflicts with a different persisted payload")
+        };
+    }
+    tx.execute(
+        "INSERT INTO memory_evidence
          (id, event_id, source_kind, source_locator, source_scope, observed_at_us, content_hash)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
-            value.id.0,
-            to_i64(value.event_id.0, "evidence event_id")?,
-            value.source_kind,
-            value.source_locator,
-            value.source_scope,
-            to_i64(value.observed_at_us, "observed_at_us")?,
-            value.content_hash,
+            value.id.0, expected.0, expected.1, expected.2, expected.3, expected.4, expected.5,
         ],
     )
     .map_err(db_error("insert memory evidence"))?;
     Ok(())
 }
 
-fn insert_claim(
-    tx: &Transaction<'_>,
-    source_event_id: EventId,
-    value: &MemoryClaim,
-) -> Result<(), StoreError> {
+fn insert_claim(tx: &Transaction<'_>, value: &MemoryClaim) -> Result<(), StoreError> {
+    type ClaimPayload = (
+        i64,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        f64,
+        i64,
+        i64,
+        Option<i64>,
+        String,
+        Option<String>,
+    );
+    let existing: Option<ClaimPayload> = tx
+        .query_row(
+            "SELECT source_event_id, subject, predicate, object, scope, attribution,
+                    confidence, asserted_at_us, valid_from_us, valid_to_us,
+                    initial_status, supersedes_claim_id
+             FROM memory_claims WHERE id = ?1",
+            params![value.id.0],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(db_error("read memory claim identity"))?;
+    let expected = (
+        to_i64(value.source_event_id.0, "claim source_event_id")?,
+        value.subject.clone(),
+        value.predicate.clone(),
+        value.object.clone(),
+        value.scope.clone(),
+        value.attribution.clone(),
+        f64::from(value.confidence),
+        to_i64(value.asserted_at_us, "claim asserted_at_us")?,
+        to_i64(value.valid_from_us, "claim valid_from_us")?,
+        value
+            .valid_to_us
+            .map(|valid_to| to_i64(valid_to, "claim valid_to_us"))
+            .transpose()?,
+        value.status.as_str().to_owned(),
+        value.supersedes_claim_id.as_ref().map(|id| id.0.clone()),
+    );
+    if let Some(existing) = existing {
+        return if existing == expected {
+            Ok(())
+        } else {
+            invalid("memory claim id conflicts with a different persisted payload")
+        };
+    }
     tx.execute(
-        "INSERT OR IGNORE INTO memory_claims
+        "INSERT INTO memory_claims
          (id, source_event_id, subject, predicate, object, scope, attribution,
           confidence, asserted_at_us, valid_from_us, valid_to_us,
           projector_version, initial_status, supersedes_claim_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             value.id.0,
-            to_i64(source_event_id.0, "claim source_event_id")?,
-            value.subject,
-            value.predicate,
-            value.object,
-            value.scope,
-            value.attribution,
-            f64::from(value.confidence),
-            to_i64(value.asserted_at_us, "claim asserted_at_us")?,
-            to_i64(value.valid_from_us, "claim valid_from_us")?,
-            value
-                .valid_to_us
-                .map(|v| to_i64(v, "claim valid_to_us"))
-                .transpose()?,
+            expected.0,
+            expected.1,
+            expected.2,
+            expected.3,
+            expected.4,
+            expected.5,
+            expected.6,
+            expected.7,
+            expected.8,
+            expected.9,
             value.projector_version,
-            value.status.as_str(),
-            value.supersedes_claim_id.as_ref().map(|id| id.0.as_str()),
+            expected.10,
+            expected.11,
         ],
     )
     .map_err(db_error("insert memory claim"))?;
@@ -282,24 +407,212 @@ fn insert_claim(
 }
 
 fn insert_transition(tx: &Transaction<'_>, value: &ClaimTransition) -> Result<(), StoreError> {
+    type TransitionPayload = (String, String, i64, i64, String, i64);
+    let existing: Option<TransitionPayload> = tx
+        .query_row(
+            "SELECT claim_id, status, asserted_at_us, effective_at_us, reason, source_event_id
+             FROM memory_claim_transitions WHERE id = ?1",
+            params![value.id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(db_error("read claim transition identity"))?;
+    let expected = (
+        value.claim_id.0.clone(),
+        value.status.as_str().to_owned(),
+        to_i64(value.asserted_at_us, "transition asserted_at_us")?,
+        to_i64(value.effective_at_us, "transition effective_at_us")?,
+        value.reason.clone(),
+        to_i64(value.source_event_id.0, "transition source_event_id")?,
+    );
+    if let Some(existing) = existing {
+        return if existing == expected {
+            Ok(())
+        } else {
+            invalid("claim transition id conflicts with a different persisted payload")
+        };
+    }
     tx.execute(
-        "INSERT OR IGNORE INTO memory_claim_transitions
+        "INSERT INTO memory_claim_transitions
          (id, claim_id, status, asserted_at_us, effective_at_us, reason,
           source_event_id, projector_version)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             value.id,
-            value.claim_id.0,
-            value.status.as_str(),
-            to_i64(value.asserted_at_us, "transition asserted_at_us")?,
-            to_i64(value.effective_at_us, "transition effective_at_us")?,
-            value.reason,
-            to_i64(value.source_event_id.0, "transition source_event_id")?,
+            expected.0,
+            expected.1,
+            expected.2,
+            expected.3,
+            expected.4,
+            expected.5,
             value.projector_version,
         ],
     )
     .map_err(db_error("insert claim transition"))?;
     Ok(())
+}
+
+fn insert_event_retraction(
+    tx: &Transaction<'_>,
+    value: &MemoryRetraction,
+) -> Result<(), StoreError> {
+    type RetractionPayload = (i64, i64, i64, i64, String);
+    let id = value.derived_id();
+    let existing: Option<RetractionPayload> = tx
+        .query_row(
+            "SELECT target_event_id, retraction_event_id, asserted_at_us,
+                    effective_at_us, reason
+             FROM memory_event_retractions WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(db_error("read event retraction identity"))?;
+    let expected = (
+        to_i64(value.target_event_id.0, "target_event_id")?,
+        to_i64(value.retraction_event_id.0, "retraction_event_id")?,
+        to_i64(value.asserted_at_us, "retraction asserted_at_us")?,
+        to_i64(value.effective_at_us, "retraction effective_at_us")?,
+        value.reason.clone(),
+    );
+    if let Some(existing) = existing {
+        return if existing == expected {
+            Ok(())
+        } else {
+            invalid("event retraction id conflicts with a different persisted payload")
+        };
+    }
+    tx.execute(
+        "INSERT INTO memory_event_retractions
+         (id, target_event_id, retraction_event_id, asserted_at_us,
+          effective_at_us, reason, projector_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            id,
+            expected.0,
+            expected.1,
+            expected.2,
+            expected.3,
+            expected.4,
+            value.projector_version,
+        ],
+    )
+    .map_err(db_error("insert event retraction"))?;
+    Ok(())
+}
+
+fn apply_recorded_retractions(tx: &Transaction<'_>, claim: &MemoryClaim) -> Result<(), StoreError> {
+    let event_ids: BTreeSet<EventId> = claim
+        .evidence
+        .iter()
+        .map(|evidence| evidence.event_id)
+        .collect();
+    for event_id in event_ids {
+        let mut stmt = tx
+            .prepare(
+                "SELECT retraction_event_id, asserted_at_us, effective_at_us,
+                        reason, projector_version
+                 FROM memory_event_retractions
+                 WHERE target_event_id = ?1
+                 ORDER BY asserted_at_us ASC, effective_at_us ASC, id ASC",
+            )
+            .map_err(db_error("prepare recorded event retractions"))?;
+        let rows = stmt
+            .query_map(params![to_i64(event_id.0, "retracted event_id")?], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(db_error("query recorded event retractions"))?;
+        let mut recorded = Vec::new();
+        for row in rows {
+            recorded.push(row.map_err(db_error("read recorded event retraction"))?);
+        }
+        drop(stmt);
+        for (source, asserted, effective, reason, projector_version) in recorded {
+            let transition = ClaimTransition::new(
+                claim.id.clone(),
+                ClaimStatus::Retracted,
+                to_u64(asserted, "retraction asserted_at_us")?,
+                to_u64(effective, "retraction effective_at_us")?,
+                &reason,
+                EventId(to_u64(source, "retraction source_event_id")?),
+                &projector_version,
+            );
+            insert_transition(tx, &transition)?;
+        }
+    }
+    Ok(())
+}
+
+fn claim_status_as_of(
+    tx: &Transaction<'_>,
+    claim_id: &MemoryClaimId,
+    valid_at_us: u64,
+    asserted_as_of_us: u64,
+) -> Result<Option<ClaimStatus>, StoreError> {
+    let initial: Option<String> = tx
+        .query_row(
+            "SELECT initial_status
+             FROM memory_claims
+             WHERE id = ?1
+               AND asserted_at_us <= ?2
+               AND valid_from_us <= ?3
+               AND (valid_to_us IS NULL OR valid_to_us >= ?3)",
+            params![
+                claim_id.0,
+                to_i64(asserted_as_of_us, "asserted_as_of_us")?,
+                to_i64(valid_at_us, "valid_at_us")?,
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db_error("read claim status coordinates"))?;
+    let Some(initial) = initial else {
+        return Ok(None);
+    };
+    let transitioned: Option<String> = tx
+        .query_row(
+            "SELECT status FROM memory_claim_transitions
+             WHERE claim_id = ?1
+               AND asserted_at_us <= ?2
+               AND effective_at_us <= ?3
+             ORDER BY asserted_at_us DESC, effective_at_us DESC, id DESC
+             LIMIT 1",
+            params![
+                claim_id.0,
+                to_i64(asserted_as_of_us, "asserted_as_of_us")?,
+                to_i64(valid_at_us, "valid_at_us")?,
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db_error("read claim transition coordinates"))?;
+    transitioned.as_deref().map_or_else(
+        || parse_status(&initial).map(Some),
+        |status| parse_status(status).map(Some),
+    )
 }
 
 pub(crate) fn read_claims_as_of(
@@ -315,7 +628,8 @@ pub(crate) fn read_claims_as_of(
         .prepare(
             "SELECT c.id, c.subject, c.predicate, c.object, c.scope, c.attribution,
                     c.confidence, c.asserted_at_us, c.valid_from_us, c.valid_to_us,
-                    c.projector_version, c.initial_status, c.supersedes_claim_id
+                    c.projector_version, c.initial_status, c.supersedes_claim_id,
+                    c.source_event_id
              FROM memory_claims c
              WHERE c.asserted_at_us <= ?1
                AND c.valid_from_us <= ?2
@@ -416,6 +730,12 @@ pub(crate) fn expand_memory(
     let mut seeds = seed_claim_ids.to_vec();
     seeds.sort();
     seeds.dedup();
+    let mut scheduled = Vec::with_capacity(seeds.len());
+    for claim_id in seeds {
+        let admissible = claim_has_admissible_evidence(tx, &claim_id, budget)?;
+        scheduled.push((!admissible, claim_id));
+    }
+    scheduled.sort();
 
     let mut claim_ids = Vec::new();
     let mut evidence_out = Vec::new();
@@ -427,7 +747,7 @@ pub(crate) fn expand_memory(
     let mut tokens_used = 0usize;
     let mut truncated = false;
 
-    for claim_id in seeds {
+    for (_, claim_id) in scheduled {
         if read_claim(tx, &claim_id)?.is_none() {
             continue;
         }
@@ -535,6 +855,35 @@ pub(crate) fn expand_memory(
     })
 }
 
+fn claim_has_admissible_evidence(
+    tx: &Transaction<'_>,
+    claim_id: &MemoryClaimId,
+    budget: ExpansionBudget,
+) -> Result<bool, StoreError> {
+    if budget.max_nodes == 0
+        || budget.max_edges == 0
+        || budget.max_evidence == 0
+        || budget.max_tokens == 0
+    {
+        return Ok(false);
+    }
+    for evidence in read_evidence(tx, claim_id)? {
+        let token_count: Option<usize> = tx
+            .query_row(
+                "SELECT text FROM events WHERE id = ?1",
+                params![to_i64(evidence.event_id.0, "evidence event_id")?],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(db_error("preflight expansion evidence"))?
+            .map(|text| text.split_whitespace().count());
+        if token_count.is_some_and(|tokens| tokens <= budget.max_tokens) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn admit_node<T: Ord>(
     value: T,
     destination: &mut BTreeSet<T>,
@@ -562,7 +911,7 @@ fn read_claim(
     tx.query_row(
         "SELECT id, subject, predicate, object, scope, attribution, confidence,
                 asserted_at_us, valid_from_us, valid_to_us, projector_version,
-                initial_status, supersedes_claim_id
+                initial_status, supersedes_claim_id, source_event_id
          FROM memory_claims WHERE id = ?1",
         params![claim_id.0],
         claim_row,
@@ -578,6 +927,7 @@ fn claim_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryClaim> {
     let confidence = confidence as f32;
     Ok(MemoryClaim {
         id: MemoryClaimId(row.get(0)?),
+        source_event_id: EventId(u64::try_from(row.get::<_, i64>(13)?).unwrap_or(0)),
         subject: row.get(1)?,
         predicate: row.get(2)?,
         object: row.get(3)?,

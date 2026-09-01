@@ -206,6 +206,8 @@ pub enum RetrievalDegradation {
     EmbeddingsUnavailable,
     /// Lexical search was unavailable.
     LexicalUnavailable,
+    /// Neither lexical nor semantic retrieval was available.
+    LexicalAndEmbeddingsUnavailable,
     /// The independently calibrated evidence-sufficiency critic did not
     /// qualify, so ranking is available but answerability is not.
     EvidenceSufficiencyUnqualified,
@@ -620,11 +622,16 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         let q_emb = match self.embedder.embed_one(&query.text) {
             Ok(value) => value,
             Err(_) => {
-                let lex = lex_result.map_err(|e| RetrieveError::Backend(e.to_string()))?;
-                return Ok(RetrievalOutcome::Degraded {
-                    degradation: RetrievalDegradation::EmbeddingsUnavailable,
-                    fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
-                });
+                return match lex_result {
+                    Ok(lex) => Ok(RetrievalOutcome::Degraded {
+                        degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                        fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
+                    }),
+                    Err(_) => Ok(RetrievalOutcome::Degraded {
+                        degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                        fallback_matches: Vec::new(),
+                    }),
+                };
             }
         };
         // ADR-0011 §5 candidate-pool pre-filter. When the query carries
@@ -646,11 +653,16 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         ) {
             Ok(value) => value,
             Err(_) => {
-                let lex = lex_result.map_err(|e| RetrieveError::Backend(e.to_string()))?;
-                return Ok(RetrievalOutcome::Degraded {
-                    degradation: RetrievalDegradation::EmbeddingsUnavailable,
-                    fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
-                });
+                return match lex_result {
+                    Ok(lex) => Ok(RetrievalOutcome::Degraded {
+                        degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                        fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
+                    }),
+                    Err(_) => Ok(RetrievalOutcome::Degraded {
+                        degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                        fallback_matches: Vec::new(),
+                    }),
+                };
             }
         };
         let lex = match lex_result {
@@ -697,7 +709,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             .get(0)
             .zip(semantic_scores.get(1))
             .map_or(0.0, |(top, second)| (top - second).max(0.0));
-        let mut critic_rows: Vec<(String, f32)> = Vec::new();
+        let mut critic_rows: Vec<(EventId, String, f32)> = Vec::new();
         let mut matches: Vec<RetrievalMatch> = Vec::with_capacity(candidate_ids.len());
         for id in candidate_ids {
             let event_opt = self
@@ -761,7 +773,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 lexical_semantic_agreement: lex_rank == Some(1) && sem_rank == Some(1),
             };
             if let Some(raw_semantic_cosine) = sem_raw {
-                critic_rows.push((event.text.clone(), raw_semantic_cosine));
+                critic_rows.push((id, event.text.clone(), raw_semantic_cosine));
             }
             matches.push(RetrievalMatch {
                 hit: RetrievalHit {
@@ -782,14 +794,15 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         }
         let critic_candidates: Vec<EvidenceCandidate<'_>> = critic_rows
             .iter()
-            .map(|(text, raw_semantic_cosine)| EvidenceCandidate {
+            .map(|(event_id, text, raw_semantic_cosine)| EvidenceCandidate {
+                stable_id: event_id.0,
                 text,
                 raw_semantic_cosine: *raw_semantic_cosine,
             })
             .collect();
+        let critic_features = evidence_features_for_candidates(&query.text, &critic_candidates);
         let evidence_is_sufficient =
-            evidence_features_for_candidates(&query.text, &critic_candidates)
-                .is_some_and(|features| self.evidence_policy.is_sufficient(features));
+            critic_features.is_some_and(|features| self.evidence_policy.is_sufficient(features));
         matches.sort_by(|a, b| {
             b.hit
                 .score_combined
@@ -967,10 +980,26 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             Ok(value) => value,
             Err(_) => return self.plain_retrieve_outcome(query, query.time_filter),
         };
-        let sem_top = self
-            .store
-            .vec_search(&q_emb, 1)
-            .map_err(|e| RetrieveError::Backend(e.to_string()))?;
+        let sem_top = match self.store.vec_search(&q_emb, 1) {
+            Ok(matches) => matches,
+            Err(_) => {
+                return match self.store.fts5_search(&query.text, self.k_lex) {
+                    Ok(lexical) => Ok(RetrievalOutcome::Degraded {
+                        degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                        fallback_matches: self.fallback_matches(
+                            query,
+                            query.time_filter,
+                            lexical,
+                            false,
+                        )?,
+                    }),
+                    Err(_) => Ok(RetrievalOutcome::Degraded {
+                        degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                        fallback_matches: Vec::new(),
+                    }),
+                }
+            }
+        };
         let Some((anchor_id, _)) = sem_top.into_iter().next() else {
             return self.plain_retrieve_outcome(query, query.time_filter);
         };

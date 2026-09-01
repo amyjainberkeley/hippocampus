@@ -1419,8 +1419,225 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
         .map_err(|e| StoreError::Backend(format!("apply migration 0005: {e}")))?;
     tx.execute_batch(sql_0006)
         .map_err(|e| StoreError::Backend(format!("apply migration 0006: {e}")))?;
+    validate_memory_schema(&tx)
+        .map_err(|error| StoreError::Backend(format!("validate migration 0006: {error}")))?;
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '6')",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("stamp migration 0006: {error}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
+    Ok(())
+}
+
+fn validate_memory_schema(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    for (table, expected) in [
+        (
+            "memory_deltas",
+            &[
+                "id",
+                "source_event_id",
+                "asserted_at_us",
+                "projector_version",
+            ][..],
+        ),
+        (
+            "memory_evidence",
+            &[
+                "id",
+                "event_id",
+                "source_kind",
+                "source_locator",
+                "source_scope",
+                "observed_at_us",
+                "content_hash",
+            ][..],
+        ),
+        (
+            "memory_claims",
+            &[
+                "id",
+                "source_event_id",
+                "subject",
+                "predicate",
+                "object",
+                "scope",
+                "attribution",
+                "confidence",
+                "asserted_at_us",
+                "valid_from_us",
+                "valid_to_us",
+                "projector_version",
+                "initial_status",
+                "supersedes_claim_id",
+            ][..],
+        ),
+        ("memory_claim_evidence", &["claim_id", "evidence_id"][..]),
+        (
+            "memory_claim_transitions",
+            &[
+                "id",
+                "claim_id",
+                "status",
+                "asserted_at_us",
+                "effective_at_us",
+                "reason",
+                "source_event_id",
+                "projector_version",
+            ][..],
+        ),
+        (
+            "memory_event_retractions",
+            &[
+                "id",
+                "target_event_id",
+                "retraction_event_id",
+                "asserted_at_us",
+                "effective_at_us",
+                "reason",
+                "projector_version",
+            ][..],
+        ),
+    ] {
+        let mut stmt = tx
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .map_err(|error| format!("prepare {table} columns: {error}"))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|error| format!("query {table} columns: {error}"))?;
+        let columns = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read {table} columns: {error}"))?;
+        if columns != expected {
+            return Err(format!("{table} columns are incompatible: {columns:?}"));
+        }
+    }
+
+    for (table, required) in [
+        ("memory_deltas", &["source_event_id:events:id:RESTRICT"][..]),
+        ("memory_evidence", &["event_id:events:id:RESTRICT"][..]),
+        (
+            "memory_claims",
+            &[
+                "source_event_id:events:id:RESTRICT",
+                "supersedes_claim_id:memory_claims:id:RESTRICT",
+            ][..],
+        ),
+        (
+            "memory_claim_evidence",
+            &[
+                "claim_id:memory_claims:id:RESTRICT",
+                "evidence_id:memory_evidence:id:RESTRICT",
+            ][..],
+        ),
+        (
+            "memory_claim_transitions",
+            &[
+                "claim_id:memory_claims:id:RESTRICT",
+                "source_event_id:events:id:RESTRICT",
+            ][..],
+        ),
+        (
+            "memory_event_retractions",
+            &[
+                "target_event_id:events:id:RESTRICT",
+                "retraction_event_id:events:id:RESTRICT",
+            ][..],
+        ),
+    ] {
+        let mut stmt = tx
+            .prepare(&format!("PRAGMA foreign_key_list({table})"))
+            .map_err(|error| format!("prepare {table} foreign keys: {error}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(format!(
+                    "{}:{}:{}:{}",
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })
+            .map_err(|error| format!("query {table} foreign keys: {error}"))?;
+        let actual = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read {table} foreign keys: {error}"))?;
+        for expected in required {
+            if !actual.iter().any(|value| value == expected) {
+                return Err(format!("{table} is missing foreign key {expected}"));
+            }
+        }
+    }
+
+    for (table, fragments) in [
+        (
+            "memory_claims",
+            &[
+                "check (confidence >= 0.0 and confidence <= 1.0)",
+                "check (initial_status in ('proposed', 'active'))",
+            ][..],
+        ),
+        (
+            "memory_claim_transitions",
+            &["check (status in ('superseded', 'retracted', 'contradicted'))"][..],
+        ),
+    ] {
+        let sql: String = tx
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("read {table} DDL: {error}"))?;
+        let normalized = sql
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        for fragment in fragments {
+            if !normalized.contains(fragment) {
+                return Err(format!("{table} is missing constraint {fragment}"));
+            }
+        }
+    }
+
+    for (index, expected) in [
+        ("memory_evidence_event", &["event_id", "id"][..]),
+        (
+            "memory_claims_fact",
+            &["subject", "predicate", "scope", "asserted_at_us", "id"][..],
+        ),
+        (
+            "memory_claims_validity",
+            &["valid_from_us", "valid_to_us", "asserted_at_us", "id"][..],
+        ),
+        (
+            "memory_claim_evidence_evidence",
+            &["evidence_id", "claim_id"][..],
+        ),
+        (
+            "memory_claim_transitions_latest",
+            &["claim_id", "asserted_at_us", "effective_at_us", "id"][..],
+        ),
+        (
+            "memory_event_retractions_target",
+            &["target_event_id", "asserted_at_us", "effective_at_us", "id"][..],
+        ),
+    ] {
+        let mut stmt = tx
+            .prepare(&format!("PRAGMA index_info({index})"))
+            .map_err(|error| format!("prepare {index}: {error}"))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(2))
+            .map_err(|error| format!("query {index}: {error}"))?;
+        let columns = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read {index}: {error}"))?;
+        if columns != expected {
+            return Err(format!("{index} columns are incompatible: {columns:?}"));
+        }
+    }
     Ok(())
 }
 
