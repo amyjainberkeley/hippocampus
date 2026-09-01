@@ -76,6 +76,7 @@ thiserror   = "1"
 # dependency-addition gate. CSO sign-off on P3.10b asserts this.
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
+getrandom   = "0.3.4"   # key generation for `init`; same crate mci-core uses
 # P3.8 — idle-batch embedder. macOS-only (Core ML / ANE backend for
 # arctic-embed-s). On non-macOS this crate compiles to an empty lib,
 # so the workspace stays green. No net-new third-party crate (objc2

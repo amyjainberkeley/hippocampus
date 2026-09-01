@@ -20,7 +20,9 @@
 //!
 //! # Key resolution
 //!
-//!   MCI_DB_KEY_HEX env var — 64-char hex SQLCipher key (REQUIRED).
+//!   MCI_DB_KEY_HEX env var — 64-char hex SQLCipher key. If unset, falls
+//!   back to ~/Library/Application Support/MCI/dev.key, which
+//!   `mci-agent init` writes.
 //!   --db-path PATH or MCI_DB_PATH env — brain file path.
 //!   Default: ~/Library/Application Support/MCI/mci.sqlite
 
@@ -31,6 +33,20 @@ use std::process::ExitCode;
 use mci_agent::brain_cli;
 use mci_brain::{BrainStore, EventId, EventRecord, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
+
+/// Read the key `mci-agent init` writes, if present and well-formed.
+///
+/// Same location and validation as the agent's copy. Length and charset are
+/// checked here so a truncated or edited file fails loudly at the key step
+/// rather than as a confusing "file is not a database" later.
+fn read_dev_key_hex() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let path = PathBuf::from(home).join("Library/Application Support/MCI/dev.key");
+    std::fs::read_to_string(&path)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()))
+}
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -542,10 +558,18 @@ fn main() -> ExitCode {
         ParseOutcome::Run(a) => a,
     };
 
-    let Ok(key_hex) = std::env::var("MCI_DB_KEY_HEX") else {
+    // Env var first, then the dev.key file `mci-agent init` writes. Without
+    // the file fallback, init finishes by telling you to run
+    // `mci-brain search`, and that command then fails on a fresh install
+    // because nothing exported the variable.
+    let Some(key_hex) = std::env::var("MCI_DB_KEY_HEX")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(read_dev_key_hex)
+    else {
         eprintln!(
-            "mci-brain: MCI_DB_KEY_HEX not set. \
-             See docs/claude-code-mcp-setup.md."
+            "mci-brain: no key. Set MCI_DB_KEY_HEX, or run `mci-agent init` \
+             to create one at ~/Library/Application Support/MCI/dev.key."
         );
         return ExitCode::from(10);
     };
