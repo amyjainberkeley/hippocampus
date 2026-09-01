@@ -204,7 +204,7 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
         XCTAssertEqual(bytes[3], 0x00)
         XCTAssertEqual(bytes.last, RedactionReason.ocrTimeSecret.rawValue,
                        "tombstone reason must be ocrTimeSecret (=6)")
-        await emitter.worker.stop()
+        await emitter.stopAndDrain()
     }
 
     /// Clean OCR text ⇒ OCREvent emitted carrying the OCR text bytes.
@@ -244,7 +244,7 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
         // Confirm "Hello\nworld" is present in the variable trailer.
         XCTAssertTrue(bytes.range(of: "Hello\nworld".data(using: .utf8)!) != nil,
                       "OCREvent payload must carry the joined OCR text")
-        await emitter.worker.stop()
+        await emitter.stopAndDrain()
     }
 
     /// Over-cap OCR text ⇒ fail-closed tombstone with reason=
@@ -278,7 +278,7 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
         XCTAssertEqual(bytes[2], 0x11, "must be a PrivacyTombstone, not OCREvent")
         XCTAssertEqual(bytes.last, RedactionReason.failsafeUnknown.rawValue,
                        "fail-closed reason on over-cap")
-        await emitter.worker.stop()
+        await emitter.stopAndDrain()
     }
 
     /// CSO escalation 2026-05-29 — Phase A interim mitigation (option
@@ -331,7 +331,7 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
         XCTAssertEqual(bytes[3], 0x00)
         XCTAssertEqual(bytes.last, RedactionReason.failsafeUnknown.rawValue,
                        "kill-switch tombstone reason must be failsafeUnknown")
-        await emitter.worker.stop()
+        await emitter.stopAndDrain()
     }
 }
 

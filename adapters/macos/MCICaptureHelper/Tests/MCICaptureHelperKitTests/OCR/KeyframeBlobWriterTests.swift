@@ -34,7 +34,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
         )
         let first = candidate(ordinal: 1)
 
-        let retainedValue = await coordinator.retain(
+        let retainedValue = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         )
@@ -47,7 +47,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
         )
         await coordinator.confirm(retained)
 
-        let duplicate = await coordinator.retain(
+        let duplicate = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: candidate(ordinal: 2)
         )
@@ -71,13 +71,13 @@ final class KeyframeBlobWriterTests: XCTestCase {
         )
         let first = candidate(ordinal: 1)
 
-        let failed = await coordinator.retain(
+        let failed = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         )
         XCTAssertNil(failed)
         store.allowWrites()
-        let retried = await coordinator.retain(
+        let retried = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         )
@@ -93,20 +93,20 @@ final class KeyframeBlobWriterTests: XCTestCase {
             keyMaterial: key
         )
         let first = candidate(ordinal: 1)
-        let retainedValue = await coordinator.retain(
+        let retainedValue = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         )
         let retained = try XCTUnwrap(retainedValue)
 
-        await coordinator.discard(retained)
+        try await coordinator.discard(retained)
 
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath: root.appendingPathComponent("\(retained.lowercaseHexDigest).bin").path
             )
         )
-        let retried = await coordinator.retain(
+        let retried = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         )
@@ -123,18 +123,18 @@ final class KeyframeBlobWriterTests: XCTestCase {
         let pixels = makePixelBuffer()
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return await coordinator.retain(
+            return try await coordinator.retain(
                 input: KeyframePixelInput(pixelBuffer: pixels),
                 candidate: candidate(ordinal: 1)
             )
         }
 
-        let retention = await task.value
+        let retention = try await task.value
         XCTAssertNil(retention)
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
     }
 
-    func testCancellationAfterStorePublicationRollsBlobBack() async {
+    func testCancellationAfterStorePublicationRollsBlobBack() async throws {
         let store = CancellingStore()
         let pixels = makePixelBuffer()
         let coordinator = KeyframeRetentionCoordinator(
@@ -149,7 +149,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
             }
         )
 
-        let retention = await coordinator.retain(
+        let retention = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: candidate(ordinal: 1)
         )
@@ -160,7 +160,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
         XCTAssertNil(previous)
     }
 
-    func testPendingCommitStateIsBounded() async {
+    func testPendingCommitStateIsBounded() async throws {
         let store = ToggleStore()
         store.allowWrites()
         let pixels = makePixelBuffer()
@@ -177,7 +177,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
         )
 
         for ordinal in 1...KeyframeRetentionCoordinator.maximumPendingCommits {
-            let retained = await coordinator.retain(
+            let retained = try await coordinator.retain(
                 input: KeyframePixelInput(pixelBuffer: pixels),
                 candidate: KeyframeEvidenceCandidate(
                     captureOrdinal: UInt64(ordinal),
@@ -188,16 +188,55 @@ final class KeyframeBlobWriterTests: XCTestCase {
             )
             XCTAssertNotNil(retained)
         }
-        let overflow = await coordinator.retain(
+        let overflow = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: KeyframeEvidenceCandidate(
-                captureOrdinal: 5,
-                focusedWindowId: 5,
+                captureOrdinal: UInt64(KeyframeRetentionCoordinator.maximumPendingCommits + 1),
+                focusedWindowId: UInt32(KeyframeRetentionCoordinator.maximumPendingCommits + 1),
                 dhash: DHash(bits: 0),
-                monotonicNanoseconds: 5
+                monotonicNanoseconds: UInt64(KeyframeRetentionCoordinator.maximumPendingCommits + 1)
             )
         )
         XCTAssertNil(overflow)
+    }
+
+    func testCleanupFailureRetriesAndKeepsPendingCommitRetryable() async throws {
+        let store = RemovalRetryStore(failuresBeforeSuccess: 3)
+        let pixels = makePixelBuffer()
+        let coordinator = KeyframeRetentionCoordinator(
+            policy: .default,
+            keyMaterial: key,
+            store: store,
+            sealer: { _, key in
+                try? KeyframeBlobCodec.seal(
+                    plaintext: Data("jpeg".utf8),
+                    keyMaterial: key
+                )
+            }
+        )
+        let retainedValue = try await coordinator.retain(
+            input: KeyframePixelInput(pixelBuffer: pixels),
+            candidate: candidate(ordinal: 1)
+        )
+        let retained = try XCTUnwrap(retainedValue)
+
+        do {
+            try await coordinator.discard(retained)
+            XCTFail("discard must surface cleanup failure after bounded retries")
+        } catch {
+            XCTAssertEqual(store.removeCount(), KeyframeRetentionCoordinator.cleanupAttemptLimit)
+        }
+
+        try await coordinator.discard(retained)
+        XCTAssertEqual(
+            store.removeCount(),
+            KeyframeRetentionCoordinator.cleanupAttemptLimit + 1
+        )
+        let retried = try await coordinator.retain(
+            input: KeyframePixelInput(pixelBuffer: pixels),
+            candidate: candidate(ordinal: 1)
+        )
+        XCTAssertNotNil(retried)
     }
 
     private func candidate(ordinal: UInt64) -> KeyframeEvidenceCandidate {
@@ -264,6 +303,32 @@ private final class CancellingStore: KeyframeBlobPersisting, @unchecked Sendable
 
     func remove(_: KeyframeSealedBlob) throws {
         lock.withLock { removals += 1 }
+    }
+
+    func removeCount() -> Int {
+        lock.withLock { removals }
+    }
+}
+
+private final class RemovalRetryStore: KeyframeBlobPersisting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var failuresRemaining: Int
+    private var removals = 0
+
+    init(failuresBeforeSuccess: Int) {
+        self.failuresRemaining = failuresBeforeSuccess
+    }
+
+    func persist(_: KeyframeSealedBlob) throws {}
+
+    func remove(_: KeyframeSealedBlob) throws {
+        try lock.withLock {
+            removals += 1
+            if failuresRemaining > 0 {
+                failuresRemaining -= 1
+                throw KeyframeBlobStoreError.cleanupFailed
+            }
+        }
     }
 
     func removeCount() -> Int {

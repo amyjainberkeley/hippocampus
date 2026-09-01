@@ -48,6 +48,55 @@ final class OrderedCaptureDispatcherTests: XCTestCase {
         XCTAssertEqual(started, [1, 3, 4])
         XCTAssertEqual(finished, [1, 3, 4])
         XCTAssertEqual(dropped, [2])
+        await dispatcher.finishAndDrain()
+    }
+
+    func testFinishAndDrainRunsEveryBufferedOperation() async {
+        let dispatcher = OrderedCaptureDispatcher(capacity: 2)
+        let recorder = DispatcherRecorder()
+        for ordinal in 1...2 {
+            dispatcher.submit(
+                captureOrdinal: UInt64(ordinal),
+                operation: { recorder.finished(UInt64(ordinal)) },
+                onDrop: { recorder.dropped(UInt64(ordinal)) }
+            )
+        }
+
+        await dispatcher.finishAndDrain()
+
+        XCTAssertEqual(recorder.finishedOrdinals(), [1, 2])
+        XCTAssertTrue(recorder.droppedOrdinals().isEmpty)
+    }
+
+    func testCancelAndDrainWaitsForOwnedWorkAndRejectsLateSubmission() async {
+        let dispatcher = OrderedCaptureDispatcher(capacity: 1)
+        let recorder = DispatcherRecorder()
+        dispatcher.submit(
+            captureOrdinal: 1,
+            operation: {
+                recorder.started(1)
+                try? await Task.sleep(for: .seconds(5))
+                recorder.finished(1)
+            },
+            onDrop: {
+                recorder.dropped(1)
+            }
+        )
+        for _ in 0..<200 {
+            if recorder.startedOrdinals() == [1] { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        await dispatcher.cancelAndDrain()
+        XCTAssertEqual(recorder.finishedOrdinals(), [1])
+        let late = dispatcher.submit(
+            captureOrdinal: 2,
+            operation: { recorder.finished(2) },
+            onDrop: { recorder.dropped(2) }
+        )
+        XCTAssertEqual(late, .terminated)
+        XCTAssertEqual(recorder.finishedOrdinals(), [1])
+        XCTAssertEqual(recorder.droppedOrdinals(), [2])
     }
 }
 

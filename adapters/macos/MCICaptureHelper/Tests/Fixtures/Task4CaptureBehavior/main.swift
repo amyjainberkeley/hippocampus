@@ -57,7 +57,7 @@ struct Task4CaptureBehavior {
             policy: policy
         )
 
-        guard let retained = await coordinator.retain(
+        guard let retained = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         ) else {
@@ -68,7 +68,7 @@ struct Task4CaptureBehavior {
         let retainedBytes = try Data(contentsOf: retainedURL)
         precondition(retainedBytes.count > 44)
         await coordinator.confirm(retained)
-        let unchangedRetention = await coordinator.retain(
+        let unchangedRetention = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: same
         )
@@ -81,13 +81,13 @@ struct Task4CaptureBehavior {
             keyMaterial: Data((0..<32).map(UInt8.init)),
             policy: policy
         )
-        guard let rollbackRetention = await rollbackCoordinator.retain(
+        guard let rollbackRetention = try await rollbackCoordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         ) else {
             preconditionFailure("rollback fixture did not retain")
         }
-        await rollbackCoordinator.discard(rollbackRetention)
+        try await rollbackCoordinator.discard(rollbackRetention)
         precondition(
             !FileManager.default.fileExists(
                 atPath: rollbackRoot
@@ -95,7 +95,7 @@ struct Task4CaptureBehavior {
                     .path
             )
         )
-        let retainedAfterRollback = await rollbackCoordinator.retain(
+        let retainedAfterRollback = try await rollbackCoordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         )
@@ -108,14 +108,14 @@ struct Task4CaptureBehavior {
             keyMaterial: Data((0..<32).map(UInt8.init)),
             policy: policy
         )
-        let failedRetention = await failingCoordinator.retain(
+        let failedRetention = try await failingCoordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         )
         precondition(failedRetention == nil, "write failure must not return a digest")
         try FileManager.default.removeItem(at: failedRoot)
         try FileManager.default.createDirectory(at: failedRoot, withIntermediateDirectories: true)
-        let retainedAfterFailure = await failingCoordinator.retain(
+        let retainedAfterFailure = try await failingCoordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
         )
@@ -130,12 +130,12 @@ struct Task4CaptureBehavior {
         )
         let cancelledTask = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return await cancelledCoordinator.retain(
+            return try await cancelledCoordinator.retain(
                 input: KeyframePixelInput(pixelBuffer: pixels),
                 candidate: first
             )
         }
-        let cancelledRetention = await cancelledTask.value
+        let cancelledRetention = try await cancelledTask.value
         precondition(cancelledRetention == nil)
         let cancelledFiles = try FileManager.default.contentsOfDirectory(atPath: cancelledRoot.path)
         precondition(cancelledFiles.isEmpty)
@@ -243,7 +243,7 @@ struct Task4CaptureBehavior {
             if await sink.count() >= 1 { break }
             try? await Task.sleep(for: .milliseconds(5))
         }
-        await worker.stop()
+        await emitter.stopAndDrain()
         let frames = await sink.frames()
         let files = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         return (frames, files.sorted())

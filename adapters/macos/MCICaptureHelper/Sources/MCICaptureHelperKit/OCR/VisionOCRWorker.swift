@@ -101,12 +101,21 @@ public actor VisionOCRWorker {
         guard !stopped else { return }
         stopped = true
         consumer?.cancel()
-        consumer = nil
         queue.removeAll()
         if let a = awaiter {
             awaiter = nil
             a.resume()
         }
+    }
+
+    /// Stop accepting OCR jobs and wait for the owned consumer to exit.
+    /// Cancellation-resistant engines are still drained before this returns,
+    /// so their completion cannot outlive the owning capture session.
+    public func stopAndDrain() async {
+        stop()
+        let task = consumer
+        await task?.value
+        consumer = nil
     }
 
     /// Submit one OCR job. If the queue is at capacity, the oldest

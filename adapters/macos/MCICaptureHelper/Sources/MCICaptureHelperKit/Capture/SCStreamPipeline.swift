@@ -629,6 +629,19 @@ public struct SCStreamPipeline: Sendable {
     /// call. Not on the wire; not load-bearing for production.
     public var cascadeFloor: CascadeFloorState { floorState }
 
+    /// Freeze the pixel-time privacy gate before a raw surface is retained or
+    /// queued. The returned value is the only gate consulted by the live
+    /// asynchronous path for that frame.
+    public func snapshotPixelPrivacy(
+        context: WorkflowContext,
+        hasBlackedRegion: Bool? = nil
+    ) -> PixelPrivacySnapshot {
+        cascade.snapshotPixelPrivacy(
+            context: context,
+            hasBlackedRegion: hasBlackedRegion
+        )
+    }
+
     /// What `process(...)` did with one candidate — returned so the
     /// OS-free test can assert the ordering invariant.
     public enum Outcome: Sendable, Equatable {
@@ -668,7 +681,8 @@ public struct SCStreamPipeline: Sendable {
         context: WorkflowContext,
         nowUs: UInt64,
         lease: SurfaceLease,
-        encoderInput: EncoderInput? = nil
+        encoderInput: EncoderInput? = nil,
+        privacySnapshot: PixelPrivacySnapshot? = nil
     ) async throws -> Outcome {
         // Exactly-once release on EVERY path, including a throwing
         // `sink.write` / `encoder.encodeAllowedFrame`. Must be the
@@ -717,7 +731,7 @@ public struct SCStreamPipeline: Sendable {
         }
 
         // Stage 2: ADR-0013 cascade — UNCONDITIONALLY before encode.
-        let decision = cascade.decide(context: context)
+        let decision = privacySnapshot?.decision ?? cascade.decide(context: context)
         // Stamp the wall-clock on EVERY cascade evaluation, regardless
         // of `.allow` / `.suppress` and regardless of filter-passed /
         // floor-forced. Failing to stamp on `.suppress` would let the

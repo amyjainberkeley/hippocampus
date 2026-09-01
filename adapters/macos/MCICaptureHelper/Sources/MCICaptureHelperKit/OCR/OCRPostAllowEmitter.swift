@@ -45,10 +45,9 @@ public protocol OCRPostAllowEmitter: Sendable {
     /// Called from `SCStreamCaptureSession` after `pipeline.process`
     /// returns `.encoded` (the pixel-time cascade returned `.allow`).
     ///
-    /// Fire-and-forget shape: the emitter returns as soon as the OCR
-    /// submission is queued. The OCR completion callback drives the
-    /// §6 re-cascade + wire emission on a Task spawned from the OCR
-    /// worker's consumer queue.
+    /// The emitter returns after OCR submission. Completion work is handed to
+    /// an emitter-owned bounded serial coordinator; no free task may outlive
+    /// the capture session.
     ///
     /// Drop-oldest queue overflow in the OCR worker means the
     /// completion callback may never fire for this submission. That
@@ -70,6 +69,16 @@ public protocol OCRPostAllowEmitter: Sendable {
         input: OCREngineInput,
         evidenceCandidate: KeyframeEvidenceCandidate?
     ) async
+
+    func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async
+
+    func stopAndDrain() async
 }
 
 public extension OCRPostAllowEmitter {
@@ -81,6 +90,22 @@ public extension OCRPostAllowEmitter {
     ) async {
         await processAfterAllow(tsUs: tsUs, context: context, input: input)
     }
+
+    func processAfterAllow(
+        captureOrdinal _: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async {
+        await processAfterAllow(
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: evidenceCandidate
+        )
+    }
+
 }
 
 /// Production `OCRPostAllowEmitter` that wires `VisionOCRWorker` +
@@ -207,6 +232,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     private let sequence: FrameSequence
     private let counters: HelperHealthCounters
     private let keyframeRetainer: (any KeyframeRetaining)?
+    private let completionCoordinator: OrderedCaptureDispatcher
 
     public init(
         worker: VisionOCRWorker,
@@ -222,6 +248,9 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         self.sequence = sequence
         self.counters = counters
         self.keyframeRetainer = keyframeRetainer
+        self.completionCoordinator = OrderedCaptureDispatcher(
+            capacity: VisionOCRWorker.defaultCapacity
+        )
     }
 
     public func processAfterAllow(
@@ -230,6 +259,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         input: OCREngineInput
     ) async {
         await processAfterAllow(
+            captureOrdinal: tsUs,
             tsUs: tsUs,
             context: context,
             input: input,
@@ -238,6 +268,22 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     }
 
     public func processAfterAllow(
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async {
+        await processAfterAllow(
+            captureOrdinal: evidenceCandidate?.captureOrdinal ?? tsUs,
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: evidenceCandidate
+        )
+    }
+
+    public func processAfterAllow(
+        captureOrdinal: UInt64,
         tsUs: UInt64,
         context: WorkflowContext,
         input: OCREngineInput,
@@ -287,23 +333,37 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         // worker's Job struct + this captured reference).
         let inputSnapshot = input
         await worker.submit(input: input) { result in
-            // Completion is `@Sendable`; spawn a Task to drive the
-            // §6 re-cascade + wire emission in an async context.
-            Task {
-                await CascadeTwiceOCREmitter.handleOCRResult(
-                    tsUs: tsUs,
-                    context: context,
-                    result: result,
-                    cascade: cascadeSnapshot,
-                    sink: sinkSnapshot,
-                    sequence: sequenceSnapshot,
-                    counters: countersSnapshot,
-                    pixelBuffer: inputSnapshot.pixelBuffer,
-                    keyframeRetainer: keyframeRetainerSnapshot,
-                    evidenceCandidate: evidenceCandidate
-                )
-            }
+            // VisionOCRWorker invokes completions serially in submission
+            // order. The owned coordinator preserves that order while
+            // bounding post-OCR persistence/publication work.
+            completionCoordinator.submit(
+                captureOrdinal: captureOrdinal,
+                operation: {
+                    await CascadeTwiceOCREmitter.handleOCRResult(
+                        tsUs: tsUs,
+                        context: context,
+                        result: result,
+                        cascade: cascadeSnapshot,
+                        sink: sinkSnapshot,
+                        sequence: sequenceSnapshot,
+                        counters: countersSnapshot,
+                        pixelBuffer: inputSnapshot.pixelBuffer,
+                        keyframeRetainer: keyframeRetainerSnapshot,
+                        evidenceCandidate: evidenceCandidate
+                    )
+                },
+                onDrop: {}
+            )
         }
+    }
+
+    /// Close result ingress first, then cancel/drain OCR. A late completion
+    /// from a cancellation-resistant engine observes a terminated coordinator
+    /// and cannot publish. After both awaits return, neither OCR nor post-OCR
+    /// persistence remains live.
+    public func stopAndDrain() async {
+        await completionCoordinator.cancelAndDrain()
+        await worker.stopAndDrain()
     }
 
     /// Pure (modulo actor I/O) emit logic. `internal` (not `private`)
@@ -403,10 +463,18 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 try? await sink.write(zeroBytes)
                 return
             }
-            guard let retention = await keyframeRetainer.retain(
-                input: KeyframePixelInput(pixelBuffer: pixelBuffer),
-                candidate: evidenceCandidate
-            ) else {
+            let retention: KeyframeRetention
+            do {
+                guard let retained = try await keyframeRetainer.retain(
+                    input: KeyframePixelInput(pixelBuffer: pixelBuffer),
+                    candidate: evidenceCandidate
+                ) else {
+                    try? await sink.write(zeroBytes)
+                    return
+                }
+                retention = retained
+            } catch {
+                reportKeyframeCleanupFailure()
                 try? await sink.write(zeroBytes)
                 return
             }
@@ -414,7 +482,11 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                   !retention.digest.allSatisfy({ $0 == 0 }),
                   !Task.isCancelled
             else {
-                await keyframeRetainer.discard(retention)
+                do {
+                    try await keyframeRetainer.discard(retention)
+                } catch {
+                    reportKeyframeCleanupFailure()
+                }
                 try? await sink.write(zeroBytes)
                 return
             }
@@ -432,7 +504,11 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 seq: seq,
                 event: retainedEvent
             ) else {
-                await keyframeRetainer.discard(retention)
+                do {
+                    try await keyframeRetainer.discard(retention)
+                } catch {
+                    reportKeyframeCleanupFailure()
+                }
                 try? await sink.write(zeroBytes)
                 return
             }
@@ -441,10 +517,20 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 try await sink.write(retainedBytes)
                 await keyframeRetainer.confirm(retention)
             } catch {
-                await keyframeRetainer.discard(retention)
+                do {
+                    try await keyframeRetainer.discard(retention)
+                } catch {
+                    reportKeyframeCleanupFailure()
+                }
                 try? await sink.write(zeroBytes)
             }
         }
+    }
+
+    private static func reportKeyframeCleanupFailure() {
+        FileHandle.standardError.write(
+            Data("mci-capture-helper: keyframe cleanup failed after bounded retries\n".utf8)
+        )
     }
 
     private static func emitTombstone(
