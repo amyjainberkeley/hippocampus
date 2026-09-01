@@ -88,7 +88,8 @@ def draw_arrow():
             blend(x, y + dy, ACCENT_DIM, 0.48)
     head = 24
     for i in range(head):
-        w = int(10 * (1 - i / head))
+        # Tip at x2, widening toward the shaft on the left: app -> Applications.
+        w = int(10 * i / (head - 1))
         for j in range(-w, w + 1):
             blend(x2 - i, y + j, ACCENT_DIM, 0.48)
 
