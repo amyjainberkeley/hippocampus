@@ -391,6 +391,203 @@ pub fn run_instance(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Abstention probe
+// ---------------------------------------------------------------------------
+
+/// One measurement: the best raw semantic cosine a brain could offer for
+/// a question, and whether that brain actually contained the answer.
+#[derive(serde::Serialize, Clone, Copy)]
+pub struct AbstentionSample {
+    /// Best cosine over the brain's vectors, before fusion normalizes it.
+    pub top_cosine: f32,
+    /// True when the question was asked of its own haystack.
+    pub answerable: bool,
+}
+
+/// Measure whether a relevance floor is possible, and where it should sit.
+///
+/// # Why this is a separate probe
+///
+/// LongMemEval contains no unanswerable questions: every one of the 500 is
+/// answerable from its own haystack. So the dataset can score retrieval
+/// but cannot, on its own, say when a system should decline to answer.
+///
+/// Cross-pairing supplies the missing half. Instance `i`'s brain is asked
+/// its own question (answerable) and then the *next* instance's question
+/// (not answerable, since that question is about a different person's
+/// history). Both run against an identical corpus, so the only thing that
+/// varies is whether the answer is present.
+///
+/// The measurement is the raw cosine rather than the fused score,
+/// deliberately. The fused score is min-max normalized per query, which
+/// rescales each query's own candidate pool so its best candidate lands
+/// near 1 whether or not anything relevant exists. That makes it a
+/// within-query rank and useless as a cross-query confidence. See
+/// `examples/score_probe.rs`.
+///
+/// Cross-pairing is not perfectly clean: another instance's question could
+/// coincidentally be answerable here. The questions are specific and
+/// personal, so this should be rare, and it biases the result toward
+/// *understating* the separation rather than inventing one.
+///
+/// # Errors
+/// Any store or embed failure, with the instance id attached.
+pub fn run_abstention_probe(
+    inst: &Instance,
+    foreign_question: &str,
+    dir: &Path,
+) -> Result<Vec<AbstentionSample>, String> {
+    let db_path = dir.join(format!("abst-{}.sqlite", inst.question_id));
+    let key = DbKey::from_bytes([0x5a; 32]);
+    let store = SqlCipherBrainStore::new(&db_path, &key)
+        .map_err(|e| format!("{}: open store: {e}", inst.question_id))?;
+
+    for (si, session) in inst.haystack_sessions.iter().enumerate() {
+        let sid = inst
+            .haystack_session_ids
+            .get(si)
+            .ok_or_else(|| format!("{}: session {si} has no id", inst.question_id))?;
+        let base_ts = parse_dataset_ts(
+            inst.haystack_dates
+                .get(si)
+                .ok_or_else(|| format!("{}: session {si} has no date", inst.question_id))?,
+        )
+        .map_err(|e| format!("{}: {e}", inst.question_id))?;
+        for (ti, turn) in session.iter().enumerate() {
+            let text = turn.content.trim();
+            if text.is_empty() {
+                continue;
+            }
+            let ts_us = base_ts + (ti as u64) * 1_000_000;
+            let header = format!(
+                "[app=longmemeval | title={} | url={sid} | ts={ts_us}]\n",
+                turn.role
+            );
+            let event = Event {
+                id: EventId(0),
+                ts_us,
+                app_bundle_id: Some("longmemeval".to_string()),
+                window_title: Some(turn.role.clone()),
+                url: Some(sid.clone()),
+                text: format!("{header}{text}"),
+                embedding: None,
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: None,
+                tab_id: None,
+            };
+            store
+                .put_event(&event)
+                .map_err(|e| format!("{}: put_event: {e}", inst.question_id))?;
+        }
+    }
+
+    let (doc_emb, is_real) = crate::embedder_load::load_embedder_backend();
+    if !is_real {
+        return Err(format!(
+            "{}: abstention probe needs a real embedder",
+            inst.question_id
+        ));
+    }
+    backfill_until_drained(&store, doc_emb.as_ref(), 64, |_| {})
+        .map_err(|e| format!("{}: embed: {e}", inst.question_id))?;
+
+    let (q_emb, _) = crate::embedder_load::load_query_embedder_backend();
+    let mut out = Vec::with_capacity(2);
+    for (text, answerable) in [(inst.question.as_str(), true), (foreign_question, false)] {
+        let v = q_emb
+            .embed_one(text)
+            .map_err(|e| format!("{}: embed query: {e}", inst.question_id))?;
+        let hits = store
+            .vec_search(&v, 1)
+            .map_err(|e| format!("{}: vec_search: {e}", inst.question_id))?;
+        out.push(AbstentionSample {
+            top_cosine: hits.first().map_or(0.0, |h| h.1),
+            answerable,
+        });
+    }
+
+    drop(store);
+    let _ = std::fs::remove_file(&db_path);
+    Ok(out)
+}
+
+/// Pick the cosine threshold that best separates answerable from not, and
+/// report what it costs.
+///
+/// Sweeps every midpoint between observed values rather than a fixed grid,
+/// so the reported threshold is one the data actually supports.
+#[must_use]
+pub fn best_threshold(samples: &[AbstentionSample]) -> Option<ThresholdReport> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut vals: Vec<f32> = samples.iter().map(|s| s.top_cosine).collect();
+    vals.sort_by(|a, b| a.partial_cmp(b).expect("no NaN cosines"));
+    vals.dedup();
+
+    let pos = samples.iter().filter(|s| s.answerable).count();
+    let neg = samples.len() - pos;
+
+    let mut best: Option<ThresholdReport> = None;
+    for w in vals.windows(2) {
+        let t = f32::midpoint(w[0], w[1]);
+        // Answer when cosine >= t.
+        let kept_answerable = samples
+            .iter()
+            .filter(|s| s.answerable && s.top_cosine >= t)
+            .count();
+        let kept_junk = samples
+            .iter()
+            .filter(|s| !s.answerable && s.top_cosine >= t)
+            .count();
+        // Youden's J: how much better than chance the split is.
+        let tpr = if pos == 0 {
+            0.0
+        } else {
+            kept_answerable as f64 / pos as f64
+        };
+        let fpr = if neg == 0 {
+            0.0
+        } else {
+            kept_junk as f64 / neg as f64
+        };
+        let j = tpr - fpr;
+        if best.as_ref().is_none_or(|b| j > b.youden_j) {
+            best = Some(ThresholdReport {
+                threshold: t,
+                answerable_kept: tpr,
+                unanswerable_kept: fpr,
+                youden_j: j,
+                positives: pos,
+                negatives: neg,
+            });
+        }
+    }
+    best
+}
+
+/// What a candidate relevance floor would do to real traffic.
+#[derive(serde::Serialize, Clone, Copy)]
+pub struct ThresholdReport {
+    /// Answer when the top raw cosine is at least this.
+    pub threshold: f32,
+    /// Fraction of answerable questions still answered. Higher is better.
+    pub answerable_kept: f64,
+    /// Fraction of unanswerable questions still answered. Lower is better;
+    /// these are the confident-nonsense cases the floor exists to stop.
+    pub unanswerable_kept: f64,
+    /// `answerable_kept - unanswerable_kept`. 0 is chance, 1 is perfect.
+    pub youden_j: f64,
+    /// Sample sizes, so the numbers can be read with their uncertainty.
+    pub positives: usize,
+    /// Count of unanswerable samples.
+    pub negatives: usize,
+}
+
 /// Aggregate a set of per-instance results into one summary.
 #[must_use]
 pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary {
@@ -434,6 +631,67 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn best_threshold_finds_a_clean_split() {
+        let mk = |c: f32, a: bool| AbstentionSample {
+            top_cosine: c,
+            answerable: a,
+        };
+        // Perfectly separable: answerable all above 0.62, junk all below.
+        let samples = vec![
+            mk(0.70, true),
+            mk(0.68, true),
+            mk(0.65, true),
+            mk(0.63, true),
+            mk(0.60, false),
+            mk(0.55, false),
+            mk(0.52, false),
+            mk(0.50, false),
+        ];
+        let t = best_threshold(&samples).expect("a threshold exists");
+        assert!(
+            (0.60..0.63).contains(&t.threshold),
+            "the split should land in the gap, got {}",
+            t.threshold
+        );
+        assert!(
+            (t.answerable_kept - 1.0).abs() < 1e-9,
+            "keeps every real answer"
+        );
+        assert!(t.unanswerable_kept.abs() < 1e-9, "drops every junk answer");
+        assert!((t.youden_j - 1.0).abs() < 1e-9, "perfect separation is J=1");
+    }
+
+    #[test]
+    fn best_threshold_reports_weak_separation_honestly() {
+        let mk = |c: f32, a: bool| AbstentionSample {
+            top_cosine: c,
+            answerable: a,
+        };
+        // Fully interleaved: no threshold can do better than chance-ish.
+        let samples = vec![
+            mk(0.60, true),
+            mk(0.59, false),
+            mk(0.58, true),
+            mk(0.57, false),
+            mk(0.56, true),
+            mk(0.55, false),
+            mk(0.54, true),
+            mk(0.53, false),
+        ];
+        let t = best_threshold(&samples).expect("a threshold exists");
+        assert!(
+            t.youden_j < 0.5,
+            "interleaved data must not report a usable split, got J={}",
+            t.youden_j
+        );
+    }
+
+    #[test]
+    fn best_threshold_handles_no_samples() {
+        assert!(best_threshold(&[]).is_none());
+    }
 
     #[test]
     fn parses_a_dataset_timestamp() {

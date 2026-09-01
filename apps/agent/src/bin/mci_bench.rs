@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use mci_agent::bench_longmemeval::{
-    run_instance, summarize, Arm, Instance, InstanceResult, Report,
+    best_threshold, run_abstention_probe, run_instance, summarize, AbstentionSample, Arm, Instance,
+    InstanceResult, Report,
 };
 
 fn usage() {
@@ -25,6 +26,10 @@ fn usage() {
          \x20 --k LIST         cutoffs, comma-separated (default: 1,3,5,10)\n\
          \x20 --out PATH       write the full JSON report here\n\
          \x20 --workdir PATH   scratch for per-instance databases\n\
+         \x20 --abstention N   instead of scoring retrieval, measure whether a\n\
+         \x20                  relevance floor is possible: ask each of N brains\n\
+         \x20                  its own question and a foreign one, and report the\n\
+         \x20                  cosine threshold that best separates them\n\
          \n\
          Measures session-level retrieval, NOT question-answering accuracy.\n\
          Those are different numbers and must not be compared.",
@@ -40,6 +45,7 @@ fn main() -> ExitCode {
     let mut ks: Vec<usize> = vec![1, 3, 5, 10];
     let mut out: Option<PathBuf> = None;
     let mut workdir = std::env::temp_dir().join("mci-bench");
+    let mut abstention: Option<usize> = None;
 
     let mut i = 1;
     while i < argv.len() {
@@ -73,6 +79,10 @@ fn main() -> ExitCode {
             }
             "--out" if i + 1 < argv.len() => {
                 out = Some(PathBuf::from(&argv[i + 1]));
+                i += 1;
+            }
+            "--abstention" if i + 1 < argv.len() => {
+                abstention = argv[i + 1].parse().ok();
                 i += 1;
             }
             "--workdir" if i + 1 < argv.len() => {
@@ -130,6 +140,91 @@ fn main() -> ExitCode {
         instances.truncate(n);
     }
     eprintln!("{} instances", instances.len());
+
+    if let Some(n) = abstention {
+        let n = n.min(instances.len());
+        if n < 2 {
+            eprintln!("mci-bench: --abstention needs at least 2 instances to cross-pair");
+            return ExitCode::from(2);
+        }
+        let started = std::time::Instant::now();
+        let mut samples: Vec<AbstentionSample> = Vec::new();
+        for idx in 0..n {
+            // Pair with the next instance's question, wrapping. Its haystack
+            // is a different person's history, so it is unanswerable here.
+            let foreign = instances[(idx + 1) % n].question.clone();
+            match run_abstention_probe(&instances[idx], &foreign, &workdir) {
+                Ok(mut s) => samples.append(&mut s),
+                Err(e) => eprintln!("mci-bench: [abstention] {e}"),
+            }
+            if (idx + 1) % 5 == 0 || idx + 1 == n {
+                eprintln!(
+                    "mci-bench: [abstention] {}/{} done, {:.0}s elapsed",
+                    idx + 1,
+                    n,
+                    started.elapsed().as_secs_f64()
+                );
+            }
+        }
+
+        let ans: Vec<f32> = samples
+            .iter()
+            .filter(|s| s.answerable)
+            .map(|s| s.top_cosine)
+            .collect();
+        let una: Vec<f32> = samples
+            .iter()
+            .filter(|s| !s.answerable)
+            .map(|s| s.top_cosine)
+            .collect();
+        let stat = |v: &[f32]| -> (f32, f32, f32) {
+            if v.is_empty() {
+                return (0.0, 0.0, 0.0);
+            }
+            let mut s = v.to_vec();
+            s.sort_by(|a, b| a.partial_cmp(b).expect("no NaN"));
+            (s[0], s[s.len() / 2], s[s.len() - 1])
+        };
+        let (amin, amed, amax) = stat(&ans);
+        let (umin, umed, umax) = stat(&una);
+        println!(
+            "\n=== abstention probe ===  ({} pairs, {:.0}s)",
+            ans.len(),
+            started.elapsed().as_secs_f64()
+        );
+        println!("  top raw cosine        min     median     max");
+        println!(
+            "    answerable      {amin:>7.4}  {amed:>9.4}  {amax:>7.4}   n={}",
+            ans.len()
+        );
+        println!(
+            "    unanswerable    {umin:>7.4}  {umed:>9.4}  {umax:>7.4}   n={}",
+            una.len()
+        );
+
+        match best_threshold(&samples) {
+            Some(t) => {
+                println!("\n  best cosine floor: {:.4}", t.threshold);
+                println!(
+                    "    answers kept on answerable questions   {:>6.1}%",
+                    100.0 * t.answerable_kept
+                );
+                println!(
+                    "    answers kept on unanswerable questions {:>6.1}%   (want low)",
+                    100.0 * t.unanswerable_kept
+                );
+                println!(
+                    "    separation (Youden J)                  {:>6.3}",
+                    t.youden_j
+                );
+                if t.youden_j < 0.5 {
+                    println!("\n  NOT separable enough to ship a floor on this signal alone.");
+                }
+            }
+            None => println!("  no samples"),
+        }
+        return ExitCode::SUCCESS;
+    }
 
     let mut overall = Vec::new();
     let mut by_type: std::collections::BTreeMap<String, Vec<_>> = std::collections::BTreeMap::new();
