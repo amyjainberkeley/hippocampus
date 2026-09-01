@@ -20,6 +20,13 @@ final class RuntimeConfigTests: XCTestCase {
         XCTAssertFalse(cfg.crashReportOptedIn)
     }
 
+    func test_capture_defaults_false_when_file_missing() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertFalse(cfg.captureEnabled)
+    }
+
     // MARK: - Write + round-trip
 
     func test_set_true_round_trip() throws {
@@ -37,6 +44,17 @@ final class RuntimeConfigTests: XCTestCase {
         try cfg.setCrashReportOptedIn(true)
         try cfg.setCrashReportOptedIn(false)
         XCTAssertFalse(cfg.crashReportOptedIn)
+    }
+
+    func test_set_capture_enabled_round_trip() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        try cfg.setCaptureEnabled(true)
+        XCTAssertTrue(cfg.captureEnabled)
+
+        try cfg.setCaptureEnabled(false)
+        XCTAssertFalse(cfg.captureEnabled)
     }
 
     func test_toggle_preserves_other_keys() throws {
@@ -65,6 +83,17 @@ final class RuntimeConfigTests: XCTestCase {
         let attrs = try FileManager.default.attributesOfItem(atPath: cfg.path.path)
         let mode = attrs[.posixPermissions] as? Int
         XCTAssertEqual(mode, 0o644, "runtime.toml must be 0644")
+    }
+
+    func test_capture_write_uses_file_mode_0644() throws {
+        let (cfg, dir) = try tmpConfig()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        try cfg.setCaptureEnabled(true)
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: cfg.path.path)
+        let mode = attrs[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o644, "runtime.toml must be 0644 because capture_enabled is not a secret")
     }
 
     // MARK: - parseBool

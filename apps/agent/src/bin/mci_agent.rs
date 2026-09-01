@@ -41,6 +41,7 @@ use mci_agent::episode_worker;
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
 use mci_agent::idle_batch;
+use mci_agent::key_resolver::{self, mcp_registration_env};
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
 use mci_agent::page_content::PageContentListener;
 use mci_agent::panic_uploader::{self, PanicUploader};
@@ -973,8 +974,8 @@ async fn main() -> ExitCode {
                 }
                 None => {
                     eprintln!(
-                            "mci-agent: no brain key found (MCI_DB_KEY_HEX not set, no dev.key). \
-                             Health-only drain. Set the key or launch Hippocampus.app to initialize."
+                            "mci-agent: no brain key found in Keychain. \
+                             Health-only drain. Launch Hippocampus.app or run `mci-agent init` to initialize."
                         );
                     if strict {
                         return ExitCode::from(23);
@@ -1246,9 +1247,11 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
     ExitCode::SUCCESS
 }
 
-/// Read the dev.key file (64-char hex) from
-/// `~/Library/Application Support/MCI/dev.key`.
+/// Read the development file key when the explicit development gate is set.
 fn read_dev_key_hex() -> Option<String> {
+    if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
+        return None;
+    }
     let home = std::env::var("HOME").ok()?;
     let path = PathBuf::from(home).join("Library/Application Support/MCI/dev.key");
     std::fs::read_to_string(&path)
@@ -1257,18 +1260,30 @@ fn read_dev_key_hex() -> Option<String> {
         .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
-/// Resolve the brain key: env var first, then dev.key file.
+fn development_key_fallback_enabled() -> bool {
+    std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() == Ok("1")
+        || (cfg!(debug_assertions)
+            && std::env::vars_os().any(|(k, _)| k.to_string_lossy().starts_with("CARGO_BIN_EXE_")))
+}
+
+/// Resolve the brain key from Keychain, with env/file keys only in explicit development mode.
 fn resolve_key_hex() -> Option<String> {
-    std::env::var("MCI_DB_KEY_HEX")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(read_dev_key_hex)
+    if let Ok(key) = key_resolver::resolve_database_key() {
+        return Some(key);
+    }
+    if development_key_fallback_enabled() {
+        return std::env::var("MCI_DB_KEY_HEX")
+            .ok()
+            .filter(|s| key_resolver::is_valid_database_key(s))
+            .or_else(read_dev_key_hex);
+    }
+    None
 }
 
 /// Register Hippocampus as an MCP server in Claude Code's MCP config
 /// (`~/.claude.json`). Merges the `hippocampus` entry under
 /// `mcpServers` without clobbering other servers. Includes an `env`
-/// block with `MCI_DB_KEY_HEX` when the dev.key file exists.
+/// block with a Keychain reference, never with reusable key material.
 /// Write the Hippocampus entry into Claude Code's `~/.claude.json`.
 ///
 /// `db_path` is the brain this agent just resolved. It has to be recorded
@@ -1296,27 +1311,13 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
         serde_json::Map::new()
     };
 
-    let key_path = PathBuf::from(&home).join("Library/Application Support/MCI/dev.key");
-    // Same resolution order the rest of the binary uses. Reading only
-    // `dev.key` here meant the env var the docs tell you to export was
-    // silently dropped from the registration.
-    let key_hex: Option<String> =
-        resolve_key_hex().filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()));
-
     let mut hippocampus_entry = serde_json::json!({
         "type": "stdio",
         "command": exe_str,
         "args": ["mcp-serve"]
     });
-    hippocampus_entry["env"] = serde_json::json!({"MCI_DB_PATH": db_str});
-    if let Some(k) = &key_hex {
-        hippocampus_entry["env"]["MCI_DB_KEY_HEX"] = serde_json::json!(k);
-    } else {
-        eprintln!(
-            "Note: brain key not yet generated at {}. Launch Hippocampus.app once to initialize, then re-run `mci-agent register-mcp`.",
-            key_path.display()
-        );
-    }
+    hippocampus_entry["env"] = serde_json::to_value(mcp_registration_env(db_str))
+        .map_err(|e| format!("serialize keychain reference: {e}"))?;
 
     let servers = root
         .entry("mcpServers")
@@ -1328,7 +1329,7 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
                 && existing.get("env") == hippocampus_entry.get("env")
             {
                 println!(
-                    "Hippocampus already registered with Claude Code (path and key unchanged)."
+                    "Hippocampus already registered with Claude Code (path and Keychain reference unchanged)."
                 );
                 return Ok(());
             }
@@ -1347,13 +1348,9 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
     std::fs::write(&tmp_path, output.as_bytes())
         .map_err(|e| format!("write {}: {e}", tmp_path.display()))?;
 
-    // rename(2) replaces the destination's mode with the temp file's, and
-    // the temp file was just created under the process umask (0644 by
-    // default). Writing in place used to preserve whatever the user had
-    // set, so without this a `chmod 600 ~/.claude.json` would be silently
-    // widened back to world-readable — on a file that holds the brain key.
-    // Carry the old mode across; a file we are creating starts at 0600,
-    // because we are putting a key in it.
+    // rename(2) replaces the destination's mode with the temp file's.
+    // Carry the old mode across; a file we are creating starts at 0600
+    // so future client metadata can stay private by default.
     let mode = std::fs::metadata(&settings_path)
         .map(|m| m.permissions().mode() & 0o777)
         .unwrap_or(0o600);
@@ -1526,12 +1523,47 @@ fn run_import_sessions_cmd(db_path: &std::path::Path, root: &std::path::Path) ->
     Ok(())
 }
 
+/// Store a freshly generated database key in the production Keychain item.
+fn write_keychain_key(hex: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let reference = key_resolver::KeychainKeyReference::default();
+        let status = std::process::Command::new("/usr/bin/security")
+            .args([
+                "add-generic-password",
+                "-s",
+                &reference.service,
+                "-a",
+                &reference.account,
+                "-w",
+                hex,
+                "-U",
+            ])
+            .status()
+            .map_err(|e| format!("run security add-generic-password: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "security add-generic-password failed for service={} account={}",
+                reference.service, reference.account
+            ))
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = hex;
+        Err("Keychain write requires macOS".to_owned())
+    }
+}
+
 /// One-command setup.
 ///
 /// Chains what a new user would otherwise do by hand: make a key, import
 /// their Claude Code history, index it, and register as an MCP server. The
 /// point is that none of it needs an environment variable, because
-/// `resolve_key_hex` already falls back to the `dev.key` file this writes.
+/// `resolve_key_hex` reads the Keychain reference this writes.
 ///
 /// Safe to re-run. It never overwrites an existing key, because doing so
 /// would make an existing brain permanently unreadable.
@@ -1551,9 +1583,8 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
 
     // 1. Key. Never regenerate over an existing one: the brain is encrypted
     // with it, and a fresh key would orphan every event already stored.
-    let key_path = support.join("dev.key");
-    if read_dev_key_hex().is_some() {
-        println!("  key      already present, leaving it alone");
+    if key_resolver::resolve_database_key().is_ok() {
+        println!("  key      already present in Keychain, leaving it alone");
     } else {
         let mut bytes = [0u8; 32];
         // Same OS CSPRNG mci-core uses for DbKey. No fallback: a weak key
@@ -1563,16 +1594,11 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
             return Err(32);
         }
         let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        if let Err(e) = std::fs::write(&key_path, &hex) {
-            eprintln!("hippocampus init: write {}: {e}", key_path.display());
+        if let Err(e) = write_keychain_key(&hex) {
+            eprintln!("hippocampus init: store database key in Keychain: {e}");
             return Err(33);
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
-        }
-        println!("  key      created at {} (0600)", key_path.display());
+        println!("  key      created in macOS Keychain");
     }
 
     // 2. Import. Missing transcripts is not an error: plenty of people have

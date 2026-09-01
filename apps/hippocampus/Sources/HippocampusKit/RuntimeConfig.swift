@@ -3,7 +3,7 @@ import Foundation
 
 /// Reads/writes `~/.config/hippocampus/runtime.toml`.
 ///
-/// CSO: mode 0644 — non-sensitive setting (crash-report opt-in boolean).
+/// CSO: mode 0644 — non-sensitive settings (capture gate and crash-report opt-in).
 /// Supervisor reads on next spawn; no live reload to avoid mid-session
 /// env-var dance.
 public struct RuntimeConfig: Sendable {
@@ -16,21 +16,37 @@ public struct RuntimeConfig: Sendable {
 
     public var crashReportOptedIn: Bool {
         get {
-            guard let data = try? Data(contentsOf: path),
-                  let text = String(data: data, encoding: .utf8)
-            else { return false }
-            return Self.parseBool(key: "crash_report_opted_in", in: text)
+            boolValue(for: "crash_report_opted_in")
         }
     }
 
+    public var captureEnabled: Bool {
+        boolValue(for: "capture_enabled")
+    }
+
     public func setCrashReportOptedIn(_ value: Bool) throws {
+        try setBool(value, for: "crash_report_opted_in")
+    }
+
+    public func setCaptureEnabled(_ value: Bool) throws {
+        try setBool(value, for: "capture_enabled")
+    }
+
+    private func boolValue(for key: String) -> Bool {
+        guard let data = try? Data(contentsOf: path),
+              let text = String(data: data, encoding: .utf8)
+        else { return false }
+        return Self.parseBool(key: key, in: text)
+    }
+
+    private func setBool(_ value: Bool, for key: String) throws {
         let parent = path.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
 
         var lines = existingLines()
-        let newLine = "crash_report_opted_in = \(value)"
+        let newLine = "\(key) = \(value)"
 
-        if let idx = lines.firstIndex(where: { $0.hasPrefix("crash_report_opted_in") }) {
+        if let idx = lines.firstIndex(where: { $0.hasPrefix(key) }) {
             lines[idx] = newLine
         } else {
             lines.append(newLine)

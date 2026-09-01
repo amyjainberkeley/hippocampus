@@ -43,6 +43,9 @@ let package = Package(
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Security"),
             ]
         ),
         .testTarget(

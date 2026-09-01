@@ -2,6 +2,53 @@
 import Foundation
 import os
 
+public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
+    public let helperExecutableURL: URL
+    public let helperArguments: [String]
+    public let agentExecutableURL: URL
+    public let agentArguments: [String]
+    public let agentEnvironment: [String: String]
+
+    public static func make(
+        helperURL: URL,
+        agentURL: URL,
+        dbPath: URL,
+        keyReference: KeychainKeyReference,
+        knownSafeAppsURL: URL?,
+        captureEnabled: Bool,
+        crashReportOptedIn: Bool,
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ProcessSupervisorLaunchPlan {
+        var helperArgs: [String] = []
+        if captureEnabled {
+            helperArgs.append("--capture")
+        }
+        helperArgs += ["--output", "/dev/stdout"]
+        if let knownSafeAppsURL {
+            helperArgs += ["--allowlist-path", knownSafeAppsURL.path]
+        }
+
+        var agentEnv = baseEnvironment
+        agentEnv.removeValue(forKey: "MCI_DB_KEY_HEX")
+        agentEnv["MCI_DB_PATH"] = dbPath.path
+        agentEnv["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
+        agentEnv["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
+        if crashReportOptedIn {
+            agentEnv["MCI_CRASH_REPORT_OPTED_IN"] = "1"
+        } else {
+            agentEnv.removeValue(forKey: "MCI_CRASH_REPORT_OPTED_IN")
+        }
+
+        return ProcessSupervisorLaunchPlan(
+            helperExecutableURL: helperURL,
+            helperArguments: helperArgs,
+            agentExecutableURL: agentURL,
+            agentArguments: ["--drain-stdin", "--strict", "--db-path", dbPath.path],
+            agentEnvironment: agentEnv
+        )
+    }
+}
+
 @MainActor
 public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var state: SupervisorState = .idle
@@ -33,7 +80,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var retryTask: Task<Void, Never>?
     private var healthTimer: Timer?
     private var brainStatsTask: Task<Void, Never>?
-    private var currentKeyHex: String?
+    private var currentKeyReference: KeychainKeyReference = .defaultDatabaseKey
     private var safariInboxReader: SafariInboxReader?
 
     private static let maxRetries = 10
@@ -51,9 +98,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         retryCount = 0
 
         do {
-            let keyHex = try resolveKey()
-            currentKeyHex = keyHex
-            try spawnChildren(keyHex: keyHex)
+            currentKeyReference = try ensureKey()
+            try spawnChildren(keyReference: currentKeyReference)
             state = .running
             startHealthPolling()
             startSafariInboxReader()
@@ -119,9 +165,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let task = Process()
         task.executableURL = recallPath
         var env = ProcessInfo.processInfo.environment
-        if let keyHex = try? keyStore.readKey() {
-            env["MCI_DB_KEY_HEX"] = keyHex
-        }
+        env.removeValue(forKey: "MCI_DB_KEY_HEX")
+        let keyReference = (keyStore as? FileKeyStore)?.keychainReference
+            ?? (keyStore as? KeychainKeyStore)?.reference
+            ?? .defaultDatabaseKey
+        env["MCI_DB_PATH"] = dbPath.path
+        env["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
+        env["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
         // Deep-link tab hint per the Brief Viewer spec
         // (`hippocampus://recall?tab=brief`). The recall-ui reads
         // `MCI_INITIAL_TAB` at launch and selects the matching tab.
@@ -156,25 +206,34 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public var devKeyPath: String {
-        (try? keyStore.readKey()) != nil
-            ? (keyStore as? FileKeyStore)?.path.path ?? "unknown"
-            : "not set"
+        if let fileStore = keyStore as? FileKeyStore {
+            if let ref = fileStore.keychainReference {
+                return "Keychain service=\(ref.service) account=\(ref.account)"
+            }
+            return fileStore.path.path
+        }
+        if let ref = (keyStore as? KeychainKeyStore)?.reference {
+            return "Keychain service=\(ref.service) account=\(ref.account)"
+        }
+        return "unknown"
     }
 
     // MARK: - Private
 
-    private func resolveKey() throws -> String {
+    private func ensureKey() throws -> KeychainKeyReference {
         do {
-            return try keyStore.readKey()
+            _ = try keyStore.readKey()
         } catch KeyStoreError.noKeyFound {
             let hex = FileKeyStore.generateHexKey()
             try keyStore.writeKey(hex)
-            logger.info("supervisor: generated new dev key at \((self.keyStore as? FileKeyStore)?.path.path ?? "unknown", privacy: .public). TEMP — Phase-4 Keychain integration (ADR-0017 §6) replaces this.")
-            return hex
+            logger.info("supervisor: generated new database key in configured key store")
         }
+        return (keyStore as? FileKeyStore)?.keychainReference
+            ?? (keyStore as? KeychainKeyStore)?.reference
+            ?? .defaultDatabaseKey
     }
 
-    private func spawnChildren(keyHex: String) throws {
+    private func spawnChildren(keyReference: KeychainKeyReference) throws {
         guard let helperURL = locator.helperPath() else {
             throw SupervisorError.binaryNotFound("MCICaptureHelper")
         }
@@ -195,14 +254,20 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.helperStderrHandle = hStderr
         self.agentStderrHandle = aStderr
 
+        let plan = ProcessSupervisorLaunchPlan.make(
+            helperURL: helperURL,
+            agentURL: agentURL,
+            dbPath: dbPath,
+            keyReference: keyReference,
+            knownSafeAppsURL: locator.knownSafeAppsPath(),
+            captureEnabled: runtimeConfig.captureEnabled,
+            crashReportOptedIn: runtimeConfig.crashReportOptedIn
+        )
+
         // Spawn helper
         let helper = Process()
-        helper.executableURL = helperURL
-        var helperArgs = ["--capture", "--output", "/dev/stdout"]
-        if let allowlistPath = locator.knownSafeAppsPath() {
-            helperArgs += ["--allowlist-path", allowlistPath.path]
-        }
-        helper.arguments = helperArgs
+        helper.executableURL = plan.helperExecutableURL
+        helper.arguments = plan.helperArguments
         helper.standardOutput = bridgePipe
         helper.standardError = hStderr
         helper.terminationHandler = { [weak self] proc in
@@ -213,16 +278,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
         // Spawn agent
         let agent = Process()
-        agent.executableURL = agentURL
-        let dbPathStr = dbPath.path
-        agent.arguments = ["--drain-stdin", "--strict", "--db-path", dbPathStr]
+        agent.executableURL = plan.agentExecutableURL
+        agent.arguments = plan.agentArguments
         agent.standardInput = bridgePipe
-        var agentEnv = ProcessInfo.processInfo.environment
-        agentEnv["MCI_DB_KEY_HEX"] = keyHex
-        if runtimeConfig.crashReportOptedIn {
-            agentEnv["MCI_CRASH_REPORT_OPTED_IN"] = "1"
-        }
-        agent.environment = agentEnv
+        agent.environment = plan.agentEnvironment
         agent.standardError = aStderr
         agent.terminationHandler = { [weak self] proc in
             Task { @MainActor in
