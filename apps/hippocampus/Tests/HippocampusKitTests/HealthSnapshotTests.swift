@@ -79,42 +79,18 @@ final class HealthSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.lastCaptureTs, expected)
     }
 
-    // MARK: - eventCount priority
-
-    func test_eventCount_prefers_brain_over_frames() {
-        let s = HealthSnapshot(
-            framesDelivered: 100,
-            framesSuppressed: 0,
-            brainEventCount: 42,
-            lastCaptureTs: nil,
-            lastUpdated: Date()
-        )
-        XCTAssertEqual(s.eventCount, 42)
-    }
-
-    func test_eventCount_falls_back_to_framesDelivered() {
-        let s = HealthSnapshot(
-            framesDelivered: 77,
-            framesSuppressed: 0,
-            brainEventCount: nil,
-            lastCaptureTs: nil,
-            lastUpdated: Date()
-        )
-        XCTAssertEqual(s.eventCount, 77)
-    }
-
     // MARK: - displayText
 
     func test_displayText_with_lastCaptureTs() {
         let s = HealthSnapshot(
             framesDelivered: 10,
             framesSuppressed: 0,
-            brainEventCount: nil,
             lastCaptureTs: Date().addingTimeInterval(-120),
             lastUpdated: Date()
         )
         let text = s.displayText
-        XCTAssertTrue(text.hasPrefix("10 events captured"), "Got: \(text)")
+        XCTAssertTrue(text.hasPrefix("10 frames processed"), "Got: \(text)")
+        XCTAssertFalse(text.contains("events captured"), "Got: \(text)")
         XCTAssertTrue(text.contains("last"), "Got: \(text)")
     }
 
@@ -122,11 +98,22 @@ final class HealthSnapshotTests: XCTestCase {
         let s = HealthSnapshot(
             framesDelivered: 5,
             framesSuppressed: 0,
-            brainEventCount: nil,
             lastCaptureTs: nil,
             lastUpdated: Date().addingTimeInterval(-60)
         )
         let text = s.displayText
-        XCTAssertTrue(text.hasPrefix("5 events captured"), "Got: \(text)")
+        XCTAssertTrue(text.hasPrefix("5 frames processed"), "Got: \(text)")
+    }
+
+    func test_displayText_without_brain_count_reports_processed_frames_not_stored_events() {
+        let s = HealthSnapshot(
+            framesDelivered: 12,
+            framesSuppressed: 2,
+            lastCaptureTs: Date().addingTimeInterval(-30),
+            lastUpdated: Date()
+        )
+
+        XCTAssertTrue(s.displayText.hasPrefix("12 frames processed"), "Got: \(s.displayText)")
+        XCTAssertFalse(s.displayText.contains("events captured"), "Got: \(s.displayText)")
     }
 }

@@ -46,6 +46,10 @@ members = [
     # `SqlCipherBrainStore` + `HybridRetriever`. See
     # `adapters/macos/mci-brain-ffi/Cargo.toml`.
     "adapters/macos/mci-brain-ffi",
+    # macOS file-Keychain adapter. Contains the audited Security.framework
+    # FFI needed to pin the legacy file domain and attach SecAccess ACLs;
+    # the agent crate keeps its `forbid(unsafe_code)` boundary.
+    "adapters/macos/mci-keychain",
     # macOS-only Rust adapter: Mail.app read path (emlx splitter + Envelope
     # Index SQLite reader + FSEvents watcher) for V2-P8a. READ-ONLY library
     # — no event emit, no brain write, no cascade. The cascade-equivalent

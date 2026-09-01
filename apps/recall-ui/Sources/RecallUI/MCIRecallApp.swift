@@ -112,15 +112,16 @@ struct MCIRecallApp: App {
 
     @MainActor
     private static func makeReader() -> BrainReader {
-        guard let keyHex = ProcessInfo.processInfo.environment["MCI_DB_KEY_HEX"],
-              !keyHex.isEmpty
-        else {
-            return StubBrainReader()
-        }
+        let environment = ProcessInfo.processInfo.environment
+        let reference = KeychainDatabaseKeyReference.from(environment: environment)
         do {
-            return try FFIBrainReader(path: defaultBrainPath(), keyHex: keyHex)
+            let keyHex = try KeychainDatabaseKeyResolver().resolveHex(reference: reference)
+            let path = environment["MCI_DB_PATH"] ?? defaultBrainPath()
+            return try FFIBrainReader(path: path, keyHex: keyHex)
         } catch {
-            return StubBrainReader()
+            let message = "Recall cannot open the encrypted brain: \(error.localizedDescription)"
+            NSLog("MCI: %@", message)
+            return UnavailableBrainReader(message: message)
         }
     }
 

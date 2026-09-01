@@ -1,0 +1,13 @@
+{
+  "storage_model": "file-keychain-acl-v1",
+  "service": "ai.hippocampus.brain",
+  "account": "database-key-v1",
+  "trusted_executables": [
+    "Hippocampus",
+    "MCICaptureHelper",
+    "mci-agent",
+    "recall-ui"
+  ],
+  "use_data_protection_keychain": false,
+  "synchronizable": false
+}

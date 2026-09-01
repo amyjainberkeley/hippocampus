@@ -22,6 +22,8 @@
 //! configured log path. In Phase-1 cycle 3 the stdin reader is
 //! replaced with the helper-child socket fd.
 
+#![forbid(unsafe_code)]
+
 use std::path::{Path, PathBuf};
 
 use mci_agent::embedder_load::{load_embedder_backend, load_query_embedder_backend};
@@ -71,8 +73,8 @@ enum Mode {
     /// P3.6.6 + P3.6.7 + P3.10c — wire-frame drainer.
     ///
     /// Health frames always go to JSONL. `OCREvent` frames go to the
-    /// `SQLCipher` brain store IFF `MCI_DB_KEY_HEX` is set; otherwise
-    /// they fall into the non-health counter (legacy behaviour).
+    /// `SQLCipher` brain store when the production Keychain reference resolves;
+    /// otherwise they fall into the non-health counter (legacy behaviour).
     DrainStdin {
         db_path: PathBuf,
         strict: bool,
@@ -458,12 +460,10 @@ fn print_usage() {
         \n\
         Env:\n\
         \x20 MCI_DB_PATH                brain SQLCipher path (--drain-stdin + mcp-serve)\n\
-        \x20 MCI_DB_KEY_HEX             64-char hex SQLCipher key (TEMP — see\n\
-        \x20                            docs/claude-code-mcp-setup.md; Keychain integration\n\
-        \x20                            lands in Phase 4 onboarding). With --drain-stdin,\n\
-        \x20                            absence falls back to health-only drain (no brain\n\
-        \x20                            writes); presence routes OCREvents through the\n\
-        \x20                            P3.6.6 wire-to-brain ingest pump.\n\
+        \x20 MCI_DB_KEYCHAIN_SERVICE    content-free Keychain service reference; production\n\
+        \x20 MCI_DB_KEYCHAIN_ACCOUNT    account reference. Defaults match Hippocampus.app.\n\
+        \x20 MCI_DEVELOPMENT_FILE_KEY   set to 1 only for local development to allow dev.key\n\
+        \x20                            or MCI_DB_KEY_HEX. Production ignores raw/file keys.\n\
         \x20 MCI_EMBEDDER_DISABLED      set to 1 to force lexical-only recall in mcp-serve\n\
         \x20                            (skips HybridRetriever even if an embedder is\n\
         \x20                            available). Default fusion weights per ADR-0010:\n\
@@ -554,8 +554,8 @@ async fn main() -> ExitCode {
             // `mcp_client_boot` value.
             let mcp_registry = Arc::clone(&mcp_client_boot.registry);
 
-            // P3.10c + P3.8 — open the brain store IFF `MCI_DB_KEY_HEX`
-            // is set. The store is shared between:
+            // P3.10c + P3.8 — open the brain store only after the production
+            // Keychain reference resolves. The store is shared between:
             //   1. BrainPump (ingest: OCREvent → events table)
             //   2. idle-batch worker (embed: events → event_vectors)
             //
@@ -571,7 +571,7 @@ async fn main() -> ExitCode {
 
             let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> = match resolve_key_hex()
             {
-                Some(key_hex) => {
+                Ok(key_hex) => {
                     match decode_hex32(&key_hex) {
                         Some(key_bytes) => {
                             if let Some(parent) = db_path.parent() {
@@ -945,14 +945,13 @@ async fn main() -> ExitCode {
                                     );
                                     eprintln!("  being stored in the brain. Possible causes:");
                                     eprintln!("    * Stale brain encrypted with old key");
-                                    eprintln!("    * Wrong MCI_DB_KEY_HEX env var");
+                                    eprintln!("    * Database and Keychain item do not match");
                                     eprintln!("    * Permissions issue on brain file");
                                     eprintln!();
-                                    eprintln!("  To reset: quit Hippocampus.app, delete");
                                     eprintln!(
-                                        "  ~/Library/Application Support/MCI/mci.sqlite + dev.key,"
+                                        "  Quit and relaunch Hippocampus.app after confirming"
                                     );
-                                    eprintln!("  then relaunch the app to start fresh.");
+                                    eprintln!("  Keychain access. Do not replace an existing key.");
                                     eprintln!("========================================================\n");
                                     if strict {
                                         return ExitCode::from(21);
@@ -972,7 +971,11 @@ async fn main() -> ExitCode {
                         }
                     }
                 }
-                None => {
+                Err(error) => {
+                    report_key_resolution_error("--drain-stdin", &error);
+                    if !matches!(error, key_resolver::KeyResolutionError::MissingKey { .. }) {
+                        return ExitCode::from(23);
+                    }
                     eprintln!(
                             "mci-agent: no brain key found in Keychain. \
                              Health-only drain. Launch Hippocampus.app or run `mci-agent init` to initialize."
@@ -1185,7 +1188,7 @@ fn bundle_ids_for_source(source: &str) -> Option<Vec<&'static str>> {
 /// Exit codes:
 ///   0 — query ran (count is on stdout; may be zero)
 ///   2 — `source` unknown
-///   3 — brain key missing (`MCI_DB_KEY_HEX` unset AND no dev.key file)
+///   3 — production Keychain reference unavailable
 ///   4 — brain open / query failure (the probe surface from the
 ///       onboarding's `RealBrowserDetector` falls back to `.unknown`
 ///       on any non-zero exit)
@@ -1197,12 +1200,9 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
         return ExitCode::from(2);
     };
 
-    let Some(key_hex) = resolve_key_hex() else {
-        eprintln!(
-            "mci-agent stats: brain key unavailable (set MCI_DB_KEY_HEX or write\n\
-             ~/Library/Application Support/MCI/dev.key with a 64-char hex key)"
-        );
-        return ExitCode::from(3);
+    let key_hex = match resolve_key_for_command("stats") {
+        Ok(key) => key,
+        Err(_) => return ExitCode::from(3),
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
         eprintln!("mci-agent stats: brain key is not a 32-byte hex string");
@@ -1266,18 +1266,37 @@ fn development_key_fallback_enabled() -> bool {
             && std::env::vars_os().any(|(k, _)| k.to_string_lossy().starts_with("CARGO_BIN_EXE_")))
 }
 
-/// Resolve the brain key from Keychain, with env/file keys only in explicit development mode.
-fn resolve_key_hex() -> Option<String> {
-    if let Ok(key) = key_resolver::resolve_database_key() {
-        return Some(key);
+/// Resolve the brain key from Keychain. Raw/file keys are development-only
+/// and are considered only after a proven item-not-found result.
+fn resolve_key_hex() -> Result<String, key_resolver::KeyResolutionError> {
+    match key_resolver::resolve_database_key() {
+        Ok(key) => Ok(key),
+        Err(missing @ key_resolver::KeyResolutionError::MissingKey { .. })
+            if development_key_fallback_enabled() =>
+        {
+            std::env::var("MCI_DB_KEY_HEX")
+                .ok()
+                .filter(|key| key_resolver::is_valid_database_key(key))
+                .or_else(read_dev_key_hex)
+                .ok_or(missing)
+        }
+        Err(error) => Err(error),
     }
-    if development_key_fallback_enabled() {
-        return std::env::var("MCI_DB_KEY_HEX")
-            .ok()
-            .filter(|s| key_resolver::is_valid_database_key(s))
-            .or_else(read_dev_key_hex);
-    }
-    None
+}
+
+fn report_key_resolution_error(command: &str, error: &key_resolver::KeyResolutionError) {
+    eprintln!(
+        "mci-agent {command}: cannot resolve the database key from the macOS Keychain: {error}. \
+         Launch the bundled Hippocampus.app to initialize or unlock access. \
+         MCI_DEVELOPMENT_FILE_KEY=1 enables raw/file keys for development only."
+    );
+}
+
+fn resolve_key_for_command(command: &str) -> Result<String, u8> {
+    resolve_key_hex().map_err(|error| {
+        report_key_resolution_error(command, &error);
+        10
+    })
 }
 
 /// Register Hippocampus as an MCP server in Claude Code's MCP config
@@ -1368,7 +1387,7 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolve the `SQLCipher` key from `MCI_DB_KEY_HEX`, open the brain,
+/// Resolve the `SQLCipher` key from the production Keychain reference, open the brain,
 /// optionally construct the embedder for hybrid recall, build the
 /// [`Server`], and run [`serve_stdio`].
 ///
@@ -1383,23 +1402,13 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
 ///   embedder is constructed, the same code path lights up full hybrid
 ///   (ADR-0010 min-max CC fusion) automatically.
 ///
-/// `MCI_DB_KEY_HEX` is the **interim** key-resolution mechanism for
-/// P3.10b. Phase-4 onboarding wires the Keychain-backed `KeyWrap`
-/// surface; the env-var path stays as a developer / CI fallback. See
-/// `docs/claude-code-mcp-setup.md` for the full operator note.
+/// Production resolves the file-Keychain service/account reference. Raw and
+/// file keys remain available only behind `MCI_DEVELOPMENT_FILE_KEY=1`.
 async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
-    let Some(key_hex) = resolve_key_hex() else {
-        eprintln!(
-            "mci-agent mcp-serve: MCI_DB_KEY_HEX not set and no dev.key found at \
-             ~/Library/Application Support/MCI/dev.key. \
-             Launch Hippocampus.app once to initialize, or see docs/claude-code-mcp-setup.md."
-        );
-        return Err(10);
-    };
+    let key_hex = resolve_key_for_command("mcp-serve")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
         eprintln!(
-            "mci-agent mcp-serve: MCI_DB_KEY_HEX must be 64 lowercase-or-uppercase \
-             hex characters (32 bytes)."
+            "mci-agent mcp-serve: resolved database key is malformed; refusing to open the brain."
         );
         return Err(11);
     };
@@ -1473,12 +1482,9 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
 /// already has on disk, and indexes only the conversation text, never tool
 /// output or model reasoning.
 fn run_import_sessions_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
-    let Some(key_hex) = resolve_key_hex() else {
-        eprintln!("mci-agent import-sessions: MCI_DB_KEY_HEX not set and no dev.key found.");
-        return Err(10);
-    };
+    let key_hex = resolve_key_for_command("import-sessions")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent import-sessions: MCI_DB_KEY_HEX must be 64 hex characters.");
+        eprintln!("mci-agent import-sessions: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -1523,38 +1529,50 @@ fn run_import_sessions_cmd(db_path: &std::path::Path, root: &std::path::Path) ->
     Ok(())
 }
 
-/// Store a freshly generated database key in the production Keychain item.
-fn write_keychain_key(hex: &str) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let reference = key_resolver::KeychainKeyReference::default();
-        let status = std::process::Command::new("/usr/bin/security")
-            .args([
-                "add-generic-password",
-                "-s",
-                &reference.service,
-                "-a",
-                &reference.account,
-                "-w",
-                hex,
-                "-U",
-            ])
-            .status()
-            .map_err(|e| format!("run security add-generic-password: {e}"))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!(
-                "security add-generic-password failed for service={} account={}",
-                reference.service, reference.account
-            ))
-        }
-    }
+#[cfg(target_os = "macos")]
+struct NativeKeychainWriter;
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = hex;
-        Err("Keychain write requires macOS".to_owned())
+#[cfg(target_os = "macos")]
+impl key_resolver::KeychainWriter for NativeKeychainWriter {
+    fn add_generic_password(
+        &self,
+        service: &str,
+        account: &str,
+        secret: &str,
+        trusted_application_paths: &[PathBuf],
+    ) -> Result<(), key_resolver::KeyResolutionError> {
+        match mci_keychain::add_file_generic_password_with_acl(
+            service,
+            account,
+            secret.as_bytes(),
+            trusted_application_paths,
+        ) {
+            Ok(()) => Ok(()),
+            Err(mci_keychain::Error::Status(-25299)) => {
+                Err(key_resolver::KeyResolutionError::KeyAlreadyExists)
+            }
+            Err(mci_keychain::Error::Status(status)) => {
+                Err(key_resolver::KeyResolutionError::WriteFailure { status })
+            }
+            Err(mci_keychain::Error::AclStatus(status)) => {
+                Err(key_resolver::KeyResolutionError::AclUnavailable {
+                    reason: format!("Security.framework ACL creation failed with status {status}"),
+                })
+            }
+            Err(mci_keychain::Error::EmptyTrustedApplications) => {
+                Err(key_resolver::KeyResolutionError::AclUnavailable {
+                    reason: "trusted executable list is empty".to_owned(),
+                })
+            }
+            Err(mci_keychain::Error::InvalidPath) => {
+                Err(key_resolver::KeyResolutionError::AclUnavailable {
+                    reason: "trusted executable path contains a NUL byte".to_owned(),
+                })
+            }
+            Err(mci_keychain::Error::InvalidResult) => {
+                Err(key_resolver::KeyResolutionError::WriteFailure { status: -26275 })
+            }
+        }
     }
 }
 
@@ -1581,24 +1599,51 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
         return Err(31);
     }
 
-    // 1. Key. Never regenerate over an existing one: the brain is encrypted
-    // with it, and a fresh key would orphan every event already stored.
-    if key_resolver::resolve_database_key().is_ok() {
-        println!("  key      already present in Keychain, leaving it alone");
-    } else {
-        let mut bytes = [0u8; 32];
-        // Same OS CSPRNG mci-core uses for DbKey. No fallback: a weak key
-        // is worse than no key, so a failure here stops init.
-        if let Err(e) = getrandom::fill(&mut bytes) {
-            eprintln!("hippocampus init: OS CSPRNG failed, refusing to make a weak key: {e}");
-            return Err(32);
+    // 1. Key. Creation is add-only and only a typed item-not-found result
+    // reaches it. The bundle contract supplies the exact signed executables
+    // for the file-Keychain SecAccess ACL.
+    #[cfg(target_os = "macos")]
+    {
+        let contract = match key_resolver::KeychainAclContract::from_current_executable() {
+            Ok(contract) => contract,
+            Err(error) => {
+                eprintln!("hippocampus init: {error}. Launch the bundled Hippocampus.app.");
+                return Err(33);
+            }
+        };
+        let outcome = key_resolver::initialize_database_key_with(
+            &key_resolver::SystemKeychainReader,
+            &NativeKeychainWriter,
+            &key_resolver::KeychainKeyReference::default(),
+            &contract.trusted_application_paths,
+            || {
+                let mut bytes = [0u8; 32];
+                getrandom::fill(&mut bytes).map_err(|error| {
+                    key_resolver::KeyResolutionError::GenerationFailure {
+                        reason: error.to_string(),
+                    }
+                })?;
+                Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+            },
+        );
+        match outcome {
+            Ok(key_resolver::KeyInitializationOutcome::AlreadyPresent) => {
+                println!("  key      already present in Keychain, leaving it alone");
+            }
+            Ok(key_resolver::KeyInitializationOutcome::Created) => {
+                println!("  key      created in macOS Keychain with bundled-executable ACL");
+            }
+            Err(error) => {
+                eprintln!("hippocampus init: database key unchanged: {error}");
+                return Err(33);
+            }
         }
-        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        if let Err(e) = write_keychain_key(&hex) {
-            eprintln!("hippocampus init: store database key in Keychain: {e}");
-            return Err(33);
-        }
-        println!("  key      created in macOS Keychain");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        eprintln!("hippocampus init: production Keychain initialization requires macOS");
+        return Err(33);
     }
 
     // 2. Import. Missing transcripts is not an error: plenty of people have
@@ -1639,16 +1684,9 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
 /// already owns. Exits non-zero when something is blocking, so it can gate
 /// a script.
 fn run_doctor_cmd(db_path: &std::path::Path) -> Result<(), u8> {
-    let Some(key_hex) = resolve_key_hex() else {
-        eprintln!(
-            "mci-agent doctor: MCI_DB_KEY_HEX not set and no dev.key found at\n  \
-             ~/Library/Application Support/MCI/dev.key\n\
-             Without the key the brain cannot be opened at all."
-        );
-        return Err(10);
-    };
+    let key_hex = resolve_key_for_command("doctor")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent doctor: MCI_DB_KEY_HEX must be 64 hex characters.");
+        eprintln!("mci-agent doctor: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -1684,12 +1722,9 @@ fn run_doctor_cmd(db_path: &std::path::Path) -> Result<(), u8> {
 /// note and everything else still runs, because entities, episodes and
 /// identities need no model.
 fn run_enrich_cmd(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8> {
-    let Some(key_hex) = resolve_key_hex() else {
-        eprintln!("mci-agent enrich: MCI_DB_KEY_HEX not set and no dev.key found.");
-        return Err(10);
-    };
+    let key_hex = resolve_key_for_command("enrich")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent enrich: MCI_DB_KEY_HEX must be 64 hex characters.");
+        eprintln!("mci-agent enrich: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -1798,12 +1833,9 @@ fn run_brief_cmd(
         return Err(21);
     }
 
-    let Some(key_hex) = resolve_key_hex() else {
-        eprintln!("mci-agent brief: MCI_DB_KEY_HEX not set and no dev.key found.");
-        return Err(10);
-    };
+    let key_hex = resolve_key_for_command("brief")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent brief: MCI_DB_KEY_HEX must be 64 hex characters.");
+        eprintln!("mci-agent brief: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -1902,12 +1934,9 @@ async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
         SyncOutcome,
     };
 
-    let Some(key_hex) = resolve_key_hex() else {
-        eprintln!("mci-agent mcp-sync: MCI_DB_KEY_HEX not set and no dev.key found.");
-        return Err(10);
-    };
+    let key_hex = resolve_key_for_command("mcp-sync")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent mcp-sync: MCI_DB_KEY_HEX must be 64 hex characters.");
+        eprintln!("mci-agent mcp-sync: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -1973,15 +2002,9 @@ async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
 /// vectors, because a zero vector matches every query at cosine 0 and
 /// would poison recall in a way that looks like a ranking bug.
 fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8> {
-    let Some(key_hex) = resolve_key_hex() else {
-        eprintln!(
-            "mci-agent embed-backfill: MCI_DB_KEY_HEX not set and no dev.key found. \
-             See docs/claude-code-mcp-setup.md."
-        );
-        return Err(10);
-    };
+    let key_hex = resolve_key_for_command("embed-backfill")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent embed-backfill: MCI_DB_KEY_HEX must be 64 hex characters.");
+        eprintln!("mci-agent embed-backfill: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);

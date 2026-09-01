@@ -1,8 +1,46 @@
 // SPDX-License-Identifier: TBD-private
 import XCTest
+import Security
 @testable import HippocampusKit
 
 final class KeyStoreTests: XCTestCase {
+
+    private final class FakeKeychainClient: KeychainClient, @unchecked Sendable {
+        var readResult: KeychainReadResult = .failure(errSecItemNotFound)
+        var addStatus: OSStatus = errSecSuccess
+        private(set) var addedSecrets: [Data] = []
+        private(set) var readQueries: [KeychainItemQuery] = []
+        private(set) var trustedPaths: [[String]] = []
+
+        func readGenericPassword(query: KeychainItemQuery) -> KeychainReadResult {
+            readQueries.append(query)
+            readResult
+        }
+
+        func addGenericPassword(
+            query: KeychainItemQuery,
+            data: Data,
+            trustedApplicationPaths: [String]
+        ) -> OSStatus {
+            addedSecrets.append(data)
+            trustedPaths.append(trustedApplicationPaths)
+            return addStatus
+        }
+    }
+
+    private static let trustedPaths = [
+        "/Applications/Hippocampus.app/Contents/MacOS/Hippocampus",
+        "/Applications/Hippocampus.app/Contents/MacOS/MCICaptureHelper",
+        "/Applications/Hippocampus.app/Contents/MacOS/mci-agent",
+        "/Applications/Hippocampus.app/Contents/MacOS/recall-ui",
+    ]
+
+    private func makeStore(client: FakeKeychainClient) -> KeychainKeyStore {
+        KeychainKeyStore(
+            client: client,
+            trustedApplicationPaths: { Self.trustedPaths }
+        )
+    }
 
     func test_default_database_key_reference_names_keychain_item_not_dev_key() {
         let reference = KeychainKeyStore.defaultDatabaseKey.reference
@@ -31,5 +69,94 @@ final class KeyStoreTests: XCTestCase {
 
         XCTAssertEqual(store.storageKind, .developmentFile)
         XCTAssertEqual(store.path.path, path.path)
+    }
+
+    func test_keychain_read_distinguishes_not_found_from_access_denied() {
+        let client = FakeKeychainClient()
+        client.readResult = .failure(errSecAuthFailed)
+        let store = makeStore(client: client)
+
+        XCTAssertThrowsError(try store.readKey()) { error in
+            guard case KeyStoreError.accessDenied = error else {
+                return XCTFail("expected accessDenied, got \(error)")
+            }
+        }
+    }
+
+    func test_keychain_read_distinguishes_locked_or_noninteractive_state() {
+        let client = FakeKeychainClient()
+        client.readResult = .failure(errSecInteractionNotAllowed)
+        let store = makeStore(client: client)
+
+        XCTAssertThrowsError(try store.readKey()) { error in
+            guard case KeyStoreError.interactionNotAllowed = error else {
+                return XCTFail("expected interactionNotAllowed, got \(error)")
+            }
+        }
+    }
+
+    func test_keychain_write_never_updates_a_duplicate_item() {
+        let client = FakeKeychainClient()
+        client.addStatus = errSecDuplicateItem
+        let store = makeStore(client: client)
+
+        XCTAssertThrowsError(try store.writeKey(String(repeating: "ab", count: 32))) { error in
+            guard case KeyStoreError.keyAlreadyExists = error else {
+                return XCTFail("expected keyAlreadyExists, got \(error)")
+            }
+        }
+        XCTAssertEqual(client.addedSecrets.count, 1)
+    }
+
+    func test_keychain_queries_pin_file_based_non_synchronizable_domain() {
+        let client = FakeKeychainClient()
+        client.readResult = .success(Data(String(repeating: "ab", count: 32).utf8))
+        let store = makeStore(client: client)
+
+        XCTAssertNoThrow(try store.readKey())
+        XCTAssertEqual(
+            client.readQueries,
+            [KeychainItemQuery(
+                service: "ai.hippocampus.brain",
+                account: "database-key-v1",
+                useDataProtectionKeychain: false,
+                synchronizable: false
+            )]
+        )
+    }
+
+    func test_keychain_write_attaches_exact_bundled_executable_acl() throws {
+        let client = FakeKeychainClient()
+        let store = makeStore(client: client)
+
+        try store.writeKey(String(repeating: "cd", count: 32))
+
+        XCTAssertEqual(client.trustedPaths, [Self.trustedPaths])
+    }
+
+    func test_validation_rejects_unicode_hex_digits() {
+        let fullWidthHex = String(repeating: "Ａ", count: 64)
+
+        XCTAssertThrowsError(try KeychainKeyStore.validate(fullWidthHex)) { error in
+            XCTAssertEqual(error as? KeyStoreError, .invalidKeyLength)
+        }
+    }
+
+    func test_keychain_read_rejects_whitespace_wrapped_key() {
+        let client = FakeKeychainClient()
+        client.readResult = .success(Data((String(repeating: "ab", count: 32) + "\n").utf8))
+        let store = makeStore(client: client)
+
+        XCTAssertThrowsError(try store.readKey()) { error in
+            XCTAssertEqual(error as? KeyStoreError, .invalidKeyLength)
+        }
+    }
+
+    func test_generation_fails_when_secure_random_source_fails() {
+        XCTAssertThrowsError(
+            try FileKeyStore.generateHexKey(randomCopy: { _, _ in errSecNotAvailable })
+        ) { error in
+            XCTAssertEqual(error as? KeyStoreError, .keyGenerationFailure(errSecNotAvailable))
+        }
     }
 }

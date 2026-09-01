@@ -33,6 +33,7 @@ DIST_DIR="$PKG_DIR/dist"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
 STATUS_SRC="$REPO_ROOT/docs/STATUS.md"
 MODELS_MANIFEST_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
+KEYCHAIN_CONTRACT_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/keychain-sharing-contract.json"
 STATUS_AUDIT_MAX_COMMITS=3
 
 fatal() {
@@ -279,6 +280,12 @@ if [[ ! -f "$MODELS_MANIFEST_SRC" ]]; then
         "Refusing to guess model inputs without the committed manifest."
 fi
 
+if [[ ! -f "$KEYCHAIN_CONTRACT_SRC" ]]; then
+    fatal \
+        "Keychain sharing contract missing at $KEYCHAIN_CONTRACT_SRC" \
+        "Restore the committed file-Keychain ACL contract before building."
+fi
+
 # Clean and create structure
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES" "$FRAMEWORKS"
@@ -298,6 +305,7 @@ if [[ -f "$KNOWN_SAFE" ]]; then
 fi
 cp "$CHANGELOG_SRC" "$RESOURCES/CHANGELOG.md"
 cp "$MODELS_MANIFEST_SRC" "$RESOURCES/models.json"
+cp "$KEYCHAIN_CONTRACT_SRC" "$RESOURCES/keychain-sharing-contract.json"
 echo "  CHANGELOG.md bundled OK → $RESOURCES/CHANGELOG.md"
 echo "  models.json bundled OK → $RESOURCES/models.json"
 

@@ -151,9 +151,30 @@ final class ProcessSupervisorTests: XCTestCase {
         )
 
         XCTAssertNil(plan.agentEnvironment["MCI_DB_KEY_HEX"])
+        XCTAssertNil(plan.helperEnvironment["MCI_DB_KEY_HEX"])
+        XCTAssertEqual(plan.helperEnvironment["MCI_DB_KEYCHAIN_SERVICE"], KeychainKeyStore.defaultService)
+        XCTAssertEqual(plan.helperEnvironment["MCI_DB_KEYCHAIN_ACCOUNT"], KeychainKeyStore.defaultAccount)
+        XCTAssertEqual(plan.helperEnvironment["MCI_DB_KEYCHAIN_STORAGE_MODEL"], KeychainKeyStore.storageModel)
         XCTAssertEqual(plan.agentEnvironment["MCI_DB_KEYCHAIN_SERVICE"], KeychainKeyStore.defaultService)
         XCTAssertEqual(plan.agentEnvironment["MCI_DB_KEYCHAIN_ACCOUNT"], KeychainKeyStore.defaultAccount)
+        XCTAssertEqual(plan.agentEnvironment["MCI_DB_KEYCHAIN_STORAGE_MODEL"], KeychainKeyStore.storageModel)
         XCTAssertEqual(plan.agentEnvironment["MCI_CRASH_REPORT_OPTED_IN"], "1")
+    }
+
+    func test_explicit_capture_off_strips_legacy_environment_gate() {
+        let plan = ProcessSupervisorLaunchPlan.make(
+            helperURL: URL(fileURLWithPath: "/bin/cat"),
+            agentURL: URL(fileURLWithPath: "/bin/cat"),
+            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey,
+            knownSafeAppsURL: nil,
+            captureEnabled: false,
+            crashReportOptedIn: false,
+            baseEnvironment: ["HIPPOCAMPUS_ENABLE_V2P1": "1"]
+        )
+
+        XCTAssertNil(plan.helperEnvironment["HIPPOCAMPUS_ENABLE_V2P1"])
+        XCTAssertFalse(plan.helperArguments.contains("--capture"))
     }
 
     // MARK: - Pause
@@ -211,7 +232,7 @@ final class ProcessSupervisorTests: XCTestCase {
 
         let keyPath = tmpDir.appendingPathComponent("dev.key")
         let store = FileKeyStore(path: keyPath)
-        let hex = FileKeyStore.generateHexKey()
+        let hex = try FileKeyStore.generateHexKey()
 
         try store.writeKey(hex)
 
@@ -266,42 +287,16 @@ final class ProcessSupervisorTests: XCTestCase {
 
     // MARK: - Health Snapshot
 
-    func test_health_snapshot_display_with_brain_count() {
-        let snapshot = HealthSnapshot(
-            framesDelivered: 100,
-            framesSuppressed: 10,
-            brainEventCount: 42,
-            lastCaptureTs: Date().addingTimeInterval(-180),
-            lastUpdated: Date()
-        )
-        let text = snapshot.displayText
-        XCTAssertTrue(text.contains("42 events"), "Brain count preferred: \(text)")
-    }
-
-    func test_health_snapshot_display_falls_back_to_frames() {
+    func test_health_snapshot_display_reports_processed_frames() {
         let snapshot = HealthSnapshot(
             framesDelivered: 77,
             framesSuppressed: 5,
-            brainEventCount: nil,
             lastCaptureTs: Date().addingTimeInterval(-60),
             lastUpdated: Date()
         )
         let text = snapshot.displayText
-        XCTAssertTrue(text.contains("77 events"), "Fallback to frames_delivered: \(text)")
-    }
-
-    func test_health_snapshot_with_brain_event_count() {
-        let snapshot = HealthSnapshot(
-            framesDelivered: 100,
-            framesSuppressed: 10,
-            brainEventCount: nil,
-            lastCaptureTs: nil,
-            lastUpdated: Date()
-        )
-        let updated = snapshot.withBrainEventCount(55)
-        XCTAssertEqual(updated.brainEventCount, 55)
-        XCTAssertEqual(updated.eventCount, 55)
-        XCTAssertEqual(updated.framesDelivered, 100)
+        XCTAssertTrue(text.contains("77 frames processed"), "Frames delivered: \(text)")
+        XCTAssertFalse(text.contains("events captured"), "Got: \(text)")
     }
 
     // MARK: - Onboarding detection

@@ -91,6 +91,7 @@ getrandom   = "0.3.4"   # key generation for `init`; same crate mci-core uses
 # family already on the lockfile from P3.3).
 [target.'cfg(target_os = "macos")'.dependencies]
 mci-embed-coreml = { path = "../../adapters/macos/mci-embed-coreml" }
+mci-keychain = { path = "../../adapters/macos/mci-keychain" }
 # ADR-0033 (Path A) / ADR-0028 — macOS Core ML bridge: generic
 # CoreMLModel wrapper + the Qwen3-1.7B brief-author shim (and, V2-P5+,
 # the GLiNER NER shim). macOS-only: the crate compiles to an empty lib

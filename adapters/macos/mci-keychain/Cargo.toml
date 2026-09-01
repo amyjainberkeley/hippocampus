@@ -1,0 +1,16 @@
+[package]
+name = "mci-keychain"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Native macOS file-Keychain query and SecAccess ACL adapter."
+
+[lints]
+workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+security-framework-sys = { version = "=2.15.0", default-features = false, features = ["OSX_10_15"] }

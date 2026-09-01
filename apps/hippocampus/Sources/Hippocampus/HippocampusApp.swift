@@ -88,6 +88,7 @@ struct HippocampusApp: App {
             store: preferencesStore,
             loginItemVM: loginItemVM,
             updater: updater,
+            captureApplier: supervisor,
             dbPath: supervisor.dbPath.path,
             onOpenRecallTab: { tab in
                 Task { @MainActor in

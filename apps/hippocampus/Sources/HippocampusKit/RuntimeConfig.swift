@@ -4,8 +4,8 @@ import Foundation
 /// Reads/writes `~/.config/hippocampus/runtime.toml`.
 ///
 /// CSO: mode 0644 — non-sensitive settings (capture gate and crash-report opt-in).
-/// Supervisor reads on next spawn; no live reload to avoid mid-session
-/// env-var dance.
+/// Capture changes are enforced by the supervisor through a child restart;
+/// this value itself remains a simple atomic on-disk preference.
 public struct RuntimeConfig: Sendable {
     public let path: URL
 

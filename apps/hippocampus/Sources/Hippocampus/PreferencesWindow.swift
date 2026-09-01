@@ -92,14 +92,13 @@ struct PreferencesRootView: View {
     @ObservedObject var store: PreferencesStore
     @Binding var section: PreferencesSection
     @ObservedObject var loginItemVM: LoginItemViewModel
+    @ObservedObject var captureController: CapturePreferenceController
     let updater: SparkleUpdaterService
     let dbPath: String
     let onOpenRecallTab: (String) -> Void
     let onOpenDenylistEditor: () -> Void
     let onOpenAllowlistEditor: () -> Void
     let onExportDebugBundle: () -> Void
-    private let runtimeConfig = RuntimeConfig()
-    @State private var captureEnabled = RuntimeConfig().captureEnabled
 
     var body: some View {
         VStack(spacing: 0) {
@@ -157,31 +156,25 @@ struct PreferencesRootView: View {
         VStack(alignment: .leading, spacing: PreferencesStyle.sectionSpacing) {
             sectionHeader("Capture")
 
-            HStack {
-                Text("V2-P1 recording engine")
-                Spacer()
-                Text(v2p1Status)
-                    .font(PreferencesStyle.captionFont)
-                    .foregroundStyle(.secondary)
-            }
-            Text("Controlled by the HIPPOCAMPUS_ENABLE_V2P1 environment variable (PR #101).")
-                .font(PreferencesStyle.captionFont)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
             Toggle("Capture screen activity", isOn: Binding(
-                get: { captureEnabled },
+                get: { captureController.captureEnabled },
                 set: { on in
-                    captureEnabled = on
-                    try? runtimeConfig.setCaptureEnabled(on)
+                    Task { @MainActor in
+                        await captureController.setCaptureEnabled(on)
+                    }
                 }
             ))
-            Text(captureEnabled
-                 ? "On means the next supervisor start may request screen access."
-                 : "Off means no screen access. The helper starts without capture.")
+            .disabled(captureController.isApplying)
+            Text(captureController.captureEnabled
+                 ? "Capture is enabled. While Hippocampus is running, the helper uses screen access."
+                 : "Off means no screen stream is initialized.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
+            if let errorMessage = captureController.errorMessage {
+                Text(errorMessage)
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.red)
+            }
 
             Divider()
 
@@ -198,12 +191,6 @@ struct PreferencesRootView: View {
             get: { store.deepHookPlugins[name] ?? false },
             set: { store.deepHookPlugins[name] = $0 }
         )
-    }
-
-    private var v2p1Status: String {
-        (ProcessInfo.processInfo.environment["HIPPOCAMPUS_ENABLE_V2P1"] == "1")
-            ? "Enabled"
-            : "Disabled (default)"
     }
 
     // MARK: Privacy
@@ -366,6 +353,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     private var store: PreferencesStore?
     private var loginItemVM: LoginItemViewModel?
     private var updater: SparkleUpdaterService?
+    private var captureController: CapturePreferenceController?
     private var dbPath: String = "~/Library/Application Support/Hippocampus/mci.sqlite"
     private var onOpenRecallTab: (String) -> Void = { _ in }
     private var onOpenDenylistEditor: () -> Void = {}
@@ -379,6 +367,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         store: PreferencesStore,
         loginItemVM: LoginItemViewModel,
         updater: SparkleUpdaterService,
+        captureApplier: any CaptureSettingApplying,
         dbPath: String,
         onOpenRecallTab: @escaping (String) -> Void,
         onOpenDenylistEditor: @escaping () -> Void,
@@ -388,6 +377,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         self.store = store
         self.loginItemVM = loginItemVM
         self.updater = updater
+        self.captureController = CapturePreferenceController(applier: captureApplier)
         self.dbPath = dbPath
         self.onOpenRecallTab = onOpenRecallTab
         self.onOpenDenylistEditor = onOpenDenylistEditor
@@ -397,7 +387,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
 
     /// Open (or focus) the preferences window.
     func show() {
-        guard let store, let loginItemVM, let updater else {
+        guard let store, let loginItemVM, let updater, let captureController else {
             // Not configured yet — silently no-op. The app's first ⌘,
             // arrives after `configure` from AppDelegate, so this only
             // fires in test / uninitialized contexts.
@@ -440,6 +430,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         rebuildContent(
             store: store,
             loginItemVM: loginItemVM,
+            captureController: captureController,
             updater: updater,
             panel: panel
         )
@@ -452,10 +443,11 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     /// Programmatically switch section — used by the toolbar action.
     private func setSection(_ new: PreferencesSection) {
         section = new
-        guard let store, let loginItemVM, let updater, let panel else { return }
+        guard let store, let loginItemVM, let updater, let captureController, let panel else { return }
         rebuildContent(
             store: store,
             loginItemVM: loginItemVM,
+            captureController: captureController,
             updater: updater,
             panel: panel
         )
@@ -464,6 +456,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     private func rebuildContent(
         store: PreferencesStore,
         loginItemVM: LoginItemViewModel,
+        captureController: CapturePreferenceController,
         updater: SparkleUpdaterService,
         panel: NSPanel
     ) {
@@ -475,6 +468,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
             store: store,
             section: sectionBinding,
             loginItemVM: loginItemVM,
+            captureController: captureController,
             updater: updater,
             dbPath: dbPath,
             onOpenRecallTab: onOpenRecallTab,
