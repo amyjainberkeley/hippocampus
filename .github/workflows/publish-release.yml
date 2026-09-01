@@ -50,9 +50,15 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           mkdir -p inspected public
-          gh release download "$TAG" --dir inspected +            --pattern 'Hippocampus-*.dmg' +            --pattern 'Hippocampus-*.dmg.sha256' +            --pattern 'appcast.xml'
+          gh release download "$TAG" --dir inspected \
+            --pattern 'Hippocampus-*.dmg' \
+            --pattern 'Hippocampus-*.dmg.sha256' \
+            --pattern 'appcast.xml'
           DMG="inspected/Hippocampus-${TAG#v}.dmg"
-          scripts/verify-release-identity.sh --phase staged +            --tag "$TAG" --dmg "$DMG" --appcast inspected/appcast.xml
+          scripts/verify-release-identity.sh --phase staged \
+            --tag "$TAG" \
+            --dmg "$DMG" \
+            --appcast inspected/appcast.xml
           codesign --verify --strict --verbose=2 "$DMG"
           xcrun stapler validate "$DMG"
           spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"

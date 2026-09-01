@@ -94,6 +94,8 @@ reject_pattern "$RELEASE" 'Deploy appcast|deploy-pages|git push origin gh-pages|
     'tag workflow cannot publish artifacts before owner inspection'
 require_pattern "$RELEASE" 'draft:[[:space:]]*true' \
     'tag workflow creates a draft release'
+reject_pattern "$RELEASE" '[+][[:space:]]{2,}' \
+    'tag workflow shell commands contain no patch-marker argument corruption'
 
 require_pattern "$PUBLISH" 'workflow_dispatch:' \
     'publication is an explicit owner-triggered workflow'
@@ -111,6 +113,8 @@ require_order "$PUBLISH" 'gh release edit.*--draft=false' 'actions/deploy-pages@
     'publication promotes the release before exposing the appcast'
 reject_pattern "$PUBLISH" 'hippocampus-appcast|APPCAST_REPO_TOKEN|git push' \
     'publication has no sibling-repository credential dependency'
+reject_pattern "$PUBLISH" '[+][[:space:]]{2,}' \
+    'publication shell commands contain no patch-marker argument corruption'
 
 require_pattern "$INFO_PLIST" 'https://amyjainberkeley\.github\.io/hippocampus/appcast\.xml' \
     'shipped Sparkle feed matches the publication target'
