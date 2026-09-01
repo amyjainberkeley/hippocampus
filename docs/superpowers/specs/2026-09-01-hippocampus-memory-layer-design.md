@@ -48,6 +48,8 @@ Hippocampus uses seven explicit layers:
 
 Raw evidence is canonical. Derived memory never overwrites evidence. Contradictions coexist. Human corrections append a superseding claim. Deleting evidence removes blobs and causes every dependent derivative to be retracted or rebuilt.
 
+Episodes have a deterministic measured tier before any model participates: application, site, start/end, dwell, input volume, transition reason, coverage gap, and evidence pointers. Model-authored labels and interpretations live only in the versioned inferred tier. The same evidence window must always compile to the same measured episode.
+
 ## Capture And Condensation
 
 - Capture is explicit and visible. `capture_enabled = false` prevents `--capture` from being passed and prevents `SCStream` construction.
@@ -146,5 +148,5 @@ Lexical and production hybrid arms are reported separately. A missing model or p
 - Native design and navigation follow Apple's Liquid Glass overview, adoption guide, and sidebar HIG: https://developer.apple.com/documentation/TechnologyOverviews/liquid-glass, https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass, https://developer.apple.com/design/human-interface-guidelines/sidebars
 - Capture uses Apple's ScreenCaptureKit contract and is constrained by multimodal routing and memory-safety research: https://developer.apple.com/documentation/screencapturekit, https://arxiv.org/abs/2606.07402, https://arxiv.org/abs/2603.11768
 - Memory hierarchy and retrieval planning are supported by MemoryOS, LongMemEval-V2, and temporal graph memory work: https://arxiv.org/abs/2506.06326, https://arxiv.org/abs/2605.12493, https://arxiv.org/abs/2501.13956
+- Deterministic activity compilation, selective screenshot retention, and lifecycle-level evaluation are supported by Activity Frames, MementoGUI, and WorldMemArena: https://arxiv.org/abs/2608.05784, https://arxiv.org/abs/2605.18652, https://arxiv.org/abs/2605.29341
 - Product interaction choices are triangulated against HeyClicky's official product and changelog, screenpipe's open capture platform, and Obsidian's local ownership model: https://www.hiclicky.com/, https://www.heyclicky.com/changelog, https://screenpipe.com/, https://obsidian.md/privacy
-
