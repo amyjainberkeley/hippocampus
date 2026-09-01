@@ -1,9 +1,9 @@
 # adapters/macos/MCICaptureHelper/
 
-The Swift capture helper — a separately signed process (ADR-0007) that
+The Swift capture helper is a separately signed process (ADR-0007) that
 owns the ScreenCaptureKit lifecycle, applies the ADR-0013 sensitive-
-surface suppression cascade BEFORE any frame or metadata crosses IPC,
-and ships HEVC keyframes via VideoToolbox.
+surface suppression cascade before any frame or metadata crosses IPC,
+and retains only condensed encrypted JPEG evidence after OCR privacy approval.
 
 ## Contents
 
@@ -28,8 +28,8 @@ and ships HEVC keyframes via VideoToolbox.
 
 ## When to edit here
 
-Any change to SCStream wiring, the sensitive-surface cascade, the
-VideoToolbox HEVC encoder, or IPC serialization on the Swift side.
+Any change to SCStream wiring, the sensitive-surface cascade, post-OCR
+evidence retention, or IPC serialization on the Swift side.
 Cascade / capture-scope changes are CSO-gated. If the change is
 platform-independent (dedupe, wire schema shape), it belongs in
 `../../../core/` — do NOT duplicate it here.

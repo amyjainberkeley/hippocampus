@@ -104,6 +104,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private let denylist: Denylist
     private let policy: StreamPolicy
     private let sampleQueue: DispatchQueue
+    private let captureDispatcher = OrderedCaptureDispatcher(
+        capacity: VisionOCRWorker.defaultCapacity
+    )
     /// ADR-0013 §2 probe, pre-fed in the callback before the cascade
     /// runs on the same frame. `nil` is permitted (legacy
     /// construction / headless tests that never need §2 to fire);
@@ -195,6 +198,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     private let lock = NSLock()
     private var priorDHash: DHash?
+    private var captureOrdinal: UInt64 = 0
     private var stream: SCStream?
 
     /// ADR-0031 §5.3 — the focus generation the currently-installed
@@ -469,6 +473,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let prior = priorDHash
         priorDHash = next
         return prior
+    }
+
+    private func allocateCaptureOrdinal() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        captureOrdinal &+= 1
+        return captureOrdinal
     }
 
     /// Read the currently-installed focus generation. Lock-guarded.
@@ -983,6 +993,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         }
 
         guard let sample = Self.extractSynchronously(from: sampleBuffer) else { return }
+        let callbackOrdinal = allocateCaptureOrdinal()
 
         // ADR-0013 §2 pre-feed: stamp the latest blacked-region
         // verdict from the synchronously-extracted 9×8 luminance grid
@@ -1105,6 +1116,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             focusedSnapshot: focusedSnapshot
         )
         let nowUs = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
+        let evidenceCandidate = focusedSnapshot?.focused.map { focused in
+            KeyframeEvidenceCandidate(
+                captureOrdinal: callbackOrdinal,
+                focusedWindowId: UInt32(focused.windowId),
+                dhash: sample.dhash,
+                monotonicNanoseconds: DispatchTime.now().uptimeNanoseconds
+            )
+        }
 
         // PR-2: retain the pixel buffer (⇒ its IOSurface) so a future
         // encoder (PR-3) can read it after the callback returns. The
@@ -1130,15 +1149,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // `nil` when the sample carries no pixel buffer; the OCR path
         // is then skipped (no OCREvent ever reaches the wire).
         let ocrInput: OCREngineInput?
-        // DOGFOOD #3 — wrap the same retained `CVPixelBuffer` in an
-        // `EncoderInput` so the cascade's `.allow` branch can hand it
-        // to `VideoToolboxHEVCEncoder`. `@unchecked Sendable` for the
-        // same reason `OCREngineInput` is — single-owner-while-in-
-        // flight; the encoder runs to completion before the pipeline's
-        // `defer { lease.release() }` fires, so the `CVPixelBuffer`
-        // outlives the encoder call without a second retain. `nil`
-        // preserves the pre-DOGFOOD#3 OS-free behaviour (the encoder
-        // no-ops and the pipeline still encodes-or-suppresses).
+        // Preserve the encoder seam for pipeline ordering tests, but
+        // production wires the no-op encoder. The post-OCR coordinator
+        // is the only visual persistence path.
         let encoderInput: EncoderInput?
         if let pb = CMSampleBufferGetImageBuffer(sampleBuffer) {
             // UNVERIFIED — needs live macOS; do not claim working.
@@ -1162,45 +1175,47 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // Only `Sendable` values are captured — NOT the sample buffer.
         let pipeline = self.pipeline
         let ocrEmitter = self.ocrPostAllowEmitter
-        Task.detached {
-            // The single sink for a captured frame is the cascade-gated
-            // pipeline. On `.allow` the pipeline hands `encoderInput`
-            // to whichever `FrameEncoder` is wired:
-            //   - default / no `--capture` build: `DeferredVideoToolboxEncoder`
-            //     (no-op, stores nothing). Amendment 1 §4 binding.
-            //   - `--capture` dev path (DOGFOOD #3): `VideoToolboxHEVCEncoder`
-            //     produces an HEVC IDR and hands it to an in-memory
-            //     `EncodedSampleSink` (not persisted to disk; the next
-            //     PR wires the OCR consumer).
-            // A `.suppress` decision emits a tombstone and never reaches
-            // encode — Amendment 1 §3(a)/(c) preserved by construction.
-            let outcome = try? await pipeline.process(
-                frame: frame,
-                context: context,
-                nowUs: nowUs,
-                lease: lease,
-                encoderInput: encoderInput
-            )
-            // ADR-0016 P3.6 — cascade-twice. On `.encoded` (pixel-time
-            // cascade returned `.allow`), submit to OCR + run §6
-            // re-cascade + emit OCREvent or tombstone-6. The emitter
-            // owns ALL of that; the callback's only job is to dispatch.
-            //
-            // Privacy invariant (ADR-0016 §4.2): there is NO call site
-            // that emits `OCREvent` other than `ocrEmitter` here, and
-            // that call is structurally gated by the pixel-time
-            // cascade's `.encoded` outcome.
-            if case .encoded = outcome,
-               let emitter = ocrEmitter,
-               let input = ocrInput
-            {
-                await emitter.processAfterAllow(
-                    tsUs: nowUs,
+        captureDispatcher.submit(
+            captureOrdinal: callbackOrdinal,
+            operation: {
+                // The single sink for a captured frame is the cascade-gated
+                // pipeline. Production always hands `encoderInput` to the
+                // no-op encoder; only the twice-cleared OCR branch below can
+                // ask the retention coordinator to persist visual evidence.
+                // A `.suppress` decision emits a tombstone and never reaches
+                // encode — Amendment 1 §3(a)/(c) preserved by construction.
+                let outcome = try? await pipeline.process(
+                    frame: frame,
                     context: context,
-                    input: input
+                    nowUs: nowUs,
+                    lease: lease,
+                    encoderInput: encoderInput
                 )
+                // ADR-0016 P3.6 — cascade-twice. On `.encoded` (pixel-time
+                // cascade returned `.allow`), submit to OCR + run §6
+                // re-cascade + emit OCREvent or tombstone-6. The emitter
+                // owns ALL of that; the callback's only job is to dispatch.
+                //
+                // Privacy invariant (ADR-0016 §4.2): there is NO call site
+                // that emits `OCREvent` other than `ocrEmitter` here, and
+                // that call is structurally gated by the pixel-time
+                // cascade's `.encoded` outcome.
+                if case .encoded = outcome,
+                   let emitter = ocrEmitter,
+                   let input = ocrInput
+                {
+                    await emitter.processAfterAllow(
+                        tsUs: nowUs,
+                        context: context,
+                        input: input,
+                        evidenceCandidate: evidenceCandidate
+                    )
+                }
+            },
+            onDrop: {
+                lease.release()
             }
-        }
+        )
     }
 
     // MARK: - SCStreamDelegate

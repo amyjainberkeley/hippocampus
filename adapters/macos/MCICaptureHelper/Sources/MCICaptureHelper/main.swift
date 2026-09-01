@@ -434,30 +434,31 @@ if captureOptions.captureEnabled {
     let ocrEngine: OCREngine = VisionOCRRunner()
     let ocrWorker = VisionOCRWorker(engine: ocrEngine)
 
-    // P3.6.5: encrypted keyframe blob writer. Resolve the same file-Keychain
-    // service/account as the app and agent. Capture cannot continue without
-    // that key: silently omitting encrypted evidence would make the visible
-    // capture state false and create a second custody contract.
-    let blobKeyMaterial: [UInt8]
-    let blobWriter: KeyframeBlobWriter?
+    // Resolve the shared database key once, then keep screenshot policy,
+    // encryption, and durable publication behind one serialized coordinator.
+    let keyframeRetainer: KeyframeRetentionCoordinator
     do {
         let reference = KeychainDatabaseKeyReference.from(
             environment: ProcessInfo.processInfo.environment
         )
         let keyBytes = try KeychainDatabaseKeyResolver().resolveBytes(reference: reference)
-        blobKeyMaterial = keyBytes
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
         let blobDir = appSupport
             .appendingPathComponent("MCI")
             .appendingPathComponent("blobs")
-        try? FileManager.default.createDirectory(
+        try FileManager.default.createDirectory(
             at: blobDir, withIntermediateDirectories: true
         )
-        let writer = KeyframeBlobWriter(blobDir: blobDir)
-        await writer.start()
-        blobWriter = writer
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: blobDir.path
+        )
+        keyframeRetainer = KeyframeRetentionCoordinator(
+            blobDirectory: blobDir,
+            keyMaterial: Data(keyBytes)
+        )
     } catch {
         FileHandle.standardError.write(
             ("mci-capture-helper: database key unavailable from Keychain; "
@@ -473,8 +474,7 @@ if captureOptions.captureEnabled {
         sink: sharedSink,
         sequence: sharedSequence,
         counters: loop.counters,
-        blobWriter: blobWriter,
-        blobKeyMaterial: blobKeyMaterial
+        keyframeRetainer: keyframeRetainer
     )
     // Start OCR worker consumer loop BEFORE the SCStream session so
     // submissions from the first `.allow` frame drain immediately.
@@ -482,32 +482,10 @@ if captureOptions.captureEnabled {
     // binding (process-lifetime, SCSTREAM-LIVE-001 discipline).
     await ocrWorker.start()
 
-    // DOGFOOD #3 — `VideoToolboxHEVCEncoder` wired ONLY inside the
-    // explicit `--capture` branch. The encoded `CMSampleBuffer`s flow into
-    // an in-memory `InMemoryEncodedSampleQueue` (NOT persisted to
-    // disk — that wiring is gated by ADR-0013 Amendment 1 §4 + the
-    // §7 corpus). The next PR (DOGFOOD #4) plugs the OCR worker into
-    // this same queue. Outside the `--capture` branch (the capture-off
-    // path) `DeferredVideoToolboxEncoder` is still the wiring
-    // and no `VTCompressionSession` is ever constructed.
-    //
-    // Amendment 1 §3 audit:
-    //   (a) cascade-before-encode — encoder is reached only from
-    //       `SCStreamPipeline.process(...)`'s `.allow` branch.
-    //   (b) fail-closed preserved — encoder additions widen no
-    //       `.allow` path.
-    //   (c) no stored/emitted suppressed event — `.suppress` returns
-    //       before the encode call site; the encoder is never reached.
-    //   (d) no IOSurface pool-stall — the pipeline's top-level
-    //       `defer { lease.release() }` releases the surface on every
-    //       exit including a throwing encoder; the encoder takes its
-    //       own bounded session-internal retain on the pixel buffer.
-    //
-    // Amendment 1 §4 — `CaptureLaunchOptions.captureEnabled` is the
-    // sole gate; this code path is unreachable until the operator
-    // passes `--capture` explicitly from the persisted app preference.
-    let encodedSampleQueue = InMemoryEncodedSampleQueue()
-    let hevcEncoder = VideoToolboxHEVCEncoder(sink: encodedSampleQueue)
+    // The pre-OCR HEVC queue had no consumer and retained pixels before the
+    // OCR privacy gate. Post-OCR condensed encrypted JPEG is now the only
+    // visual persistence path, so the pipeline encoder is deliberately no-op.
+    let noOpEncoder = NoOpFrameEncoder()
 
     // STEP-2-FINDING-005 fix — pass `loop.counters` to the pipeline so
     // pipeline writes (`recordDelivered` / `recordSuppressed` /
@@ -530,7 +508,7 @@ if captureOptions.captureEnabled {
     let captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
-            encoder: hevcEncoder,
+            encoder: noOpEncoder,
             counters: loop.counters,
             sequence: sharedSequence,
             sink: sharedSink,
