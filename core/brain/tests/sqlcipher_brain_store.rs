@@ -125,12 +125,10 @@ fn new_creates_encrypted_db_and_runs_migration() {
             |r| r.get(0),
         )
         .expect("brain_schema_version stamp");
-    // V2-P3 migration 0004 stamps brain_schema_version = '4'; V2-P6
-    // migration 0005 (entity_identities) bumps it to '5'. The
-    // intermediate '2' was never published (briefs uses a separate
-    // briefs_schema_version key) — the brain main-schema version
-    // jumped 1 → 3 at V2-P2, 3 → 4 at V2-P3, 4 → 5 at V2-P6.
-    assert_eq!(v, "5");
+    // V2-P3 migration 0004 adds the graph, V2-P6 migration 0005 adds
+    // entity identities, and Task 5 migration 0006 adds governed memory.
+    // Briefs retain their separate version key.
+    assert_eq!(v, "6");
 }
 
 // ---------------------------------------------------------------------------

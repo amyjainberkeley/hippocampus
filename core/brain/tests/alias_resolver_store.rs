@@ -127,7 +127,7 @@ fn entity_identities_count(path: &Path, key: &DbKey) -> i64 {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Migration 0005 creates the table + indexes and bumps the version
+// 1. Migration 0005 creates the table + indexes; later migrations preserve it
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -171,7 +171,7 @@ fn migration_0005_creates_entity_identities() {
             |r| r.get(0),
         )
         .expect("schema version");
-    assert_eq!(version, "5");
+    assert_eq!(version, "6");
 }
 
 // ---------------------------------------------------------------------------

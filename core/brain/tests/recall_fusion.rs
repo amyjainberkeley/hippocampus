@@ -28,8 +28,9 @@ use mci_brain::extraction::tier2::KIND_PERSON_NAME;
 use mci_brain::graph::{Entity, EntityIdentity, EntityMention, EpisodeEdge};
 use mci_brain::stubs::FixedDimEmbedder;
 use mci_brain::{
-    BrainStore, Embedder, Event, EventId, FusionWeights, HybridRetriever, IdentityId,
-    RetrievalQuery, Retriever, SqlCipherBrainStore,
+    BrainStore, Embedder, Event, EventId, EvidenceSufficiencyPolicy, FusionWeights,
+    HybridRetriever, IdentityId, RetrievalQuery, Retriever, SqlCipherBrainStore,
+    EVIDENCE_SUFFICIENCY_POLICY,
 };
 use mci_core::crypto::{DbKey, InMemoryKeyWrap, KeyWrap};
 use tempfile::TempDir;
@@ -189,7 +190,13 @@ fn run_query(
     text: &str,
     weights: Option<FusionWeights>,
 ) -> Vec<EventId> {
-    let mut r = HybridRetriever::new(store, embedder, now);
+    let mut r = HybridRetriever::new(store, embedder, now).with_evidence_policy(
+        EvidenceSufficiencyPolicy {
+            validation_qualified: true,
+            threshold: 0.0,
+            ..EVIDENCE_SUFFICIENCY_POLICY
+        },
+    );
     if let Some(w) = weights {
         r = r.with_weights(w);
     }

@@ -15,7 +15,7 @@
 //! - `docs/DESIGN.md` §8 — pipeline shape: state-transition event → OCR/text
 //!   → episode segmenter → embed event text with prepended context header →
 //!   one `SQLite` file (FTS5 + sqlite-vec) → hybrid lexical+semantic retrieval
-//!   fused by **min-max Convex Combination**.
+//!   fused by a deterministic **rank-aware Convex Combination**.
 //! - `docs/DESIGN.md` §12 — data model: `events`, `episodes`, `event_text`
 //!   (+ FTS5), `event_vectors` (sqlite-vec, 384-d), `chunks` (only over-long
 //!   events).
@@ -25,7 +25,8 @@
 //!   dimension is **384**, vectors L2-normalized.
 //! - `docs/decisions/0010-event-episode-retrieval-unit-cc-fusion.md` — **the
 //!   retrieval and index unit is the event**, not the flat chunk; fusion is
-//!   min-max Convex Combination, not Reciprocal Rank Fusion. Resolved Phase 0
+//!   rank-aware Convex Combination with explicit feature weights, not a single
+//!   unweighted Reciprocal Rank Fusion score. Resolved Phase 0
 //!   fork "Director-Brain — Memory unit" (`docs/AGENT_QUESTIONS.md`,
 //!   ACCEPTED 2026-05-18).
 //! - `docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md` —
@@ -117,9 +118,16 @@ pub use consolidator::{ConsolidatorConfig, DerivedEdge, EpisodeConsolidator, Ide
 
 pub mod fts_sanitizer;
 
+pub mod memory_delta;
+pub mod memory_projector;
 pub mod retention_purger;
 mod sqlcipher_brain_store;
 
+pub use memory_delta::{
+    ClaimStatus, ClaimStatusRecord, ClaimTransition, EvidenceId, EvidenceRef, ExpandedEvidence,
+    ExpansionBudget, MemoryClaim, MemoryClaimId, MemoryDelta, MemoryExpansion, MemoryRetraction,
+};
+pub use memory_projector::{project_event, retract_event};
 pub use retention_purger::{PurgeStats, RetentionConfig};
 pub use sqlcipher_brain_store::{IntegrityError, SqlCipherBrainStore};
 
@@ -221,10 +229,19 @@ pub struct BrainStats {
 }
 
 pub mod episode_segmenter;
+pub mod evidence_sufficiency;
 pub mod hybrid_retriever;
 
 pub use episode_segmenter::EpisodeId;
-pub use hybrid_retriever::{FusionWeights, HybridRetriever, RetrievalShape};
+pub use evidence_sufficiency::{
+    evidence_features_for_candidates, EvidenceCandidate, EvidenceFeatures,
+    EvidenceSufficiencyPolicy, EVIDENCE_SUFFICIENCY_POLICY,
+};
+pub use hybrid_retriever::{
+    lexical_retrieval_outcome, FusionWeights, HybridRetriever, NothingMatchedReason,
+    RetrievalDegradation, RetrievalEvidence, RetrievalMatch, RetrievalOutcome, RetrievalShape,
+    RetrievalSignals, SourceQuality,
+};
 
 /// One daily brief — the row shape stored in the `briefs` table per
 /// migration `0002_briefs.sql`.
@@ -1159,11 +1176,13 @@ pub struct RetrievalHit {
     pub score_lexical: f32,
     /// Min-max-normalized semantic cosine (`sem_hat` in ADR-0010 §5).
     pub score_semantic: f32,
-    /// Recency decay `0.99^Δt_hours` (ADR-0010 §5). Computed at retrieval
-    /// time against the wall clock the retriever was constructed with.
+    /// Exponential recency decay (ADR-0010 §5). Computed at retrieval time
+    /// against the explicit instant the retriever was constructed with.
     pub score_recency: f32,
-    /// Final fused score after the convex combination
-    /// `w_sem · sem_hat + w_lex · lex_hat + w_rec · recency (+ w_src · src)`.
+    /// Documented source-fidelity prior in `[0, 1]`.
+    pub score_source: f32,
+    /// Final fused ranking score over reciprocal semantic/lexical ranks,
+    /// recency, entity agreement, and source quality. It is not confidence.
     /// Hits are returned ordered by this column, descending.
     pub score_combined: f32,
 }

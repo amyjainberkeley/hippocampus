@@ -389,6 +389,7 @@ impl<E: Embedder> Retriever for StubRetriever<E> {
                 score_lexical: lex_hat,
                 score_semantic: sem_hat,
                 score_recency: recency,
+                score_source: 0.0,
                 score_combined: combined,
             });
         }

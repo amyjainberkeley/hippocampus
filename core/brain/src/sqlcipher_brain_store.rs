@@ -52,8 +52,9 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter};
 
 use crate::{
-    BrainStats, ConsolidationWatermark, Event, EventId, EventRecord, IdentityMentionSite,
-    ResolutionWatermark, StoreError, TimeRange,
+    BrainStats, ConsolidationWatermark, Event, EventId, EventRecord, ExpansionBudget,
+    IdentityMentionSite, MemoryClaim, MemoryClaimId, MemoryDelta, MemoryExpansion,
+    MemoryRetraction, ResolutionWatermark, StoreError, TimeRange,
 };
 
 /// Phase 3 production `BrainStore`.
@@ -74,6 +75,84 @@ pub struct SqlCipherBrainStore {
 }
 
 impl SqlCipherBrainStore {
+    /// Apply one governed memory delta atomically.
+    pub fn project_memory_delta(&self, delta: &MemoryDelta) -> Result<(), StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory projection: {e}")))?;
+        crate::memory_projector::apply_delta(&tx, delta)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory projection: {e}")))
+    }
+
+    /// Append retraction transitions for claims evidenced by one event.
+    pub fn retract_memory_event(&self, value: &MemoryRetraction) -> Result<(), StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory retraction: {e}")))?;
+        crate::memory_projector::apply_retraction(&tx, value)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory retraction: {e}")))
+    }
+
+    /// Return active claims valid at `valid_at_us` and known by
+    /// `asserted_as_of_us`, in deterministic order.
+    pub fn memory_claims_as_of(
+        &self,
+        valid_at_us: u64,
+        asserted_as_of_us: u64,
+        limit: usize,
+    ) -> Result<Vec<MemoryClaim>, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory read: {e}")))?;
+        let claims =
+            crate::memory_projector::read_claims_as_of(&tx, valid_at_us, asserted_as_of_us, limit)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory read: {e}")))?;
+        Ok(claims)
+    }
+
+    /// Return one claim's append-only status history.
+    pub fn memory_claim_history(
+        &self,
+        claim_id: &MemoryClaimId,
+    ) -> Result<Vec<crate::ClaimStatusRecord>, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory history read: {e}")))?;
+        let history = crate::memory_projector::read_claim_history(&tx, claim_id)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory history read: {e}")))?;
+        Ok(history)
+    }
+
+    /// Expand seed claims across extant evidence, episodes, entities, and
+    /// identities under explicit deterministic budgets.
+    pub fn expand_memory(
+        &self,
+        seed_claim_ids: &[MemoryClaimId],
+        budget: ExpansionBudget,
+    ) -> Result<MemoryExpansion, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory expansion: {e}")))?;
+        let expansion = crate::memory_projector::expand_memory(&tx, seed_claim_ids, budget)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory expansion: {e}")))?;
+        Ok(expansion)
+    }
+
     /// Open (or create) the encrypted brain store at `path` with `key`.
     ///
     /// Wraps `mci_core::store::open` for the encryption + WAL +
@@ -1305,6 +1384,7 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     let sql_0003 = include_str!("../migrations/0003_events_tab_id.sql");
     let sql_0004 = include_str!("../migrations/0004_v2_graph_schema.sql");
     let sql_0005 = include_str!("../migrations/0005_entity_identities.sql");
+    let sql_0006 = include_str!("../migrations/0006_memory_claims.sql");
     let tx = db
         .conn_mut()
         .transaction()
@@ -1337,6 +1417,8 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     // on re-open with no separate probe (same discipline as 0004).
     tx.execute_batch(sql_0005)
         .map_err(|e| StoreError::Backend(format!("apply migration 0005: {e}")))?;
+    tx.execute_batch(sql_0006)
+        .map_err(|e| StoreError::Backend(format!("apply migration 0006: {e}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
     Ok(())
