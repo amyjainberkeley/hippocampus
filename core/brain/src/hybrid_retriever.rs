@@ -563,13 +563,6 @@ impl<S: BrainStore, E: Embedder> Retriever for HybridRetriever<S, E> {
                 Ok(matches.into_iter().map(|value| value.hit).collect())
             }
             RetrievalOutcome::NothingMatched { .. } => Ok(Vec::new()),
-            RetrievalOutcome::Degraded {
-                degradation: RetrievalDegradation::EvidenceSufficiencyUnqualified,
-                fallback_matches,
-            } => Ok(fallback_matches
-                .into_iter()
-                .map(|value| value.hit)
-                .collect()),
             RetrievalOutcome::Degraded { degradation, .. } => Err(RetrieveError::Backend(format!(
                 "retrieval degraded: {degradation:?}"
             ))),

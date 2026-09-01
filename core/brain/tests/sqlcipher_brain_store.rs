@@ -128,7 +128,7 @@ fn new_creates_encrypted_db_and_runs_migration() {
     // V2-P3 migration 0004 adds the graph, V2-P6 migration 0005 adds
     // entity identities, and Task 5 migration 0006 adds governed memory.
     // Briefs retain their separate version key.
-    assert_eq!(v, "6");
+    assert_eq!(v, "7");
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +330,23 @@ fn fts5_search_returns_bm25_ranked_hits() {
 }
 
 #[test]
+fn fts5_equal_score_cutoff_uses_event_id_tie_break() {
+    let (_dir, path) = tmp("fts_tie.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let first = store
+        .put_event(&blank_event(1, "identical marker"))
+        .unwrap();
+    let second = store
+        .put_event(&blank_event(1, "identical marker"))
+        .unwrap();
+
+    let hits = store.fts5_search("identical marker", 1).unwrap();
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].0, first.min(second));
+}
+
+#[test]
 fn fts5_indexes_summary_window_title_and_url_columns() {
     let (_dir, path) = tmp("brain.sqlite");
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
@@ -510,6 +527,42 @@ fn vec_search_returns_cosine_ranked_hits() {
     assert!((hits[0].1 - 0.914).abs() < 1e-3);
     assert!((hits[1].1 - 0.406).abs() < 1e-3);
     assert!(hits[2].1.abs() < 1e-6);
+}
+
+#[test]
+fn vector_equal_score_cutoff_uses_event_id_tie_break() {
+    let (_dir, path) = tmp("vec_tie.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let mut first_event = blank_event(1, "first");
+    first_event.embedding = Some(axis_unit_vec(0));
+    let mut second_event = blank_event(2, "second");
+    second_event.embedding = Some(axis_unit_vec(0));
+    let first = store.put_event(&first_event).unwrap();
+    let second = store.put_event(&second_event).unwrap();
+
+    let hits = store.vec_search(&axis_unit_vec(0), 1).unwrap();
+
+    assert_eq!(hits, vec![(first.min(second), 1.0)]);
+}
+
+#[test]
+fn filtered_vector_equal_score_cutoff_uses_event_id_tie_break() {
+    let (_dir, path) = tmp("vec_filtered_tie.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let mut first_event = blank_event(1, "first");
+    first_event.app_bundle_id = Some("com.test.tie".into());
+    first_event.embedding = Some(axis_unit_vec(0));
+    let mut second_event = blank_event(2, "second");
+    second_event.app_bundle_id = Some("com.test.tie".into());
+    second_event.embedding = Some(axis_unit_vec(0));
+    let first = store.put_event(&first_event).unwrap();
+    let second = store.put_event(&second_event).unwrap();
+
+    let hits = store
+        .vec_search_filtered(&axis_unit_vec(0), 1, None, Some("com.test.tie"))
+        .unwrap();
+
+    assert_eq!(hits, vec![(first.min(second), 1.0)]);
 }
 
 #[test]
@@ -1352,7 +1405,10 @@ fn wipe_all_on_empty_store_returns_zero() {
 #[test]
 fn retriever_prefilter_matches_full_knn_on_scored_topk() {
     use mci_brain::stubs::FixedDimEmbedder;
-    use mci_brain::{Embedder, HybridRetriever, RetrievalQuery, Retriever};
+    use mci_brain::{
+        Embedder, EvidenceSufficiencyPolicy, HybridRetriever, RetrievalQuery, Retriever,
+        EVIDENCE_SUFFICIENCY_POLICY,
+    };
     use std::sync::Arc;
 
     let (_dir, path) = tmp("prefilter_topk.sqlite");
@@ -1375,7 +1431,12 @@ fn retriever_prefilter_matches_full_knn_on_scored_topk() {
         store.put_event(&ev).expect("put");
     }
 
-    let retriever = HybridRetriever::new(store.clone(), embedder.clone(), 30 * 1_000_000);
+    let retriever = HybridRetriever::new(store.clone(), embedder.clone(), 30 * 1_000_000)
+        .with_evidence_policy(EvidenceSufficiencyPolicy {
+            validation_qualified: true,
+            threshold: 0.0,
+            ..EVIDENCE_SUFFICIENCY_POLICY
+        });
 
     // Both queries carry the same app_filter — the retriever code path
     // that runs `vec_search_filtered` (with pre-filter) is the one under

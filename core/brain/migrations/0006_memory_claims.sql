@@ -5,7 +5,7 @@
 -- transition. Canonical event text is never rewritten by this schema.
 
 CREATE TABLE IF NOT EXISTS memory_deltas (
-    id                  TEXT PRIMARY KEY,
+    id                  TEXT NOT NULL PRIMARY KEY,
     source_event_id     INTEGER NOT NULL,
     asserted_at_us      INTEGER NOT NULL,
     projector_version   TEXT NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS memory_deltas (
 );
 
 CREATE TABLE IF NOT EXISTS memory_evidence (
-    id                  TEXT PRIMARY KEY,
+    id                  TEXT NOT NULL PRIMARY KEY,
     event_id            INTEGER NOT NULL,
     source_kind         TEXT NOT NULL,
     source_locator      TEXT NOT NULL,
@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS memory_evidence_event
     ON memory_evidence(event_id, id);
 
 CREATE TABLE IF NOT EXISTS memory_claims (
-    id                  TEXT PRIMARY KEY,
+    id                  TEXT NOT NULL PRIMARY KEY,
     source_event_id     INTEGER NOT NULL,
     subject             TEXT NOT NULL,
     predicate           TEXT NOT NULL,
@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS memory_claim_evidence_evidence
     ON memory_claim_evidence(evidence_id, claim_id);
 
 CREATE TABLE IF NOT EXISTS memory_claim_transitions (
-    id                  TEXT PRIMARY KEY,
+    id                  TEXT NOT NULL PRIMARY KEY,
     claim_id            TEXT NOT NULL,
     status              TEXT NOT NULL CHECK (status IN ('superseded', 'retracted', 'contradicted')),
     asserted_at_us      INTEGER NOT NULL,
@@ -80,7 +80,7 @@ CREATE INDEX IF NOT EXISTS memory_claim_transitions_latest
     ON memory_claim_transitions(claim_id, asserted_at_us, effective_at_us, id);
 
 CREATE TABLE IF NOT EXISTS memory_event_retractions (
-    id                  TEXT PRIMARY KEY,
+    id                  TEXT NOT NULL PRIMARY KEY,
     target_event_id     INTEGER NOT NULL,
     retraction_event_id INTEGER NOT NULL,
     asserted_at_us      INTEGER NOT NULL,

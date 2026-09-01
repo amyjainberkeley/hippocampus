@@ -49,7 +49,7 @@ use mci_core::store::{
     StoreError as CoreStoreError,
 };
 use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter};
+use rusqlite::{params, params_from_iter, OptionalExtension};
 
 use crate::{
     BrainStats, ConsolidationWatermark, Event, EventId, EventRecord, ExpansionBudget,
@@ -1229,8 +1229,9 @@ impl SqlCipherBrainStore {
     //
     // CASCADE cleanup (event_vectors, chunks, entity_mentions,
     // episode_edges) is handled by the ON DELETE CASCADE clauses in
-    // migrations 0001 + 0004 + 0005; the methods below do not restate
-    // the child DELETEs.
+    // migrations 0001 + 0004 + 0005. Governed-memory rows deliberately
+    // use RESTRICT FKs, so each path stages its event ids and removes the
+    // corresponding projection inside the same transaction first.
     // ---------------------------------------------------------------
 
     /// Delete one event by id. Returns the number of `events` rows
@@ -1246,6 +1247,17 @@ impl SqlCipherBrainStore {
             .transaction()
             .map_err(|e| StoreError::Backend(format!("begin delete_event tx: {e}")))?;
         let id_i = i64::try_from(id.0).unwrap_or(i64::MAX);
+        let event_ids = tx
+            .query_row(
+                "SELECT id FROM events WHERE id = ?1",
+                params![id_i],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|e| StoreError::Backend(format!("select delete event: {e}")))?
+            .into_iter()
+            .collect::<Vec<_>>();
+        delete_projected_memory_for_events(&tx, &event_ids)?;
         let n = tx
             .execute("DELETE FROM events WHERE id = ?1", params![id_i])
             .map_err(|e| StoreError::Backend(format!("DELETE events: {e}")))?;
@@ -1285,6 +1297,13 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("begin delete_range tx: {e}")))?;
         let s_i = i64::try_from(start_ts_us).unwrap_or(i64::MAX);
         let e_i = i64::try_from(end_ts_us).unwrap_or(i64::MAX);
+        let event_ids = event_ids_matching(
+            &tx,
+            "SELECT id FROM events WHERE ts_us >= ?1 AND ts_us <= ?2 ORDER BY id",
+            params![s_i, e_i],
+            "select delete range events",
+        )?;
+        delete_projected_memory_for_events(&tx, &event_ids)?;
         let n = tx
             .execute(
                 "DELETE FROM events WHERE ts_us >= ?1 AND ts_us <= ?2",
@@ -1333,6 +1352,13 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("DELETE entity_mentions: {e}")))?;
         tx.execute("DELETE FROM entities", [])
             .map_err(|e| StoreError::Backend(format!("DELETE entities: {e}")))?;
+        let event_ids = event_ids_matching(
+            &tx,
+            "SELECT id FROM events ORDER BY id",
+            [],
+            "select wipe events",
+        )?;
+        delete_projected_memory_for_events(&tx, &event_ids)?;
         let n = tx
             .execute("DELETE FROM events", [])
             .map_err(|e| StoreError::Backend(format!("DELETE events: {e}")))?;
@@ -1346,6 +1372,190 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("VACUUM after wipe_all: {e}")))?;
         Ok(n as u64)
     }
+}
+
+fn event_ids_matching<P: rusqlite::Params>(
+    tx: &rusqlite::Transaction<'_>,
+    sql: &str,
+    params: P,
+    operation: &str,
+) -> Result<Vec<i64>, StoreError> {
+    let mut statement = tx
+        .prepare(sql)
+        .map_err(|error| StoreError::Backend(format!("prepare {operation}: {error}")))?;
+    let rows = statement
+        .query_map(params, |row| row.get::<_, i64>(0))
+        .map_err(|error| StoreError::Backend(format!("query {operation}: {error}")))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| StoreError::Backend(format!("read {operation}: {error}")))
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn delete_projected_memory_for_events(
+    tx: &rusqlite::Transaction<'_>,
+    event_ids: &[i64],
+) -> Result<(), StoreError> {
+    if event_ids.is_empty() {
+        return Ok(());
+    }
+
+    tx.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS memory_events_pending_delete (
+             id INTEGER PRIMARY KEY
+         ) WITHOUT ROWID;
+         CREATE TEMP TABLE IF NOT EXISTS memory_claims_pending_delete (
+             id TEXT PRIMARY KEY
+         ) WITHOUT ROWID;
+         CREATE TEMP TABLE IF NOT EXISTS memory_projection_sources_pending_delete (
+             id INTEGER PRIMARY KEY
+         ) WITHOUT ROWID;
+         DELETE FROM memory_events_pending_delete;
+         DELETE FROM memory_claims_pending_delete;
+         DELETE FROM memory_projection_sources_pending_delete;",
+    )
+    .map_err(|error| StoreError::Backend(format!("stage memory deletion: {error}")))?;
+    {
+        let mut insert = tx
+            .prepare("INSERT INTO memory_events_pending_delete (id) VALUES (?1)")
+            .map_err(|error| {
+                StoreError::Backend(format!("prepare staged event deletion: {error}"))
+            })?;
+        for event_id in event_ids {
+            insert.execute(params![event_id]).map_err(|error| {
+                StoreError::Backend(format!("stage event {event_id} for deletion: {error}"))
+            })?;
+        }
+    }
+
+    tx.execute(
+        "WITH RECURSIVE dependent_claims(id) AS (
+             SELECT claim.id
+             FROM memory_claims claim
+             WHERE claim.source_event_id IN (SELECT id FROM memory_events_pending_delete)
+                OR EXISTS (
+                    SELECT 1
+                    FROM memory_claim_evidence link
+                    JOIN memory_evidence evidence ON evidence.id = link.evidence_id
+                    WHERE link.claim_id = claim.id
+                      AND evidence.event_id IN (
+                          SELECT id FROM memory_events_pending_delete
+                      )
+                )
+             UNION
+             SELECT child.id
+             FROM memory_claims child
+             JOIN dependent_claims parent
+               ON child.supersedes_claim_id = parent.id
+             UNION
+             SELECT sibling.id
+             FROM dependent_claims parent
+             JOIN memory_claims parent_claim ON parent_claim.id = parent.id
+             JOIN memory_claims sibling
+               ON sibling.source_event_id = parent_claim.source_event_id
+         )
+         INSERT OR IGNORE INTO memory_claims_pending_delete (id)
+         SELECT id FROM dependent_claims",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("stage dependent memory claims: {error}")))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO memory_projection_sources_pending_delete (id)
+         SELECT id FROM memory_events_pending_delete
+         UNION
+         SELECT DISTINCT claim.source_event_id
+         FROM memory_claims claim
+         JOIN memory_claims_pending_delete pending ON pending.id = claim.id",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("stage memory projection sources: {error}")))?;
+
+    tx.execute(
+        "DELETE FROM memory_claim_transitions
+         WHERE source_event_id IN (
+                 SELECT id FROM memory_projection_sources_pending_delete
+             )
+            OR claim_id IN (SELECT id FROM memory_claims_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory transitions: {error}")))?;
+    tx.execute(
+        "DELETE FROM memory_claim_evidence
+         WHERE claim_id IN (SELECT id FROM memory_claims_pending_delete)
+            OR evidence_id IN (
+                SELECT id FROM memory_evidence
+                WHERE event_id IN (SELECT id FROM memory_events_pending_delete)
+            )",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory evidence links: {error}")))?;
+
+    loop {
+        let remaining: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM memory_claims_pending_delete",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| StoreError::Backend(format!("count staged memory claims: {error}")))?;
+        if remaining == 0 {
+            break;
+        }
+        let deleted = tx
+            .execute(
+                "DELETE FROM memory_claims
+                 WHERE id IN (SELECT id FROM memory_claims_pending_delete)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM memory_claims child
+                       WHERE child.supersedes_claim_id = memory_claims.id
+                   )",
+                [],
+            )
+            .map_err(|error| StoreError::Backend(format!("delete memory claims: {error}")))?;
+        if deleted == 0 {
+            return Err(StoreError::Backend(
+                "delete memory claims: dependent claim graph did not make progress".into(),
+            ));
+        }
+        tx.execute(
+            "DELETE FROM memory_claims_pending_delete
+             WHERE id NOT IN (SELECT id FROM memory_claims)",
+            [],
+        )
+        .map_err(|error| StoreError::Backend(format!("advance memory claim deletion: {error}")))?;
+    }
+
+    tx.execute(
+        "DELETE FROM memory_evidence
+         WHERE event_id IN (SELECT id FROM memory_events_pending_delete)
+            OR NOT EXISTS (
+                SELECT 1 FROM memory_claim_evidence link
+                WHERE link.evidence_id = memory_evidence.id
+            )",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory evidence: {error}")))?;
+    tx.execute(
+        "DELETE FROM memory_event_retractions
+         WHERE target_event_id IN (SELECT id FROM memory_events_pending_delete)
+            OR retraction_event_id IN (SELECT id FROM memory_events_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory retractions: {error}")))?;
+    tx.execute(
+        "DELETE FROM memory_deltas
+         WHERE source_event_id IN (
+             SELECT id FROM memory_projection_sources_pending_delete
+         )",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory deltas: {error}")))?;
+    tx.execute_batch(
+        "DELETE FROM memory_claims_pending_delete;
+         DELETE FROM memory_events_pending_delete;
+         DELETE FROM memory_projection_sources_pending_delete;",
+    )
+    .map_err(|error| StoreError::Backend(format!("clear memory deletion staging: {error}")))?;
+    Ok(())
 }
 
 /// Typed outcome of [`SqlCipherBrainStore::verify_integrity_on_boot`].
@@ -1374,11 +1584,8 @@ pub enum IntegrityError {
 /// one transaction so a partial migration cannot leave the store in a
 /// torn state (`SQLCipher` rolls back DDL on commit failure).
 fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
-    // Both migrations run inside a single transaction so a partial apply
-    // can never leave the store in a torn state. SQLCipher rolls back DDL
-    // on commit failure; every statement is `CREATE … IF NOT EXISTS` /
-    // `INSERT OR REPLACE` so a re-run on an already-migrated DB is a
-    // no-op.
+    // Every brain migration, including the v6-to-v7 constraint rebuild, runs
+    // inside one transaction so a partial apply cannot leave a mixed schema.
     let sql_0001 = include_str!("../migrations/0001_phase_3_brain_schema.sql");
     let sql_0002 = include_str!("../migrations/0002_briefs.sql");
     let sql_0003 = include_str!("../migrations/0003_events_tab_id.sql");
@@ -1389,6 +1596,26 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
         .conn_mut()
         .transaction()
         .map_err(|e| StoreError::Backend(format!("begin migration tx: {e}")))?;
+    let meta_exists = tx
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| StoreError::Backend(format!("probe starting schema version: {error}")))?;
+    let starting_version = if meta_exists {
+        tx.query_row(
+            "SELECT value FROM meta WHERE key='brain_schema_version'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| StoreError::Backend(format!("read starting schema version: {error}")))?
+    } else {
+        None
+    };
     tx.execute_batch(sql_0001)
         .map_err(|e| StoreError::Backend(format!("apply migration 0001: {e}")))?;
     tx.execute_batch(sql_0002)
@@ -1419,130 +1646,241 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
         .map_err(|e| StoreError::Backend(format!("apply migration 0005: {e}")))?;
     tx.execute_batch(sql_0006)
         .map_err(|e| StoreError::Backend(format!("apply migration 0006: {e}")))?;
+    if starting_version.as_deref() == Some("6") {
+        upgrade_memory_schema_v6_to_v7(&tx, sql_0006)?;
+    }
     validate_memory_schema(&tx)
-        .map_err(|error| StoreError::Backend(format!("validate migration 0006: {error}")))?;
+        .map_err(|error| StoreError::Backend(format!("validate migration 0007: {error}")))?;
     tx.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '6')",
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '7')",
         [],
     )
-    .map_err(|error| StoreError::Backend(format!("stamp migration 0006: {error}")))?;
+    .map_err(|error| StoreError::Backend(format!("stamp migration 0007: {error}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
     Ok(())
 }
 
+fn upgrade_memory_schema_v6_to_v7(
+    tx: &rusqlite::Transaction<'_>,
+    canonical_schema: &str,
+) -> Result<(), StoreError> {
+    tx.execute_batch(
+        "CREATE TEMP TABLE memory_deltas_v6_backup AS SELECT * FROM memory_deltas;
+         CREATE TEMP TABLE memory_evidence_v6_backup AS SELECT * FROM memory_evidence;
+         CREATE TEMP TABLE memory_claims_v6_backup AS SELECT * FROM memory_claims;
+         CREATE TEMP TABLE memory_claim_evidence_v6_backup AS
+             SELECT * FROM memory_claim_evidence;
+         CREATE TEMP TABLE memory_claim_transitions_v6_backup AS
+             SELECT * FROM memory_claim_transitions;
+         CREATE TEMP TABLE memory_event_retractions_v6_backup AS
+             SELECT * FROM memory_event_retractions;",
+    )
+    .map_err(|error| StoreError::Backend(format!("backup migration 0006 rows: {error}")))?;
+
+    let event_ids = event_ids_matching(
+        tx,
+        "SELECT id FROM events ORDER BY id",
+        [],
+        "select migration 0007 events",
+    )?;
+    delete_projected_memory_for_events(tx, &event_ids)?;
+    tx.execute_batch(
+        "DROP TABLE memory_claim_transitions;
+         DROP TABLE memory_claim_evidence;
+         DROP TABLE memory_event_retractions;
+         DROP TABLE memory_claims;
+         DROP TABLE memory_evidence;
+         DROP TABLE memory_deltas;",
+    )
+    .map_err(|error| StoreError::Backend(format!("replace migration 0006 tables: {error}")))?;
+    tx.execute_batch(canonical_schema)
+        .map_err(|error| StoreError::Backend(format!("create migration 0007 tables: {error}")))?;
+
+    tx.execute_batch(
+        "INSERT INTO memory_deltas
+             SELECT * FROM memory_deltas_v6_backup ORDER BY id;
+         INSERT INTO memory_evidence
+             SELECT * FROM memory_evidence_v6_backup ORDER BY id;
+         WITH RECURSIVE ordered_claims(id, depth) AS (
+             SELECT id, 0
+             FROM memory_claims_v6_backup
+             WHERE supersedes_claim_id IS NULL
+             UNION ALL
+             SELECT child.id, parent.depth + 1
+             FROM memory_claims_v6_backup child
+             JOIN ordered_claims parent
+               ON child.supersedes_claim_id = parent.id
+         )
+         INSERT INTO memory_claims
+             SELECT claim.*
+             FROM memory_claims_v6_backup claim
+             JOIN ordered_claims ordering ON ordering.id = claim.id
+             ORDER BY ordering.depth, claim.id;
+         INSERT INTO memory_claim_evidence
+             SELECT * FROM memory_claim_evidence_v6_backup ORDER BY claim_id, evidence_id;
+         INSERT INTO memory_claim_transitions
+             SELECT * FROM memory_claim_transitions_v6_backup ORDER BY id;
+         INSERT INTO memory_event_retractions
+             SELECT * FROM memory_event_retractions_v6_backup ORDER BY id;
+         DROP TABLE memory_claim_transitions_v6_backup;
+         DROP TABLE memory_claim_evidence_v6_backup;
+         DROP TABLE memory_event_retractions_v6_backup;
+         DROP TABLE memory_claims_v6_backup;
+         DROP TABLE memory_evidence_v6_backup;
+         DROP TABLE memory_deltas_v6_backup;",
+    )
+    .map_err(|error| StoreError::Backend(format!("restore migration 0007 rows: {error}")))?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
 fn validate_memory_schema(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
-    for (table, expected) in [
+    type ColumnShape = (&'static str, &'static str, bool, Option<&'static str>, i64);
+    let table_shapes: &[(&str, &[ColumnShape])] = &[
         (
             "memory_deltas",
             &[
-                "id",
-                "source_event_id",
-                "asserted_at_us",
-                "projector_version",
+                ("id", "TEXT", true, None, 1),
+                ("source_event_id", "INTEGER", true, None, 0),
+                ("asserted_at_us", "INTEGER", true, None, 0),
+                ("projector_version", "TEXT", true, None, 0),
             ][..],
         ),
         (
             "memory_evidence",
             &[
-                "id",
-                "event_id",
-                "source_kind",
-                "source_locator",
-                "source_scope",
-                "observed_at_us",
-                "content_hash",
+                ("id", "TEXT", true, None, 1),
+                ("event_id", "INTEGER", true, None, 0),
+                ("source_kind", "TEXT", true, None, 0),
+                ("source_locator", "TEXT", true, None, 0),
+                ("source_scope", "TEXT", true, None, 0),
+                ("observed_at_us", "INTEGER", true, None, 0),
+                ("content_hash", "TEXT", true, None, 0),
             ][..],
         ),
         (
             "memory_claims",
             &[
-                "id",
-                "source_event_id",
-                "subject",
-                "predicate",
-                "object",
-                "scope",
-                "attribution",
-                "confidence",
-                "asserted_at_us",
-                "valid_from_us",
-                "valid_to_us",
-                "projector_version",
-                "initial_status",
-                "supersedes_claim_id",
-            ][..],
-        ),
-        ("memory_claim_evidence", &["claim_id", "evidence_id"][..]),
-        (
-            "memory_claim_transitions",
-            &[
-                "id",
-                "claim_id",
-                "status",
-                "asserted_at_us",
-                "effective_at_us",
-                "reason",
-                "source_event_id",
-                "projector_version",
-            ][..],
-        ),
-        (
-            "memory_event_retractions",
-            &[
-                "id",
-                "target_event_id",
-                "retraction_event_id",
-                "asserted_at_us",
-                "effective_at_us",
-                "reason",
-                "projector_version",
-            ][..],
-        ),
-    ] {
-        let mut stmt = tx
-            .prepare(&format!("PRAGMA table_info({table})"))
-            .map_err(|error| format!("prepare {table} columns: {error}"))?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .map_err(|error| format!("query {table} columns: {error}"))?;
-        let columns = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("read {table} columns: {error}"))?;
-        if columns != expected {
-            return Err(format!("{table} columns are incompatible: {columns:?}"));
-        }
-    }
-
-    for (table, required) in [
-        ("memory_deltas", &["source_event_id:events:id:RESTRICT"][..]),
-        ("memory_evidence", &["event_id:events:id:RESTRICT"][..]),
-        (
-            "memory_claims",
-            &[
-                "source_event_id:events:id:RESTRICT",
-                "supersedes_claim_id:memory_claims:id:RESTRICT",
+                ("id", "TEXT", true, None, 1),
+                ("source_event_id", "INTEGER", true, None, 0),
+                ("subject", "TEXT", true, None, 0),
+                ("predicate", "TEXT", true, None, 0),
+                ("object", "TEXT", true, None, 0),
+                ("scope", "TEXT", true, None, 0),
+                ("attribution", "TEXT", false, None, 0),
+                ("confidence", "REAL", true, None, 0),
+                ("asserted_at_us", "INTEGER", true, None, 0),
+                ("valid_from_us", "INTEGER", true, None, 0),
+                ("valid_to_us", "INTEGER", false, None, 0),
+                ("projector_version", "TEXT", true, None, 0),
+                ("initial_status", "TEXT", true, None, 0),
+                ("supersedes_claim_id", "TEXT", false, None, 0),
             ][..],
         ),
         (
             "memory_claim_evidence",
             &[
-                "claim_id:memory_claims:id:RESTRICT",
-                "evidence_id:memory_evidence:id:RESTRICT",
+                ("claim_id", "TEXT", true, None, 1),
+                ("evidence_id", "TEXT", true, None, 2),
             ][..],
         ),
         (
             "memory_claim_transitions",
             &[
-                "claim_id:memory_claims:id:RESTRICT",
-                "source_event_id:events:id:RESTRICT",
+                ("id", "TEXT", true, None, 1),
+                ("claim_id", "TEXT", true, None, 0),
+                ("status", "TEXT", true, None, 0),
+                ("asserted_at_us", "INTEGER", true, None, 0),
+                ("effective_at_us", "INTEGER", true, None, 0),
+                ("reason", "TEXT", true, None, 0),
+                ("source_event_id", "INTEGER", true, None, 0),
+                ("projector_version", "TEXT", true, None, 0),
             ][..],
         ),
         (
             "memory_event_retractions",
             &[
-                "target_event_id:events:id:RESTRICT",
-                "retraction_event_id:events:id:RESTRICT",
+                ("id", "TEXT", true, None, 1),
+                ("target_event_id", "INTEGER", true, None, 0),
+                ("retraction_event_id", "INTEGER", true, None, 0),
+                ("asserted_at_us", "INTEGER", true, None, 0),
+                ("effective_at_us", "INTEGER", true, None, 0),
+                ("reason", "TEXT", true, None, 0),
+                ("projector_version", "TEXT", true, None, 0),
+            ][..],
+        ),
+    ];
+    for (table, expected) in table_shapes {
+        let mut stmt = tx
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .map_err(|error| format!("prepare {table} columns: {error}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)? != 0,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })
+            .map_err(|error| format!("query {table} columns: {error}"))?;
+        let columns = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read {table} columns: {error}"))?;
+        let expected = expected
+            .iter()
+            .map(|(name, kind, not_null, default, primary_key)| {
+                (
+                    (*name).to_owned(),
+                    (*kind).to_owned(),
+                    *not_null,
+                    default.map(str::to_owned),
+                    *primary_key,
+                )
+            })
+            .collect::<Vec<_>>();
+        if columns != expected {
+            return Err(format!("{table} columns are incompatible: {columns:?}"));
+        }
+    }
+
+    for (table, expected) in [
+        (
+            "memory_deltas",
+            &["source_event_id:events:id:NO ACTION:RESTRICT:NONE"][..],
+        ),
+        (
+            "memory_evidence",
+            &["event_id:events:id:NO ACTION:RESTRICT:NONE"][..],
+        ),
+        (
+            "memory_claims",
+            &[
+                "source_event_id:events:id:NO ACTION:RESTRICT:NONE",
+                "supersedes_claim_id:memory_claims:id:NO ACTION:RESTRICT:NONE",
+            ][..],
+        ),
+        (
+            "memory_claim_evidence",
+            &[
+                "claim_id:memory_claims:id:NO ACTION:RESTRICT:NONE",
+                "evidence_id:memory_evidence:id:NO ACTION:RESTRICT:NONE",
+            ][..],
+        ),
+        (
+            "memory_claim_transitions",
+            &[
+                "claim_id:memory_claims:id:NO ACTION:RESTRICT:NONE",
+                "source_event_id:events:id:NO ACTION:RESTRICT:NONE",
+            ][..],
+        ),
+        (
+            "memory_event_retractions",
+            &[
+                "target_event_id:events:id:NO ACTION:RESTRICT:NONE",
+                "retraction_event_id:events:id:NO ACTION:RESTRICT:NONE",
             ][..],
         ),
     ] {
@@ -1552,36 +1890,45 @@ fn validate_memory_schema(tx: &rusqlite::Transaction<'_>) -> Result<(), String> 
         let rows = stmt
             .query_map([], |row| {
                 Ok(format!(
-                    "{}:{}:{}:{}",
+                    "{}:{}:{}:{}:{}:{}",
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
                 ))
             })
             .map_err(|error| format!("query {table} foreign keys: {error}"))?;
-        let actual = rows
+        let mut actual = rows
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| format!("read {table} foreign keys: {error}"))?;
-        for expected in required {
-            if !actual.iter().any(|value| value == expected) {
-                return Err(format!("{table} is missing foreign key {expected}"));
-            }
+        actual.sort();
+        let mut expected = expected.iter().map(ToString::to_string).collect::<Vec<_>>();
+        expected.sort();
+        if actual != expected {
+            return Err(format!("{table} foreign keys are incompatible: {actual:?}"));
         }
     }
 
-    for (table, fragments) in [
+    for (table, fragments, expected_check_count) in [
+        ("memory_deltas", &[][..], 0),
+        ("memory_evidence", &[][..], 0),
         (
             "memory_claims",
             &[
                 "check (confidence >= 0.0 and confidence <= 1.0)",
                 "check (initial_status in ('proposed', 'active'))",
             ][..],
+            2,
         ),
+        ("memory_claim_evidence", &[][..], 0),
         (
             "memory_claim_transitions",
             &["check (status in ('superseded', 'retracted', 'contradicted'))"][..],
+            1,
         ),
+        ("memory_event_retractions", &[][..], 0),
     ] {
         let sql: String = tx
             .query_row(
@@ -1600,42 +1947,112 @@ fn validate_memory_schema(tx: &rusqlite::Transaction<'_>) -> Result<(), String> 
                 return Err(format!("{table} is missing constraint {fragment}"));
             }
         }
+        let actual_check_count = normalized
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .filter(|token| *token == "check")
+            .count();
+        if actual_check_count != expected_check_count {
+            return Err(format!("{table} has an incompatible CHECK constraint set"));
+        }
     }
 
-    for (index, expected) in [
-        ("memory_evidence_event", &["event_id", "id"][..]),
+    type IndexShape = (&'static str, &'static [&'static str]);
+    let index_shapes: &[(&str, &[IndexShape])] = &[
+        ("memory_deltas", &[]),
         (
-            "memory_claims_fact",
-            &["subject", "predicate", "scope", "asserted_at_us", "id"][..],
+            "memory_evidence",
+            &[("memory_evidence_event", &["event_id", "id"])],
         ),
         (
-            "memory_claims_validity",
-            &["valid_from_us", "valid_to_us", "asserted_at_us", "id"][..],
+            "memory_claims",
+            &[
+                (
+                    "memory_claims_fact",
+                    &["subject", "predicate", "scope", "asserted_at_us", "id"],
+                ),
+                (
+                    "memory_claims_validity",
+                    &["valid_from_us", "valid_to_us", "asserted_at_us", "id"],
+                ),
+                (
+                    "memory_claims_supersedes",
+                    &["supersedes_claim_id", "asserted_at_us", "id"],
+                ),
+            ],
         ),
         (
-            "memory_claim_evidence_evidence",
-            &["evidence_id", "claim_id"][..],
+            "memory_claim_evidence",
+            &[(
+                "memory_claim_evidence_evidence",
+                &["evidence_id", "claim_id"],
+            )],
         ),
         (
-            "memory_claim_transitions_latest",
-            &["claim_id", "asserted_at_us", "effective_at_us", "id"][..],
+            "memory_claim_transitions",
+            &[(
+                "memory_claim_transitions_latest",
+                &["claim_id", "asserted_at_us", "effective_at_us", "id"],
+            )],
         ),
         (
-            "memory_event_retractions_target",
-            &["target_event_id", "asserted_at_us", "effective_at_us", "id"][..],
+            "memory_event_retractions",
+            &[(
+                "memory_event_retractions_target",
+                &["target_event_id", "asserted_at_us", "effective_at_us", "id"],
+            )],
         ),
-    ] {
-        let mut stmt = tx
-            .prepare(&format!("PRAGMA index_info({index})"))
-            .map_err(|error| format!("prepare {index}: {error}"))?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(2))
-            .map_err(|error| format!("query {index}: {error}"))?;
-        let columns = rows
+    ];
+    for (table, expected_indexes) in index_shapes {
+        let mut statement = tx
+            .prepare(&format!("PRAGMA index_list({table})"))
+            .map_err(|error| format!("prepare {table} indexes: {error}"))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? != 0,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)? != 0,
+                ))
+            })
+            .map_err(|error| format!("query {table} indexes: {error}"))?;
+        let indexes = rows
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("read {index}: {error}"))?;
-        if columns != expected {
-            return Err(format!("{index} columns are incompatible: {columns:?}"));
+            .map_err(|error| format!("read {table} indexes: {error}"))?;
+        let primary = indexes
+            .iter()
+            .filter(|(_, unique, origin, partial)| origin == "pk" && *unique && !*partial)
+            .count();
+        if primary != 1 {
+            return Err(format!("{table} must have exactly one primary-key index"));
+        }
+        let mut custom = indexes
+            .iter()
+            .filter(|(_, _, origin, _)| origin == "c")
+            .map(|(name, unique, _, partial)| (name.clone(), *unique, *partial))
+            .collect::<Vec<_>>();
+        custom.sort();
+        let mut expected_custom = expected_indexes
+            .iter()
+            .map(|(name, _)| ((*name).to_owned(), false, false))
+            .collect::<Vec<_>>();
+        expected_custom.sort();
+        if custom != expected_custom || indexes.iter().any(|(_, _, origin, _)| origin == "u") {
+            return Err(format!("{table} indexes are incompatible: {indexes:?}"));
+        }
+        for (index, expected_columns) in *expected_indexes {
+            let mut statement = tx
+                .prepare(&format!("PRAGMA index_info({index})"))
+                .map_err(|error| format!("prepare {index}: {error}"))?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(2))
+                .map_err(|error| format!("query {index}: {error}"))?;
+            let columns = rows
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| format!("read {index}: {error}"))?;
+            if columns != *expected_columns {
+                return Err(format!("{index} columns are incompatible: {columns:?}"));
+            }
         }
     }
     Ok(())
@@ -1974,7 +2391,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 "SELECT rowid, rank
                  FROM events_fts
                  WHERE events_fts MATCH ?1
-                 ORDER BY rank ASC
+                 ORDER BY rank ASC, rowid ASC
                  LIMIT ?2",
             )
             .map_err(|e| StoreError::Backend(format!("prepare fts5: {e}")))?;
@@ -2021,7 +2438,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         let mut stmt = guard
             .conn()
-            .prepare("SELECT event_id, embedding FROM event_vectors")
+            .prepare("SELECT event_id, embedding FROM event_vectors ORDER BY event_id ASC")
             .map_err(|e| StoreError::Backend(format!("prepare vec scan: {e}")))?;
 
         // Brute-force cosine. Vectors are L2-normalized at insert time
@@ -2057,7 +2474,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 .sum();
             hits.push((EventId(u64::try_from(event_id).unwrap_or(0)), dot));
         }
-        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         hits.truncate(limit);
         Ok(hits)
     }
@@ -2128,6 +2545,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
         if app_filter.is_some() {
             sql.push_str(&format!(" AND e.app_bundle_id = ?{}", param_idx + 1));
         }
+        sql.push_str(" ORDER BY ev.event_id ASC");
 
         let mut stmt = guard
             .conn()
@@ -2174,7 +2592,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 .sum();
             hits.push((EventId(u64::try_from(event_id).unwrap_or(0)), dot));
         }
-        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         hits.truncate(limit);
         Ok(hits)
     }

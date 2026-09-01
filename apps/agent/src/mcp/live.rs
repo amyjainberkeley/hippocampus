@@ -315,7 +315,7 @@ impl LiveBrainReader {
             Ok(raw) => raw,
             Err(_) => {
                 return Ok(McpRecallOutcome::Degraded {
-                    degradation: mci_brain::RetrievalDegradation::LexicalUnavailable,
+                    degradation: mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
                     related_context: Vec::new(),
                 })
             }
@@ -345,13 +345,10 @@ impl LiveBrainReader {
                 linked_event_ids,
             });
         }
-        if out.is_empty() {
-            Ok(McpRecallOutcome::NothingMatched {
-                reason: NothingMatchedReason::NoCandidates,
-            })
-        } else {
-            Ok(McpRecallOutcome::Matched { hits: out })
-        }
+        Ok(McpRecallOutcome::Degraded {
+            degradation: mci_brain::RetrievalDegradation::EmbeddingsUnavailable,
+            related_context: out,
+        })
     }
 
     /// Hybrid recall via `HybridRetriever` (ADR-0010 min-max CC fusion).

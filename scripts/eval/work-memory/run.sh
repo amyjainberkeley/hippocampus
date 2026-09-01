@@ -9,7 +9,6 @@ BASELINE_NEXT="docs/eval/work-memory-baseline.next.json"
 DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
 
 UPDATE_BASELINE=0
-USE_BASELINE=1
 OUT=""
 PASS_ARGS=()
 
@@ -20,8 +19,8 @@ while (($# > 0)); do
             shift
             ;;
         --no-baseline)
-            USE_BASELINE=0
-            shift
+            echo "work-memory runner: the accepted baseline comparison is mandatory" >&2
+            exit 2
             ;;
         --out)
             if (($# < 2)); then
@@ -63,6 +62,11 @@ if [[ ! -f "$DATASET" ]]; then
     exit 3
 fi
 
+if [[ ! -f "$BASELINE" ]]; then
+    echo "work-memory runner: accepted baseline not found at $REPO_ROOT/$BASELINE" >&2
+    exit 3
+fi
+
 if [[ -n "${MCI_BENCH_BIN:-}" ]]; then
     BENCH_CMD=("$MCI_BENCH_BIN")
     export MCI_BENCH_COMMAND="mci-bench"
@@ -72,10 +76,6 @@ else
 fi
 
 if [[ $UPDATE_BASELINE -eq 1 ]]; then
-    if [[ $USE_BASELINE -eq 0 ]]; then
-        echo "work-memory runner: --no-baseline is not meaningful with --update-baseline" >&2
-        exit 2
-    fi
     for ((i = 0; i < ${#PASS_ARGS[@]}; i++)); do
         case "${PASS_ARGS[$i]}" in
             --dataset | --limit | --allow-smoke | --abstention | --workdir)
@@ -109,6 +109,7 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
         --dataset "$DATASET"
         --arm both
         --out "$BASELINE_NEXT"
+        --baseline "$BASELINE"
     )
     if [[ ${#PASS_ARGS[@]} -gt 0 ]]; then
         UPDATE_CMD+=("${PASS_ARGS[@]}")
@@ -149,9 +150,7 @@ CMD=(
     --out "$OUT"
 )
 
-if [[ $USE_BASELINE -eq 1 && -f "$BASELINE" ]]; then
-    CMD+=(--baseline "$BASELINE")
-fi
+CMD+=(--baseline "$BASELINE")
 
 if [[ ${#PASS_ARGS[@]} -gt 0 ]]; then
     CMD+=("${PASS_ARGS[@]}")

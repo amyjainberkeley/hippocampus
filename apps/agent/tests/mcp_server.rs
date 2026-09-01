@@ -832,7 +832,7 @@ fn open_temp_store() -> (tempfile::TempDir, Arc<SqlCipherBrainStore>) {
 }
 
 #[test]
-fn mci_recall_with_no_embedder_falls_back_to_fts5() {
+fn mci_recall_with_no_embedder_returns_typed_lexical_context() {
     let (_dir, store) = open_temp_store();
 
     store
@@ -856,13 +856,32 @@ fn mci_recall_with_no_embedder_falls_back_to_fts5() {
         .expect("response");
 
     let result = resp.result.expect("result — FTS5 fallback must succeed");
+    assert_eq!(
+        result.get("outcome").and_then(|value| value.as_str()),
+        Some("degraded")
+    );
+    assert_eq!(
+        result.get("degradation").and_then(|value| value.as_str()),
+        Some("embeddings_unavailable")
+    );
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())
         .expect("hits array");
-    assert_eq!(hits.len(), 1, "FTS5 should find 'hello' in one event");
+    assert!(hits.is_empty(), "degraded context must not become hits");
+    let related_context = result
+        .get("related_context")
+        .and_then(|v| v.as_array())
+        .expect("related context array");
     assert_eq!(
-        hits[0].get("text_snippet").and_then(|v| v.as_str()),
+        related_context.len(),
+        1,
+        "FTS5 should find 'hello' in one event"
+    );
+    assert_eq!(
+        related_context[0]
+            .get("text_snippet")
+            .and_then(|v| v.as_str()),
         Some("hello world testing")
     );
 }
@@ -950,12 +969,19 @@ fn mci_recall_handles_hyphen_in_query_gracefully() {
         .expect("response");
 
     let result = resp.result.expect("result — hyphen query must not error");
+    assert_eq!(result["outcome"], "degraded");
+    assert_eq!(result["degradation"], "embeddings_unavailable");
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())
         .expect("hits array");
+    assert!(hits.is_empty());
+    let related_context = result
+        .get("related_context")
+        .and_then(|v| v.as_array())
+        .expect("related context array");
     assert_eq!(
-        hits.len(),
+        related_context.len(),
         1,
         "sqlite-vec (sanitized) should match the event containing that text"
     );
