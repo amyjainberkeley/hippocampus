@@ -1,0 +1,47 @@
+name: Release contract and artifact fixtures
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release*.yml'
+      - 'apps/hippocampus/Resources/Info.plist'
+      - 'scripts/*release*'
+      - 'scripts/*sparkle*'
+      - 'scripts/check.sh'
+      - 'docs/appcast-hosting.md'
+      - 'docs/release/**'
+  pull_request:
+    paths:
+      - '.github/workflows/release*.yml'
+      - 'apps/hippocampus/Resources/Info.plist'
+      - 'scripts/*release*'
+      - 'scripts/*sparkle*'
+      - 'scripts/check.sh'
+      - 'docs/appcast-hosting.md'
+      - 'docs/release/**'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: scripts/test-release-contract.sh
+      - run: scripts/test-release-identity.sh
+      - run: scripts/test-prepare-release-models.sh
+      - run: scripts/test-sparkle-keygen.sh
+      - run: scripts/test-sparkle-keypair.sh
+
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7

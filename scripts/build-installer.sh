@@ -138,9 +138,12 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
         NOTARIZE=1
         echo "Notarization: enabled (env credentials)"
     else
-        echo "WARNING: Notarization skipped — no keychain profile 'notarytool-profile'"
-        echo "         and no NOTARYTOOL_APPLE_ID/TEAM_ID/PASSWORD env vars found."
-        echo "  Setup: xcrun notarytool store-credentials notarytool-profile"
+        if [[ "$BUILD_PROFILE" == "release" ]]; then
+            echo "FATAL: Release installer requires notarization credentials" >&2
+            echo "Store keychain profile 'notarytool-profile' or provide all NOTARYTOOL credentials." >&2
+            exit 1
+        fi
+        echo "WARNING: Debug artifact will not be notarized because credentials are absent."
     fi
 fi
 
@@ -701,7 +704,16 @@ if [[ -f "$SLA_R" ]]; then
     fi
 fi
 
-# --- Step 7: Notarize + staple (Developer ID only) ---
+# --- Step 7: Sign the outer disk image ---
+
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    echo ""
+    echo "--- Signing outer DMG with Developer ID ---"
+    codesign --timestamp --sign "$DEVELOPER_ID" "$FINAL_DMG"
+    codesign --verify --strict --verbose=2 "$FINAL_DMG"
+fi
+
+# --- Step 8: Notarize + staple (Developer ID only) ---
 
 if [[ "$NOTARIZE" -eq 1 ]]; then
     echo ""
@@ -721,6 +733,9 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
         echo ""
         echo "--- Stapling notarization ticket ---"
         xcrun stapler staple "$FINAL_DMG"
+        xcrun stapler validate "$FINAL_DMG"
+        codesign --verify --strict --verbose=2 "$FINAL_DMG"
+        spctl --assess --type open --context context:primary-signature --verbose=2 "$FINAL_DMG"
         echo "  DMG notarized and stapled."
     else
         echo ""
@@ -730,7 +745,7 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
     fi
 fi
 
-# --- Step 8: Write SHA-256 sidecar ---
+# --- Step 9: Write SHA-256 sidecar ---
 
 echo ""
 echo "--- Computing SHA-256 ---"

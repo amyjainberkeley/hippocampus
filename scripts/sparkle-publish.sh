@@ -4,9 +4,9 @@ set -euo pipefail
 # sparkle-publish.sh — Sign a Hippocampus DMG with the Sparkle Ed25519 private
 # key and add/replace its <item> entry in appcast.xml.
 #
-# This script reads the private key from a FILE (not an env var) so it can be
-# operated from the same machine that minted the key. The on-disk key file is
-# the canonical artifact; backup lives in 1Password / HSM.
+# This owner-operated path reads the exported private seed from a FILE. The
+# named Sparkle Keychain account is the local source and the exported file is
+# the owner backup/CI import artifact.
 #
 # Usage:
 #   ./scripts/sparkle-publish.sh \
@@ -20,10 +20,9 @@ set -euo pipefail
 #                          Default: GitHub Releases URL derived from --release-tag.
 #   --release-tag TAG      Git tag of the release that hosts the DMG asset.
 #                          Default: "v<version>" extracted from DMG filename.
-#   --hosting-mode MODE    "vercel-landing" (default) | "ghpages-releases" | "s3"
+#   --hosting-mode MODE    "github-releases" (default) | "s3"
 #                          Only changes the default --download-url shape.
-#                          "vercel-landing"  → https://hippocampus-swart.vercel.app/<dmg>
-#                          "ghpages-releases" → GitHub Releases asset URL
+#                          "github-releases" → GitHub Releases asset URL
 #                          "s3"               → https://releases.hippocampus.ai/<dmg>
 #   --dist DIR             Output directory for appcast.xml (default: dist/)
 #   --no-confirm           Skip interactive confirmation for destructive ops.
@@ -48,7 +47,7 @@ RELEASE_NOTES_PATH=""
 APPCAST_PATH=""
 DOWNLOAD_URL=""
 RELEASE_TAG=""
-HOSTING_MODE="vercel-landing"
+HOSTING_MODE="github-releases"
 DIST_DIR="$REPO_ROOT/dist"
 NO_CONFIRM=0
 
@@ -69,7 +68,7 @@ Optional:
                          Default: \$DIST_DIR/appcast.xml.
   --download-url URL     Full URL where users will fetch the DMG.
   --release-tag TAG      Git tag that publishes the DMG (default: v<version>).
-  --hosting-mode MODE    "vercel-landing" (default) | "ghpages-releases" | "s3".
+  --hosting-mode MODE    "github-releases" (default) | "s3".
   --dist DIR             Output directory for appcast.xml (default: dist/).
   --no-confirm           Bypass interactive confirmation prompts.
   --help                 Show this help.
@@ -176,36 +175,22 @@ if [[ -z "$RELEASE_TAG" ]]; then RELEASE_TAG="v${VERSION}"; fi
 
 if [[ -z "$DOWNLOAD_URL" ]]; then
     case "$HOSTING_MODE" in
-        vercel-landing)
-            # Same origin as landing/index.html serves the DMG from. When the
-            # `hippocampus.ai` custom domain is provisioned (OWNER_TASKS #3),
-            # swap this URL together with `SUFeedURL` in Info.plist.
-            DOWNLOAD_URL="https://hippocampus-swart.vercel.app/$(basename "$DMG_PATH")"
-            ;;
-        ghpages-releases)
+        github-releases)
             DOWNLOAD_URL="https://github.com/amyjainberkeley/hippocampus/releases/download/${RELEASE_TAG}/$(basename "$DMG_PATH")"
             ;;
         s3)
             DOWNLOAD_URL="https://releases.hippocampus.ai/$(basename "$DMG_PATH")"
             ;;
-        *) die "Unknown --hosting-mode: $HOSTING_MODE (use vercel-landing, ghpages-releases, or s3)" ;;
+        *) die "Unknown --hosting-mode: $HOSTING_MODE (use github-releases or s3)" ;;
     esac
 fi
 
 # --- Default appcast path ---
 #
-# We write directly into the checked-in `landing/appcast.xml` under
-# vercel-landing mode so `landing/deploy.sh --prod` picks up the new <item>
-# in the same push. Under ghpages-releases mode the historical `dist/appcast.xml`
-# staging path is preserved so the docs/appcast-hosting.md GH-Pages recipe still
-# works unchanged.
+# Appcasts are staged in dist/ and are not public until the protected Pages
+# publication workflow deploys the inspected draft artifact.
 
-if [[ -z "$APPCAST_PATH" ]]; then
-    case "$HOSTING_MODE" in
-        vercel-landing) APPCAST_PATH="$REPO_ROOT/landing/appcast.xml" ;;
-        *)              APPCAST_PATH="$DIST_DIR/appcast.xml" ;;
-    esac
-fi
+if [[ -z "$APPCAST_PATH" ]]; then APPCAST_PATH="$DIST_DIR/appcast.xml"; fi
 mkdir -p "$(dirname "$APPCAST_PATH")"
 
 # --- Summary + confirm if writing outside dist/ ---
@@ -437,20 +422,5 @@ echo "  Appcast:  $APPCAST_PATH"
 echo "  Version:  $VERSION (build $BUILD_NUMBER)"
 echo "  DMG URL:  $DOWNLOAD_URL"
 echo ""
-echo "Next:"
-case "$HOSTING_MODE" in
-    vercel-landing)
-        echo "  1. Commit the updated $APPCAST_PATH to the current branch."
-        echo "  2. Copy the DMG next to it and deploy to Vercel:"
-        echo "       cp $DMG_PATH $REPO_ROOT/landing/"
-        echo "       (landing/deploy.sh will do the copy + \`vercel deploy --prod\` for you.)"
-        echo "  3. Verify:  curl -sI $DOWNLOAD_URL | head -1"
-        echo "             curl -sS https://hippocampus-swart.vercel.app/appcast.xml | xmllint --noout - && echo OK"
-        ;;
-    *)
-        echo "  1. Upload $DMG_PATH as a release asset for tag $RELEASE_TAG:"
-        echo "       gh release create $RELEASE_TAG --notes-file $RELEASE_NOTES_PATH $DMG_PATH"
-        echo "  2. Commit + push $APPCAST_PATH to the public appcast repo"
-        echo "     (see docs/appcast-hosting.md for the GH Pages procedure)."
-        ;;
-esac
+echo "Next: stage the DMG, checksum, and appcast in a draft GitHub release."
+echo "Publish only through the protected workflow in docs/appcast-hosting.md."
