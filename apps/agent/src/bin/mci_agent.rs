@@ -271,9 +271,17 @@ fn parse_args(argv: &[String]) -> Args {
             // a different thing entirely — it means the user typed a
             // command this build does not have, and printing the usage
             // text with exit 0 tells them it worked.
+            //
+            // Only remembered, not acted on yet. An unknown flag's *value*
+            // is also a bare token, so `--future-flag /some/path` would
+            // otherwise make `/some/path` fatal — which is the same
+            // ships-out-of-step outage the flag rule exists to avoid. The
+            // decision is deferred until the whole argv has been read, and
+            // taken only if no mode was recognised anywhere in it.
             other if !other.starts_with('-') => {
-                mode_kind = ModeKind::UnknownCommand;
-                unknown_command = Some(other.to_owned());
+                if unknown_command.is_none() {
+                    unknown_command = Some(other.to_owned());
+                }
             }
             _ => {}
         }
@@ -283,6 +291,12 @@ fn parse_args(argv: &[String]) -> Args {
     let resolved_db_path = db_path
         .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
         .unwrap_or_else(default_db_path);
+    // Deferred from the parse loop: a stray bare token is only an error
+    // when nothing else in argv named a mode.
+    if matches!(mode_kind, ModeKind::Help) && unknown_command.is_some() {
+        mode_kind = ModeKind::UnknownCommand;
+    }
+
     let mode = match mode_kind {
         ModeKind::Help => Mode::Help,
         ModeKind::Version => Mode::Version,

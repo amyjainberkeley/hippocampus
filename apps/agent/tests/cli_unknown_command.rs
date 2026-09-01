@@ -60,3 +60,38 @@ fn help_and_version_still_exit_zero() {
         assert!(output.status.success(), "{arg} must exit 0");
     }
 }
+
+/// An unknown flag's *value* is a bare token too. Rejecting it would
+/// reintroduce exactly the ships-out-of-step outage the flag rule exists
+/// to prevent, so the bare-token decision waits until the whole argv has
+/// been read and fires only when nothing named a mode.
+#[test]
+fn an_unknown_flags_value_is_not_mistaken_for_a_command() {
+    let output = Command::new(agent_bin())
+        .arg("--some-future-flag")
+        .arg("/some/path")
+        .arg("--version")
+        .output()
+        .expect("spawn mci-agent");
+
+    assert!(
+        output.status.success(),
+        "a future flag carrying a value must not break a host that ships out of step; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The loud path must still be loud when there is genuinely no mode.
+#[test]
+fn a_bare_token_with_no_mode_anywhere_still_fails() {
+    let output = Command::new(agent_bin())
+        .arg("--some-future-flag")
+        .arg("totally-bogus-command")
+        .output()
+        .expect("spawn mci-agent");
+
+    assert!(
+        !output.status.success(),
+        "no mode was named, so this must not exit 0"
+    );
+}
