@@ -1,13 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Hippocampus AppIcon variant A — anatomical, left-facing">
-  <!-- A — left-facing, anatomical cortex curves, flat brand mint background. Hand-authored from first principles. NOT a derivative of Apple SF Symbol brain.head.profile. -->
-  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="#7AFFC1"/>
-  <g fill="#0D0D0D">
-    <path d="M 560 140 C 720 140, 880 290, 880 460 C 880 600, 850 690, 820 730 C 780 740, 740 740, 700 730 C 660 770, 580 820, 500 850 C 460 860, 420 860, 380 840 C 360 830, 350 810, 350 780 C 350 740, 340 720, 320 710 C 310 700, 300 680, 305 660 C 310 640, 320 630, 335 625 C 340 620, 340 600, 335 590 C 305 580, 270 575, 235 560 C 200 545, 195 525, 235 510 C 280 502, 305 500, 320 490 L 325 440 C 320 380, 340 320, 400 240 C 440 190, 500 145, 560 140 Z"/>
-  </g>
-  <g fill="none" stroke="#7AFFC1" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M 740 310 C 700 340, 660 350, 620 330 C 590 314, 568 336, 562 372 C 554 412, 590 426, 626 410 C 660 394, 692 414, 684 452"/>
-    <path d="M 560 408 C 528 392, 490 408, 478 444 C 466 480, 498 504, 536 494 C 574 484, 604 514, 588 552"/>
-    <path d="M 472 476 C 440 484, 418 514, 432 552 C 446 588, 488 590, 514 568 C 538 548, 572 558, 568 596"/>
-    <path d="M 428 552 C 396 562, 382 596, 402 624 C 422 652, 466 648, 484 624"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Hippocampus layered memory mark">
+  <defs>
+    <linearGradient id="base" x1="160" y1="104" x2="864" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DDE4EC"/>
+    </linearGradient>
+    <linearGradient id="paneA" x1="254" y1="214" x2="598" y2="748" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#C8D2DE" stop-opacity="0.86"/>
+    </linearGradient>
+    <linearGradient id="paneB" x1="370" y1="184" x2="716" y2="746" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F6F8FB" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#5F6975" stop-opacity="0.62"/>
+    </linearGradient>
+    <linearGradient id="paneC" x1="486" y1="254" x2="776" y2="782" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5F6975" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#18212B" stop-opacity="0.88"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="#F6F8FB"/>
+  <rect x="112" y="112" width="800" height="800" rx="190" fill="url(#base)"/>
+  <g transform="translate(0 4)">
+    <rect x="262" y="266" width="356" height="530" rx="94" fill="#C8D2DE" opacity="0.42" transform="rotate(-8 440 531)"/>
+    <rect x="302" y="218" width="356" height="560" rx="96" fill="url(#paneA)" transform="rotate(-5 480 498)"/>
+    <rect x="382" y="196" width="356" height="560" rx="96" fill="url(#paneB)" transform="rotate(5 560 476)"/>
+    <rect x="466" y="250" width="296" height="492" rx="84" fill="url(#paneC)" transform="rotate(9 614 496)"/>
+    <rect x="510" y="350" width="176" height="28" rx="14" fill="#F6F8FB" opacity="0.88"/>
+    <rect x="520" y="456" width="164" height="28" rx="14" fill="#F6F8FB" opacity="0.72"/>
+    <rect x="528" y="562" width="132" height="28" rx="14" fill="#F6F8FB" opacity="0.56"/>
   </g>
 </svg>

@@ -11,6 +11,7 @@ struct SearchView: View {
     /// case.
     var reader: BrainReader? = nil
     @FocusState private var isSearchFieldFocused: Bool
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     /// Cycle 8.51 (PR #74 follow-up): observe the shared registry so a
     /// ⌘R refresh anywhere in the app renders a spinner in the search
     /// field alongside the toast. Non-owning reference — the registry
@@ -32,7 +33,7 @@ struct SearchView: View {
             Divider().background(Color.brandCardBorder)
             content
         }
-        .background(Color.brandBgPrimary)
+        .background(reduceTransparency ? Color.brandBgPrimary : Color.brandBgPrimary.opacity(0.92))
         .task {
             await viewModel.reloadObservedApps()
         }
@@ -112,8 +113,8 @@ struct SearchView: View {
             }
         } else if viewModel.query.isEmpty && !viewModel.filters.anyActive {
             ContentUnavailableView(
-                "Type to search your brain",
-                systemImage: "brain",
+                "Type to search your memory",
+                systemImage: "magnifyingglass",
                 description: Text(
                     "Lexical + semantic recall across everything Hippocampus has captured."
                 )
