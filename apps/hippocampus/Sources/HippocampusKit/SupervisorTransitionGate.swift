@@ -26,6 +26,10 @@ struct SupervisorTransitionGate {
         activeTransitionID = nil
     }
 
+    func ownsTransition(_ transitionID: UUID) -> Bool {
+        activeTransitionID == transitionID
+    }
+
     func acceptsUnexpectedExit(generationID: String) -> Bool {
         activeTransitionID == nil && committedGenerationID == generationID
     }

@@ -52,6 +52,17 @@ final class MenuBarQuickActionsTests: XCTestCase {
         XCTAssertEqual(labels.count, 4)
     }
 
+    func testDefaultOffRunningTopologyIsIdleWithStartRecordingControl() {
+        XCTAssertEqual(
+            MenuBarStatus.derive(from: .running, captureEnabled: false),
+            .idle
+        )
+        XCTAssertEqual(
+            RecordingControl.derive(from: .running, captureEnabled: false),
+            .start
+        )
+    }
+
     /// User-pause round-trip through the menu-bar quick-actions
     /// coordinator: user flips ⌘⇧P → controller flips → supervisor
     /// hypothetically mirrors → derivation shows `.paused`. On

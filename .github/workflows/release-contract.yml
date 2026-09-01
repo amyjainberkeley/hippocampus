@@ -20,6 +20,22 @@ on:
       - 'scripts/test-toml-license-contract.sh'
       - 'scripts/verify-toml-license-contract.py'
       - 'scripts/test-task-2-product-truth.sh'
+      - 'scripts/test-retention-policy-contract.sh'
+      - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift'
+      - 'apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
+      - 'apps/agent/src/retention_worker.rs'
+      - 'apps/agent/src/bin/mci_agent.rs'
+      - 'apps/agent/tests/retention_preferences_contract.rs'
       - 'assets/installer/EULA.rtf'
       - 'assets/installer/sla.r'
       - 'assets/installer/generate-eula.py'
@@ -53,6 +69,22 @@ on:
       - 'scripts/test-toml-license-contract.sh'
       - 'scripts/verify-toml-license-contract.py'
       - 'scripts/test-task-2-product-truth.sh'
+      - 'scripts/test-retention-policy-contract.sh'
+      - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift'
+      - 'apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
+      - 'apps/agent/src/retention_worker.rs'
+      - 'apps/agent/src/bin/mci_agent.rs'
+      - 'apps/agent/tests/retention_preferences_contract.rs'
       - 'assets/installer/EULA.rtf'
       - 'assets/installer/sla.r'
       - 'assets/installer/generate-eula.py'
@@ -82,6 +114,7 @@ jobs:
       - run: scripts/test-release-contract.sh
       - run: scripts/test-toml-license-contract.sh
       - run: scripts/test-task-2-product-truth.sh
+      - run: scripts/test-retention-policy-contract.sh
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh
       - run: scripts/test-release-model-manifest.sh

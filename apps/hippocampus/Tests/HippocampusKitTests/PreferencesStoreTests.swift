@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: TBD-private
 //
-// Tests for `PreferencesStore` — the UserDefaults-backed model behind
+// Tests for `PreferencesStore` — the persisted model behind
 // the comprehensive Preferences window (⌘,).
 //
 // The SwiftUI window itself lives in the `Hippocampus` executable
@@ -23,16 +23,22 @@ final class PreferencesStoreTests: XCTestCase {
     /// in tearDown to keep the disk cache clean between runs.
     private var suiteName: String!
     private var defaults: UserDefaults!
+    private var retentionURL: URL!
 
     override func setUp() async throws {
         try await super.setUp()
         suiteName = "prefs-test-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
+        retentionURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("retention-prefs-\(UUID().uuidString)")
+            .appendingPathComponent("retention.json")
     }
 
     override func tearDown() async throws {
         defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
+        try? FileManager.default.removeItem(at: retentionURL.deletingLastPathComponent())
+        retentionURL = nil
         suiteName = nil
         try await super.tearDown()
     }
@@ -43,7 +49,7 @@ final class PreferencesStoreTests: XCTestCase {
     /// ships with today. A first-run user who never opens Preferences
     /// sees zero behavior change — this test is the pin.
     func testDefaults_matchCurrentBehavior() {
-        let store = PreferencesStore(defaults: defaults)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
 
         XCTAssertTrue(store.showMenuBarIcon,
                       "menu-bar icon defaults ON (current behavior)")
@@ -72,20 +78,20 @@ final class PreferencesStoreTests: XCTestCase {
     /// property addition.
     func testRoundTrip_allPreferencesPersist() {
         do {
-            let store = PreferencesStore(defaults: defaults)
+            let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
             store.showMenuBarIcon = false
             store.defaultRecallTab = .brief
-            store.retentionPolicy = .days30
+            XCTAssertTrue(store.setRetentionPolicy(.thirtyDays))
             store.ollamaEndpoint = "http://localhost:11434"
             store.customDatabasePath = "/tmp/custom.sqlite"
             store.deepHookPlugins["Messages"] = false
             store.deepHookPlugins["Calendar"] = true
         }
         // New instance, same defaults — should re-read the persisted values.
-        let reloaded = PreferencesStore(defaults: defaults)
+        let reloaded = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
         XCTAssertFalse(reloaded.showMenuBarIcon)
         XCTAssertEqual(reloaded.defaultRecallTab, .brief)
-        XCTAssertEqual(reloaded.retentionPolicy, .days30)
+        XCTAssertEqual(reloaded.retentionPolicy, .thirtyDays)
         XCTAssertEqual(reloaded.ollamaEndpoint, "http://localhost:11434")
         XCTAssertEqual(reloaded.customDatabasePath, "/tmp/custom.sqlite")
         XCTAssertEqual(reloaded.deepHookPlugins["Messages"], false)
@@ -101,7 +107,7 @@ final class PreferencesStoreTests: XCTestCase {
         defaults.set("not-a-tab", forKey: PreferencesStore.Keys.defaultRecallTab)
         defaults.set("not-a-policy", forKey: PreferencesStore.Keys.retentionPolicy)
 
-        let store = PreferencesStore(defaults: defaults)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
         XCTAssertEqual(store.defaultRecallTab, .search)
         XCTAssertEqual(store.retentionPolicy, .forever)
     }
@@ -112,7 +118,7 @@ final class PreferencesStoreTests: XCTestCase {
         defaults.set(Data([0xFF, 0x00, 0x42]),
                      forKey: PreferencesStore.Keys.deepHookPlugins)
 
-        let store = PreferencesStore(defaults: defaults)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
         XCTAssertEqual(store.deepHookPlugins,
                        PreferencesStore.defaultDeepHookPlugins)
     }
@@ -138,9 +144,45 @@ final class PreferencesStoreTests: XCTestCase {
     /// pruner; pin the arithmetic so a `days30 → days60` typo is
     /// caught before it hits the brain.
     func testRetentionPolicy_maxAgeSecondsMatches() {
-        XCTAssertEqual(RetentionPolicy.days30.maxAgeSeconds, 30 * 24 * 3600)
-        XCTAssertEqual(RetentionPolicy.days90.maxAgeSeconds, 90 * 24 * 3600)
+        XCTAssertEqual(RetentionPolicy.thirtyDays.maxAgeSeconds, 30 * 24 * 3600)
+        XCTAssertEqual(RetentionPolicy.sevenDays.maxAgeSeconds, 7 * 24 * 3600)
         XCTAssertNil(RetentionPolicy.forever.maxAgeSeconds)
+        XCTAssertNil(RetentionPolicy.custom.maxAgeSeconds)
+    }
+
+    func testRetentionPickerWritesWorkerCompatibleJsonAndReloadsIt() throws {
+        let fixedDate = Date(timeIntervalSince1970: 1_788_220_800)
+        let store = PreferencesStore(
+            defaults: defaults,
+            retentionURL: retentionURL,
+            now: { fixedDate }
+        )
+
+        XCTAssertTrue(store.setRetentionPolicy(.custom, customDays: 90))
+
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: retentionURL))
+        let json = try XCTUnwrap(object as? [String: Any])
+        XCTAssertEqual(json["mode"] as? String, "custom")
+        XCTAssertEqual(json["days"] as? Int, 90)
+        XCTAssertEqual(json["updated_at"] as? String, "2026-09-01T00:00:00Z")
+        XCTAssertNil(defaults.string(forKey: PreferencesStore.Keys.retentionPolicy))
+        let reloaded = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+        XCTAssertEqual(reloaded.retentionPolicy, .custom)
+        XCTAssertEqual(reloaded.retentionCustomDays, 90)
+    }
+
+    func testLegacyUserDefaultsRetentionMigratesOnceToCanonicalFile() throws {
+        defaults.set("days90", forKey: PreferencesStore.Keys.retentionPolicy)
+
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+
+        XCTAssertEqual(store.retentionPolicy, .custom)
+        XCTAssertEqual(store.retentionCustomDays, 90)
+        XCTAssertNil(defaults.string(forKey: PreferencesStore.Keys.retentionPolicy))
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: retentionURL))
+        let json = try XCTUnwrap(object as? [String: Any])
+        XCTAssertEqual(json["mode"] as? String, "custom")
+        XCTAssertEqual(json["days"] as? Int, 90)
     }
 
     // MARK: - Namespacing

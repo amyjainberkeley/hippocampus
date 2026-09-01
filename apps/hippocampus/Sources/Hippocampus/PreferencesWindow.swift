@@ -33,8 +33,8 @@
 //
 // About every preference we render, defaults MUST match current
 // behavior — a first-run user who never opens Preferences sees zero
-// behavior change. Every write goes through the store's `@Published`
-// setters which persist to UserDefaults synchronously.
+// behavior change. Retention writes atomically to the agent's canonical
+// `retention.json`; cosmetic settings remain in UserDefaults.
 
 import SwiftUI
 import HippocampusKit
@@ -204,15 +204,42 @@ struct PreferencesRootView: View {
 
             Divider()
 
-            Picker("Retention policy", selection: $store.retentionPolicy) {
+            Picker("Retention policy", selection: Binding(
+                get: { store.retentionPolicy },
+                set: { policy in
+                    _ = store.setRetentionPolicy(
+                        policy,
+                        customDays: policy == .custom
+                            ? (store.retentionCustomDays ?? 30)
+                            : nil
+                    )
+                }
+            )) {
                 ForEach(RetentionPolicy.allCases, id: \.self) { policy in
                     Text(policy.displayLabel).tag(policy)
                 }
             }
             .pickerStyle(.menu)
+            if store.retentionPolicy == .custom {
+                Stepper(
+                    "Keep events for \(store.retentionCustomDays ?? 30) days",
+                    value: Binding(
+                        get: { store.retentionCustomDays ?? 30 },
+                        set: { days in
+                            _ = store.setRetentionPolicy(.custom, customDays: days)
+                        }
+                    ),
+                    in: 1...365
+                )
+            }
             Text("Older events are pruned automatically. Default: forever (no pruning).")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
+            if let retentionWriteError = store.retentionWriteError {
+                Text(retentionWriteError)
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.red)
+            }
 
             Divider()
 

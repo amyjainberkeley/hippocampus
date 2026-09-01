@@ -8,12 +8,33 @@ SOURCE="$REPO_ROOT/docs/legal/terms-of-service.md"
 EULA="$REPO_ROOT/assets/installer/EULA.rtf"
 SLA="$REPO_ROOT/assets/installer/sla.r"
 INSTALLER="$REPO_ROOT/scripts/build-installer.sh"
+PREFERENCES_STORE="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift"
+PREFERENCES_WINDOW="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
+RETENTION_WORKER="$REPO_ROOT/apps/agent/src/retention_worker.rs"
+AGENT_MAIN="$REPO_ROOT/apps/agent/src/bin/mci_agent.rs"
+STATUS_MENU="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"
+APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift"
 
 python3 "$GENERATOR" --check
 
 rg -Fq 'Deleted memories are removed as database rows and local storage is compacted.' \
     "$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift"
 rg -Fq 'python3 "$GENERATE_EULA" --check' "$INSTALLER"
+rg -Fq '.appendingPathComponent("MCI")' "$PREFERENCES_STORE"
+rg -Fq '.appendingPathComponent("retention.json")' "$PREFERENCES_STORE"
+rg -Fq 'replaceItemAt(' "$PREFERENCES_STORE"
+rg -Fq '[.posixPermissions: 0o600]' "$PREFERENCES_STORE"
+rg -Fq 'home.join("Library/Application Support/MCI/retention.json")' "$AGENT_MAIN"
+rg -Fq 'setRetentionPolicy(' "$PREFERENCES_WINDOW"
+rg -Fq '"thirtyDays" => RetentionConfig::Days(30)' "$RETENTION_WORKER"
+rg -Fq '"sevenDays" => RetentionConfig::Days(7)' "$RETENTION_WORKER"
+rg -Fq 'captureEnabled: supervisor.captureEnabled' "$STATUS_MENU" "$APP"
+rg -Fq 'RecordingControl.derive(' "$STATUS_MENU"
+rg -Fq 'Text(menuBarStatus.displayText)' "$STATUS_MENU"
+if rg -Fq 'defaults.set(retentionPolicy.rawValue' "$PREFERENCES_STORE"; then
+    echo "FAIL: UserDefaults remains a competing retention authority" >&2
+    exit 1
+fi
 
 for prohibited in \
     'crypto[[:space:]-]*shred' \

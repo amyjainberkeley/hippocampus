@@ -57,6 +57,7 @@ final class FakeRuntimeConfig: RuntimeConfiguring, @unchecked Sendable {
 @MainActor
 final class FakeKeyCustodyPreparer: KeyCustodyPreparing {
     var error: Error?
+    var suspension: TestSuspension?
     private(set) var calls: [(URL, URL, KeychainKeyReference)] = []
 
     func prepare(
@@ -65,6 +66,7 @@ final class FakeKeyCustodyPreparer: KeyCustodyPreparing {
         keyReference: KeychainKeyReference
     ) async throws {
         calls.append((agentURL, databaseURL, keyReference))
+        if let suspension { await suspension.suspend() }
         if let error { throw error }
     }
 }
@@ -77,6 +79,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
     var onReadinessWait: ((ProcessSupervisorLaunchPlan) -> Void)?
     var onStop: (() -> Void)?
     var stopDelay: Duration?
+    var readinessSuspension: TestSuspension?
     private(set) var launchPlans: [ProcessSupervisorLaunchPlan] = []
     private(set) var generations: [SupervisorProcessGeneration] = []
     private(set) var unexpectedExitCallbacks: [@MainActor @Sendable (String, Int32) -> Void] = []
@@ -99,6 +102,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
     ) async throws {
         _ = (generation, timeout)
         onReadinessWait?(launchPlans.last!)
+        if let readinessSuspension { await readinessSuspension.suspend() }
         if !readinessResults.isEmpty {
             try readinessResults.removeFirst().get()
         }
@@ -121,6 +125,26 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
 
     func fireUnexpectedExit(forLaunchAt index: Int, label: String = "helper", status: Int32 = 9) {
         unexpectedExitCallbacks[index](label, status)
+    }
+}
+
+@MainActor
+final class TestSuspension {
+    private var entered = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func suspend() async {
+        entered = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilEntered() async {
+        while !entered { await Task.yield() }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 
@@ -302,6 +326,66 @@ final class ProcessSupervisorTests: XCTestCase {
 
         XCTAssertEqual(topology.stopCalls, 1)
         XCTAssertEqual(supervisor.state, .stopped)
+    }
+
+    func test_shutdown_during_key_preparation_prevents_late_launch() async throws {
+        let (supervisor, _, _, _, topology, custody) = makeSupervisor()
+        let suspension = TestSuspension()
+        custody.suspension = suspension
+        let startup = Task { @MainActor in try await supervisor.startAndWaitForReadiness() }
+        await suspension.waitUntilEntered()
+
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        while topology.stopCalls == 0 { await Task.yield() }
+        suspension.resume()
+        try await shutdown.value
+        await XCTAssertThrowsErrorAsync(try await startup.value)
+
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertEqual(topology.launchPlans.count, 0)
+        XCTAssertFalse(topology.isRunning)
+    }
+
+    func test_shutdown_during_readiness_keeps_stopped_and_discards_launch() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        let suspension = TestSuspension()
+        topology.readinessSuspension = suspension
+        let startup = Task { @MainActor in try await supervisor.startAndWaitForReadiness() }
+        await suspension.waitUntilEntered()
+
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        while topology.stopCalls == 0 { await Task.yield() }
+        suspension.resume()
+        try await shutdown.value
+        await XCTAssertThrowsErrorAsync(try await startup.value)
+
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertFalse(topology.isRunning)
+    }
+
+    func test_shutdown_during_capture_reconfiguration_readiness_discards_requested_topology() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        let suspension = TestSuspension()
+        topology.readinessSuspension = suspension
+
+        let reconfiguration = Task { @MainActor in
+            try await supervisor.applyCaptureEnabled(true)
+        }
+        await suspension.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        while topology.stopCalls < 2 { await Task.yield() }
+        suspension.resume()
+        try await shutdown.value
+        await XCTAssertThrowsErrorAsync(try await reconfiguration.value)
+
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [])
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertFalse(topology.isRunning)
     }
 
     func test_termination_coordinator_replies_after_stopped_and_restart_scheduling() async throws {
