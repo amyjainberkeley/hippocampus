@@ -30,6 +30,18 @@ REPO_ROOT="$(cd "$PKG_DIR/../.." && pwd)"
 
 PROFILE="release"
 DIST_DIR="$PKG_DIR/dist"
+CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
+MODELS_MANIFEST_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
+
+fatal() {
+    echo "FATAL: $1"
+    shift
+    while [[ $# -gt 0 ]]; do
+        echo "       $1"
+        shift
+    done
+    exit 1
+}
 
 usage() {
     echo "Usage: build-app.sh [OPTIONS]"
@@ -158,6 +170,20 @@ for bin_path in "$HIPPOCAMPUS_BIN" "$HELPER_BIN" "$AGENT_BIN" "$RECALL_UI_BIN" "
     fi
 done
 
+if [[ ! -f "$CHANGELOG_SRC" ]]; then
+    fatal \
+        "CHANGELOG.md missing at $CHANGELOG_SRC" \
+        "Run: ./scripts/gen-changelog.sh --output CHANGELOG.md" \
+        "Refusing to ship a bundle whose What's New release notes have no committed source."
+fi
+
+if [[ ! -f "$MODELS_MANIFEST_SRC" ]]; then
+    fatal \
+        "models.json missing at $MODELS_MANIFEST_SRC" \
+        "Run: git restore apps/hippocampus/Sources/HippocampusKit/Resources/models.json" \
+        "Refusing to guess model inputs without the committed manifest."
+fi
+
 # Clean and create structure
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES" "$FRAMEWORKS"
@@ -175,28 +201,10 @@ cp "$INFO_PLIST" "$CONTENTS/Info.plist"
 if [[ -f "$KNOWN_SAFE" ]]; then
     cp "$KNOWN_SAFE" "$RESOURCES/known-safe-apps.toml"
 fi
-
-# Cycle 8.54 — bake CHANGELOG.md into the .app so the "What's new"
-# modal (recall-ui/WhatsNew/) can render release notes with zero
-# network access. Read at runtime by `WhatsNewCoordinator` via
-# `Bundle.main.url(forResource:"CHANGELOG",withExtension:"md")`.
-#
-# Fail-loud if missing — matches the Qwen3/NER model-bundling gates
-# above (codified-WARNs-are-stops discipline, cycle 8.25). Without
-# CHANGELOG.md the modal falls back to the "dev build" empty state
-# on every post-update launch, which defeats the "users see what
-# changed after Sparkle auto-updates" mission.
-CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
-if [[ -f "$CHANGELOG_SRC" ]]; then
-    cp "$CHANGELOG_SRC" "$RESOURCES/CHANGELOG.md"
-    echo "  CHANGELOG.md bundled OK → $RESOURCES/CHANGELOG.md"
-else
-    echo "FATAL: CHANGELOG.md missing at $CHANGELOG_SRC"
-    echo "       Run scripts/gen-changelog.sh (PR #96) before bundling."
-    echo "       Refusing to ship a DMG whose 'What's new' modal would fall"
-    echo "       back to the dev-build empty state on every post-update launch."
-    exit 1
-fi
+cp "$CHANGELOG_SRC" "$RESOURCES/CHANGELOG.md"
+cp "$MODELS_MANIFEST_SRC" "$RESOURCES/models.json"
+echo "  CHANGELOG.md bundled OK → $RESOURCES/CHANGELOG.md"
+echo "  models.json bundled OK → $RESOURCES/models.json"
 
 # Copy SwiftPM-generated resource bundle for HippocampusKit into
 # Contents/Resources/ (macOS-conventional location; codesign seals it as
@@ -210,17 +218,6 @@ fi
 KIT_BUNDLE_NAME="$(basename "$HIPPOCAMPUS_KIT_BUNDLE")"
 if [[ -d "$HIPPOCAMPUS_KIT_BUNDLE" ]]; then
     ditto "$HIPPOCAMPUS_KIT_BUNDLE" "$RESOURCES/$KIT_BUNDLE_NAME"
-    # Hoist models.json to the .app's standard resource root. The Bundle.main-
-    # first resolver-order swap in ModelDownloadManager.swift reads from here
-    # on production installs, avoiding the SwiftPM Bundle.module accessor's
-    # fatalError path entirely. Fatal because the on-launch decode chain
-    # would silently fall through to an empty manifest otherwise.
-    if [[ -f "$HIPPOCAMPUS_KIT_BUNDLE/models.json" ]]; then
-        cp "$HIPPOCAMPUS_KIT_BUNDLE/models.json" "$RESOURCES/models.json"
-    else
-        echo "ERROR: models.json missing inside $HIPPOCAMPUS_KIT_BUNDLE"
-        exit 1
-    fi
 else
     echo "ERROR: HippocampusKit resource bundle not found at $HIPPOCAMPUS_KIT_BUNDLE"
     echo "Run 'swift build -c $PROFILE' in apps/hippocampus/ first."
@@ -284,20 +281,42 @@ fi
 EMBEDDER_PACKAGE="$REPO_ROOT/models/ArcticEmbedS_INT8.mlpackage"
 EMBEDDER_COMPILED="$REPO_ROOT/models/ArcticEmbedS_INT8.mlmodelc"
 EMBEDDER_DEST_DIR="$RESOURCES/Models"
+EMBEDDER_DEST="$EMBEDDER_DEST_DIR/ArcticEmbedS_INT8.mlmodelc"
+EMBEDDER_SOURCE_PRESENT=0
 
 if [[ -d "$EMBEDDER_COMPILED" ]]; then
     echo "Bundling pre-compiled ArcticEmbedS_INT8.mlmodelc"
+    EMBEDDER_SOURCE_PRESENT=1
     mkdir -p "$EMBEDDER_DEST_DIR"
+    rm -rf "$EMBEDDER_DEST"
     cp -R "$EMBEDDER_COMPILED" "$EMBEDDER_DEST_DIR/"
 elif [[ -d "$EMBEDDER_PACKAGE" ]]; then
     echo "Compiling ArcticEmbedS_INT8.mlpackage → .mlmodelc"
+    EMBEDDER_SOURCE_PRESENT=1
     mkdir -p "$EMBEDDER_DEST_DIR"
+    rm -rf "$EMBEDDER_DEST"
     xcrun coremlcompiler compile "$EMBEDDER_PACKAGE" "$EMBEDDER_DEST_DIR"
 else
-    echo "WARNING: ArcticEmbedS .mlpackage not found at $EMBEDDER_PACKAGE."
-    echo "  Semantic search will use zero-vector stub fallback."
-    echo "  To produce: pip install -r scripts/requirements-ml.txt && \\"
-    echo "             python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage"
+    fatal \
+        "ArcticEmbedS_INT8.{mlpackage,mlmodelc} missing under $REPO_ROOT/models" \
+        "Run: pip install -r scripts/requirements-ml.txt" \
+        "Then: python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage --verify" \
+        "Refusing to ship a bundle whose semantic recall silently degrades to lexical-only."
+fi
+
+if [[ "$EMBEDDER_SOURCE_PRESENT" -eq 1 ]]; then
+    if [[ ! -d "$EMBEDDER_DEST" ]]; then
+        fatal \
+            "ArcticEmbedS_INT8.mlmodelc missing at $EMBEDDER_DEST after bundling" \
+            "Run: python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage --verify" \
+            "Then re-run: ./apps/hippocampus/Resources/build-app.sh"
+    fi
+    if [[ ! -f "$EMBEDDER_DEST/model.mil" || ! -d "$EMBEDDER_DEST/weights" || ! -f "$EMBEDDER_DEST/coremldata.bin" ]]; then
+        fatal \
+            "bundled $EMBEDDER_DEST is structurally incomplete" \
+            "(missing model.mil, weights/, or coremldata.bin)." \
+            "Rebuild with: python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage --verify"
+    fi
 fi
 
 # Embed bert-base-NER Core ML model (V2-P5+ sync NER tier; CEO-ratified
@@ -331,11 +350,11 @@ elif [[ -d "$NER_PACKAGE" ]]; then
     rm -rf "$NER_DEST"
     xcrun coremlcompiler compile "$NER_PACKAGE" "$NER_DEST_DIR"
 else
-    echo "WARNING: bert-base-NER model not found at $NER_COMPILED"
-    echo "  (nor $NER_PACKAGE). The sync NER tier will be DISABLED in this build;"
-    echo "  Tier-1 regex mentions still flow on the hot path. For the shipping /"
-    echo "  dogfood build the model MUST be bundled — provide"
-    echo "  models/bert_base_NER_INT8.mlmodelc before re-running."
+    fatal \
+        "bert_base_NER_INT8.{mlpackage,mlmodelc} missing under $REPO_ROOT/models" \
+        "Run: pip install -r scripts/requirements-ml.txt" \
+        "Then: python scripts/convert_ner.py --verify --compile" \
+        "Refusing to ship a bundle whose sync NER tier is disabled."
 fi
 
 # Fail-loud NER-model gate — FATAL.
@@ -409,6 +428,21 @@ QWEN3_COMPILED="$REPO_ROOT/models/$QWEN3_BASENAME"
 QWEN3_DEST_DIR="$RESOURCES/Models/$QWEN3_MODEL_ID"
 QWEN3_DEST="$QWEN3_DEST_DIR/$QWEN3_BASENAME"
 QWEN3_SOURCE_PRESENT=0
+QWEN3_DOWNLOAD_URL="$(
+    python3 - "$MODELS_MANIFEST_SRC" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+
+for model in manifest.get("models", []):
+    if model.get("modelID") == "qwen3-1.7b-fp16":
+        print(model.get("downloadURL", ""))
+        break
+PY
+)"
+QWEN3_DOWNLOAD_CMD="mkdir -p models && curl -L \"$QWEN3_DOWNLOAD_URL\" -o /tmp/Qwen3-1.7B-FP16.mlmodelc.tar.gz && tar -xzf /tmp/Qwen3-1.7B-FP16.mlmodelc.tar.gz -C models"
 
 if [[ -d "$QWEN3_COMPILED" ]]; then
     echo "Bundling pre-compiled $QWEN3_BASENAME (~3.4 GB — this may take ~30s)"
@@ -423,12 +457,10 @@ elif [[ -d "$QWEN3_PACKAGE" ]]; then
     rm -rf "$QWEN3_DEST"
     xcrun coremlcompiler compile "$QWEN3_PACKAGE" "$QWEN3_DEST_DIR"
 else
-    echo "WARNING: Qwen3-1.7B model not found at $QWEN3_COMPILED"
-    echo "  (nor $QWEN3_PACKAGE). Daily-brief generation will be DISABLED in"
-    echo "  this build; brief worker falls back to run_disabled_idle."
-    echo "  For the shipping / dogfood build the model MUST be bundled —"
-    echo "  copy it from the primary checkout before re-running:"
-    echo "    cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/"
+    fatal \
+        "$QWEN3_BASENAME missing under $REPO_ROOT/models" \
+        "Run: $QWEN3_DOWNLOAD_CMD" \
+        "Refusing to ship a bundle whose daily briefs silently fall back to run_disabled_idle."
 fi
 
 # Fail-loud Qwen3-model gate — FATAL.
