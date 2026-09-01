@@ -22,7 +22,7 @@
 //! configured log path. In Phase-1 cycle 3 the stdin reader is
 //! replaced with the helper-child socket fd.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -117,8 +117,15 @@ enum Mode {
         db_path: PathBuf,
         batch_size: usize,
     },
+    /// A subcommand this build does not have. Carries the token so the
+    /// error can name it.
+    UnknownCommand {
+        name: String,
+    },
     /// Register Hippocampus as an MCP server in Claude Code's settings.
-    RegisterMcp,
+    RegisterMcp {
+        db_path: PathBuf,
+    },
     /// Cycle 8.29 P0 #3 — empirical "is content reaching the brain
     /// from `source`?" probe. Used by
     /// `OnboardingKit.RealBrowserDetector.checkExtensionInstalled` to
@@ -185,6 +192,7 @@ fn parse_args(argv: &[String]) -> Args {
     let mut stats_since_seconds = DEFAULT_STATS_WINDOW_SECONDS;
     let mut embed_batch_size = DEFAULT_EMBED_BATCH_SIZE;
     let mut transcript_root: Option<PathBuf> = None;
+    let mut unknown_command: Option<String> = None;
 
     let mut i = 1;
     while i < argv.len() {
@@ -246,10 +254,17 @@ fn parse_args(argv: &[String]) -> Args {
             }
             "-h" | "--help" => mode_kind = ModeKind::Help,
             "--version" => mode_kind = ModeKind::Version,
-            _ => {
-                // Unknown args silent for now (parity with the Swift
-                // helper's parser); cycle 3 tightens this.
+            // An unrecognised *flag* stays silent: the Swift host passes
+            // its own, and rejecting them would break the app whenever the
+            // two halves ship out of step. An unrecognised *subcommand* is
+            // a different thing entirely — it means the user typed a
+            // command this build does not have, and printing the usage
+            // text with exit 0 tells them it worked.
+            other if !other.starts_with('-') => {
+                mode_kind = ModeKind::UnknownCommand;
+                unknown_command = Some(other.to_owned());
             }
+            _ => {}
         }
         i += 1;
     }
@@ -268,7 +283,12 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::McpServe => Mode::McpServe {
             db_path: resolved_db_path.clone(),
         },
-        ModeKind::RegisterMcp => Mode::RegisterMcp,
+        ModeKind::UnknownCommand => Mode::UnknownCommand {
+            name: unknown_command.unwrap_or_default(),
+        },
+        ModeKind::RegisterMcp => Mode::RegisterMcp {
+            db_path: resolved_db_path,
+        },
         ModeKind::Stats => Mode::Stats {
             source: stats_source,
             since_seconds: stats_since_seconds,
@@ -318,6 +338,7 @@ enum ModeKind {
     Doctor,
     ImportSessions,
     Init,
+    UnknownCommand,
 }
 
 fn print_usage() {
@@ -968,7 +989,12 @@ async fn main() -> ExitCode {
                 }
             }
         }
-        Mode::RegisterMcp => match register_mcp() {
+        Mode::UnknownCommand { name } => {
+            eprintln!("mci-agent: unknown command `{name}`.\n");
+            print_usage();
+            ExitCode::from(2)
+        }
+        Mode::RegisterMcp { db_path } => match register_mcp(&db_path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("mci-agent register-mcp: {e}");
@@ -1155,10 +1181,17 @@ fn resolve_key_hex() -> Option<String> {
 /// (`~/.claude.json`). Merges the `hippocampus` entry under
 /// `mcpServers` without clobbering other servers. Includes an `env`
 /// block with `MCI_DB_KEY_HEX` when the dev.key file exists.
-fn register_mcp() -> Result<(), String> {
+/// Write the Hippocampus entry into Claude Code's `~/.claude.json`.
+///
+/// `db_path` is the brain this agent just resolved. It has to be recorded
+/// explicitly: `mcp-serve` otherwise falls back to the hardcoded default,
+/// so a user who imported into any other path would register a server that
+/// opens an empty (or absent) database and reports success while doing it.
+fn register_mcp(db_path: &Path) -> Result<(), String> {
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve own binary path: {e}"))?;
     let exe_str = exe.to_str().ok_or("binary path is not valid UTF-8")?;
+    let db_str = db_path.to_str().ok_or("brain path is not valid UTF-8")?;
 
     let home = std::env::var("HOME").map_err(|_| "HOME not set")?;
     let settings_path = PathBuf::from(&home).join(".claude.json");
@@ -1173,18 +1206,20 @@ fn register_mcp() -> Result<(), String> {
     };
 
     let key_path = PathBuf::from(&home).join("Library/Application Support/MCI/dev.key");
-    let key_hex: Option<String> = std::fs::read_to_string(&key_path)
-        .ok()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()));
+    // Same resolution order the rest of the binary uses. Reading only
+    // `dev.key` here meant the env var the docs tell you to export was
+    // silently dropped from the registration.
+    let key_hex: Option<String> =
+        resolve_key_hex().filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()));
 
     let mut hippocampus_entry = serde_json::json!({
         "type": "stdio",
         "command": exe_str,
         "args": ["mcp-serve"]
     });
+    hippocampus_entry["env"] = serde_json::json!({"MCI_DB_PATH": db_str});
     if let Some(k) = &key_hex {
-        hippocampus_entry["env"] = serde_json::json!({"MCI_DB_KEY_HEX": k});
+        hippocampus_entry["env"]["MCI_DB_KEY_HEX"] = serde_json::json!(k);
     } else {
         eprintln!(
             "Note: brain key not yet generated at {}. Launch Hippocampus.app once to initialize, then re-run `mci-agent register-mcp`.",
@@ -1212,8 +1247,18 @@ fn register_mcp() -> Result<(), String> {
 
     let output =
         serde_json::to_string_pretty(&root).map_err(|e| format!("serialize settings: {e}"))?;
-    std::fs::write(&settings_path, output.as_bytes())
-        .map_err(|e| format!("write {}: {e}", settings_path.display()))?;
+    // Write through a sibling temp file and rename. `~/.claude.json` holds
+    // every MCP server and setting the user has; a truncated write from a
+    // full disk or a signal would take all of it, not just our entry.
+    // rename(2) within a directory is atomic, so the file is either the old
+    // one or the new one and never a prefix of the new one.
+    let tmp_path = settings_path.with_extension(format!("json.tmp-{}", std::process::id()));
+    std::fs::write(&tmp_path, output.as_bytes())
+        .map_err(|e| format!("write {}: {e}", tmp_path.display()))?;
+    if let Err(e) = std::fs::rename(&tmp_path, &settings_path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("replace {}: {e}", settings_path.display()));
+    }
 
     println!("Hippocampus registered with Claude Code. Restart Claude Code to connect.");
     Ok(())
@@ -1443,7 +1488,7 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
     }
 
     // 4. Register with Claude Code.
-    match register_mcp() {
+    match register_mcp(db_path) {
         Ok(()) => println!("  mcp      registered with Claude Code"),
         Err(e) => println!("  mcp      not registered: {e}"),
     }

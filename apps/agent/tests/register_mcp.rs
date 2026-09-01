@@ -88,6 +88,7 @@ fn register_mcp_includes_env_block_when_dev_key_exists() {
     let output = Command::new(agent_bin())
         .arg("register-mcp")
         .env("HOME", home)
+        .env_remove("MCI_DB_KEY_HEX")
         .output()
         .expect("spawn mci-agent");
 
@@ -105,14 +106,17 @@ fn register_mcp_includes_env_block_when_dev_key_exists() {
     );
 }
 
+/// The env block is now always written, because it carries `MCI_DB_PATH`
+/// as well as the key. Only the key half is conditional.
 #[test]
-fn register_mcp_omits_env_block_when_dev_key_missing() {
+fn register_mcp_omits_only_the_key_when_dev_key_missing() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
 
     let output = Command::new(agent_bin())
         .arg("register-mcp")
         .env("HOME", home)
+        .env_remove("MCI_DB_KEY_HEX")
         .output()
         .expect("spawn mci-agent");
 
@@ -120,10 +124,106 @@ fn register_mcp_omits_env_block_when_dev_key_missing() {
 
     let content: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
-    let hippo = &content["mcpServers"]["hippocampus"];
+    let env = &content["mcpServers"]["hippocampus"]["env"];
     assert!(
-        hippo.get("env").is_none(),
-        "env block should NOT be present when dev.key is missing"
+        env.get("MCI_DB_KEY_HEX").is_none(),
+        "no key exists, so none should be recorded"
+    );
+    assert!(
+        env.get("MCI_DB_PATH").is_some(),
+        "the brain path must be recorded even with no key"
+    );
+}
+
+/// `mcp-serve` otherwise opens the hardcoded default path. Registering
+/// without recording which brain was actually filled produced a server
+/// that started cleanly against an empty or missing database.
+#[test]
+fn register_mcp_records_the_db_path_it_was_given() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let brain = home.join("somewhere-else/brain.sqlite");
+
+    let output = Command::new(agent_bin())
+        .arg("register-mcp")
+        .arg("--db-path")
+        .arg(&brain)
+        .env("HOME", home)
+        .env_remove("MCI_DB_KEY_HEX")
+        .output()
+        .expect("spawn mci-agent");
+
+    assert!(output.status.success());
+
+    let content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
+    assert_eq!(
+        content["mcpServers"]["hippocampus"]["env"]["MCI_DB_PATH"].as_str(),
+        Some(brain.to_str().unwrap()),
+        "the registered brain must be the one the user pointed at"
+    );
+}
+
+/// The docs tell users to export `MCI_DB_KEY_HEX`; registration used to
+/// read only `dev.key` and silently drop it.
+#[test]
+fn register_mcp_honours_the_key_env_var_without_a_dev_key_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let key_hex = "b".repeat(64);
+
+    let output = Command::new(agent_bin())
+        .arg("register-mcp")
+        .env("HOME", home)
+        .env("MCI_DB_KEY_HEX", &key_hex)
+        .output()
+        .expect("spawn mci-agent");
+
+    assert!(output.status.success());
+
+    let content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
+    assert_eq!(
+        content["mcpServers"]["hippocampus"]["env"]["MCI_DB_KEY_HEX"].as_str(),
+        Some(key_hex.as_str())
+    );
+}
+
+/// A stale entry naming a binary that no longer exists is what breaks a
+/// real user: Claude Code reports `failed to connect` and nothing says why.
+/// Re-running must replace the path rather than keep the dead one.
+#[test]
+fn register_mcp_replaces_a_stale_command_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    std::fs::write(
+        home.join(".claude.json"),
+        r#"{"mcpServers":{"hippocampus":{"type":"stdio","command":"/nope/gone/mci-agent","args":["mcp-serve"]},"other":{"command":"keep-me"}}}"#,
+    )
+    .unwrap();
+
+    let output = Command::new(agent_bin())
+        .arg("register-mcp")
+        .env("HOME", home)
+        .env_remove("MCI_DB_KEY_HEX")
+        .output()
+        .expect("spawn mci-agent");
+    assert!(output.status.success());
+
+    let content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
+    let cmd = content["mcpServers"]["hippocampus"]["command"]
+        .as_str()
+        .unwrap();
+    assert_ne!(cmd, "/nope/gone/mci-agent", "stale path must be replaced");
+    assert!(
+        std::path::Path::new(cmd).exists(),
+        "the recorded command must exist on disk: {cmd}"
+    );
+    assert_eq!(
+        content["mcpServers"]["other"]["command"].as_str(),
+        Some("keep-me"),
+        "other MCP servers must survive untouched"
     );
 }
 
