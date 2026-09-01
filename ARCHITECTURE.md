@@ -115,13 +115,15 @@ One deliberate constraint shapes the FFI: **pixels never cross the seam as an ow
 |---|---|
 | **Encrypted store + hybrid recall** | **Working and tested.** The SQLCipher store, FTS5 + sqlite-vec hybrid retriever, episode segmentation, retention, and the read-only FFI to the recall UI are implemented and exercised end-to-end. |
 | **On-device semantic search (Arctic-Embed-S)** | **Working.** Core ML embedding pipeline (external Rust tokenization, FP16 weights, CLS-pool + L2-norm in-graph) with a quality regression test asserting cosine parity. |
-| **Live screen capture (Swift helper)** | **Built but unverified, and default-OFF.** The full ScreenCaptureKit → filter chain → OCR path exists in `MCICaptureHelper`, but the live V2-P1 pipeline is gated behind the `HIPPOCAMPUS_ENABLE_V2P1` env var and has not passed the interactive on-device soak/smoke test. Shipping builds run with capture disabled. Do not assume the capture path is proven. |
+| **Live screen capture (Swift helper)** | **Built but not yet verified on release hardware, and default-OFF.** Capture is controlled only by the persisted `capture_enabled` preference. A change restarts the topology and is committed only after the matching generation reports readiness following `SCStream.startCapture()`. The removed `HIPPOCAMPUS_ENABLE_V2P1` variable has no authority. Full TCC denial/recovery and sustained on-device capture still require owner verification. |
 | **Context join (app / window / URL / page text)** | **Implemented.** NSWorkspace + Accessibility + AppleScript URL providers landed; browser extension (Chromium MV3 + native messaging) working, Safari appex scaffold-only. |
-| **Privacy controls** | **Mostly landed** (retention purger, denylist/suppression, Keychain-wrapped key, crypto-shred deletion). Real-capture verification with the extension and persistent-grant signing still owed. |
+| **Privacy controls** | **Mostly landed** (retention purger, denylist/suppression, file-Keychain database-key custody, legacy plaintext migration, crypto-shred deletion). Production children receive content-free Keychain references and scrub reusable key variables. Real ACL inspection across all four signed consumers, cross-version continuity, and physical-Mac capture verification remain owner/API gates. |
 | **On-device brief author (Qwen)** | **Partial.** Rust backend complete; historically blocked on Core ML `.mlpackage` conversion. The shipping DMG bakes in the models (embedder, NER, brief) to make first-run fully offline. |
 | **Encrypted cloud sync** | **Skeleton.** Server + client-side crypto + device-enrollment tests exist; cross-device convergence not proven. The zero-knowledge invariant (server holds only a hash-chained ciphertext delta log) is enforced by design and gated by review on any crypto/sync change. |
 | **Deep hooks (Mail/Messages)** | **Read paths landed, read-only.** No brain write on the ingest cascade until the per-plugin redaction path is wired. Calendar/Notes/Reminders are scaffold only. |
 | **Windows adapter** | **Not built.** Scaffold crate, stubbed methods. |
+
+Stable Developer ID signing is required for release so file-Keychain ACL trust can remain continuous across app updates. Ad-hoc development builds do not prove that continuity.
 
 ---
 

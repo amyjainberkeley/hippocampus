@@ -422,29 +422,32 @@ where
             });
         }
     };
+    let legacy_exists = match std::fs::metadata(legacy_key_path) {
+        Ok(_) => true,
+        Err(error) if error.kind() == ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(KeyResolutionError::LegacyKeyReadFailed {
+                path: legacy_key_path.to_path_buf(),
+                reason: error.to_string(),
+            });
+        }
+    };
 
     match resolve_database_key_with_reader(reader, reference) {
         Ok(key) => {
             if database_exists {
                 validator.validate_existing_database(database_path, &key)?;
-                match std::fs::metadata(legacy_key_path) {
-                    Ok(_) => {
-                        let legacy = read_legacy_key(legacy_key_path)?;
-                        validator.validate_existing_database(database_path, &legacy)?;
-                        if legacy != key {
-                            return Err(KeyResolutionError::LegacyKeyMismatch);
-                        }
-                        remove_legacy_key(remover, legacy_key_path)?;
-                        return Ok(KeyInitializationOutcome::CompletedInterruptedMigration);
-                    }
-                    Err(error) if error.kind() == ErrorKind::NotFound => {}
-                    Err(error) => {
-                        return Err(KeyResolutionError::LegacyKeyReadFailed {
-                            path: legacy_key_path.to_path_buf(),
-                            reason: error.to_string(),
-                        });
-                    }
+            }
+            if legacy_exists {
+                let legacy = read_legacy_key(legacy_key_path)?;
+                if database_exists {
+                    validator.validate_existing_database(database_path, &legacy)?;
                 }
+                if legacy != key {
+                    return Err(KeyResolutionError::LegacyKeyMismatch);
+                }
+                remove_legacy_key(remover, legacy_key_path)?;
+                return Ok(KeyInitializationOutcome::CompletedInterruptedMigration);
             }
             Ok(KeyInitializationOutcome::AlreadyPresent)
         }
@@ -455,10 +458,17 @@ where
                 });
             }
 
-            let candidate = if database_exists {
+            let candidate = if legacy_exists {
                 let legacy = read_legacy_key(legacy_key_path)?;
-                validator.validate_existing_database(database_path, &legacy)?;
+                if database_exists {
+                    validator.validate_existing_database(database_path, &legacy)?;
+                }
                 legacy
+            } else if database_exists {
+                return Err(KeyResolutionError::LegacyKeyReadFailed {
+                    path: legacy_key_path.to_path_buf(),
+                    reason: "file does not exist".to_owned(),
+                });
             } else {
                 let generated = generate()?;
                 if !is_valid_database_key(&generated) {
@@ -489,12 +499,17 @@ where
                     .map_err(|source| KeyResolutionError::PostAddValidationFailed {
                         source: Box::new(source),
                     })?;
+            }
+            if legacy_exists {
+                if reread != candidate {
+                    return Err(KeyResolutionError::LegacyKeyMismatch);
+                }
                 remove_legacy_key(remover, legacy_key_path)?;
             }
 
             if raced {
                 Ok(KeyInitializationOutcome::ConcurrentItemValidated)
-            } else if database_exists {
+            } else if legacy_exists {
                 Ok(KeyInitializationOutcome::MigratedLegacyKey)
             } else {
                 Ok(KeyInitializationOutcome::Created)

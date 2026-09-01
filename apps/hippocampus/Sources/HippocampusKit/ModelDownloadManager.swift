@@ -228,7 +228,7 @@ public actor ModelDownloadManager {
     }
 
     static func extractTarGz(_ archive: URL, to dest: URL) throws {
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
         proc.arguments = ["xzf", archive.path, "-C", dest.path]
         try proc.run()
@@ -239,7 +239,7 @@ public actor ModelDownloadManager {
     }
 
     static func extractZip(_ archive: URL, to dest: URL) throws {
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         proc.arguments = ["-o", archive.path, "-d", dest.path]
         try proc.run()

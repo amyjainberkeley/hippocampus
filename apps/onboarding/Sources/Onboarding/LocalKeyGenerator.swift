@@ -20,24 +20,15 @@ struct LocalKeyGenerator: KeyGenerator, Sendable {
 
         let databaseURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/MCI/mci.sqlite")
-        var environment = ProcessInfo.processInfo.environment
-        for name in [
-            "MCI_DB_KEY_HEX",
-            "MCI_DB_KEY_FILE",
-            "MCI_DEVELOPMENT_FILE_KEY",
-            "HIPPOCAMPUS_ENABLE_V2P1",
-        ] {
-            environment.removeValue(forKey: name)
-        }
+        var environment = ChildProcessEnvironment.scrubbingReusableKeys()
         environment["MCI_DB_PATH"] = databaseURL.path
         environment["MCI_DB_KEYCHAIN_SERVICE"] = "ai.hippocampus.brain"
         environment["MCI_DB_KEYCHAIN_ACCOUNT"] = "database-key-v1"
         environment["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = "file-keychain-acl-v1"
 
-        let process = Process()
+        let process = ChildProcessEnvironment.makeProcess(baseEnvironment: environment)
         process.executableURL = agentURL
         process.arguments = ["ensure-key", "--db-path", databaseURL.path]
-        process.environment = environment
         process.standardOutput = FileHandle(forWritingAtPath: "/dev/null")
         let stderr = Pipe()
         process.standardError = stderr

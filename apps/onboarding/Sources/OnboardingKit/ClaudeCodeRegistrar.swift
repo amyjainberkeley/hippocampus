@@ -84,7 +84,7 @@ public struct DefaultClaudeCodeRegistrar: ClaudeCodeRegistrar {
             throw ClaudeCodeRegistrarError.agentNotFound(searchedPath: agentURL.path)
         }
 
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = agentURL
         proc.arguments = ["register-mcp"]
         let stdout = Pipe()

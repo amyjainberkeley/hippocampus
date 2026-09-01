@@ -139,7 +139,7 @@ public final class BrowserExtensionViewModel: ObservableObject {
             keystroke "," using command down
         end tell
         """
-        let task = Process()
+        let task = ChildProcessEnvironment.makeProcess()
         task.launchPath = "/usr/bin/osascript"
         task.arguments = ["-e", script]
         // Swallow errors — if the user denies the AppleScript
@@ -238,7 +238,7 @@ public struct DefaultBrowserLauncher: BrowserLauncher {
 
     public func openInBrowser(browserName: String, url: String) -> Bool {
         #if canImport(AppKit)
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         proc.arguments = ["-a", browserName, url]
         do {

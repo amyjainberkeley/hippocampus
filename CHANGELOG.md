@@ -25,5 +25,5 @@ commits are intentionally omitted from release notes.
 
 ### Preview limitations
 
-- Live capture remains off by default and requires the `HIPPOCAMPUS_ENABLE_V2P1=1` boot-time opt-in while release verification is pending.
-- The branch is migrating legacy `dev.key` custody to the macOS Keychain; end-to-end migration and release verification are still pending.
+- Live capture remains off by default until the user enables the persisted capture setting. Each change is accepted only after generation-bound helper readiness; physical-Mac TCC and sustained-capture verification are still pending.
+- Legacy `dev.key` custody migrates add-only into the macOS file Keychain and removes plaintext only after validation. Cross-version Developer ID ACL continuity for Hippocampus, the capture helper, the agent, and Recall remains an owner release gate.

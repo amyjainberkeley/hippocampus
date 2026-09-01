@@ -180,7 +180,7 @@ public struct QuarantineUnlocker: Sendable {
     /// Real strip invocation via `/usr/bin/xattr -dr com.apple.quarantine`.
     /// Returns the child's exit code (or 255 if the spawn itself failed).
     public static let realStrip: StripInvoker = { xattrBin, url in
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: xattrBin)
         proc.arguments = ["-dr", "com.apple.quarantine", url.path]
         // Swallow stdout/stderr — we already log the outcome above.
