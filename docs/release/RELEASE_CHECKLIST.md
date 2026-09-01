@@ -43,6 +43,7 @@ Run on a quiet host and retain command logs:
 ./scripts/test-release-contract.sh
 ./scripts/test-release-identity.sh
 ./scripts/test-prepare-release-models.sh
+./scripts/test-release-model-manifest.sh
 ./scripts/test-sparkle-keygen.sh
 ./scripts/test-sparkle-keypair.sh
 cargo fmt --check
@@ -79,7 +80,10 @@ Complete `OWNER_SIGNING.md`, then verify:
 - [ ] A valid Developer ID Application identity with private key is present.
 - [ ] `notarytool-profile` authenticates successfully.
 - [ ] Sparkle private/public keys match.
-- [ ] GitHub release secrets exist and are scoped to the release environment.
+- [ ] GitHub signing secrets exist only in the protected `release-signing`
+      environment; owner review and tag restrictions are enabled.
+- [ ] `release-models.json` names real immutable bytes and has no
+      `UNPROVISIONED` values.
 
 ## Signed Artifact
 
@@ -94,6 +98,8 @@ Complete `OWNER_SIGNING.md`, then verify:
 - [ ] Gatekeeper accepts a freshly downloaded/quarantined copy on a second Mac.
 - [ ] DMG checksum sidecar verifies.
 - [ ] Sparkle appcast XML validates and the enclosure signature verifies.
+- [ ] Both Apple submission result files and notarization logs are retained and
+      reviewed, including accepted submissions.
 - [ ] Update from the previous public version succeeds without losing the
       Keychain-held database key or capture preference.
 

@@ -75,11 +75,12 @@ for package in apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui a
 done
 require_pattern "$RELEASE" 'scripts/prepare-release-models\.sh' \
     'release workflow reconstructs and validates model inputs'
-for name in RELEASE_MODELS_URL RELEASE_MODELS_SHA256; do
-    printf -v expected 'Required release variable is missing: \\$%s' "$name"
-    require_literal "$RELEASE" "$expected" \
-        "release workflow requires ${name}"
-done
+require_pattern "$RELEASE" 'scripts/release_models_manifest\.py' \
+    'release workflow reads the tag-owned model manifest'
+require_literal "$RELEASE" '--manifest release-models.json' \
+    'release workflow binds model inputs to the committed manifest'
+reject_pattern "$RELEASE" 'vars\.RELEASE_MODELS_(URL|SHA256)' \
+    'release model identity cannot drift through mutable repository variables'
 require_pattern "$RELEASE" 'scripts/verify-release-identity\.sh --phase prebuild' \
     'release workflow freezes tag, bundle, changelog, and feed identity before building'
 require_pattern "$RELEASE" 'scripts/verify-release-identity\.sh --phase staged' \
@@ -155,7 +156,8 @@ reject_pattern "$INSTALLER" 'NOTARYTOOL_PASSWORD|NOTARY_ARGS\[\*\]|APP_NOTARY_AR
 require_pattern "$CHECK" 'release-contract\|bash\|lint\|scripts/test-release-contract\.sh' \
     'the unified local gate runs the release contract'
 for script in test-release-contract.sh test-release-identity.sh \
-    test-prepare-release-models.sh test-sparkle-keygen.sh test-sparkle-keypair.sh; do
+    test-prepare-release-models.sh test-release-model-manifest.sh \
+    test-sparkle-keygen.sh test-sparkle-keypair.sh; do
     require_literal "$RELEASE_CI" "scripts/$script" \
         "release CI runs $script"
 done
@@ -165,6 +167,8 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     require_literal "$RELEASE_CI" "'$release_input'" \
         "release CI watches $release_input"
 done
+require_literal "$RELEASE_CI" "'release-models.json'" \
+    'release CI watches the tag-owned model manifest'
 reject_pattern "$CARGO" 'continue-on-error:[[:space:]]*true' \
     'Clippy is a blocking CI gate'
 

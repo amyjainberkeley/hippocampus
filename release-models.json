@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "releaseVersion": "0.1.0",
+  "archiveURL": "UNPROVISIONED",
+  "archiveSHA256": "UNPROVISIONED",
+  "models": [
+    {
+      "id": "arctic-embed-s-int8",
+      "bundle": "ArcticEmbedS_INT8.mlmodelc"
+    },
+    {
+      "id": "bert-base-ner-int8",
+      "bundle": "bert_base_NER_INT8.mlmodelc"
+    },
+    {
+      "id": "qwen3-1.7b-fp16",
+      "bundle": "Qwen3-1.7B-FP16.mlmodelc"
+    }
+  ]
+}

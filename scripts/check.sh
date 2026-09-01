@@ -36,6 +36,7 @@ LANES=(
     "release-contract|bash|lint|scripts/test-release-contract.sh"
     "release-identity-fixtures|bash|test|scripts/test-release-identity.sh"
     "release-model-fixtures|bash|test|scripts/test-prepare-release-models.sh"
+    "release-model-manifest|bash|test|scripts/test-release-model-manifest.sh"
     "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
     "sparkle-keypair-fixtures|bash|test|scripts/test-sparkle-keypair.sh"
     "key-custody-runner|bash|test|scripts/test-agent-key-custody-runner.sh"
@@ -75,6 +76,7 @@ LANES
     release-contract      release graph and artifact identity contract
     release-identity-fixtures release tag, DMG, checksum, and appcast fixtures
     release-model-fixtures immutable model archive integrity fixtures
+    release-model-manifest tag-owned model identity fixtures
     sparkle-keygen-fixtures bundled Sparkle CLI contract fixture
     sparkle-keypair-fixtures Ed25519 private/public matching fixtures
     key-custody-runner    nonblocking bounded child-process diagnostic fixture

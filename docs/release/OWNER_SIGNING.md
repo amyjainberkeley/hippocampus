@@ -1,8 +1,10 @@
 # Hippocampus Owner Signing Setup
 
 This document covers the account-controlled prerequisites for distributing
-Hippocampus outside the Mac App Store. It does not contain credentials and no
-repository script creates, exports, rotates, or uploads owner secrets.
+Hippocampus outside the Mac App Store. It does not contain credentials. The
+interactive Sparkle helper can create and export that one update key after
+explicit confirmation; no repository script creates Apple credentials or
+uploads any secret.
 
 Apple requires directly distributed macOS software to use a Developer ID
 Application certificate, hardened runtime, a secure timestamp, and
@@ -37,6 +39,10 @@ No Keychain password item found for profile: notarytool-profile
 The code can be built and tested with the repository's constrained SwiftPM
 wrapper where supported, but this machine cannot yet produce a Developer
 ID-signed and notarized public release.
+
+The first Hippocampus Sparkle keypair was generated on this owner machine on
+2026-09-01. Its private seed remains outside the repository at mode `0600`; the
+matching public key is committed in `Info.plist` and the pair verifier passes.
 
 ## 1. Install And Select Full Xcode
 
@@ -114,9 +120,12 @@ Verify the pair before adding the CI secret:
   --info-plist apps/hippocampus/Resources/Info.plist
 ```
 
-## 5. Configure GitHub Actions Secrets
+## 5. Configure The Protected Signing Environment
 
-The release workflow needs these repository secrets:
+Create a GitHub environment named `release-signing`. Require owner review,
+prevent self-review, disable administrator bypass where the repository plan
+allows it, and restrict it to release tags. Store these as environment secrets,
+not general repository secrets:
 
 | Secret | Purpose |
 |---|---|
@@ -127,21 +136,18 @@ The release workflow needs these repository secrets:
 | `NOTARYTOOL_PASSWORD` | App-specific password |
 | `SPARKLE_PRIVATE_KEY` | Private EdDSA key matching `SUPublicEDKey` |
 
-Use the narrowest repository/environment access available. Never print these
-values, include them in build artifacts, or pass them to Hippocampus child
-processes.
+The signing job has a read-only repository token. A separate job with no
+signing secrets creates the draft release using a write token. Never print
+secret values, include them in build artifacts, or pass them to Hippocampus
+child processes.
 
 ## 6. Configure The Immutable Model Bundle
 
 The three release models are intentionally not checked into git. A clean tag
 runner therefore requires one HTTPS tar archive whose top-level `models/`
 directory contains complete compiled bundles for Arctic Embed S, BERT NER, and
-Qwen3. Configure these repository variables:
-
-| Variable | Purpose |
-|---|---|
-| `RELEASE_MODELS_URL` | Immutable HTTPS URL for the owner-controlled model tar archive |
-| `RELEASE_MODELS_SHA256` | Exact lowercase SHA-256 of that archive |
+Qwen3. The immutable URL and digest live in the tagged
+`release-models.json`; mutable GitHub variables are not release authority.
 
 Create the archive without AppleDouble metadata where possible and calculate
 the digest from the final bytes:
@@ -153,20 +159,26 @@ shasum -a 256 release-models-v1.tar.gz
   --archive release-models-v1.tar.gz \
   --sha256 '<digest>' \
   --output /tmp/hippocampus-release-models-check
+./scripts/release_models_manifest.py \
+  --manifest release-models.json \
+  --release-version 0.1.0
 ```
 
-The current owner still needs to choose and provision the immutable HTTPS
-hosting location. Until both variables point to real bytes, a clean release is
-correctly blocked.
+Upload the final bytes as
+`release-models-0.1.0.tar.gz` in a versioned GitHub release asset, then replace
+both `UNPROVISIONED` values in `release-models.json` with that exact URL and
+lowercase digest before creating the app tag. The prebuild identity gate blocks
+until this tag-owned manifest is valid.
 
 ## 7. Configure GitHub Pages Publication
 
 In repository Settings > Pages, select **GitHub Actions** as the source. The
 shipped feed URL is
 `https://amyjainberkeley.github.io/hippocampus/appcast.xml`. Configure the
-`github-pages` environment with an owner approval rule where the repository
-plan supports required reviewers. Publication still requires the manual
-workflow input `PUBLISH` even without that optional platform rule.
+`github-pages` environment with the same owner-review protections. Publication
+still requires the manual workflow input `PUBLISH`; a rerun may safely finish a
+failed Pages deployment after release promotion because every artifact is
+re-downloaded and cryptographically reverified first.
 
 ## 8. Verify Without Publishing
 

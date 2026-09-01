@@ -53,10 +53,23 @@ PLIST
 
 - A source-backed memory release.
 CHANGELOG
+    cat >"$root/release-models.json" <<'MODELS'
+{
+  "schemaVersion": 1,
+  "releaseVersion": "1.2.3",
+  "archiveURL": "https://github.com/amyjainberkeley/hippocampus-models/releases/download/v1.2.3/release-models-1.2.3.tar.gz",
+  "archiveSHA256": "abababababababababababababababababababababababababababababababab",
+  "models": [
+    {"id": "arctic-embed-s-int8", "bundle": "ArcticEmbedS_INT8.mlmodelc"},
+    {"id": "bert-base-ner-int8", "bundle": "bert_base_NER_INT8.mlmodelc"},
+    {"id": "qwen3-1.7b-fp16", "bundle": "Qwen3-1.7B-FP16.mlmodelc"}
+  ]
+}
+MODELS
     git -C "$root" init -q
     git -C "$root" config user.name 'Release Fixture'
     git -C "$root" config user.email 'release-fixture@example.invalid'
-    git -C "$root" add apps CHANGELOG.md
+    git -C "$root" add apps CHANGELOG.md release-models.json
     git -C "$root" commit -qm 'fixture release inputs'
     local baseline
     baseline="$(git -C "$root" rev-parse HEAD)"
@@ -77,6 +90,13 @@ expect_fail 'prebuild rejects a tag that differs from the bundle version' \
 
 expect_pass 'prebuild accepts one coherent release identity' \
     "$VERIFY" --repo-root "$ROOT" --phase prebuild --tag v1.2.3
+
+sed -i '' 's|abababababababababababababababababababababababababababababababab|UNPROVISIONED|' \
+    "$ROOT/release-models.json"
+expect_fail 'prebuild rejects an unprovisioned tag-owned model manifest' \
+    "$VERIFY" --repo-root "$ROOT" --phase prebuild --tag v1.2.3
+sed -i '' 's|UNPROVISIONED|abababababababababababababababababababababababababababababababab|' \
+    "$ROOT/release-models.json"
 
 for index in 1 2 3; do
     git -C "$ROOT" commit --allow-empty -qm "stale fixture $index"

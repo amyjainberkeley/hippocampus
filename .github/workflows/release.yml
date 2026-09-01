@@ -33,8 +33,6 @@ jobs:
           NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
           NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-          RELEASE_MODELS_URL: ${{ vars.RELEASE_MODELS_URL }}
-          RELEASE_MODELS_SHA256: ${{ vars.RELEASE_MODELS_SHA256 }}
         run: |
           test -n "$APPLE_CERTIFICATE_P12" || { echo "::error::Required release secret is missing: \$APPLE_CERTIFICATE_P12"; exit 1; }
           test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "::error::Required release secret is missing: \$APPLE_CERTIFICATE_PASSWORD"; exit 1; }
@@ -42,8 +40,6 @@ jobs:
           test -n "$NOTARYTOOL_TEAM_ID" || { echo "::error::Required release secret is missing: \$NOTARYTOOL_TEAM_ID"; exit 1; }
           test -n "$NOTARYTOOL_PASSWORD" || { echo "::error::Required release secret is missing: \$NOTARYTOOL_PASSWORD"; exit 1; }
           test -n "$SPARKLE_PRIVATE_KEY" || { echo "::error::Required release secret is missing: \$SPARKLE_PRIVATE_KEY"; exit 1; }
-          test -n "$RELEASE_MODELS_URL" || { echo "::error::Required release variable is missing: \$RELEASE_MODELS_URL"; exit 1; }
-          test -n "$RELEASE_MODELS_SHA256" || { echo "::error::Required release variable is missing: \$RELEASE_MODELS_SHA256"; exit 1; }
 
       - name: Freeze release identity
         run: scripts/verify-release-identity.sh --phase prebuild --tag "$GITHUB_REF_NAME"
@@ -73,10 +69,16 @@ jobs:
           restore-keys: swift-release-${{ runner.os }}-
 
       - name: Reconstruct immutable release models
-        env:
-          RELEASE_MODELS_URL: ${{ vars.RELEASE_MODELS_URL }}
-          RELEASE_MODELS_SHA256: ${{ vars.RELEASE_MODELS_SHA256 }}
         run: |
+          RELEASE_VERSION="${GITHUB_REF_NAME#v}"
+          RELEASE_MODELS_URL="$(scripts/release_models_manifest.py \
+            --manifest release-models.json \
+            --release-version "$RELEASE_VERSION" \
+            --field archive-url)"
+          RELEASE_MODELS_SHA256="$(scripts/release_models_manifest.py \
+            --manifest release-models.json \
+            --release-version "$RELEASE_VERSION" \
+            --field archive-sha256)"
           curl --fail --location --retry 3 --proto '=https' \
             "$RELEASE_MODELS_URL" --output "$RUNNER_TEMP/release-models.tar.gz"
           scripts/prepare-release-models.sh \
