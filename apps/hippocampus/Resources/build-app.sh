@@ -33,6 +33,7 @@ DEVELOPMENT_ADHOC=0
 DIST_DIR="$PKG_DIR/dist"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
 NOTICE_SRC="$REPO_ROOT/NOTICE"
+TOML_LICENSE_VERIFIER="$REPO_ROOT/scripts/verify-toml-license-contract.py"
 STATUS_SRC="$REPO_ROOT/docs/STATUS.md"
 MODELS_MANIFEST_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
 KEYCHAIN_CONTRACT_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/keychain-sharing-contract.json"
@@ -283,6 +284,9 @@ if [[ ! -f "$NOTICE_SRC" ]]; then
         "NOTICE missing at $NOTICE_SRC" \
         "Restore the committed third-party and model attribution before building."
 fi
+
+echo "Verifying pinned TOML dependency licenses..."
+python3 "$TOML_LICENSE_VERIFIER" --repo-root "$REPO_ROOT"
 
 BUNDLE_SHORT_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST" 2>/dev/null || true)
 if [[ -z "$BUNDLE_SHORT_VERSION" ]]; then

@@ -34,6 +34,7 @@ LANES=(
     "swift-test-onboarding|swift|test|swift test --package-path apps/onboarding"
     "bash-syntax|bash|lint|__bash_syntax_lane"
     "release-contract|bash|lint|scripts/test-release-contract.sh"
+    "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
     "task-2-product-truth|bash|lint|scripts/test-task-2-product-truth.sh"
     "release-identity-fixtures|bash|test|scripts/test-release-identity.sh"
     "release-model-fixtures|bash|test|scripts/test-prepare-release-models.sh"
@@ -75,6 +76,7 @@ LANES
     swift-test-onboarding swift test in apps/onboarding
     bash-syntax           bash -n across repo *.sh files
     release-contract      release graph and artifact identity contract
+    toml-license-contract pinned TOML dependency license contract
     task-2-product-truth  legal artifact drift and active product-truth contract
     release-identity-fixtures release tag, DMG, checksum, and appcast fixtures
     release-model-fixtures immutable model archive integrity fixtures

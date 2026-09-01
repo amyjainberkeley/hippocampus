@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "swift_package": {
+    "identity": "tomlkit",
+    "location": "https://github.com/LebJe/TOMLKit.git",
+    "revision": "ec6198d37d495efc6acd4dffbd262cdca7ff9b3f",
+    "version": "0.6.0"
+  },
+  "licenses": [
+    {
+      "component": "TOMLKit",
+      "version": "0.6.0",
+      "license_path": "third_party/licenses/TOMLKit-0.6.0-LICENSE.txt",
+      "license_sha256": "bccd5fe8b98c6caede07def6c03f55877416ec40ea5fcd18e668b5c6fbb10abe",
+      "reviewed_source_path": "LICENSE",
+      "reviewed_source_sha256": "bccd5fe8b98c6caede07def6c03f55877416ec40ea5fcd18e668b5c6fbb10abe",
+      "source_url": "https://github.com/LebJe/TOMLKit"
+    },
+    {
+      "component": "toml++",
+      "version": "3.4.0",
+      "license_path": "third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt",
+      "license_sha256": "529bc3900a9571e49db285b0df432397e70b881cc3bf48de6667ae74ff4b06d8",
+      "reviewed_source_path": "Sources/CTOML/Sources/toml.hpp",
+      "reviewed_source_sha256": "6b5172ad4dd6519aec67b919181fa7a38a2234131e5b2afa232dfe444819783e",
+      "source_url": "https://github.com/marzer/tomlplusplus"
+    }
+  ]
+}

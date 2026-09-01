@@ -17,6 +17,8 @@ CONVERT_NER="$REPO_ROOT/scripts/convert_ner.py"
 CONVERT_BRIEF="$REPO_ROOT/scripts/convert_brief_model.py"
 PREFERENCES="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
 NOTICE="$REPO_ROOT/NOTICE"
+TOML_LICENSE_TEST="$REPO_ROOT/scripts/test-toml-license-contract.sh"
+TOML_LICENSE_VERIFIER="$REPO_ROOT/scripts/verify-toml-license-contract.py"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -180,8 +182,14 @@ require_literal "$CONVERT_BRIEF" 'MODEL_REVISION = "70d244cc86ccca08cf5af4e1e306
     'brief-model conversion pins the reviewed upstream revision'
 require_literal "$BUILD_APP" 'NOTICE_SRC="$REPO_ROOT/NOTICE"' \
     'app assembly treats third-party notices as a release input'
+require_literal "$BUILD_APP" 'python3 "$TOML_LICENSE_VERIFIER" --repo-root "$REPO_ROOT"' \
+    'app assembly runs the pinned TOML license-content gate'
 require_literal "$BUILD_APP" 'cp "$NOTICE_SRC" "$RESOURCES/NOTICE.txt"' \
     'app assembly bundles third-party notices for offline access'
+require_order "$BUILD_APP" 'python3 "\$TOML_LICENSE_VERIFIER"' 'cp "\$NOTICE_SRC"' \
+    'license content is verified before the offline notice is bundled'
+require_order "$BUILD_APP" 'cp "\$NOTICE_SRC"' 'codesign --verify --deep --strict' \
+    'offline third-party notices are present before the app is signed'
 require_literal "$PREFERENCES" 'Bundle.main.url(forResource: "NOTICE", withExtension: "txt")' \
     'About opens the bundled third-party notices without a network dependency'
 reject_pattern "$PREFERENCES" 'hippocampus-swart\.vercel\.app/licenses' \
@@ -190,6 +198,8 @@ reject_pattern "$NOTICE" 'imposes no condition' \
     'model notice does not make an unverified Reuters derivative-rights conclusion'
 require_pattern "$CHECK" 'release-contract\|bash\|lint\|scripts/test-release-contract\.sh' \
     'the unified local gate runs the release contract'
+require_pattern "$CHECK" 'toml-license-contract\|bash\|lint\|scripts/test-toml-license-contract\.sh' \
+    'the unified local gate runs the TOML dependency license contract'
 for script in test-release-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
     test-sparkle-keygen.sh test-sparkle-keypair.sh; do
@@ -198,8 +208,15 @@ for script in test-release-contract.sh test-release-identity.sh \
 done
 require_literal "$RELEASE_CI" 'scripts/test-task-2-product-truth.sh' \
     'release CI runs the legal drift and product-truth contract'
+require_literal "$RELEASE_CI" 'scripts/test-toml-license-contract.sh' \
+    'release CI runs the TOML dependency license contract'
 for release_input in .github/workflows/publish-release.yml scripts/build-installer.sh \
-    apps/hippocampus/Resources/build-app.sh apps/hippocampus/Package.resolved \
+    apps/hippocampus/Resources/build-app.sh apps/hippocampus/Package.swift \
+    apps/hippocampus/Package.resolved NOTICE \
+    third_party/licenses/TOMLKit-0.6.0-LICENSE.txt \
+    third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt \
+    third_party/licenses/toml-license-manifest.json \
+    scripts/verify-toml-license-contract.py scripts/test-toml-license-contract.sh \
     CHANGELOG.md docs/STATUS.md rust-toolchain.toml; do
     require_literal "$RELEASE_CI" "'$release_input'" \
         "release CI watches $release_input"
@@ -208,6 +225,12 @@ require_literal "$RELEASE_CI" "'release-models.json'" \
     'release CI watches the tag-owned model manifest'
 reject_pattern "$CARGO" 'continue-on-error:[[:space:]]*true' \
     'Clippy is a blocking CI gate'
+
+if [[ -f "$TOML_LICENSE_TEST" && -f "$TOML_LICENSE_VERIFIER" ]]; then
+    pass 'TOML dependency license gate and verifier are committed'
+else
+    fail 'TOML dependency license gate and verifier are committed'
+fi
 
 printf '%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [[ "$FAIL_COUNT" -eq 0 ]]
