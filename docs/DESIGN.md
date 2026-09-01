@@ -206,7 +206,7 @@ MCI captures the most sensitive possible data stream. Trust is the product; this
 - **Plaintext in an MCI same-user-accessible process while running** (per ADR-0012). MCI is an all-day daemon; any other process running as the same user is, by default, able to read its memory and IPC channels via standard OS APIs. This is exactly how Microsoft Recall's 2025/26 redesign failed (`AIXHost.exe` unprotected-process leak, TotalRecall Reloaded, CSO Online 2026-04-16). The at-rest model alone is insufficient — see §10 process-hardening.
 
 ### 9.2 Encryption
-- **At rest (device, ADR-0008):** the SQLite store + blob store are encrypted with SQLCipher. The target-state key custody is a **Secure-Enclave-gated, biometric-access-controlled, non-exportable, `ThisDeviceOnly`** Keychain item on macOS (TPM + DPAPI-NG analog on Windows), but the current shipping path still uses an interim local `dev.key` file.
+- **At rest (device, ADR-0008):** the SQLite store + blob store are encrypted with SQLCipher. The target-state key custody is a **Secure-Enclave-gated, biometric-access-controlled, non-exportable, `ThisDeviceOnly`** Keychain item on macOS (TPM + DPAPI-NG analog on Windows). The current branch is migrating the legacy local `dev.key` path to Keychain service `ai.hippocampus.brain`, account `database-key-v1`; Task 2 repair and end-to-end release verification remain pending, so this is not yet accepted as shipped behavior.
 - **Cloud (transport, ADR-0012):** **client-side encryption before upload** under a per-device Secure-Enclave-backed keypair + a shared user master key bootstrapped via **device-to-device authenticated enrollment** (existing device cross-signs new device's key; PAKE-style exchange over the sync transport; server never vouches). For single-device users, an opt-in **HSM-rate-limited recovery vault that self-destructs after N=10 failed attempts** (Apple ADP / WhatsApp Encrypted Backups envelope) provides catastrophic-loss recovery.
 - **Hash-chained delta log (ADR-0012).** The sync log is append-only and **hash-chained end-to-end** to defend against rollback, truncation, and key-substitution (Backendal et al., CRYPTO 2024 + ACM CCS 2024 companion). Clients verify the chain on every sync round.
 - **Searchable Symmetric Encryption is an explicit non-goal** (ADR-0012). Search runs on-device against a decrypted-in-memory index; SSE would add the known leakage-abuse exposure for zero functional gain.
@@ -318,7 +318,7 @@ mci/
 - **Phase 8 — Windows adapter.** Implement `CaptureSource` on WGC/Media Foundation/Windows.Media.Ocr/UIA. Core unchanged.
 - **Phase 9 — Retention/compaction**, scale hardening, polish.
 
-### Phase status as of 2026-05-22 EOD (cycle 8.5)
+### Phase status for the 2026-09-01 v1 branch
 
 | Phase | Status | Notes |
 |---|---|---|
@@ -326,8 +326,8 @@ mci/
 | Phase 1 | ✅ COMPLETE | Capture spine + sensitive-surface suppression. G2.1 preliminary pass; G2.2 4h soak still owed |
 | Phase 2 | ✅ COMPLETE | Context join — all providers + wiring landed |
 | Phase 3 | ✅ CLOSED (cycle 7) | OCR + brain landed. Current delete behavior is direct row deletion plus `VACUUM`, not crypto-shredded range deletion. |
-| Phase 4 | ~95% | Retention purger + onboarding scaffold landed. Keychain custody is still pending, and live capture remains default-off pending release verification. |
-| Phase 5 | ~80% | Semantic search works with the CPU-pinned Core ML embedder and Rust cosine scan over stored vectors. No canonical synthetic benchmark artifact is committed yet. |
+| Phase 4 | ~95% | Retention purger + onboarding scaffold landed. The `dev.key` to Keychain service/account migration is under Task 2 repair and has not passed end-to-end release verification; live capture remains default-off. |
+| Phase 5 | ~80% | Semantic search works with the CPU-pinned Core ML embedder and Rust cosine scan over stored vectors. Task 3 committed a synthetic retrieval baseline at `docs/eval/work-memory-baseline.json`: lexical matched 7/21 answerable cases and abstained 3/3 times; hybrid matched 21/21 but produced 3/3 false positives. Generation is unmeasured, and Task 3 review is pending. |
 | Phase 6 | ~75% | Browser extension path works. Mail and Messages deep-hook ingest can persist allowed rows, but those paths are still gated behind explicit allowlists / FDA rather than the default demo flow. |
 | Phase 7 | ~75% | Hippocampus.app shell + Sparkle + LoginItems + DMG + rpath fix landed. Apple Developer ID signing and release verification are still owed. |
 | Phase 8 | Scaffolded | `adapters/windows/` crate (PR #124). Implementation post-v1.0 |

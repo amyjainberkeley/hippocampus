@@ -20,7 +20,7 @@ It runs entirely on your machine. There is no server to trust, because there is 
 
 - Canonical shipped status lives in [docs/STATUS.md](docs/STATUS.md).
 - **Local by construction, not by policy.** Screen text is parsed on-device, embedded through Core ML with the current runtime pinned to CPU, and kept on your Mac. No API key is needed and nothing is sent anywhere.
-- **One local store, plus local blobs.** Rows, FTS, and stored vectors live in SQLCipher; keyframes stay as local blobs referenced from the database. Today delete is row removal plus `VACUUM`, while key custody is still the interim `dev.key` path until Keychain-backed storage lands.
+- **One local store, plus local blobs.** Rows, FTS, and stored vectors live in SQLCipher; keyframes stay as local blobs referenced from the database. Today delete is row removal plus `VACUUM`. The branch is migrating legacy `dev.key` custody to the macOS Keychain item `ai.hippocampus.brain` / `database-key-v1`, but Task 2 repair and end-to-end release verification are still pending.
 - **Search the way you remember.** Keyword search for exact things like an error code, Rust-side cosine search for vague things like "that pricing discussion," fused into one ranked list when the embedder and backfill are present. (The CLI below exposes the keyword half. See [what works](#what-works-and-what-doesnt).)
 - **Blocked at the source.** Password prompts, private browsing, and DRM video are refused before a frame is ever encoded, not scrubbed afterwards.
 
@@ -42,7 +42,7 @@ Everything lands in `./hippocampus-demo/`. Your real brain is never touched, no 
 rm -rf ./hippocampus-demo
 ```
 
-That deletes the demo database and its demo key. The app path is slightly different today: the store is still SQLCipher, but the shipping wrap is an interim `~/Library/Application Support/MCI/dev.key` file rather than Keychain-backed custody.
+That deletes the demo database and its demo key. The app path is slightly different today: the store is still SQLCipher, and the branch is migrating the legacy `~/Library/Application Support/MCI/dev.key` wrap to the macOS Keychain. That migration remains under repair and is not yet accepted as shipped behavior.
 
 ---
 
@@ -359,17 +359,17 @@ The obvious question is how this differs from [mem0](https://github.com/mem0ai/m
 
 mem0 and supermemory are memory layers for agents. You hand them a conversation, a document, or a fact, and they store and retrieve it. The input is text you deliberately give them.
 
-Hippocampus has no input step. The source is your screen, which means it reaches the context you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once.
+Hippocampus's intended input is permitted screen context, which reaches the details you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once. In the current preview, live capture remains an explicit boot-time opt-in while release verification is pending.
 
 | | mem0 | supermemory | Hippocampus |
 |---|---|---|---|
-| What goes in | Conversations, facts you pass it | Documents, files, connectors | Your screen, automatically |
+| What goes in | Conversations, facts you pass it | Documents, files, connectors | Permitted screen context when capture is enabled |
 | Runs offline | Yes, library mode | Yes, local binary | Yes, and there is no cloud mode |
 | Retrieval | Vector, plus a graph store | Embedded graph engine | Keyword + vector fused; semantic uses a Rust-side cosine scan over SQLCipher-stored vectors |
 | Where memories live | Your DB or their cloud | Your machine or their cloud | SQLCipher plus local blobs, only your machine |
 | Maturity | Production, 62k stars | Production, 29k stars | Recall works; capture unproven |
 
-**On benchmarks, plainly: I have not run any.** mem0 publishes LoCoMo and LongMemEval numbers, supermemory publishes theirs. Those are conversational-memory benchmarks, and Hippocampus has no conversational input, so the numbers would not be comparable even if I ran them. I would rather say that than put a table of favorable numbers next to theirs. If you want a memory layer for an agent today, use one of theirs. Use this if you want your own machine to remember what you saw.
+**On benchmarks, plainly:** a committed 24-case synthetic work-memory retrieval baseline now exists, but Task 3 review is still pending and it is not comparable to LoCoMo or LongMemEval. Lexical retrieval matched 7 of 21 answerable cases and abstained on all 3 unanswerable cases. Hybrid retrieval matched all 21 answerable cases, but produced false positives on all 3 unanswerable cases. Answer generation was not measured. The artifact and full metrics are in [docs/eval/work-memory-baseline.json](docs/eval/work-memory-baseline.json); current acceptance status is in [docs/STATUS.md](docs/STATUS.md).
 
 ---
 
@@ -431,7 +431,7 @@ mci-agent stats --source safari
 
 The promise is "nothing leaves your machine," so here is what enforces it rather than my word for it.
 
-- **One encrypted local store** via SQLCipher, plus local keyframe blobs referenced from it. Today the shipping key wrap is an owner-local `dev.key` file; Keychain-backed custody is the target state, not the current one.
+- **One encrypted local store** via SQLCipher, plus local keyframe blobs referenced from it. The branch is migrating the legacy owner-local `dev.key` wrap to Keychain service `ai.hippocampus.brain`, account `database-key-v1`; Task 2 repair and clean-install release verification are pending, so this is not yet an accepted shipping claim.
 - **No separate vector service.** Today semantic recall does a Rust-side cosine scan over vectors stored in SQLCipher. The bundled sqlite-vec path is still deferred, so there is no extra vector daemon or cloud index to trust.
 - **Blocked at the source, not scrubbed after.** Password prompts, private browsing, and DRM surfaces are refused before a frame is encoded. Scrubbing afterwards means the data existed.
 - **A second layer for text.** Extracted text is checked for one-time codes, bank alerts, and API keys and refused. Tested against a synthetic corpus of 133 message shapes built from public security writeups, NIST guidance, and OWASP fixtures, in [core/brain/fixtures/](core/brain/fixtures/). Those fixtures contain no real messages.
