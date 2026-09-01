@@ -160,9 +160,13 @@ miss, abstention, or false positive. Therefore:
 
 - `cargo test -p mci-brain --quiet`: exit `0`; 613 passed, 0 failed,
   1 ignored.
-- `cargo test -p mci-agent --test mcp_server --test work_memory_bench \
-  --test chunker_event_wire --bin mci-bench --bin mci_calibrate_evidence \
-  --quiet`: exit `0`; 54 passed, 0 failed.
+- `cargo test -p mci-agent --locked --test mcp_server \
+  --test work_memory_bench --test chunker_event_wire \
+  --test wire_e2e_fixture --bin mci-bench --bin mci_calibrate_evidence \
+  --quiet`: exit `0`; 57 passed, 0 failed.
+- `cargo test -p mci-agent --locked --no-run`: exit `0`; all agent library,
+  binary, and integration-test targets compiled, including
+  `wire_e2e_fixture`.
 - `cargo fmt --all -- --check`: exit `0`.
 - Accepted baseline diff: empty.
 - `git diff --check` and scoped staged-file review: run immediately before
