@@ -34,21 +34,24 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
     }
 
     var descriptor: MCI.Workspace.Destination {
-        let all = MCI.Workspace.primaryDestinations + MCI.Workspace.secondaryDestinations
-        return all.first { $0.id == rawValue } ?? MCI.Workspace.primaryDestinations[0]
+        MCI.Workspace.allDestinations.first { $0.id == rawValue }
+            ?? MCI.Workspace.primaryDestinations[0]
     }
 
     var keyboardShortcutLabel: String {
-        switch self {
-        case .now: return "1"
-        case .search: return "2"
-        case .timeline: return "3"
-        case .episodes: return "4"
-        case .briefs: return "5"
-        case .sources: return "6"
-        case .privacy: return "7"
-        case .settings: return "8"
+        descriptor.keyboardShortcut
+    }
+
+    init?(keyboardShortcut: Character) {
+        guard
+            let destination = MCI.Workspace.destination(
+                forKeyboardShortcut: String(keyboardShortcut)
+            ),
+            let selection = Self(rawValue: destination.id)
+        else {
+            return nil
         }
+        self = selection
     }
 }
 
@@ -102,12 +105,6 @@ struct MemoryWorkspaceView: View {
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .background(.regularMaterial)
-        .safeAreaInset(edge: .bottom) {
-            CaptureStatusFooter()
-                .padding(.horizontal, MCI.Spacing.m)
-                .padding(.vertical, MCI.Spacing.s)
-                .background(.regularMaterial)
-        }
     }
 
     @ViewBuilder
@@ -138,7 +135,7 @@ struct MemoryWorkspaceView: View {
                             isModelPresentProbe: {
                                 ModelPresenceProbe.isBriefModelInstalled()
                             },
-                            hasFullDayCapture: true
+                            hasFullDayCapture: false
                         ),
                         onRequestModelDownload: onRequestModelDownload
                     )
@@ -204,34 +201,6 @@ private struct MemorySidebarRow: View {
     }
 }
 
-private struct CaptureStatusFooter: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    var body: some View {
-        HStack(spacing: MCI.Spacing.s) {
-            Image(systemName: "record.circle")
-                .foregroundStyle(Color.brandChange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Capture status")
-                    .mciFont(.caption)
-                    .foregroundStyle(Color.brandFgPrimary)
-                Text("Controlled by Hippocampus")
-                    .font(MCI.Font.footnote)
-                    .foregroundStyle(Color.brandFgMuted)
-            }
-            Spacer(minLength: MCI.Spacing.s)
-        }
-        .padding(MCI.Spacing.s)
-        .background(reduceTransparency ? Color.brandBgSecondary : Color.brandBgElevated.opacity(0.75))
-        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                .stroke(Color.brandCardBorder, lineWidth: 0.5)
-        )
-        .accessibilityElement(children: .combine)
-    }
-}
-
 private struct WorkspaceFilmstrip: View {
     let reader: BrainReader
     @State private var hits: [Hit] = []
@@ -245,7 +214,7 @@ private struct WorkspaceFilmstrip: View {
                 Text("Recent keyframes")
                     .mciFont(.caption)
                     .foregroundStyle(Color.brandFgSecondary)
-                Text(statusLabel)
+                Text(countLabel)
                     .font(MCI.Font.mono)
                     .foregroundStyle(Color.brandFgMuted)
             }
@@ -261,7 +230,7 @@ private struct WorkspaceFilmstrip: View {
                     .foregroundStyle(Color.brandError)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if hits.isEmpty {
-                Label("No visual evidence yet", systemImage: "photo.on.rectangle.angled")
+                Label("No recent keyframes", systemImage: "photo.on.rectangle.angled")
                     .mciFont(.caption)
                     .foregroundStyle(Color.brandFgMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -283,10 +252,10 @@ private struct WorkspaceFilmstrip: View {
         }
     }
 
-    private var statusLabel: String {
+    private var countLabel: String {
         if isLoading { return "Loading" }
         if errorMessage != nil { return "Unavailable" }
-        return "\(hits.count) sources"
+        return MCI.Workspace.keyframeCountLabel(hits.count)
     }
 
     @MainActor
@@ -295,8 +264,8 @@ private struct WorkspaceFilmstrip: View {
         defer { isLoading = false }
         do {
             errorMessage = nil
-            hits = try await reader.recentEvents(limit: 12)
-                .filter { $0.thumbnailPath != nil || !$0.ocrTextSnippet.isEmpty }
+            let events = try await reader.recentEvents(limit: 48)
+            hits = Array(MCI.Workspace.recentKeyframes(from: events).prefix(12))
         } catch {
             hits = []
             errorMessage = "Memory unavailable"
@@ -341,6 +310,8 @@ private struct NowWorkspaceView: View {
     @State private var errorMessage: String?
 
     var body: some View {
+        let storedEvents = summary.map(MCI.Workspace.historicalEventMetric(for:))
+
         ScrollView {
             VStack(alignment: .leading, spacing: MCI.Spacing.l) {
                 LazyVGrid(
@@ -348,24 +319,24 @@ private struct NowWorkspaceView: View {
                     alignment: .leading,
                     spacing: MCI.Spacing.l
                 ) {
-                    StatusPanel(
-                        title: "Capture",
-                        value: captureValue,
-                        detail: "Visible controls remain in the menu bar.",
-                        systemImage: "record.circle",
-                        tint: Color.brandChange
-                    )
-                    StatusPanel(
-                        title: "Evidence",
-                        value: evidenceValue,
-                        detail: "Source-backed recall is read-only here.",
-                        systemImage: "externaldrive",
+                    MetricPanel(
+                        title: storedEvents?.title ?? "Stored events",
+                        value: historicalEventValue,
+                        detail: storedEvents?.detail ?? "Historical memory rows",
+                        systemImage: "tray.full",
                         tint: Color.brandMint
                     )
-                    StatusPanel(
+                    MetricPanel(
+                        title: "Recent events",
+                        value: recentEventValue,
+                        detail: "Latest rows returned from memory",
+                        systemImage: "clock.arrow.circlepath",
+                        tint: Color.brandFgSecondary
+                    )
+                    MetricPanel(
                         title: "Brief",
-                        value: latestBrief?.dateLocal ?? "No brief",
-                        detail: latestBrief?.title ?? "Daily briefs appear after capture.",
+                        value: briefValue,
+                        detail: briefDetail,
                         systemImage: "doc.text",
                         tint: Color.brandFgSecondary
                     )
@@ -412,14 +383,29 @@ private struct NowWorkspaceView: View {
         }
     }
 
-    private var captureValue: String {
-        guard let summary else { return "Ready" }
-        return summary.totalEvents > 0 ? "On record" : "Ready"
+    private var historicalEventValue: String {
+        if isLoading { return "Loading" }
+        if errorMessage != nil { return "Unavailable" }
+        guard let summary else { return "Unknown" }
+        return MCI.Workspace.historicalEventMetric(for: summary).value
     }
 
-    private var evidenceValue: String {
-        guard let summary else { return "No events" }
-        return "\(summary.totalEvents) events"
+    private var recentEventValue: String {
+        if isLoading { return "Loading" }
+        if errorMessage != nil { return "Unavailable" }
+        return "\(recentHits.count)"
+    }
+
+    private var briefValue: String {
+        if isLoading { return "Loading" }
+        if errorMessage != nil { return "Unavailable" }
+        return latestBrief?.dateLocal ?? "None saved"
+    }
+
+    private var briefDetail: String {
+        if isLoading { return "Reading saved briefs" }
+        if errorMessage != nil { return "Brief memory could not be read" }
+        return latestBrief?.title ?? "No saved brief in memory"
     }
 
     @MainActor
@@ -443,7 +429,7 @@ private struct NowWorkspaceView: View {
     }
 }
 
-private struct StatusPanel: View {
+private struct MetricPanel: View {
     let title: String
     let value: String
     let detail: String
@@ -501,7 +487,7 @@ private struct SourcesWorkspaceView: View {
                 ContentUnavailableView(
                     "No sources yet",
                     systemImage: "link.badge.plus",
-                    description: Text("Sources appear after permitted applications produce evidence.")
+                    description: Text("Sources appear after permitted applications add events to memory.")
                 )
                 .foregroundStyle(Color.brandFgSecondary)
             } else {

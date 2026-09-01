@@ -25,6 +25,7 @@
 //
 // See `docs/design/design-system.md` for rationale + usage examples.
 
+import Foundation
 import SwiftUI
 
 // MARK: - Namespace
@@ -322,20 +323,32 @@ public extension MCI {
             public let title: String
             public let systemImage: String
             public let requiresSourceAccess: Bool
-            public let showsCaptureStatus: Bool
+            public let keyboardShortcut: String
 
             public init(
                 id: String,
                 title: String,
                 systemImage: String,
                 requiresSourceAccess: Bool,
-                showsCaptureStatus: Bool = false
+                keyboardShortcut: String
             ) {
                 self.id = id
                 self.title = title
                 self.systemImage = systemImage
                 self.requiresSourceAccess = requiresSourceAccess
-                self.showsCaptureStatus = showsCaptureStatus
+                self.keyboardShortcut = keyboardShortcut
+            }
+        }
+
+        public struct HistoricalMetric: Sendable, Equatable {
+            public let title: String
+            public let value: String
+            public let detail: String
+
+            public init(title: String, value: String, detail: String) {
+                self.title = title
+                self.value = value
+                self.detail = detail
             }
         }
 
@@ -345,31 +358,35 @@ public extension MCI {
                 title: "Now",
                 systemImage: "sparkle.magnifyingglass",
                 requiresSourceAccess: false,
-                showsCaptureStatus: true
+                keyboardShortcut: "1"
             ),
             .init(
                 id: "search",
                 title: "Search",
                 systemImage: "magnifyingglass",
-                requiresSourceAccess: true
+                requiresSourceAccess: true,
+                keyboardShortcut: "2"
             ),
             .init(
                 id: "timeline",
                 title: "Timeline",
                 systemImage: "clock",
-                requiresSourceAccess: true
+                requiresSourceAccess: true,
+                keyboardShortcut: "3"
             ),
             .init(
                 id: "episodes",
                 title: "Episodes",
                 systemImage: "rectangle.stack",
-                requiresSourceAccess: true
+                requiresSourceAccess: true,
+                keyboardShortcut: "4"
             ),
             .init(
                 id: "briefs",
                 title: "Briefs",
                 systemImage: "doc.text",
-                requiresSourceAccess: true
+                requiresSourceAccess: true,
+                keyboardShortcut: "5"
             ),
         ]
 
@@ -378,20 +395,48 @@ public extension MCI {
                 id: "sources",
                 title: "Sources",
                 systemImage: "link.badge.plus",
-                requiresSourceAccess: true
+                requiresSourceAccess: true,
+                keyboardShortcut: "6"
             ),
             .init(
                 id: "privacy",
                 title: "Privacy",
                 systemImage: "lock.shield",
-                requiresSourceAccess: false
+                requiresSourceAccess: false,
+                keyboardShortcut: "7"
             ),
             .init(
                 id: "settings",
                 title: "Settings",
                 systemImage: "gearshape",
-                requiresSourceAccess: false
+                requiresSourceAccess: false,
+                keyboardShortcut: "8"
             ),
         ]
+
+        public static let allDestinations = primaryDestinations + secondaryDestinations
+
+        public static func destination(forKeyboardShortcut shortcut: String) -> Destination? {
+            allDestinations.first { $0.keyboardShortcut == shortcut }
+        }
+
+        public static func historicalEventMetric(for summary: SummaryStats) -> HistoricalMetric {
+            HistoricalMetric(
+                title: "Stored events",
+                value: String(summary.totalEvents),
+                detail: "Historical memory rows"
+            )
+        }
+
+        public static func recentKeyframes(from hits: [Hit]) -> [Hit] {
+            hits.filter { hit in
+                guard let path = hit.thumbnailPath else { return false }
+                return !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
+
+        public static func keyframeCountLabel(_ count: Int) -> String {
+            "\(count) \(count == 1 ? "keyframe" : "keyframes")"
+        }
     }
 }

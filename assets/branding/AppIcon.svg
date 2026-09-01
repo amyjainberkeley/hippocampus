@@ -17,7 +17,7 @@
       <stop offset="1" stop-color="#18212B" stop-opacity="0.88"/>
     </linearGradient>
   </defs>
-  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="#F6F8FB"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="#DDE4EC"/>
   <rect x="112" y="112" width="800" height="800" rx="190" fill="url(#base)"/>
   <g transform="translate(0 4)">
     <rect x="262" y="266" width="356" height="530" rx="94" fill="#C8D2DE" opacity="0.42" transform="rotate(-8 440 531)"/>

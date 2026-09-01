@@ -100,8 +100,10 @@ struct BriefView: View {
 
     private func awaitingFirstFullDayView(hoursSoFar: Double?) -> some View {
         let hoursLabel: String = {
-            guard let h = hoursSoFar, h > 0 else { return "Capture hasn't started yet." }
-            return String(format: "Captured %.1f hours so far.", h)
+            guard let h = hoursSoFar, h >= 0 else {
+                return "Full-day capture coverage has not been confirmed."
+            }
+            return String(format: "Recorded capture time: %.1f hours.", h)
         }()
         return ContentUnavailableView(
             "First brief generates after your first full day",
@@ -117,9 +119,7 @@ struct BriefView: View {
             ContentUnavailableView(
                 "No brief for \(dateLocal)",
                 systemImage: "doc.text.magnifyingglass",
-                description: Text(
-                    "Either capture was off this day or brief generation was skipped."
-                )
+                description: Text("No saved brief was found for this date.")
             )
             .foregroundStyle(Color.brandFgSecondary)
 

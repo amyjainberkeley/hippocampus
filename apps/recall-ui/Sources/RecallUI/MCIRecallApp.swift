@@ -188,7 +188,7 @@ struct RootView: View {
             .init(
                 id: "app.openCustomNames",
                 title: "Open Custom Names Dictionary",
-                shortcut: "⌘6",
+                shortcut: "⌘\(MemoryWorkspaceSelection.settings.keyboardShortcutLabel)",
                 category: .app,
                 description: "Edit user-defined entity aliases."
             ) {
@@ -316,27 +316,24 @@ struct RootView: View {
         )
         .padding(.top, 6)
         .background(Color.brandBgPrimary)
-        .focusable()
+        .focusable(true, interactions: .automatic)
         .onKeyPress(
-            keys: [
-                .init("1"), .init("2"), .init("3"), .init("4"),
-                .init("5"), .init("6"), .init("7"), .init("8"), .init("9"),
-            ],
+            keys: Set(
+                MCI.Workspace.allDestinations.compactMap { destination in
+                    destination.keyboardShortcut.first.map { KeyEquivalent($0) }
+                }
+            ),
             phases: .down
         ) { press in
-            guard press.modifiers == .command else { return .ignored }
-            switch press.key {
-            case KeyEquivalent("1"): selection = .now
-            case KeyEquivalent("2"): selection = .search
-            case KeyEquivalent("3"): selection = .timeline
-            case KeyEquivalent("4"): selection = .episodes
-            case KeyEquivalent("5"): selection = .briefs
-            case KeyEquivalent("6"): selection = .sources
-            case KeyEquivalent("7"): selection = .privacy
-            case KeyEquivalent("8"): selection = .settings
-            case KeyEquivalent("9"): selection = .now
-            default: return .ignored
+            guard
+                press.modifiers == .command,
+                let destination = MemoryWorkspaceSelection(
+                    keyboardShortcut: press.key.character
+                )
+            else {
+                return .ignored
             }
+            selection = destination
             return .handled
         }
         .onKeyPress(.init("f"), phases: .down) { press in
