@@ -74,6 +74,24 @@ A unit test checks every derived hit, recall, provenance, false-positive, separa
 
 A trap removes the candidate on every rejected path. Invalid candidates never replace an existing output.
 
+### Direct-binary publication scope
+
+The `mci-bench` binary now applies the canonical publication contract itself,
+independently of the shell promotion wrapper. A report is publishable only
+when its logical dataset path is `eval/work-memory/synthetic-v1.json`, its
+dataset id is `synthetic-work-memory-v1`, both original and evaluated counts
+are exactly 24, both arms ran, the k set is `1,3,5,10`, no limit was applied,
+the tree was clean, and the model was checksummed.
+
+A direct two-arm binary regression with an unrelated zero-case envelope now
+records `complete=true`, `publishable=false`, `launch_qualified=false`, and
+`0/0` original/evaluated cases. A deterministic scope unit test separately
+proves the canonical path/id/24/24 case is accepted and rejects wrong path,
+wrong id, zero cases, partial evaluation, single-arm runs, and noncanonical k.
+The baseline artifact was not regenerated because this repair changes only
+publication eligibility for noncanonical inputs; canonical metrics, schema,
+thresholds, and provenance are unchanged.
+
 ### Scratch isolation and cleanup
 
 Every process creates a unique scratch child directory using process, timestamp, and atomic sequence identity. Per-instance database names remain stable hashes inside that private directory.
@@ -174,6 +192,12 @@ Code/test/runner repair commit `f9a255e6679ec5f5e8513b30b07f619714198602`:
 - `eval/work-memory/README.md`
 - `scripts/eval/work-memory/run.sh`
 
+R2 direct-binary follow-up:
+
+- `apps/agent/src/bin/mci_bench.rs`
+- `apps/agent/tests/work_memory_bench.rs`
+- `.superpowers/sdd/2026-09-01-hippocampus-memory-layer/task-3-report.md`
+
 Baseline/report artifact commit:
 
 - `docs/eval/work-memory-baseline.json`
@@ -183,16 +207,22 @@ No unrelated Task 1, Task 2, or Task 7 files were staged.
 
 ## Tests And Runs
 
-- `cargo test -p mci-agent --test work_memory_bench -- --nocapture`: 14 passed
+- `cargo test -p mci-agent --test work_memory_bench -- --nocapture`: 15 passed
 - `cargo test -p mci-agent --lib bench_longmemeval::tests -- --nocapture`: 11 passed
-- `cargo test -p mci-agent --bin mci-bench -- --nocapture`: 1 passed
+- `cargo test -p mci-agent --bin mci-bench -- --nocapture`: 2 passed
 - `bash -n scripts/eval/work-memory/run.sh`: passed
 - full runner from outside the repository without baseline comparison: both arms completed; exit 7 only on the absolute quality gate
 - canonical baseline generation from exact clean code commit: promoted 24/24 artifact; exit 7 only on the absolute quality gate
 - full self-baseline rerun: regression passed with no failures; exit 7 only on the absolute quality gate
 - privacy scan: no canonical home or temporary paths in the baseline or report
 
-The focused suite covers self-baseline threshold acceptance, dataset override rejection, invalid candidate nonpromotion, concurrent scratch isolation, main/WAL/SHM cleanup after failure, index growth with content, outside-CWD execution, limited-run semantics, identity validation, undefined denominators, production header parity, path traversal rejection, and metadata path redaction.
+The focused suite covers direct-binary canonical publication scope, unrelated
+empty-corpus nonpublication, self-baseline threshold acceptance, dataset
+override rejection, invalid candidate nonpromotion, concurrent scratch
+isolation, main/WAL/SHM cleanup after failure, index growth with content,
+outside-CWD execution, limited-run semantics, identity validation, undefined
+denominators, production header parity, path traversal rejection, and metadata
+path redaction.
 
 ## Decisions And Risks
 
