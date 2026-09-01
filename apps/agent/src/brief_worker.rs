@@ -34,13 +34,23 @@
 //!   structurally banned (ADR-0018 §4.1). The lifecycle state lives in
 //!   the brief row's content; the briefs table itself does not store
 //!   `BriefState` — Tier-2 syncs are gated separately by ADR-0019.
+//!
+//! # One pass, two callers
+//!
+//! [`generate_brief_once`] is the whole unit of work: select the source
+//! events, author, run the tripwire, persist. The scheduled loop calls it
+//! once per fire; `mci-agent brief` calls the same function once and exits.
+//! Neither owns a copy of the body, so the cron path and the CLI path
+//! cannot drift.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use mci_brain::{BriefRow, SqlCipherBrainStore};
+use mci_brain::{BrainStore, BriefRow, SqlCipherBrainStore};
 use mci_brief::author::BriefAuthor;
+use mci_brief::model::BriefState;
+use mci_brief::tripwire::validate_citations;
 use tokio::sync::watch;
 
 use crate::wall_clock::format_unix_ms;
@@ -73,6 +83,13 @@ pub enum BriefWorkerError {
     /// The brain store call failed.
     #[error("brief-worker: store: {0}")]
     Store(String),
+    /// The author handed back a brief that was not a `Draft`, or one that
+    /// already carried an approver. ADR-0018 §4.1 says a brief reaches
+    /// `Approved` only through `lifecycle::advance` with an explicit human
+    /// approver id, so a generator that produces anything else is refused
+    /// and nothing is written.
+    #[error("brief-worker: refused to persist a brief that is not a Draft: {0}")]
+    NotDraft(String),
 }
 
 /// Stats reported when the worker exits.
@@ -135,6 +152,83 @@ pub fn qwen3_model_present(model_dir: &std::path::Path) -> bool {
         .exists()
 }
 
+/// Whether brief generation can run at all, and if not, why.
+///
+/// The scheduled worker turns a blocked gate into disabled-idle. A CLI run
+/// has nobody to idle for, so it prints [`gate_block_message`] and exits
+/// non-zero — the alternative is a command that appears to succeed while
+/// writing nothing, which is the failure mode `doctor` exists to end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BriefGate {
+    /// Nothing is in the way.
+    Open,
+    /// `MCI_BRIEFS_DISABLED=1` is set.
+    DisabledByEnv,
+    /// The Qwen3 `.mlmodelc` is not on disk.
+    ModelMissing,
+}
+
+/// Read the gate. Callers pass [`briefs_disabled_via_env`] for
+/// `disabled_by_env`; taking it as an argument keeps the decision pure and
+/// keeps its test out of a race with every other test that touches the
+/// process environment.
+///
+/// The env answer wins over the disk answer deliberately. Somebody who set
+/// `MCI_BRIEFS_DISABLED=1` wants to hear about that variable, not be sent
+/// to build a 1.7 B model they may already have.
+#[must_use]
+pub fn brief_gate(model_dir: &Path, disabled_by_env: bool) -> BriefGate {
+    if disabled_by_env {
+        return BriefGate::DisabledByEnv;
+    }
+    if qwen3_model_present(model_dir) {
+        BriefGate::Open
+    } else {
+        BriefGate::ModelMissing
+    }
+}
+
+/// What to print when the gate is shut. Names the thing that is missing,
+/// where it was looked for, and the one action that changes the answer.
+///
+/// Returns an empty string for [`BriefGate::Open`] — there is nothing to
+/// explain when nothing is blocked.
+#[must_use]
+pub fn gate_block_message(gate: BriefGate, model_dir: &Path) -> String {
+    match gate {
+        BriefGate::Open => String::new(),
+        BriefGate::DisabledByEnv => "briefs are switched off: MCI_BRIEFS_DISABLED=1 is set in \
+             this environment.\n\
+             Unset it (`unset MCI_BRIEFS_DISABLED`) and run this again."
+            .to_owned(),
+        BriefGate::ModelMissing => format!(
+            "no Qwen3 model, so there is nothing to write the brief with.\n\
+             \n\
+             Looked for:\n      \
+               {}\n\
+             \n\
+             That model is ~1.7 B parameters and is not checked into the\n\
+             repository. Convert and compile it yourself:\n\
+             \n      \
+               python3.11 -m venv .venv-ml && source .venv-ml/bin/activate\n      \
+               pip install -r scripts/requirements-ml.txt\n      \
+               python scripts/convert_brief_model.py --help\n\
+             \n\
+             The full recipe, including the `xcrun coremlcompiler compile` step\n\
+             that produces the .mlmodelc the loader needs, is in\n\
+             docs/coreml-conversion-howto.md. Put the compiled directory at the\n\
+             path above, or pass --model-dir to point somewhere else.\n\
+             \n\
+             Everything else keeps working — recall, enrich, doctor. There is\n\
+             just no author to run yet, so no brief was written.",
+            model_dir
+                .join(QWEN3_MODEL_ID)
+                .join(QWEN3_MODEL_BASENAME)
+                .display(),
+        ),
+    }
+}
+
 /// Run the daily brief loop until the shutdown signal fires.
 ///
 /// `tz_offset_resolver` returns the local timezone offset (in seconds
@@ -153,18 +247,19 @@ pub async fn run_brief_worker(
     match first_launch_decision(&store).await {
         Ok(true) => {
             match run_one_cycle(&store, &author_factory, "First brief", &tz_offset_resolver).await {
-                Ok(CycleOutcome::Stored {
+                Ok(BriefOutcome::Stored {
                     date_local,
                     word_count,
                     event_count,
                     id,
+                    citation_violations,
                 }) => {
                     stats.briefs_generated += 1;
                     eprintln!(
-                    "mci-agent: brief generated for {date_local} (first-launch, id={id}, {event_count} events, {word_count} words)"
+                    "mci-agent: brief generated for {date_local} (first-launch, id={id}, {event_count} events, {word_count} words, {citation_violations} citation violations)"
                 );
                 }
-                Ok(CycleOutcome::SkippedEmpty) => {
+                Ok(BriefOutcome::SkippedEmpty) => {
                     stats.cycles_skipped_empty += 1;
                 }
                 Err(e) => {
@@ -202,18 +297,19 @@ pub async fn run_brief_worker(
         }
 
         match run_one_cycle(&store, &author_factory, "Daily brief", &tz_offset_resolver).await {
-            Ok(CycleOutcome::Stored {
+            Ok(BriefOutcome::Stored {
                 date_local,
                 word_count,
                 event_count,
                 id,
+                citation_violations,
             }) => {
                 stats.briefs_generated += 1;
                 eprintln!(
-                    "mci-agent: brief generated for {date_local} (id={id}, {event_count} events, {word_count} words)"
+                    "mci-agent: brief generated for {date_local} (id={id}, {event_count} events, {word_count} words, {citation_violations} citation violations)"
                 );
             }
-            Ok(CycleOutcome::SkippedEmpty) => {
+            Ok(BriefOutcome::SkippedEmpty) => {
                 stats.cycles_skipped_empty += 1;
                 eprintln!("mci-agent: brief skipped (no events in 24 h window)");
             }
@@ -244,85 +340,196 @@ pub async fn run_disabled_idle(
     }
 }
 
-/// Outcome of one brief cycle. Used internally for stats accounting.
-enum CycleOutcome {
+/// The slice of time one brief covers, plus the local date its row is
+/// keyed on.
+///
+/// `briefs.date_local` is UNIQUE, so the date is not decoration: it is the
+/// identity of the row. Keeping it next to the bounds it was derived from
+/// stops the two from disagreeing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefWindow {
+    /// Inclusive lower bound, unix microseconds.
+    pub since_us: u64,
+    /// Exclusive upper bound, unix microseconds.
+    pub until_us: u64,
+    /// `YYYY-MM-DD` in the user's local zone. Keys the `briefs` row.
+    pub date_local: String,
+}
+
+impl BriefWindow {
+    /// The scheduled worker's window: the 24 h ending now, filed under
+    /// today's local date.
+    ///
+    /// The upper bound is open on purpose. Generation takes seconds, and an
+    /// event captured while the author is running still happened today —
+    /// clipping at the instant the cycle started would drop it from a brief
+    /// that no later cycle will ever cover.
+    #[must_use]
+    pub fn trailing_24h(now_us: u64, tz_offset_secs: i32) -> Self {
+        let now_secs = i64::try_from(now_us / 1_000_000).unwrap_or(i64::MAX);
+        Self {
+            since_us: now_us.saturating_sub(24 * 3600 * 1_000_000),
+            until_us: u64::MAX,
+            date_local: local_date_string(now_secs, tz_offset_secs),
+        }
+    }
+
+    /// One whole local day, for `mci-agent brief --date YYYY-MM-DD`.
+    ///
+    /// Returns `None` if the date is not a real `YYYY-MM-DD` calendar date.
+    /// Both bounds are closed on the local midnights, so re-running for a
+    /// past day reads exactly what that day held and nothing either side.
+    #[must_use]
+    pub fn for_local_date(date_local: &str, tz_offset_secs: i32) -> Option<Self> {
+        let start_secs = local_date_start_secs(date_local, tz_offset_secs)?;
+        let start_us = u64::try_from(start_secs).ok()?.saturating_mul(1_000_000);
+        Some(Self {
+            since_us: start_us,
+            until_us: start_us.saturating_add(24 * 3600 * 1_000_000),
+            date_local: date_local.to_owned(),
+        })
+    }
+
+    /// Lower bound in the form `events_since` wants it.
+    ///
+    /// That query is `ts_us > cursor`, strictly greater, so an event landing
+    /// exactly on local midnight would fall out of its own day. Step back one
+    /// microsecond to make the bound inclusive.
+    fn query_cursor_us(&self) -> u64 {
+        self.since_us.saturating_sub(1)
+    }
+}
+
+/// Outcome of one brief pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BriefOutcome {
+    /// A brief was authored and written to the `briefs` table.
     Stored {
+        /// Local date the row is keyed on.
         date_local: String,
+        /// Words in the body.
         word_count: u32,
+        /// Events fed to the author.
         event_count: u32,
+        /// Row id assigned by the store.
         id: u64,
+        /// Citation violations the tripwire found. Non-zero does NOT stop
+        /// the draft being written — a draft is exactly the thing a human
+        /// reviews. It blocks approval later, in `lifecycle::advance`.
+        citation_violations: usize,
     },
+    /// The window held no events, so there was nothing to summarize.
     SkippedEmpty,
 }
 
+/// Author and persist one brief. The entire unit of work, done once.
+///
+/// Both callers run this and nothing else: [`run_brief_worker`] on its
+/// schedule, `mci-agent brief` on demand. Synchronous and free of tokio so
+/// a CLI does not have to stand up a runtime to reach it; the async worker
+/// hands it to `spawn_blocking`.
+///
+/// Order is: select events in `window`, author them, check the state,
+/// run the tripwire, write the row.
+///
+/// # ADR-0018 §4.1
+///
+/// The brief is written as authored — `Draft`. This function never calls
+/// `lifecycle::advance` and takes no approver, so no caller can reach
+/// `Approved` through it. A brief that arrives in any other state is
+/// refused with [`BriefWorkerError::NotDraft`] and nothing is written.
+///
+/// # Errors
+/// [`BriefWorkerError::Store`] if the brain read or write fails,
+/// [`BriefWorkerError::Author`] if generation fails, and
+/// [`BriefWorkerError::NotDraft`] if the author breaks the ADR-0018
+/// invariant above.
+pub fn generate_brief_once(
+    store: &SqlCipherBrainStore,
+    factory: &AuthorFactory,
+    topic: &str,
+    window: &BriefWindow,
+    generated_ts_us: u64,
+) -> Result<BriefOutcome, BriefWorkerError> {
+    let mut records = store
+        .events_since(window.query_cursor_us(), MAX_EVENTS_PER_BRIEF)
+        .map_err(|e| BriefWorkerError::Store(format!("events_since: {e}")))?;
+    records.retain(|r| r.ts_us < window.until_us);
+
+    if records.is_empty() {
+        return Ok(BriefOutcome::SkippedEmpty);
+    }
+    let event_count = u32::try_from(records.len()).unwrap_or(u32::MAX);
+
+    // The author is constructed here, not by the caller, and dropped at the
+    // end of this function — the ~500 MB working set is resident only while
+    // generating (ADR-0028 §6), and only when there was something to write.
+    let author = (factory)()?;
+    let brief = author
+        .author(&records, topic)
+        .map_err(|e| BriefWorkerError::Author(e.to_string()))?;
+    drop(author);
+
+    if brief.state != BriefState::Draft || brief.human_approver_id.is_some() {
+        return Err(BriefWorkerError::NotDraft(format!(
+            "state={} approver={:?}",
+            brief.state, brief.human_approver_id
+        )));
+    }
+
+    // Runs on every generated brief so the count is visible at generation
+    // time rather than only when somebody opens the review UI. Advisory
+    // here; structural at the approval chokepoint.
+    let citation_violations = validate_citations(&brief, store as &dyn BrainStore).len();
+
+    let word_count = u32::try_from(brief.body.split_whitespace().count()).unwrap_or(u32::MAX);
+    let row = BriefRow {
+        id: 0,
+        date_local: window.date_local.clone(),
+        generated_ts_us,
+        model_id: QWEN3_MODEL_ID.to_owned(),
+        model_version: "1.0".to_owned(),
+        title: brief.title,
+        body: brief.body,
+        word_count,
+        source_event_count: event_count,
+    };
+
+    // INSERT OR REPLACE on UNIQUE(date_local): regenerating a date replaces
+    // that date's brief rather than accumulating duplicates.
+    let id = store
+        .put_brief(&row)
+        .map_err(|e| BriefWorkerError::Store(format!("put_brief: {e}")))?;
+
+    Ok(BriefOutcome::Stored {
+        date_local: window.date_local.clone(),
+        word_count,
+        event_count,
+        id,
+        citation_violations,
+    })
+}
+
+/// Async shell around [`generate_brief_once`]: resolve the clock, then run
+/// the pass on the blocking pool so model load and `SQLCipher` I/O stay off
+/// the runtime thread.
 async fn run_one_cycle(
     store: &Arc<SqlCipherBrainStore>,
     factory: &AuthorFactory,
     topic: &str,
     tz_offset_resolver: &Arc<dyn Fn() -> i32 + Send + Sync>,
-) -> Result<CycleOutcome, BriefWorkerError> {
+) -> Result<BriefOutcome, BriefWorkerError> {
     let now_us = unix_now_us();
-    let since_us = now_us.saturating_sub(24 * 3600 * 1_000_000);
+    let window = BriefWindow::trailing_24h(now_us, (tz_offset_resolver)());
 
-    let store_for_query = Arc::clone(store);
-    let records = tokio::task::spawn_blocking(move || {
-        store_for_query.events_since(since_us, MAX_EVENTS_PER_BRIEF)
-    })
-    .await
-    .map_err(|e| BriefWorkerError::Fatal(format!("events_since join: {e}")))?
-    .map_err(|e| BriefWorkerError::Store(format!("events_since: {e}")))?;
-
-    if records.is_empty() {
-        return Ok(CycleOutcome::SkippedEmpty);
-    }
-
-    let event_count = u32::try_from(records.len()).unwrap_or(u32::MAX);
+    let store_c = Arc::clone(store);
     let factory_c = Arc::clone(factory);
     let topic_owned = topic.to_owned();
-    let records_for_author = records;
-    let brief = tokio::task::spawn_blocking(
-        move || -> Result<mci_brief::model::Brief, BriefWorkerError> {
-            let author = (factory_c)()?;
-            author
-                .author(&records_for_author, &topic_owned)
-                .map_err(|e| BriefWorkerError::Author(e.to_string()))
-        },
-    )
-    .await
-    .map_err(|e| BriefWorkerError::Fatal(format!("author join: {e}")))??;
-
-    let body = brief.body;
-    let title = brief.title;
-    let word_count = u32::try_from(body.split_whitespace().count()).unwrap_or(u32::MAX);
-    let tz_off = (tz_offset_resolver)();
-    let now_secs = i64::try_from(now_us / 1_000_000).unwrap_or(i64::MAX);
-    let date_local = local_date_string(now_secs, tz_off);
-
-    let row = BriefRow {
-        id: 0,
-        date_local: date_local.clone(),
-        generated_ts_us: now_us,
-        model_id: "qwen3-1.7b-fp16".to_owned(),
-        model_version: "1.0".to_owned(),
-        title,
-        body,
-        word_count,
-        source_event_count: event_count,
-    };
-
-    let store_for_write = Arc::clone(store);
-    let row_for_write = row;
-    let id = tokio::task::spawn_blocking(move || store_for_write.put_brief(&row_for_write))
-        .await
-        .map_err(|e| BriefWorkerError::Fatal(format!("put_brief join: {e}")))?
-        .map_err(|e| BriefWorkerError::Store(format!("put_brief: {e}")))?;
-
-    Ok(CycleOutcome::Stored {
-        date_local,
-        word_count,
-        event_count,
-        id,
+    tokio::task::spawn_blocking(move || {
+        generate_brief_once(&store_c, &factory_c, &topic_owned, &window, now_us)
     })
+    .await
+    .map_err(|e| BriefWorkerError::Fatal(format!("brief cycle join: {e}")))?
 }
 
 /// Decide whether the first-launch path should fire on startup.
@@ -398,6 +605,48 @@ pub fn local_date_string(unix_secs: i64, tz_offset_secs: i32) -> String {
     let rfc = format_unix_ms(ms);
     // `format_unix_ms` always returns `YYYY-MM-DDTHH:MM:SS.sssZ`.
     rfc[..10].to_owned()
+}
+
+/// Pure: the UTC second at which `date_local` (`YYYY-MM-DD`) begins in a
+/// zone `tz_offset_secs` east of UTC. The exact inverse of
+/// [`local_date_string`].
+///
+/// `None` for anything that is not a real calendar date. The check is a
+/// round-trip through [`local_date_string`] rather than a hand-written
+/// month-length table: "2026-02-30" parses as digits, converts to a day
+/// number, and renders back as "2026-03-02", which is not what was asked
+/// for, so it is rejected.
+#[must_use]
+pub fn local_date_start_secs(date_local: &str, tz_offset_secs: i32) -> Option<i64> {
+    let bytes = date_local.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    let year: i64 = date_local.get(0..4)?.parse().ok()?;
+    let month: u32 = date_local.get(5..7)?.parse().ok()?;
+    let day: u32 = date_local.get(8..10)?.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    let local_midnight = days_from_civil(year, month, day).checked_mul(86_400)?;
+    if local_date_string(local_midnight, 0) != date_local {
+        return None;
+    }
+    local_midnight.checked_sub(i64::from(tz_offset_secs))
+}
+
+/// Days since 1970-01-01 for a civil date. Howard Hinnant's
+/// `days_from_civil`; the inverse of the `civil_from_days` that
+/// [`crate::wall_clock::format_unix_ms`] already uses.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let mp = i64::from(if month > 2 { month - 3 } else { month + 9 }); // [0, 11]
+    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
 }
 
 /// Resolve the system's current local-zone offset in seconds east of
@@ -605,6 +854,142 @@ mod tests {
         let utc = 1_779_163_200 + 16 * 3600;
         let off = 5 * 3600 + 30 * 60;
         assert_eq!(local_date_string(utc, off), "2026-05-20");
+    }
+
+    // ---------------- local_date_start_secs ----------------
+
+    #[test]
+    fn local_date_start_is_the_inverse_of_local_date_string() {
+        // Every date it accepts must render back to itself, in any zone.
+        for date in [
+            "1970-01-01",
+            "2024-02-29",
+            "2026-05-19",
+            "2026-12-31",
+            "2027-01-01",
+        ] {
+            for off in [0, -8 * 3600, 5 * 3600 + 30 * 60, 14 * 3600] {
+                let start = local_date_start_secs(date, off).expect(date);
+                assert_eq!(
+                    local_date_string(start, off),
+                    date,
+                    "{date} at offset {off}"
+                );
+                // One second earlier is the previous day — the bound is
+                // exactly midnight, not "some time that morning". Skipped
+                // at the epoch itself, where there is no previous day to
+                // land in and `local_date_string` clamps at zero.
+                if start.saturating_add(i64::from(off)) > 0 {
+                    assert_ne!(
+                        local_date_string(start - 1, off),
+                        date,
+                        "{date} at offset {off}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn local_date_start_rejects_dates_that_do_not_exist() {
+        assert_eq!(local_date_start_secs("2026-02-30", 0), None);
+        assert_eq!(
+            local_date_start_secs("2025-02-29", 0),
+            None,
+            "not a leap year"
+        );
+        assert_eq!(local_date_start_secs("2026-13-01", 0), None);
+        assert_eq!(local_date_start_secs("2026-00-10", 0), None);
+        assert_eq!(local_date_start_secs("2026-01-00", 0), None);
+    }
+
+    #[test]
+    fn local_date_start_rejects_malformed_input() {
+        assert_eq!(local_date_start_secs("", 0), None);
+        assert_eq!(local_date_start_secs("2026-5-19", 0), None);
+        assert_eq!(local_date_start_secs("2026/05/19", 0), None);
+        assert_eq!(local_date_start_secs("19-05-2026", 0), None);
+        assert_eq!(local_date_start_secs("yesterday", 0), None);
+        assert_eq!(local_date_start_secs("2026-05-19T00:00:00Z", 0), None);
+    }
+
+    // ---------------- BriefWindow ----------------
+
+    #[test]
+    fn trailing_window_covers_the_last_24h_and_stays_open_at_the_top() {
+        let now_us = 1_779_163_200_000_000_u64; // 2026-05-19T04:00:00Z
+        let w = BriefWindow::trailing_24h(now_us, 0);
+        assert_eq!(w.since_us, now_us - 24 * 3600 * 1_000_000);
+        assert_eq!(
+            w.until_us,
+            u64::MAX,
+            "an event captured during generation still belongs to today"
+        );
+        assert_eq!(w.date_local, "2026-05-19");
+    }
+
+    #[test]
+    fn dated_window_is_exactly_one_local_day() {
+        let w = BriefWindow::for_local_date("2026-05-19", -8 * 3600).expect("valid date");
+        assert_eq!(w.until_us - w.since_us, 24 * 3600 * 1_000_000);
+        assert_eq!(w.date_local, "2026-05-19");
+        // Local midnight in PST is 08:00 UTC.
+        let start_secs = i64::try_from(w.since_us / 1_000_000).unwrap();
+        assert_eq!(local_date_string(start_secs, -8 * 3600), "2026-05-19");
+    }
+
+    #[test]
+    fn dated_window_query_cursor_includes_midnight_itself() {
+        // `events_since` is `ts_us > cursor`. An event landing exactly on
+        // local midnight has to stay inside its own day.
+        let w = BriefWindow::for_local_date("2026-05-19", 0).expect("valid date");
+        assert_eq!(w.query_cursor_us(), w.since_us - 1);
+    }
+
+    #[test]
+    fn dated_window_rejects_a_date_that_does_not_exist() {
+        assert_eq!(BriefWindow::for_local_date("2026-02-30", 0), None);
+    }
+
+    // ---------------- brief_gate ----------------
+
+    #[test]
+    fn gate_is_open_only_with_a_model_and_no_disable_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(brief_gate(dir.path(), false), BriefGate::ModelMissing);
+        assert_eq!(brief_gate(dir.path(), true), BriefGate::DisabledByEnv);
+
+        std::fs::create_dir_all(dir.path().join(QWEN3_MODEL_ID).join(QWEN3_MODEL_BASENAME))
+            .unwrap();
+        assert_eq!(brief_gate(dir.path(), false), BriefGate::Open);
+        assert_eq!(
+            brief_gate(dir.path(), true),
+            BriefGate::DisabledByEnv,
+            "the switch wins over the model being there"
+        );
+    }
+
+    #[test]
+    fn every_shut_gate_says_what_to_do_about_it() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let missing = gate_block_message(BriefGate::ModelMissing, dir.path());
+        assert!(
+            missing.contains(QWEN3_MODEL_BASENAME),
+            "must name the file it looked for: {missing}"
+        );
+        assert!(
+            missing.contains("convert_brief_model.py"),
+            "must say how to get one: {missing}"
+        );
+
+        let disabled = gate_block_message(BriefGate::DisabledByEnv, dir.path());
+        assert!(
+            disabled.contains("MCI_BRIEFS_DISABLED"),
+            "must name the variable that is switching it off: {disabled}"
+        );
+
+        assert!(gate_block_message(BriefGate::Open, dir.path()).is_empty());
     }
 
     // ---------------- should_fire_first_brief ----------------
