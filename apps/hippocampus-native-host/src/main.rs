@@ -134,7 +134,9 @@ fn read_native_message(reader: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
 }
 
 fn write_native_message(writer: &mut impl Write, msg: &[u8]) -> io::Result<()> {
-    let len = (msg.len() as u32).to_le_bytes();
+    let len = u32::try_from(msg.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "native message too large"))?
+        .to_le_bytes();
     writer.write_all(&len)?;
     writer.write_all(msg)?;
     writer.flush()
@@ -146,7 +148,7 @@ fn truncate_at_sentence_boundary(text: &str, max_bytes: usize) -> &str {
     }
     let slice = &text[..max_bytes];
     if let Some(pos) = slice.rfind(". ") {
-        &text[..pos + 1]
+        &text[..=pos]
     } else if let Some(pos) = slice.rfind('\n') {
         &text[..pos]
     } else {
@@ -289,7 +291,8 @@ mod tests {
     fn read_native_message_roundtrip() {
         let payload = b"{\"test\":true}";
         let mut buf = Vec::new();
-        buf.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        let payload_len = u32::try_from(payload.len()).expect("fixture fits native message frame");
+        buf.extend_from_slice(&payload_len.to_le_bytes());
         buf.extend_from_slice(payload);
 
         let result = read_native_message(&mut &buf[..]).unwrap().unwrap();
@@ -440,7 +443,7 @@ mod tests {
     // ---- SH Fork E1 (all_frames:true) per-frame coverage --------------
 
     /// Builder for an SH-Fork-E1-era top-frame message. Use this in
-    /// tests so adding more fields to BrowserMessage doesn't churn the
+    /// tests so adding more fields to `BrowserMessage` doesn't churn the
     /// suite.
     fn top_frame_msg(url: &str, title: &str, text: &str, incognito: bool) -> BrowserMessage {
         BrowserMessage {

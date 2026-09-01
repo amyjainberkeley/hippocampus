@@ -10,7 +10,7 @@
 //!
 //! | Field | Source | May carry user content? |
 //! |---|---|---|
-//! | `current_calendar_event.subject` | EventKit `EKEvent.title` | YES |
+//! | `current_calendar_event.subject` | `EventKit` `EKEvent.title` | YES |
 //! | `current_listening_track.title`  | `MPNowPlayingInfoCenter`  | YES |
 //! | `current_listening_track.artist` | `MPNowPlayingInfoCenter`  | YES |
 //! | `current_contact.identifier`     | `CNContact.identifier`    | NO (opaque) |
@@ -89,7 +89,7 @@ pub fn redact_calendar_subject(subject: &mut String) -> RedactionResult {
     if result.matched() {
         // Replace the source bytes with the redacted text — no
         // source bytes from a matched span survive in the field.
-        *subject = result.redacted_text.clone();
+        subject.clone_from(&result.redacted_text);
     }
     result
 }
@@ -103,7 +103,7 @@ pub fn redact_calendar_subject(subject: &mut String) -> RedactionResult {
 pub fn redact_track_title(title: &mut String) -> RedactionResult {
     let result = sms_otp::redact_sms_shapes(title);
     if result.matched() {
-        *title = result.redacted_text.clone();
+        title.clone_from(&result.redacted_text);
     }
     result
 }
@@ -117,7 +117,7 @@ pub fn redact_track_title(title: &mut String) -> RedactionResult {
 pub fn redact_track_artist(artist: &mut String) -> RedactionResult {
     let result = sms_otp::redact_sms_shapes(artist);
     if result.matched() {
-        *artist = result.redacted_text.clone();
+        artist.clone_from(&result.redacted_text);
     }
     result
 }

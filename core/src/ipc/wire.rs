@@ -64,7 +64,7 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// `0x06 → 0x07` (2026-05-28, ocr-emit-silence fix): `HelperHealth`
 /// gained the `frames_encode_failed` counter
 /// (`docs/research/ocr-emit-silence-2026-05-28.md`). Trip-wire for
-/// VideoToolbox HEVC encode throws on the cascade `.allow` branch so
+/// `VideoToolbox` HEVC encode throws on the cascade `.allow` branch so
 /// the prior silent muting of the cascade-twice OCR emitter cannot
 /// regress unnoticed. Content-free counter — same discipline as
 /// `frames_redacted_by_failsafe`. **Decoder dual-accept**: this is the
@@ -82,13 +82,13 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// the `frames_focus_race_dropped` counter
 /// (`docs/research/capture-scope-window-vs-display-2026-05-29.md` §5.3).
 /// Trip-wire for the ADR-0031 race-consistency gate — frames dropped
-/// because the `FocusedWindowStore.generation` observed at SCStream
+/// because the `FocusedWindowStore.generation` observed at `SCStream`
 /// callback time did not match the `installedFocusGeneration` the
-/// live SCStream's filter was rebound under. Content-free counter —
+/// live `SCStream`'s filter was rebound under. Content-free counter —
 /// same discipline as `frames_redacted_by_failsafe` /
 /// `frames_encode_failed`. Tells the Telemetry-Gap analyst whether
 /// the new Option (a) focused-window filter is racing against the
-/// FocusTracker (e.g. rapid alt-tabbing, Electron AX intermittency
+/// `FocusTracker` (e.g. rapid alt-tabbing, Electron AX intermittency
 /// drifting the tracker). Cascade-twice OCR emitter is NOT consulted
 /// on this path; the race gate fails closed before reaching it.
 /// Decoder dual-accept continues — the decoder accepts both `0x07`
@@ -99,7 +99,7 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// byte layouts between `0x07` and `0x08`, so dual-accept is
 /// byte-equivalent for them.
 ///
-/// `0x08 → 0x09` (2026-06-01, Phase 6 PR 6 — MetricKit non-content
+/// `0x08 → 0x09` (2026-06-01, Phase 6 PR 6 — `MetricKit` non-content
 /// footprint telemetry pipeline + per-app failsafe counter map;
 /// `docs/research/ocr-emit-silence-v2-2026-05-29.md` §5.1 + CTO
 /// fully-working-product plan §4 Phase 6 PR 6 + S13 acceptance gate).
@@ -114,15 +114,15 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 ///      unknown into a one-command live measurement that surfaces
 ///      via `mci-agent --health-summary` as
 ///      `failsafe-by-app: com.example.app=124, …`.
-///   2. `cpu_pct_micro: u32` — instantaneous helper CPU % × 1_000_000
-///      (microfraction; 1_000_000 = 100% of one core), sampled via
-///      `getrusage(RUSAGE_SELF)` delta at HelperHealth flush. 0 =
+///   2. `cpu_pct_micro: u32` — instantaneous helper CPU % × `1_000_000`
+///      (microfraction; `1_000_000` = 100% of one core), sampled via
+///      `getrusage(RUSAGE_SELF)` delta at `HelperHealth` flush. 0 =
 ///      not yet sampled (first tick) or sampling unavailable. Pairs
-///      with the MetricKit pipeline for finer-than-daily-aggregate
+///      with the `MetricKit` pipeline for finer-than-daily-aggregate
 ///      CPU observability against the G2-ratified ≤10–15% SLO.
 ///   3. `rss_bytes: u64` — instantaneous resident set size in bytes,
 ///      sampled via Mach `task_info(MACH_TASK_BASIC_INFO)`. 0 =
-///      sampling unavailable. Pairs with MetricKit for finer-than-
+///      sampling unavailable. Pairs with `MetricKit` for finer-than-
 ///      daily-aggregate memory observability against the ≤2 GB SLO.
 ///   4. `tracker_alive_at_us: u64` — RESERVED SLOT for V2-P1 PR 13.
 ///      Per `docs/research/v2-p1-redesign-architecture-2026-06-01.md`
@@ -135,6 +135,7 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 ///      heartbeat timestamp. Allows the §6.2 = A 2000ms race-gate
 ///      timeout to fire on a sustained AX tracker hang without
 ///      adding a wire bump.
+///
 /// All four fields are content-free observability counters —
 /// bundle ids + numeric sample only; no OCR text, no window content.
 /// Decoder dual-accept extends to `[0x09, 0x08, 0x07, 0x06]`. On
@@ -153,7 +154,7 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// dark. The browser-extension boundary cannot be updated atomically
 /// with helper releases (extensions ship through their respective
 /// browser app stores), so the dual-accept window is re-extended to
-/// include `0x06` for PageContentEvent. Layout discipline (per the
+/// include `0x06` for `PageContentEvent`. Layout discipline (per the
 /// `0x05 → 0x06`, `0x06 → 0x07`, `0x07 → 0x08` notes above):
 /// `PageContentEvent` byte layout is identical across `0x06`, `0x07`,
 /// `0x08` — the bumps only added trailing `u64`s to `HelperHealth`.
