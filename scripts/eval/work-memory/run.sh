@@ -78,7 +78,7 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
     fi
     for ((i = 0; i < ${#PASS_ARGS[@]}; i++)); do
         case "${PASS_ARGS[$i]}" in
-            --limit | --allow-smoke | --abstention | --workdir)
+            --dataset | --limit | --allow-smoke | --abstention | --workdir)
                 echo "work-memory runner: ${PASS_ARGS[$i]} cannot produce a publishable baseline" >&2
                 exit 2
                 ;;
@@ -100,6 +100,7 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
         echo "work-memory runner: refusing to overwrite stale $REPO_ROOT/$BASELINE_NEXT" >&2
         exit 3
     fi
+    trap 'rm -f "$BASELINE_NEXT"' EXIT
 
     OUT="${OUT:-$BASELINE}"
     echo "work-memory runner: generating publishable baseline for $OUT" >&2
@@ -117,20 +118,25 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
     BENCH_STATUS=$?
     set -e
 
-    if ! jq -e '
+    if [[ ! -f "$BASELINE_NEXT" || ( $BENCH_STATUS -ne 0 && $BENCH_STATUS -ne 7 ) ]] ||
+        ! jq -e --arg dataset "$DATASET" '
         .complete == true and
         .publishable == true and
+        .dataset == $dataset and
+        .dataset_id == "synthetic-work-memory-v1" and
         .run.git_dirty_at_start == false and
         .run.limit == null and
         .run.requested_arms == ["lexical", "hybrid"] and
-        .run.ks == [1, 3, 5, 10]
+        .run.ks == [1, 3, 5, 10] and
+        .run.original_instances == 24 and
+        .run.evaluated_instances == 24
     ' "$BASELINE_NEXT" >/dev/null; then
         echo "work-memory runner: generated report is not eligible to become a baseline" >&2
-        mv "$BASELINE_NEXT" "${OUT}.rejected"
         exit 5
     fi
 
     mv "$BASELINE_NEXT" "$OUT"
+    trap - EXIT
     echo "work-memory runner: baseline written to $OUT" >&2
     exit "$BENCH_STATUS"
 fi

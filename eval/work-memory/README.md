@@ -50,7 +50,14 @@ requires all 24 cases, both lexical and hybrid arms, `k=1,3,5,10`, a clean
 committed code tree, and a checksummed Core ML model. `launch_qualified` is a
 separate absolute quality gate. Regression thresholds detect change from the
 measured baseline, but cannot bless a weak baseline that violates the fixed
-quality targets.
+quality targets. Signed `TPR - FPR` regression floors preserve negative
+source values, so every derived baseline accepts the metrics that produced it.
+
+Each process owns a unique scratch subdirectory. Per-instance SQLite main,
+WAL, and SHM files are removed by scope guards on success and error paths.
+Index footprint is measured after the store closes and includes any remaining
+main/WAL/SHM bytes, so it reflects indexed content rather than the live 4 KiB
+main-file stub.
 
 Run metadata records the clean commit, normalized command arguments, dataset
 checksum, OS/build, architecture, hardware, compute mode, and a deterministic
@@ -70,9 +77,12 @@ Update the committed baseline after an intentional benchmark change:
 scripts/eval/work-memory/run.sh --update-baseline
 ```
 
-Baseline generation refuses limited, single-arm, noncanonical-k, dirty-tree,
-or otherwise nonpublishable reports. It can write an honest publishable
-baseline and still return nonzero when the separate launch-quality gate fails.
+Baseline generation pins `eval/work-memory/synthetic-v1.json` and refuses
+dataset overrides, limited or single-arm runs, noncanonical k values, dirty
+trees, any dataset id other than `synthetic-work-memory-v1`, and any count
+other than exactly 24 original and 24 evaluated cases. An ineligible candidate
+is deleted without replacing the output. A valid publishable baseline can
+still return nonzero when the separate launch-quality gate fails.
 
 For an intentional one-case smoke run that may exit zero:
 

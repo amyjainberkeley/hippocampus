@@ -1,9 +1,12 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
 use serde_json::Value;
 use tempfile::tempdir;
+
+use mci_agent::bench_longmemeval::ScratchRun;
 
 fn run_bench(dataset_json: &str, extra_args: &[&str]) -> (std::process::Output, Value) {
     let dir = tempdir().expect("tempdir");
@@ -27,6 +30,78 @@ fn run_bench(dataset_json: &str, extra_args: &[&str]) -> (std::process::Output, 
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or(Value::Null);
     (output, report)
+}
+
+fn stage_runner_fixture(
+    root: &Path,
+    fake_report: &Value,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root");
+    let script = root.join("scripts/eval/work-memory/run.sh");
+    fs::create_dir_all(script.parent().expect("runner parent")).expect("runner directory");
+    fs::copy(repo_root.join("scripts/eval/work-memory/run.sh"), &script).expect("copy runner");
+
+    let dataset = root.join("eval/work-memory/synthetic-v1.json");
+    fs::create_dir_all(dataset.parent().expect("dataset parent")).expect("dataset directory");
+    fs::write(&dataset, "{}").expect("canonical dataset placeholder");
+    fs::create_dir_all(root.join("docs/eval")).expect("baseline directory");
+
+    let fake_report_path = root.join("fake-report.json");
+    fs::write(
+        &fake_report_path,
+        serde_json::to_vec_pretty(fake_report).expect("serialize fake report"),
+    )
+    .expect("write fake report");
+    let fake_args_path = root.join("fake-args.txt");
+    let fake_bin = root.join("fake-mci-bench");
+    fs::write(
+        &fake_bin,
+        r#"#!/bin/sh
+set -eu
+printf '%s\n' "$@" > "$MCI_FAKE_ARGS"
+out=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --out)
+            out=$2
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+cp "$MCI_FAKE_REPORT" "$out"
+"#,
+    )
+    .expect("write fake benchmark");
+    let mut permissions = fs::metadata(&fake_bin)
+        .expect("fake benchmark metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_bin, permissions).expect("make fake benchmark executable");
+
+    (script, fake_args_path)
+}
+
+fn eligible_fake_baseline() -> Value {
+    serde_json::json!({
+        "complete": true,
+        "publishable": true,
+        "dataset": "eval/work-memory/synthetic-v1.json",
+        "dataset_id": "synthetic-work-memory-v1",
+        "run": {
+            "git_dirty_at_start": false,
+            "limit": null,
+            "requested_arms": ["lexical", "hybrid"],
+            "ks": [1, 3, 5, 10],
+            "original_instances": 24,
+            "evaluated_instances": 24
+        }
+    })
 }
 
 #[test]
@@ -490,6 +565,230 @@ fn work_memory_runner_is_cwd_independent() {
     assert_eq!(
         report["dataset"],
         Value::String("eval/work-memory/synthetic-v1.json".into())
+    );
+}
+
+#[test]
+fn baseline_update_rejects_forwarded_dataset_overrides() {
+    let dir = tempdir().expect("tempdir");
+    let report = eligible_fake_baseline();
+    let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+    let external_dataset = dir.path().join("external-empty.json");
+    fs::write(
+        &external_dataset,
+        r#"{"dataset_id":"not-the-work-memory-corpus","instances":[]}"#,
+    )
+    .expect("write external dataset");
+    let output_path = dir.path().join("published.json");
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+        .env("MCI_FAKE_ARGS", &fake_args_path)
+        .arg("--update-baseline")
+        .arg("--out")
+        .arg(&output_path)
+        .arg("--dataset")
+        .arg(&external_dataset)
+        .output()
+        .expect("run update mode with dataset override");
+
+    assert!(
+        !output.status.success(),
+        "update mode must reject a forwarded dataset override"
+    );
+    assert!(
+        !output_path.exists(),
+        "a rejected override must not install a baseline"
+    );
+    assert!(
+        !fake_args_path.exists(),
+        "dataset overrides must be rejected before invoking the benchmark"
+    );
+}
+
+#[test]
+fn baseline_update_never_installs_an_invalid_corpus_report() {
+    let dir = tempdir().expect("tempdir");
+    let mut report = eligible_fake_baseline();
+    report["dataset"] = Value::String("external-dataset://empty.json".into());
+    report["dataset_id"] = Value::String("not-the-work-memory-corpus".into());
+    report["run"]["original_instances"] = Value::from(0);
+    report["run"]["evaluated_instances"] = Value::from(0);
+    let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+    let output_path = dir.path().join("published.json");
+    fs::write(&output_path, "existing-baseline").expect("write protected output");
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+        .env("MCI_FAKE_ARGS", &fake_args_path)
+        .arg("--update-baseline")
+        .arg("--out")
+        .arg(&output_path)
+        .output()
+        .expect("run update mode with invalid report");
+
+    assert!(
+        !output.status.success(),
+        "an invalid corpus report must fail baseline promotion"
+    );
+    assert_eq!(
+        fs::read_to_string(&output_path).expect("protected output remains"),
+        "existing-baseline",
+        "invalid output must never replace an existing baseline"
+    );
+    assert!(
+        !dir.path()
+            .join("docs/eval/work-memory-baseline.next.json")
+            .exists(),
+        "invalid candidate artifacts must be cleaned up"
+    );
+}
+
+#[test]
+fn concurrent_scratch_runs_are_isolated_and_cleaned_on_drop() {
+    let dir = tempdir().expect("tempdir");
+    let base = dir.path().join("scratch");
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+    let handles = ["first", "second"].map(|marker| {
+        let base = base.clone();
+        let barrier = std::sync::Arc::clone(&barrier);
+        std::thread::spawn(move || {
+            let run = ScratchRun::create(&base).expect("create unique scratch run");
+            let path = run.path().to_path_buf();
+            let db = path.join("same.sqlite");
+            for suffix in ["", "-wal", "-shm"] {
+                fs::write(path.join(format!("same.sqlite{suffix}")), marker)
+                    .expect("write isolated database artifact");
+            }
+            barrier.wait();
+            assert_eq!(
+                fs::read_to_string(&db).expect("read own database marker"),
+                marker,
+                "concurrent runs must never share an instance database"
+            );
+            barrier.wait();
+            path
+        })
+    });
+
+    let first = handles[0].thread().id();
+    let paths = handles
+        .into_iter()
+        .map(|handle| handle.join().expect("scratch thread"))
+        .collect::<Vec<_>>();
+    assert_ne!(paths[0], paths[1], "every run needs a unique directory");
+    assert_ne!(
+        first,
+        std::thread::current().id(),
+        "threads actually ran concurrently"
+    );
+    assert!(
+        fs::read_dir(&base)
+            .expect("scratch base remains")
+            .next()
+            .is_none(),
+        "run directories must be removed when their guards drop"
+    );
+}
+
+#[test]
+fn failed_instances_leave_no_database_or_wal_artifacts() {
+    let dataset = r#"{
+      "dataset_id": "synthetic-v1-cleanup",
+      "instances": [{
+        "question_id": "failure-cleanup",
+        "question_type": "temporal",
+        "question": "What happened before the rollback?",
+        "question_date": "not a timestamp",
+        "answer_session_ids": ["terminal://zsh/session-19"],
+        "haystack_dates": ["2026/08/31 (Mon) 11:55"],
+        "haystack_session_ids": ["terminal://zsh/session-19"],
+        "haystack_sessions": [[{
+          "role": "assistant",
+          "content": "The terminal session reverted the rollout and tailed agent logs."
+        }]]
+      }]
+    }"#;
+    let dir = tempdir().expect("tempdir");
+    let scratch = dir.path().join("scratch");
+    let scratch_arg = scratch.to_str().expect("utf-8 scratch path");
+
+    let (output, report) = run_bench(dataset, &["--workdir", scratch_arg]);
+
+    assert!(!output.status.success(), "the malformed date must fail");
+    assert_eq!(report["complete"], Value::Bool(false));
+    assert!(
+        fs::read_dir(&scratch)
+            .expect("scratch base remains")
+            .next()
+            .is_none(),
+        "error returns must clean the database, WAL, SHM, and run directory"
+    );
+}
+
+#[test]
+fn reported_index_footprint_grows_with_indexed_content() {
+    let large_body = format!("large-anchor {}", "distinct-index-payload ".repeat(40_000));
+    let dataset = serde_json::json!({
+        "dataset_id": "synthetic-v1-index-footprint",
+        "instances": [
+            {
+                "question_id": "small-index",
+                "question_type": "exact_recall",
+                "question": "small-anchor",
+                "question_date": "2026/08/31 (Mon) 12:00",
+                "answer_session_ids": ["files:///small.txt"],
+                "haystack_dates": ["2026/08/31 (Mon) 11:00"],
+                "haystack_session_ids": ["files:///small.txt"],
+                "haystack_sessions": [[{
+                    "role": "assistant",
+                    "content": "small-anchor"
+                }]]
+            },
+            {
+                "question_id": "large-index",
+                "question_type": "exact_recall",
+                "question": "large-anchor",
+                "question_date": "2026/08/31 (Mon) 12:00",
+                "answer_session_ids": ["files:///large.txt"],
+                "haystack_dates": ["2026/08/31 (Mon) 11:00"],
+                "haystack_session_ids": ["files:///large.txt"],
+                "haystack_sessions": [[{
+                    "role": "assistant",
+                    "content": large_body
+                }]]
+            }
+        ]
+    });
+    let serialized = serde_json::to_string(&dataset).expect("serialize size fixture");
+
+    let (output, report) = run_bench(&serialized, &[]);
+
+    assert!(
+        output.status.success(),
+        "size fixture must run; stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let results = report["results"].as_array().expect("instance results");
+    let size_for = |question_id: &str| {
+        results
+            .iter()
+            .find(|result| result["question_id"] == question_id)
+            .and_then(|result| result["index_size_bytes"].as_u64())
+            .expect("reported index size")
+    };
+    let small = size_for("small-index");
+    let large = size_for("large-index");
+    assert!(
+        large > small,
+        "real index footprint must grow with indexed content: small={small} large={large}"
     );
 }
 

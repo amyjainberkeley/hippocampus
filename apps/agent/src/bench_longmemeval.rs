@@ -49,8 +49,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use mci_brain::{
     BrainStore, Embedder, Event, EventChunker, EventId, HybridRetriever, RetrievalQuery, Retriever,
@@ -583,11 +584,103 @@ fn stable_id_hash(value: &str) -> u64 {
     hash
 }
 
+static SCRATCH_RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Unique scratch directory owned by one benchmark process.
+#[derive(Debug)]
+pub struct ScratchRun {
+    path: PathBuf,
+}
+
+impl ScratchRun {
+    /// Create a unique run directory below the configured scratch base.
+    ///
+    /// # Errors
+    /// Returns an error when the base or a unique child directory cannot be
+    /// created.
+    pub fn create(base: &Path) -> Result<Self, String> {
+        std::fs::create_dir_all(base)
+            .map_err(|error| format!("create scratch base {}: {error}", base.display()))?;
+        let epoch_nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        for _ in 0..100 {
+            let sequence = SCRATCH_RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = base.join(format!(
+                "run-{}-{epoch_nanos:032x}-{sequence:016x}",
+                std::process::id()
+            ));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Ok(Self { path }),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(format!("create scratch run {}: {error}", path.display()));
+                }
+            }
+        }
+        Err(format!(
+            "could not allocate a unique scratch run below {}",
+            base.display()
+        ))
+    }
+
+    /// Directory to use for this run's per-instance databases.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for ScratchRun {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 fn scratch_db_path(dir: &Path, prefix: &str, question_id: &str) -> std::path::PathBuf {
     dir.join(format!(
         "{prefix}-{:016x}.sqlite",
         stable_id_hash(question_id)
     ))
+}
+
+fn sqlite_artifact_paths(path: &Path) -> [PathBuf; 3] {
+    let sidecar = |suffix: &str| {
+        let mut value = path.as_os_str().to_os_string();
+        value.push(suffix);
+        PathBuf::from(value)
+    };
+    [path.to_path_buf(), sidecar("-wal"), sidecar("-shm")]
+}
+
+struct ScratchDatabase {
+    path: PathBuf,
+}
+
+impl ScratchDatabase {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn footprint_bytes(&self) -> u64 {
+        sqlite_artifact_paths(&self.path)
+            .iter()
+            .filter_map(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .sum()
+    }
+}
+
+impl Drop for ScratchDatabase {
+    fn drop(&mut self) {
+        for path in sqlite_artifact_paths(&self.path) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 fn event_excerpt(text: &str) -> String {
@@ -776,7 +869,7 @@ pub fn run_instance(
     embedders: Option<&Embedders>,
 ) -> Result<InstanceResult, String> {
     let started = Instant::now();
-    let db_path = scratch_db_path(dir, arm.label(), &inst.question_id);
+    let database = ScratchDatabase::new(scratch_db_path(dir, arm.label(), &inst.question_id));
     let document_embedder = match arm {
         Arm::Lexical => None,
         Arm::Hybrid => Some(
@@ -792,7 +885,7 @@ pub fn run_instance(
         ),
     };
     let (store, owner, events_indexed) =
-        seed_instance_with_embedder(inst, &db_path, document_embedder)?;
+        seed_instance_with_embedder(inst, database.path(), document_embedder)?;
 
     let store = Arc::new(store);
     let now_us =
@@ -923,7 +1016,6 @@ pub fn run_instance(
         );
     }
 
-    let index_size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
     let outcome = if is_unanswerable {
         if top_hits.is_empty() {
             Outcome::Abstained
@@ -937,7 +1029,7 @@ pub fn run_instance(
     };
 
     drop(store);
-    let _ = std::fs::remove_file(&db_path);
+    let index_size_bytes = database.footprint_bytes();
 
     Ok(InstanceResult {
         arm: arm.label().to_string(),
@@ -1010,9 +1102,9 @@ pub fn run_abstention_probe(
     dir: &Path,
     embedders: &Embedders,
 ) -> Result<Vec<AbstentionSample>, String> {
-    let db_path = scratch_db_path(dir, "abstention", &inst.question_id);
+    let database = ScratchDatabase::new(scratch_db_path(dir, "abstention", &inst.question_id));
     let (store, _owner, _events_indexed) =
-        seed_instance_with_embedder(inst, &db_path, Some(embedders.document.as_ref()))?;
+        seed_instance_with_embedder(inst, database.path(), Some(embedders.document.as_ref()))?;
     let q_emb = &embedders.query;
     let mut out = Vec::with_capacity(2);
     for (text, answerable) in [(inst.question.as_str(), true), (foreign_question, false)] {
@@ -1029,7 +1121,6 @@ pub fn run_abstention_probe(
     }
 
     drop(store);
-    let _ = std::fs::remove_file(&db_path);
     Ok(out)
 }
 
@@ -1134,6 +1225,10 @@ fn threshold_floor(value: f64) -> f64 {
     (value - value.max(0.5) * 0.1).max(0.0)
 }
 
+fn separation_threshold_floor(value: f64) -> f64 {
+    (value - value.abs().max(0.5) * 0.1).max(-1.0)
+}
+
 fn threshold_ceiling(value: f64) -> f64 {
     (value + 0.10).min(1.0)
 }
@@ -1152,6 +1247,18 @@ fn map_threshold_min(source: &BTreeMap<usize, Option<f64>>, k: usize, dest: &mut
 
 fn map_threshold_max(source: &BTreeMap<usize, Option<f64>>, k: usize, dest: &mut Option<f64>) {
     *dest = source.get(&k).copied().flatten().map(threshold_ceiling);
+}
+
+fn map_separation_threshold_min(
+    source: &BTreeMap<usize, Option<f64>>,
+    k: usize,
+    dest: &mut Option<f64>,
+) {
+    *dest = source
+        .get(&k)
+        .copied()
+        .flatten()
+        .map(separation_threshold_floor);
 }
 
 /// Derive material-regression thresholds from a measured baseline run.
@@ -1211,22 +1318,22 @@ pub fn derive_regression_thresholds(summary: &Summary) -> RegressionThresholds {
         10,
         &mut out.false_positive_rate_at_10_max,
     );
-    map_threshold_min(
+    map_separation_threshold_min(
         &summary.abstention_separation_at,
         1,
         &mut out.abstention_separation_at_1_min,
     );
-    map_threshold_min(
+    map_separation_threshold_min(
         &summary.abstention_separation_at,
         3,
         &mut out.abstention_separation_at_3_min,
     );
-    map_threshold_min(
+    map_separation_threshold_min(
         &summary.abstention_separation_at,
         5,
         &mut out.abstention_separation_at_5_min,
     );
-    map_threshold_min(
+    map_separation_threshold_min(
         &summary.abstention_separation_at,
         10,
         &mut out.abstention_separation_at_10_min,
@@ -1868,6 +1975,81 @@ mod tests {
                 "{bad:?} should not parse, a wrong timestamp corrupts the recency term silently"
             );
         }
+    }
+
+    #[test]
+    fn derived_regression_thresholds_accept_their_source_summary() {
+        let ks = [1, 3, 5, 10];
+        let summary = Summary {
+            arm: "hybrid".into(),
+            instances: 24,
+            hit_rate_at: ks
+                .into_iter()
+                .zip([Some(0.95), Some(1.0), Some(1.0), Some(1.0)])
+                .collect(),
+            recall_at: ks
+                .into_iter()
+                .zip([Some(0.88), Some(1.0), Some(1.0), Some(1.0)])
+                .collect(),
+            provenance_coverage_at: ks
+                .into_iter()
+                .zip([Some(0.95), Some(1.0), Some(1.0), Some(1.0)])
+                .collect(),
+            false_positive_rate_at: ks
+                .into_iter()
+                .zip([Some(1.0), Some(1.0), Some(1.0), Some(1.0)])
+                .collect(),
+            abstention_separation_at: ks
+                .into_iter()
+                .zip([Some(-0.05), Some(0.0), Some(0.0), Some(0.0)])
+                .collect(),
+            mrr: Some(0.97),
+            complete_misses: 0,
+            outcomes: OutcomeCounts::default(),
+            answerable_instances: 21,
+            unanswerable_instances: 3,
+            latency_ms: DistributionStats {
+                p95: 50.0,
+                ..DistributionStats::default()
+            },
+            index_size_bytes: DistributionStats {
+                p95: 256_000.0,
+                ..DistributionStats::default()
+            },
+        };
+
+        let thresholds = derive_regression_thresholds(&summary);
+        for k in ks {
+            assert!(
+                map_value(&summary.hit_rate_at, k) >= thresholds.hit_min(k),
+                "hit@{k} must accept its source metric"
+            );
+            assert!(
+                map_value(&summary.recall_at, k) >= thresholds.recall_min(k),
+                "recall@{k} must accept its source metric"
+            );
+            assert!(
+                map_value(&summary.provenance_coverage_at, k) >= thresholds.provenance_min(k),
+                "provenance@{k} must accept its source metric"
+            );
+            assert!(
+                map_value(&summary.false_positive_rate_at, k) <= thresholds.false_positive_max(k),
+                "false-positive@{k} must accept its source metric"
+            );
+            assert!(
+                map_value(&summary.abstention_separation_at, k) >= thresholds.separation_min(k),
+                "separation@{k} must accept its source metric"
+            );
+        }
+        assert!(summary.mrr >= thresholds.mrr_min);
+        assert!(
+            Some(summary.latency_ms.p95) <= thresholds.latency_p95_ms_max,
+            "latency threshold must accept its source metric"
+        );
+        assert!(
+            Some(summary.index_size_bytes.p95) <= thresholds.index_size_p95_bytes_max,
+            "index-size threshold must accept its source metric"
+        );
     }
 
     #[test]
