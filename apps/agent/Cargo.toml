@@ -29,6 +29,14 @@ path = "src/bin/mci_seed_brain.rs"
 # No new third-party crates (same serde + serde_json already on the
 # workspace lockfile). CSO invariant: read-only handle ONLY.
 [[bin]]
+# Maintainer tool, not shipped to users: runs the LongMemEval retrieval
+# benchmark against the real store, retriever and embedder. Kept out of
+# `mci-agent` so the benchmark's dataset parsing adds no weight to the
+# binary people install.
+name = "mci-bench"
+path = "src/bin/mci_bench.rs"
+
+[[bin]]
 name = "mci-brain"
 path = "src/bin/mci_brain.rs"
 

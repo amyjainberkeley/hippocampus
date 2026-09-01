@@ -19,6 +19,7 @@
 #![deny(missing_docs)]
 
 pub mod alias_resolver_worker;
+pub mod bench_longmemeval;
 pub mod brain_cli;
 pub mod brain_ingest;
 pub mod brief_worker;
@@ -33,6 +34,7 @@ pub mod consolidator_worker;
 pub mod crash_recovery;
 pub mod device_id;
 pub mod doctor;
+pub mod embedder_load;
 pub mod enrich;
 pub mod episode_worker;
 pub mod health_log;

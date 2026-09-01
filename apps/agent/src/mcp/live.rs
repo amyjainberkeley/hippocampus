@@ -51,7 +51,7 @@ use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit};
 ///
 /// This is the "minimal adaptor" the PR prompt specifies — NOT a new
 /// trait method on the core brain crate.
-struct DynEmbedder(Arc<dyn Embedder>);
+pub struct DynEmbedder(pub Arc<dyn Embedder>);
 
 impl Embedder for DynEmbedder {
     fn dimension(&self) -> usize {
@@ -73,8 +73,9 @@ impl Embedder for DynEmbedder {
 /// store. Used so `HybridRetriever` (which passes raw query text to
 /// `fts5_search`) gets safe FTS5 input without modifying the retriever
 /// or the embedder's query text.
-struct FtsSanitizingStore {
-    inner: Arc<SqlCipherBrainStore>,
+pub struct FtsSanitizingStore {
+    /// The store every call is forwarded to.
+    pub inner: Arc<SqlCipherBrainStore>,
 }
 
 impl BrainStore for FtsSanitizingStore {
