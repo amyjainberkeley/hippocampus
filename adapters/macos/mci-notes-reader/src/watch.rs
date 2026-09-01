@@ -2,7 +2,7 @@
 //!
 //! Notes.app does not fire `NSDistributedNotificationCenter` events for
 //! note edits and does not expose a Core Data change token via
-//! AppleScript. The wire-up PR will fall back to polling (default 30s;
+//! `AppleScript`. The wire-up PR will fall back to polling (default 30s;
 //! configurable per V2-P10 onboarding) — the same polling shape as the
 //! Messages `FSEvents` fallback path when WAL watching is unavailable.
 //! Today the stream is empty.

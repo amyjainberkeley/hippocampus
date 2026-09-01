@@ -17,7 +17,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum CalendarReaderError {
     /// macOS Automation TCC (per-target: Calendar) has not been granted
-    /// to the calling process, so every EventKit read returns denied.
+    /// to the calling process, so every `EventKit` read returns denied.
     /// This is the wire-up-only variant; the scaffold never returns it.
     #[error(
         "Calendar access denied: macOS Automation permission for Calendar not granted. \

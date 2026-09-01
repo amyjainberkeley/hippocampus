@@ -333,6 +333,7 @@ static SENTINEL_NEVER_SHARE: LazyLock<Regex> = LazyLock::new(|| {
 /// issuer + code phrase and consume what the lower-tier shapes
 /// would otherwise match. Then Tier 2 / 3 / R / Sentinel.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn redact_sms_shapes(text: &str) -> RedactionResult {
     let mut redacted = text.to_string();
     let mut fired: Vec<&'static str> = Vec::new();

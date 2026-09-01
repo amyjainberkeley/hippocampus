@@ -252,7 +252,7 @@ pub use hybrid_retriever::{
 ///
 /// # Privacy
 ///
-/// Briefs are user content. They live inside the SQLCipher store under
+/// Briefs are user content. They live inside the `SQLCipher` store under
 /// the same key-wrap as `events` (ADR-0008) — no new crypto surface. The
 /// retention purger ([`crate::retention_purger::purge_once`]) honors the
 /// user's existing retention window on briefs in the same DELETE pass it
@@ -388,10 +388,10 @@ pub struct Event {
     /// Browser-assigned tab identifier the event came from. V2-P2 — fills
     /// the per-tab attribution gap the cycle 8.18 memo
     /// (`docs/research/tab-attribution-mix-2026-05-29.md` §5) opens.
-    /// `None` for OCREvents (no tab signal from the helper) and for
+    /// `None` for `OCREvents` (no tab signal from the helper) and for
     /// pre-V2-P2 browser events; `Some(id)` for V2-P2 `PageContentEvent`
     /// ingests where the extension shipped a non-zero tab id. The
-    /// brain store column is `INTEGER NULL`; the brain_ingest path
+    /// brain store column is `INTEGER NULL`; the `brain_ingest` path
     /// converts a wire-level `0` (extension default = "no tab id
     /// available") to `None` before insert.
     pub tab_id: Option<u32>,
@@ -596,7 +596,7 @@ pub trait BrainStore: Send + Sync {
     /// # Errors
     /// - [`StoreError::InvalidInput`] if `query_embedding.len()` does
     ///   not match the schema-pinned dimension (384 per ADR-0009).
-    /// - [`StoreError::Backend`] on SQLite failure.
+    /// - [`StoreError::Backend`] on `SQLite` failure.
     fn vec_search_filtered(
         &self,
         query_embedding: &[f32],
@@ -636,13 +636,13 @@ pub trait BrainStore: Send + Sync {
     /// Semantics: upsert keyed on PK. Re-writing an entity with new
     /// `summary` / `summary_embedding` / `updated_ts_us` overwrites the
     /// stored row; `created_ts_us` on the existing row is preserved by
-    /// the SQLCipher impl (the writer's `created_ts_us` is honored only
+    /// the `SQLCipher` impl (the writer's `created_ts_us` is honored only
     /// on first insert).
     ///
     /// # Errors
     /// - [`StoreError::InvalidInput`] if the `summary_embedding` length
     ///   does not match the schema-pinned dimension (384 per ADR-0009).
-    /// - [`StoreError::Backend`] on SQLite failure.
+    /// - [`StoreError::Backend`] on `SQLite` failure.
     fn put_entity(&self, _entity: &Entity) -> Result<(), StoreError> {
         Err(StoreError::Other(
             "put_entity not supported by this BrainStore impl (V2-P3)".into(),
@@ -655,11 +655,11 @@ pub trait BrainStore: Send + Sync {
     /// Semantics: idempotent on PK collision (`INSERT OR IGNORE`) — a
     /// re-run of the same extractor on the same event does not duplicate.
     /// The mention's `entity_id` and `event_id` MUST reference existing
-    /// rows; the SQLCipher impl enforces this via FOREIGN KEY (ADR-0008
+    /// rows; the `SQLCipher` impl enforces this via FOREIGN KEY (ADR-0008
     /// `PRAGMA foreign_keys = ON`).
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure (including FK violation
+    /// [`StoreError::Backend`] on `SQLite` failure (including FK violation
     /// if `entity_id` / `event_id` does not exist).
     fn put_entity_mention(&self, _mention: &EntityMention) -> Result<(), StoreError> {
         Err(StoreError::Other(
@@ -676,7 +676,7 @@ pub trait BrainStore: Send + Sync {
     /// existing `episodes` rows.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn put_episode_edge(&self, _edge: &EpisodeEdge) -> Result<(), StoreError> {
         Err(StoreError::Other(
             "put_episode_edge not supported by this BrainStore impl (V2-P3)".into(),
@@ -693,7 +693,7 @@ pub trait BrainStore: Send + Sync {
     /// extractor uses the `None` path to mint a fresh entity.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn find_entity_by_alias(
         &self,
         _kind: &str,
@@ -714,10 +714,10 @@ pub trait BrainStore: Send + Sync {
     /// [`EventRecord::SNIPPET_MAX_CHARS`]) — callers wanting the full
     /// text go through [`get_event`](Self::get_event).
     ///
-    /// `limit == 0` returns `Ok(vec![])` without touching SQLite.
+    /// `limit == 0` returns `Ok(vec![])` without touching `SQLite`.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn events_with_entity(
         &self,
         _entity_id: &EntityId,
@@ -746,7 +746,7 @@ pub trait BrainStore: Send + Sync {
     /// resolver.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn list_resolvable_entities(&self) -> Result<Vec<alias_resolver::ResolverEntity>, StoreError> {
         Err(StoreError::Other(
             "list_resolvable_entities not supported by this BrainStore impl (V2-P6)".into(),
@@ -759,7 +759,7 @@ pub trait BrainStore: Send + Sync {
     /// allowlist mention appear.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn entity_cooccurrences(&self) -> Result<Vec<(EventId, Vec<EntityId>)>, StoreError> {
         Err(StoreError::Other(
             "entity_cooccurrences not supported by this BrainStore impl (V2-P6)".into(),
@@ -776,7 +776,7 @@ pub trait BrainStore: Send + Sync {
     /// FK (the identity is the set of rows sharing the value).
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure (incl. FK violation).
+    /// [`StoreError::Backend`] on `SQLite` failure (incl. FK violation).
     fn put_entity_identity(&self, _membership: &EntityIdentity) -> Result<(), StoreError> {
         Err(StoreError::Other(
             "put_entity_identity not supported by this BrainStore impl (V2-P6)".into(),
@@ -789,7 +789,7 @@ pub trait BrainStore: Send + Sync {
     /// that already exist).
     ///
     /// This is the production write path (the idle worker calls it each
-    /// cycle): the AliasResolver's leaf-attachment rules are
+    /// cycle): the `AliasResolver`'s leaf-attachment rules are
     /// **non-monotonic** — a leaf (a single-token name, an email) that
     /// attached unambiguously in an earlier pass can become ambiguous and
     /// be dropped once a colliding core is later captured. A plain
@@ -800,7 +800,7 @@ pub trait BrainStore: Send + Sync {
     /// nothing inserted, `ts_us` untouched).
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn reconcile_entity_identities(
         &self,
         _rows: &[EntityIdentity],
@@ -815,7 +815,7 @@ pub trait BrainStore: Send + Sync {
     /// for an unknown id.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn identity_members(
         &self,
         _identity_id: &IdentityId,
@@ -832,7 +832,7 @@ pub trait BrainStore: Send + Sync {
     /// identity.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn identity_of_entity(&self, _entity_id: &EntityId) -> Result<Vec<EntityIdentity>, StoreError> {
         Err(StoreError::Other(
             "identity_of_entity not supported by this BrainStore impl (V2-P6)".into(),
@@ -845,7 +845,7 @@ pub trait BrainStore: Send + Sync {
     /// instead of re-resolving (idle-batch, not hot-path).
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn resolution_watermark(&self) -> Result<ResolutionWatermark, StoreError> {
         Err(StoreError::Other(
             "resolution_watermark not supported by this BrainStore impl (V2-P6)".into(),
@@ -872,7 +872,7 @@ pub trait BrainStore: Send + Sync {
     /// grouping.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn consolidation_candidates(&self) -> Result<Vec<IdentityMentionSite>, StoreError> {
         Err(StoreError::Other(
             "consolidation_candidates not supported by this BrainStore impl (V2-P6)".into(),
@@ -885,7 +885,7 @@ pub trait BrainStore: Send + Sync {
     /// every edge MUST reference existing `episodes` rows (FK enforced).
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure (incl. FK violation).
+    /// [`StoreError::Backend`] on `SQLite` failure (incl. FK violation).
     fn put_episode_edges(&self, _edges: &[EpisodeEdge]) -> Result<u64, StoreError> {
         Err(StoreError::Other(
             "put_episode_edges not supported by this BrainStore impl (V2-P6)".into(),
@@ -910,7 +910,7 @@ pub trait BrainStore: Send + Sync {
     /// untouched; every element of `edges` MUST carry that `edge_kind`.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure (incl. FK violation).
+    /// [`StoreError::Backend`] on `SQLite` failure (incl. FK violation).
     fn reconcile_episode_edges(
         &self,
         _kind: &str,
@@ -927,7 +927,7 @@ pub trait BrainStore: Send + Sync {
     /// cycle sleeps instead of re-deriving (idle-batch, not hot-path).
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn consolidation_watermark(&self) -> Result<ConsolidationWatermark, StoreError> {
         Err(StoreError::Other(
             "consolidation_watermark not supported by this BrainStore impl (V2-P6)".into(),
@@ -942,7 +942,7 @@ pub trait BrainStore: Send + Sync {
     /// excluded. Empty for an identity with no cross-app links.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn episode_edges_for_identity(
         &self,
         _identity_id: &IdentityId,
@@ -955,10 +955,10 @@ pub trait BrainStore: Send + Sync {
     /// Return the events assigned to `episode_id`, newest first, capped at
     /// `limit` — the leaf step of the dot-connect walk (edge → episode →
     /// its events). `limit == 0` returns `Ok(vec![])` without touching
-    /// SQLite.
+    /// `SQLite`.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure.
+    /// [`StoreError::Backend`] on `SQLite` failure.
     fn events_in_episode(
         &self,
         _episode_id: EpisodeId,
@@ -998,7 +998,7 @@ pub trait BrainStore: Send + Sync {
     /// contributes no entity signal, so the entity arm is inert.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure (production impl only).
+    /// [`StoreError::Backend`] on `SQLite` failure (production impl only).
     fn mention_match_for_events(
         &self,
         _query_entity_ids: &[EntityId],
@@ -1021,7 +1021,7 @@ pub trait BrainStore: Send + Sync {
     /// Default `Ok(vec![])`.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure (production impl only).
+    /// [`StoreError::Backend`] on `SQLite` failure (production impl only).
     fn entity_names_for_event(
         &self,
         _event_id: EventId,
@@ -1044,7 +1044,7 @@ pub trait BrainStore: Send + Sync {
     /// Default `Ok(vec![])`.
     ///
     /// # Errors
-    /// [`StoreError::Backend`] on SQLite failure (production impl only).
+    /// [`StoreError::Backend`] on `SQLite` failure (production impl only).
     fn linked_event_ids_for_event(
         &self,
         _event_id: EventId,

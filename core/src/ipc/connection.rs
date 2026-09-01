@@ -65,7 +65,7 @@ pub enum Routed {
     /// Browser extension emitted a `PageContentEvent` (Phase 7
     /// pull-forward). Full page text from the DOM, delivered via native
     /// messaging host. The agent's brain-ingestor uses this as the
-    /// preferred text source when a URL-matched OCREvent also exists.
+    /// preferred text source when a URL-matched `OCREvent` also exists.
     PageContent(Frame),
 }
 

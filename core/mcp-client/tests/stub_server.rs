@@ -111,9 +111,8 @@ impl StubMcpServer {
                 tokio::select! {
                     _ = shutdown_rx.recv() => return,
                     accepted = listener.accept() => {
-                        let (sock, _) = match accepted {
-                            Ok(v) => v,
-                            Err(_) => continue,
+                        let Ok((sock, _)) = accepted else {
+                            continue;
                         };
                         let auth = Arc::clone(&auth_clone);
                         let senders = Arc::clone(&sse_clone);
@@ -140,6 +139,7 @@ impl StubMcpServer {
         }
     }
 
+    #[must_use]
     pub fn port(&self) -> u16 {
         self.port
     }
@@ -298,10 +298,7 @@ impl StubService {
 fn build_response(req: &serde_json::Value, cfg: &StubConfig) -> Option<String> {
     let method = req.get("method")?.as_str()?;
     let id = req.get("id").cloned();
-    if id.is_none() {
-        // Notification — no response.
-        return None;
-    }
+    id.as_ref()?;
     let result = match method {
         "initialize" => serde_json::json!({
             "protocolVersion": "2024-11-05",

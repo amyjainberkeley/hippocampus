@@ -328,6 +328,7 @@ async fn creator_full_crypto_round_trip(factory: fn() -> Box<dyn WorkspaceStore>
 
 /// ADR-0019 §2.2: existing member vouches for new candidate → candidate admitted
 /// → new member can read briefs (with their own key wrap).
+#[allow(clippy::too_many_lines)]
 async fn vouch_admits_new_member_who_reads_briefs(factory: fn() -> Box<dyn WorkspaceStore>) {
     use mci_server::crypto::aead::{self, AeadKey, AeadNonce};
     use mci_server::crypto::key_wrap;
@@ -447,7 +448,7 @@ async fn vouch_admits_new_member_who_reads_briefs(factory: fn() -> Box<dyn Works
     assert_eq!(decrypted, content);
 }
 
-/// Invalid vouch: non-existent enrollment_id → error response.
+/// Invalid vouch: non-existent `enrollment_id` → error response.
 async fn invalid_vouch_nonexistent_enrollment(factory: fn() -> Box<dyn WorkspaceStore>) {
     let (app, ws_id, creator_id) = test_app_with_workspace_from(factory()).await;
 
