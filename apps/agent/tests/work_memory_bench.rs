@@ -8,7 +8,11 @@ use tempfile::tempdir;
 
 use mci_agent::bench_longmemeval::ScratchRun;
 
-fn run_bench(dataset_json: &str, extra_args: &[&str]) -> (std::process::Output, Value) {
+fn run_bench_for_arm(
+    dataset_json: &str,
+    arm: &str,
+    extra_args: &[&str],
+) -> (std::process::Output, Value) {
     let dir = tempdir().expect("tempdir");
     let dataset_path = dir.path().join("dataset.json");
     let report_path = dir.path().join("report.json");
@@ -18,7 +22,7 @@ fn run_bench(dataset_json: &str, extra_args: &[&str]) -> (std::process::Output, 
         .arg("--dataset")
         .arg(&dataset_path)
         .arg("--arm")
-        .arg("lexical")
+        .arg(arm)
         .arg("--out")
         .arg(&report_path)
         .args(extra_args)
@@ -30,6 +34,10 @@ fn run_bench(dataset_json: &str, extra_args: &[&str]) -> (std::process::Output, 
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or(Value::Null);
     (output, report)
+}
+
+fn run_bench(dataset_json: &str, extra_args: &[&str]) -> (std::process::Output, Value) {
+    run_bench_for_arm(dataset_json, "lexical", extra_args)
 }
 
 fn stage_runner_fixture(
@@ -211,6 +219,38 @@ fn synthetic_work_memory_dataset_reports_extended_metrics() {
         "answerable-only metrics are undefined on an unanswerable-only slice"
     );
     assert_eq!(report["by_type"]["unanswerable"][0]["mrr"], Value::Null);
+}
+
+#[test]
+fn direct_binary_never_publishes_an_unrelated_empty_corpus() {
+    let dataset = r#"{
+      "dataset_id": "not-the-work-memory-corpus",
+      "instances": []
+    }"#;
+
+    let (_output, report) = run_bench_for_arm(dataset, "both", &[]);
+
+    assert_eq!(
+        report["complete"],
+        Value::Bool(true),
+        "the empty generic run executed without an instance failure"
+    );
+    assert_eq!(
+        report["publishable"],
+        Value::Bool(false),
+        "direct binary reports must enforce canonical work-memory publication scope"
+    );
+    assert_eq!(report["launch_qualified"], Value::Bool(false));
+    assert_eq!(
+        report["dataset_id"],
+        Value::String("not-the-work-memory-corpus".into())
+    );
+    assert_eq!(report["run"]["original_instances"], Value::from(0));
+    assert_eq!(report["run"]["evaluated_instances"], Value::from(0));
+    assert_eq!(
+        report["run"]["requested_arms"],
+        serde_json::json!(["lexical", "hybrid"])
+    );
 }
 
 #[test]

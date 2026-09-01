@@ -18,6 +18,10 @@ use mci_agent::bench_longmemeval::{
     LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, ScratchRun, Summary,
 };
 
+const CANONICAL_WORK_MEMORY_DATASET: &str = "eval/work-memory/synthetic-v1.json";
+const CANONICAL_WORK_MEMORY_DATASET_ID: &str = "synthetic-work-memory-v1";
+const CANONICAL_WORK_MEMORY_INSTANCES: usize = 24;
+
 fn usage() {
     println!(
         "mci-bench {}\n\
@@ -221,6 +225,24 @@ fn normalized_arguments(argv: &[String], root: &Path) -> Vec<String> {
 
 fn report_path(path: &Path, root: &Path) -> String {
     logical_path(path, root, "dataset")
+}
+
+fn canonical_work_memory_scope(
+    dataset_path: &str,
+    dataset_id: &str,
+    original_instances: usize,
+    evaluated_instances: usize,
+    arms: &[Arm],
+    ks: &[usize],
+    limited: bool,
+) -> bool {
+    dataset_path == CANONICAL_WORK_MEMORY_DATASET
+        && dataset_id == CANONICAL_WORK_MEMORY_DATASET_ID
+        && original_instances == CANONICAL_WORK_MEMORY_INSTANCES
+        && evaluated_instances == CANONICAL_WORK_MEMORY_INSTANCES
+        && arms == [Arm::Lexical, Arm::Hybrid]
+        && ks == [1, 3, 5, 10]
+        && !limited
 }
 
 fn run_metadata(
@@ -794,9 +816,15 @@ fn main() -> ExitCode {
     };
     let regression_failed = regression.as_ref().is_some_and(|r| !r.passed);
     let complete = failures.is_empty() && !limited;
-    let canonical_arms = arms == [Arm::Lexical, Arm::Hybrid];
-    let canonical_ks = ks == [1, 3, 5, 10];
-    let canonical_scope = canonical_arms && canonical_ks && !limited;
+    let canonical_scope = canonical_work_memory_scope(
+        &dataset_report_path,
+        &dataset.dataset_id,
+        original_instances,
+        evaluated_instances,
+        &arms,
+        &ks,
+        limited,
+    );
     let publishable = complete
         && canonical_scope
         && !metadata.git_dirty_at_start
@@ -851,6 +879,87 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_publication_scope_requires_path_identity_and_24_cases() {
+        let arms = [Arm::Lexical, Arm::Hybrid];
+        let ks = [1, 3, 5, 10];
+        assert!(canonical_work_memory_scope(
+            "eval/work-memory/synthetic-v1.json",
+            "synthetic-work-memory-v1",
+            24,
+            24,
+            &arms,
+            &ks,
+            false,
+        ));
+
+        for (label, path, dataset_id, original, evaluated, limited) in [
+            (
+                "external path",
+                "external-dataset://synthetic-v1.json",
+                "synthetic-work-memory-v1",
+                24,
+                24,
+                false,
+            ),
+            (
+                "unrelated id",
+                "eval/work-memory/synthetic-v1.json",
+                "not-the-work-memory-corpus",
+                24,
+                24,
+                false,
+            ),
+            (
+                "empty original corpus",
+                "eval/work-memory/synthetic-v1.json",
+                "synthetic-work-memory-v1",
+                0,
+                0,
+                false,
+            ),
+            (
+                "partial evaluation",
+                "eval/work-memory/synthetic-v1.json",
+                "synthetic-work-memory-v1",
+                24,
+                23,
+                true,
+            ),
+        ] {
+            assert!(
+                !canonical_work_memory_scope(
+                    path, dataset_id, original, evaluated, &arms, &ks, limited,
+                ),
+                "{label} must not be publishable"
+            );
+        }
+        assert!(
+            !canonical_work_memory_scope(
+                "eval/work-memory/synthetic-v1.json",
+                "synthetic-work-memory-v1",
+                24,
+                24,
+                &[Arm::Lexical],
+                &ks,
+                false,
+            ),
+            "single-arm reports are not canonical"
+        );
+        assert!(
+            !canonical_work_memory_scope(
+                "eval/work-memory/synthetic-v1.json",
+                "synthetic-work-memory-v1",
+                24,
+                24,
+                &arms,
+                &[1, 3, 5],
+                false,
+            ),
+            "noncanonical cutoffs are not publishable"
+        );
+    }
 
     #[test]
     fn logical_paths_redact_external_model_and_user_paths() {
