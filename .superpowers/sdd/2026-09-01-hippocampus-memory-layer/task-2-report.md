@@ -1,104 +1,157 @@
-# Task 2 Final Repair Report R3: Key Custody And Capture Lifecycle
+# Task 2 Final Repair Report R4: Fail-Closed Capture And Verified Lifecycle
 
-Status: repository-local R3 P1/P2 findings repaired in the focused commit containing this report on `codex/hippocampus-v1`. Nothing was pushed, signed, notarized, uploaded, or published.
+Status: every repository-local R4 P1/P2/P3 finding is repaired in the focused
+commit containing this report on `codex/hippocampus-v1`. Nothing was pushed,
+signed, notarized, uploaded, or published.
 
-Starting HEAD: `e66babebb5dc81c2e54797c6fa5f57a7e569e6a4`
+R4 review base: `3e8248aac5ba8512f47b874d40cda3543ae6b684`.
+Concurrent Task 5 commits `dd960ad73c8486c3eaa3590e8e8504d2da6faa85`
+and `1f2bc12b87bcff579d87ddbcf1b45e8c1301cbae` landed as parents during
+this repair and were preserved.
 
-## R3 Finding Disposition
+## R4 Finding Disposition
 
 | Finding | Disposition |
 |---|---|
-| P1-1 awaited Quit / Quit-and-Restart | Closed locally. AppKit returns `terminateLater`; it replies true only after the shared supervisor shutdown proves helper and agent death. Restart scheduling happens after that proof. A failed shutdown replies false and leaves the GUI visible. |
-| P1-2 MainActor Keychain audit | Closed locally. Audit reads use the detached `KeyStoreAccess` boundary. The MainActor view model exposes loading, loaded, and error states. |
-| P1-3 invalid TOML capture authority | Closed locally. Only exact TOML `true` or `false` at the root key is accepted. Invalid types, malformed assignments, semantic quoted/bare duplicates, and table-local keys fail closed. |
-| P2-1 fabricated ACL health | Closed as a product-truth defect. The UI reports key readability and ACL status separately; successful data access always leaves access-control verification `unverified`. Real access-object inspection and signed continuity remain owner/API gates. |
-| P2-2 Rust child environment inheritance | Closed locally. Every source-level agent-owned `std::process::Command` construction routes through one scrubber that removes all four reusable-key or removed-authority variables. |
-| P2-3 fake-only shutdown tests | Closed locally. A standalone fixture launches real normal and TERM-resistant `Process` pairs, calls the production shutdown boundary, and proves both PIDs are absent before completion. |
-| P2-4 packaging contract drift | Closed. The focused contract now checks the current release-signing semantics without restoring stale documentation. |
-| P2-5 false custody/retrieval/deletion copy | Closed in README and architecture truth. Copy now states file-Keychain readability, CPU-pinned Core ML, Rust-side cosine scan, deferred sqlite-vec, and row deletion plus `VACUUM`. |
-
-## Shutdown Design
-
-- `SupervisorProcessShutdown` is the only production TERM-to-KILL boundary. It resumes paused children, sends TERM, waits for the configured grace period, sends KILL to survivors, then verifies both Foundation process state and PID absence.
-- `FoundationSupervisorTopology.stop` delegates to that boundary and cleans up only after verified death.
-- A partial helper launch is also closed through the same boundary if the agent fails to launch; the helper handle is not discarded while it may still be alive.
-- `ProcessSupervisor.shutdownAndWait` is idempotent for concurrent callers. It cancels retries and invalidates transition acceptance before stopping, but does not publish `.stopped` until topology shutdown succeeds. Failure publishes a visible crash state.
-- `AppDelegate.applicationShouldTerminate` uses AppKit terminate-later/reply. Quit-and-Restart launches its delayed reopen child only after verified shutdown. `applicationWillTerminate` performs idempotent resource cleanup and does not start an unawaited second stop.
-
-## Audit And Custody Truth
-
-- `KeyWrapAuditor.inspectKeychain` is async and performs the final typed Keychain read outside MainActor.
-- `KeyWrapAuditViewModel` keeps UI mutation on MainActor and represents loading, loaded, and failed states explicitly.
-- The report names whether the key was readable. It never maps readability to sealing or ACL health.
-- The access-control field states that the access object was not inspected. The report also names access-object inspection and signed cross-version continuity as release-owner gates.
-- No key bytes are rendered, logged, placed in child argv, or added to reports.
+| P1-1 whole-document TOML authority | Closed locally. TOMLKit 0.6.0 parses the complete document before a root boolean is read or changed. Malformed syntax, unrelated malformed root values, wrong types, duplicate semantic keys including escaped quoted keys, and ambiguous table conflicts fail closed. |
+| P1-2 first-run and legal guarantees | Closed as product truth. First-run copy describes row deletion plus local compaction. One canonical Markdown license source generates both installer artifacts. Release checks reject drift and unimplemented guarantees before DMG staging. Legal-owner approval remains a release gate and is not fabricated here. |
+| P2-1 composed termination proof | Closed locally. An extracted coordinator composes real normal and TERM-resistant child pairs through `ProcessSupervisor.state == .stopped`, restart scheduling, cleanup, and the termination reply. Restart and a positive reply occur only after both tracked PIDs are absent. |
+| P2-2 active false claims | Closed. Seeded demo memory, the boot guard, the data-flow diagram, README examples, architecture, onboarding, and installer legal copy now match the shipped Rust cosine scan, CPU-pinned Core ML, file-Keychain boundary, and row-deletion behavior. |
+| P3-1 Task 5 compile-drift report | Closed. R4 found typed-outcome compile drift in both `apps/agent/tests/chunker_event_wire.rs` and `apps/agent/tests/wire_e2e_fixture.rs`. Preserved concurrent Task 5 commits `dd960ad` and `1f2bc12` repaired them respectively. A full agent test compile now passes, and neither test is part of the Task 2 commit. |
 
 ## Capture Authority
 
-- Root `capture_enabled` accepts only the TOML boolean tokens `true` and `false` with optional whitespace/comment text.
-- Numeric values, strings, arrays, inline tables, malformed tokens, malformed exact assignments, and semantically duplicate bare/basic-quoted/literal-quoted keys fail closed.
-- A `capture_enabled` key inside a TOML table is not root capture authority.
-- Writes preserve unrelated lines, comments, leading indentation, and similarly prefixed siblings. They collapse root semantic duplicates to one canonical bare key.
-- If tables already exist and no root key exists, the writer inserts the root key before the first table header. Fresh-instance relaunch tests prove malformed numeric authority remains off and on-to-off remains off.
+- `RuntimeConfig` uses TOMLKit's toml++-backed TOML 1.0 parser. The package is
+  exact-pinned at 0.6.0 and `Package.resolved` pins revision
+  `ec6198d37d495efc6acd4dffbd262cdca7ff9b3f`.
+- Reads parse the complete UTF-8 document and take only a typed root boolean.
+  Any parser error or non-boolean root value returns false.
+- Writes first parse the complete existing document and reject malformed,
+  duplicate, conflicting, or wrong-typed authority without changing its bytes.
+  The existing line editor then preserves comments, indentation, tables, and
+  prefix siblings; the emitted document is reparsed and its root value verified
+  before atomic replacement.
+- Standalone and XCTest behavior cases cover an unterminated table after a valid
+  key, an unrelated malformed assignment and array after a valid key, an escaped
+  `"\u0063apture_enabled"` duplicate, wrong types, quoted duplicates, table-local
+  keys, comment preservation, insertion before tables, and on-to-off relaunch.
 
-## Child Environment Policy
+## Legal And Product Truth
 
-- `apps/agent/src/child_command_environment.rs` owns the Rust denylist and `sanitized_command` constructor.
-- The brief worker `date +%z` process and every other `Command` spawn under `apps/agent/src` use that constructor.
-- The denylist removes `MCI_DB_KEY_HEX`, `MCI_DB_KEY_FILE`, `MCI_DEVELOPMENT_FILE_KEY`, and `HIPPOCAMPUS_ENABLE_V2P1`.
-- A process-level test runs `/usr/bin/env`, verifies an ordinary marker survives, and verifies all four forbidden values are absent from the received environment.
+- `docs/legal/terms-of-service.md` is the single reviewed product-behavior
+  source. It describes the current local pipeline, same-user process boundary,
+  explicit capture setting, row deletion, database compaction, and limitations.
+  Its source header keeps legal-owner approval explicit.
+- `generate-eula.py` deterministically generates `EULA.rtf` and `sla.r` and has
+  a read-only `--check` mode. It rejects unimplemented hardware, deletion, sync,
+  vector-extension, and absolute-decryption guarantees in the canonical source.
+- `build-installer.sh` runs that check before `--verify-assets` can succeed and
+  before normal release assembly stages the app. Missing or stale artifacts fail
+  instead of being silently reused or regenerated during release assembly.
+- `scripts/test-task-2-product-truth.sh` verifies active copy, mutates a fixture
+  artifact to prove drift fails, mutates the source to prove a prohibited claim
+  fails, and is wired into the local check catalog and release-contract CI.
+- TOMLKit and bundled toml++ attributions were added to the shipped notice.
+
+## Shutdown Composition
+
+- `ApplicationTerminationCoordinator` owns the awaited shutdown, restart,
+  cleanup, and reply sequence. `AppDelegate` still returns AppKit
+  `.terminateLater`; a failed stop presents the error and replies false.
+- `ProcessSupervisor.shutdownAndWait` remains the state boundary. It publishes
+  `.stopped` only after topology stop succeeds, and concurrent callers share one
+  shutdown task.
+- `SupervisorProcessShutdown` remains the sole TERM-grace-to-SIGKILL production
+  boundary and rejects surviving Foundation processes or PIDs.
+- `DelayedApplicationRestartLauncher` is extracted from AppDelegate and creates
+  its child through the centralized reusable-key scrubber.
+- The standalone composed fixture launches actual `/bin/sh` helper and agent
+  processes for normal quit and TERM-resistant restart. It invokes the real
+  `ProcessSupervisor` and coordinator, then proves `.stopped`, PID death,
+  restart ordering, cleanup, and the positive reply. XCTest also covers success
+  ordering and failed-stop false-reply/no-restart/no-cleanup behavior.
+- `applicationWillTerminate` remains idempotent cleanup only; it does not start
+  an unawaited second shutdown.
 
 ## Verification
 
 - `cargo test -p mci-agent --test key_resolver --test register_mcp --test keychain_packaging_contract --test child_command_environment --locked`: PASS, 45 passed and 0 failed (21 resolver, 13 MCP registration, 9 packaging, 2 child environment).
 - `cargo check -p mci-agent --bins --locked`: PASS.
 - `scripts/swift-package.sh build --package-path apps/hippocampus`: PASS with pre-existing warnings.
-- Standalone Swift behavior executables: PASS, 7/7 for strict runtime TOML, async audit responsiveness/error state, real normal/resistant process shutdown, detached KeyStore access, transition generations, process-level child environment, and custody cancellation boundaries.
-- `scripts/test-agent-key-custody-runner.sh`: PASS, 3 printed assertions and 0 failures.
-- `scripts/test-supervisor-stop-policy.sh`: PASS, 1 printed assertion and 0 failures. This is supplemental; the real-process shutdown fixture is the lifecycle evidence.
-- `xcrun swiftc -parse` over every changed Swift source, fixture, and XCTest source: PASS.
-- `rustfmt --edition 2021` over every changed Rust source and test: PASS.
-- `scripts/swift-package.sh test --package-path apps/hippocampus`: reached test compilation but did not execute XCTest because this Command Line Tools installation has no `XCTest` module. Full XCTest remains an external Xcode gate and is not claimed.
-- `cargo test -p mci-agent --locked`: broader package compile remains blocked outside Task 2 by `apps/agent/tests/chunker_event_wire.rs`, which calls `is_empty` and `iter` on the Task 5 `McpRecallOutcome` enum. Task 5 typed-outcome code and this out-of-scope test were not modified.
+- `scripts/swift-package.sh build --package-path apps/onboarding`: PASS.
+- Standalone Swift behavior executables: PASS, 8/8. This includes whole-document TOML, composed real-process lifecycle, asynchronous Key Wrap audit, detached KeyStore access, transition generations, child environment receipt, custody cancellation, and normal/resistant shutdown primitives.
+- `scripts/test-agent-key-custody-runner.sh`: PASS, 3 assertions and 0 failures.
+- `scripts/test-supervisor-stop-policy.sh`: PASS, 1 assertion and 0 failures.
+- `scripts/test-release-contract.sh`: PASS, 86 assertions and 0 failures.
+- `scripts/test-task-2-product-truth.sh`: PASS, including drift and prohibited-guarantee mutation cases.
+- `python3 assets/installer/generate-eula.py --check`: PASS.
+- `scripts/build-installer.sh --verify-assets`: PASS for canonical brand and legal artifacts.
+- `xcrun swiftc -parse` over changed Swift production, fixture, and XCTest sources: PASS.
+- `rustfmt --edition 2021 --check apps/agent/src/bin/mci_seed_brain.rs`: PASS.
+- `python3 -m py_compile assets/installer/generate-eula.py`: PASS.
+- `bash -n` over changed shell scripts and `git diff --check`: PASS.
+- `scripts/swift-package.sh test --package-path apps/hippocampus`: BLOCKED by the active Command Line Tools installation, which cannot import `XCTest`. Full XCTest is not claimed.
+- `cargo test -p mci-agent --locked --no-run`: PASS. R4 had found compile
+  drift in both `apps/agent/tests/chunker_event_wire.rs` and
+  `apps/agent/tests/wire_e2e_fixture.rs`; preserved Task 5 parents `dd960ad`
+  and `1f2bc12` repair them respectively. Neither repair is staged by Task 2.
 
 ## Changed Files
 
+- `.github/workflows/release-contract.yml`
 - `.superpowers/sdd/2026-09-01-hippocampus-memory-layer/progress.md`
 - `.superpowers/sdd/2026-09-01-hippocampus-memory-layer/task-2-report.md`
-- `README.md`
 - `ARCHITECTURE.md`
 - `CHANGELOG.md`
-- `apps/agent/src/child_command_environment.rs`
-- `apps/agent/src/brief_worker.rs`
-- `apps/agent/src/bin/mci_bench.rs`
-- `apps/agent/src/bin/mci_calibrate_evidence.rs`
-- `apps/agent/src/lib.rs`
-- `apps/agent/tests/child_command_environment.rs`
-- `apps/agent/tests/keychain_packaging_contract.rs`
+- `NOTICE`
+- `README.md`
+- `apps/agent/src/bin/mci_seed_brain.rs`
+- `apps/hippocampus/Package.resolved`
+- `apps/hippocampus/Package.swift`
 - `apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift`
-- `apps/hippocampus/Sources/Hippocampus/KeyWrapAuditView.swift`
-- `apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift`
-- `apps/hippocampus/Sources/HippocampusKit/KeyWrapAudit.swift`
+- `apps/hippocampus/Sources/HippocampusKit/ApplicationTerminationCoordinator.swift`
+- `apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift`
 - `apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift`
 - `apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift`
 - `apps/hippocampus/Sources/HippocampusKit/SupervisorProcessRuntime.swift`
 - `apps/hippocampus/Sources/HippocampusKit/SupervisorProcessShutdown.swift`
-- `apps/hippocampus/Tests/Fixtures/KeyWrapAuditResponsiveness.swift`
 - `apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift`
-- `apps/hippocampus/Tests/Fixtures/SupervisorProcessShutdownBehavior.swift`
-- `apps/hippocampus/Tests/HippocampusKitTests/KeyWrapAuditTests.swift`
+- `apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift`
 - `apps/hippocampus/Tests/HippocampusKitTests/MenuBarLifecycleTests.swift`
 - `apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift`
 - `apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift`
+- `apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift`
+- `assets/installer/EULA.rtf`
+- `assets/installer/generate-eula.py`
+- `assets/installer/sla.r`
+- `docs/assets/data-flow-diagram.svg`
+- `docs/legal/terms-of-service.md`
+- `scripts/build-installer.sh`
+- `scripts/check.sh`
+- `scripts/test-release-contract.sh`
+- `scripts/test-task-2-product-truth.sh`
 
 ## Residual Owner And API Gates
 
-- Implement a safe access-object inspection/migration API before claiming the Keychain ACL has been observed. Do not infer it from value readability and do not rewrite secret bytes merely to inspect it.
-- Build two Developer-ID-signed versions and prove Hippocampus, `MCICaptureHelper`, `mci-agent`, and Recall retain access across upgrade without an unexpected prompt.
-- Exercise locked, denied, canceled-interaction, duplicate-add, and interrupted-migration Security.framework outcomes in a disposable macOS account.
+- Complete legal-owner review of the canonical terms before public distribution;
+  this repair verifies product truth and artifact identity, not legal advice.
+- Implement a safe access-object inspection/migration API before claiming the
+  Keychain ACL has been observed. Do not infer it from value readability or
+  rewrite secret bytes merely to inspect it.
+- Build two Developer-ID-signed versions and prove Hippocampus,
+  `MCICaptureHelper`, `mci-agent`, and Recall retain Keychain access across an
+  upgrade without an unexpected prompt.
+- Exercise locked, denied, canceled-interaction, duplicate-add, and interrupted
+  migration outcomes in a disposable macOS account.
 - Run full XCTest with full Xcode.
-- Run physical-Mac TCC denial/recovery, generation readiness, rollback overlap, Quit, Quit-and-Restart, resistant-child shutdown, and sustained capture on the release candidate.
-- Resolve the separately owned Task 5 `chunker_event_wire` typed-outcome drift before using a full `mci-agent` package run as release evidence.
-- Signing, notarization, publication, and production Keychain/TCC access were intentionally not performed.
+- Run physical-Mac TCC denial/recovery, capture-off/on, rollback overlap, normal
+  Quit, Quit-and-Restart, TERM-resistant shutdown, and sustained capture on the
+  release candidate.
+- Preserve Task 5's typed-outcome repairs in parents `dd960ad` and `1f2bc12`;
+  both tests named by R4 now compile in the full agent package.
+- Signing, notarization, upload, publication, and production Keychain/TCC access
+  were intentionally not performed.
 
-The Task 5 typed retrieval outcome and the `95ee449` release-model changes were preserved. No core/brain, MCP retrieval/server, release workflow, release script, `Info.plist`, `docs/STATUS.md`, or Task 4/5/6 implementation file was changed by this repair.
+Concurrent Task 5 commits `dd960ad` and `1f2bc12` were preserved as this
+repair's parents. Their files are not in this report's changed-file ledger or
+Task 2 commit. `scripts/__pycache__/` was also preserved and not staged.

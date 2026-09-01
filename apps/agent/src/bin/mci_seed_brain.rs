@@ -246,25 +246,25 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
             "com.mci.demo.seed.safari",
             "Cure53 — Source Code & Penetration Testing",
             "https://cure53.de/",
-            "Cure53 offers cryptography review, penetration testing, and source-code audits. The COO GTM doc recommends a $50K–$100K v1 audit ahead of the 2026-09 launch — the third-party signal that backs MCI's zero-knowledge / local-first claims.",
+            "Cure53 offers cryptography review, penetration testing, and source-code audits. Independent review is a release gate for validating Hippocampus's local custody and documented threat boundaries.",
         ),
         (
             "com.mci.demo.seed.linear",
             "Linear — MCI · F-STRAT-002 — Done",
             "https://linear.app/mci/issue/MCI-31/dual-market-commit-hippocampus-mci-engineering-codename",
-            "F-STRAT-002 dual-market commit. Hippocampus is the external/pitch-deck name; MCI is the engineering codename (no repo rebrand). B2C free (Personal tier) + B2B per-seat (Teams tier). Tier 1 (raw+cascade+brain) strictly local; Tier 2 (approved briefs only) syncs to vendor-blind workspace server.",
+            "Hippocampus is the product name; MCI is the engineering codename. The implemented product is personal local memory. Team sharing and sync remain unshipped design work and are not release behavior.",
         ),
         (
             "com.mci.demo.seed.vscode",
             "docs/decisions/0019-company-workspace-server-tier-2-store.md — mci",
             "",
-            "ADR-0019 — Company workspace server + Tier 2 store. Vendor-blind by construction: server holds only ciphertext + opaque key-wraps. Per-workspace E2E key. Existing-member-vouches enrollment. NO BACKDOOR KEY. LOAD-BEARING §4.",
+            "ADR-0019 records an unshipped company-workspace design. It is architecture exploration, not a claim about the current local product or its release guarantees.",
         ),
         (
             "com.mci.demo.seed.safari",
-            "sqlite-vec — A vector search SQLite extension",
-            "https://github.com/asg017/sqlite-vec",
-            "sqlite-vec is a SQLite extension that provides vector search via the vec0 virtual table. MCI uses sqlite-vec for semantic recall over 384-d embeddings (ADR-0009 pins the dimension). The vec0 mirror lands at P3.8.",
+            "Hybrid recall — lexical ranking plus local embeddings",
+            "",
+            "Hippocampus combines lexical ranking with 384-dimensional local embeddings. The shipped retriever loads candidate vectors and computes cosine similarity in Rust.",
         ),
         (
             "com.mci.demo.seed.slack",
@@ -282,7 +282,7 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
             "com.mci.demo.seed.notion",
             "Notion — MCI / Demo Script — Cycle 5",
             "https://www.notion.so/mci/demo-script-cycle-5",
-            "Demo script for the Phase 3 cycle: (1) Boot helper in .app bundle. (2) Use Mac normally for 5 min. (3) Open Recall UI — show timeline. (4) Search 'sqlite-vec' — show ranked results. (5) Connect Claude Code via mcp-serve — show agent-readable brain.",
+            "Demo script for the local memory flow: (1) Boot the bundled helper. (2) Use the Mac normally for 5 min. (3) Open Recall UI and inspect the timeline. (4) Search 'hybrid recall' and inspect ranked evidence. (5) Connect Claude Code through the local MCP server.",
         ),
         (
             "com.mci.demo.seed.github",
@@ -292,9 +292,9 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
         ),
         (
             "com.mci.demo.seed.safari",
-            "MCI — About the brain (local-first, zero-knowledge)",
+            "MCI — About the local brain",
             "https://mci.local/about",
-            "MCI keeps your full screen-and-context memory on your device. Capture, OCR, embedding, search — all local. The encrypted SQLite file IS your brain; you can move it, back it up, delete it. No third party can decrypt it; no vendor (including us) holds the key.",
+            "Hippocampus keeps captured memory in a local SQLCipher database. Its key is stored in a non-synchronizing macOS Keychain item for the shipped components. Same-user processes and unverified signed-upgrade access remain explicit threat and release boundaries.",
         ),
     ];
 

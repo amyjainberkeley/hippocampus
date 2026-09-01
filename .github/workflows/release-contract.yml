@@ -12,6 +12,15 @@ on:
       - 'scripts/build-installer.sh'
       - 'scripts/*release*'
       - 'scripts/*sparkle*'
+      - 'scripts/test-task-2-product-truth.sh'
+      - 'assets/installer/EULA.rtf'
+      - 'assets/installer/sla.r'
+      - 'assets/installer/generate-eula.py'
+      - 'docs/legal/**'
+      - 'apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift'
+      - 'apps/agent/src/bin/mci_seed_brain.rs'
+      - 'apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift'
+      - 'docs/assets/data-flow-diagram.svg'
       - 'scripts/check.sh'
       - 'CHANGELOG.md'
       - 'docs/STATUS.md'
@@ -29,6 +38,15 @@ on:
       - 'scripts/build-installer.sh'
       - 'scripts/*release*'
       - 'scripts/*sparkle*'
+      - 'scripts/test-task-2-product-truth.sh'
+      - 'assets/installer/EULA.rtf'
+      - 'assets/installer/sla.r'
+      - 'assets/installer/generate-eula.py'
+      - 'docs/legal/**'
+      - 'apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift'
+      - 'apps/agent/src/bin/mci_seed_brain.rs'
+      - 'apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift'
+      - 'docs/assets/data-flow-diagram.svg'
       - 'scripts/check.sh'
       - 'CHANGELOG.md'
       - 'docs/STATUS.md'
@@ -48,6 +66,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: scripts/test-release-contract.sh
+      - run: scripts/test-task-2-product-truth.sh
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh
       - run: scripts/test-release-model-manifest.sh

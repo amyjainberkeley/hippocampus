@@ -14,7 +14,7 @@ struct RetentionSlide: View {
                         .multilineTextAlignment(.center)
                 }
 
-                OnboardingDesign.TypeRamp.body("Choose how long Hippocampus keeps your memories. Deleted data is crypto-shredded — the encryption key for that segment is destroyed.")
+                OnboardingDesign.TypeRamp.body("Choose how long Hippocampus keeps your memories. Deleted memories are removed as database rows and local storage is compacted.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: OnboardingDesign.Width.prose)

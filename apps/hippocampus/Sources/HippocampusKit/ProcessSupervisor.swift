@@ -109,7 +109,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         )
     }
 
-    init(
+    package init(
         locator: BinaryLocator,
         keyStore: KeyStore,
         runtimeConfig: any RuntimeConfiguring,
@@ -139,7 +139,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
-    func startAndWaitForReadiness() async throws {
+    package func startAndWaitForReadiness() async throws {
         guard shutdownTask == nil else { throw SupervisorError.transitionInProgress }
         guard let transitionID = transitionGate.beginTransition() else {
             throw SupervisorError.transitionInProgress

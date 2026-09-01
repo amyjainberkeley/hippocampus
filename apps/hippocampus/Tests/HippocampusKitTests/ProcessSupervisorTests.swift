@@ -125,6 +125,17 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
 }
 
 @MainActor
+final class FakeApplicationRestartLauncher: ApplicationRestartLaunching {
+    var onSchedule: (() -> Void)?
+    private(set) var scheduleCount = 0
+
+    func scheduleRestart() throws {
+        scheduleCount += 1
+        onSchedule?()
+    }
+}
+
+@MainActor
 final class ProcessSupervisorTests: XCTestCase {
     private enum TestError: LocalizedError {
         case denied
@@ -291,6 +302,63 @@ final class ProcessSupervisorTests: XCTestCase {
 
         XCTAssertEqual(topology.stopCalls, 1)
         XCTAssertEqual(supervisor.state, .stopped)
+    }
+
+    func test_termination_coordinator_replies_after_stopped_and_restart_scheduling() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        let restartLauncher = FakeApplicationRestartLauncher()
+        restartLauncher.onSchedule = {
+            XCTAssertEqual(supervisor.state, .stopped)
+            XCTAssertFalse(topology.isRunning)
+        }
+        var cleanedUp = false
+        var replies: [Bool] = []
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: restartLauncher,
+            cleanup: { cleanedUp = true }
+        )
+
+        let allowed = await coordinator.terminate(intent: .restart) {
+            XCTAssertEqual(supervisor.state, .stopped)
+            XCTAssertTrue(cleanedUp)
+            replies.append($0)
+        }
+
+        XCTAssertTrue(allowed)
+        XCTAssertTrue(coordinator.hasVerifiedShutdown)
+        XCTAssertEqual(restartLauncher.scheduleCount, 1)
+        XCTAssertEqual(replies, [true])
+    }
+
+    func test_termination_coordinator_replies_false_without_restart_or_cleanup_on_failed_stop() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+        topology.stopResults = [.failure(TestError.partialStop)]
+        try await supervisor.startAndWaitForReadiness()
+        let restartLauncher = FakeApplicationRestartLauncher()
+        var cleanedUp = false
+        var replies: [Bool] = []
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: restartLauncher,
+            cleanup: { cleanedUp = true }
+        )
+
+        let allowed = await coordinator.terminate(intent: .restart) {
+            replies.append($0)
+        }
+
+        XCTAssertFalse(allowed)
+        XCTAssertFalse(coordinator.hasVerifiedShutdown)
+        XCTAssertEqual(restartLauncher.scheduleCount, 0)
+        XCTAssertFalse(cleanedUp)
+        XCTAssertEqual(replies, [false])
+        guard case .crashed = supervisor.state else {
+            return XCTFail("failed stop must remain visible, got \(supervisor.state)")
+        }
     }
 
     func test_failed_verified_shutdown_never_claims_stopped() async throws {

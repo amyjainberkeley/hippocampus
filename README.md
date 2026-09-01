@@ -181,7 +181,7 @@ $ mci_recall "finding things by meaning rather than exact wording"
 3 hits
   score=0.645  Notion — MCI / Recall UI Spec
   score=0.598  Snowflake Arctic Embed S — Hugging Face
-  score=0.594  sqlite-vec — A vector search SQLite extension
+  score=0.594  Hybrid recall — lexical ranking plus local embeddings
 ```
 
 Keyword search cannot answer that question, because you did not use any of the words. That difference is the entire reason this project exists.
@@ -395,7 +395,7 @@ Production commands resolve the same content-free macOS Keychain service/account
 mci-brain stats                          # counts and time range
 mci-brain stats --json                   # same, machine-readable
 
-mci-brain search "sqlite-vec"            # find events by text
+mci-brain search "hybrid recall"         # find events by text
 mci-brain search "vector" --limit 20
 mci-brain search "..." --json
 

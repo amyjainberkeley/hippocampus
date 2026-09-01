@@ -115,7 +115,7 @@ One deliberate constraint shapes the FFI: **pixels never cross the seam as an ow
 |---|---|
 | **Encrypted store + hybrid recall** | **Working and tested.** The SQLCipher store, FTS5 + Rust-side cosine hybrid retriever, episode segmentation, retention, and the read-only FFI to the recall UI are implemented and exercised end-to-end. sqlite-vec is not shipped. |
 | **On-device semantic search (Arctic-Embed-S)** | **Working.** Core ML embedding pipeline (external Rust tokenization, FP16 weights, CLS-pool + L2-norm in-graph) with a quality regression test asserting cosine parity. |
-| **Live screen capture (Swift helper)** | **Built but not yet verified on release hardware, and default-OFF.** Capture is controlled only by the persisted `capture_enabled` preference. A change restarts the topology and is committed only after the matching generation reports readiness following `SCStream.startCapture()`. The removed `HIPPOCAMPUS_ENABLE_V2P1` variable has no authority. Full TCC denial/recovery and sustained on-device capture still require owner verification. |
+| **Live screen capture (Swift helper)** | **Built but not yet verified on release hardware, and default-OFF.** Capture is controlled only by the persisted root `capture_enabled` preference after TOMLKit validates the entire runtime document. Malformed syntax, wrong types, duplicate semantic keys, and ambiguous authority fail closed; writes are reparsed before atomic replacement. A change restarts the topology and is committed only after the matching generation reports readiness following `SCStream.startCapture()`. The removed `HIPPOCAMPUS_ENABLE_V2P1` variable has no authority. Full TCC denial/recovery and sustained on-device capture still require owner verification. |
 | **Context join (app / window / URL / page text)** | **Implemented.** NSWorkspace + Accessibility + AppleScript URL providers landed; browser extension (Chromium MV3 + native messaging) working, Safari appex scaffold-only. |
 | **Privacy controls** | **Mostly landed** (retention purger, denylist/suppression, file-Keychain database-key custody, and legacy plaintext migration). Delete is local row deletion plus `VACUUM`; crypto-shredded range deletion is not implemented. Production children receive content-free Keychain references and scrub reusable key variables. Real ACL inspection across all four signed consumers, cross-version continuity, and physical-Mac capture verification remain owner/API gates. |
 | **On-device brief author (Qwen)** | **Partial.** Rust backend complete; historically blocked on Core ML `.mlpackage` conversion. The shipping DMG bakes in the models (embedder, NER, brief) to make first-run fully offline. |
@@ -124,6 +124,12 @@ One deliberate constraint shapes the FFI: **pixels never cross the seam as an ow
 | **Windows adapter** | **Not built.** Scaffold crate, stubbed methods. |
 
 Stable Developer ID signing is required for release so file-Keychain ACL trust can remain continuous across app updates. Ad-hoc development builds do not prove that continuity.
+
+AppKit quit and quit-and-restart use an awaited termination coordinator. It
+publishes `.stopped` only after helper and agent PIDs have passed TERM grace,
+KILL escalation when needed, and process-table death checks. Restart scheduling,
+lifecycle cleanup, and a positive AppKit termination reply occur after that
+verified state. `applicationWillTerminate` performs idempotent cleanup only.
 
 ---
 

@@ -101,6 +101,21 @@ Sparkle 2.9.2
     network requests" rather than making a claim about the whole app.
     Sparkle is not present in the CLI distribution at all.
 
+TOMLKit 0.6.0
+    Copyright (c) 2024 Jeff Lebrun
+    MIT
+    https://github.com/LebJe/TOMLKit
+
+    Parses and validates the complete runtime configuration before a
+    capture preference can be read or changed.
+
+toml++ 3.4.0
+    Copyright (c) Mark Gillard
+    MIT
+    https://github.com/marzer/tomlplusplus
+
+    Bundled by TOMLKit and used as its conforming TOML 1.0 parser.
+
 --------------------------------------------------------------------
 
 Full license texts for every dependency can be regenerated with:
