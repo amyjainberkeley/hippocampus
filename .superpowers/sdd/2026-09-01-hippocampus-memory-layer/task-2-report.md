@@ -1,87 +1,80 @@
-# Task 2 Final Repair Report: Key Custody And Capture Readiness
+# Task 2 Final Repair Report R3: Key Custody And Capture Lifecycle
 
-Status: R2 repair completed in the focused commit containing this report on `codex/hippocampus-v1`; not pushed, signed, notarized, uploaded, or published.
+Status: repository-local R3 P1/P2 findings repaired in the focused commit containing this report on `codex/hippocampus-v1`. Nothing was pushed, signed, notarized, uploaded, or published.
 
-Original repair commit: `a821f65dc2f195309ba0442ffd9a13faec536cd0`
+Starting HEAD: `e66babebb5dc81c2e54797c6fa5f57a7e569e6a4`
 
-## R2 Repair Summary
+## R3 Finding Disposition
 
-- The initializer now models legacy-file presence independently from database presence. With no database, a valid legacy key is reused add-only instead of generating a contradictory key; an existing matching Keychain item finalizes plaintext cleanup. Both states are exercised across two launches with a real SQLCipher brain.
-- Runtime TOML reads fail closed on duplicate exact keys. Writes structurally match only the exact assignment, preserve comments and similarly prefixed siblings, and deterministically collapse duplicates. An on-to-off fresh-instance relaunch remains off.
-- Supervisor exits and retries are accepted only for the committed generation. Startup, capture changes, rollback, retry, and stop use transition identities; callbacks are suppressed while a transaction owns the topology.
-- The final typed Keychain read runs through a detached access boundary. A delayed-key-store fixture proves a MainActor heartbeat remains responsive.
-- Every production `Process` in Hippocampus and onboarding is created through a package-local shared factory that strips reusable key variables and the removed capture authority. Process-level fixtures inspect the actual environment received by `/usr/bin/env`.
-- Custody-runner cancellation installs control before launch, gives SIGTERM a 250 ms grace period, escalates a still-live matching PID to SIGKILL, waits for death, and lets cancellation win launch-failure races. The fixture covers a resistant child, cancel-before-install, cancel-after-exit, and no surviving PID.
-- Operator documentation now describes the persisted capture toggle, generation-bound readiness, completed migration behavior, and exact remaining owner gates.
+| Finding | Disposition |
+|---|---|
+| P1-1 awaited Quit / Quit-and-Restart | Closed locally. AppKit returns `terminateLater`; it replies true only after the shared supervisor shutdown proves helper and agent death. Restart scheduling happens after that proof. A failed shutdown replies false and leaves the GUI visible. |
+| P1-2 MainActor Keychain audit | Closed locally. Audit reads use the detached `KeyStoreAccess` boundary. The MainActor view model exposes loading, loaded, and error states. |
+| P1-3 invalid TOML capture authority | Closed locally. Only exact TOML `true` or `false` at the root key is accepted. Invalid types, malformed assignments, semantic quoted/bare duplicates, and table-local keys fail closed. |
+| P2-1 fabricated ACL health | Closed as a product-truth defect. The UI reports key readability and ACL status separately; successful data access always leaves access-control verification `unverified`. Real access-object inspection and signed continuity remain owner/API gates. |
+| P2-2 Rust child environment inheritance | Closed locally. Every source-level agent-owned `std::process::Command` construction routes through one scrubber that removes all four reusable-key or removed-authority variables. |
+| P2-3 fake-only shutdown tests | Closed locally. A standalone fixture launches real normal and TERM-resistant `Process` pairs, calls the production shutdown boundary, and proves both PIDs are absent before completion. |
+| P2-4 packaging contract drift | Closed. The focused contract now checks the current release-signing semantics without restoring stale documentation. |
+| P2-5 false custody/retrieval/deletion copy | Closed in README and architecture truth. Copy now states file-Keychain readability, CPU-pinned Core ML, Rust-side cosine scan, deferred sqlite-vec, and row deletion plus `VACUUM`. |
 
-## R2 Verification
+## Shutdown Design
 
-- `cargo test -p mci-agent --test key_resolver --locked`: PASS, 21 passed and 0 failed, including two real SQLCipher two-launch no-database legacy tests.
-- Standalone Swift behavior fixtures: PASS for runtime TOML, supervisor transition identity, off-MainActor Keychain access, Hippocampus child environment, onboarding child environment, and custody cancellation (`6/6` fixture lanes).
-- `scripts/test-agent-key-custody-runner.sh`: PASS, 3 assertions and 0 failures.
+- `SupervisorProcessShutdown` is the only production TERM-to-KILL boundary. It resumes paused children, sends TERM, waits for the configured grace period, sends KILL to survivors, then verifies both Foundation process state and PID absence.
+- `FoundationSupervisorTopology.stop` delegates to that boundary and cleans up only after verified death.
+- A partial helper launch is also closed through the same boundary if the agent fails to launch; the helper handle is not discarded while it may still be alive.
+- `ProcessSupervisor.shutdownAndWait` is idempotent for concurrent callers. It cancels retries and invalidates transition acceptance before stopping, but does not publish `.stopped` until topology shutdown succeeds. Failure publishes a visible crash state.
+- `AppDelegate.applicationShouldTerminate` uses AppKit terminate-later/reply. Quit-and-Restart launches its delayed reopen child only after verified shutdown. `applicationWillTerminate` performs idempotent resource cleanup and does not start an unawaited second stop.
+
+## Audit And Custody Truth
+
+- `KeyWrapAuditor.inspectKeychain` is async and performs the final typed Keychain read outside MainActor.
+- `KeyWrapAuditViewModel` keeps UI mutation on MainActor and represents loading, loaded, and failed states explicitly.
+- The report names whether the key was readable. It never maps readability to sealing or ACL health.
+- The access-control field states that the access object was not inspected. The report also names access-object inspection and signed cross-version continuity as release-owner gates.
+- No key bytes are rendered, logged, placed in child argv, or added to reports.
+
+## Capture Authority
+
+- Root `capture_enabled` accepts only the TOML boolean tokens `true` and `false` with optional whitespace/comment text.
+- Numeric values, strings, arrays, inline tables, malformed tokens, malformed exact assignments, and semantically duplicate bare/basic-quoted/literal-quoted keys fail closed.
+- A `capture_enabled` key inside a TOML table is not root capture authority.
+- Writes preserve unrelated lines, comments, leading indentation, and similarly prefixed siblings. They collapse root semantic duplicates to one canonical bare key.
+- If tables already exist and no root key exists, the writer inserts the root key before the first table header. Fresh-instance relaunch tests prove malformed numeric authority remains off and on-to-off remains off.
+
+## Child Environment Policy
+
+- `apps/agent/src/child_command_environment.rs` owns the Rust denylist and `sanitized_command` constructor.
+- The brief worker `date +%z` process and every other `Command` spawn under `apps/agent/src` use that constructor.
+- The denylist removes `MCI_DB_KEY_HEX`, `MCI_DB_KEY_FILE`, `MCI_DEVELOPMENT_FILE_KEY`, and `HIPPOCAMPUS_ENABLE_V2P1`.
+- A process-level test runs `/usr/bin/env`, verifies an ordinary marker survives, and verifies all four forbidden values are absent from the received environment.
+
+## Verification
+
+- `cargo test -p mci-agent --test key_resolver --test register_mcp --test keychain_packaging_contract --test child_command_environment --locked`: PASS, 45 passed and 0 failed (21 resolver, 13 MCP registration, 9 packaging, 2 child environment).
+- `cargo check -p mci-agent --bins --locked`: PASS.
 - `scripts/swift-package.sh build --package-path apps/hippocampus`: PASS with pre-existing warnings.
-- `scripts/swift-package.sh build --package-path apps/onboarding`: PASS.
-- Focused changed Swift test-source parsing: PASS. XCTest execution still requires a full Xcode toolchain because this host's Command Line Tools cannot import `XCTest`.
-- `cargo test -p mci-agent --test keychain_packaging_contract --locked`: 8 passed and 1 failed because the committed release work removed an exact sentence from out-of-scope `scripts/README.md` while the Task 2 contract still asserts it. Task 2 did not edit the release documentation or test.
-- `cargo test -p mci-agent --locked`: blocked during compilation by concurrent Task 5 wire tests that call vector methods on the new `McpRecallOutcome` enum. The four errors are outside Task 2 ownership; the focused key resolver and MCP registration lanes pass.
-
-## R2 Residual Owner And API Gates
-
-- P2-1 remains explicit: current adapters can read data and create an ACL-protected item but cannot safely inspect or migrate an existing item's access object without changing secret bytes. Do not represent the four-consumer ACL as observed until that API exists and a real signed upgrade test records it.
-- On a disposable physical Mac, use two Developer-ID-signed versions to prove Hippocampus, `MCICaptureHelper`, `mci-agent`, and Recall can read the same item across upgrade without an unexpected prompt.
-- Exercise real locked, denied, canceled-interaction, duplicate-add, and interrupted-migration Security.framework outcomes in a disposable account.
-- Run full Swift XCTest with Xcode, then live TCC denial/recovery, generation-bound readiness, rollback overlap, and sustained capture on release hardware.
-
-## Final Design
-
-- Production custody uses Apple's macOS file-based Keychain model: one non-synchronizable generic-password item with service `ai.hippocampus.brain`, account `database-key-v1`, storage model `file-keychain-acl-v1`, `kSecUseDataProtectionKeychain=false`, and a `SecAccess` ACL containing `SecTrustedApplication` entries for `Hippocampus`, `MCICaptureHelper`, `mci-agent`, and `recall-ui`.
-- This is intentionally not the data-protection Keychain. There is no `keychain-access-groups` entitlement or provisioning-profile sharing flow. Stable Developer ID signing is a release prerequisite because file-Keychain ACL trust depends on stable executable designated requirements. Ad-hoc signing is available only through the explicit debug development option and is not represented as update-safe.
-- The Rust `mci-keychain` crate remains the sole unsafe Security.framework adapter. The repair adds no second Keychain FFI implementation. Swift consumers use native Security.framework clients with the same query-domain attributes.
-- Production children receive only the content-free service/account/storage-model reference. Raw and file keys are stripped from helper, agent, Recall, onboarding, and Claude-registration child environments. Raw/file behavior remains only behind exact `MCI_DEVELOPMENT_FILE_KEY=1` development mode, including seed and demo tools.
-
-## Migration Semantics
-
-- A valid existing Keychain item is never overwritten. Missing, denied, locked/interaction-unavailable, malformed, and generic read failures remain distinct.
-- If `mci.sqlite` exists and the item is missing, initialization never generates. It requires an exact 64-character ASCII-hex legacy `dev.key`, opens the existing SQLCipher database read-only, queries its schema/stats, adds that exact key with the packaged ACL, re-reads Keychain, and proves the re-read value opens the same database.
-- The plaintext legacy file is preserved on malformed/wrong key, denied/locked access, add failure, post-add read failure, post-add database validation failure, mismatch, or deletion failure. No key bytes are logged.
-- After full validation, the legacy file is removed. A same-key duplicate race is accepted only after winner re-read and database validation, then removes the legacy file.
-- Restart after interrupted add is handled explicitly: if Keychain and the database validate while `dev.key` remains, the legacy key is independently validated, required to equal the Keychain key, and then removed. Malformed, wrong, or ambiguous legacy material fails visibly and remains untouched.
-- Generation occurs only when no database exists. Entropy failure and ACL-contract failure close initialization.
-
-## Capture And Product Behavior
-
-- `HIPPOCAMPUS_ENABLE_V2P1` is no longer a capture authority. Only the persisted preference translated into explicit supervisor `--capture` argv can construct content-bearing capture/context/OCR resources.
-- The helper resolves Keychain before capture, exits nonzero on custody or stream-start failure, and writes a generation-bound readiness receipt only after `SCStream.startCapture()` succeeds. Capture-off readiness does not construct capture resources.
-- The supervisor waits for readiness from the expected process generation and for both processes to remain alive. It persists and publishes a capture preference only after verified readiness. Stop, startup, persistence, timeout, early-exit, partial-stop, and rollback failures leave a visible actual/closed state; rollback creates and verifies a fresh prior topology.
-- Product app, `mci-brain`, helper, Recall, onboarding, Key Wrap Audit, docs, and CLI help use the shared Keychain-reference contract. Production defaults no longer select `FileKeyStore`.
-- Removing the raw-key brain-stats subprocess leaves no stored-event-count source. Health status therefore reports `N frames processed`; delivered frames are never relabeled as stored events.
-- Recall links only a deterministic profile-specific staged `libmci_brain_ffi.a`. The wrapper builds and stages the requested Cargo profile before SwiftPM, and release has no `target/debug` fallback.
+- Standalone Swift behavior executables: PASS, 7/7 for strict runtime TOML, async audit responsiveness/error state, real normal/resistant process shutdown, detached KeyStore access, transition generations, process-level child environment, and custody cancellation boundaries.
+- `scripts/test-agent-key-custody-runner.sh`: PASS, 3 printed assertions and 0 failures.
+- `scripts/test-supervisor-stop-policy.sh`: PASS, 1 printed assertion and 0 failures. This is supplemental; the real-process shutdown fixture is the lifecycle evidence.
+- `xcrun swiftc -parse` over every changed Swift source, fixture, and XCTest source: PASS.
+- `rustfmt --edition 2021` over every changed Rust source and test: PASS.
+- `scripts/swift-package.sh test --package-path apps/hippocampus`: reached test compilation but did not execute XCTest because this Command Line Tools installation has no `XCTest` module. Full XCTest remains an external Xcode gate and is not claimed.
+- `cargo test -p mci-agent --locked`: broader package compile remains blocked outside Task 2 by `apps/agent/tests/chunker_event_wire.rs`, which calls `is_empty` and `iter` on the Task 5 `McpRecallOutcome` enum. Task 5 typed-outcome code and this out-of-scope test were not modified.
 
 ## Changed Files
 
+- `.superpowers/sdd/2026-09-01-hippocampus-memory-layer/progress.md`
+- `.superpowers/sdd/2026-09-01-hippocampus-memory-layer/task-2-report.md`
 - `README.md`
-- `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift`
-- `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/CaptureLaunchOptions.swift`
-- `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/HelperReadinessReceipt.swift`
-- `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/MciV2P1Gate.swift` (deleted)
-- `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/KeyframeBlobWriter.swift`
-- `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/OCRPostAllowEmitter.swift`
-- `adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/CaptureLaunchOptionsTests.swift`
-- `adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/HelperReadinessReceiptTests.swift`
-- `adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/MainSwiftWiringTests.swift`
-- `adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/MciV2P1GateTests.swift` (deleted)
-- `apps/agent/src/bin/mci_agent.rs`
-- `apps/agent/src/bin/mci_brain.rs`
-- `apps/agent/src/bin/mci_seed_brain.rs`
-- `apps/agent/src/bin/mci_seed_brief.rs`
-- `apps/agent/src/doctor.rs`
-- `apps/agent/src/key_resolver.rs`
+- `ARCHITECTURE.md`
+- `CHANGELOG.md`
+- `apps/agent/src/child_command_environment.rs`
+- `apps/agent/src/brief_worker.rs`
+- `apps/agent/src/bin/mci_bench.rs`
+- `apps/agent/src/bin/mci_calibrate_evidence.rs`
 - `apps/agent/src/lib.rs`
-- `apps/agent/src/supervisor.rs`
-- `apps/agent/src/v2p1_gate.rs` (deleted)
-- `apps/agent/tests/key_resolver.rs`
+- `apps/agent/tests/child_command_environment.rs`
 - `apps/agent/tests/keychain_packaging_contract.rs`
-- `apps/hippocampus/Resources/build-app.sh`
 - `apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift`
 - `apps/hippocampus/Sources/Hippocampus/KeyWrapAuditView.swift`
 - `apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift`
@@ -89,56 +82,23 @@ Original repair commit: `a821f65dc2f195309ba0442ffd9a13faec536cd0`
 - `apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift`
 - `apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift`
 - `apps/hippocampus/Sources/HippocampusKit/SupervisorProcessRuntime.swift`
+- `apps/hippocampus/Sources/HippocampusKit/SupervisorProcessShutdown.swift`
+- `apps/hippocampus/Tests/Fixtures/KeyWrapAuditResponsiveness.swift`
+- `apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift`
+- `apps/hippocampus/Tests/Fixtures/SupervisorProcessShutdownBehavior.swift`
 - `apps/hippocampus/Tests/HippocampusKitTests/KeyWrapAuditTests.swift`
+- `apps/hippocampus/Tests/HippocampusKitTests/MenuBarLifecycleTests.swift`
 - `apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift`
-- `apps/onboarding/Sources/Onboarding/KeyWrapAuditView.swift`
-- `apps/onboarding/Sources/Onboarding/LocalKeyGenerator.swift`
-- `apps/onboarding/Sources/Onboarding/Slides/TrustSlide.swift`
-- `apps/onboarding/Sources/OnboardingKit/KeyWrapAudit.swift`
-- `apps/onboarding/Tests/OnboardingKitTests/KeyWrapAuditTests.swift`
-- `apps/recall-ui/Package.swift`
-- `docs/DESIGN.md`
-- `docs/STATUS.md`
-- `scripts/README.md`
-- `scripts/build-installer.sh`
-- `scripts/demo.sh`
-- `scripts/render-cli-screenshot.py`
-- `scripts/stage-recall-ffi.sh`
-- `scripts/swift-package.sh`
-- `scripts/try-it.sh`
-- `scripts/verify-keychain-acl-upgrade.sh`
+- `apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift`
 
-## Exact Verification
+## Residual Owner And API Gates
 
-- `cargo test -p mci-agent --test key_resolver --locked`: PASS, 19 passed. Covers clean install, valid migration/removal, malformed/wrong legacy preservation, denied/locked preservation, duplicate race, post-add read/validation failure, deletion failure, and restart-after-add cleanup/mismatch.
-- `cargo test -p mci-agent --test keychain_packaging_contract --locked`: red first at 7 passed/2 failed, then PASS at 9 passed after the installer and explicit development-gate fixes.
-- `cargo test -p mci-agent --test register_mcp --locked`: PASS, 13 passed; MCP registration stores references only and development raw/file fallback requires the explicit gate.
-- `cargo check -p mci-agent --bins --locked`: PASS for all agent binaries and the shared Keychain adapter.
-- `cargo test -p mci-agent --lib --locked`: PASS, 333 passed and 1 model-dependent test ignored.
-- `cargo test -p mci-agent --locked`: PASS across all unit, binary, integration, and doc-test targets; no failures. The package library reported 333 passed and 1 ignored, with the focused 19/9/13 suites also green in the full run.
-- `SWIFT_EXEC_MANIFEST=/tmp/hippo-swiftc-manifest-wrapper-20260901 scripts/swift-package.sh build --package-path adapters/macos/MCICaptureHelper`: PASS.
-- `SWIFT_EXEC_MANIFEST=/tmp/hippo-swiftc-manifest-wrapper-20260901 scripts/swift-package.sh build --package-path apps/hippocampus`: PASS; only pre-existing Swift warnings.
-- `SWIFT_EXEC_MANIFEST=/tmp/hippo-swiftc-manifest-wrapper-20260901 scripts/swift-package.sh build --package-path apps/onboarding`: PASS.
-- `SWIFT_EXEC_MANIFEST=/tmp/hippo-swiftc-manifest-wrapper-20260901 scripts/swift-package.sh build -c release --package-path apps/recall-ui`: PASS. The initial release link selected only `.build/mci-brain-ffi/release/libmci_brain_ffi.a`; a final cached release build also passed.
-- `cmp target/release/libmci_brain_ffi.a apps/recall-ui/.build/mci-brain-ffi/release/libmci_brain_ffi.a`: PASS, byte-identical staged release archive.
-- Wrapper-prefixed `swift-package.sh test` was attempted for MCICaptureHelper, Hippocampus, Recall, and onboarding. MCICaptureHelper, Hippocampus, and onboarding reached test compilation but this CLT has no `XCTest` module. Recall debug test compilation is blocked earlier by the existing missing `PreviewsMacros` plugin. No XCTest case executed on this host.
-- `xcrun swiftc -parse` over all changed helper, Hippocampus, Recall, and onboarding test sources: PASS in two explicit source sets.
-- `scripts/test-swift-package.sh`: PASS, 25 passed and 0 failed.
-- `scripts/test-release-contract.sh`: PASS, 36 passed and 0 failed. This also exercised coordinator-owned release-contract changes present in the shared worktree; none were included in the Task 2 commit.
-- `bash -n` over `build-app.sh`, `build-installer.sh`, `swift-package.sh`, `test-release-contract.sh`, `stage-recall-ffi.sh`, `verify-keychain-acl-upgrade.sh`, `demo.sh`, and `try-it.sh`: PASS.
-- `rustfmt --edition 2021` over the changed Task 2 Rust source and test files: PASS.
-- Custody/capture source sweeps for the removed environment authority, debug Recall archive fallbacks, stale file-store defaults, dead `devKeyPath`, and false `events captured` health copy: PASS. Remaining raw-key references are sanitizer deny entries, migration handling, or explicitly gated development tools.
-- `git diff --cached --check`: PASS before commit.
+- Implement a safe access-object inspection/migration API before claiming the Keychain ACL has been observed. Do not infer it from value readability and do not rewrite secret bytes merely to inspect it.
+- Build two Developer-ID-signed versions and prove Hippocampus, `MCICaptureHelper`, `mci-agent`, and Recall retain access across upgrade without an unexpected prompt.
+- Exercise locked, denied, canceled-interaction, duplicate-add, and interrupted-migration Security.framework outcomes in a disposable macOS account.
+- Run full XCTest with full Xcode.
+- Run physical-Mac TCC denial/recovery, generation readiness, rollback overlap, Quit, Quit-and-Restart, resistant-child shutdown, and sustained capture on the release candidate.
+- Resolve the separately owned Task 5 `chunker_event_wire` typed-outcome drift before using a full `mci-agent` package run as release evidence.
+- Signing, notarization, publication, and production Keychain/TCC access were intentionally not performed.
 
-## Remaining Owner Actions And Risks
-
-- Run the committed Swift XCTest cases on a full Xcode toolchain that supplies `XCTest` and `PreviewsMacros`. Product compilation and test-source parsing passed here, but they are not substitutes for XCTest execution.
-- Build two real Developer-ID-signed app versions and run `scripts/verify-keychain-acl-upgrade.sh OLD.app NEW.app`, followed by a disposable release-test-Mac Keychain create/read upgrade smoke for all four ACL consumers. The repository test is content-free and intentionally did not mutate or probe Amy's production Keychain.
-- Run clean-install, valid legacy migration, interrupted-after-add restart, and deletion-failure acceptance on a backed-up disposable macOS account before shipping. Unit tests exercise every state-machine branch without touching production custody.
-- Run live Screen Recording denial, successful readiness, timeout, capture toggle, rollback, and sustained capture tests under real TCC/SCStream conditions.
-- The Recall release link emitted existing deployment-version warnings when Rust objects built for macOS 26.5 linked into the macOS 14 Swift target. Profile selection is now deterministic, but release engineering should align deployment targets.
-- `SecAccess` and `SecTrustedApplication` are deprecated but are the TN3137-compatible sharing mechanism for the selected file-based Keychain model. Migrating to data-protection access groups would require a separately provisioned entitlement/signing architecture for every binary.
-- Explicit ad-hoc debug artifacts are disposable and cannot prove cross-version ACL continuity. They must not be promoted or used as release upgrades.
-- Outer-DMG Developer ID signing remains coordinator-owned and was intentionally left for the follow-up announced after this Task 2 freeze. Task 2 made no changes after that coordination point.
-- Signing, notarization, publication, and production Keychain/TCC access were not performed.
-- Concurrent coordinator changes to `Info.plist`, `.github`, and independent release scripts remained unstaged and were not included in `a821f65`.
+The Task 5 typed retrieval outcome and the `95ee449` release-model changes were preserved. No core/brain, MCP retrieval/server, release workflow, release script, `Info.plist`, `docs/STATUS.md`, or Task 4/5/6 implementation file was changed by this repair.

@@ -300,9 +300,9 @@ This step is most of the engineering. A day of screen recording is millions of f
 
 **2. Read.** Surviving frames go through on-device OCR and get joined to what you were doing: which app, which window, which URL.
 
-**3. Understand.** Moments get grouped into episodes and turned into vectors by a small embedding model on the Neural Engine. This happens when your machine is idle, never while you are using it.
+**3. Understand.** Moments get grouped into episodes and turned into vectors by a small embedding model through Core ML, currently pinned to CPU. This happens when your machine is idle, never while you are using it.
 
-**4. Store.** Everything goes into one encrypted SQLite file. The key is wrapped by the Secure Enclave and cannot be exported.
+**4. Store.** Everything goes into one SQLCipher-encrypted SQLite file. Its database key is stored as a non-synchronizable item in the macOS file Keychain. New item creation uses the bundled trusted-app contract, while access-object inspection and signed cross-version continuity remain release gates; the key is not represented as Secure-Enclave-wrapped or non-exportable.
 
 **5. Recall.** Your question runs two searches at once, keyword and vector, and the results are merged and weighted by how recent and how relevant each hit is.
 

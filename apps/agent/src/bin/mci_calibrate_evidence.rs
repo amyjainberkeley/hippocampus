@@ -7,9 +7,10 @@
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{ExitCode, Stdio};
 
 use mci_agent::bench_longmemeval::Embedders;
+use mci_agent::child_command_environment::sanitized_command;
 use mci_brain::{evidence_features_for_candidates, EvidenceCandidate, EvidenceFeatures};
 use serde::{Deserialize, Serialize};
 
@@ -261,7 +262,7 @@ fn policy_qualified(
 }
 
 fn sha256(bytes: &[u8]) -> Result<String, String> {
-    let mut child = Command::new("shasum")
+    let mut child = sanitized_command("shasum")
         .args(["-a", "256"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

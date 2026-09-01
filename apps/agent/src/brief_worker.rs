@@ -53,6 +53,7 @@ use mci_brief::model::BriefState;
 use mci_brief::tripwire::validate_citations;
 use tokio::sync::watch;
 
+use crate::child_command_environment::sanitized_command;
 use crate::wall_clock::format_unix_ms;
 
 /// Default target hour for the daily brief, local time. 06:00.
@@ -663,7 +664,7 @@ pub fn current_tz_offset_secs() -> i32 {
             return v;
         }
     }
-    let output = match std::process::Command::new("date").arg("+%z").output() {
+    let output = match sanitized_command("date").arg("+%z").output() {
         Ok(o) if o.status.success() => o,
         _ => return 0,
     };

@@ -31,13 +31,14 @@ final class KeyWrapAuditTests: XCTestCase {
         KeychainKeyStore(client: client, trustedApplicationPaths: { [] })
     }
 
-    func test_keychain_audit_uses_exact_file_domain_reference_and_reports_sealed() {
+    func test_keychain_audit_uses_exact_file_domain_reference_and_reports_readable() async {
         let key = String(repeating: "ab", count: 32)
         let client = FakeKeychainClient(result: .success(Data(key.utf8)))
 
-        let report = KeyWrapAuditor.inspectKeychain(store(client: client))
+        let report = await KeyWrapAuditor.inspectKeychain(store(client: client))
 
-        XCTAssertTrue(report.sealed)
+        XCTAssertTrue(report.keyReadable)
+        XCTAssertEqual(report.accessControlVerification, .unverified)
         XCTAssertEqual(report.severity, .production)
         XCTAssertEqual(report.implementationName, "macOS file-based Keychain")
         XCTAssertEqual(client.queries, [KeychainItemQuery(
@@ -50,23 +51,24 @@ final class KeyWrapAuditTests: XCTestCase {
         XCTAssertFalse(report.identifier.contains(key))
     }
 
-    func test_keychain_audit_reports_missing_or_denied_without_claiming_sealed() {
+    func test_keychain_audit_reports_missing_or_denied_without_claiming_readable() async {
         for status in [errSecItemNotFound, errSecAuthFailed, errSecInteractionNotAllowed] {
             let client = FakeKeychainClient(result: .failure(status))
-            let report = KeyWrapAuditor.inspectKeychain(store(client: client))
+            let report = await KeyWrapAuditor.inspectKeychain(store(client: client))
 
-            XCTAssertFalse(report.sealed)
+            XCTAssertFalse(report.keyReadable)
+            XCTAssertEqual(report.accessControlVerification, .unverified)
             XCTAssertTrue(report.notes.contains(where: { $0.contains("unavailable") }))
         }
     }
 
-    func test_report_never_carries_key_bytes() {
+    func test_report_never_carries_key_bytes() async {
         let key = "0123456789abcdef" + String(repeating: "a5", count: 24)
         let client = FakeKeychainClient(result: .success(Data(key.utf8)))
-        let report = KeyWrapAuditor.inspectKeychain(store(client: client))
+        let report = await KeyWrapAuditor.inspectKeychain(store(client: client))
         let fields = [
             report.implementationName,
-            report.aclDescription,
+            report.accessControlDescription,
             report.identifier,
         ] + report.notes
 

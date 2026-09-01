@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{ExitCode, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_agent::bench_longmemeval::{
@@ -17,6 +17,7 @@ use mci_agent::bench_longmemeval::{
     run_instance, summarize, AbstentionSample, Arm, BaselineFile, Embedders, InstanceResult,
     LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, ScratchRun, Summary,
 };
+use mci_agent::child_command_environment::sanitized_command;
 
 const CANONICAL_WORK_MEMORY_DATASET: &str = "eval/work-memory/synthetic-v1.json";
 const CANONICAL_WORK_MEMORY_DATASET_ID: &str = "synthetic-work-memory-v1";
@@ -64,21 +65,25 @@ fn repo_root() -> PathBuf {
 }
 
 fn command_value(program: &str, args: &[&str]) -> String {
-    match Command::new(program).args(args).output() {
+    match sanitized_command(program).args(args).output() {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => "unknown".to_string(),
     }
 }
 
 fn git_value(root: &Path, args: &[&str]) -> String {
-    match Command::new("git").current_dir(root).args(args).output() {
+    match sanitized_command("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+    {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => "unknown".to_string(),
     }
 }
 
 fn git_dirty(root: &Path) -> bool {
-    Command::new("git")
+    sanitized_command("git")
         .current_dir(root)
         .args(["status", "--porcelain", "--untracked-files=all"])
         .output()
@@ -86,7 +91,7 @@ fn git_dirty(root: &Path) -> bool {
 }
 
 fn captured_at_utc() -> String {
-    match Command::new("date")
+    match sanitized_command("date")
         .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output()
     {
@@ -104,7 +109,7 @@ fn sysctl_value(name: &str) -> Option<String> {
 }
 
 fn sha256_bytes(bytes: &[u8]) -> Result<String, String> {
-    let mut child = Command::new("shasum")
+    let mut child = sanitized_command("shasum")
         .args(["-a", "256"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

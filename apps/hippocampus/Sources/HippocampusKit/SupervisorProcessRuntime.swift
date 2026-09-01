@@ -86,7 +86,7 @@ protocol SupervisorTopologyControlling: AnyObject {
         plan: ProcessSupervisorLaunchPlan,
         generation: SupervisorProcessGeneration,
         onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
-    ) throws
+    ) async throws
     func waitForReadiness(
         generation: SupervisorProcessGeneration,
         timeout: TimeInterval
@@ -123,7 +123,7 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         plan: ProcessSupervisorLaunchPlan,
         generation: SupervisorProcessGeneration,
         onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
-    ) throws {
+    ) async throws {
         guard helper == nil, agent == nil else {
             throw SupervisorProcessRuntimeError.partialStop
         }
@@ -181,10 +181,18 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
             self.helper = helper
             try agent.run()
             self.agent = agent
-        } catch {
-            if helper.isRunning { helper.terminate() }
-            cleanup()
-            throw error
+        } catch let launchError {
+            isStopping = true
+            do {
+                try await SupervisorProcessShutdown.stop(
+                    processes: [helper],
+                    termTimeout: 0.25
+                )
+                cleanup()
+            } catch {
+                throw SupervisorProcessRuntimeError.partialStop
+            }
+            throw launchError
         }
     }
 
@@ -222,34 +230,12 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
 
     func stop(timeout: TimeInterval) async throws {
         isStopping = true
-        for process in [helper, agent] {
-            guard let process, process.isRunning else { continue }
-            kill(process.processIdentifier, SIGCONT)
-            process.terminate()
-        }
-
-        var deadline = Date().addingTimeInterval(timeout)
-        while SupervisorStopPolicy.shouldWait(
-            now: Date(),
-            deadline: deadline,
-            helperRunning: helper?.isRunning == true,
-            agentRunning: agent?.isRunning == true
-        ) {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        for process in [helper, agent] where process?.isRunning == true {
-            if let process { kill(process.processIdentifier, SIGKILL) }
-        }
-        deadline = Date().addingTimeInterval(1)
-        while SupervisorStopPolicy.shouldWait(
-            now: Date(),
-            deadline: deadline,
-            helperRunning: helper?.isRunning == true,
-            agentRunning: agent?.isRunning == true
-        ) {
-            try await Task.sleep(for: .milliseconds(25))
-        }
-        guard helper?.isRunning != true, agent?.isRunning != true else {
+        do {
+            try await SupervisorProcessShutdown.stop(
+                processes: [helper, agent].compactMap { $0 },
+                termTimeout: timeout
+            )
+        } catch {
             throw SupervisorProcessRuntimeError.partialStop
         }
         cleanup()

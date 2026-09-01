@@ -52,8 +52,16 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
 
         var updated: [String] = []
         var replaced = false
+        var inRootTable = true
         for line in existingLines() {
-            guard Self.assignmentKey(in: line) == key else {
+            if inRootTable, Self.isTableHeader(line) {
+                if !replaced {
+                    updated.append("\(key) = \(value)")
+                    replaced = true
+                }
+                inRootTable = false
+            }
+            guard inRootTable, Self.assignmentKey(in: line) == key else {
                 updated.append(line)
                 continue
             }
@@ -83,31 +91,128 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
     }
 
     static func parseBool(key: String, in text: String) -> Bool {
-        let assignments = text.components(separatedBy: "\n").filter {
-            assignmentKey(in: $0) == key
+        var assignments: [String] = []
+        for line in text.components(separatedBy: "\n") {
+            if isTableHeader(line) { break }
+            if assignmentKey(in: line) == key { assignments.append(line) }
         }
         guard assignments.count == 1,
-              let equals = assignments[0].firstIndex(of: "=")
+              let value = tomlBooleanValue(in: assignments[0])
         else { return false }
-        let rawValue = assignments[0][assignments[0].index(after: equals)...]
-            .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
-            .trimmingCharacters(in: .whitespaces)
-        return rawValue == "true" || rawValue == "1"
+        return value
     }
 
-    private static func assignmentKey(in line: String) -> String? {
+    /// Deliberately narrow TOML key grammar for the two runtime booleans.
+    /// Bare, basic-quoted, and literal-quoted exact keys are recognized so
+    /// semantically duplicate spellings cannot create a second authority.
+    static func assignmentKey(in line: String) -> String? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
-              let equals = trimmed.firstIndex(of: "=")
-        else { return nil }
-        let key = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
+
+        if let quote = trimmed.first, quote == "\"" || quote == "'" {
+            let contentStart = trimmed.index(after: trimmed.startIndex)
+            guard let closing = trimmed[contentStart...].firstIndex(of: quote) else {
+                return nil
+            }
+            let key = String(trimmed[contentStart..<closing])
+            guard isRuntimeKey(key) else { return key }
+            let suffix = trimmed[trimmed.index(after: closing)...]
+                .trimmingCharacters(in: .whitespaces)
+            // Return the semantic key even for malformed exact assignments;
+            // reads then fail closed and writes replace the bad authority.
+            guard suffix.isEmpty || suffix.hasPrefix("=") else { return key }
+            return key
+        }
+
+        let keyEnd = trimmed.firstIndex { character in
+            character == "=" || character == " " || character == "\t"
+        } ?? trimmed.endIndex
+        let key = String(trimmed[..<keyEnd])
         guard !key.isEmpty else { return nil }
         return key
     }
 
     private static func replacingBool(in line: String, key: String, value: Bool) -> String {
         let leading = line.prefix { $0 == " " || $0 == "\t" }
-        let comment = line.firstIndex(of: "#").map { " " + line[$0...] } ?? ""
+        let comment = commentStart(in: line).map { " " + line[$0...] } ?? ""
         return "\(leading)\(key) = \(value)\(comment)"
+    }
+
+    private static func tomlBooleanValue(in line: String) -> Bool? {
+        guard let key = assignmentKey(in: line),
+              let equals = equalsAfterKey(in: line),
+              isValidKeySyntax(String(line[..<equals]), key: key)
+        else { return nil }
+        let valueStart = line.index(after: equals)
+        let valueAndComment = String(line[valueStart...])
+        let valueEnd = commentStart(in: valueAndComment) ?? valueAndComment.endIndex
+        let rawValue = valueAndComment[..<valueEnd].trimmingCharacters(in: .whitespaces)
+        switch rawValue {
+        case "true": return true
+        case "false": return false
+        default: return nil
+        }
+    }
+
+    private static func equalsAfterKey(in line: String) -> String.Index? {
+        var quote: Character?
+        var escaped = false
+        for index in line.indices {
+            let character = line[index]
+            if let activeQuote = quote {
+                if activeQuote == "\"" && character == "\\" && !escaped {
+                    escaped = true
+                    continue
+                }
+                if character == activeQuote && !escaped { quote = nil }
+                escaped = false
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "=" {
+                return index
+            } else if character == "#" {
+                return nil
+            }
+        }
+        return nil
+    }
+
+    private static func commentStart(in line: String) -> String.Index? {
+        var quote: Character?
+        var escaped = false
+        for index in line.indices {
+            let character = line[index]
+            if let activeQuote = quote {
+                if activeQuote == "\"" && character == "\\" && !escaped {
+                    escaped = true
+                    continue
+                }
+                if character == activeQuote && !escaped { quote = nil }
+                escaped = false
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "#" {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private static func isRuntimeKey(_ key: String) -> Bool {
+        key == "capture_enabled" || key == "crash_report_opted_in"
+    }
+
+    private static func isValidKeySyntax(_ rawKey: String, key: String) -> Bool {
+        let trimmed = rawKey.trimmingCharacters(in: .whitespaces)
+        return trimmed == key || trimmed == "\"\(key)\"" || trimmed == "'\(key)'"
+    }
+
+    private static func isTableHeader(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.hasPrefix("[")
     }
 }
