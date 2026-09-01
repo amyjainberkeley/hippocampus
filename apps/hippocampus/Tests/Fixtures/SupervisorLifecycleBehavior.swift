@@ -8,6 +8,9 @@ struct SupervisorLifecycleBehavior {
     static func main() async throws {
         try await proveNormalQuitComposition()
         try await proveResistantRestartComposition()
+        try await proveShutdownCancelsKeyPreparation()
+        try await proveShutdownCancelsReadiness()
+        try await proveShutdownCancelsCaptureReconfiguration()
     }
 
     @MainActor
@@ -67,6 +70,90 @@ struct SupervisorLifecycleBehavior {
             readinessTimeout: 1
         )
     }
+
+    @MainActor
+    private static func proveShutdownCancelsKeyPreparation() async throws {
+        let preparationGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: SuspendingKeyCustodyPreparer(gate: preparationGate)
+        )
+        let startup = Task { @MainActor in try await supervisor.startAndWaitForReadiness() }
+        await preparationGate.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        await topology.waitUntilStopped()
+        preparationGate.resume()
+        try await shutdown.value
+        _ = try? await startup.value
+
+        precondition(supervisor.state == .stopped)
+        precondition(topology.launchCount == 0)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func proveShutdownCancelsReadiness() async throws {
+        let readinessGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology(readinessGate: readinessGate)
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        let startup = Task { @MainActor in try await supervisor.startAndWaitForReadiness() }
+        await readinessGate.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        await topology.waitUntilStopped()
+        readinessGate.resume()
+        try await shutdown.value
+        _ = try? await startup.value
+
+        precondition(supervisor.state == .stopped)
+        precondition(topology.launchCount == 1)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func proveShutdownCancelsCaptureReconfiguration() async throws {
+        let readinessGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        try await supervisor.startAndWaitForReadiness()
+        topology.suspendNextReadiness(on: readinessGate)
+
+        let reconfiguration = Task { @MainActor in
+            try await supervisor.applyCaptureEnabled(true)
+        }
+        await readinessGate.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        await topology.waitUntilStopped(minimumCount: 2)
+        readinessGate.resume()
+        try await shutdown.value
+        _ = try? await reconfiguration.value
+
+        precondition(supervisor.state == .stopped)
+        precondition(!supervisor.captureEnabled)
+        precondition(topology.launchCount == 2)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func makeSupervisor(
+        topology: any SupervisorTopologyControlling,
+        keyCustodyPreparer: any KeyCustodyPreparing
+    ) -> ProcessSupervisor {
+        ProcessSupervisor(
+            locator: FixtureBinaryLocator(),
+            keyStore: FixtureKeyStore(),
+            runtimeConfig: FixtureRuntimeConfig(),
+            topology: topology,
+            keyCustodyPreparer: keyCustodyPreparer,
+            readinessTimeout: 1
+        )
+    }
 }
 
 private struct FixtureBinaryLocator: BinaryLocator {
@@ -98,6 +185,91 @@ private final class FixtureKeyCustodyPreparer: KeyCustodyPreparing {
         keyReference: KeychainKeyReference
     ) async throws {
         _ = (agentURL, databaseURL, keyReference)
+    }
+}
+
+@MainActor
+private final class FixtureSuspension {
+    private var entered = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func suspend() async {
+        entered = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilEntered() async {
+        while !entered { await Task.yield() }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class SuspendingKeyCustodyPreparer: KeyCustodyPreparing {
+    private let gate: FixtureSuspension
+
+    init(gate: FixtureSuspension) { self.gate = gate }
+
+    func prepare(
+        agentURL: URL,
+        databaseURL: URL,
+        keyReference: KeychainKeyReference
+    ) async throws {
+        _ = (agentURL, databaseURL, keyReference)
+        await gate.suspend()
+    }
+}
+
+@MainActor
+private final class SuspendingLifecycleTopology: SupervisorTopologyControlling {
+    private var readinessGate: FixtureSuspension?
+    private(set) var isRunning = false
+    private(set) var launchCount = 0
+    private(set) var stopCount = 0
+
+    init(readinessGate: FixtureSuspension? = nil) {
+        self.readinessGate = readinessGate
+    }
+
+    func suspendNextReadiness(on gate: FixtureSuspension) {
+        readinessGate = gate
+    }
+
+    func launch(
+        plan: ProcessSupervisorLaunchPlan,
+        generation: SupervisorProcessGeneration,
+        onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
+    ) async throws {
+        _ = (plan, generation, onUnexpectedExit)
+        launchCount += 1
+        isRunning = true
+    }
+
+    func waitForReadiness(
+        generation: SupervisorProcessGeneration,
+        timeout: TimeInterval
+    ) async throws {
+        _ = (generation, timeout)
+        if let readinessGate {
+            self.readinessGate = nil
+            await readinessGate.suspend()
+        }
+    }
+
+    func stop(timeout: TimeInterval) async throws {
+        _ = timeout
+        stopCount += 1
+        isRunning = false
+    }
+
+    func setPaused(_ paused: Bool) throws { _ = paused }
+
+    func waitUntilStopped(minimumCount: Int = 1) async {
+        while stopCount < minimumCount { await Task.yield() }
     }
 }
 

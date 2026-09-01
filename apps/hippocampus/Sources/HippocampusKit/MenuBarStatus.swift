@@ -104,6 +104,7 @@ public enum MenuBarStatus: Equatable, Sendable {
     /// via `TCCRevokedReason`.
     public static func derive(
         from state: SupervisorState,
+        captureEnabled: Bool = true,
         integrityError: String? = nil,
         tccRevokedSurface: TCCRevokedReason? = nil
     ) -> MenuBarStatus {
@@ -113,16 +114,36 @@ public enum MenuBarStatus: Equatable, Sendable {
         if let reason = integrityError {
             return .error(reason: reason)
         }
-        switch state {
-        case .crashed(let reason):
+        if case .crashed(let reason) = state {
             return .error(reason: reason)
+        }
+        guard captureEnabled else { return .idle }
+        switch state {
         case .paused:
             return .paused
         case .running:
             return .recording
-        case .idle, .starting, .stopped:
+        case .idle, .starting, .stopped, .crashed:
             return .idle
         }
+    }
+}
+
+/// The capture command visible in the status menu. The agent can be
+/// healthy while screen capture is disabled, so topology state alone
+/// cannot decide whether Start or Stop Recording is appropriate.
+public enum RecordingControl: Equatable, Sendable {
+    case none
+    case start
+    case stop
+
+    public static func derive(
+        from state: SupervisorState,
+        captureEnabled: Bool
+    ) -> RecordingControl {
+        if state == .starting { return .none }
+        if captureEnabled && state.isActive { return .stop }
+        return .start
     }
 }
 

@@ -56,7 +56,7 @@ struct PersistedRetention {
 ///
 /// Missing file, unreadable file, or unrecognized mode all default to
 /// [`RetentionConfig::Forever`] — the safest fallback (never deletes).
-fn load_retention_config(path: &Path) -> RetentionConfig {
+pub fn load_retention_config(path: &Path) -> RetentionConfig {
     let data = match std::fs::read(path) {
         Ok(d) => d,
         Err(_) => return RetentionConfig::Forever,

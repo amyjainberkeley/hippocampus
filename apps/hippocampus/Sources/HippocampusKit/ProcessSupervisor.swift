@@ -90,6 +90,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var transitionGate = SupervisorTransitionGate()
     private var pendingRetryGenerationID: String?
     private var shutdownTask: Task<Void, Error>?
+    private var shutdownRequested = false
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -127,7 +128,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func start() {
-        guard shutdownTask == nil, !state.isActive, state != .starting else { return }
+        guard !shutdownRequested, shutdownTask == nil, !state.isActive, state != .starting else {
+            return
+        }
         cancelPendingRetry()
         retryTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -140,7 +143,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     package func startAndWaitForReadiness() async throws {
-        guard shutdownTask == nil else { throw SupervisorError.transitionInProgress }
+        guard !shutdownRequested, shutdownTask == nil else {
+            throw SupervisorError.transitionInProgress
+        }
         guard let transitionID = transitionGate.beginTransition() else {
             throw SupervisorError.transitionInProgress
         }
@@ -148,14 +153,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         do {
             let generationID = try await startTopology(
                 captureEnabled: runtimeConfig.captureEnabled,
-                publishState: true
+                transitionID: transitionID
             )
+            try ensureTransitionIsActive(transitionID)
             guard transitionGate.commit(
                 generationID: generationID,
                 transitionID: transitionID
             ) else {
                 throw SupervisorError.transitionInProgress
             }
+            activateTopology(captureEnabled: runtimeConfig.captureEnabled)
         } catch {
             transitionGate.fail(transitionID: transitionID)
             throw error
@@ -181,10 +188,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             return
         }
 
+        shutdownRequested = true
+        cancelPendingRetry()
+        transitionGate.reset()
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            self.cancelPendingRetry()
-            self.transitionGate.reset()
             do {
                 try await self.topology.stop(timeout: timeout)
                 self.stopAncillaryServices()
@@ -195,11 +203,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             }
         }
         shutdownTask = task
+        defer {
+            shutdownTask = nil
+            shutdownRequested = false
+        }
         do {
             try await task.value
-            shutdownTask = nil
         } catch {
-            shutdownTask = nil
             throw error
         }
     }
@@ -215,7 +225,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func applyCaptureEnabled(_ enabled: Bool) async throws {
-        guard shutdownTask == nil else { throw SupervisorError.transitionInProgress }
+        guard !shutdownRequested, shutdownTask == nil else {
+            throw SupervisorError.transitionInProgress
+        }
         guard enabled != captureEnabled else { return }
         cancelPendingRetry()
         guard let transitionID = transitionGate.beginTransition() else {
@@ -225,6 +237,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
         do {
             try await topology.stop(timeout: 5)
+            try ensureTransitionIsActive(transitionID)
             stopAncillaryServices()
         } catch {
             transitionGate.fail(transitionID: transitionID)
@@ -235,8 +248,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         do {
             let generationID = try await startTopology(
                 captureEnabled: enabled,
-                publishState: false
+                transitionID: transitionID
             )
+            try ensureTransitionIsActive(transitionID)
             try runtimeConfig.setCaptureEnabled(enabled)
             guard transitionGate.commit(
                 generationID: generationID,
@@ -245,18 +259,24 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 throw SupervisorError.transitionInProgress
             }
             captureEnabled = enabled
-            state = .running
+            activateTopology(captureEnabled: enabled)
         } catch {
             let requestedError = error
+            guard transitionGate.ownsTransition(transitionID) else {
+                await stopUncommittedTopologyIfNeeded()
+                throw requestedError
+            }
             do {
                 if topology.isRunning {
                     try await topology.stop(timeout: 5)
+                    try ensureTransitionIsActive(transitionID)
                 }
                 stopAncillaryServices()
                 let rollbackGenerationID = try await startTopology(
                     captureEnabled: prior,
-                    publishState: false
+                    transitionID: transitionID
                 )
+                try ensureTransitionIsActive(transitionID)
                 guard transitionGate.commit(
                     generationID: rollbackGenerationID,
                     transitionID: transitionID
@@ -264,13 +284,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     throw SupervisorError.transitionInProgress
                 }
                 captureEnabled = prior
-                state = .running
+                activateTopology(captureEnabled: prior)
             } catch {
-                transitionGate.fail(transitionID: transitionID)
-                captureEnabled = prior
-                state = .crashed(
-                    reason: "Capture change failed and prior topology could not be restored: \(error.localizedDescription)"
-                )
+                if transitionGate.ownsTransition(transitionID) {
+                    transitionGate.fail(transitionID: transitionID)
+                    captureEnabled = prior
+                    state = .crashed(
+                        reason: "Capture change failed and prior topology could not be restored: \(error.localizedDescription)"
+                    )
+                } else {
+                    await stopUncommittedTopologyIfNeeded()
+                }
             }
             throw requestedError
         }
@@ -278,8 +302,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private func startTopology(
         captureEnabled requestedCapture: Bool,
-        publishState: Bool
+        transitionID: UUID
     ) async throws -> String {
+        try ensureTransitionIsActive(transitionID)
         state = .starting
         guard let helperURL = locator.helperPath() else {
             try failStart(SupervisorError.binaryNotFound("MCICaptureHelper"))
@@ -291,13 +316,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let reference = (keyStore as? FileKeyStore)?.keychainReference
             ?? (keyStore as? KeychainKeyStore)?.reference
             ?? .defaultDatabaseKey
+        var launched = false
         do {
             try await keyCustodyPreparer.prepare(
                 agentURL: agentURL,
                 databaseURL: dbPath,
                 keyReference: reference
             )
+            try ensureTransitionIsActive(transitionID)
             _ = try await KeyStoreAccess.readValidatedKey(from: keyStore)
+            try ensureTransitionIsActive(transitionID)
             currentKeyReference = reference
 
             let generation = try SupervisorProcessGeneration.make(
@@ -324,24 +352,48 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     )
                 }
             )
+            launched = true
+            try ensureTransitionIsActive(transitionID)
             try await topology.waitForReadiness(
                 generation: generation,
                 timeout: readinessTimeout
             )
+            try ensureTransitionIsActive(transitionID)
             guard topology.isRunning else {
                 throw SupervisorProcessRuntimeError.invalidReadiness
             }
-            if publishState { self.captureEnabled = requestedCapture }
-            state = .running
-            startHealthPolling()
-            startSafariInboxReader()
             return generation.id
         } catch {
-            try? await topology.stop(timeout: 2)
+            if launched && topology.isRunning {
+                try? await topology.stop(timeout: 2)
+            }
             stopAncillaryServices()
-            state = .crashed(reason: error.localizedDescription)
+            if transitionGate.ownsTransition(transitionID) {
+                state = .crashed(reason: error.localizedDescription)
+            }
             throw error
         }
+    }
+
+    private func ensureTransitionIsActive(_ transitionID: UUID) throws {
+        try Task.checkCancellation()
+        guard !shutdownRequested, transitionGate.ownsTransition(transitionID) else {
+            throw SupervisorError.transitionInProgress
+        }
+    }
+
+    private func activateTopology(captureEnabled: Bool) {
+        self.captureEnabled = captureEnabled
+        state = .running
+        startHealthPolling()
+        startSafariInboxReader()
+    }
+
+    private func stopUncommittedTopologyIfNeeded() async {
+        if topology.isRunning {
+            try? await topology.stop(timeout: 2)
+        }
+        stopAncillaryServices()
     }
 
     private func failStart(_ error: Error) throws -> Never {
@@ -380,19 +432,26 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             self.pendingRetryGenerationID = nil
             do {
                 try await self.topology.stop(timeout: 2)
+                try self.ensureTransitionIsActive(transitionID)
                 let generationID = try await self.startTopology(
                     captureEnabled: self.runtimeConfig.captureEnabled,
-                    publishState: true
+                    transitionID: transitionID
                 )
+                try self.ensureTransitionIsActive(transitionID)
                 guard self.transitionGate.commit(
                     generationID: generationID,
                     transitionID: transitionID
                 ) else {
                     throw SupervisorError.transitionInProgress
                 }
+                self.activateTopology(captureEnabled: self.runtimeConfig.captureEnabled)
             } catch {
-                self.transitionGate.fail(transitionID: transitionID)
-                self.state = .crashed(reason: error.localizedDescription)
+                if self.transitionGate.ownsTransition(transitionID) {
+                    self.transitionGate.fail(transitionID: transitionID)
+                    self.state = .crashed(reason: error.localizedDescription)
+                } else {
+                    await self.stopUncommittedTopologyIfNeeded()
+                }
             }
         }
     }

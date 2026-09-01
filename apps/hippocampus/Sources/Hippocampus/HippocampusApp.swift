@@ -138,6 +138,7 @@ struct MenuBarIcon: View {
         MenuBarStatusLabel(
             status: MenuBarStatus.derive(
                 from: supervisor.state,
+                captureEnabled: supervisor.captureEnabled,
                 tccRevokedSurface: supervisor.tccRevokedSurface
             )
         )

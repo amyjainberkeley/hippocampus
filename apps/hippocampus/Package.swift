@@ -20,6 +20,7 @@ let standaloneFixtureSources = [
     "KeyStoreResponsiveness.swift",
     "KeyWrapAuditResponsiveness.swift",
     "RuntimeConfigBehavior.swift",
+    "RetentionPreferencesBehavior.swift",
     "SupervisorLifecycleBehavior.swift",
     "SupervisorProcessShutdownBehavior.swift",
     "SupervisorTransitionGateBehavior.swift",
@@ -83,6 +84,13 @@ let package = Package(
             path: "Tests/Fixtures",
             exclude: standaloneFixtureSources.filter { $0 != "SupervisorLifecycleBehavior.swift" },
             sources: ["SupervisorLifecycleBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "RetentionPreferencesBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "RetentionPreferencesBehavior.swift" },
+            sources: ["RetentionPreferencesBehavior.swift"]
         ),
     ]
 )

@@ -25,28 +25,44 @@ struct StatusMenuView: View {
 
             Divider()
 
-            if let health = supervisor.health {
-                Text(health.displayText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if supervisor.state.isActive {
-                Text("Waiting for first capture…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if supervisor.captureEnabled {
+                if let health = supervisor.health {
+                    Text(health.displayText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if supervisor.state.isActive {
+                    Text("Waiting for first capture…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Divider()
 
             quickActionsSection
 
-            if !supervisor.state.isActive && supervisor.state != .starting {
+            switch RecordingControl.derive(
+                from: supervisor.state,
+                captureEnabled: supervisor.captureEnabled
+            ) {
+            case .start:
                 Button("Start Recording") {
-                    supervisor.start()
+                    if supervisor.captureEnabled {
+                        supervisor.start()
+                    } else {
+                        Task { @MainActor in
+                            try? await supervisor.applyCaptureEnabled(true)
+                        }
+                    }
                 }
-            } else if supervisor.state.isActive {
+            case .stop:
                 Button("Stop Recording") {
-                    supervisor.stop()
+                    Task { @MainActor in
+                        try? await supervisor.applyCaptureEnabled(false)
+                    }
                 }
+            case .none:
+                EmptyView()
             }
 
             if supervisor.hasOnboarding {
@@ -199,6 +215,7 @@ struct StatusMenuView: View {
     private var menuBarStatus: MenuBarStatus {
         MenuBarStatus.derive(
             from: supervisor.state,
+            captureEnabled: supervisor.captureEnabled,
             tccRevokedSurface: supervisor.tccRevokedSurface
         )
     }
@@ -232,10 +249,12 @@ struct StatusMenuView: View {
         let paused = (supervisor.state == .paused)
             || UserPauseController.shared.isPaused
 
-        Button(paused ? "Resume Capture" : "Pause Capture") {
-            toggleUserPause()
+        if supervisor.captureEnabled {
+            Button(paused ? "Resume Capture" : "Pause Capture") {
+                toggleUserPause()
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
         }
-        .keyboardShortcut("p", modifiers: [.command, .shift])
 
         Button("Open Recall Popup") {
             supervisor.openRecallUI()
@@ -284,7 +303,7 @@ struct StatusMenuView: View {
             Circle()
                 .fill(menuBarStatus.indicatorColor)
                 .frame(width: 8, height: 8)
-            Text(supervisor.state.statusText)
+            Text(menuBarStatus.displayText)
                 .font(.headline)
         }
     }

@@ -1,96 +1,88 @@
-# Task 2 Final Repair Report R5: Pinned Parser License Contract
+# Task 2 Final Repair Report R6: Lifecycle, Retention, And Capture Truth
 
-Status: the repository-local R5 P1/P2 findings are repaired on
-`codex/hippocampus-v1`. The R5 review accepted the behavioral and privacy work
-from R4; this repair changes only third-party-license disclosure and its release
-gates. Nothing was pushed, Developer-ID signed, notarized, uploaded, or
-published.
-
-R5 review base: `6fb8bab56b6ba26a0ce2af4e0eb7bd56d4c4686b`.
+Status: all three repository-local R6 findings are repaired on
+`codex/hippocampus-v1`. This repair was developed against the shared branch
+after Task 4/5 advanced HEAD to `756b339`. It does not modify Task 4/5 core,
+Recall, capture-helper, benchmark, or FFI files. Nothing was pushed, signed,
+notarized, uploaded, or published.
 
 ## Finding Disposition
 
 | Finding | Disposition |
 |---|---|
-| P1-1 complete MIT terms absent from the app | Repaired locally. Complete TOMLKit 0.6.0 and bundled toml++ 3.4.0 MIT texts are committed and embedded verbatim in `NOTICE`. The build pipeline copies that file to the app's `NOTICE.txt` for the existing offline About link, then signs later. App assembly runs the content verifier before either step. |
-| P2-1 release CI misses dependency-license inputs | Repaired locally. Push and pull-request filters watch `Package.swift`, `Package.resolved`, `NOTICE`, both canonical licenses, their manifest, and the verifier/test. Release CI and the unified local gate run the license contract. |
+| P1 shutdown races startup and capture reconfiguration | Repaired. Shutdown invalidates the active transition before awaiting topology stop. Startup, retry, and capture reconfiguration recheck cancellation plus transition ownership after every suspension. A launched but uncommitted topology is stopped, and invalidated work cannot publish `.running` or schedule rollback/retry. The production lifecycle fixture covers shutdown during key preparation, startup readiness, and capture-reconfiguration readiness in addition to normal quit and resistant-child restart. |
+| P1 retention picker and purge worker use different authorities | Repaired. `~/Library/Application Support/MCI/retention.json` is now the sole active authority. Preferences atomically writes the worker vocabulary (`forever`, `thirtyDays`, `sevenDays`, `custom`), publishes state only after a successful commit, validates custom days, preserves malformed canonical state fail-closed, and migrates legacy `days30`/`days90` UserDefaults once. A Swift-to-Rust process contract proves the production worker consumes every picker output and an existing file replacement. |
+| P2 capture-off topology presents Recording/Stop Recording | Repaired. Menu icon, header, health copy, pause action, and recording command derive from both topology state and `captureEnabled`. A healthy agent-only topology now displays Idle and Start Recording; Start/Stop changes capture policy without incorrectly stopping the memory agent. Standalone and XCTest fixtures pin default-off behavior. |
 
-## Source Identity And Drift Boundary
+## Truth And CI Gates
 
-- `Package.swift` exact-pins TOMLKit 0.6.0 and `Package.resolved` pins revision
-  `ec6198d37d495efc6acd4dffbd262cdca7ff9b3f`.
-- `third_party/licenses/toml-license-manifest.json` records that pin, each
-  canonical license hash, and the reviewed upstream source path/hash.
-- The committed TOMLKit license is byte-identical to `LICENSE` at the pinned
-  checkout (`bccd5fe8...10abe`). The committed toml++ text is the complete MIT
-  block from bundled `Sources/CTOML/Sources/toml.hpp`; that exact 3.4.0 header
-  hashes to `6b5172ad...19783e`.
-- `verify-toml-license-contract.py` rejects manifest drift, Swift declaration
-  drift, resolved URL/version/revision drift, missing canonical files, license
-  hash drift, absent permission/inclusion/warranty/liability clauses, and any
-  non-verbatim or duplicate embedding in `NOTICE`.
-- `test-toml-license-contract.sh` starts from the real repository and then
-  mutates isolated copies. It proves rejection of a missing permission grant,
-  missing warranty disclaimer, changed resolved revision, shipped-notice drift,
-  and a missing canonical license.
-
-## Release Integration
-
-- `build-app.sh` executes the deterministic verifier before assembling the
-  app, copies the verified `NOTICE` to `Contents/Resources/NOTICE.txt`, and only
-  signs later. The existing About surface opens this bundled file without a
-  network dependency.
-- `test-release-contract.sh` checks invocation and ordering, verifies the local
-  About path, asserts every license input is watched by release CI, and requires
-  the license test in both CI and `scripts/check.sh`.
-- The release-contract workflow runs the mutation contract on macOS and watches
-  both dependency manifests, the shipped notice, canonical sources, manifest,
-  verifier, and test on pushes and pull requests.
+- `test-task-2-product-truth.sh` asserts the canonical Swift and Rust path,
+  atomic replacement and `0600` mode, worker mode vocabulary, absence of a
+  competing UserDefaults write, and capture-aware production call sites.
+- `test-release-contract.sh` requires the picker-to-worker contract in local
+  checks and release CI. Push and pull-request filters watch all R6 production
+  sources, standalone fixtures, XCTest cases, and contract scripts.
+- `scripts/check.sh` exposes `retention-policy-contract` as a blocking test lane.
+- The retention fixture rejects malformed canonical JSON without overwriting it,
+  proves a failed disk write leaves the published policy unchanged, and checks
+  that atomic replacement leaves no temporary siblings.
 
 ## TDD And Verification
 
-- Red: the new license contract reported 4 missing required inputs; the release
-  contract reported 11 missing assembly/CI/watch hooks (86 passed, 11 failed).
-- `scripts/test-toml-license-contract.sh`: PASS, 6 passed and 0 failed.
-- `scripts/test-release-contract.sh`: PASS, 99 passed and 0 failed.
-- `scripts/check.sh bash lint`: PASS, 5 lanes and 0 failures, including shell
-  syntax, release contract, TOML license contract, Task 2 product truth, and
-  changelog sanity.
-- `scripts/swift-package.sh build --package-path apps/hippocampus`: PASS.
-- Exact-checkout source comparison at the resolved TOMLKit revision: PASS for
-  byte-identical TOMLKit text, normalized complete toml++ header text, and both
-  reviewed source hashes.
-- Changed-shell `bash -n`, Python source compilation, manifest JSON parsing, and
+- Red lifecycle fixture: shutdown during suspended key preparation resumed into
+  a non-stopped state before transition invalidation was implemented.
+- Red retention contract: Swift lacked worker-compatible policy cases, disk
+  persistence, custom days, and capture-aware status/control derivation.
+- `scripts/swift-package.sh run --package-path apps/hippocampus
+  SupervisorLifecycleBehavior`: PASS, 5 composed behaviors including real
+  normal/resistant child PIDs and all three suspension races.
+- `scripts/test-retention-policy-contract.sh`: PASS. Swift exercised four
+  picker modes, replacement, malformed-file, failed-write, and capture-off
+  behaviors; Rust process contract: 1 passed, 0 failed.
+- `cargo test -p mci-agent retention_worker::tests --lib --locked`: PASS,
+  9 passed, 0 failed.
+- `scripts/test-task-2-product-truth.sh`: PASS.
+- `scripts/test-release-contract.sh`: PASS, 117 passed, 0 failed.
+- `scripts/swift-package.sh build --package-path apps/hippocampus`: PASS,
+  including the Hippocampus executable and standalone fixtures.
+- Focused `swift test` was attempted, but this Command Line Tools host has no
+  `XCTest` module. Full XCTest remains an external full-Xcode gate and is not
+  claimed.
+- Focused Rust formatting, changed-shell syntax, workflow lint, and
   `git diff --check`: PASS.
-- `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-  .github/workflows/release-contract.yml`: PASS.
-- Full XCTest was not run on this Command Line Tools host and is not claimed.
 
 ## Changed Files
 
 - `.github/workflows/release-contract.yml`
 - `.superpowers/sdd/2026-09-01-hippocampus-memory-layer/task-2-report.md`
-- `NOTICE`
-- `apps/hippocampus/Resources/build-app.sh`
+- `apps/agent/src/retention_worker.rs`
+- `apps/agent/tests/retention_preferences_contract.rs`
+- `apps/hippocampus/Package.swift`
+- `apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift`
+- `apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift`
+- `apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift`
+- `apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift`
+- `apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift`
+- `apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift`
+- `apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift`
+- `apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift`
+- `apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift`
+- `apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift`
+- `apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift`
+- `apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift`
 - `scripts/check.sh`
 - `scripts/test-release-contract.sh`
-- `scripts/test-toml-license-contract.sh`
-- `scripts/verify-toml-license-contract.py`
-- `third_party/licenses/TOMLKit-0.6.0-LICENSE.txt`
-- `third_party/licenses/toml-license-manifest.json`
-- `third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt`
+- `scripts/test-retention-policy-contract.sh`
+- `scripts/test-task-2-product-truth.sh`
 
-## Residual Owner And API Gates
+## Residual Owner And External Gates
 
-- Obtain legal-owner approval of the complete third-party notice bundle and
-  canonical user terms before public distribution. These repository checks
-  verify content identity and packaging behavior; they are not legal advice or
-  legal approval.
 - Run full XCTest with full Xcode.
 - Complete the existing Developer-ID continuity, Keychain access-object,
-  physical-Mac TCC/lifecycle, sustained-capture, signing, notarization, and
-  publication gates documented by R4/R5 before release.
+  physical-Mac TCC/lifecycle, sustained-capture, signing, notarization, legal
+  approval, and publication gates before release.
+- The repository gates verify behavior and artifact consistency; they do not
+  constitute legal approval.
 
-Concurrent Task 5 benchmark/core edits and Task 4 keyframe/thumbnail artifacts
-were preserved and are not part of this repair. `scripts/__pycache__/` also
-remains untouched and untracked.
+Concurrent Task 4/5 work was preserved. `scripts/__pycache__/` remains untouched
+and untracked.
