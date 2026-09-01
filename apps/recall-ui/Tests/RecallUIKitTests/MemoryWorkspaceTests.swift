@@ -20,9 +20,45 @@ final class MemoryWorkspaceTests: XCTestCase {
         XCTAssertEqual(sourceBacked.map(\.title), ["Search", "Timeline", "Episodes", "Briefs"])
     }
 
-    func testCaptureStatusIsVisibleFromNowDestination() {
-        let now = MCI.Workspace.primaryDestinations.first { $0.title == "Now" }
-        XCTAssertEqual(now?.showsCaptureStatus, true)
+    func testNowMetricDescribesHistoricalRowsWithoutClaimingLiveCaptureState() {
+        let summary = SummaryStats(
+            totalEvents: 42,
+            oldestTsUs: 1_000,
+            newestTsUs: 2_000,
+            diskBytes: 4_096
+        )
+
+        let metric = MCI.Workspace.historicalEventMetric(for: summary)
+
+        XCTAssertEqual(metric.title, "Stored events")
+        XCTAssertEqual(metric.value, "42")
+        XCTAssertEqual(metric.detail, "Historical memory rows")
+    }
+
+    func testRecentKeyframesRequireANonemptyThumbnailPath() {
+        let hits = [
+            makeHit(id: 1, ocr: "OCR only", thumbnailPath: nil),
+            makeHit(id: 2, ocr: "OCR only", thumbnailPath: ""),
+            makeHit(id: 3, ocr: "OCR only", thumbnailPath: "   "),
+            makeHit(id: 4, ocr: "", thumbnailPath: "/tmp/keyframe-4.bin"),
+            makeHit(id: 5, ocr: "Visible text", thumbnailPath: "/tmp/keyframe-5.bin"),
+        ]
+
+        XCTAssertEqual(MCI.Workspace.recentKeyframes(from: hits).map(\.eventId), [4, 5])
+    }
+
+    func testFilmstripCountUsesKeyframeUnit() {
+        XCTAssertEqual(MCI.Workspace.keyframeCountLabel(0), "0 keyframes")
+        XCTAssertEqual(MCI.Workspace.keyframeCountLabel(1), "1 keyframe")
+        XCTAssertEqual(MCI.Workspace.keyframeCountLabel(12), "12 keyframes")
+    }
+
+    func testWorkspaceShortcutMapIsUniqueAndResolvesSourcesToCommandSix() {
+        let destinations = MCI.Workspace.primaryDestinations + MCI.Workspace.secondaryDestinations
+        XCTAssertEqual(destinations.map(\.keyboardShortcut), ["1", "2", "3", "4", "5", "6", "7", "8"])
+        XCTAssertEqual(Set(destinations.map(\.keyboardShortcut)).count, destinations.count)
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "6")?.id, "sources")
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "8")?.id, "settings")
     }
 
     func testUtilityAndPlaceholderSurfacesAreNotPrimaryDestinations() {
@@ -34,5 +70,23 @@ final class MemoryWorkspaceTests: XCTestCase {
         XCTAssertEqual(MCI.Workspace.secondaryDestinations.map(\.title), [
             "Sources", "Privacy", "Settings",
         ])
+    }
+
+    private func makeHit(
+        id: UInt64,
+        ocr: String,
+        thumbnailPath: String?
+    ) -> Hit {
+        Hit(
+            eventId: id,
+            tsUs: id,
+            appBundleId: "com.example.app",
+            windowTitle: "Window",
+            url: nil,
+            ocrTextSnippet: ocr,
+            source: "timeline",
+            score: nil,
+            thumbnailPath: thumbnailPath
+        )
     }
 }

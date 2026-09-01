@@ -116,7 +116,7 @@ struct SearchView: View {
                 "Type to search your memory",
                 systemImage: "magnifyingglass",
                 description: Text(
-                    "Lexical + semantic recall across everything Hippocampus has captured."
+                    "Lexical + semantic recall across stored memory."
                 )
             )
             .foregroundStyle(Color.brandFgSecondary)
