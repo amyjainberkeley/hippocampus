@@ -95,6 +95,19 @@ final class BriefViewModelTests: XCTestCase {
         XCTAssertEqual(vm.scene, .awaitingFirstFullDay(captureHoursSoFar: 4.5))
     }
 
+    func testReloadWithUnknownCoverageUsesNeutralUnknownScene() async {
+        let reader = InMemoryBriefReader(briefs: [])
+        let vm = BriefViewModel(
+            reader: reader,
+            isModelPresent: true,
+            captureCoverage: .unknown
+        )
+
+        await vm.reload()
+
+        XCTAssertEqual(vm.scene, .captureCoverageUnknown)
+    }
+
     func testReloadWithBriefsLoadsLatestBrief() async {
         let early = sampleBrief(date: "2026-05-20", generated: 1)
         let late = sampleBrief(date: "2026-05-22", generated: 3)

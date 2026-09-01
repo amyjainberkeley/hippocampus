@@ -2,15 +2,16 @@
 // tab in the Recall UI (`docs/design/brief-viewer-spec.md`).
 //
 // The view model owns one explicit `BriefScene` enum that the SwiftUI
-// scene switches over. The five scenes map 1-1 to the five viewer
-// states in the spec table:
+// scene switches over. Its scenes cover the viewer states in the spec
+// plus an explicit unknown-coverage state:
 //
 //   1. .modelMissing             — model not downloaded
-//   2. .awaitingFirstFullDay     — model present, no full day captured
-//   3. .loading                  — querying the brain
-//   4. .brief(_)                 — full brief screen
-//   5. .missingForDate(_)        — selected date has no brief
-//   6. .error(_)                 — reader returned an error (spec table row 6)
+//   2. .captureCoverageUnknown   — no trustworthy coverage signal
+//   3. .awaitingFirstFullDay     — measured coverage is insufficient
+//   4. .loading                  — querying the brain
+//   5. .brief(_)                 — full brief screen
+//   6. .missingForDate(_)        — selected date has no brief
+//   7. .error(_)                 — reader returned an error (spec table row 6)
 //
 // The "generating in flight" state in the spec is reachable through
 // `.loading` here — the Recall UI is a READ-ONLY consumer of the brain,
@@ -21,6 +22,17 @@
 
 import Foundation
 
+/// Source-backed full-day coverage used only to choose the no-brief scene.
+public enum CaptureCoverage: Sendable, Equatable {
+    /// Recall has no trustworthy supervisor or persisted coverage signal.
+    case unknown
+    /// A real measurement exists and is below one full day. Hours may be
+    /// omitted when the provider exposes only the threshold result.
+    case insufficient(captureHoursSoFar: Double?)
+    /// A real measurement confirms at least one full day.
+    case fullDay
+}
+
 /// What the Brief scene should render. Exhaustive: every transition
 /// goes through `loadFor` / `pickPrevious` / `pickNext` and lands on
 /// exactly one of these.
@@ -28,9 +40,11 @@ public enum BriefScene: Equatable {
     /// Daily-brief author model is not installed — deep-link the user
     /// to the Hippocampus.app's ModelDownloadView.
     case modelMissing
-    /// Model is present but no brief has been generated yet (no full
-    /// day captured). `captureHoursSoFar` surfaces a "first brief
-    /// generates after your first full day" copy with progress.
+    /// Model is present and no brief exists, but Recall has no coverage
+    /// measurement with which to explain that absence.
+    case captureCoverageUnknown
+    /// Model is present, no brief exists, and measured coverage is below
+    /// one full day. `captureHoursSoFar` optionally surfaces progress.
     case awaitingFirstFullDay(captureHoursSoFar: Double?)
     /// FFI fetch is in flight — render shimmer.
     case loading
@@ -65,30 +79,37 @@ public final class BriefViewModel: ObservableObject {
     /// VM short-circuits to `.modelMissing` regardless of brain state.
     public let isModelPresentProbe: @Sendable () -> Bool
 
-    /// Whether the user has accumulated at least one full day of capture.
-    /// The view supplies this at init time. If `false` AND no brief is
-    /// found, the VM renders `.awaitingFirstFullDay`. If a brief IS
-    /// found, the VM renders the brief regardless — a synthetic test
-    /// brief should always show.
-    public let hasFullDayCapture: Bool
-
-    /// Hours of capture so far (best-effort, optional). Surfaces in the
-    /// `.awaitingFirstFullDay` copy.
-    public let captureHoursSoFar: Double?
+    /// Coverage evidence used only after a no-brief result. Existing briefs
+    /// render regardless of coverage so source-backed content always wins.
+    public let captureCoverage: CaptureCoverage
 
     private let reader: BrainReader
 
     public convenience init(
         reader: BrainReader,
         isModelPresent: Bool = true,
-        hasFullDayCapture: Bool = true,
+        captureCoverage: CaptureCoverage = .unknown
+    ) {
+        self.init(
+            reader: reader,
+            isModelPresentProbe: { isModelPresent },
+            captureCoverage: captureCoverage
+        )
+    }
+
+    /// Compatibility for callers with a real Bool coverage measurement.
+    public convenience init(
+        reader: BrainReader,
+        isModelPresent: Bool = true,
+        hasFullDayCapture: Bool,
         captureHoursSoFar: Double? = nil
     ) {
         self.init(
             reader: reader,
             isModelPresentProbe: { isModelPresent },
-            hasFullDayCapture: hasFullDayCapture,
-            captureHoursSoFar: captureHoursSoFar
+            captureCoverage: hasFullDayCapture
+                ? .fullDay
+                : .insufficient(captureHoursSoFar: captureHoursSoFar)
         )
     }
 
@@ -98,13 +119,27 @@ public final class BriefViewModel: ObservableObject {
     public init(
         reader: BrainReader,
         isModelPresentProbe: @escaping @Sendable () -> Bool,
-        hasFullDayCapture: Bool = true,
-        captureHoursSoFar: Double? = nil
+        captureCoverage: CaptureCoverage = .unknown
     ) {
         self.reader = reader
         self.isModelPresentProbe = isModelPresentProbe
-        self.hasFullDayCapture = hasFullDayCapture
-        self.captureHoursSoFar = captureHoursSoFar
+        self.captureCoverage = captureCoverage
+    }
+
+    /// Compatibility for closure-based callers with a real Bool measurement.
+    public convenience init(
+        reader: BrainReader,
+        isModelPresentProbe: @escaping @Sendable () -> Bool,
+        hasFullDayCapture: Bool,
+        captureHoursSoFar: Double? = nil
+    ) {
+        self.init(
+            reader: reader,
+            isModelPresentProbe: isModelPresentProbe,
+            captureCoverage: hasFullDayCapture
+                ? .fullDay
+                : .insufficient(captureHoursSoFar: captureHoursSoFar)
+        )
     }
 
     /// Re-query the brain, picking the latest brief (or whatever the
@@ -136,17 +171,17 @@ public final class BriefViewModel: ObservableObject {
                 return
             }
 
-            // No briefs at all. Decide between "first full day pending"
-            // vs "missing brief".
-            if hasFullDayCapture {
-                // The user has captured a full day but no brief exists
-                // yet — either generation is pending or capture is off
-                // for this date. Surface the date-specific empty state.
+            // No briefs at all. Explain only what the supplied coverage
+            // evidence can establish.
+            switch captureCoverage {
+            case .unknown:
+                scene = .captureCoverageUnknown
+            case .insufficient(let captureHoursSoFar):
+                scene = .awaitingFirstFullDay(captureHoursSoFar: captureHoursSoFar)
+            case .fullDay:
                 let today = Self.todayISO()
                 selectedDate = today
                 scene = .missingForDate(dateLocal: today)
-            } else {
-                scene = .awaitingFirstFullDay(captureHoursSoFar: captureHoursSoFar)
             }
         } catch {
             scene = .error(message: "\(error)")

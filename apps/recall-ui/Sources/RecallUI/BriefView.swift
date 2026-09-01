@@ -2,8 +2,8 @@
 // UI per `docs/design/brief-viewer-spec.md`.
 //
 // The scene is a thin renderer over BriefViewModel.scene; the VM owns
-// all state-machine logic. The five spec states map to the
-// `BriefScene` enum the VM publishes.
+// all state-machine logic. The viewer states map to the `BriefScene`
+// enum the VM publishes.
 
 import AppKit
 import RecallUIKit
@@ -55,6 +55,8 @@ struct BriefView: View {
         switch viewModel.scene {
         case .modelMissing:
             modelMissingView
+        case .captureCoverageUnknown:
+            captureCoverageUnknownView
         case .awaitingFirstFullDay(let hoursSoFar):
             awaitingFirstFullDayView(hoursSoFar: hoursSoFar)
         case .loading:
@@ -98,10 +100,20 @@ struct BriefView: View {
         .padding(24)
     }
 
+    private var captureCoverageUnknownView: some View {
+        ContentUnavailableView(
+            "Capture coverage is unknown",
+            systemImage: "questionmark.circle",
+            description: Text("Recall does not currently receive full-day coverage data.")
+        )
+        .foregroundStyle(Color.brandFgSecondary)
+        .padding(24)
+    }
+
     private func awaitingFirstFullDayView(hoursSoFar: Double?) -> some View {
         let hoursLabel: String = {
             guard let h = hoursSoFar, h >= 0 else {
-                return "Full-day capture coverage has not been confirmed."
+                return "Measured coverage is below one full day."
             }
             return String(format: "Recorded capture time: %.1f hours.", h)
         }()

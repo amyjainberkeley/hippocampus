@@ -135,7 +135,7 @@ struct MemoryWorkspaceView: View {
                             isModelPresentProbe: {
                                 ModelPresenceProbe.isBriefModelInstalled()
                             },
-                            hasFullDayCapture: false
+                            captureCoverage: .unknown
                         ),
                         onRequestModelDownload: onRequestModelDownload
                     )
