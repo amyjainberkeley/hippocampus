@@ -5,6 +5,7 @@ import os
 public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
     public let helperExecutableURL: URL
     public let helperArguments: [String]
+    public let helperEnvironment: [String: String]
     public let agentExecutableURL: URL
     public let agentArguments: [String]
     public let agentEnvironment: [String: String]
@@ -28,11 +29,17 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
             helperArgs += ["--allowlist-path", knownSafeAppsURL.path]
         }
 
-        var agentEnv = baseEnvironment
-        agentEnv.removeValue(forKey: "MCI_DB_KEY_HEX")
-        agentEnv["MCI_DB_PATH"] = dbPath.path
-        agentEnv["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
-        agentEnv["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
+        var childEnv = baseEnvironment
+        childEnv.removeValue(forKey: "MCI_DB_KEY_HEX")
+        childEnv["MCI_DB_PATH"] = dbPath.path
+        childEnv["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
+        childEnv["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
+        childEnv["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
+        if !captureEnabled {
+            childEnv.removeValue(forKey: "HIPPOCAMPUS_ENABLE_V2P1")
+        }
+
+        var agentEnv = childEnv
         if crashReportOptedIn {
             agentEnv["MCI_CRASH_REPORT_OPTED_IN"] = "1"
         } else {
@@ -42,6 +49,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         return ProcessSupervisorLaunchPlan(
             helperExecutableURL: helperURL,
             helperArguments: helperArgs,
+            helperEnvironment: childEnv,
             agentExecutableURL: agentURL,
             agentArguments: ["--drain-stdin", "--strict", "--db-path", dbPath.path],
             agentEnvironment: agentEnv
@@ -53,6 +61,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
 public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var state: SupervisorState = .idle
     @Published public private(set) var health: HealthSnapshot?
+    @Published public private(set) var captureEnabled: Bool
 
     /// The current TCC-revoked surface (if any). Populated by the
     /// AppDelegate's `TCCHelperStderrTail` when the helper's stderr
@@ -79,7 +88,6 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var retryCount = 0
     private var retryTask: Task<Void, Never>?
     private var healthTimer: Timer?
-    private var brainStatsTask: Task<Void, Never>?
     private var currentKeyReference: KeychainKeyReference = .defaultDatabaseKey
     private var safariInboxReader: SafariInboxReader?
 
@@ -90,6 +98,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.locator = locator
         self.keyStore = keyStore
         self.runtimeConfig = runtimeConfig
+        self.captureEnabled = runtimeConfig.captureEnabled
     }
 
     public func start() {
@@ -100,11 +109,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         do {
             currentKeyReference = try ensureKey()
             try spawnChildren(keyReference: currentKeyReference)
+            captureEnabled = runtimeConfig.captureEnabled
             state = .running
             startHealthPolling()
             startSafariInboxReader()
             logger.info("supervisor: started. helper PID \(self.helperProcess?.processIdentifier ?? -1), agent PID \(self.agentProcess?.processIdentifier ?? -1)")
         } catch {
+            stop()
             state = .crashed(reason: error.localizedDescription)
             logger.error("supervisor: start failed: \(error.localizedDescription)")
         }
@@ -116,8 +127,6 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
         retryTask?.cancel()
         retryTask = nil
-        brainStatsTask?.cancel()
-        brainStatsTask = nil
         healthTimer?.invalidate()
         healthTimer = nil
 
@@ -172,6 +181,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         env["MCI_DB_PATH"] = dbPath.path
         env["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
         env["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
+        env["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
         // Deep-link tab hint per the Brief Viewer spec
         // (`hippocampus://recall?tab=brief`). The recall-ui reads
         // `MCI_INITIAL_TAB` at launch and selects the matching tab.
@@ -188,6 +198,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
         let task = Process()
         task.executableURL = onboardingPath
+        var env = ProcessInfo.processInfo.environment
+        env.removeValue(forKey: "MCI_DB_KEY_HEX")
+        task.environment = env
         try? task.run()
         return true
     }
@@ -224,7 +237,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         do {
             _ = try keyStore.readKey()
         } catch KeyStoreError.noKeyFound {
-            let hex = FileKeyStore.generateHexKey()
+            let hex = try FileKeyStore.generateHexKey()
             try keyStore.writeKey(hex)
             logger.info("supervisor: generated new database key in configured key store")
         }
@@ -268,6 +281,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let helper = Process()
         helper.executableURL = plan.helperExecutableURL
         helper.arguments = plan.helperArguments
+        helper.environment = plan.helperEnvironment
         helper.standardOutput = bridgePipe
         helper.standardError = hStderr
         helper.terminationHandler = { [weak self] proc in
@@ -353,6 +367,37 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         try? runtimeConfig.setCrashReportOptedIn(value)
     }
 
+    public func applyCaptureEnabled(_ enabled: Bool) async throws {
+        let priorSetting = captureEnabled
+        do {
+            try runtimeConfig.setCaptureEnabled(enabled)
+        } catch {
+            captureEnabled = priorSetting
+            throw error
+        }
+
+        guard state.isActive else {
+            captureEnabled = runtimeConfig.captureEnabled
+            return
+        }
+
+        do {
+            try await stopForCaptureReconfiguration()
+            start()
+            guard state == .running else {
+                throw SupervisorError.captureRestartFailed(state.statusText)
+            }
+            captureEnabled = enabled
+        } catch {
+            let helperStillRunning = helperProcess?.isRunning == true
+            if enabled || helperStillRunning {
+                try? runtimeConfig.setCaptureEnabled(helperStillRunning ? priorSetting : false)
+            }
+            captureEnabled = helperStillRunning ? priorSetting : false
+            throw error
+        }
+    }
+
     private func startSafariInboxReader() {
         let reader = SafariInboxReader()
         reader.start()
@@ -369,42 +414,44 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         healthTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if var snapshot = HealthSnapshot.readFromLog() {
-                    if let existing = self.health {
-                        snapshot = snapshot.withBrainEventCount(existing.brainEventCount)
-                    }
+                if let snapshot = HealthSnapshot.readFromLog() {
                     self.health = snapshot
                 }
             }
         }
         health = HealthSnapshot.readFromLog()
-        startBrainStatsPolling()
     }
 
-    private func startBrainStatsPolling() {
-        brainStatsTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                let brainPath = self.locator.brainCLIPath()
-                let keyHex = self.currentKeyHex
-                let count = await Task.detached {
-                    HealthSnapshot.readBrainStats(brainPath: brainPath, keyHex: keyHex)
-                }.value
-                if let h = self.health {
-                    self.health = h.withBrainEventCount(count)
-                }
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
-            }
+    private func stopForCaptureReconfiguration() async throws {
+        let previousState = state
+        let helper = helperProcess
+        let agent = agentProcess
+        stop()
+
+        for _ in 0..<50 where helper?.isRunning == true || agent?.isRunning == true {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard helper?.isRunning != true, agent?.isRunning != true else {
+            helperProcess = helper
+            agentProcess = agent
+            state = previousState
+            throw SupervisorError.captureStopFailed
         }
     }
 }
 
+extension ProcessSupervisor: CaptureSettingApplying {}
+
 enum SupervisorError: LocalizedError {
     case binaryNotFound(String)
+    case captureStopFailed
+    case captureRestartFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .binaryNotFound(let name): return "\(name) binary not found"
+        case .captureStopFailed: return "Capture helper did not stop; the previous state remains active."
+        case .captureRestartFailed(let state): return "Capture setting could not be enforced: \(state)"
         }
     }
 }

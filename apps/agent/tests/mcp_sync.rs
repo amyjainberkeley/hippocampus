@@ -92,6 +92,13 @@ async fn run_cli(home: &Path, db_path: &Path) -> (i32, String) {
         .arg("--db-path")
         .arg(db_path)
         .env("HOME", home)
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.mcp-sync.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", KEY_HEX)
         .env_remove("MCI_DB_PATH")
         .env_remove("MCI_CRASH_REPORT_URL")

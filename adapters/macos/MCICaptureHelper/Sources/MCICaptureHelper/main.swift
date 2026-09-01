@@ -497,18 +497,17 @@ if captureOptions.captureEnabled {
     let ocrEngine: OCREngine = VisionOCRRunner()
     let ocrWorker = VisionOCRWorker(engine: ocrEngine)
 
-    // P3.6.5: encrypted keyframe blob writer. Reads the DbKey from
-    // MCI_DB_KEY_HEX env var (set by the parent process or demo
-    // recipe). When absent, blobs are not written — OCREvents carry
-    // keyframeHash = [0; 32]. CSO invariant: the DbKey is the SAME
-    // key that opens the SQLCipher brain store (ADR-0008 §5 — no
-    // new key material, no new key custody surface).
+    // P3.6.5: encrypted keyframe blob writer. Resolve the same file-Keychain
+    // service/account as the app and agent. Capture cannot continue without
+    // that key: silently omitting encrypted evidence would make the visible
+    // capture state false and create a second custody contract.
     let blobKeyMaterial: [UInt8]
     let blobWriter: KeyframeBlobWriter?
-    if let dbKeyHex = ProcessInfo.processInfo.environment["MCI_DB_KEY_HEX"],
-       let keyBytes = hexStringToBytes(dbKeyHex),
-       keyBytes.count == 32
-    {
+    do {
+        let reference = KeychainDatabaseKeyReference.from(
+            environment: ProcessInfo.processInfo.environment
+        )
+        let keyBytes = try KeychainDatabaseKeyResolver().resolveBytes(reference: reference)
         blobKeyMaterial = keyBytes
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -522,14 +521,13 @@ if captureOptions.captureEnabled {
         let writer = KeyframeBlobWriter(blobDir: blobDir)
         await writer.start()
         blobWriter = writer
-    } else {
-        blobKeyMaterial = []
-        blobWriter = nil
+    } catch {
         FileHandle.standardError.write(
-            ("mci-capture-helper: MCI_DB_KEY_HEX not set or invalid "
-             + "— keyframe blobs will not be written\n")
+            ("mci-capture-helper: database key unavailable from Keychain; "
+             + "capture is disabled: \(error.localizedDescription)\n")
                 .data(using: .utf8) ?? Data()
         )
+        exit(78)
     }
 
     let ocrEmitter: any OCRPostAllowEmitter = CascadeTwiceOCREmitter(

@@ -72,18 +72,17 @@ fn register_mcp_writes_to_claude_json_not_settings_json() {
 }
 
 // -----------------------------------------------------------------------
-// Fix 2: register-mcp includes env block when dev.key exists
+// Fix 2: register-mcp records a Keychain reference, never reusable key bytes
 // -----------------------------------------------------------------------
 
 #[test]
-fn register_mcp_includes_env_block_when_dev_key_exists() {
+fn register_mcp_records_keychain_reference_even_when_dev_key_exists() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
 
     let key_dir = home.join("Library/Application Support/MCI");
     std::fs::create_dir_all(&key_dir).unwrap();
-    let key_hex = "a".repeat(64);
-    std::fs::write(key_dir.join("dev.key"), &key_hex).unwrap();
+    std::fs::write(key_dir.join("dev.key"), "a".repeat(64)).unwrap();
 
     let output = Command::new(agent_bin())
         .arg("register-mcp")
@@ -99,17 +98,25 @@ fn register_mcp_includes_env_block_when_dev_key_exists() {
     let hippo = &content["mcpServers"]["hippocampus"];
     let env = hippo
         .get("env")
-        .expect("env block should be present when dev.key exists");
+        .expect("env block should always carry the Keychain reference");
     assert_eq!(
-        env.get("MCI_DB_KEY_HEX").and_then(|v| v.as_str()),
-        Some(key_hex.as_str())
+        env.get("MCI_DB_KEYCHAIN_SERVICE").and_then(|v| v.as_str()),
+        Some("ai.hippocampus.brain")
     );
+    assert_eq!(
+        env.get("MCI_DB_KEYCHAIN_ACCOUNT").and_then(|v| v.as_str()),
+        Some("database-key-v1")
+    );
+    assert_eq!(
+        env.get("MCI_DB_KEYCHAIN_STORAGE_MODEL")
+            .and_then(|v| v.as_str()),
+        Some("file-keychain-acl-v1")
+    );
+    assert!(env.get("MCI_DB_KEY_HEX").is_none());
 }
 
-/// The env block is now always written, because it carries `MCI_DB_PATH`
-/// as well as the key. Only the key half is conditional.
 #[test]
-fn register_mcp_omits_only_the_key_when_dev_key_missing() {
+fn register_mcp_records_path_and_reference_when_keychain_item_is_missing() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
 
@@ -127,11 +134,24 @@ fn register_mcp_omits_only_the_key_when_dev_key_missing() {
     let env = &content["mcpServers"]["hippocampus"]["env"];
     assert!(
         env.get("MCI_DB_KEY_HEX").is_none(),
-        "no key exists, so none should be recorded"
+        "reusable key material must never be recorded"
     );
     assert!(
         env.get("MCI_DB_PATH").is_some(),
         "the brain path must be recorded even with no key"
+    );
+    assert_eq!(
+        env.get("MCI_DB_KEYCHAIN_SERVICE").and_then(|v| v.as_str()),
+        Some("ai.hippocampus.brain")
+    );
+    assert_eq!(
+        env.get("MCI_DB_KEYCHAIN_ACCOUNT").and_then(|v| v.as_str()),
+        Some("database-key-v1")
+    );
+    assert_eq!(
+        env.get("MCI_DB_KEYCHAIN_STORAGE_MODEL")
+            .and_then(|v| v.as_str()),
+        Some("file-keychain-acl-v1")
     );
 }
 
@@ -164,10 +184,8 @@ fn register_mcp_records_the_db_path_it_was_given() {
     );
 }
 
-/// The docs tell users to export `MCI_DB_KEY_HEX`; registration used to
-/// read only `dev.key` and silently drop it.
 #[test]
-fn register_mcp_honours_the_key_env_var_without_a_dev_key_file() {
+fn register_mcp_does_not_serialize_an_ambient_raw_key() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
     let key_hex = "b".repeat(64);
@@ -183,9 +201,11 @@ fn register_mcp_honours_the_key_env_var_without_a_dev_key_file() {
 
     let content: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
-    assert_eq!(
-        content["mcpServers"]["hippocampus"]["env"]["MCI_DB_KEY_HEX"].as_str(),
-        Some(key_hex.as_str())
+    assert!(
+        content["mcpServers"]["hippocampus"]["env"]
+            .get("MCI_DB_KEY_HEX")
+            .is_none(),
+        "ambient raw keys must not enter MCP configuration"
     );
 }
 
@@ -228,7 +248,7 @@ fn register_mcp_replaces_a_stale_command_path() {
 }
 
 #[test]
-fn register_mcp_warns_stderr_when_dev_key_missing() {
+fn register_mcp_does_not_require_or_probe_reusable_key_material() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
 
@@ -239,11 +259,7 @@ fn register_mcp_warns_stderr_when_dev_key_missing() {
         .expect("spawn mci-agent");
 
     assert!(output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("brain key not yet generated"),
-        "stderr should warn about missing dev.key, got: {stderr}"
-    );
+    assert!(output.stderr.is_empty());
 }
 
 // -----------------------------------------------------------------------
@@ -251,7 +267,7 @@ fn register_mcp_warns_stderr_when_dev_key_missing() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn mcp_serve_falls_back_to_dev_key_when_env_unset() {
+fn mcp_serve_uses_dev_key_only_when_explicit_development_mode_is_enabled() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
 
@@ -265,6 +281,10 @@ fn mcp_serve_falls_back_to_dev_key_when_env_unset() {
     let output = Command::new(agent_bin())
         .arg("mcp-serve")
         .env("HOME", home)
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env("MCI_DB_KEYCHAIN_SERVICE", "ai.hippocampus.tests.missing")
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "missing")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env_remove("MCI_DB_KEY_HEX")
         .output()
         .expect("spawn mci-agent");
@@ -277,7 +297,7 @@ fn mcp_serve_falls_back_to_dev_key_when_env_unset() {
 }
 
 #[test]
-fn mcp_serve_falls_back_to_dev_key_when_env_empty() {
+fn mcp_serve_uses_dev_key_for_empty_raw_key_only_in_explicit_development_mode() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
 
@@ -289,6 +309,10 @@ fn mcp_serve_falls_back_to_dev_key_when_env_empty() {
     let output = Command::new(agent_bin())
         .arg("mcp-serve")
         .env("HOME", home)
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env("MCI_DB_KEYCHAIN_SERVICE", "ai.hippocampus.tests.missing")
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "missing")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", "")
         .output()
         .expect("spawn mci-agent");
@@ -312,6 +336,12 @@ fn drain_stdin_strict_exits_nonzero_on_no_key() {
     let output = Command::new(agent_bin())
         .args(["--drain-stdin", "--strict"])
         .env("HOME", home)
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.task2.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env_remove("MCI_DB_KEY_HEX")
         .stdin(std::process::Stdio::null())
         .output()
@@ -333,6 +363,12 @@ fn drain_stdin_no_strict_prints_loud_warning_and_continues() {
     let output = Command::new(agent_bin())
         .arg("--drain-stdin")
         .env("HOME", home)
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.task2.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env_remove("MCI_DB_KEY_HEX")
         .stdin(std::process::Stdio::null())
         .output()
@@ -349,8 +385,8 @@ fn drain_stdin_no_strict_prints_loud_warning_and_continues() {
     );
 }
 
-/// `~/.claude.json` carries the brain key, so a user tightening it to 0600
-/// is doing the right thing. Writing through a temp file and renaming would
+/// `~/.claude.json` carries executable paths and Keychain references, so a
+/// user tightening it to 0600 is doing the right thing. A temp-file rename would
 /// silently hand the destination the temp file's umask-derived mode and
 /// widen it back to world-readable.
 #[test]
@@ -378,8 +414,7 @@ fn register_mcp_preserves_a_tightened_file_mode() {
     );
 }
 
-/// Creating the file for the first time: we are writing a key into it, so
-/// it should not start out world-readable either.
+/// A newly created client config should not start out world-readable.
 #[test]
 fn register_mcp_creates_the_file_private() {
     use std::os::unix::fs::PermissionsExt;

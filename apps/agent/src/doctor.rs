@@ -192,12 +192,12 @@ fn check_screen_recording(log: Option<&str>) -> Check {
 /// Can the helper write keyframe blobs?
 fn check_helper_key(log: Option<&str>) -> Check {
     match log {
-        Some(t) if t.contains("MCI_DB_KEY_HEX not set or invalid") => Check::new(
+        Some(t) if t.contains("database key unavailable from Keychain") => Check::new(
             "helper db key",
-            Status::Warn,
-            "the helper ran without MCI_DB_KEY_HEX",
-            "Text still lands; keyframe images do not. Set MCI_DB_KEY_HEX in the \
-             environment the app is launched from if you want thumbnails.",
+            Status::Fail,
+            "the helper could not resolve its Keychain reference",
+            "Capture fails closed until the bundled helper has access to the \
+             Hippocampus database-key item.",
         ),
         _ => Check::new(
             "helper db key",
@@ -396,13 +396,11 @@ mod tests {
     }
 
     #[test]
-    fn missing_helper_key_is_a_warning_not_a_blocker() {
-        // Text still lands without it; only keyframe images are lost. Calling
-        // this fatal would send people chasing the wrong thing.
+    fn missing_helper_key_blocks_capture() {
         let c = check_helper_key(Some(
-            "mci-capture-helper: MCI_DB_KEY_HEX not set or invalid",
+            "mci-capture-helper: database key unavailable from Keychain",
         ));
-        assert_eq!(c.status, Status::Warn);
+        assert_eq!(c.status, Status::Fail);
     }
 
     #[test]

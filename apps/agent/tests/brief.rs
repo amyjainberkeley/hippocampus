@@ -443,6 +443,13 @@ fn no_model_exits_non_zero_and_explains_itself() {
         .arg("--model-dir")
         .arg(&model_dir)
         .env("HOME", tmp.path())
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.brief.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", "a".repeat(64))
         .env_remove("MCI_BRIEFS_DISABLED")
         .output()
@@ -478,6 +485,13 @@ fn the_disable_switch_exits_non_zero_and_names_itself() {
         .arg("--model-dir")
         .arg(tmp.path())
         .env("HOME", tmp.path())
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.brief.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", "a".repeat(64))
         .env("MCI_BRIEFS_DISABLED", "1")
         .output()
@@ -504,6 +518,13 @@ fn a_date_that_is_not_a_date_is_rejected_before_anything_else() {
         .arg("--model-dir")
         .arg(tmp.path())
         .env("HOME", tmp.path())
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.brief.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", "a".repeat(64))
         .output()
         .expect("spawn mci-agent");

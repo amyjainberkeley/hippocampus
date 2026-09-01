@@ -18,9 +18,8 @@
 //   target wraps the canonical C header so Swift can `import CMciBrainFFI`;
 //   new `FFIBrainReader` Swift type adapts the C ABI to the `BrainReader`
 //   protocol; the executable target wires `FFIBrainReader` against
-//   `~/Library/Application Support/MCI/mci.sqlite` (key from env var
-//   `MCI_DB_KEY_HEX` for the demo, with a clear TODO for Keychain
-//   integration).
+//   `~/Library/Application Support/MCI/mci.sqlite` using the bundled
+//   executable's file-Keychain ACL and content-free service/account reference.
 //
 // # Build precondition
 //
@@ -90,6 +89,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags(["-L../../target/debug"]),
                 .unsafeFlags(["-L../../target/release"]),
+                .linkedFramework("Security"),
             ]
         ),
         .testTarget(
