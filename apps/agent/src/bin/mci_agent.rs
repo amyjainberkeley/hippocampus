@@ -1188,6 +1188,9 @@ fn resolve_key_hex() -> Option<String> {
 /// so a user who imported into any other path would register a server that
 /// opens an empty (or absent) database and reports success while doing it.
 fn register_mcp(db_path: &Path) -> Result<(), String> {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve own binary path: {e}"))?;
     let exe_str = exe.to_str().ok_or("binary path is not valid UTF-8")?;
@@ -1255,6 +1258,22 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
     let tmp_path = settings_path.with_extension(format!("json.tmp-{}", std::process::id()));
     std::fs::write(&tmp_path, output.as_bytes())
         .map_err(|e| format!("write {}: {e}", tmp_path.display()))?;
+
+    // rename(2) replaces the destination's mode with the temp file's, and
+    // the temp file was just created under the process umask (0644 by
+    // default). Writing in place used to preserve whatever the user had
+    // set, so without this a `chmod 600 ~/.claude.json` would be silently
+    // widened back to world-readable — on a file that holds the brain key.
+    // Carry the old mode across; a file we are creating starts at 0600,
+    // because we are putting a key in it.
+    let mode = std::fs::metadata(&settings_path)
+        .map(|m| m.permissions().mode() & 0o777)
+        .unwrap_or(0o600);
+    if let Err(e) = std::fs::set_permissions(&tmp_path, Permissions::from_mode(mode)) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("set mode on {}: {e}", tmp_path.display()));
+    }
+
     if let Err(e) = std::fs::rename(&tmp_path, &settings_path) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(format!("replace {}: {e}", settings_path.display()));

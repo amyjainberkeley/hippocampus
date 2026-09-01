@@ -348,3 +348,60 @@ fn drain_stdin_no_strict_prints_loud_warning_and_continues() {
         "should warn about missing key, got: {stderr}"
     );
 }
+
+/// `~/.claude.json` carries the brain key, so a user tightening it to 0600
+/// is doing the right thing. Writing through a temp file and renaming would
+/// silently hand the destination the temp file's umask-derived mode and
+/// widen it back to world-readable.
+#[test]
+fn register_mcp_preserves_a_tightened_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let settings = home.join(".claude.json");
+    std::fs::write(&settings, r#"{"mcpServers":{}}"#).unwrap();
+    std::fs::set_permissions(&settings, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    let output = Command::new(agent_bin())
+        .arg("register-mcp")
+        .env("HOME", home)
+        .env_remove("MCI_DB_KEY_HEX")
+        .output()
+        .expect("spawn mci-agent");
+    assert!(output.status.success());
+
+    let mode = std::fs::metadata(&settings).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "a tightened mode must survive the rewrite, got {mode:o}"
+    );
+}
+
+/// Creating the file for the first time: we are writing a key into it, so
+/// it should not start out world-readable either.
+#[test]
+fn register_mcp_creates_the_file_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+
+    let output = Command::new(agent_bin())
+        .arg("register-mcp")
+        .env("HOME", home)
+        .env_remove("MCI_DB_KEY_HEX")
+        .output()
+        .expect("spawn mci-agent");
+    assert!(output.status.success());
+
+    let mode = std::fs::metadata(home.join(".claude.json"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "a freshly created config must be 0600, got {mode:o}"
+    );
+}
