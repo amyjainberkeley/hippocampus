@@ -2,13 +2,14 @@
 
 ## Status And Provenance
 
-Task 3 now runs the production lexical and Core ML hybrid retrieval paths against a 24-case synthetic work-memory corpus. The benchmark is execution-complete and publishable as a reproducible measurement, but it is not launch-qualified because the hybrid arm returns evidence for every unanswerable query.
+Task 3 runs the production lexical and Core ML hybrid retrieval paths against the 24-case synthetic work-memory corpus. The final-review repairs are complete. The benchmark artifact is execution-complete and publishable as a reproducible measurement, but it remains not launch-qualified because the hybrid arm returns evidence for every unanswerable query.
 
-- Exact code commit executed: `04b9b8c1e39042b41dc64a1b7f4f986eb41583be`
+- Exact code commit executed: `f9a255e6679ec5f5e8513b30b07f619714198602`
 - Git dirty at benchmark start: `false`
 - Branch: `codex/hippocampus-v1`
-- Captured at: `2026-09-01T09:06:51Z`
+- Captured at: `2026-09-01T09:42:39Z`
 - Dataset: `eval/work-memory/synthetic-v1.json`
+- Dataset id: `synthetic-work-memory-v1`
 - Dataset SHA-256: `96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f`
 - Model: `installed-model://ArcticEmbedS_INT8.mlmodelc`
 - Model SHA-256: `f782f7f4a13c69a4399345f1d6a4b8de8f4327c131e537a1ea6bf9fdeaeaeef8`
@@ -23,11 +24,11 @@ Task 3 now runs the production lexical and Core ML hybrid retrieval paths agains
 - Toolchain: `rustc 1.96.0 (ac68faa20 2026-05-25)`, `cargo 1.96.0 (30a34c682 2026-05-25)`
 - Host: macOS 26.5 build 25F71, arm64, Mac15,13, Apple M3, 17179869184 bytes RAM
 
-Path-bearing metadata is repository-relative or uses stable logical labels. The baseline contains no canonical home-directory or temporary-directory paths.
+Path-bearing metadata is repository-relative or uses stable logical labels. The baseline and report contain no canonical home-directory or temporary-directory paths.
 
 ## Dataset Construction
 
-The dataset remains exactly 24 cases, with three cases in each promised category:
+The dataset remains exactly 24 cases, with three cases in each required category:
 
 - exact recall
 - paraphrase
@@ -40,19 +41,50 @@ The dataset remains exactly 24 cases, with three cases in each promised category
 
 GitHub, terminal, browser, Slack, Linear, and file evidence are represented. Every event carries source metadata so provenance coverage is scored from retrieved evidence.
 
-The three unanswerable questions are plausible in-domain negatives that share projects, people, tools, and vocabulary with their haystacks while asking for absent facts:
+The three unanswerable questions are plausible in-domain negatives sharing projects, people, tools, and vocabulary with their haystacks while asking for absent facts:
 
 - who approved PR 431 after the rollback
 - the exact duration of the work-memory benchmark test
 - Priya's due date for HIPP-201
 
-These replace the previous nonsense-token probes and include GitHub, terminal/file, Slack, and Linear pressure. Answer-session labels remain empty for all three.
+The dataset bytes and checksum are unchanged by this repair.
 
-## Production Path
+## Final-Review Repairs
 
-`brain_ingest::prepare_event_content` is shared by production OCR ingestion and benchmark seeding. It calls the public `compose_context_header`, runs the production `EventChunker`, returns the exact bytes stored in `events.text`, and selects the same first chunk used for synchronous document embedding. FTS, extraction, and hybrid retrieval therefore see production-identical seeded text.
+### Self-validating thresholds
 
-The benchmark arms use the production `SqlCipherBrainStore`, `FtsSanitizingStore`, `HybridRetriever`, and shared Core ML embedder loader. Scratch database names are derived from stable hashes, and malformed IDs containing separators, controls, or traversal text are rejected before filesystem access.
+Ordinary lower-bound metrics retain the nonnegative floor. Abstention separation uses a dedicated signed floor bounded to `[-1, 1]`. The measured hybrid separation@1 is `-0.047619` and its derived regression minimum is `-0.097619`.
+
+A unit test checks every derived hit, recall, provenance, false-positive, separation, MRR, latency, and index-size threshold against the exact source summary. A full rerun against the generated artifact also recorded `regression.passed=true` with no failures.
+
+### Canonical baseline promotion
+
+`--update-baseline` pins `eval/work-memory/synthetic-v1.json` and rejects forwarded `--dataset` arguments before invoking the benchmark. Promotion now requires:
+
+- `complete=true`
+- `publishable=true`
+- repository-relative canonical dataset path
+- dataset id `synthetic-work-memory-v1`
+- clean source tree
+- no limit
+- arms exactly `lexical` and `hybrid`
+- k values exactly `1,3,5,10`
+- exactly 24 original and 24 evaluated cases
+- benchmark exit status 0 or the documented quality-gate status 7
+
+A trap removes the candidate on every rejected path. Invalid candidates never replace an existing output.
+
+### Scratch isolation and cleanup
+
+Every process creates a unique scratch child directory using process, timestamp, and atomic sequence identity. Per-instance database names remain stable hashes inside that private directory.
+
+A per-database scope guard owns the SQLite main file, `-wal` sidecar, and `-shm` sidecar. The guard removes all three on success or error; the run-level guard removes the unique directory tree. Concurrent run tests force two guards to overlap while using the same database basename and verify isolation plus cleanup.
+
+### Real index footprint
+
+The last store handle is closed before size measurement. The benchmark then sums any live SQLite main, WAL, and SHM artifacts before cleanup. A tiny-versus-large content test proves the reported footprint grows with indexed content.
+
+The old constant 4096-byte measurement was the open main-file stub and is no longer used.
 
 ## Metric Definitions
 
@@ -60,11 +92,11 @@ The benchmark arms use the production `SqlCipherBrainStore`, `FtsSanitizingStore
 - false-positive rate uses unanswerable instances only.
 - abstention separation is answerable hit rate minus unanswerable false-positive rate, or `TPR - FPR`.
 - every summary records explicit answerable and unanswerable denominators.
-- metrics with zero eligible denominator serialize as `null`; they are never coerced to zero.
-
-## Baseline Metrics
+- metrics with zero eligible denominator serialize as `null`.
 
 Both arms have 21 answerable and 3 unanswerable instances.
+
+## Baseline Metrics
 
 Lexical:
 
@@ -75,8 +107,8 @@ Lexical:
 - abstention separation@1/3/5/10: `0.3333 / 0.3333 / 0.3333 / 0.3333`
 - MRR: `0.3333`
 - outcomes: matched 7, missed 14, abstained 3, false positive 0
-- latency: p50 `4.275 ms`, p95 `9.770 ms`, mean `5.144 ms`
-- index size: p50/p95 `4096 B / 4096 B`
+- latency: min `3.448 ms`, p50 `3.775 ms`, p95 `4.035 ms`, max `8.945 ms`, mean `3.961 ms`
+- index footprint: min/p50/p95/max/mean `184320 B`
 
 Hybrid:
 
@@ -87,10 +119,10 @@ Hybrid:
 - abstention separation@1/3/5/10: `-0.0476 / 0.0000 / 0.0000 / 0.0000`
 - MRR: `0.9762`
 - outcomes: matched 21, missed 0, abstained 0, false positive 3
-- latency: p50 `35.442 ms`, p95 `49.646 ms`, mean `39.511 ms`
-- index size: p50/p95 `4096 B / 4096 B`
+- latency: min `34.915 ms`, p50 `37.587 ms`, p95 `50.625 ms`, max `58.462 ms`, mean `41.473 ms`
+- index footprint: min/p50 `184320 B`, p95/max `192512 B`, mean `186368 B`
 
-Undefined-slice behavior is visible in the artifact: the unanswerable slice has null hit/recall/MRR/provenance/separation, while answerable-only slices have null false-positive/separation.
+Retrieval, provenance, abstention outcomes, and misses are unchanged from the previous truthful run. Only latency noise, threshold derivation, and index-size measurement changed.
 
 ## Misses And False Positives
 
@@ -111,17 +143,15 @@ Lexical missed 14 answerable cases:
 - `source-which-file-runner`
 - `source-which-pr-complete-false`
 
-Hybrid had no answerable misses, but produced false positives for all three unanswerable cases:
+Hybrid had no answerable misses but produced false positives for all three unanswerable cases:
 
 - `unanswerable-pr-431-approver`
 - `unanswerable-benchmark-test-duration`
 - `unanswerable-hipp-201-due-date`
 
-## Gates
+## Quality And Regression Gates
 
-Regression thresholds remain relative to the measured baseline and catch material declines. Baseline validation refuses incomplete or nonpublishable artifacts, dataset ID/checksum mismatches, missing requested arms, missing k thresholds, dirty or abbreviated baseline commits, and incompatible hybrid model family/checksum/compute identity.
-
-Absolute launch targets are separate so poor baseline behavior cannot bless itself:
+Absolute launch targets remain separate from measured regression thresholds:
 
 - hybrid hit@5 at least `0.90`
 - hybrid recall@5 at least `0.90`
@@ -130,45 +160,45 @@ Absolute launch targets are separate so poor baseline behavior cannot bless itse
 - hybrid abstention separation@5 at least `0.80`
 - hybrid MRR at least `0.85`
 
-The current artifact fails the absolute gate on false-positive@5 (`1.00`) and abstention separation@5 (`0.00`). It records `complete=true`, `publishable=true`, `launch_qualified=false`.
+The current artifact fails false-positive@5 (`1.00`) and abstention separation@5 (`0.00`). It records `complete=true`, `publishable=true`, and `launch_qualified=false`.
 
-Limited runs are smoke reports with `complete=false` and `publishable=false`. They exit nonzero by default. `--allow-smoke` may make a limited smoke command exit zero, but the runner rejects it for baseline generation.
+A second full run against the new baseline exited 7 only because of this absolute gate. Its baseline regression comparison passed.
 
 ## Files
 
-Code/dataset/test/runner repair commit:
+Code/test/runner repair commit `f9a255e6679ec5f5e8513b30b07f619714198602`:
 
-- `apps/agent/src/brain_ingest.rs`
 - `apps/agent/src/bench_longmemeval.rs`
 - `apps/agent/src/bin/mci_bench.rs`
 - `apps/agent/tests/work_memory_bench.rs`
-- `eval/work-memory/synthetic-v1.json`
 - `eval/work-memory/README.md`
 - `scripts/eval/work-memory/run.sh`
-- `docs/eval/README.md`
 
 Baseline/report artifact commit:
 
 - `docs/eval/work-memory-baseline.json`
 - `.superpowers/sdd/2026-09-01-hippocampus-memory-layer/task-3-report.md`
 
-No Task 1, Task 2, or Task 7 files were staged by this implementation.
+No unrelated Task 1, Task 2, or Task 7 files were staged.
 
 ## Tests And Runs
 
-- `cargo test -p mci-agent --test work_memory_bench -- --nocapture`: 9 passed
-- production header parity unit test: 1 passed
-- path normalization unit test: 1 passed
+- `cargo test -p mci-agent --test work_memory_bench -- --nocapture`: 14 passed
+- `cargo test -p mci-agent --lib bench_longmemeval::tests -- --nocapture`: 11 passed
+- `cargo test -p mci-agent --bin mci-bench -- --nocapture`: 1 passed
 - `bash -n scripts/eval/work-memory/run.sh`: passed
-- full runner invoked from outside the repository without baseline update: completed both arms; exited 7 on the absolute quality gate
-- full baseline generation from the exact clean code commit: completed both arms; wrote the publishable artifact; exited 7 on the same absolute quality gate
+- full runner from outside the repository without baseline comparison: both arms completed; exit 7 only on the absolute quality gate
+- canonical baseline generation from exact clean code commit: promoted 24/24 artifact; exit 7 only on the absolute quality gate
+- full self-baseline rerun: regression passed with no failures; exit 7 only on the absolute quality gate
+- privacy scan: no canonical home or temporary paths in the baseline or report
 
-Coverage includes outside-CWD execution, limited-run completeness and exit status, missing-arm rejection, incompatible identity rejection, undefined denominator nulls, production header byte parity, path traversal IDs, and external path redaction.
+The focused suite covers self-baseline threshold acceptance, dataset override rejection, invalid candidate nonpromotion, concurrent scratch isolation, main/WAL/SHM cleanup after failure, index growth with content, outside-CWD execution, limited-run semantics, identity validation, undefined denominators, production header parity, path traversal rejection, and metadata path redaction.
 
 ## Decisions And Risks
 
-- A complete benchmark and a launch-qualified benchmark are intentionally separate states. The corpus and run are reproducible even when retrieval quality is unacceptable.
-- The hybrid arm is a launch blocker until retrieval can abstain or enforce an evidence threshold on plausible absent facts.
-- Lexical retrieval remains weak on paraphrase, synthesis, changed facts, contradiction, and source attribution. Its low baseline is descriptive, not a launch target.
-- The corpus is intentionally small and synthetic. It protects contracts and catches regressions but does not establish broad real-world quality.
+- Complete, publishable, and launch-qualified remain separate states.
+- The hybrid arm is still a launch blocker until retrieval can abstain or enforce an evidence threshold on plausible absent facts.
+- Lexical retrieval remains weak on paraphrase, synthesis, changed facts, contradiction, and source attribution.
+- Index size now reflects closed/checkpointed SQLite storage, but page-level allocation means small corpora can share the same footprint; growth is verified with materially larger content.
+- The corpus is small and synthetic. It protects benchmark contracts and detects regressions but does not establish broad real-world quality.
 - The benchmark measures retrieval and provenance, not generated-answer correctness.
