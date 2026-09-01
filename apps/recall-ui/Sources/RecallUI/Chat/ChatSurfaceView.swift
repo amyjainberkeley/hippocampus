@@ -324,7 +324,7 @@ private struct MessageRow: View {
 
 // MARK: - Previews
 
-#if DEBUG  // Previews are dev-only tooling; excluded from release builds (the #Preview macro plugin ships with Xcode, not the CLI toolchain). macOS-15 SDK migration 2026-07-15.
+#if DEBUG && canImport(PreviewsMacros)
 #Preview("Empty state") {
     ChatSurfaceView()
         .frame(width: 720, height: 480)

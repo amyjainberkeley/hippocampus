@@ -165,7 +165,7 @@ struct LinkedEventsBadge: View {
 // overflow. Rendered on the brand background so mint-on-dark matches
 // the shipping visual.
 
-#if DEBUG
+#if DEBUG && canImport(PreviewsMacros)
     private func previewHit(
         id: UInt64,
         title: String,
