@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use mci_agent::bench_longmemeval::{
-    best_threshold, run_abstention_probe, run_instance, summarize, AbstentionSample, Arm, Instance,
-    InstanceResult, Report,
+    best_threshold, run_abstention_probe, run_instance, summarize, AbstentionSample, Arm,
+    Embedders, Instance, InstanceResult, Report,
 };
 
 fn usage() {
@@ -141,6 +141,21 @@ fn main() -> ExitCode {
     }
     eprintln!("{} instances", instances.len());
 
+    // Loaded once for the whole run, and only when something needs it:
+    // a lexical-only run must not require the model to be present.
+    let needs_embedder = abstention.is_some() || arms.contains(&Arm::Hybrid);
+    let embedders = if needs_embedder {
+        match Embedders::load() {
+            Ok(e) => Some(e),
+            Err(e) => {
+                eprintln!("mci-bench: {e}");
+                return ExitCode::from(4);
+            }
+        }
+    } else {
+        None
+    };
+
     if let Some(n) = abstention {
         let n = n.min(instances.len());
         if n < 2 {
@@ -153,7 +168,12 @@ fn main() -> ExitCode {
             // Pair with the next instance's question, wrapping. Its haystack
             // is a different person's history, so it is unanswerable here.
             let foreign = instances[(idx + 1) % n].question.clone();
-            match run_abstention_probe(&instances[idx], &foreign, &workdir) {
+            match run_abstention_probe(
+                &instances[idx],
+                &foreign,
+                &workdir,
+                embedders.as_ref().expect("abstention requires an embedder"),
+            ) {
                 Ok(mut s) => samples.append(&mut s),
                 Err(e) => eprintln!("mci-bench: [abstention] {e}"),
             }
@@ -236,7 +256,7 @@ fn main() -> ExitCode {
         let mut failures = 0usize;
 
         for (n, inst) in instances.iter().enumerate() {
-            match run_instance(inst, arm, &ks, &workdir) {
+            match run_instance(inst, arm, &ks, &workdir, embedders.as_ref()) {
                 Ok(r) => results.push(r),
                 Err(e) => {
                     failures += 1;
