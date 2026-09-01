@@ -18,9 +18,10 @@ Not "what file was that in." **"That pricing page I looked at last Tuesday, when
 
 It runs entirely on your machine. There is no server to trust, because there is no server.
 
-- **Local by construction, not by policy.** Screen text is parsed on-device, embedded on the Neural Engine, and written to one encrypted SQLite file. No API key is needed and nothing is sent anywhere.
-- **One file, one lock.** Everything (rows, full-text index, vectors) lives inside a single SQLCipher database. Deleting a memory crypto-shreds it.
-- **Search the way you remember.** Keyword search for exact things like an error code, vector search for vague things like "that pricing discussion," fused into one ranked list. (The engine does both; the CLI below exposes the keyword half. See [what works](#what-works-and-what-doesnt).)
+- Canonical shipped status lives in [docs/STATUS.md](docs/STATUS.md).
+- **Local by construction, not by policy.** Screen text is parsed on-device, embedded through Core ML with the current runtime pinned to CPU, and kept on your Mac. No API key is needed and nothing is sent anywhere.
+- **One local store, plus local blobs.** Rows, FTS, and stored vectors live in SQLCipher; keyframes stay as local blobs referenced from the database. Today delete is row removal plus `VACUUM`, while key custody is still the interim `dev.key` path until Keychain-backed storage lands.
+- **Search the way you remember.** Keyword search for exact things like an error code, Rust-side cosine search for vague things like "that pricing discussion," fused into one ranked list when the embedder and backfill are present. (The CLI below exposes the keyword half. See [what works](#what-works-and-what-doesnt).)
 - **Blocked at the source.** Password prompts, private browsing, and DRM video are refused before a frame is ever encoded, not scrubbed afterwards.
 
 ---
@@ -41,7 +42,7 @@ Everything lands in `./hippocampus-demo/`. Your real brain is never touched, no 
 rm -rf ./hippocampus-demo
 ```
 
-That deletes the database and its only key, which makes the data unrecoverable. That is the same crypto-shred property the real store has.
+That deletes the demo database and its demo key. The app path is slightly different today: the store is still SQLCipher, but the shipping wrap is an interim `~/Library/Application Support/MCI/dev.key` file rather than Keychain-backed custody.
 
 ---
 
@@ -337,10 +338,10 @@ Most projects bury this. It should be near the top, because it decides whether t
 | **MCP server** | **Works.** Five tools over stdio JSON-RPC, so an agent can query your memory. See below. |
 | **Pulling from other MCP servers** | **Works against a local server.** `mci-agent mcp-sync` reads what your registered servers offer and files it in the brain, tagged so you can tell it apart. Tested end to end against a loopback MCP server; not tested against any third-party one. |
 | **Semantic search + fusion ranking** | **Works, and I have run the whole path.** Build the model, run `mci-agent embed-backfill`, restart. Verified end to end on a clean machine: a query sharing no words with the corpus goes from 0 hits to 3 correct ones. The model is ~66 MB so you build it yourself; until you do, everything degrades to keyword-only and says so on startup. |
-| **On-device embeddings** | **Works.** Runs through Core ML with a regression test asserting the vectors still match a known-good reference. |
+| **On-device embeddings** | **Works.** Runs through Core ML with the runtime pinned to CPU, with a regression test asserting the vectors still match a known-good reference. |
 | **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
-| **Reading Mail and Messages** | **Read-only.** Nothing is written to the brain until the per-source redaction path is finished. |
-| **Live screen capture** | **Built, unproven, ships OFF.** All the code exists. I have not watched it run all day on a real machine and measured it, so I am not going to tell you it works. |
+| **Reading Mail and Messages** | **Partly wired.** The agent-side deep-hook pumps can persist allowed Mail and Messages content into the brain after their cascade checks, but they are not part of the default demo flow and still depend on explicit allowlists / FDA. |
+| **Live screen capture** | **Built, unproven, ships OFF.** Shipping builds keep capture disabled unless you opt in at boot with `HIPPOCAMPUS_ENABLE_V2P1=1`; the all-day soak and release verification are still owed. |
 | **Sync between machines** | **Skeleton.** The crypto is there. Proof that two devices converge is not. |
 | **Windows** | **Not started.** An empty crate with the right shape. |
 
@@ -364,8 +365,8 @@ Hippocampus has no input step. The source is your screen, which means it reaches
 |---|---|---|---|
 | What goes in | Conversations, facts you pass it | Documents, files, connectors | Your screen, automatically |
 | Runs offline | Yes, library mode | Yes, local binary | Yes, and there is no cloud mode |
-| Retrieval | Vector, plus a graph store | Embedded graph engine | Keyword + vector fused, inside SQLite |
-| Where memories live | Your DB or their cloud | Your machine or their cloud | One encrypted file, only your machine |
+| Retrieval | Vector, plus a graph store | Embedded graph engine | Keyword + vector fused; semantic uses a Rust-side cosine scan over SQLCipher-stored vectors |
+| Where memories live | Your DB or their cloud | Your machine or their cloud | SQLCipher plus local blobs, only your machine |
 | Maturity | Production, 62k stars | Production, 29k stars | Recall works; capture unproven |
 
 **On benchmarks, plainly: I have not run any.** mem0 publishes LoCoMo and LongMemEval numbers, supermemory publishes theirs. Those are conversational-memory benchmarks, and Hippocampus has no conversational input, so the numbers would not be comparable even if I ran them. I would rather say that than put a table of favorable numbers next to theirs. If you want a memory layer for an agent today, use one of theirs. Use this if you want your own machine to remember what you saw.
@@ -422,7 +423,7 @@ mci-agent stats --source safari
 |---|---|---|
 | `MCI_DB_KEY_HEX` | 64-character hex SQLCipher key | Yes |
 | `MCI_DB_PATH` | Path to the brain file | No, defaults to `~/Library/Application Support/MCI/mci.sqlite` |
-| `HIPPOCAMPUS_ENABLE_V2P1` | Turns live capture on | No, and leave it off until capture is verified |
+| `HIPPOCAMPUS_ENABLE_V2P1` | Boot-time opt-in for the unverified capture path | No, and leave it off until capture is verified |
 
 ---
 
@@ -430,11 +431,11 @@ mci-agent stats --source safari
 
 The promise is "nothing leaves your machine," so here is what enforces it rather than my word for it.
 
-- **One encrypted SQLite file** via SQLCipher. The key is wrapped by a Keychain item gated on the Secure Enclave and cannot be exported.
-- **No vector database outside that file.** This is why search uses sqlite-vec, which lives inside the same file, rather than something faster and separate. A second store would mean a second encryption boundary, and the weaker one would be the real one.
+- **One encrypted local store** via SQLCipher, plus local keyframe blobs referenced from it. Today the shipping key wrap is an owner-local `dev.key` file; Keychain-backed custody is the target state, not the current one.
+- **No separate vector service.** Today semantic recall does a Rust-side cosine scan over vectors stored in SQLCipher. The bundled sqlite-vec path is still deferred, so there is no extra vector daemon or cloud index to trust.
 - **Blocked at the source, not scrubbed after.** Password prompts, private browsing, and DRM surfaces are refused before a frame is encoded. Scrubbing afterwards means the data existed.
 - **A second layer for text.** Extracted text is checked for one-time codes, bank alerts, and API keys and refused. Tested against a synthetic corpus of 133 message shapes built from public security writeups, NIST guidance, and OWASP fixtures, in [core/brain/fixtures/](core/brain/fixtures/). Those fixtures contain no real messages.
-- **Delete means delete.** Removing a memory crypto-shreds it rather than hiding a row.
+- **Delete is direct and local.** Removing a memory deletes the rows, cascades dependent tables, and runs `VACUUM`. Crypto-shredded range deletion remains a design target rather than the current shipped path.
 - **No telemetry.** No analytics, no usage tracking, no crash reporting to me.
 
 Found something wrong? [SECURITY.md](SECURITY.md) says what I most want to hear about and how to report it privately.

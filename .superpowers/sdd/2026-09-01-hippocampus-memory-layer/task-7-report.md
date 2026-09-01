@@ -2,7 +2,7 @@
 
 Status: implemented and committed in this worktree.
 
-Commit: PENDING
+Commit: cfb7c06
 
 ## Scope
 
