@@ -78,3 +78,6 @@ tools/perf-soak/out/
 
 # scripts/try-it.sh sandbox
 hippocampus-demo/
+
+# Isolated implementation workspaces
+.worktrees/
