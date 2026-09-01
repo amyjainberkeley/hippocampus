@@ -641,6 +641,114 @@ fn work_memory_runner_rejects_baseline_bypass_before_invoking_benchmark() {
 }
 
 #[test]
+fn work_memory_runner_rejects_every_caller_baseline_override_before_execution() {
+    for (label, arguments) in [
+        ("ordinary override", vec!["--baseline", "attacker.json"]),
+        ("equals override", vec!["--baseline=attacker.json"]),
+        (
+            "update override",
+            vec!["--update-baseline", "--baseline", "attacker.json"],
+        ),
+    ] {
+        let dir = tempdir().expect("tempdir");
+        let report = eligible_fake_baseline();
+        let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+        let output = Command::new(&script)
+            .current_dir(dir.path())
+            .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+            .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+            .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+            .env("MCI_FAKE_ARGS", &fake_args_path)
+            .args(arguments)
+            .output()
+            .expect("run forbidden baseline override");
+
+        assert!(!output.status.success(), "{label} must be rejected");
+        assert!(
+            !fake_args_path.exists(),
+            "{label} must fail before benchmark execution"
+        );
+    }
+}
+
+#[test]
+fn direct_binary_rejects_duplicate_baseline_arguments_before_writing_a_report() {
+    let dataset = r#"{
+      "dataset_id":"duplicate-baseline-fixture",
+      "instances":[{
+        "question_id":"q1",
+        "question_type":"exact_recall",
+        "question":"What moved?",
+        "answer":"The benchmark moved.",
+        "question_date":"2023/05/20 (Sat) 03:00",
+        "haystack_dates":["2023/05/20 (Sat) 02:00"],
+        "haystack_session_ids":["s1"],
+        "haystack_sessions":[[{"role":"assistant","content":"The benchmark moved."}]]
+      }]
+    }"#;
+    let (output, report) = run_bench(
+        dataset,
+        &[
+            "--baseline",
+            "first-baseline.json",
+            "--baseline",
+            "second-baseline.json",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        report,
+        Value::Null,
+        "argument rejection must precede report output"
+    );
+}
+
+#[test]
+fn canonical_binary_rejects_an_exact_baseline_copy_and_clears_authority_booleans() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root");
+    let dir = tempdir().expect("tempdir");
+    let copied_baseline = dir.path().join("copied-accepted-baseline.json");
+    fs::copy(
+        repo_root.join("docs/eval/work-memory-baseline.json"),
+        &copied_baseline,
+    )
+    .expect("copy accepted baseline");
+    let report_path = dir.path().join("report.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_mci-bench"))
+        .current_dir(&repo_root)
+        .arg("--dataset")
+        .arg("eval/work-memory/synthetic-v1.json")
+        .arg("--arm")
+        .arg("lexical")
+        .arg("--baseline")
+        .arg(&copied_baseline)
+        .arg("--out")
+        .arg(&report_path)
+        .output()
+        .expect("run canonical binary with copied baseline");
+
+    assert_eq!(output.status.code(), Some(5));
+    let report: Value =
+        serde_json::from_slice(&fs::read(report_path).expect("report")).expect("valid report");
+    assert_eq!(report["regression"]["passed"], Value::Bool(false));
+    assert_eq!(report["complete"], Value::Bool(false));
+    assert_eq!(report["publishable"], Value::Bool(false));
+    assert_eq!(report["launch_qualified"], Value::Bool(false));
+    assert!(report["regression"]["failures"]
+        .as_array()
+        .expect("failures")
+        .iter()
+        .any(|failure| failure
+            .as_str()
+            .is_some_and(|value| value.contains("accepted baseline path"))));
+}
+
+#[test]
 fn work_memory_runner_requires_the_accepted_baseline_file() {
     let dir = tempdir().expect("tempdir");
     let report = eligible_fake_baseline();
@@ -684,8 +792,23 @@ fn work_memory_runner_always_forwards_the_accepted_baseline() {
 
     assert!(output.status.success());
     let args = fs::read_to_string(&fake_args_path).expect("captured benchmark arguments");
-    assert!(args.contains("--baseline"));
-    assert!(args.contains("docs/eval/work-memory-baseline.json"));
+    let arguments = args.lines().collect::<Vec<_>>();
+    assert_eq!(
+        arguments
+            .iter()
+            .filter(|argument| **argument == "--baseline")
+            .count(),
+        1,
+        "runner must forward exactly one baseline flag"
+    );
+    let baseline_index = arguments
+        .iter()
+        .position(|argument| *argument == "--baseline")
+        .expect("baseline flag");
+    assert_eq!(
+        arguments.get(baseline_index + 1).copied(),
+        Some("docs/eval/work-memory-baseline.json")
+    );
 }
 
 #[test]

@@ -22,8 +22,8 @@
 //!   reciprocal ranks. Tied raw scores share a rank, and raw cosine remains
 //!   available separately to the evidence critic.
 //! - **Fuse** per ADR-0010 §5 + the Phase-6-close recall-surface fusion:
-//!   `score = w_sem · rr_sem + w_lex · rr_lex + w_rec · exp(−λ · Δt_h)
-//!   + w_entity · ent̂ + w_src · src` with default weights
+//!   `score = w_sem * rr_sem + w_lex * rr_lex + w_rec * decay + w_entity * ent_hat + w_src * src`
+//!   with default weights
 //!   [`FusionWeights::default`] = `0.40 / 0.30 / 0.10 / 0.15 / 0.05`.
 //!   `ent̂` is the query-aware deterministic entity-match signal (see
 //!   [`HybridRetriever::derive_query_entity_ids`]): the query is run
@@ -250,14 +250,11 @@ pub fn lexical_retrieval_outcome<S: BrainStore>(
             reason: NothingMatchedReason::ZeroLimit,
         });
     }
-    let raw = match store.fts5_search(&query.text, query.limit) {
-        Ok(value) => value,
-        Err(_) => {
-            return Ok(RetrievalOutcome::Degraded {
-                degradation: RetrievalDegradation::LexicalUnavailable,
-                fallback_matches: Vec::new(),
-            });
-        }
+    let Ok(raw) = store.fts5_search(&query.text, query.limit) else {
+        return Ok(RetrievalOutcome::Degraded {
+            degradation: RetrievalDegradation::LexicalUnavailable,
+            fallback_matches: Vec::new(),
+        });
     };
     let ranked = ranked_map(raw);
     let mut candidates: Vec<(EventId, (f32, usize))> = ranked.into_iter().collect();
@@ -447,6 +444,14 @@ pub struct HybridRetriever<S: BrainStore, E: Embedder> {
     evidence_policy: EvidenceSufficiencyPolicy,
 }
 
+enum CandidateArms {
+    Ready {
+        lexical: HashMap<EventId, (f32, usize)>,
+        semantic: HashMap<EventId, (f32, usize)>,
+    },
+    Degraded(RetrievalOutcome),
+}
+
 impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     /// Construct a retriever with the [`FusionWeights::default`] weights
     /// (ADR-0010 §5 starting set), [`RecencyConfig::default`] (24h
@@ -611,95 +616,21 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         query: &RetrievalQuery,
         time_filter: Option<TimeRange>,
     ) -> Result<RetrievalOutcome, RetrieveError> {
-        let lex_result = self.store.fts5_search(&query.text, self.k_lex);
-        let q_emb = match self.embedder.embed_one(&query.text) {
-            Ok(value) => value,
-            Err(_) => {
-                return match lex_result {
-                    Ok(lex) => Ok(RetrievalOutcome::Degraded {
-                        degradation: RetrievalDegradation::EmbeddingsUnavailable,
-                        fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
-                    }),
-                    Err(_) => Ok(RetrievalOutcome::Degraded {
-                        degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
-                        fallback_matches: Vec::new(),
-                    }),
-                };
-            }
+        let (lex_map, sem_map) = match self.candidate_arms(query, time_filter)? {
+            CandidateArms::Ready { lexical, semantic } => (lexical, semantic),
+            CandidateArms::Degraded(outcome) => return Ok(outcome),
         };
-        // ADR-0011 §5 candidate-pool pre-filter. When the query carries
-        // a time / app scope (either from the router — anchor window,
-        // extracted time range — or from the caller-supplied
-        // `RetrievalQuery::app_filter`), push those into the store so
-        // brute-force cosine walks only the in-scope vectors instead of
-        // the whole `event_vectors` table. Semantic ranks are otherwise
-        // unchanged: the pool narrowing is a subset of the row set the
-        // full-KNN would have scored, and the retriever's row-level
-        // app/time guard downstream is still authoritative. When both
-        // filters are `None` the store's default impl delegates to
-        // `vec_search` — byte-identical fallback (full KNN).
-        let sem = match self.store.vec_search_filtered(
-            &q_emb,
-            self.k_sem,
-            time_filter,
-            query.app_filter.as_deref(),
-        ) {
-            Ok(value) => value,
-            Err(_) => {
-                return match lex_result {
-                    Ok(lex) => Ok(RetrievalOutcome::Degraded {
-                        degradation: RetrievalDegradation::EmbeddingsUnavailable,
-                        fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
-                    }),
-                    Err(_) => Ok(RetrievalOutcome::Degraded {
-                        degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
-                        fallback_matches: Vec::new(),
-                    }),
-                };
-            }
-        };
-        let lex = match lex_result {
-            Ok(value) => value,
-            Err(_) => {
-                return Ok(RetrievalOutcome::Degraded {
-                    degradation: RetrievalDegradation::LexicalUnavailable,
-                    fallback_matches: self.fallback_matches(query, time_filter, sem, true)?,
-                });
-            }
-        };
-
-        let lex_map = ranked_map(lex);
-        let sem_map = ranked_map(sem);
 
         let mut candidate_ids: HashSet<EventId> = HashSet::new();
         candidate_ids.extend(lex_map.keys().copied());
         candidate_ids.extend(sem_map.keys().copied());
 
-        // Query-aware deterministic entity signal (Phase-6-close
-        // recall-surface fusion, Option A). Derive the entity ids the query
-        // references, then in ONE additional store read count how many of
-        // them each candidate event mentions. `entity_max` normalizes the
-        // per-event counts into `ent̂ ∈ [0, 1]`. Both the derivation and
-        // the count are best-effort: a backend without the graph surface
-        // yields an empty set / map, so the arm contributes `0` for every
-        // candidate and the ranking is byte-identical to the four-arm
-        // fusion (the read-only no-op the negative-control test pins).
-        let query_entity_ids = self.derive_query_entity_ids(&query.text);
-        let entity_counts: HashMap<EventId, u32> = if query_entity_ids.is_empty() {
-            HashMap::new()
-        } else {
-            let qids: Vec<EntityId> = query_entity_ids.into_iter().collect();
-            let candidate_vec: Vec<EventId> = candidate_ids.iter().copied().collect();
-            self.store
-                .mention_match_for_events(&qids, &candidate_vec)
-                .unwrap_or_default()
-        };
-        let entity_max = entity_counts.values().copied().max().unwrap_or(0);
+        let (entity_counts, entity_max) = self.entity_match_counts(&query.text, &candidate_ids);
 
         let mut semantic_scores: Vec<f32> = sem_map.values().map(|value| value.0).collect();
         semantic_scores.sort_by(|left, right| right.total_cmp(left));
         let semantic_margin = semantic_scores
-            .get(0)
+            .first()
             .zip(semantic_scores.get(1))
             .map_or(0.0, |(top, second)| (top - second).max(0.0));
         let mut critic_rows: Vec<(EventId, String, f32)> = Vec::new();
@@ -785,39 +716,139 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 signals,
             });
         }
-        let critic_candidates: Vec<EvidenceCandidate<'_>> = critic_rows
+        let evidence_is_sufficient = self.rank_and_assess(query, &mut matches, &critic_rows);
+        Ok(self.finalize_retrieval_outcome(
+            matches,
+            evidence_is_sufficient,
+            lex_map.is_empty() && sem_map.is_empty(),
+        ))
+    }
+
+    fn entity_match_counts(
+        &self,
+        query_text: &str,
+        candidate_ids: &HashSet<EventId>,
+    ) -> (HashMap<EventId, u32>, u32) {
+        let query_entity_ids = self.derive_query_entity_ids(query_text);
+        let counts = if query_entity_ids.is_empty() {
+            HashMap::new()
+        } else {
+            let query_ids = query_entity_ids.into_iter().collect::<Vec<_>>();
+            let candidates = candidate_ids.iter().copied().collect::<Vec<_>>();
+            self.store
+                .mention_match_for_events(&query_ids, &candidates)
+                .unwrap_or_default()
+        };
+        let maximum = counts.values().copied().max().unwrap_or(0);
+        (counts, maximum)
+    }
+
+    fn rank_and_assess(
+        &self,
+        query: &RetrievalQuery,
+        matches: &mut Vec<RetrievalMatch>,
+        critic_rows: &[(EventId, String, f32)],
+    ) -> bool {
+        let candidates = critic_rows
             .iter()
             .map(|(event_id, text, raw_semantic_cosine)| EvidenceCandidate {
                 stable_id: event_id.0,
                 text,
                 raw_semantic_cosine: *raw_semantic_cosine,
             })
-            .collect();
-        let critic_features = evidence_features_for_candidates(&query.text, &critic_candidates);
-        let evidence_is_sufficient =
-            critic_features.is_some_and(|features| self.evidence_policy.is_sufficient(features));
-        matches.sort_by(|a, b| {
-            b.hit
+            .collect::<Vec<_>>();
+        let sufficient = evidence_features_for_candidates(&query.text, &candidates)
+            .is_some_and(|features| self.evidence_policy.is_sufficient(features));
+        matches.sort_by(|left, right| {
+            right
+                .hit
                 .score_combined
-                .total_cmp(&a.hit.score_combined)
-                .then_with(|| a.hit.event_id.cmp(&b.hit.event_id))
+                .total_cmp(&left.hit.score_combined)
+                .then_with(|| left.hit.event_id.cmp(&right.hit.event_id))
         });
         matches.truncate(query.limit);
+        sufficient
+    }
+
+    fn candidate_arms(
+        &self,
+        query: &RetrievalQuery,
+        time_filter: Option<TimeRange>,
+    ) -> Result<CandidateArms, RetrieveError> {
+        let lex_result = self.store.fts5_search(&query.text, self.k_lex);
+        let Ok(q_emb) = self.embedder.embed_one(&query.text) else {
+            return match lex_result {
+                Ok(lex) => Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                    fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
+                })),
+                Err(_) => Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                    fallback_matches: Vec::new(),
+                })),
+            };
+        };
+        // ADR-0011 §5 candidate-pool pre-filter. When the query carries
+        // a time / app scope (either from the router — anchor window,
+        // extracted time range — or from the caller-supplied
+        // `RetrievalQuery::app_filter`), push those into the store so
+        // brute-force cosine walks only the in-scope vectors instead of
+        // the whole `event_vectors` table. Semantic ranks are otherwise
+        // unchanged: the pool narrowing is a subset of the row set the
+        // full-KNN would have scored, and the retriever's row-level
+        // app/time guard downstream is still authoritative. When both
+        // filters are `None` the store's default impl delegates to
+        // `vec_search` — byte-identical fallback (full KNN).
+        let Ok(sem) = self.store.vec_search_filtered(
+            &q_emb,
+            self.k_sem,
+            time_filter,
+            query.app_filter.as_deref(),
+        ) else {
+            return match lex_result {
+                Ok(lex) => Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                    fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
+                })),
+                Err(_) => Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                    fallback_matches: Vec::new(),
+                })),
+            };
+        };
+        let Ok(lex) = lex_result else {
+            return Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                degradation: RetrievalDegradation::LexicalUnavailable,
+                fallback_matches: self.fallback_matches(query, time_filter, sem, true)?,
+            }));
+        };
+        Ok(CandidateArms::Ready {
+            lexical: ranked_map(lex),
+            semantic: ranked_map(sem),
+        })
+    }
+
+    fn finalize_retrieval_outcome(
+        &self,
+        matches: Vec<RetrievalMatch>,
+        evidence_is_sufficient: bool,
+        candidate_arms_empty: bool,
+    ) -> RetrievalOutcome {
         if !self.evidence_policy.validation_qualified {
-            return Ok(RetrievalOutcome::Degraded {
+            return RetrievalOutcome::Degraded {
                 degradation: RetrievalDegradation::EvidenceSufficiencyUnqualified,
                 fallback_matches: matches,
-            });
+            };
         }
         if matches.is_empty() || !evidence_is_sufficient {
-            let reason = if lex_map.is_empty() && sem_map.is_empty() {
+            let reason = if candidate_arms_empty {
                 NothingMatchedReason::NoCandidates
             } else {
                 NothingMatchedReason::EvidenceFloor
             };
-            Ok(RetrievalOutcome::NothingMatched { reason })
+            RetrievalOutcome::NothingMatched { reason }
         } else {
-            Ok(RetrievalOutcome::Matched { matches })
+            RetrievalOutcome::Matched { matches }
         }
     }
 
@@ -969,29 +1000,25 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         &self,
         query: &RetrievalQuery,
     ) -> Result<RetrievalOutcome, RetrieveError> {
-        let q_emb = match self.embedder.embed_one(&query.text) {
-            Ok(value) => value,
-            Err(_) => return self.plain_retrieve_outcome(query, query.time_filter),
+        let Ok(q_emb) = self.embedder.embed_one(&query.text) else {
+            return self.plain_retrieve_outcome(query, query.time_filter);
         };
-        let sem_top = match self.store.vec_search(&q_emb, 1) {
-            Ok(matches) => matches,
-            Err(_) => {
-                return match self.store.fts5_search(&query.text, self.k_lex) {
-                    Ok(lexical) => Ok(RetrievalOutcome::Degraded {
-                        degradation: RetrievalDegradation::EmbeddingsUnavailable,
-                        fallback_matches: self.fallback_matches(
-                            query,
-                            query.time_filter,
-                            lexical,
-                            false,
-                        )?,
-                    }),
-                    Err(_) => Ok(RetrievalOutcome::Degraded {
-                        degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
-                        fallback_matches: Vec::new(),
-                    }),
-                }
-            }
+        let Ok(sem_top) = self.store.vec_search(&q_emb, 1) else {
+            return match self.store.fts5_search(&query.text, self.k_lex) {
+                Ok(lexical) => Ok(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                    fallback_matches: self.fallback_matches(
+                        query,
+                        query.time_filter,
+                        lexical,
+                        false,
+                    )?,
+                }),
+                Err(_) => Ok(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                    fallback_matches: Vec::new(),
+                }),
+            };
         };
         let Some((anchor_id, _)) = sem_top.into_iter().next() else {
             return self.plain_retrieve_outcome(query, query.time_filter);

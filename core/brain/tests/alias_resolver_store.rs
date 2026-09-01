@@ -171,7 +171,7 @@ fn migration_0005_creates_entity_identities() {
             |r| r.get(0),
         )
         .expect("schema version");
-    assert_eq!(version, "7");
+    assert_eq!(version, "8");
 }
 
 // ---------------------------------------------------------------------------

@@ -1,100 +1,99 @@
-# Task 5 R2 Repair Report: Governed Source-Backed Memory
+# Task 5 R3 Repair Report: Governed Source-Backed Memory
 
 ## Status
 
 - Repair commit: this focused commit.
-- R2 P1/P2/P3 code findings: repaired with focused regressions.
+- R3 P1/P3 findings: repaired with focused regressions.
 - Accepted baseline: unchanged at
   `35fbebff470f957caf7ea17b456ba0708d48521858061470a2c51dfccc7691c9`.
-- Fixed lexical and absolute quality thresholds: unchanged.
+- Accepted dataset: unchanged at
+  `96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f`.
+- Fixed lexical, regression, and absolute quality thresholds: unchanged.
 - Canonical result: `complete=false`, `publishable=false`,
   `launch_qualified=false`.
-- Residual blocker: the frozen evidence critic remains scientifically
-  unqualified. Production therefore returns typed degradation instead of
-  promoting related context to authority.
+- Residual scientific blocker: the frozen evidence critic remains
+  unqualified. Production returns typed degradation instead of promoting
+  related context to authority.
 
-## R2 Repairs
+## R3 Repairs
 
-### Typed retrieval authority
+### Accepted baseline identity
 
-`RetrievalOutcome` remains typed through the MCP wire:
+The canonical runner rejects every caller-provided `--baseline` form before
+executing the benchmark, including `--baseline PATH`, `--baseline=PATH`, and
+duplicates in update mode. It supplies exactly one repository baseline.
 
-- `matched` contains evidence-qualified `hits` only.
-- `nothing_matched` contains a reason and no hits.
-- `degraded` contains a named degradation, keeps `hits` empty, and may expose
-  non-authoritative rows only as `related_context`.
+The binary independently rejects duplicate baseline arguments and binds every
+canonical report to both:
 
-The no-embedder live path now returns `EmbeddingsUnavailable`, including when
-FTS finds rows. A simultaneous FTS failure is
-`LexicalAndEmbeddingsUnavailable`. The chunker-to-store-to-MCP integration
-test enforces the same wire contract. The public legacy `Retriever::retrieve`
-API now rejects every degradation, including
-`EvidenceSufficiencyUnqualified`, rather than returning fallback rows as hits.
+- the canonicalized path `docs/eval/work-memory-baseline.json`; and
+- the pinned SHA-256
+  `35fbebff470f957caf7ea17b456ba0708d48521858061470a2c51dfccc7691c9`.
 
-### Canonical identities and source governance
+A missing, copied, replaced, or tampered baseline creates a failed regression
+and forces `complete=false`, `publishable=false`, and
+`launch_qualified=false`. Tests cover runner override attempts, update-mode
+attempts, duplicates, a byte-identical copy at another path, and content
+tampering while inspecting all three report booleans. No accepted artifact or
+threshold was regenerated or weakened.
 
-- Evidence, claims, deltas, transitions, and retractions are verified inside
-  the projection transaction against their deterministic payload identities.
-- Existing same-ID rows are compared with their immutable payload. A mutated
-  collision aborts the transaction and preserves the original row.
-- Transition IDs use the public canonical constructor, and every explicit
-  transition must be owned by its enclosing delta source event.
-- Evidence locator, source scope, observation time, and content hash are
-  recomputed from the stored canonical event at commit time.
-- Initial active claims require attribution, same-event evidence, and a scope
-  no broader than every evidence source scope.
-- Tests cover mutation, forged IDs, wrong transition ownership, persisted
-  collisions, reversed evidence order, and reversed delta replay while
-  inspecting durable rows.
+### Delta-owned deletion provenance
 
-### Retraction, correction, and deletion lifecycle
+Claims and explicit claim transitions now persist a nullable, constrained
+`delta_id`. Fresh projection writes this ownership transactionally; collision
+checks include ownership. Schema v8 rebuilds populated v6/v7 memory tables and
+backfills ownership only when the legacy source and assertion coordinates
+identify exactly one delta. Ambiguous legacy rows remain unowned rather than
+being guessed.
 
-Migration 0006 contains the durable `memory_event_retractions` ledger. Every
-projection consults it, including retract-before-project and replay under a
-new projector version.
+Privacy deletion now stages the requested events, affected claims, explicitly
+owned deltas, correction descendants, transition dependencies, and only the
+evidence in that closure. It no longer expands from one affected claim to all
+claims sharing a source event, and it no longer globally deletes unlinked
+evidence. Source-event deletion still removes all deltas sourced by the event,
+as required.
 
-Corrections may supersede only a claim active at
-`(new_claim.valid_from_us, delta.asserted_at_us)`. Tests cover proposed,
-superseded, retracted, and contradicted targets, plus backdated terminal
-transitions and independent valid/transaction time.
+Regressions cover two independent deltas sharing one source event, unrelated
+orphan evidence, same-delta siblings, secondary evidence, mixed correction and
+explicit-transition graphs, and single/range/retention/wipe paths. Each test
+inspects durable rows after deletion.
 
-Single deletion, range deletion, retention purge, and full wipe now remove
-dependent memory rows in the same transaction before deleting events. The
-dependency closure includes recursive corrections. Deleting secondary
-evidence invalidates the complete affected source delta, including sibling
-claims and transition rows, so persisted deterministic payloads cannot retain
-missing evidence. Unrelated events and projections remain intact.
+### Exact migration shape
 
-### Determinism, fairness, and exact schema
+Schema validation now uses `PRAGMA table_xinfo` and `PRAGMA index_xinfo`.
+Before stamping version 8 it verifies:
 
-- Split-conformal calibration rejects unattainable coverage/sample-size
-  combinations and uses the valid order statistic at the minimum sample size.
-- Critic ties and all FTS/vector cutoff ties end in stable event identity.
-- Plain and anchor retrieval preserve typed embedder, vector, lexical, and
-  combined degradations.
-- Expansion preflights each seed, so oversized evidence cannot consume a
-  one-node budget and starve a later admissible seed.
-- Schema version 7 transactionally rebuilds populated v6 memory tables with
-  explicit scalar `NOT NULL PRIMARY KEY` constraints while preserving deltas,
-  evidence, correction chains, links, transitions, and retractions.
-- Validation compares exact column type/null/default/PK shape, the complete FK
-  action set, exact custom-index uniqueness/partial/column shape, PK and UNIQUE
-  indexes, and the exact CHECK count. Regressions cover missing scalar and
-  composite PKs, wrong index uniqueness, extra CHECK constraints with altered
-  spacing, rollback, and populated v6-to-v7 migration.
+- every table column's CID, name, type, nullability, default, PK position, and
+  hidden/generated status;
+- inherited per-column collation through a transient index;
+- the complete foreign-key action set;
+- every canonical index's key columns, BINARY collation, and ASC order;
+- index uniqueness, partial status, origin, and auxiliary row shape; and
+- the canonical CHECK constraints.
 
-### Mandatory accepted baseline
+Adversarial tests reject scalar IDs using `NOCASE`, comment-obfuscated
+non-indexed collations, generated columns, and `NOCASE DESC` secondary indexes.
+Migration rollback and populated legacy preservation remain covered.
 
-Canonical work-memory runs cannot omit the accepted baseline. The runner
-rejects `--no-baseline`, fails before execution when the baseline is absent,
-and always forwards
-`--baseline docs/eval/work-memory-baseline.json`. The binary independently
-records a failed regression when a canonical invocation lacks the baseline.
+### Determinism and typed authority retained
 
-A supplied or synthesized failed regression now forces `complete=false`,
-which also forces `publishable=false` and `launch_qualified=false`. Tests
-inspect all serialized booleans. No evaluation-specific production rule was
-added, and no threshold or accepted baseline was changed.
+- `RetrievalOutcome` remains typed through MCP as `matched`,
+  `nothing_matched`, or `degraded`; degraded related context is never an
+  ordinary hit.
+- No-embedder lexical output remains
+  `degraded/embeddings_unavailable`.
+- Evidence, claim, transition, delta, and retraction identities remain
+  deterministic and transactionally collision-checked.
+- Corrections still require the superseded claim to be active at both the
+  correction's valid-time and transaction-time coordinates.
+- Split-conformal validity, deterministic critic and retrieval ties, typed
+  anchor degradation, and one-node expansion fairness remain covered.
+- The public legacy retrieval escape hatch continues to reject degradation.
+
+The R3 refactor also removes the Task 5 full-Clippy findings without lint
+allows: oversized retrieval, expansion, migration, deletion, and schema
+validation functions were decomposed into focused helpers. The all-target
+brain benchmark was updated for the typed `Event.tab_id` field.
 
 ## Independent Calibration
 
@@ -106,35 +105,29 @@ added, and no threshold or accepted baseline was changed.
 - Untouched validation: coverage `0.833`, FPR `0.333`
 - Production policy: `validation_qualified=false`
 
-Reproduction:
-
-```text
-MCI_ARCTIC_MODEL_PATH=/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc \
-cargo run -q -p mci-agent --bin mci_calibrate_evidence -- \
-  eval/relevance-calibration/v1.json /tmp/task5-r2-policy-repro.json
-cmp eval/relevance-calibration/v1-policy.json /tmp/task5-r2-policy-repro.json
-```
-
-Both commands exited `0`; the regenerated artifact matched byte-for-byte.
+The frozen calibration artifact and critic policy were not changed by R3.
 
 ## Canonical Benchmark
 
 Reproduction:
 
 ```text
-MCI_ARCTIC_MODEL_PATH=/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc \
-scripts/eval/work-memory/run.sh --out /tmp/hippo-task5-r2.json
+scripts/eval/work-memory/run.sh --out /tmp/hippo-task5-r3.json
 ```
 
-- Process exit: `5`.
+- Process exit: `5`, the expected honest qualification failure.
 - Dataset SHA-256:
   `96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f`.
+- Accepted baseline SHA-256:
+  `35fbebff470f957caf7ea17b456ba0708d48521858061470a2c51dfccc7691c9`.
 - Model SHA-256:
   `f782f7f4a13c69a4399345f1d6a4b8de8f4327c131e537a1ea6bf9fdeaeaeef8`.
-- Recorded base commit: `3e8248aac5ba8512f47b874d40cda3543ae6b684`.
+- Recorded base commit: `8454ab54e66d2c6ef24bcf5c7e5fffb01e74a191`.
 - Compute: Core ML CPU-only, Apple M3, macOS 26.5.
-- The run recorded `git_dirty_at_start=true` because it measured this repair
-  before its focused commit and concurrent Task 2 files were present.
+- The report records exactly one argument:
+  `--baseline docs/eval/work-memory-baseline.json`.
+- `git_dirty_at_start=true` because this repair and concurrent owned work were
+  uncommitted when measured.
 
 | Arm | Scored | Hit@5 | Recall@5 | Provenance@5 | FPR@5 | Separation@5 | MRR | Index p95 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -142,39 +135,55 @@ scripts/eval/work-memory/run.sh --out /tmp/hippo-task5-r2.json
 | Hybrid | 0 | undefined | undefined | undefined | undefined | undefined | undefined | 0 B |
 
 Lexical outcomes were 7 matched, 14 missed, 3 abstained, and 0 false
-positives. Lexical p50/p95 latency was `13.384625/19.567291 ms`.
+positives. Lexical p50/p95 latency was `12.085458/22.259833 ms`.
 
 All 24 hybrid instances returned
 `EvidenceSufficiencyUnqualified`. None was relabeled or scored as a hit,
 miss, abstention, or false positive. Therefore:
 
 - `regression.passed=false` because accepted-baseline hybrid metrics are
-  undefined.
-- `quality_gate.passed=false` because all fixed hybrid quality metrics are
-  undefined.
+  undefined;
+- `quality_gate.passed=false` because fixed hybrid quality metrics are
+  undefined; and
 - `complete=false`, `publishable=false`, and `launch_qualified=false`.
-- Fixed targets remain FPR@5 `<= 0.10`, separation@5 `>= 0.80`, hit/recall/
-  provenance@5 `>= 0.90`, and MRR `>= 0.85`.
+
+Fixed targets remain FPR@5 `<= 0.10`, separation@5 `>= 0.80`, hit/recall/
+provenance@5 `>= 0.90`, and MRR `>= 0.85`.
 
 ## Verification
 
-- `cargo test -p mci-brain --quiet`: exit `0`; 613 passed, 0 failed,
+- `cargo test -p mci-brain --locked --quiet`: exit `0`; 620 passed, 0 failed,
   1 ignored.
 - `cargo test -p mci-agent --locked --test mcp_server \
-  --test work_memory_bench --test chunker_event_wire \
-  --test wire_e2e_fixture --bin mci-bench --bin mci_calibrate_evidence \
-  --quiet`: exit `0`; 57 passed, 0 failed.
-- `cargo test -p mci-agent --locked --no-run`: exit `0`; all agent library,
-  binary, and integration-test targets compiled, including
-  `wire_e2e_fixture`.
-- `cargo fmt --all -- --check`: exit `0`.
-- Accepted baseline diff: empty.
-- `git diff --check` and scoped staged-file review: run immediately before
-  commit.
+  --test work_memory_bench --test wire_e2e_fixture \
+  --test chunker_event_wire --bin mci-bench \
+  --bin mci_calibrate_evidence -- --nocapture`: exit `0`; 61 passed,
+  0 failed.
+- `cargo test -p mci-agent --locked --no-run`: exit `0`; every agent target
+  compiled.
+- `cargo check -p mci-brain -p mci-agent --all-targets --locked`: exit `0`;
+  every brain and agent target, including `hybrid_recall`, compiled.
+- Scoped `rustfmt --check` over every Task 5-owned Rust file: exit `0`.
+- `cargo fmt --all -- --check`: executed; the exact workspace command is
+  blocked by the concurrently edited, out-of-scope `mci-brain-ffi` file.
+- `cargo clippy -p mci-brain --lib --test memory_projection \
+  --test sqlcipher_brain_store --locked -- -D warnings`: exit `0`.
+- Task 5 evaluation/retrieval Clippy checks for `evidence_sufficiency` and
+  `fts_sanitizer_against_sqlite`: exit `0`.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: executed;
+  Task 5 brain code is clean, but the exact workspace command is blocked by
+  pre-existing/out-of-scope lint errors in `mci-embed-coreml`,
+  `mci-coreml-bridge`, the concurrently edited `mci-brain-ffi`, and older
+  non-Task-5 brain targets such as `tier2_footprint` and
+  `mail_cascade_corpus`. No lint was weakened and no out-of-scope file was
+  changed.
+- Accepted baseline and dataset diffs: empty.
+- Scoped formatting, `git diff --check`, and staged-file review are run
+  immediately before commit.
 
 ## Residual Gate
 
-The R2 code-integrity findings are repaired. Task 5 remains scientifically
+The R3 code-integrity findings are repaired. Task 5 remains scientifically
 unqualified because the frozen generic ArcticEmbedS critic cannot yet separate
 answer-bearing evidence from closely related insufficient context at the fixed
 false-positive gate. The next qualifying change needs an independently frozen

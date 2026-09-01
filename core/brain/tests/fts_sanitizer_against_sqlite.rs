@@ -5,7 +5,7 @@
 //! `sanitize_fts5_query`'s unit tests assert the *shape* of the string it
 //! returns. Every one of them passed while the function was emitting
 //! queries FTS5 rejects outright, because three of those expectations had
-//! been written from what the function did rather than from what SQLite
+//! been written from what the function did rather than from what `SQLite`
 //! accepts. `what did I do?` reached the engine as a bareword and came
 //! back as `fts5: syntax error near "?"`, so `mci_recall` returned an
 //! error instead of results for most natural questions.
@@ -13,7 +13,7 @@
 //! Asserting on the output string cannot catch that. Only running it can.
 //! So this file feeds the sanitizer realistic input and executes the
 //! result, which is the property that actually matters: whatever comes
-//! out of the sanitizer, SQLite will run it.
+//! out of the sanitizer, `SQLite` will run it.
 
 use mci_brain::fts_sanitizer::sanitize_fts5_query;
 use rusqlite::Connection;

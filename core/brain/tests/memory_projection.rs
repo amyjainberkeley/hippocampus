@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use mci_brain::episode_segmenter::EpisodeWriter;
 use mci_brain::{
@@ -24,6 +24,13 @@ fn store() -> (TempDir, PathBuf, DbKey, SqlCipherBrainStore) {
     let key = test_key();
     let store = SqlCipherBrainStore::new(&path, &key).expect("open");
     (dir, path, key, store)
+}
+
+fn expect_open_error(path: &Path, key: &DbKey, message: &str) -> StoreError {
+    let Err(error) = SqlCipherBrainStore::new(path, key) else {
+        panic!("{message}");
+    };
+    error
 }
 
 fn event(text: &str, ts_us: u64) -> Event {
@@ -57,6 +64,27 @@ fn evidence(
 fn canonical_evidence(store: &SqlCipherBrainStore, event_id: EventId) -> EvidenceRef {
     let event = store.get_event(event_id).unwrap().unwrap();
     EvidenceRef::from_event(event_id, &event, "structured_app")
+}
+
+fn insert_orphan_evidence(path: &std::path::Path, key: &DbKey, value: &EvidenceRef) {
+    let db = raw_open(path, key).unwrap();
+    db.conn()
+        .execute(
+            "INSERT INTO memory_evidence
+             (id, event_id, source_kind, source_locator, source_scope,
+              observed_at_us, content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                value.id.0,
+                i64::try_from(value.event_id.0).unwrap(),
+                value.source_kind,
+                value.source_locator,
+                value.source_scope,
+                i64::try_from(value.observed_at_us).unwrap(),
+                value.content_hash,
+            ],
+        )
+        .unwrap();
 }
 
 fn claim(
@@ -264,15 +292,17 @@ fn deleting_a_source_event_removes_its_recursive_correction_descendants() {
 }
 
 #[test]
-fn deleting_secondary_evidence_removes_the_entire_affected_delta_projection() {
+fn deleting_secondary_evidence_preserves_independent_same_source_delta_and_orphan() {
     let (_dir, path, key, store) = store();
     let projection_source = store.put_event(&event("projection source", 10)).unwrap();
     let secondary_evidence = store.put_event(&event("supporting source", 11)).unwrap();
+    let orphan_source = store.put_event(&event("unrelated orphan", 12)).unwrap();
     let source_evidence = canonical_evidence(&store, projection_source);
     let support_evidence = canonical_evidence(&store, secondary_evidence);
+    let orphan_evidence = canonical_evidence(&store, orphan_source);
     let scope = source_evidence.source_scope.clone();
     let dependent = claim(
-        vec![source_evidence, support_evidence],
+        vec![source_evidence.clone(), support_evidence],
         "Priya",
         ClaimStatus::Active,
         None,
@@ -281,15 +311,26 @@ fn deleting_secondary_evidence_removes_the_entire_affected_delta_projection() {
         20,
     );
     let sibling = proposed_claim(projection_source, "sibling", 20);
-    project_event(
-        &store,
-        &delta(
-            projection_source,
-            20,
-            vec![dependent.clone(), sibling.clone()],
-        ),
-    )
-    .unwrap();
+    let affected_delta = delta(
+        projection_source,
+        20,
+        vec![dependent.clone(), sibling.clone()],
+    );
+    project_event(&store, &affected_delta).unwrap();
+    let independent = claim(
+        vec![source_evidence],
+        "independent",
+        ClaimStatus::Active,
+        None,
+        &scope,
+        Some("Independent Source"),
+        30,
+    );
+    let independent_delta = delta(projection_source, 30, vec![independent.clone()]);
+    project_event(&store, &independent_delta).unwrap();
+    drop(store);
+    insert_orphan_evidence(&path, &key, &orphan_evidence);
+    let store = SqlCipherBrainStore::new(&path, &key).unwrap();
 
     assert_eq!(store.delete_event(secondary_evidence).unwrap(), 1);
     assert!(store.get_event(projection_source).unwrap().is_some());
@@ -298,24 +339,165 @@ fn deleting_secondary_evidence_removes_the_entire_affected_delta_projection() {
         .unwrap()
         .is_empty());
     assert!(store.memory_claim_history(&sibling.id).unwrap().is_empty());
+    assert_eq!(
+        store.memory_claim_history(&independent.id).unwrap().len(),
+        1
+    );
     drop(store);
 
     let db = raw_open(&path, &key).unwrap();
-    for table in [
-        "memory_deltas",
-        "memory_evidence",
-        "memory_claims",
-        "memory_claim_evidence",
-        "memory_claim_transitions",
-    ] {
-        let count: i64 = db
-            .conn()
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 0, "affected delta survived in {table}");
-    }
+    let mut statement = db
+        .conn()
+        .prepare("SELECT id FROM memory_deltas ORDER BY id")
+        .unwrap();
+    let remaining_delta_ids = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(remaining_delta_ids, vec![independent_delta.id]);
+    assert_ne!(remaining_delta_ids, vec![affected_delta.id]);
+    let orphan_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM memory_evidence WHERE id = ?1",
+            params![orphan_evidence.id.0],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(orphan_count, 1, "unrelated orphan evidence must survive");
+}
+
+#[test]
+fn deletion_closure_removes_owned_correction_and_transition_but_not_independent_delta() {
+    let (_dir, _path, _key, store) = store();
+    let stable_source = store.put_event(&event("stable fact", 5)).unwrap();
+    let original_source = store.put_event(&event("Alice owns HIPP-201", 10)).unwrap();
+    let withdrawn_evidence = store.put_event(&event("supporting note", 11)).unwrap();
+    let correction_source = store.put_event(&event("Priya owns HIPP-201", 30)).unwrap();
+
+    let stable_evidence = canonical_evidence(&store, stable_source);
+    let stable_scope = stable_evidence.source_scope.clone();
+    let stable = claim(
+        vec![stable_evidence],
+        "stable",
+        ClaimStatus::Active,
+        None,
+        &stable_scope,
+        Some("Stable Source"),
+        15,
+    );
+    project_event(&store, &delta(stable_source, 15, vec![stable.clone()])).unwrap();
+
+    let original_evidence = canonical_evidence(&store, original_source);
+    let original_scope = original_evidence.source_scope.clone();
+    let original = claim(
+        vec![
+            original_evidence,
+            canonical_evidence(&store, withdrawn_evidence),
+        ],
+        "Alice",
+        ClaimStatus::Active,
+        None,
+        &original_scope,
+        Some("Alice"),
+        20,
+    );
+    project_event(&store, &delta(original_source, 20, vec![original.clone()])).unwrap();
+
+    let correction_evidence = canonical_evidence(&store, correction_source);
+    let correction_scope = correction_evidence.source_scope.clone();
+    let correction = claim(
+        vec![correction_evidence],
+        "Priya",
+        ClaimStatus::Active,
+        Some(&original),
+        &correction_scope,
+        Some("Priya"),
+        40,
+    );
+    let explicit_transition = ClaimTransition::new(
+        stable.id.clone(),
+        ClaimStatus::Contradicted,
+        40,
+        40,
+        "mixed correction delta",
+        correction_source,
+        "projector-v1",
+    );
+    let correction_delta = MemoryDelta::new(
+        correction_source,
+        40,
+        "projector-v1",
+        vec![correction.clone()],
+        vec![explicit_transition],
+    );
+    project_event(&store, &correction_delta).unwrap();
+
+    let independent = proposed_claim(correction_source, "independent", 50);
+    let independent_delta = delta(correction_source, 50, vec![independent.clone()]);
+    project_event(&store, &independent_delta).unwrap();
+
+    assert_eq!(store.delete_event(withdrawn_evidence).unwrap(), 1);
+    assert!(store.memory_claim_history(&original.id).unwrap().is_empty());
+    assert!(store
+        .memory_claim_history(&correction.id)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        store.memory_claim_history(&independent.id).unwrap().len(),
+        1
+    );
+    let stable_history = store.memory_claim_history(&stable.id).unwrap();
+    assert_eq!(stable_history.len(), 1);
+    assert_eq!(stable_history[0].status, ClaimStatus::Active);
+}
+
+#[test]
+fn range_deletion_of_secondary_evidence_preserves_independent_same_source_delta() {
+    let (_dir, _path, _key, store) = store();
+    let expired_evidence = store.put_event(&event("expired support", 10)).unwrap();
+    let projection_source = store.put_event(&event("current source", 100)).unwrap();
+    let source_evidence = canonical_evidence(&store, projection_source);
+    let scope = source_evidence.source_scope.clone();
+    let affected = claim(
+        vec![
+            source_evidence.clone(),
+            canonical_evidence(&store, expired_evidence),
+        ],
+        "affected",
+        ClaimStatus::Active,
+        None,
+        &scope,
+        Some("Affected Source"),
+        110,
+    );
+    project_event(
+        &store,
+        &delta(projection_source, 110, vec![affected.clone()]),
+    )
+    .unwrap();
+    let independent = claim(
+        vec![source_evidence],
+        "independent",
+        ClaimStatus::Active,
+        None,
+        &scope,
+        Some("Independent Source"),
+        120,
+    );
+    project_event(
+        &store,
+        &delta(projection_source, 120, vec![independent.clone()]),
+    )
+    .unwrap();
+
+    assert_eq!(store.delete_events_in_range(0, 50).unwrap(), 1);
+    assert!(store.memory_claim_history(&affected.id).unwrap().is_empty());
+    assert_eq!(
+        store.memory_claim_history(&independent.id).unwrap().len(),
+        1
+    );
 }
 
 #[test]
@@ -353,9 +535,12 @@ fn range_deletion_removes_only_memory_projected_from_events_in_range() {
 fn wipe_all_clears_projected_memory_and_retraction_ledger() {
     let (_dir, path, key, store) = store();
     let source = store.put_event(&event("source", 10)).unwrap();
+    let orphan_source = store.put_event(&event("orphan evidence", 20)).unwrap();
     let retraction_source = store.put_event(&event("withdraw source", 30)).unwrap();
     let projected = proposed_claim(source, "Priya", 20);
     project_event(&store, &delta(source, 20, vec![projected])).unwrap();
+    let independent = proposed_claim(source, "independent", 25);
+    project_event(&store, &delta(source, 25, vec![independent])).unwrap();
     retract_event(
         &store,
         &MemoryRetraction::new(
@@ -368,8 +553,12 @@ fn wipe_all_clears_projected_memory_and_retraction_ledger() {
         ),
     )
     .unwrap();
+    let orphan_evidence = canonical_evidence(&store, orphan_source);
+    drop(store);
+    insert_orphan_evidence(&path, &key, &orphan_evidence);
+    let store = SqlCipherBrainStore::new(&path, &key).unwrap();
 
-    assert_eq!(store.wipe_all().unwrap(), 2);
+    assert_eq!(store.wipe_all().unwrap(), 3);
     drop(store);
 
     let db = raw_open(&path, &key).unwrap();
@@ -1113,7 +1302,7 @@ fn migration_upgrades_and_reopens_every_prior_brain_schema() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(schema, "7", "upgrade from schema {version}");
+        assert_eq!(schema, "8", "upgrade from schema {version}");
         for table in [
             "memory_deltas",
             "memory_evidence",
@@ -1135,20 +1324,28 @@ fn migration_upgrades_and_reopens_every_prior_brain_schema() {
     }
 }
 
-#[test]
-fn migration_v7_rebuilds_v6_identity_constraints_without_losing_memory_rows() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("brain-v6.sqlite");
-    let key = test_key();
-    create_prior_schema(&path, &key, 5);
-    {
-        let mut db = raw_open(&path, &key).unwrap();
-        let tx = db.conn_mut().transaction().unwrap();
-        let old_v6 = include_str!("../migrations/0006_memory_claims.sql")
-            .replace("TEXT NOT NULL PRIMARY KEY", "TEXT PRIMARY KEY");
-        tx.execute_batch(&old_v6).unwrap();
-        tx.execute_batch(
-            "INSERT INTO events (id, ts_us, text, cascade_reason)
+fn create_populated_v6_memory_schema(path: &Path, key: &DbKey) {
+    create_prior_schema(path, key, 5);
+    let mut db = raw_open(path, key).unwrap();
+    let tx = db.conn_mut().transaction().unwrap();
+    let old_v6 = include_str!("../migrations/0006_memory_claims.sql")
+        .replace("TEXT NOT NULL PRIMARY KEY", "TEXT PRIMARY KEY")
+        .replace("    delta_id            TEXT,\n", "")
+        .replace(
+            "    FOREIGN KEY (delta_id) REFERENCES memory_deltas(id) ON DELETE RESTRICT,\n",
+            "",
+        )
+        .replace(
+            "CREATE INDEX IF NOT EXISTS memory_claims_delta\n    ON memory_claims(delta_id, id);\n",
+            "",
+        )
+        .replace(
+            "CREATE INDEX IF NOT EXISTS memory_claim_transitions_delta\n    ON memory_claim_transitions(delta_id, id);\n",
+            "",
+        );
+    tx.execute_batch(&old_v6).unwrap();
+    tx.execute_batch(
+        "INSERT INTO events (id, ts_us, text, cascade_reason)
                  VALUES (1, 10, 'old source', 0), (2, 20, 'correction source', 0);
              INSERT INTO memory_deltas VALUES
                  ('d1', 1, 10, 'projector-v1'),
@@ -1168,10 +1365,17 @@ fn migration_v7_rebuilds_v6_identity_constraints_without_losing_memory_rows() {
                  ('r1', 1, 2, 30, 30, 'withdrawn', 'projector-v1');
              INSERT OR REPLACE INTO meta (key, value)
                  VALUES ('brain_schema_version', '6');",
-        )
-        .unwrap();
-        tx.commit().unwrap();
-    }
+    )
+    .unwrap();
+    tx.commit().unwrap();
+}
+
+#[test]
+fn migration_v8_rebuilds_v6_identity_constraints_and_adds_delta_ownership() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("brain-v6.sqlite");
+    let key = test_key();
+    create_populated_v6_memory_schema(&path, &key);
 
     let store = SqlCipherBrainStore::new(&path, &key).expect("upgrade populated v6 store");
     drop(store);
@@ -1184,7 +1388,7 @@ fn migration_v7_rebuilds_v6_identity_constraints_without_losing_memory_rows() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "7");
+    assert_eq!(version, "8");
     for (table, expected) in [
         ("memory_deltas", 2_i64),
         ("memory_evidence", 2),
@@ -1210,6 +1414,29 @@ fn migration_v7_rebuilds_v6_identity_constraints_without_losing_memory_rows() {
         )
         .unwrap();
     assert_eq!(id_not_null, 1);
+    let claim_owners = db
+        .conn()
+        .prepare("SELECT id, delta_id FROM memory_claims ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        claim_owners,
+        vec![("c1".into(), "d1".into()), ("c2".into(), "d2".into())]
+    );
+    let transition_owner: String = db
+        .conn()
+        .query_row(
+            "SELECT delta_id FROM memory_claim_transitions WHERE id='t1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(transition_owner, "d2");
 }
 
 #[test]
@@ -1225,10 +1452,7 @@ fn failed_memory_migration_rolls_back_all_0006_changes() {
             .unwrap();
     }
 
-    let err = match SqlCipherBrainStore::new(&path, &key) {
-        Ok(_) => panic!("migration must fail"),
-        Err(error) => error,
-    };
+    let err = expect_open_error(&path, &key, "migration must fail");
     assert!(matches!(err, StoreError::Backend(_)));
     let db = raw_open(&path, &key).unwrap();
     let schema: String = db
@@ -2087,10 +2311,11 @@ fn migration_rejects_column_compatible_table_missing_constraints_and_keeps_v5_st
             .unwrap();
     }
 
-    let error = match SqlCipherBrainStore::new(&path, &key) {
-        Ok(_) => panic!("structurally weak Task 5 table must be rejected"),
-        Err(error) => error,
-    };
+    let error = expect_open_error(
+        &path,
+        &key,
+        "structurally weak Task 5 table must be rejected",
+    );
     assert!(matches!(error, StoreError::Backend(_)));
     let db = raw_open(&path, &key).unwrap();
     let version: String = db
@@ -2134,10 +2359,11 @@ fn migration_rejects_exact_columns_and_foreign_key_when_primary_key_is_missing()
             .unwrap();
     }
 
-    let error = match SqlCipherBrainStore::new(&path, &key) {
-        Ok(_) => panic!("a name-compatible table without its primary key must be rejected"),
-        Err(error) => error,
-    };
+    let error = expect_open_error(
+        &path,
+        &key,
+        "a name-compatible table without its primary key must be rejected",
+    );
     assert!(matches!(error, StoreError::Backend(_)));
     let db = raw_open(&path, &key).unwrap();
     let version: String = db
@@ -2171,10 +2397,11 @@ fn migration_rejects_claim_evidence_without_composite_primary_key() {
             .unwrap();
     }
 
-    let error = match SqlCipherBrainStore::new(&path, &key) {
-        Ok(_) => panic!("claim/evidence identity requires its composite primary key"),
-        Err(error) => error,
-    };
+    let error = expect_open_error(
+        &path,
+        &key,
+        "claim/evidence identity requires its composite primary key",
+    );
     assert!(matches!(error, StoreError::Backend(_)));
 }
 
@@ -2204,10 +2431,138 @@ fn migration_rejects_secondary_index_with_wrong_uniqueness() {
             .unwrap();
     }
 
-    let error = match SqlCipherBrainStore::new(&path, &key) {
-        Ok(_) => panic!("a load-bearing secondary index must have exact uniqueness"),
-        Err(error) => error,
-    };
+    let error = expect_open_error(
+        &path,
+        &key,
+        "a load-bearing secondary index must have exact uniqueness",
+    );
+    assert!(matches!(error, StoreError::Backend(_)));
+}
+
+#[test]
+fn migration_rejects_case_insensitive_scalar_identity_collation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nocase-memory-delta-id.sqlite");
+    let key = test_key();
+    create_prior_schema(&path, &key, 5);
+    {
+        let db = raw_open(&path, &key).unwrap();
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE memory_deltas (
+                    id TEXT COLLATE NOCASE NOT NULL PRIMARY KEY,
+                    source_event_id INTEGER NOT NULL,
+                    asserted_at_us INTEGER NOT NULL,
+                    projector_version TEXT NOT NULL,
+                    FOREIGN KEY (source_event_id) REFERENCES events(id) ON DELETE RESTRICT
+                );",
+            )
+            .unwrap();
+    }
+
+    let error = expect_open_error(
+        &path,
+        &key,
+        "case-insensitive memory identities must not be stamped canonical",
+    );
+    assert!(matches!(error, StoreError::Backend(_)));
+}
+
+#[test]
+fn migration_rejects_generated_or_hidden_memory_columns() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("generated-memory-column.sqlite");
+    let key = test_key();
+    create_prior_schema(&path, &key, 5);
+    {
+        let db = raw_open(&path, &key).unwrap();
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE memory_deltas (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    source_event_id INTEGER NOT NULL,
+                    asserted_at_us INTEGER NOT NULL,
+                    projector_version TEXT NOT NULL,
+                    shadow_id TEXT GENERATED ALWAYS AS (lower(id)) VIRTUAL,
+                    FOREIGN KEY (source_event_id) REFERENCES events(id) ON DELETE RESTRICT
+                );",
+            )
+            .unwrap();
+    }
+
+    let error = expect_open_error(
+        &path,
+        &key,
+        "generated memory columns must not be invisible to schema validation",
+    );
+    assert!(matches!(error, StoreError::Backend(_)));
+}
+
+#[test]
+fn migration_rejects_secondary_index_collation_and_direction_drift() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("drifted-memory-index.sqlite");
+    let key = test_key();
+    create_prior_schema(&path, &key, 5);
+    {
+        let db = raw_open(&path, &key).unwrap();
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE memory_evidence (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    event_id INTEGER NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    source_locator TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    observed_at_us INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE RESTRICT
+                );
+                CREATE INDEX memory_evidence_event
+                    ON memory_evidence(event_id COLLATE NOCASE DESC, id ASC);",
+            )
+            .unwrap();
+    }
+
+    let error = expect_open_error(
+        &path,
+        &key,
+        "memory index collation and direction must be canonical",
+    );
+    assert!(matches!(error, StoreError::Backend(_)));
+}
+
+#[test]
+fn migration_rejects_nonindexed_column_collation_with_comment_spacing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("drifted-memory-column-collation.sqlite");
+    let key = test_key();
+    create_prior_schema(&path, &key, 5);
+    {
+        let db = raw_open(&path, &key).unwrap();
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE memory_evidence (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    event_id INTEGER NOT NULL,
+                    source_kind TEXT COLLATE/**/NOCASE NOT NULL,
+                    source_locator TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    observed_at_us INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE RESTRICT
+                );
+                CREATE INDEX memory_evidence_event
+                    ON memory_evidence(event_id, id);",
+            )
+            .unwrap();
+    }
+
+    let error = expect_open_error(
+        &path,
+        &key,
+        "all persisted memory column collations must be canonical",
+    );
     assert!(matches!(error, StoreError::Backend(_)));
 }
 
@@ -2246,9 +2601,10 @@ fn migration_rejects_an_extra_check_constraint_regardless_of_spacing() {
             .unwrap();
     }
 
-    let error = match SqlCipherBrainStore::new(&path, &key) {
-        Ok(_) => panic!("an extra CHECK must not be accepted as the canonical schema"),
-        Err(error) => error,
-    };
+    let error = expect_open_error(
+        &path,
+        &key,
+        "an extra CHECK must not be accepted as the canonical schema",
+    );
     assert!(matches!(error, StoreError::Backend(_)));
 }

@@ -3,6 +3,10 @@ use mci_brain::{
     EVIDENCE_SUFFICIENCY_POLICY,
 };
 
+fn assert_close(actual: f32, expected: f32) {
+    assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
+}
+
 #[test]
 fn feature_extraction_is_generic_and_preserves_raw_model_geometry() {
     let candidates = [
@@ -20,10 +24,10 @@ fn feature_extraction_is_generic_and_preserves_raw_model_geometry() {
     let features = evidence_features_for_candidates("Where is the cedar chest?", &candidates)
         .expect("non-empty finite candidates");
 
-    assert_eq!(features.raw_semantic_cosine, 0.72);
+    assert_close(features.raw_semantic_cosine, 0.72);
     assert!((features.semantic_margin - 0.02).abs() < 1e-6);
-    assert_eq!(features.query_coverage, 1.0);
-    assert_eq!(features.lexical_semantic_agreement, 1.0);
+    assert_close(features.query_coverage, 1.0);
+    assert_close(features.lexical_semantic_agreement, 1.0);
 }
 
 #[test]
@@ -42,7 +46,7 @@ fn tied_semantic_candidates_have_zero_raw_margin() {
     ];
     let features =
         evidence_features_for_candidates("Which bowl?", &candidates).expect("finite candidates");
-    assert_eq!(features.semantic_margin, 0.0);
+    assert_close(features.semantic_margin, 0.0);
 }
 
 #[test]
@@ -64,7 +68,7 @@ fn tied_candidates_produce_identical_features_when_input_order_is_reversed() {
         evidence_features_for_candidates("Where are the spare brushes stored?", &[second, first])
             .unwrap();
     assert_eq!(forward, reverse);
-    assert_eq!(forward.semantic_margin, 0.0);
+    assert_close(forward.semantic_margin, 0.0);
     assert!((forward.document_coverage - 0.4).abs() < 1e-6);
 }
 
@@ -85,11 +89,11 @@ fn coverage_features_describe_best_lexical_evidence_not_an_unrelated_semantic_to
     let features =
         evidence_features_for_candidates("Where are the spare brushes stored?", &candidates)
             .unwrap();
-    assert_eq!(features.raw_semantic_cosine, 0.90);
-    assert_eq!(features.query_coverage, 1.0);
+    assert_close(features.raw_semantic_cosine, 0.90);
+    assert_close(features.query_coverage, 1.0);
     assert!((features.document_coverage - 0.6).abs() < 1e-6);
-    assert_eq!(features.lexical_semantic_agreement, 0.0);
-    assert_eq!(features.novel_specificity, 1.0);
+    assert_close(features.lexical_semantic_agreement, 0.0);
+    assert_close(features.novel_specificity, 1.0);
 }
 
 #[test]
@@ -119,7 +123,7 @@ fn frozen_policy_has_independent_calibration_provenance() {
         policy.calibration_dataset_id,
         "hippocampus-evidence-sufficiency-calibration-v1"
     );
-    assert_eq!(policy.target_positive_coverage, 0.90);
+    assert_close(policy.target_positive_coverage, 0.90);
     assert_eq!(policy.feature_schema_version, 2);
     assert!(!policy.calibration_sha256.is_empty());
 }

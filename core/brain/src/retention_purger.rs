@@ -153,7 +153,10 @@ pub fn purge_once(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{project_event, BrainStore, ClaimStatus, Event, EventId, MemoryClaim, MemoryDelta};
+    use crate::{
+        project_event, BrainStore, ClaimStatus, Event, EventId, EvidenceRef, MemoryClaim,
+        MemoryDelta,
+    };
     use mci_core::crypto::DbKey;
 
     fn temp_store() -> (SqlCipherBrainStore, tempfile::TempDir) {
@@ -258,6 +261,87 @@ mod tests {
 
         assert_eq!(stats.events_deleted, 1);
         assert!(store.memory_claim_history(&claim.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn purge_of_secondary_evidence_preserves_independent_same_source_delta() {
+        let (store, _dir) = temp_store();
+        let day_us = 86_400_000_000_u64;
+        let now = 100 * day_us;
+        let expired = store
+            .put_event(&make_event(now - 40 * day_us, "expired support"))
+            .unwrap();
+        let source = store
+            .put_event(&make_event(now - day_us, "current source"))
+            .unwrap();
+        let source_event = store.get_event(source).unwrap().unwrap();
+        let expired_event = store.get_event(expired).unwrap().unwrap();
+        let source_evidence = EvidenceRef::from_event(source, &source_event, "structured_app");
+        let expired_evidence = EvidenceRef::from_event(expired, &expired_event, "structured_app");
+        let source_scope = source_evidence.source_scope.clone();
+        let affected = MemoryClaim::new(
+            source,
+            "retention fixture",
+            "status",
+            "affected",
+            &source_scope,
+            Some("source".into()),
+            0.9,
+            now - 1_000,
+            now - day_us,
+            None,
+            "projector-v1",
+            ClaimStatus::Active,
+            None,
+            vec![source_evidence.clone(), expired_evidence],
+        );
+        project_event(
+            &store,
+            &MemoryDelta::new(
+                source,
+                now - 1_000,
+                "projector-v1",
+                vec![affected.clone()],
+                Vec::new(),
+            ),
+        )
+        .unwrap();
+        let independent = MemoryClaim::new(
+            source,
+            "retention fixture",
+            "status",
+            "independent",
+            &source_scope,
+            Some("source".into()),
+            0.9,
+            now - 500,
+            now - day_us,
+            None,
+            "projector-v1",
+            ClaimStatus::Active,
+            None,
+            vec![source_evidence],
+        );
+        project_event(
+            &store,
+            &MemoryDelta::new(
+                source,
+                now - 500,
+                "projector-v1",
+                vec![independent.clone()],
+                Vec::new(),
+            ),
+        )
+        .unwrap();
+
+        let stats = purge_once(&store, &RetentionConfig::Days(30), now).unwrap();
+
+        assert_eq!(stats.events_deleted, 1);
+        assert!(store.memory_claim_history(&affected.id).unwrap().is_empty());
+        assert_eq!(
+            store.memory_claim_history(&independent.id).unwrap().len(),
+            1
+        );
     }
 
     #[test]
