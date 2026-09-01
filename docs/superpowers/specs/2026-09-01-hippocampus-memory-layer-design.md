@@ -80,6 +80,18 @@ Vector similarity is a recall signal, not truth. Scores from different candidate
 - Client registration writes executable and broker identifiers only. It never writes `MCI_DB_KEY_HEX` or another reusable secret to Claude, Codex, Cursor, or shell configuration.
 - Unsupported clients receive a generated local configuration preview and an explicit install action.
 
+## HeyClicky Interaction Adaptation
+
+Hippocampus adopts five interaction principles without copying HeyClicky's product identity:
+
+1. **Invoke anywhere:** a global shortcut opens recall or a current-context action without changing applications.
+2. **Screen as universal adapter:** an explicit capture-now action can create evidence for the visible task even when no native integration exists.
+3. **Lightweight presence:** menu-bar status and compact overlays expose capture health, pause, and handoff without making the main window a constant interruption.
+4. **Fast/deep routing:** deterministic recall handles simple requests immediately; synthesis and broader graph/context work run only when the request requires it.
+5. **Agent handoff:** a result can become an evidence-backed context packet for Claude, Codex, or another detected local client.
+
+Voice, animated teaching, a mascot, and general-purpose computer control are outside the memory-layer acceptance criteria. They can consume the memory layer later but do not belong inside its trusted capture core.
+
 ## Visual System
 
 ### Subject and job
