@@ -1,7 +1,10 @@
 {
   "complete": true,
-  "dataset": "/Users/amy/hippo-work/hippocampus/.worktrees/hippocampus-v1/eval/work-memory/synthetic-v1.json",
+  "publishable": true,
+  "launch_qualified": false,
+  "dataset": "eval/work-memory/synthetic-v1.json",
   "dataset_id": "synthetic-work-memory-v1",
+  "dataset_checksum_sha256": "96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f",
   "dataset_description": "Synthetic technical-work benchmark for Hippocampus v1. Covers exact recall, paraphrase, temporal questions, cross-session synthesis, changed facts, contradiction, source attribution, and unanswerable queries across GitHub, terminal, browser, Slack, Linear, and files.",
   "overall": [
     {
@@ -48,11 +51,11 @@
       "answerable_instances": 21,
       "unanswerable_instances": 3,
       "latency_ms": {
-        "min": 3.743458,
-        "p50": 4.7100409999999995,
-        "p95": 7.6609169999999995,
-        "max": 10.541500000000001,
-        "mean": 5.1043541249999995
+        "min": 3.726833,
+        "p50": 4.2750840000000006,
+        "p95": 9.770375,
+        "max": 17.651,
+        "mean": 5.143902833333333
       },
       "index_size_bytes": {
         "min": 4096.0,
@@ -66,19 +69,19 @@
       "arm": "hybrid",
       "instances": 24,
       "hit_rate_at": {
-        "1": 1.0,
+        "1": 0.9523809523809523,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
       "recall_at": {
-        "1": 0.9285714285714286,
+        "1": 0.8809523809523809,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
       "provenance_coverage_at": {
-        "1": 1.0,
+        "1": 0.9523809523809523,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
@@ -90,12 +93,12 @@
         "10": 1.0
       },
       "abstention_separation_at": {
-        "1": 0.0,
+        "1": -0.04761904761904767,
         "3": 0.0,
         "5": 0.0,
         "10": 0.0
       },
-      "mrr": 1.0,
+      "mrr": 0.9761904761904762,
       "complete_misses": 0,
       "outcomes": {
         "matched": 21,
@@ -106,11 +109,11 @@
       "answerable_instances": 21,
       "unanswerable_instances": 3,
       "latency_ms": {
-        "min": 33.937000000000005,
-        "p50": 37.025875,
-        "p95": 57.816959000000004,
-        "max": 60.577542,
-        "mean": 40.874284708333334
+        "min": 33.432916,
+        "p50": 35.44225,
+        "p95": 49.645666,
+        "max": 66.14141599999999,
+        "mean": 39.511171708333336
       },
       "index_size_bytes": {
         "min": 4096.0,
@@ -145,16 +148,16 @@
           "10": 0.3333333333333333
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.3333333333333333,
-          "3": 0.3333333333333333,
-          "5": 0.3333333333333333,
-          "10": 0.3333333333333333
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.3333333333333333,
         "complete_misses": 2,
@@ -167,11 +170,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 5.275042,
-          "p50": 6.214791,
-          "p95": 7.1755830000000005,
-          "max": 7.1755830000000005,
-          "mean": 6.221805333333333
+          "min": 3.9172499999999997,
+          "p50": 4.198666,
+          "p95": 4.293583999999999,
+          "max": 4.293583999999999,
+          "mean": 4.1365
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -185,36 +188,36 @@
         "arm": "hybrid",
         "instances": 3,
         "hit_rate_at": {
-          "1": 1.0,
+          "1": 0.6666666666666666,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
         },
         "recall_at": {
-          "1": 1.0,
+          "1": 0.6666666666666666,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
         },
         "provenance_coverage_at": {
-          "1": 1.0,
+          "1": 0.6666666666666666,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
-        "mrr": 1.0,
+        "mrr": 0.8333333333333334,
         "complete_misses": 0,
         "outcomes": {
           "matched": 3,
@@ -225,11 +228,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 34.449167,
-          "p50": 34.71962499999999,
-          "p95": 46.14775,
-          "max": 46.14775,
-          "mean": 38.438847333333335
+          "min": 33.978791,
+          "p50": 36.642584,
+          "p95": 45.813583,
+          "max": 45.813583,
+          "mean": 38.81165266666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -263,16 +266,16 @@
           "10": 0.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.0,
         "complete_misses": 3,
@@ -285,11 +288,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 4.145666,
-          "p50": 4.1980830000000005,
-          "p95": 5.827916,
-          "max": 5.827916,
-          "mean": 4.723888333333334
+          "min": 3.9962920000000004,
+          "p50": 4.2750840000000006,
+          "p95": 4.521875,
+          "max": 4.521875,
+          "mean": 4.264417
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -321,16 +324,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -343,11 +346,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 34.084791,
-          "p50": 34.76025,
-          "p95": 36.622333,
-          "max": 36.622333,
-          "mean": 35.15579133333333
+          "min": 33.637583,
+          "p50": 34.253708,
+          "p95": 34.642582999999995,
+          "max": 34.642582999999995,
+          "mean": 34.177958
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -381,16 +384,16 @@
           "10": 0.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.0,
         "complete_misses": 3,
@@ -403,11 +406,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 3.7773749999999997,
-          "p50": 5.419708,
-          "p95": 7.6609169999999995,
-          "max": 7.6609169999999995,
-          "mean": 5.619333333333333
+          "min": 4.621917,
+          "p50": 4.647584,
+          "p95": 4.691084,
+          "max": 4.691084,
+          "mean": 4.653528333333333
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -439,16 +442,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -461,11 +464,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 45.779041,
-          "p50": 51.349625,
-          "p95": 57.816959000000004,
-          "max": 57.816959000000004,
-          "mean": 51.64854166666667
+          "min": 45.371458000000004,
+          "p50": 45.811833,
+          "p95": 46.826125000000005,
+          "max": 46.826125000000005,
+          "mean": 46.003138666666665
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -499,16 +502,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -521,11 +524,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 5.1017090000000005,
-          "p50": 5.367167,
-          "p95": 10.541500000000001,
-          "max": 10.541500000000001,
-          "mean": 7.003458666666667
+          "min": 4.226667,
+          "p50": 4.637166,
+          "p95": 9.770375,
+          "max": 9.770375,
+          "mean": 6.211402666666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -557,16 +560,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -579,11 +582,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 40.013583,
-          "p50": 40.414417,
-          "p95": 60.577542,
-          "max": 60.577542,
-          "mean": 47.00184733333333
+          "min": 34.23775,
+          "p50": 45.587875,
+          "p95": 49.645666,
+          "max": 49.645666,
+          "mean": 43.157097
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -617,16 +620,16 @@
           "10": 0.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.0,
         "complete_misses": 3,
@@ -639,11 +642,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 3.819958,
-          "p50": 4.0569999999999995,
-          "p95": 5.065084,
-          "max": 5.065084,
-          "mean": 4.314014
+          "min": 3.8075,
+          "p50": 7.1083750000000006,
+          "p95": 17.651,
+          "max": 17.651,
+          "mean": 9.522291666666666
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -675,16 +678,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -697,11 +700,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 36.241,
-          "p50": 37.025875,
-          "p95": 38.676042,
-          "max": 38.676042,
-          "mean": 37.31430566666666
+          "min": 33.432916,
+          "p50": 33.796333,
+          "p95": 34.153417,
+          "max": 34.153417,
+          "mean": 33.794222
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -735,16 +738,16 @@
           "10": 0.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.0,
         "complete_misses": 3,
@@ -757,11 +760,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 3.743458,
-          "p50": 3.952125,
-          "p95": 6.284042,
-          "max": 6.284042,
-          "mean": 4.659875
+          "min": 4.121042,
+          "p50": 4.2835410000000005,
+          "p95": 4.5164159999999995,
+          "max": 4.5164159999999995,
+          "mean": 4.306999666666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -793,16 +796,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -815,11 +818,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 33.937000000000005,
-          "p50": 34.274916000000005,
-          "p95": 34.840708,
-          "max": 34.840708,
-          "mean": 34.35087466666667
+          "min": 34.242458000000006,
+          "p50": 34.686417,
+          "p95": 36.056125,
+          "max": 36.056125,
+          "mean": 34.995000000000005
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -853,16 +856,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -875,11 +878,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 4.165292,
-          "p50": 4.238334,
-          "p95": 4.7100409999999995,
-          "max": 4.7100409999999995,
-          "mean": 4.371222333333333
+          "min": 3.726833,
+          "p50": 4.024042000000001,
+          "p95": 4.029040999999999,
+          "max": 4.029040999999999,
+          "mean": 3.926638666666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -911,16 +914,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -933,11 +936,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 36.510583,
-          "p50": 48.167375,
-          "p95": 57.688875,
-          "max": 57.688875,
-          "mean": 47.455611
+          "min": 35.014875,
+          "p50": 44.9895,
+          "p95": 66.14141599999999,
+          "max": 66.14141599999999,
+          "mean": 48.715263666666665
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -953,22 +956,22 @@
         "arm": "lexical",
         "instances": 3,
         "hit_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "recall_at": {
-          "1": -0.0,
-          "3": -0.0,
-          "5": -0.0,
-          "10": -0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "provenance_coverage_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "false_positive_rate_at": {
           "1": 0.0,
@@ -977,12 +980,12 @@
           "10": 0.0
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
-        "mrr": -0.0,
+        "mrr": null,
         "complete_misses": 0,
         "outcomes": {
           "matched": 0,
@@ -993,11 +996,11 @@
         "answerable_instances": 0,
         "unanswerable_instances": 3,
         "latency_ms": {
-          "min": 3.8560830000000004,
-          "p50": 3.9394169999999997,
-          "p95": 3.968208,
-          "max": 3.968208,
-          "mean": 3.9212360000000004
+          "min": 4.067917,
+          "p50": 4.0875829999999995,
+          "p95": 4.232834,
+          "max": 4.232834,
+          "mean": 4.129444666666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1011,22 +1014,22 @@
         "arm": "hybrid",
         "instances": 3,
         "hit_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "recall_at": {
-          "1": -0.0,
-          "3": -0.0,
-          "5": -0.0,
-          "10": -0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "provenance_coverage_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "false_positive_rate_at": {
           "1": 1.0,
@@ -1035,12 +1038,12 @@
           "10": 1.0
         },
         "abstention_separation_at": {
-          "1": -1.0,
-          "3": -1.0,
-          "5": -1.0,
-          "10": -1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
-        "mrr": -0.0,
+        "mrr": null,
         "complete_misses": 0,
         "outcomes": {
           "matched": 0,
@@ -1051,11 +1054,11 @@
         "answerable_instances": 0,
         "unanswerable_instances": 3,
         "latency_ms": {
-          "min": 34.678042,
-          "p50": 34.792084,
-          "p95": 37.41525,
-          "max": 37.41525,
-          "mean": 35.62845866666667
+          "min": 34.612667,
+          "p50": 35.44225,
+          "p95": 39.250208,
+          "max": 39.250208,
+          "mean": 36.43504166666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1071,7 +1074,7 @@
     "browser": [
       {
         "arm": "lexical",
-        "instances": 4,
+        "instances": 3,
         "hit_rate_at": {
           "1": 0.3333333333333333,
           "3": 0.3333333333333333,
@@ -1091,33 +1094,33 @@
           "10": 0.3333333333333333
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.3333333333333333,
-          "3": 0.3333333333333333,
-          "5": 0.3333333333333333,
-          "10": 0.3333333333333333
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.3333333333333333,
         "complete_misses": 2,
         "outcomes": {
           "matched": 1,
           "missed": 2,
-          "abstained": 1,
+          "abstained": 0,
           "false_positive": 0
         },
         "answerable_instances": 3,
-        "unanswerable_instances": 1,
+        "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 3.968208,
-          "p50": 5.419708,
-          "p95": 6.214791,
-          "max": 6.214791,
-          "mean": 4.914926749999999
+          "min": 3.9172499999999997,
+          "p50": 4.691084,
+          "p95": 7.1083750000000006,
+          "max": 7.1083750000000006,
+          "mean": 5.238903
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1129,7 +1132,7 @@
       },
       {
         "arm": "hybrid",
-        "instances": 4,
+        "instances": 3,
         "hit_rate_at": {
           "1": 1.0,
           "3": 1.0,
@@ -1149,16 +1152,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -1166,16 +1169,16 @@
           "matched": 3,
           "missed": 0,
           "abstained": 0,
-          "false_positive": 1
+          "false_positive": 0
         },
         "answerable_instances": 3,
-        "unanswerable_instances": 1,
+        "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 34.71962499999999,
-          "p50": 36.241,
-          "p95": 51.349625,
-          "max": 51.349625,
-          "mean": 39.275583499999996
+          "min": 33.796333,
+          "p50": 36.642584,
+          "p95": 45.811833,
+          "max": 45.811833,
+          "mean": 38.75025
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1209,16 +1212,16 @@
           "10": 0.3333333333333333
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.3333333333333333,
-          "3": 0.3333333333333333,
-          "5": 0.3333333333333333,
-          "10": 0.3333333333333333
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.3333333333333333,
         "complete_misses": 2,
@@ -1231,11 +1234,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 5.275042,
-          "p50": 6.214791,
-          "p95": 7.1755830000000005,
-          "max": 7.1755830000000005,
-          "mean": 6.221805333333333
+          "min": 3.9172499999999997,
+          "p50": 4.198666,
+          "p95": 4.293583999999999,
+          "max": 4.293583999999999,
+          "mean": 4.1365
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1249,36 +1252,36 @@
         "arm": "hybrid",
         "instances": 3,
         "hit_rate_at": {
-          "1": 1.0,
+          "1": 0.6666666666666666,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
         },
         "recall_at": {
-          "1": 1.0,
+          "1": 0.6666666666666666,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
         },
         "provenance_coverage_at": {
-          "1": 1.0,
+          "1": 0.6666666666666666,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
-        "mrr": 1.0,
+        "mrr": 0.8333333333333334,
         "complete_misses": 0,
         "outcomes": {
           "matched": 3,
@@ -1289,11 +1292,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 34.449167,
-          "p50": 34.71962499999999,
-          "p95": 46.14775,
-          "max": 46.14775,
-          "mean": 38.438847333333335
+          "min": 33.978791,
+          "p50": 36.642584,
+          "p95": 45.813583,
+          "max": 45.813583,
+          "mean": 38.81165266666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1327,16 +1330,16 @@
           "10": 0.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.0,
         "complete_misses": 3,
@@ -1349,11 +1352,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 4.145666,
-          "p50": 4.1980830000000005,
-          "p95": 5.827916,
-          "max": 5.827916,
-          "mean": 4.723888333333334
+          "min": 3.9962920000000004,
+          "p50": 4.2750840000000006,
+          "p95": 4.521875,
+          "max": 4.521875,
+          "mean": 4.264417
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1385,16 +1388,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -1407,11 +1410,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 34.084791,
-          "p50": 34.76025,
-          "p95": 36.622333,
-          "max": 36.622333,
-          "mean": 35.15579133333333
+          "min": 33.637583,
+          "p50": 34.253708,
+          "p95": 34.642582999999995,
+          "max": 34.642582999999995,
+          "mean": 34.177958
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1445,16 +1448,16 @@
           "10": 0.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.0,
         "complete_misses": 3,
@@ -1467,11 +1470,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 3.7773749999999997,
-          "p50": 5.419708,
-          "p95": 7.6609169999999995,
-          "max": 7.6609169999999995,
-          "mean": 5.619333333333333
+          "min": 4.621917,
+          "p50": 4.647584,
+          "p95": 4.691084,
+          "max": 4.691084,
+          "mean": 4.653528333333333
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1503,16 +1506,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -1525,11 +1528,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 45.779041,
-          "p50": 51.349625,
-          "p95": 57.816959000000004,
-          "max": 57.816959000000004,
-          "mean": 51.64854166666667
+          "min": 45.371458000000004,
+          "p50": 45.811833,
+          "p95": 46.826125000000005,
+          "max": 46.826125000000005,
+          "mean": 46.003138666666665
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1563,16 +1566,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -1585,11 +1588,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 5.1017090000000005,
-          "p50": 5.367167,
-          "p95": 10.541500000000001,
-          "max": 10.541500000000001,
-          "mean": 7.003458666666667
+          "min": 4.226667,
+          "p50": 4.637166,
+          "p95": 9.770375,
+          "max": 9.770375,
+          "mean": 6.211402666666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1621,16 +1624,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -1643,11 +1646,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 40.013583,
-          "p50": 40.414417,
-          "p95": 60.577542,
-          "max": 60.577542,
-          "mean": 47.00184733333333
+          "min": 34.23775,
+          "p50": 45.587875,
+          "p95": 49.645666,
+          "max": 49.645666,
+          "mean": 43.157097
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1703,11 +1706,11 @@
         "answerable_instances": 7,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 3.952125,
-          "p50": 5.275042,
-          "p95": 7.6609169999999995,
-          "max": 7.6609169999999995,
-          "mean": 5.0936509999999995
+          "min": 3.726833,
+          "p50": 4.198666,
+          "p95": 4.621917,
+          "max": 4.621917,
+          "mean": 4.177729124999999
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1761,11 +1764,11 @@
         "answerable_instances": 7,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 33.937000000000005,
-          "p50": 36.510583,
-          "p95": 57.816959000000004,
-          "max": 57.816959000000004,
-          "mean": 38.657771
+          "min": 33.978791,
+          "p50": 36.642584,
+          "p95": 49.645666,
+          "max": 49.645666,
+          "mean": 38.605463375
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1821,11 +1824,11 @@
         "answerable_instances": 6,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 3.7773749999999997,
-          "p50": 5.065084,
-          "p95": 10.541500000000001,
-          "max": 10.541500000000001,
-          "mean": 5.661916714285715
+          "min": 3.9962920000000004,
+          "p50": 4.5164159999999995,
+          "p95": 17.651,
+          "max": 17.651,
+          "mean": 7.012797857142857
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1879,11 +1882,11 @@
         "answerable_instances": 6,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 34.084791,
-          "p50": 37.025875,
-          "p95": 60.577542,
-          "max": 60.577542,
-          "mean": 40.559666428571425
+          "min": 33.637583,
+          "p50": 35.44225,
+          "p95": 46.826125000000005,
+          "max": 46.826125000000005,
+          "mean": 38.04942257142857
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1939,11 +1942,11 @@
         "answerable_instances": 4,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 3.8560830000000004,
-          "p50": 5.419708,
-          "p95": 7.1755830000000005,
-          "max": 7.1755830000000005,
-          "mean": 5.3978662
+          "min": 4.024042000000001,
+          "p50": 4.2750840000000006,
+          "p95": 4.691084,
+          "max": 4.691084,
+          "mean": 4.2703422
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -1957,19 +1960,19 @@
         "arm": "hybrid",
         "instances": 5,
         "hit_rate_at": {
-          "1": 1.0,
+          "1": 0.75,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
         },
         "recall_at": {
-          "1": 0.875,
+          "1": 0.625,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
         },
         "provenance_coverage_at": {
-          "1": 1.0,
+          "1": 0.75,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
@@ -1981,12 +1984,12 @@
           "10": 1.0
         },
         "abstention_separation_at": {
-          "1": 0.0,
+          "1": -0.25,
           "3": 0.0,
           "5": 0.0,
           "10": 0.0
         },
-        "mrr": 1.0,
+        "mrr": 0.875,
         "complete_misses": 0,
         "outcomes": {
           "matched": 4,
@@ -1997,11 +2000,11 @@
         "answerable_instances": 4,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 34.084791,
-          "p50": 46.14775,
-          "p95": 51.349625,
-          "max": 51.349625,
-          "mean": 42.8855166
+          "min": 33.637583,
+          "p50": 44.9895,
+          "p95": 45.813583,
+          "max": 45.813583,
+          "mean": 40.973033199999996
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2035,16 +2038,16 @@
           "10": 0.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.0,
         "complete_misses": 3,
@@ -2057,11 +2060,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 3.819958,
-          "p50": 4.0569999999999995,
-          "p95": 5.065084,
-          "max": 5.065084,
-          "mean": 4.314014
+          "min": 3.8075,
+          "p50": 7.1083750000000006,
+          "p95": 17.651,
+          "max": 17.651,
+          "mean": 9.522291666666666
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2093,16 +2096,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -2115,11 +2118,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 36.241,
-          "p50": 37.025875,
-          "p95": 38.676042,
-          "max": 38.676042,
-          "mean": 37.31430566666666
+          "min": 33.432916,
+          "p50": 33.796333,
+          "p95": 34.153417,
+          "max": 34.153417,
+          "mean": 33.794222
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2153,16 +2156,16 @@
           "10": 0.3076923076923077
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.3076923076923077,
-          "3": 0.3076923076923077,
-          "5": 0.3076923076923077,
-          "10": 0.3076923076923077
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.3076923076923077,
         "complete_misses": 9,
@@ -2175,11 +2178,11 @@
         "answerable_instances": 13,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 3.743458,
-          "p50": 4.7100409999999995,
-          "p95": 7.6609169999999995,
-          "max": 10.541500000000001,
-          "mean": 5.403310692307692
+          "min": 3.8075,
+          "p50": 4.2750840000000006,
+          "p95": 4.647584,
+          "max": 9.770375,
+          "mean": 4.671506538461539
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2211,16 +2214,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -2233,11 +2236,11 @@
         "answerable_instances": 13,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 33.937000000000005,
-          "p50": 36.622333,
-          "p95": 57.816959000000004,
-          "max": 60.577542,
-          "mean": 41.12853838461539
+          "min": 33.432916,
+          "p50": 36.056125,
+          "p95": 46.826125000000005,
+          "max": 49.645666,
+          "mean": 39.23192292307693
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2293,11 +2296,11 @@
         "answerable_instances": 5,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 3.743458,
-          "p50": 3.9394169999999997,
-          "p95": 4.1980830000000005,
-          "max": 4.1980830000000005,
-          "mean": 3.937326166666667
+          "min": 3.8075,
+          "p50": 4.2835410000000005,
+          "p95": 4.647584,
+          "max": 4.647584,
+          "mean": 4.248271
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2351,11 +2354,11 @@
         "answerable_instances": 5,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 34.76025,
-          "p50": 37.41525,
-          "p95": 45.779041,
-          "max": 45.779041,
-          "mean": 38.015603999999996
+          "min": 33.432916,
+          "p50": 34.642582999999995,
+          "p95": 46.826125000000005,
+          "max": 46.826125000000005,
+          "mean": 36.47334
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2389,16 +2392,16 @@
           "10": 0.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 0.0,
         "complete_misses": 3,
@@ -2411,11 +2414,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 3.743458,
-          "p50": 3.952125,
-          "p95": 6.284042,
-          "max": 6.284042,
-          "mean": 4.659875
+          "min": 4.121042,
+          "p50": 4.2835410000000005,
+          "p95": 4.5164159999999995,
+          "max": 4.5164159999999995,
+          "mean": 4.306999666666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2447,16 +2450,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -2469,11 +2472,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 33.937000000000005,
-          "p50": 34.274916000000005,
-          "p95": 34.840708,
-          "max": 34.840708,
-          "mean": 34.35087466666667
+          "min": 34.242458000000006,
+          "p50": 34.686417,
+          "p95": 36.056125,
+          "max": 36.056125,
+          "mean": 34.995000000000005
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2507,16 +2510,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -2529,11 +2532,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 4.165292,
-          "p50": 4.238334,
-          "p95": 4.7100409999999995,
-          "max": 4.7100409999999995,
-          "mean": 4.371222333333333
+          "min": 3.726833,
+          "p50": 4.024042000000001,
+          "p95": 4.029040999999999,
+          "max": 4.029040999999999,
+          "mean": 3.926638666666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2565,16 +2568,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "abstention_separation_at": {
-          "1": 1.0,
-          "3": 1.0,
-          "5": 1.0,
-          "10": 1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -2587,11 +2590,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 36.510583,
-          "p50": 48.167375,
-          "p95": 57.688875,
-          "max": 57.688875,
-          "mean": 47.455611
+          "min": 35.014875,
+          "p50": 44.9895,
+          "p95": 66.14141599999999,
+          "max": 66.14141599999999,
+          "mean": 48.715263666666665
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2605,7 +2608,7 @@
     "terminal": [
       {
         "arm": "lexical",
-        "instances": 3,
+        "instances": 4,
         "hit_rate_at": {
           "1": 0.6666666666666666,
           "3": 0.6666666666666666,
@@ -2641,17 +2644,17 @@
         "outcomes": {
           "matched": 2,
           "missed": 1,
-          "abstained": 0,
+          "abstained": 1,
           "false_positive": 0
         },
         "answerable_instances": 3,
-        "unanswerable_instances": 0,
+        "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 4.238334,
-          "p50": 5.1017090000000005,
-          "p95": 7.6609169999999995,
-          "max": 7.6609169999999995,
-          "mean": 5.666986666666666
+          "min": 4.029040999999999,
+          "p50": 4.621917,
+          "p95": 4.637166,
+          "max": 4.637166,
+          "mean": 4.34392675
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2663,7 +2666,7 @@
       },
       {
         "arm": "hybrid",
-        "instances": 3,
+        "instances": 4,
         "hit_rate_at": {
           "1": 1.0,
           "3": 1.0,
@@ -2683,16 +2686,16 @@
           "10": 1.0
         },
         "false_positive_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
-        },
-        "abstention_separation_at": {
           "1": 1.0,
           "3": 1.0,
           "5": 1.0,
           "10": 1.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
         },
         "mrr": 1.0,
         "complete_misses": 0,
@@ -2700,16 +2703,16 @@
           "matched": 3,
           "missed": 0,
           "abstained": 0,
-          "false_positive": 0
+          "false_positive": 1
         },
         "answerable_instances": 3,
-        "unanswerable_instances": 0,
+        "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 40.013583,
-          "p50": 57.688875,
-          "p95": 57.816959000000004,
-          "max": 57.816959000000004,
-          "mean": 51.83980566666667
+          "min": 34.23775,
+          "p50": 45.371458000000004,
+          "p95": 66.14141599999999,
+          "max": 66.14141599999999,
+          "mean": 46.250208
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2725,22 +2728,22 @@
         "arm": "lexical",
         "instances": 3,
         "hit_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "recall_at": {
-          "1": -0.0,
-          "3": -0.0,
-          "5": -0.0,
-          "10": -0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "provenance_coverage_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "false_positive_rate_at": {
           "1": 0.0,
@@ -2749,12 +2752,12 @@
           "10": 0.0
         },
         "abstention_separation_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
-        "mrr": -0.0,
+        "mrr": null,
         "complete_misses": 0,
         "outcomes": {
           "matched": 0,
@@ -2765,11 +2768,11 @@
         "answerable_instances": 0,
         "unanswerable_instances": 3,
         "latency_ms": {
-          "min": 3.8560830000000004,
-          "p50": 3.9394169999999997,
-          "p95": 3.968208,
-          "max": 3.968208,
-          "mean": 3.9212360000000004
+          "min": 4.067917,
+          "p50": 4.0875829999999995,
+          "p95": 4.232834,
+          "max": 4.232834,
+          "mean": 4.129444666666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2783,22 +2786,22 @@
         "arm": "hybrid",
         "instances": 3,
         "hit_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "recall_at": {
-          "1": -0.0,
-          "3": -0.0,
-          "5": -0.0,
-          "10": -0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "provenance_coverage_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0,
-          "10": 0.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
         "false_positive_rate_at": {
           "1": 1.0,
@@ -2807,12 +2810,12 @@
           "10": 1.0
         },
         "abstention_separation_at": {
-          "1": -1.0,
-          "3": -1.0,
-          "5": -1.0,
-          "10": -1.0
+          "1": null,
+          "3": null,
+          "5": null,
+          "10": null
         },
-        "mrr": -0.0,
+        "mrr": null,
         "complete_misses": 0,
         "outcomes": {
           "matched": 0,
@@ -2823,11 +2826,11 @@
         "answerable_instances": 0,
         "unanswerable_instances": 3,
         "latency_ms": {
-          "min": 34.678042,
-          "p50": 34.792084,
-          "p95": 37.41525,
-          "max": 37.41525,
-          "mean": 35.62845866666667
+          "min": 34.612667,
+          "p50": 35.44225,
+          "p95": 39.250208,
+          "max": 39.250208,
+          "mean": 36.43504166666667
         },
         "index_size_bytes": {
           "min": 4096.0,
@@ -2876,11 +2879,11 @@
           "window_title": "PR 431 benchmark honesty",
           "url": "github://hippocampus/pull/431",
           "relevant": true,
-          "score": 6.030456916050753e-6,
+          "score": 6.027094968885649e-6,
           "excerpt": "PR 431 sets complete false on partial runs and exits nonzero when any requested arm fails."
         }
       ],
-      "latency_ms": 10.541500000000001,
+      "latency_ms": 9.770375,
       "index_size_bytes": 4096
     },
     {
@@ -2918,11 +2921,11 @@
           "window_title": "Focused benchmark tests",
           "url": "terminal://zsh/work-memory-tests",
           "relevant": true,
-          "score": 0.000011693253327393904,
+          "score": 0.000011705894394253846,
           "excerpt": "Run cargo test -p mci-agent --test work_memory_bench to check the new parser and scoring metrics."
         }
       ],
-      "latency_ms": 5.1017090000000005,
+      "latency_ms": 4.637166,
       "index_size_bytes": 4096
     },
     {
@@ -2961,11 +2964,11 @@
           "window_title": "work-memory-baseline.json",
           "url": "file:///docs/eval/work-memory-baseline.json",
           "relevant": true,
-          "score": 7.461346740456065e-6,
+          "score": 7.514606750191888e-6,
           "excerpt": "The baseline report records that a missing model or partial run is a failure and never a silently downgraded result."
         }
       ],
-      "latency_ms": 5.367167,
+      "latency_ms": 4.226667,
       "index_size_bytes": 4096
     },
     {
@@ -2995,7 +2998,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 5.065084,
+      "latency_ms": 17.651,
       "index_size_bytes": 4096
     },
     {
@@ -3025,7 +3028,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 4.0569999999999995,
+      "latency_ms": 7.1083750000000006,
       "index_size_bytes": 4096
     },
     {
@@ -3056,7 +3059,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 3.819958,
+      "latency_ms": 3.8075,
       "index_size_bytes": 4096
     },
     {
@@ -3094,11 +3097,11 @@
           "window_title": "Right before rollback",
           "url": "terminal://zsh/right-before-rollback",
           "relevant": true,
-          "score": 3.2729008197784424,
+          "score": 3.2814972400665283,
           "excerpt": "Right before the rollback we disabled hybrid on empty reports to stop fake green output."
         }
       ],
-      "latency_ms": 4.238334,
+      "latency_ms": 4.029040999999999,
       "index_size_bytes": 4096
     },
     {
@@ -3137,11 +3140,11 @@
           "window_title": "HIPP-219 comment",
           "url": "linear://HIPP-219/comment-2",
           "relevant": true,
-          "score": 0.9818874597549438,
+          "score": 0.9868549704551697,
           "excerpt": "After opening HIPP 219 we added provenance coverage and typed abstention to the scorecard."
         }
       ],
-      "latency_ms": 4.7100409999999995,
+      "latency_ms": 4.024042000000001,
       "index_size_bytes": 4096
     },
     {
@@ -3179,11 +3182,11 @@
           "window_title": "run.sh",
           "url": "file:///scripts/eval/work-memory/run.sh",
           "relevant": true,
-          "score": 0.00001055330994859105,
+          "score": 0.000010613835002004635,
           "excerpt": "Before we switched to the app bundle path the model lived at models ArcticEmbedS INT8 mlmodelc in the repo root."
         }
       ],
-      "latency_ms": 4.165292,
+      "latency_ms": 3.726833,
       "index_size_bytes": 4096
     },
     {
@@ -3215,7 +3218,7 @@
       "sessions_in_haystack": 3,
       "events_indexed": 3,
       "top_hits": [],
-      "latency_ms": 3.7773749999999997,
+      "latency_ms": 4.647584,
       "index_size_bytes": 4096
     },
     {
@@ -3247,7 +3250,7 @@
       "sessions_in_haystack": 3,
       "events_indexed": 3,
       "top_hits": [],
-      "latency_ms": 7.6609169999999995,
+      "latency_ms": 4.621917,
       "index_size_bytes": 4096
     },
     {
@@ -3278,7 +3281,7 @@
       "sessions_in_haystack": 3,
       "events_indexed": 3,
       "top_hits": [],
-      "latency_ms": 5.419708,
+      "latency_ms": 4.691084,
       "index_size_bytes": 4096
     },
     {
@@ -3308,7 +3311,7 @@
       "sessions_in_haystack": 3,
       "events_indexed": 3,
       "top_hits": [],
-      "latency_ms": 7.1755830000000005,
+      "latency_ms": 4.293583999999999,
       "index_size_bytes": 4096
     },
     {
@@ -3352,7 +3355,7 @@
           "excerpt": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc."
         }
       ],
-      "latency_ms": 6.214791,
+      "latency_ms": 3.9172499999999997,
       "index_size_bytes": 4096
     },
     {
@@ -3382,7 +3385,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 5.275042,
+      "latency_ms": 4.198666,
       "index_size_bytes": 4096
     },
     {
@@ -3414,7 +3417,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 4.1980830000000005,
+      "latency_ms": 3.9962920000000004,
       "index_size_bytes": 4096
     },
     {
@@ -3446,7 +3449,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 5.827916,
+      "latency_ms": 4.2750840000000006,
       "index_size_bytes": 4096
     },
     {
@@ -3478,7 +3481,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 4.145666,
+      "latency_ms": 4.521875,
       "index_size_bytes": 4096
     },
     {
@@ -3509,7 +3512,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 3.743458,
+      "latency_ms": 4.2835410000000005,
       "index_size_bytes": 4096
     },
     {
@@ -3540,7 +3543,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 3.952125,
+      "latency_ms": 4.121042,
       "index_size_bytes": 4096
     },
     {
@@ -3571,12 +3574,12 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 6.284042,
+      "latency_ms": 4.5164159999999995,
       "index_size_bytes": 4096
     },
     {
       "arm": "lexical",
-      "question_id": "unanswerable-vinyl-koala",
+      "question_id": "unanswerable-pr-431-approver",
       "question_type": "unanswerable",
       "tags": [
         "unanswerable",
@@ -3587,58 +3590,58 @@
       "outcome": "abstained",
       "first_hit_rank": null,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0,
-        "10": 0.0
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "provenance_coverage_at": {
-        "1": false,
-        "3": false,
-        "5": false,
-        "10": false
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "answer_sessions": 0,
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 3.9394169999999997,
+      "latency_ms": 4.232834,
       "index_size_bytes": 4096
     },
     {
       "arm": "lexical",
-      "question_id": "unanswerable-saffron-orbit",
+      "question_id": "unanswerable-benchmark-test-duration",
       "question_type": "unanswerable",
       "tags": [
         "unanswerable",
-        "browser",
+        "terminal",
         "files"
       ],
       "unanswerable": true,
       "outcome": "abstained",
       "first_hit_rank": null,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0,
-        "10": 0.0
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "provenance_coverage_at": {
-        "1": false,
-        "3": false,
-        "5": false,
-        "10": false
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "answer_sessions": 0,
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 3.968208,
+      "latency_ms": 4.0875829999999995,
       "index_size_bytes": 4096
     },
     {
       "arm": "lexical",
-      "question_id": "unanswerable-marble-cactus",
+      "question_id": "unanswerable-hipp-201-due-date",
       "question_type": "unanswerable",
       "tags": [
         "unanswerable",
@@ -3648,22 +3651,22 @@
       "outcome": "abstained",
       "first_hit_rank": null,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0,
-        "10": 0.0
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "provenance_coverage_at": {
-        "1": false,
-        "3": false,
-        "5": false,
-        "10": false
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "answer_sessions": 0,
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 3.8560830000000004,
+      "latency_ms": 4.067917,
       "index_size_bytes": 4096
     },
     {
@@ -3717,7 +3720,7 @@
           "excerpt": "cargo test -p mci-agent --test work_memory_bench finished green after the partial-run guard landed."
         }
       ],
-      "latency_ms": 60.577542,
+      "latency_ms": 45.587875,
       "index_size_bytes": 4096
     },
     {
@@ -3770,7 +3773,7 @@
           "excerpt": "PR 430 adds the dataset envelope parser and the complete field in the JSON report."
         }
       ],
-      "latency_ms": 40.013583,
+      "latency_ms": 34.23775,
       "index_size_bytes": 4096
     },
     {
@@ -3824,7 +3827,7 @@
           "excerpt": "ADR 0010 keeps vector similarity as a recall signal, not truth."
         }
       ],
-      "latency_ms": 40.414417,
+      "latency_ms": 49.645666,
       "index_size_bytes": 4096
     },
     {
@@ -3877,7 +3880,7 @@
           "excerpt": "PR 421 drafted an earlier synthetic dataset but did not use the production retriever."
         }
       ],
-      "latency_ms": 37.025875,
+      "latency_ms": 34.153417,
       "index_size_bytes": 4096
     },
     {
@@ -3930,7 +3933,7 @@
           "excerpt": "docs/eval/README.md lists the measurement surfaces but not the fusion caveat."
         }
       ],
-      "latency_ms": 36.241,
+      "latency_ms": 33.796333,
       "index_size_bytes": 4096
     },
     {
@@ -3984,7 +3987,7 @@
           "excerpt": "The model check command verified the app bundle path exists on disk."
         }
       ],
-      "latency_ms": 38.676042,
+      "latency_ms": 33.432916,
       "index_size_bytes": 4096
     },
     {
@@ -4026,7 +4029,7 @@
           "excerpt": "Right before the rollback we disabled hybrid on empty reports to stop fake green output."
         }
       ],
-      "latency_ms": 57.688875,
+      "latency_ms": 66.14141599999999,
       "index_size_bytes": 4096
     },
     {
@@ -4076,7 +4079,7 @@
           "window_title": "HIPP-219",
           "url": "linear://HIPP-219",
           "relevant": false,
-          "score": 0.549992561340332,
+          "score": 0.5582471489906311,
           "excerpt": "Opened HIPP 219 to track honest provenance coverage in the work-memory benchmark."
         },
         {
@@ -4091,7 +4094,7 @@
           "excerpt": "PR 418 still reported only hit rate recall and MRR."
         }
       ],
-      "latency_ms": 48.167375,
+      "latency_ms": 44.9895,
       "index_size_bytes": 4096
     },
     {
@@ -4144,7 +4147,7 @@
           "excerpt": "The model history note says the runner now prefers the installed app bundle model."
         }
       ],
-      "latency_ms": 36.510583,
+      "latency_ms": 35.014875,
       "index_size_bytes": 4096
     },
     {
@@ -4195,7 +4198,7 @@
           "window_title": "PR 431 benchmark honesty",
           "url": "github://hippocampus/pull/431",
           "relevant": true,
-          "score": 0.4897185266017914,
+          "score": 0.48268523812294006,
           "excerpt": "PR 431 implements complete false and exit nonzero for partial benchmark runs."
         },
         {
@@ -4210,7 +4213,7 @@
           "excerpt": "Local notes mention follow-up thresholds work but not the honesty rule."
         }
       ],
-      "latency_ms": 45.779041,
+      "latency_ms": 46.826125000000005,
       "index_size_bytes": 4096
     },
     {
@@ -4261,7 +4264,7 @@
           "window_title": "eval/work-memory README",
           "url": "file:///eval/work-memory/README.md",
           "relevant": true,
-          "score": 0.4714048504829407,
+          "score": 0.4671895205974579,
           "excerpt": "The work-memory README explains the synthetic corpus and the one-command runner."
         },
         {
@@ -4276,7 +4279,7 @@
           "excerpt": "Slack misc thread contains a screenshot but no rerun steps."
         }
       ],
-      "latency_ms": 57.816959000000004,
+      "latency_ms": 45.371458000000004,
       "index_size_bytes": 4096
     },
     {
@@ -4326,7 +4329,7 @@
           "window_title": "HIPP-219",
           "url": "linear://HIPP-219",
           "relevant": true,
-          "score": 0.21593420207500458,
+          "score": 0.233194500207901,
           "excerpt": "HIPP 219 tracks the requirement that incomplete benchmark arms must fail loudly."
         },
         {
@@ -4341,7 +4344,7 @@
           "excerpt": "PR 426 drafted baseline output without the final nonzero guard."
         }
       ],
-      "latency_ms": 51.349625,
+      "latency_ms": 45.811833,
       "index_size_bytes": 4096
     },
     {
@@ -4354,15 +4357,15 @@
       ],
       "unanswerable": false,
       "outcome": "matched",
-      "first_hit_rank": 1,
+      "first_hit_rank": 2,
       "recall_at": {
-        "1": 1.0,
+        "1": 0.0,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
       "provenance_coverage_at": {
-        "1": true,
+        "1": false,
         "3": true,
         "5": true,
         "10": true
@@ -4373,17 +4376,6 @@
       "top_hits": [
         {
           "rank": 1,
-          "event_id": 2,
-          "session_id": "linear://HIPP-201/comment-priya",
-          "app_bundle_id": "com.linear",
-          "window_title": "HIPP-201 new owner",
-          "url": "linear://HIPP-201/comment-priya",
-          "relevant": true,
-          "score": 0.5716736912727356,
-          "excerpt": "Updated note says Priya owns HIPP 201 now that the benchmark is in implementation."
-        },
-        {
-          "rank": 2,
           "event_id": 1,
           "session_id": "linear://HIPP-201/comment-alice",
           "app_bundle_id": "com.linear",
@@ -4392,6 +4384,17 @@
           "relevant": false,
           "score": 0.5692776441574097,
           "excerpt": "Earlier note says Alice owns HIPP 201 while the benchmark schema is still in draft."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "linear://HIPP-201/comment-priya",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-201 new owner",
+          "url": "linear://HIPP-201/comment-priya",
+          "relevant": true,
+          "score": 0.5635181665420532,
+          "excerpt": "Updated note says Priya owns HIPP 201 now that the benchmark is in implementation."
         },
         {
           "rank": 3,
@@ -4405,7 +4408,7 @@
           "excerpt": "Slack thread confirms the owner switch but not the issue number."
         }
       ],
-      "latency_ms": 46.14775,
+      "latency_ms": 45.813583,
       "index_size_bytes": 4096
     },
     {
@@ -4460,7 +4463,7 @@
           "excerpt": "Older note says use models ArcticEmbedS INT8 mlmodelc from the repo root."
         }
       ],
-      "latency_ms": 34.71962499999999,
+      "latency_ms": 36.642584,
       "index_size_bytes": 4096
     },
     {
@@ -4513,7 +4516,7 @@
           "excerpt": "Draft dataset note says the synthetic work-memory corpus has 18 cases."
         }
       ],
-      "latency_ms": 34.449167,
+      "latency_ms": 33.978791,
       "index_size_bytes": 4096
     },
     {
@@ -4568,7 +4571,7 @@
           "excerpt": "Old thread says a partial benchmark run can warn and still count as green."
         }
       ],
-      "latency_ms": 34.76025,
+      "latency_ms": 34.642582999999995,
       "index_size_bytes": 4096
     },
     {
@@ -4623,7 +4626,7 @@
           "excerpt": "Older PR note says provenance coverage is optional and can wait for later."
         }
       ],
-      "latency_ms": 34.084791,
+      "latency_ms": 33.637583,
       "index_size_bytes": 4096
     },
     {
@@ -4678,7 +4681,7 @@
           "excerpt": "Draft threshold thread says only hit at five matters."
         }
       ],
-      "latency_ms": 36.622333,
+      "latency_ms": 34.253708,
       "index_size_bytes": 4096
     },
     {
@@ -4732,7 +4735,7 @@
           "excerpt": "The model path thread is about MCI_ARCTIC_MODEL_PATH and not the rollback."
         }
       ],
-      "latency_ms": 34.840708,
+      "latency_ms": 34.242458000000006,
       "index_size_bytes": 4096
     },
     {
@@ -4786,7 +4789,7 @@
           "excerpt": "docs/eval README lists the methodology docs but not the runner details."
         }
       ],
-      "latency_ms": 33.937000000000005,
+      "latency_ms": 34.686417,
       "index_size_bytes": 4096
     },
     {
@@ -4840,12 +4843,12 @@
           "excerpt": "PR 440 moved the benchmark onto the production retriever path."
         }
       ],
-      "latency_ms": 34.274916000000005,
+      "latency_ms": 36.056125,
       "index_size_bytes": 4096
     },
     {
       "arm": "hybrid",
-      "question_id": "unanswerable-vinyl-koala",
+      "question_id": "unanswerable-pr-431-approver",
       "question_type": "unanswerable",
       "tags": [
         "unanswerable",
@@ -4856,16 +4859,16 @@
       "outcome": "falsePositive",
       "first_hit_rank": null,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0,
-        "10": 0.0
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "provenance_coverage_at": {
-        "1": false,
-        "3": false,
-        "5": false,
-        "10": false
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "answer_sessions": 0,
       "sessions_in_haystack": 2,
@@ -4894,32 +4897,32 @@
           "excerpt": "The model path thread is about exporting MCI_ARCTIC_MODEL_PATH."
         }
       ],
-      "latency_ms": 37.41525,
+      "latency_ms": 35.44225,
       "index_size_bytes": 4096
     },
     {
       "arm": "hybrid",
-      "question_id": "unanswerable-saffron-orbit",
+      "question_id": "unanswerable-benchmark-test-duration",
       "question_type": "unanswerable",
       "tags": [
         "unanswerable",
-        "browser",
+        "terminal",
         "files"
       ],
       "unanswerable": true,
       "outcome": "falsePositive",
       "first_hit_rank": null,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0,
-        "10": 0.0
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "provenance_coverage_at": {
-        "1": false,
-        "3": false,
-        "5": false,
-        "10": false
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "answer_sessions": 0,
       "sessions_in_haystack": 2,
@@ -4927,33 +4930,33 @@
       "top_hits": [
         {
           "rank": 1,
-          "event_id": 1,
-          "session_id": "browser://adr/0010-fusion",
-          "app_bundle_id": "com.apple.Safari",
-          "window_title": "ADR 0010 fusion",
-          "url": "browser://adr/0010-fusion",
-          "relevant": false,
-          "score": 0.5960714817047119,
-          "excerpt": "ADR 0010 says vector similarity is a recall signal and not truth."
-        },
-        {
-          "rank": 2,
           "event_id": 2,
           "session_id": "file:///eval/work-memory/README.md",
           "app_bundle_id": "com.microsoft.VSCode",
           "window_title": "eval/work-memory README",
           "url": "file:///eval/work-memory/README.md",
           "relevant": false,
-          "score": 0.23655366897583008,
-          "excerpt": "The work-memory README explains the synthetic corpus."
+          "score": 0.6365536451339722,
+          "excerpt": "The work-memory README documents the synthetic corpus and runner command."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "terminal://zsh/session-14",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "work-memory tests",
+          "url": "terminal://zsh/session-14",
+          "relevant": false,
+          "score": 0.23052452504634857,
+          "excerpt": "Terminal ran cargo test -p mci-agent --test work_memory_bench and all focused tests passed."
         }
       ],
-      "latency_ms": 34.792084,
+      "latency_ms": 39.250208,
       "index_size_bytes": 4096
     },
     {
       "arm": "hybrid",
-      "question_id": "unanswerable-marble-cactus",
+      "question_id": "unanswerable-hipp-201-due-date",
       "question_type": "unanswerable",
       "tags": [
         "unanswerable",
@@ -4963,16 +4966,16 @@
       "outcome": "falsePositive",
       "first_hit_rank": null,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0,
-        "10": 0.0
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "provenance_coverage_at": {
-        "1": false,
-        "3": false,
-        "5": false,
-        "10": false
+        "1": null,
+        "3": null,
+        "5": null,
+        "10": null
       },
       "answer_sessions": 0,
       "sessions_in_haystack": 2,
@@ -4980,43 +4983,43 @@
       "top_hits": [
         {
           "rank": 1,
-          "event_id": 1,
-          "session_id": "linear://HIPP-201/comment-alice",
-          "app_bundle_id": "com.linear",
-          "window_title": "HIPP-201 old owner",
-          "url": "linear://HIPP-201/comment-alice",
-          "relevant": false,
-          "score": 0.5885552763938904,
-          "excerpt": "Earlier note says Alice owns HIPP 201 while the benchmark schema is still in draft."
-        },
-        {
-          "rank": 2,
           "event_id": 2,
           "session_id": "linear://HIPP-201/comment-priya",
           "app_bundle_id": "com.linear",
           "window_title": "HIPP-201 new owner",
           "url": "linear://HIPP-201/comment-priya",
           "relevant": false,
-          "score": 0.19134241342544556,
+          "score": 0.5913424491882324,
           "excerpt": "Updated note says Priya owns HIPP 201 now that the benchmark is in implementation."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "linear://HIPP-201/comment-alice",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-201 old owner",
+          "url": "linear://HIPP-201/comment-alice",
+          "relevant": false,
+          "score": 0.1885552704334259,
+          "excerpt": "Earlier note says Alice owns HIPP 201 while the benchmark schema is still in draft."
         }
       ],
-      "latency_ms": 34.678042,
+      "latency_ms": 34.612667,
       "index_size_bytes": 4096
     }
   ],
   "failures": [],
   "regression_thresholds": {
     "hybrid": {
-      "hit_rate_at_1_min": 0.9,
+      "hit_rate_at_1_min": 0.8571428571428571,
       "hit_rate_at_3_min": 0.9,
       "hit_rate_at_5_min": 0.9,
       "hit_rate_at_10_min": 0.9,
-      "recall_at_1_min": 0.8357142857142857,
+      "recall_at_1_min": 0.7928571428571428,
       "recall_at_3_min": 0.9,
       "recall_at_5_min": 0.9,
       "recall_at_10_min": 0.9,
-      "provenance_coverage_at_1_min": 0.9,
+      "provenance_coverage_at_1_min": 0.8571428571428571,
       "provenance_coverage_at_3_min": 0.9,
       "provenance_coverage_at_5_min": 0.9,
       "provenance_coverage_at_10_min": 0.9,
@@ -5028,8 +5031,8 @@
       "abstention_separation_at_3_min": 0.0,
       "abstention_separation_at_5_min": 0.0,
       "abstention_separation_at_10_min": 0.0,
-      "mrr_min": 0.9,
-      "latency_p95_ms_max": 115.63391800000001,
+      "mrr_min": 0.8785714285714286,
+      "latency_p95_ms_max": 99.291332,
       "index_size_p95_bytes_max": 9625.6
     },
     "lexical": {
@@ -5054,18 +5057,55 @@
       "abstention_separation_at_5_min": 0.2833333333333333,
       "abstention_separation_at_10_min": 0.2833333333333333,
       "mrr_min": 0.2833333333333333,
-      "latency_p95_ms_max": 32.660917,
+      "latency_p95_ms_max": 34.770375,
       "index_size_p95_bytes_max": 9625.6
     }
   },
+  "absolute_quality_targets": {
+    "hybrid": {
+      "hit_rate_at_5_min": 0.9,
+      "recall_at_5_min": 0.9,
+      "provenance_coverage_at_5_min": 0.9,
+      "false_positive_rate_at_5_max": 0.1,
+      "abstention_separation_at_5_min": 0.8,
+      "mrr_min": 0.85
+    }
+  },
+  "quality_gate": {
+    "passed": false,
+    "failures": [
+      "hybrid: absolute false_positive@5 1.000 > 0.100",
+      "hybrid: absolute abstention_separation@5 0.000 < 0.800"
+    ]
+  },
   "regression": null,
   "run": {
-    "captured_at_utc": "2026-09-01T08:18:37Z",
-    "git_commit": "b4c045a66b38c075c238340c2215cc882cb7d438",
+    "captured_at_utc": "2026-09-01T09:06:51Z",
+    "git_commit": "04b9b8c1e39042b41dc64a1b7f4f986eb41583be",
+    "git_dirty_at_start": false,
     "branch": "codex/hippocampus-v1",
-    "os": "macos",
-    "arch": "aarch64",
-    "model_path": "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc",
+    "command": "cargo run -q -p mci-agent --bin mci-bench --",
+    "arguments": [
+      "--dataset",
+      "eval/work-memory/synthetic-v1.json",
+      "--arm",
+      "both",
+      "--out",
+      "docs/eval/work-memory-baseline.next.json"
+    ],
+    "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "cargo_version": "cargo 1.96.0 (30a34c682 2026-05-25)",
+    "os_name": "macOS",
+    "os_version": "26.5",
+    "os_build": "25F71",
+    "architecture": "arm64",
+    "hardware_model": "Mac15,13",
+    "hardware_chip": "Apple M3",
+    "ram_bytes": 17179869184,
+    "compute_mode": "coreml_cpu_only",
+    "model_family": "snowflake-arctic-embed-s-int8",
+    "model_path": "installed-model://ArcticEmbedS_INT8.mlmodelc",
+    "model_checksum_sha256": "f782f7f4a13c69a4399345f1d6a4b8de8f4327c131e537a1ea6bf9fdeaeaeef8",
     "requested_arms": [
       "lexical",
       "hybrid"
@@ -5077,6 +5117,7 @@
       10
     ],
     "limit": null,
-    "workdir": "/var/folders/mh/rmbxwhjs4dj64tyy3wrv87yr0000gn/T/mci-bench"
+    "original_instances": 24,
+    "evaluated_instances": 24
   }
 }
