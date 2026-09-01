@@ -470,8 +470,9 @@ public final class SurfaceLease: @unchecked Sendable {
     }
 }
 
-/// The encode seam. Production impl = VideoToolbox HEVC keyframe
-/// encode (`VideoToolboxHEVCEncoder.swift`). Tests inject a spy.
+/// The post-pixel-privacy dispatch seam. Production uses the no-op
+/// implementation because visual retention now occurs after OCR privacy.
+/// Tests may inject a spy or the legacy HEVC implementation in isolation.
 ///
 /// The `input: EncoderInput?` argument carries the retained pixel
 /// buffer for one frame. `nil` means "OS-free / headless test path"
@@ -493,14 +494,8 @@ public protocol FrameEncoder: Sendable {
     ) async throws
 }
 
-/// Default-OFF placeholder. Retained because `main.swift` may wire it
-/// when the operator omits `--capture`, and headless tests use it as a
-/// zero-cost stand-in for the production encoder. Replacing it with
-/// `VideoToolboxHEVCEncoder` is itself NOT a default flip — flipping
-/// the §4 default-ON capture gate requires the §7 corpus + CSO
-/// sign-off (`CaptureLaunchOptions.swift`). DOGFOOD #3 wires the real
-/// encoder ONLY inside the `--capture` dev branch in `main.swift`.
-public struct DeferredVideoToolboxEncoder: FrameEncoder {
+/// Production no-op. Post-OCR condensed JPEG is the only retained visual.
+public struct NoOpFrameEncoder: FrameEncoder {
     public init() {}
     public func encodeAllowedFrame(
         input _: EncoderInput?,
@@ -513,6 +508,9 @@ public struct DeferredVideoToolboxEncoder: FrameEncoder {
         // gate without pulling in VideoToolbox.
     }
 }
+
+@available(*, deprecated, renamed: "NoOpFrameEncoder")
+public typealias DeferredVideoToolboxEncoder = NoOpFrameEncoder
 
 /// Mutable wall-clock state for the cascade floor.
 ///
@@ -766,8 +764,8 @@ public struct SCStreamPipeline: Sendable {
             // ONLY reachable after `.allow`. This is the single encode
             // call site in the helper. The top-level `defer` releases
             // the surface on every path including the encoder catch arm.
-            // DOGFOOD #3: `encoderInput` carries the live frame's
-            // retained `CVPixelBuffer`. A `nil` input keeps the
+            // `encoderInput` carries the live frame's retained
+            // `CVPixelBuffer`. A `nil` input keeps the
             // headless / OS-free test path unchanged (the encoder is
             // expected to no-op on nil); the live `SCStreamCapture`
             // callback always supplies a non-nil input.
@@ -775,12 +773,9 @@ public struct SCStreamPipeline: Sendable {
             // ADR-0016 §4.2 — OCR emission is gated on cascade-twice
             // on pixels (and §6 on text), NOT on encode-success. The
             // cascade decision above is the structural gate that
-            // protects user content; the encoder's role is to produce
-            // an HEVC blob for the recall timeline (post-§7-corpus /
-            // post-key-plumbing). A VideoToolbox failure on this `.allow`
-            // frame must not silently mute the OCR brain — that was
-            // the ocr-emit-silence regression closed by docs/research/
-            // ocr-emit-silence-2026-05-28.md. Treat encoder errors as
+            // protects user content. The production encoder is no-op;
+            // preserving this error arm keeps injected encoder failures
+            // from silently muting OCR. Treat encoder errors as
             // content-free observables: increment the
             // `framesEncoderFailed` counter (surfaced on the wire by
             // the 0x06 → 0x07 HelperHealth bump) and still return

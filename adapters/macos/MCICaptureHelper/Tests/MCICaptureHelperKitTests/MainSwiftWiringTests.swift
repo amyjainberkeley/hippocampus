@@ -203,6 +203,14 @@ final class MainSwiftWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("exit(79)"), "SCStream startup failure must exit nonzero")
     }
 
+    func test_main_uses_no_op_encoder_without_an_undrained_hevc_queue() throws {
+        let src = try Self.readMainSwift()
+
+        XCTAssertTrue(src.contains("NoOpFrameEncoder()"))
+        XCTAssertFalse(src.contains("InMemoryEncodedSampleQueue()"))
+        XCTAssertFalse(src.contains("VideoToolboxHEVCEncoder("))
+    }
+
     /// Grep-in-place assertion on `SCStreamPipeline.swift` — the
     /// factory (which `main.swift` now wires) MUST call
     /// `SCContentFilter(display:including:exceptingWindows:)` with the
