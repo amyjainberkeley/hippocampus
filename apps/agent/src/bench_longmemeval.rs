@@ -214,6 +214,42 @@ pub fn parse_dataset_ts(s: &str) -> Result<u64, String> {
         .map_err(|_| bad())
 }
 
+/// The two embedder flavours, built once for a whole run.
+///
+/// Loading the Core ML model costs roughly 340 ms. Building these inside
+/// the per-instance function meant a 500-instance run paid that 1,000
+/// times, about five minutes of pure model loading and more under load.
+/// A benchmark exists to be re-run after a change, so its own overhead is
+/// worth removing.
+pub struct Embedders {
+    /// Embeds stored text.
+    pub document: Arc<dyn mci_brain::Embedder>,
+    /// Embeds the query, adding the model-card prefix (ADR-0011 §3).
+    /// Using the document flavour here quietly degrades every result.
+    pub query: Arc<dyn mci_brain::Embedder>,
+}
+
+impl Embedders {
+    /// Load both flavours once.
+    ///
+    /// # Errors
+    /// When no real Core ML model resolves. The benchmark refuses rather
+    /// than reporting a number for an arm that silently ran on a
+    /// zero-vector stub.
+    pub fn load() -> Result<Self, String> {
+        let (document, is_real) = crate::embedder_load::load_embedder_backend();
+        if !is_real {
+            return Err(
+                "the hybrid arm needs the real ArcticEmbedS model and none resolved; \
+                 refusing to report a number for an arm that did not run"
+                    .to_string(),
+            );
+        }
+        let (query, _) = crate::embedder_load::load_query_embedder_backend();
+        Ok(Self { document, query })
+    }
+}
+
 /// Build one instance's brain, then run the question against it.
 ///
 /// # Errors
@@ -223,6 +259,7 @@ pub fn run_instance(
     arm: Arm,
     ks: &[usize],
     dir: &Path,
+    embedders: Option<&Embedders>,
 ) -> Result<InstanceResult, String> {
     let db_path = dir.join(format!("{}.sqlite", inst.question_id));
     // A throwaway key: the corpus is a public dataset and the database is
@@ -316,17 +353,17 @@ pub fn run_instance(
             .map(|(id, _score)| id.0)
             .collect(),
         Arm::Hybrid => {
-            let (doc_emb, is_real) = crate::embedder_load::load_embedder_backend();
-            if !is_real {
-                return Err(format!(
-                    "{}: hybrid arm needs the real ArcticEmbedS model and none loaded;                      refusing to report a number for an arm that did not run",
+            // The lexical arm needs no model, so the caller is allowed to
+            // skip loading one entirely for a lexical-only run.
+            let embedders = embedders.ok_or_else(|| {
+                format!(
+                    "{}: the hybrid arm needs an embedder and none was given",
                     inst.question_id
-                ));
-            }
-            backfill_until_drained(store.as_ref(), doc_emb.as_ref(), 64, |_| {})
+                )
+            })?;
+            backfill_until_drained(store.as_ref(), embedders.document.as_ref(), 64, |_| {})
                 .map_err(|e| format!("{}: embed: {e}", inst.question_id))?;
-            // Query flavour, not document flavour: ADR-0011 §3 prefix.
-            let (q_emb, _) = crate::embedder_load::load_query_embedder_backend();
+            let q_emb = Arc::clone(&embedders.query);
             // Both wrappers are the ones `mcp-serve` uses. `DynEmbedder`
             // because `HybridRetriever<S, E>` needs `E: Sized`, and
             // `FtsSanitizingStore` because the retriever hands raw query
@@ -437,6 +474,7 @@ pub fn run_abstention_probe(
     inst: &Instance,
     foreign_question: &str,
     dir: &Path,
+    embedders: &Embedders,
 ) -> Result<Vec<AbstentionSample>, String> {
     let db_path = dir.join(format!("abst-{}.sqlite", inst.question_id));
     let key = DbKey::from_bytes([0x5a; 32]);
@@ -485,17 +523,9 @@ pub fn run_abstention_probe(
         }
     }
 
-    let (doc_emb, is_real) = crate::embedder_load::load_embedder_backend();
-    if !is_real {
-        return Err(format!(
-            "{}: abstention probe needs a real embedder",
-            inst.question_id
-        ));
-    }
-    backfill_until_drained(&store, doc_emb.as_ref(), 64, |_| {})
+    backfill_until_drained(&store, embedders.document.as_ref(), 64, |_| {})
         .map_err(|e| format!("{}: embed: {e}", inst.question_id))?;
-
-    let (q_emb, _) = crate::embedder_load::load_query_embedder_backend();
+    let q_emb = &embedders.query;
     let mut out = Vec::with_capacity(2);
     for (text, answerable) in [(inst.question.as_str(), true), (foreign_question, false)] {
         let v = q_emb
