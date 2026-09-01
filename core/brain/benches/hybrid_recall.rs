@@ -53,6 +53,7 @@ fn build_corpus() -> Corpus {
             summary: None,
             entities: None,
             episode_id: None,
+            tab_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
             embedding: Some(emb),

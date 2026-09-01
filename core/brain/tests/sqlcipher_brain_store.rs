@@ -128,7 +128,7 @@ fn new_creates_encrypted_db_and_runs_migration() {
     // V2-P3 migration 0004 adds the graph, V2-P6 migration 0005 adds
     // entity identities, and Task 5 migration 0006 adds governed memory.
     // Briefs retain their separate version key.
-    assert_eq!(v, "7");
+    assert_eq!(v, "8");
 }
 
 // ---------------------------------------------------------------------------
@@ -640,7 +640,7 @@ fn vec_search_filtered_time_range_matches_manual_subset() {
             let e = store.get_event(*id).unwrap().unwrap();
             e.ts_us >= 150 && e.ts_us <= 350
         })
-        .cloned()
+        .copied()
         .collect();
     assert_eq!(
         filtered, full_in_range,
@@ -1218,8 +1218,8 @@ fn observed_apps_zero_limit_returns_empty() {
 
 /// Two events with the same `url` but distinct `tab_id` values must
 /// round-trip as DISTINCT rows. Pins the V2-P2 fix shape end-to-end
-/// on the brain side: per-tab attribution survives put_event +
-/// get_event without collapsing on the URL key.
+/// on the brain side: per-tab attribution survives `put_event` +
+/// `get_event` without collapsing on the URL key.
 #[test]
 fn put_then_get_round_trips_distinct_tab_ids_under_shared_url() {
     let (_dir, path) = tmp("tab_id_distinct.sqlite");
@@ -1245,7 +1245,7 @@ fn put_then_get_round_trips_distinct_tab_ids_under_shared_url() {
     assert_eq!(got_b.url, Some(url));
 }
 
-/// Inserting an event with `tab_id = None` (OCREvent path; no tab
+/// Inserting an event with `tab_id = None` (`OCREvent` path; no tab
 /// signal) round-trips as NULL on disk and `None` in the read model.
 #[test]
 fn put_event_with_null_tab_id_round_trips_as_none() {
@@ -1424,9 +1424,10 @@ fn retriever_prefilter_matches_full_knn_on_scored_topk() {
         "test",
     ];
     for i in 0..20_u64 {
-        let text = format!("{} {}", words[(i as usize) % words.len()], "sample");
+        let index = usize::try_from(i).expect("fixture index fits usize");
+        let text = format!("{} {}", words[index % words.len()], "sample");
         let mut ev = blank_event(1_000_000 * (i + 1), &text);
-        ev.app_bundle_id = Some(apps[(i as usize) % 2].to_string());
+        ev.app_bundle_id = Some(apps[index % 2].to_string());
         ev.embedding = Some(embedder.embed_one(&text).unwrap());
         store.put_event(&ev).expect("put");
     }

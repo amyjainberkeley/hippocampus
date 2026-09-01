@@ -28,6 +28,7 @@ CREATE INDEX IF NOT EXISTS memory_evidence_event
 
 CREATE TABLE IF NOT EXISTS memory_claims (
     id                  TEXT NOT NULL PRIMARY KEY,
+    delta_id            TEXT,
     source_event_id     INTEGER NOT NULL,
     subject             TEXT NOT NULL,
     predicate           TEXT NOT NULL,
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS memory_claims (
     projector_version   TEXT NOT NULL,
     initial_status      TEXT NOT NULL CHECK (initial_status IN ('proposed', 'active')),
     supersedes_claim_id TEXT,
+    FOREIGN KEY (delta_id) REFERENCES memory_deltas(id) ON DELETE RESTRICT,
     FOREIGN KEY (source_event_id) REFERENCES events(id) ON DELETE RESTRICT,
     FOREIGN KEY (supersedes_claim_id) REFERENCES memory_claims(id) ON DELETE RESTRICT
 );
@@ -51,6 +53,8 @@ CREATE INDEX IF NOT EXISTS memory_claims_validity
     ON memory_claims(valid_from_us, valid_to_us, asserted_at_us, id);
 CREATE INDEX IF NOT EXISTS memory_claims_supersedes
     ON memory_claims(supersedes_claim_id, asserted_at_us, id);
+CREATE INDEX IF NOT EXISTS memory_claims_delta
+    ON memory_claims(delta_id, id);
 
 CREATE TABLE IF NOT EXISTS memory_claim_evidence (
     claim_id            TEXT NOT NULL,
@@ -65,6 +69,7 @@ CREATE INDEX IF NOT EXISTS memory_claim_evidence_evidence
 
 CREATE TABLE IF NOT EXISTS memory_claim_transitions (
     id                  TEXT NOT NULL PRIMARY KEY,
+    delta_id            TEXT,
     claim_id            TEXT NOT NULL,
     status              TEXT NOT NULL CHECK (status IN ('superseded', 'retracted', 'contradicted')),
     asserted_at_us      INTEGER NOT NULL,
@@ -72,12 +77,15 @@ CREATE TABLE IF NOT EXISTS memory_claim_transitions (
     reason              TEXT NOT NULL,
     source_event_id     INTEGER NOT NULL,
     projector_version   TEXT NOT NULL,
+    FOREIGN KEY (delta_id) REFERENCES memory_deltas(id) ON DELETE RESTRICT,
     FOREIGN KEY (claim_id) REFERENCES memory_claims(id) ON DELETE RESTRICT,
     FOREIGN KEY (source_event_id) REFERENCES events(id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS memory_claim_transitions_latest
     ON memory_claim_transitions(claim_id, asserted_at_us, effective_at_us, id);
+CREATE INDEX IF NOT EXISTS memory_claim_transitions_delta
+    ON memory_claim_transitions(delta_id, id);
 
 CREATE TABLE IF NOT EXISTS memory_event_retractions (
     id                  TEXT NOT NULL PRIMARY KEY,

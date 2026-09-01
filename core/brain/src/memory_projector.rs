@@ -39,7 +39,7 @@ pub(crate) fn apply_delta(tx: &Transaction<'_>, delta: &MemoryDelta) -> Result<(
         for evidence in &claim.evidence {
             insert_evidence(tx, evidence)?;
         }
-        insert_claim(tx, claim)?;
+        insert_claim(tx, claim, &delta.id)?;
         for evidence in &claim.evidence {
             tx.execute(
                 "INSERT OR IGNORE INTO memory_claim_evidence (claim_id, evidence_id)
@@ -59,12 +59,12 @@ pub(crate) fn apply_delta(tx: &Transaction<'_>, delta: &MemoryDelta) -> Result<(
                 delta.source_event_id,
                 &delta.projector_version,
             );
-            insert_transition(tx, &transition)?;
+            insert_transition(tx, &transition, Some(&delta.id))?;
         }
     }
     for transition in &delta.transitions {
         validate_transition(tx, delta, transition)?;
-        insert_transition(tx, transition)?;
+        insert_transition(tx, transition, Some(&delta.id))?;
     }
     Ok(())
 }
@@ -112,7 +112,7 @@ pub(crate) fn apply_retraction(
             retraction.retraction_event_id,
             &retraction.projector_version,
         );
-        insert_transition(tx, &transition)?;
+        insert_transition(tx, &transition, None)?;
     }
     Ok(())
 }
@@ -361,8 +361,12 @@ fn insert_evidence(tx: &Transaction<'_>, value: &EvidenceRef) -> Result<(), Stor
     Ok(())
 }
 
-fn insert_claim(tx: &Transaction<'_>, value: &MemoryClaim) -> Result<(), StoreError> {
-    type ClaimPayload = (
+fn insert_claim(
+    tx: &Transaction<'_>,
+    value: &MemoryClaim,
+    delta_id: &str,
+) -> Result<(), StoreError> {
+    type ClaimFields = (
         i64,
         String,
         String,
@@ -376,9 +380,10 @@ fn insert_claim(tx: &Transaction<'_>, value: &MemoryClaim) -> Result<(), StoreEr
         String,
         Option<String>,
     );
+    type ClaimPayload = (Option<String>, ClaimFields);
     let existing: Option<ClaimPayload> = tx
         .query_row(
-            "SELECT source_event_id, subject, predicate, object, scope, attribution,
+            "SELECT delta_id, source_event_id, subject, predicate, object, scope, attribution,
                     confidence, asserted_at_us, valid_from_us, valid_to_us,
                     initial_status, supersedes_claim_id
              FROM memory_claims WHERE id = ?1",
@@ -386,38 +391,44 @@ fn insert_claim(tx: &Transaction<'_>, value: &MemoryClaim) -> Result<(), StoreEr
             |row| {
                 Ok((
                     row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get(8)?,
-                    row.get(9)?,
-                    row.get(10)?,
-                    row.get(11)?,
+                    (
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                    ),
                 ))
             },
         )
         .optional()
         .map_err(db_error("read memory claim identity"))?;
     let expected = (
-        to_i64(value.source_event_id.0, "claim source_event_id")?,
-        value.subject.clone(),
-        value.predicate.clone(),
-        value.object.clone(),
-        value.scope.clone(),
-        value.attribution.clone(),
-        f64::from(value.confidence),
-        to_i64(value.asserted_at_us, "claim asserted_at_us")?,
-        to_i64(value.valid_from_us, "claim valid_from_us")?,
-        value
-            .valid_to_us
-            .map(|valid_to| to_i64(valid_to, "claim valid_to_us"))
-            .transpose()?,
-        value.status.as_str().to_owned(),
-        value.supersedes_claim_id.as_ref().map(|id| id.0.clone()),
+        Some(delta_id.to_owned()),
+        (
+            to_i64(value.source_event_id.0, "claim source_event_id")?,
+            value.subject.clone(),
+            value.predicate.clone(),
+            value.object.clone(),
+            value.scope.clone(),
+            value.attribution.clone(),
+            f64::from(value.confidence),
+            to_i64(value.asserted_at_us, "claim asserted_at_us")?,
+            to_i64(value.valid_from_us, "claim valid_from_us")?,
+            value
+                .valid_to_us
+                .map(|valid_to| to_i64(valid_to, "claim valid_to_us"))
+                .transpose()?,
+            value.status.as_str().to_owned(),
+            value.supersedes_claim_id.as_ref().map(|id| id.0.clone()),
+        ),
     );
     if let Some(existing) = existing {
         return if existing == expected {
@@ -428,58 +439,71 @@ fn insert_claim(tx: &Transaction<'_>, value: &MemoryClaim) -> Result<(), StoreEr
     }
     tx.execute(
         "INSERT INTO memory_claims
-         (id, source_event_id, subject, predicate, object, scope, attribution,
+         (id, delta_id, source_event_id, subject, predicate, object, scope, attribution,
           confidence, asserted_at_us, valid_from_us, valid_to_us,
           projector_version, initial_status, supersedes_claim_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             value.id.0,
             expected.0,
-            expected.1,
-            expected.2,
-            expected.3,
-            expected.4,
-            expected.5,
-            expected.6,
-            expected.7,
-            expected.8,
-            expected.9,
+            expected.1 .0,
+            expected.1 .1,
+            expected.1 .2,
+            expected.1 .3,
+            expected.1 .4,
+            expected.1 .5,
+            expected.1 .6,
+            expected.1 .7,
+            expected.1 .8,
+            expected.1 .9,
             value.projector_version,
-            expected.10,
-            expected.11,
+            expected.1 .10,
+            expected.1 .11,
         ],
     )
     .map_err(db_error("insert memory claim"))?;
     Ok(())
 }
 
-fn insert_transition(tx: &Transaction<'_>, value: &ClaimTransition) -> Result<(), StoreError> {
-    type TransitionPayload = (String, String, i64, i64, String, i64);
+fn insert_transition(
+    tx: &Transaction<'_>,
+    value: &ClaimTransition,
+    delta_id: Option<&str>,
+) -> Result<(), StoreError> {
+    type TransitionFields = (String, String, i64, i64, String, i64);
+    type TransitionPayload = (Option<String>, TransitionFields);
     let existing: Option<TransitionPayload> = tx
         .query_row(
-            "SELECT claim_id, status, asserted_at_us, effective_at_us, reason, source_event_id
+            "SELECT delta_id, claim_id, status, asserted_at_us, effective_at_us, reason,
+                    source_event_id
              FROM memory_claim_transitions WHERE id = ?1",
             params![value.id],
             |row| {
                 Ok((
                     row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
+                    (
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ),
                 ))
             },
         )
         .optional()
         .map_err(db_error("read claim transition identity"))?;
     let expected = (
-        value.claim_id.0.clone(),
-        value.status.as_str().to_owned(),
-        to_i64(value.asserted_at_us, "transition asserted_at_us")?,
-        to_i64(value.effective_at_us, "transition effective_at_us")?,
-        value.reason.clone(),
-        to_i64(value.source_event_id.0, "transition source_event_id")?,
+        delta_id.map(str::to_owned),
+        (
+            value.claim_id.0.clone(),
+            value.status.as_str().to_owned(),
+            to_i64(value.asserted_at_us, "transition asserted_at_us")?,
+            to_i64(value.effective_at_us, "transition effective_at_us")?,
+            value.reason.clone(),
+            to_i64(value.source_event_id.0, "transition source_event_id")?,
+        ),
     );
     if let Some(existing) = existing {
         return if existing == expected {
@@ -490,17 +514,18 @@ fn insert_transition(tx: &Transaction<'_>, value: &ClaimTransition) -> Result<()
     }
     tx.execute(
         "INSERT INTO memory_claim_transitions
-         (id, claim_id, status, asserted_at_us, effective_at_us, reason,
+         (id, delta_id, claim_id, status, asserted_at_us, effective_at_us, reason,
           source_event_id, projector_version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             value.id,
             expected.0,
-            expected.1,
-            expected.2,
-            expected.3,
-            expected.4,
-            expected.5,
+            expected.1 .0,
+            expected.1 .1,
+            expected.1 .2,
+            expected.1 .3,
+            expected.1 .4,
+            expected.1 .5,
             value.projector_version,
         ],
     )
@@ -607,7 +632,7 @@ fn apply_recorded_retractions(tx: &Transaction<'_>, claim: &MemoryClaim) -> Resu
                 EventId(to_u64(source, "retraction source_event_id")?),
                 &projector_version,
             );
-            insert_transition(tx, &transition)?;
+            insert_transition(tx, &transition, None)?;
         }
     }
     Ok(())
@@ -769,6 +794,48 @@ pub(crate) fn read_claim_history(
     Ok(out)
 }
 
+struct ExpansionAccumulator {
+    claim_ids: Vec<MemoryClaimId>,
+    evidence: Vec<ExpandedEvidence>,
+    episodes: BTreeSet<EpisodeId>,
+    entities: BTreeSet<EntityId>,
+    identities: BTreeSet<IdentityId>,
+    nodes_used: usize,
+    edges_used: usize,
+    tokens_used: usize,
+    truncated: bool,
+}
+
+impl ExpansionAccumulator {
+    fn new(seed_count: usize) -> Self {
+        Self {
+            claim_ids: Vec::with_capacity(seed_count),
+            evidence: Vec::new(),
+            episodes: BTreeSet::new(),
+            entities: BTreeSet::new(),
+            identities: BTreeSet::new(),
+            nodes_used: 0,
+            edges_used: 0,
+            tokens_used: 0,
+            truncated: false,
+        }
+    }
+
+    fn finish(self) -> MemoryExpansion {
+        MemoryExpansion {
+            claim_ids: self.claim_ids,
+            evidence: self.evidence,
+            episode_ids: self.episodes.into_iter().collect(),
+            entity_ids: self.entities.into_iter().collect(),
+            identity_ids: self.identities.into_iter().collect(),
+            nodes_used: self.nodes_used,
+            edges_used: self.edges_used,
+            tokens_used: self.tokens_used,
+            truncated: self.truncated,
+        }
+    }
+}
+
 pub(crate) fn expand_memory(
     tx: &Transaction<'_>,
     seed_claim_ids: &[MemoryClaimId],
@@ -783,123 +850,117 @@ pub(crate) fn expand_memory(
         scheduled.push((!admissible, claim_id));
     }
     scheduled.sort();
-
-    let mut claim_ids = Vec::new();
-    let mut evidence_out = Vec::new();
-    let mut episodes = BTreeSet::new();
-    let mut entities = BTreeSet::new();
-    let mut identities = BTreeSet::new();
-    let mut nodes_used = 0usize;
-    let mut edges_used = 0usize;
-    let mut tokens_used = 0usize;
-    let mut truncated = false;
+    let mut accumulator = ExpansionAccumulator::new(scheduled.len());
 
     for (_, claim_id) in scheduled {
         if read_claim(tx, &claim_id)?.is_none() {
             continue;
         }
-        if nodes_used == budget.max_nodes {
-            truncated = true;
+        if accumulator.nodes_used == budget.max_nodes {
+            accumulator.truncated = true;
             continue;
         }
-        nodes_used += 1;
-        claim_ids.push(claim_id.clone());
+        accumulator.nodes_used += 1;
+        accumulator.claim_ids.push(claim_id.clone());
+        expand_claim_evidence(tx, &claim_id, budget, &mut accumulator)?;
+    }
 
-        for evidence in read_evidence(tx, &claim_id)? {
-            if evidence_out.len() == budget.max_evidence || edges_used == budget.max_edges {
-                truncated = true;
-                continue;
-            }
-            let event_row: Option<(String, Option<i64>)> = tx
-                .query_row(
-                    "SELECT text, episode_id FROM events WHERE id = ?1",
-                    params![to_i64(evidence.event_id.0, "evidence event_id")?],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()
-                .map_err(db_error("read expansion event"))?;
-            let Some((text, episode_id)) = event_row else {
-                continue;
-            };
-            let token_count = text.split_whitespace().count();
-            if token_count > budget.max_tokens.saturating_sub(tokens_used) {
-                truncated = true;
-                continue;
-            }
-            tokens_used += token_count;
-            edges_used += 1;
-            evidence_out.push(ExpandedEvidence {
-                evidence: evidence.clone(),
-                excerpt: crate::EventRecord::truncate_snippet(&text),
-                token_count,
-            });
+    Ok(accumulator.finish())
+}
 
-            if let Some(raw_episode) = episode_id {
-                let episode = EpisodeId(to_u64(raw_episode, "episode_id")?);
+fn expand_claim_evidence(
+    tx: &Transaction<'_>,
+    claim_id: &MemoryClaimId,
+    budget: ExpansionBudget,
+    accumulator: &mut ExpansionAccumulator,
+) -> Result<(), StoreError> {
+    for evidence in read_evidence(tx, claim_id)? {
+        if accumulator.evidence.len() == budget.max_evidence
+            || accumulator.edges_used == budget.max_edges
+        {
+            accumulator.truncated = true;
+            continue;
+        }
+        let event_row: Option<(String, Option<i64>)> = tx
+            .query_row(
+                "SELECT text, episode_id FROM events WHERE id = ?1",
+                params![to_i64(evidence.event_id.0, "evidence event_id")?],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(db_error("read expansion event"))?;
+        let Some((text, episode_id)) = event_row else {
+            continue;
+        };
+        let token_count = text.split_whitespace().count();
+        if token_count > budget.max_tokens.saturating_sub(accumulator.tokens_used) {
+            accumulator.truncated = true;
+            continue;
+        }
+        accumulator.tokens_used += token_count;
+        accumulator.edges_used += 1;
+        accumulator.evidence.push(ExpandedEvidence {
+            evidence: evidence.clone(),
+            excerpt: crate::EventRecord::truncate_snippet(&text),
+            token_count,
+        });
+
+        if let Some(raw_episode) = episode_id {
+            let episode = EpisodeId(to_u64(raw_episode, "episode_id")?);
+            admit_node(
+                episode,
+                &mut accumulator.episodes,
+                &mut accumulator.nodes_used,
+                &mut accumulator.edges_used,
+                budget,
+                &mut accumulator.truncated,
+            );
+        }
+
+        for (entity, identity) in expansion_graph_rows(tx, evidence.event_id)? {
+            admit_node(
+                EntityId(entity),
+                &mut accumulator.entities,
+                &mut accumulator.nodes_used,
+                &mut accumulator.edges_used,
+                budget,
+                &mut accumulator.truncated,
+            );
+            if let Some(identity) = identity {
                 admit_node(
-                    episode,
-                    &mut episodes,
-                    &mut nodes_used,
-                    &mut edges_used,
+                    IdentityId(identity),
+                    &mut accumulator.identities,
+                    &mut accumulator.nodes_used,
+                    &mut accumulator.edges_used,
                     budget,
-                    &mut truncated,
+                    &mut accumulator.truncated,
                 );
-            }
-
-            let mut stmt = tx
-                .prepare(
-                    "SELECT em.entity_id, ei.identity_id
-                     FROM entity_mentions em
-                     LEFT JOIN entity_identities ei ON ei.entity_id = em.entity_id
-                     WHERE em.event_id = ?1
-                     ORDER BY em.entity_id ASC, ei.identity_id ASC",
-                )
-                .map_err(db_error("prepare expansion graph"))?;
-            let rows = stmt
-                .query_map(
-                    params![to_i64(evidence.event_id.0, "graph event_id")?],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-                )
-                .map_err(db_error("query expansion graph"))?;
-            let mut graph_rows = Vec::new();
-            for row in rows {
-                graph_rows.push(row.map_err(db_error("read expansion graph"))?);
-            }
-            drop(stmt);
-            for (entity, identity) in graph_rows {
-                admit_node(
-                    EntityId(entity),
-                    &mut entities,
-                    &mut nodes_used,
-                    &mut edges_used,
-                    budget,
-                    &mut truncated,
-                );
-                if let Some(identity) = identity {
-                    admit_node(
-                        IdentityId(identity),
-                        &mut identities,
-                        &mut nodes_used,
-                        &mut edges_used,
-                        budget,
-                        &mut truncated,
-                    );
-                }
             }
         }
     }
+    Ok(())
+}
 
-    Ok(MemoryExpansion {
-        claim_ids,
-        evidence: evidence_out,
-        episode_ids: episodes.into_iter().collect(),
-        entity_ids: entities.into_iter().collect(),
-        identity_ids: identities.into_iter().collect(),
-        nodes_used,
-        edges_used,
-        tokens_used,
-        truncated,
-    })
+fn expansion_graph_rows(
+    tx: &Transaction<'_>,
+    event_id: EventId,
+) -> Result<Vec<(String, Option<String>)>, StoreError> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT em.entity_id, ei.identity_id
+             FROM entity_mentions em
+             LEFT JOIN entity_identities ei ON ei.entity_id = em.entity_id
+             WHERE em.event_id = ?1
+             ORDER BY em.entity_id ASC, ei.identity_id ASC",
+        )
+        .map_err(db_error("prepare expansion graph"))?;
+    let rows = stmt
+        .query_map(params![to_i64(event_id.0, "graph event_id")?], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .map_err(db_error("query expansion graph"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(db_error("read expansion graph"))
 }
 
 fn claim_has_admissible_evidence(

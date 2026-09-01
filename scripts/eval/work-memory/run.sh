@@ -22,6 +22,10 @@ while (($# > 0)); do
             echo "work-memory runner: the accepted baseline comparison is mandatory" >&2
             exit 2
             ;;
+        --baseline | --baseline=*)
+            echo "work-memory runner: caller-provided baselines are forbidden" >&2
+            exit 2
+            ;;
         --out)
             if (($# < 2)); then
                 echo "work-memory runner: --out requires a path" >&2

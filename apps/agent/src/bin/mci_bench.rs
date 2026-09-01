@@ -22,6 +22,9 @@ use mci_agent::child_command_environment::sanitized_command;
 const CANONICAL_WORK_MEMORY_DATASET: &str = "eval/work-memory/synthetic-v1.json";
 const CANONICAL_WORK_MEMORY_DATASET_ID: &str = "synthetic-work-memory-v1";
 const CANONICAL_WORK_MEMORY_INSTANCES: usize = 24;
+const CANONICAL_WORK_MEMORY_BASELINE: &str = "docs/eval/work-memory-baseline.json";
+const CANONICAL_WORK_MEMORY_BASELINE_SHA256: &str =
+    "35fbebff470f957caf7ea17b456ba0708d48521858061470a2c51dfccc7691c9";
 
 fn usage() {
     println!(
@@ -241,13 +244,65 @@ fn canonical_work_memory_scope(
     ks: &[usize],
     limited: bool,
 ) -> bool {
+    canonical_work_memory_dataset_scope(
+        dataset_path,
+        dataset_id,
+        original_instances,
+        evaluated_instances,
+        limited,
+    ) && arms == [Arm::Lexical, Arm::Hybrid]
+        && ks == [1, 3, 5, 10]
+}
+
+fn canonical_work_memory_dataset_scope(
+    dataset_path: &str,
+    dataset_id: &str,
+    original_instances: usize,
+    evaluated_instances: usize,
+    limited: bool,
+) -> bool {
     dataset_path == CANONICAL_WORK_MEMORY_DATASET
         && dataset_id == CANONICAL_WORK_MEMORY_DATASET_ID
         && original_instances == CANONICAL_WORK_MEMORY_INSTANCES
         && evaluated_instances == CANONICAL_WORK_MEMORY_INSTANCES
-        && arms == [Arm::Lexical, Arm::Hybrid]
-        && ks == [1, 3, 5, 10]
         && !limited
+}
+
+fn verify_accepted_baseline_identity(
+    canonical_dataset_scope: bool,
+    baseline_path: Option<&Path>,
+    root: &Path,
+    expected_sha256: &str,
+) -> Result<(), String> {
+    if !canonical_dataset_scope {
+        return Ok(());
+    }
+    let provided = baseline_path
+        .ok_or_else(|| "canonical work-memory reports require the accepted baseline".to_string())?;
+    let expected = root.join(CANONICAL_WORK_MEMORY_BASELINE);
+    let expected = expected
+        .canonicalize()
+        .map_err(|error| format!("resolve accepted baseline path: {error}"))?;
+    let provided = if provided.is_absolute() {
+        provided.to_path_buf()
+    } else {
+        root.join(provided)
+    };
+    let provided = provided
+        .canonicalize()
+        .map_err(|error| format!("resolve provided baseline path: {error}"))?;
+    if provided != expected {
+        return Err(format!(
+            "canonical work-memory reports require accepted baseline path {CANONICAL_WORK_MEMORY_BASELINE}"
+        ));
+    }
+    let actual_sha256 = sha256_file(&provided)?;
+    if actual_sha256 != expected_sha256 {
+        return Err(format!(
+            "accepted baseline SHA-256 mismatch: expected {expected_sha256}, got {actual_sha256}"
+        ));
+    }
+    Ok(())
 }
 
 fn run_metadata(
@@ -418,6 +473,10 @@ fn main() -> ExitCode {
                 i += 1;
             }
             "--baseline" if i + 1 < argv.len() => {
+                if baseline_path.is_some() {
+                    eprintln!("mci-bench: --baseline may be specified only once");
+                    return ExitCode::from(2);
+                }
                 baseline_path = Some(PathBuf::from(&argv[i + 1]));
                 i += 1;
             }
@@ -803,8 +862,25 @@ fn main() -> ExitCode {
         .iter()
         .map(|summary| (summary.arm.clone(), derive_regression_thresholds(summary)))
         .collect::<BTreeMap<_, _>>();
-    let mut regression = match baseline_path.as_deref() {
-        Some(path) => match parse_baseline(path) {
+    let canonical_dataset_scope = canonical_work_memory_dataset_scope(
+        &dataset_report_path,
+        &dataset.dataset_id,
+        original_instances,
+        evaluated_instances,
+        limited,
+    );
+    let baseline_identity = verify_accepted_baseline_identity(
+        canonical_dataset_scope,
+        baseline_path.as_deref(),
+        &repo_root(),
+        CANONICAL_WORK_MEMORY_BASELINE_SHA256,
+    );
+    let mut regression = match (baseline_identity, baseline_path.as_deref()) {
+        (Err(error), _) => Some(RegressionReport {
+            passed: false,
+            failures: vec![error],
+        }),
+        (Ok(()), Some(path)) => match parse_baseline(path) {
             Ok(baseline) => Some(compare_against_baseline(
                 &overall,
                 &baseline,
@@ -817,7 +893,7 @@ fn main() -> ExitCode {
                 failures: vec![error],
             }),
         },
-        None => None,
+        (Ok(()), None) => None,
     };
     let canonical_scope = canonical_work_memory_scope(
         &dataset_report_path,
@@ -993,6 +1069,37 @@ mod tests {
         let mut noncanonical_regression = None;
         require_accepted_baseline(false, &mut noncanonical_regression);
         assert!(noncanonical_regression.is_none());
+    }
+
+    #[test]
+    fn canonical_baseline_identity_binds_canonical_path_and_sha256() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let accepted = root.path().join(CANONICAL_WORK_MEMORY_BASELINE);
+        std::fs::create_dir_all(accepted.parent().expect("baseline parent"))
+            .expect("baseline directory");
+        std::fs::write(&accepted, b"accepted baseline").expect("accepted baseline");
+        let expected_sha = sha256_bytes(b"accepted baseline").expect("sha256");
+
+        assert!(verify_accepted_baseline_identity(
+            true,
+            Some(&accepted),
+            root.path(),
+            &expected_sha,
+        )
+        .is_ok());
+
+        let copied = root.path().join("copied.json");
+        std::fs::copy(&accepted, &copied).expect("copy baseline");
+        let path_error =
+            verify_accepted_baseline_identity(true, Some(&copied), root.path(), &expected_sha)
+                .expect_err("a byte-identical copy is not the accepted path");
+        assert!(path_error.contains("accepted baseline path"));
+
+        std::fs::write(&accepted, b"tampered baseline").expect("tamper baseline");
+        let digest_error =
+            verify_accepted_baseline_identity(true, Some(&accepted), root.path(), &expected_sha)
+                .expect_err("the accepted path must retain its pinned digest");
+        assert!(digest_error.contains("SHA-256"));
     }
 
     #[test]
