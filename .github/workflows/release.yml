@@ -18,6 +18,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Require release secrets
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          NOTARYTOOL_APPLE_ID: ${{ secrets.NOTARYTOOL_APPLE_ID }}
+          NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
+          NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          test -n "$APPLE_CERTIFICATE_P12" || { echo "::error::Required release secret is missing: \$APPLE_CERTIFICATE_P12"; exit 1; }
+          test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "::error::Required release secret is missing: \$APPLE_CERTIFICATE_PASSWORD"; exit 1; }
+          test -n "$NOTARYTOOL_APPLE_ID" || { echo "::error::Required release secret is missing: \$NOTARYTOOL_APPLE_ID"; exit 1; }
+          test -n "$NOTARYTOOL_TEAM_ID" || { echo "::error::Required release secret is missing: \$NOTARYTOOL_TEAM_ID"; exit 1; }
+          test -n "$NOTARYTOOL_PASSWORD" || { echo "::error::Required release secret is missing: \$NOTARYTOOL_PASSWORD"; exit 1; }
+          test -n "$SPARKLE_PRIVATE_KEY" || { echo "::error::Required release secret is missing: \$SPARKLE_PRIVATE_KEY"; exit 1; }
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -42,12 +58,11 @@ jobs:
 
       - name: Build all binaries
         run: |
-          swift build -c release --package-path apps/hippocampus
-          swift build -c release --package-path adapters/macos/MCICaptureHelper
+          scripts/swift-package.sh build -c release --package-path apps/hippocampus
+          scripts/swift-package.sh build -c release --package-path adapters/macos/MCICaptureHelper
           cargo build --workspace --release
 
       - name: Import Developer ID certificate
-        if: env.APPLE_CERTIFICATE_P12 != ''
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -71,7 +86,6 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
       - name: Store notarytool credentials
-        if: env.NOTARYTOOL_APPLE_ID != ''
         env:
           NOTARYTOOL_APPLE_ID: ${{ secrets.NOTARYTOOL_APPLE_ID }}
           NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
@@ -82,7 +96,7 @@ jobs:
               --team-id "$NOTARYTOOL_TEAM_ID" \
               --password "$NOTARYTOOL_PASSWORD"
 
-      - name: Detect Developer ID
+      - name: Require Developer ID
         id: detect-identity
         run: |
           DEVID=$(security find-identity -v -p codesigning | \
@@ -90,16 +104,16 @@ jobs:
               head -1 | \
               sed 's/.*"\(.*\)"/\1/' || true)
           echo "developer_id=$DEVID" >> "$GITHUB_OUTPUT"
-          if [[ -n "$DEVID" ]]; then
-            echo "Found Developer ID: $DEVID"
-          else
-            echo "No Developer ID — DMG will be ad-hoc signed"
-          fi
+          test -n "$DEVID" || { echo "::error::No valid Developer ID Application identity was imported"; exit 1; }
+          echo "Found Developer ID: $DEVID"
+
+      - name: Verify signing prerequisites
+        run: scripts/check-signing-prereqs.sh --release
 
       - name: Build DMG
         env:
           DEVELOPER_ID: ${{ steps.detect-identity.outputs.developer_id }}
-        run: scripts/build-installer.sh --skip-build
+        run: scripts/build-installer.sh
 
       - name: Verify DMG
         run: |
@@ -113,11 +127,12 @@ jobs:
           test -d "$MOUNT/Hippocampus.app"
           test -L "$MOUNT/Applications"
 
-          if [[ -n "${{ steps.detect-identity.outputs.developer_id }}" ]]; then
-            echo "--- Signature check ---"
-            codesign --verify --deep --strict "$MOUNT/Hippocampus.app"
-            echo "Signature valid."
-          fi
+          echo "--- Signature and notarization checks ---"
+          codesign --verify --deep --strict "$MOUNT/Hippocampus.app"
+          xcrun stapler validate "$MOUNT/Hippocampus.app"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type execute --verbose=2 "$MOUNT/Hippocampus.app"
+          echo "Signature and notarization tickets valid."
 
           hdiutil detach "$MOUNT" -quiet
 
@@ -125,32 +140,13 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
-      # `secrets` is not a valid context in a step-level `if:`. Using it
-      # makes the whole workflow file invalid, so every push failed
-      # instantly with "workflow file issue" even though this workflow
-      # only triggers on tags. Map the secret into `env` and test that,
-      # which is what the signing and notarization steps above already do.
-      - name: Map Sparkle key for conditional steps
-        id: sparkle
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          if [ -n "$SPARKLE_PRIVATE_KEY" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::SPARKLE_PRIVATE_KEY not set — skipping appcast publish."
-          fi
-
       - name: Publish appcast
-        if: steps.sparkle.outputs.present == 'true'
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           scripts/publish-appcast.sh --hosting-mode ghpages
 
       - name: Deploy appcast to GitHub Pages
-        if: steps.sparkle.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -163,9 +159,9 @@ jobs:
               "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/hippocampus-appcast.git" \
               "$WORK"
           else
-            echo "WARNING: hippocampus-appcast repo or gh-pages branch not found — skipping deploy."
+            echo "ERROR: hippocampus-appcast repo or gh-pages branch not found."
             echo "  Create the repo and branch per docs/appcast-hosting.md Option A."
-            exit 0
+            exit 1
           fi
 
           cp dist/appcast.xml "$WORK/"

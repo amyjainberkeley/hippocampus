@@ -63,15 +63,7 @@ jobs:
           key: cargo-clippy-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-clippy-${{ runner.os }}-
 
-      # Clippy bar: real errors block; pedantic lints from the
-      # workspace `[workspace.lints.clippy]` pedantic group stay at
-      # `warn` and don't promote to deny via `-D warnings`. The CI
-      # ratchet-up is a separate follow-up PR opting in specific
-      # lints to `deny` after the codebase is rinsed. Tracking:
-      # clippy debt across mci-agent / mci-brain / mci-brief from
-      # PRs #88–#94 that landed before CI infrastructure existed.
-      - run: cargo clippy --workspace --all-targets
-        continue-on-error: true
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
     name: cargo fmt
