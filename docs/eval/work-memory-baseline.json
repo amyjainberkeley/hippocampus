@@ -1,0 +1,5082 @@
+{
+  "complete": true,
+  "dataset": "/Users/amy/hippo-work/hippocampus/.worktrees/hippocampus-v1/eval/work-memory/synthetic-v1.json",
+  "dataset_id": "synthetic-work-memory-v1",
+  "dataset_description": "Synthetic technical-work benchmark for Hippocampus v1. Covers exact recall, paraphrase, temporal questions, cross-session synthesis, changed facts, contradiction, source attribution, and unanswerable queries across GitHub, terminal, browser, Slack, Linear, and files.",
+  "overall": [
+    {
+      "arm": "lexical",
+      "instances": 24,
+      "hit_rate_at": {
+        "1": 0.3333333333333333,
+        "3": 0.3333333333333333,
+        "5": 0.3333333333333333,
+        "10": 0.3333333333333333
+      },
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 0.3333333333333333,
+        "5": 0.3333333333333333,
+        "10": 0.3333333333333333
+      },
+      "provenance_coverage_at": {
+        "1": 0.3333333333333333,
+        "3": 0.3333333333333333,
+        "5": 0.3333333333333333,
+        "10": 0.3333333333333333
+      },
+      "false_positive_rate_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "abstention_separation_at": {
+        "1": 0.3333333333333333,
+        "3": 0.3333333333333333,
+        "5": 0.3333333333333333,
+        "10": 0.3333333333333333
+      },
+      "mrr": 0.3333333333333333,
+      "complete_misses": 14,
+      "outcomes": {
+        "matched": 7,
+        "missed": 14,
+        "abstained": 3,
+        "false_positive": 0
+      },
+      "answerable_instances": 21,
+      "unanswerable_instances": 3,
+      "latency_ms": {
+        "min": 3.743458,
+        "p50": 4.7100409999999995,
+        "p95": 7.6609169999999995,
+        "max": 10.541500000000001,
+        "mean": 5.1043541249999995
+      },
+      "index_size_bytes": {
+        "min": 4096.0,
+        "p50": 4096.0,
+        "p95": 4096.0,
+        "max": 4096.0,
+        "mean": 4096.0
+      }
+    },
+    {
+      "arm": "hybrid",
+      "instances": 24,
+      "hit_rate_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "recall_at": {
+        "1": 0.9285714285714286,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "false_positive_rate_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "abstention_separation_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "mrr": 1.0,
+      "complete_misses": 0,
+      "outcomes": {
+        "matched": 21,
+        "missed": 0,
+        "abstained": 0,
+        "false_positive": 3
+      },
+      "answerable_instances": 21,
+      "unanswerable_instances": 3,
+      "latency_ms": {
+        "min": 33.937000000000005,
+        "p50": 37.025875,
+        "p95": 57.816959000000004,
+        "max": 60.577542,
+        "mean": 40.874284708333334
+      },
+      "index_size_bytes": {
+        "min": 4096.0,
+        "p50": 4096.0,
+        "p95": 4096.0,
+        "max": 4096.0,
+        "mean": 4096.0
+      }
+    }
+  ],
+  "by_type": {
+    "changed_fact": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "recall_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "provenance_coverage_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "mrr": 0.3333333333333333,
+        "complete_misses": 2,
+        "outcomes": {
+          "matched": 1,
+          "missed": 2,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 5.275042,
+          "p50": 6.214791,
+          "p95": 7.1755830000000005,
+          "max": 7.1755830000000005,
+          "mean": 6.221805333333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 34.449167,
+          "p50": 34.71962499999999,
+          "p95": 46.14775,
+          "max": 46.14775,
+          "mean": 38.438847333333335
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "contradiction": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 0,
+          "missed": 3,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 4.145666,
+          "p50": 4.1980830000000005,
+          "p95": 5.827916,
+          "max": 5.827916,
+          "mean": 4.723888333333334
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 34.084791,
+          "p50": 34.76025,
+          "p95": 36.622333,
+          "max": 36.622333,
+          "mean": 35.15579133333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "cross_session": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 0,
+          "missed": 3,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 3.7773749999999997,
+          "p50": 5.419708,
+          "p95": 7.6609169999999995,
+          "max": 7.6609169999999995,
+          "mean": 5.619333333333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.5,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 45.779041,
+          "p50": 51.349625,
+          "p95": 57.816959000000004,
+          "max": 57.816959000000004,
+          "mean": 51.64854166666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "exact_recall": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 5.1017090000000005,
+          "p50": 5.367167,
+          "p95": 10.541500000000001,
+          "max": 10.541500000000001,
+          "mean": 7.003458666666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 40.013583,
+          "p50": 40.414417,
+          "p95": 60.577542,
+          "max": 60.577542,
+          "mean": 47.00184733333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "paraphrase": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 0,
+          "missed": 3,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 3.819958,
+          "p50": 4.0569999999999995,
+          "p95": 5.065084,
+          "max": 5.065084,
+          "mean": 4.314014
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 36.241,
+          "p50": 37.025875,
+          "p95": 38.676042,
+          "max": 38.676042,
+          "mean": 37.31430566666666
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "source_attribution": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 0,
+          "missed": 3,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 3.743458,
+          "p50": 3.952125,
+          "p95": 6.284042,
+          "max": 6.284042,
+          "mean": 4.659875
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 33.937000000000005,
+          "p50": 34.274916000000005,
+          "p95": 34.840708,
+          "max": 34.840708,
+          "mean": 34.35087466666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "temporal": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 4.165292,
+          "p50": 4.238334,
+          "p95": 4.7100409999999995,
+          "max": 4.7100409999999995,
+          "mean": 4.371222333333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 36.510583,
+          "p50": 48.167375,
+          "p95": 57.688875,
+          "max": 57.688875,
+          "mean": 47.455611
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "unanswerable": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": -0.0,
+          "3": -0.0,
+          "5": -0.0,
+          "10": -0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": -0.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 0,
+          "missed": 0,
+          "abstained": 3,
+          "false_positive": 0
+        },
+        "answerable_instances": 0,
+        "unanswerable_instances": 3,
+        "latency_ms": {
+          "min": 3.8560830000000004,
+          "p50": 3.9394169999999997,
+          "p95": 3.968208,
+          "max": 3.968208,
+          "mean": 3.9212360000000004
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": -0.0,
+          "3": -0.0,
+          "5": -0.0,
+          "10": -0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "abstention_separation_at": {
+          "1": -1.0,
+          "3": -1.0,
+          "5": -1.0,
+          "10": -1.0
+        },
+        "mrr": -0.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 0,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 3
+        },
+        "answerable_instances": 0,
+        "unanswerable_instances": 3,
+        "latency_ms": {
+          "min": 34.678042,
+          "p50": 34.792084,
+          "p95": 37.41525,
+          "max": 37.41525,
+          "mean": 35.62845866666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ]
+  },
+  "by_tag": {
+    "browser": [
+      {
+        "arm": "lexical",
+        "instances": 4,
+        "hit_rate_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "recall_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "provenance_coverage_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "mrr": 0.3333333333333333,
+        "complete_misses": 2,
+        "outcomes": {
+          "matched": 1,
+          "missed": 2,
+          "abstained": 1,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 3.968208,
+          "p50": 5.419708,
+          "p95": 6.214791,
+          "max": 6.214791,
+          "mean": 4.914926749999999
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 4,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.8333333333333334,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 1
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 34.71962499999999,
+          "p50": 36.241,
+          "p95": 51.349625,
+          "max": 51.349625,
+          "mean": 39.275583499999996
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "changed_fact": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "recall_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "provenance_coverage_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.3333333333333333,
+          "3": 0.3333333333333333,
+          "5": 0.3333333333333333,
+          "10": 0.3333333333333333
+        },
+        "mrr": 0.3333333333333333,
+        "complete_misses": 2,
+        "outcomes": {
+          "matched": 1,
+          "missed": 2,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 5.275042,
+          "p50": 6.214791,
+          "p95": 7.1755830000000005,
+          "max": 7.1755830000000005,
+          "mean": 6.221805333333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 34.449167,
+          "p50": 34.71962499999999,
+          "p95": 46.14775,
+          "max": 46.14775,
+          "mean": 38.438847333333335
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "contradiction": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 0,
+          "missed": 3,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 4.145666,
+          "p50": 4.1980830000000005,
+          "p95": 5.827916,
+          "max": 5.827916,
+          "mean": 4.723888333333334
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 34.084791,
+          "p50": 34.76025,
+          "p95": 36.622333,
+          "max": 36.622333,
+          "mean": 35.15579133333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "cross_session": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 0,
+          "missed": 3,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 3.7773749999999997,
+          "p50": 5.419708,
+          "p95": 7.6609169999999995,
+          "max": 7.6609169999999995,
+          "mean": 5.619333333333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.5,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 45.779041,
+          "p50": 51.349625,
+          "p95": 57.816959000000004,
+          "max": 57.816959000000004,
+          "mean": 51.64854166666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "exact": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 5.1017090000000005,
+          "p50": 5.367167,
+          "p95": 10.541500000000001,
+          "max": 10.541500000000001,
+          "mean": 7.003458666666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 40.013583,
+          "p50": 40.414417,
+          "p95": 60.577542,
+          "max": 60.577542,
+          "mean": 47.00184733333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "files": [
+      {
+        "arm": "lexical",
+        "instances": 8,
+        "hit_rate_at": {
+          "1": 0.42857142857142855,
+          "3": 0.42857142857142855,
+          "5": 0.42857142857142855,
+          "10": 0.42857142857142855
+        },
+        "recall_at": {
+          "1": 0.42857142857142855,
+          "3": 0.42857142857142855,
+          "5": 0.42857142857142855,
+          "10": 0.42857142857142855
+        },
+        "provenance_coverage_at": {
+          "1": 0.42857142857142855,
+          "3": 0.42857142857142855,
+          "5": 0.42857142857142855,
+          "10": 0.42857142857142855
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.42857142857142855,
+          "3": 0.42857142857142855,
+          "5": 0.42857142857142855,
+          "10": 0.42857142857142855
+        },
+        "mrr": 0.42857142857142855,
+        "complete_misses": 4,
+        "outcomes": {
+          "matched": 3,
+          "missed": 4,
+          "abstained": 1,
+          "false_positive": 0
+        },
+        "answerable_instances": 7,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 3.952125,
+          "p50": 5.275042,
+          "p95": 7.6609169999999995,
+          "max": 7.6609169999999995,
+          "mean": 5.0936509999999995
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 8,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.9285714285714286,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 7,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 1
+        },
+        "answerable_instances": 7,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 33.937000000000005,
+          "p50": 36.510583,
+          "p95": 57.816959000000004,
+          "max": 57.816959000000004,
+          "mean": 38.657771
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "github": [
+      {
+        "arm": "lexical",
+        "instances": 7,
+        "hit_rate_at": {
+          "1": 0.16666666666666666,
+          "3": 0.16666666666666666,
+          "5": 0.16666666666666666,
+          "10": 0.16666666666666666
+        },
+        "recall_at": {
+          "1": 0.16666666666666666,
+          "3": 0.16666666666666666,
+          "5": 0.16666666666666666,
+          "10": 0.16666666666666666
+        },
+        "provenance_coverage_at": {
+          "1": 0.16666666666666666,
+          "3": 0.16666666666666666,
+          "5": 0.16666666666666666,
+          "10": 0.16666666666666666
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.16666666666666666,
+          "3": 0.16666666666666666,
+          "5": 0.16666666666666666,
+          "10": 0.16666666666666666
+        },
+        "mrr": 0.16666666666666666,
+        "complete_misses": 5,
+        "outcomes": {
+          "matched": 1,
+          "missed": 5,
+          "abstained": 1,
+          "false_positive": 0
+        },
+        "answerable_instances": 6,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 3.7773749999999997,
+          "p50": 5.065084,
+          "p95": 10.541500000000001,
+          "max": 10.541500000000001,
+          "mean": 5.661916714285715
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 7,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.9166666666666666,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 6,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 1
+        },
+        "answerable_instances": 6,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 34.084791,
+          "p50": 37.025875,
+          "p95": 60.577542,
+          "max": 60.577542,
+          "mean": 40.559666428571425
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "linear": [
+      {
+        "arm": "lexical",
+        "instances": 5,
+        "hit_rate_at": {
+          "1": 0.25,
+          "3": 0.25,
+          "5": 0.25,
+          "10": 0.25
+        },
+        "recall_at": {
+          "1": 0.25,
+          "3": 0.25,
+          "5": 0.25,
+          "10": 0.25
+        },
+        "provenance_coverage_at": {
+          "1": 0.25,
+          "3": 0.25,
+          "5": 0.25,
+          "10": 0.25
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.25,
+          "3": 0.25,
+          "5": 0.25,
+          "10": 0.25
+        },
+        "mrr": 0.25,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 1,
+          "missed": 3,
+          "abstained": 1,
+          "false_positive": 0
+        },
+        "answerable_instances": 4,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 3.8560830000000004,
+          "p50": 5.419708,
+          "p95": 7.1755830000000005,
+          "max": 7.1755830000000005,
+          "mean": 5.3978662
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 5,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.875,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 4,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 1
+        },
+        "answerable_instances": 4,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 34.084791,
+          "p50": 46.14775,
+          "p95": 51.349625,
+          "max": 51.349625,
+          "mean": 42.8855166
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "paraphrase": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 0,
+          "missed": 3,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 3.819958,
+          "p50": 4.0569999999999995,
+          "p95": 5.065084,
+          "max": 5.065084,
+          "mean": 4.314014
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 36.241,
+          "p50": 37.025875,
+          "p95": 38.676042,
+          "max": 38.676042,
+          "mean": 37.31430566666666
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "provenance": [
+      {
+        "arm": "lexical",
+        "instances": 13,
+        "hit_rate_at": {
+          "1": 0.3076923076923077,
+          "3": 0.3076923076923077,
+          "5": 0.3076923076923077,
+          "10": 0.3076923076923077
+        },
+        "recall_at": {
+          "1": 0.3076923076923077,
+          "3": 0.3076923076923077,
+          "5": 0.3076923076923077,
+          "10": 0.3076923076923077
+        },
+        "provenance_coverage_at": {
+          "1": 0.3076923076923077,
+          "3": 0.3076923076923077,
+          "5": 0.3076923076923077,
+          "10": 0.3076923076923077
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.3076923076923077,
+          "3": 0.3076923076923077,
+          "5": 0.3076923076923077,
+          "10": 0.3076923076923077
+        },
+        "mrr": 0.3076923076923077,
+        "complete_misses": 9,
+        "outcomes": {
+          "matched": 4,
+          "missed": 9,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 13,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 3.743458,
+          "p50": 4.7100409999999995,
+          "p95": 7.6609169999999995,
+          "max": 10.541500000000001,
+          "mean": 5.403310692307692
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 13,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.9230769230769231,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 13,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 13,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 33.937000000000005,
+          "p50": 36.622333,
+          "p95": 57.816959000000004,
+          "max": 60.577542,
+          "mean": 41.12853838461539
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "slack": [
+      {
+        "arm": "lexical",
+        "instances": 6,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 5,
+        "outcomes": {
+          "matched": 0,
+          "missed": 5,
+          "abstained": 1,
+          "false_positive": 0
+        },
+        "answerable_instances": 5,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 3.743458,
+          "p50": 3.9394169999999997,
+          "p95": 4.1980830000000005,
+          "max": 4.1980830000000005,
+          "mean": 3.937326166666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 6,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.9,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 5,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 1
+        },
+        "answerable_instances": 5,
+        "unanswerable_instances": 1,
+        "latency_ms": {
+          "min": 34.76025,
+          "p50": 37.41525,
+          "p95": 45.779041,
+          "max": 45.779041,
+          "mean": 38.015603999999996
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "source_attribution": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": 0.0,
+        "complete_misses": 3,
+        "outcomes": {
+          "matched": 0,
+          "missed": 3,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 3.743458,
+          "p50": 3.952125,
+          "p95": 6.284042,
+          "max": 6.284042,
+          "mean": 4.659875
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 33.937000000000005,
+          "p50": 34.274916000000005,
+          "p95": 34.840708,
+          "max": 34.840708,
+          "mean": 34.35087466666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "temporal": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 4.165292,
+          "p50": 4.238334,
+          "p95": 4.7100409999999995,
+          "max": 4.7100409999999995,
+          "mean": 4.371222333333333
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 36.510583,
+          "p50": 48.167375,
+          "p95": 57.688875,
+          "max": 57.688875,
+          "mean": 47.455611
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "terminal": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.6666666666666666,
+          "3": 0.6666666666666666,
+          "5": 0.6666666666666666,
+          "10": 0.6666666666666666
+        },
+        "recall_at": {
+          "1": 0.6666666666666666,
+          "3": 0.6666666666666666,
+          "5": 0.6666666666666666,
+          "10": 0.6666666666666666
+        },
+        "provenance_coverage_at": {
+          "1": 0.6666666666666666,
+          "3": 0.6666666666666666,
+          "5": 0.6666666666666666,
+          "10": 0.6666666666666666
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.6666666666666666,
+          "3": 0.6666666666666666,
+          "5": 0.6666666666666666,
+          "10": 0.6666666666666666
+        },
+        "mrr": 0.6666666666666666,
+        "complete_misses": 1,
+        "outcomes": {
+          "matched": 2,
+          "missed": 1,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 4.238334,
+          "p50": 5.1017090000000005,
+          "p95": 7.6609169999999995,
+          "max": 7.6609169999999995,
+          "mean": 5.666986666666666
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "recall_at": {
+          "1": 0.8333333333333334,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "provenance_coverage_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "mrr": 1.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 3,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 0
+        },
+        "answerable_instances": 3,
+        "unanswerable_instances": 0,
+        "latency_ms": {
+          "min": 40.013583,
+          "p50": 57.688875,
+          "p95": 57.816959000000004,
+          "max": 57.816959000000004,
+          "mean": 51.83980566666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ],
+    "unanswerable": [
+      {
+        "arm": "lexical",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": -0.0,
+          "3": -0.0,
+          "5": -0.0,
+          "10": -0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "abstention_separation_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "mrr": -0.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 0,
+          "missed": 0,
+          "abstained": 3,
+          "false_positive": 0
+        },
+        "answerable_instances": 0,
+        "unanswerable_instances": 3,
+        "latency_ms": {
+          "min": 3.8560830000000004,
+          "p50": 3.9394169999999997,
+          "p95": 3.968208,
+          "max": 3.968208,
+          "mean": 3.9212360000000004
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      },
+      {
+        "arm": "hybrid",
+        "instances": 3,
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "recall_at": {
+          "1": -0.0,
+          "3": -0.0,
+          "5": -0.0,
+          "10": -0.0
+        },
+        "provenance_coverage_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "false_positive_rate_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "abstention_separation_at": {
+          "1": -1.0,
+          "3": -1.0,
+          "5": -1.0,
+          "10": -1.0
+        },
+        "mrr": -0.0,
+        "complete_misses": 0,
+        "outcomes": {
+          "matched": 0,
+          "missed": 0,
+          "abstained": 0,
+          "false_positive": 3
+        },
+        "answerable_instances": 0,
+        "unanswerable_instances": 3,
+        "latency_ms": {
+          "min": 34.678042,
+          "p50": 34.792084,
+          "p95": 37.41525,
+          "max": 37.41525,
+          "mean": 35.62845866666667
+        },
+        "index_size_bytes": {
+          "min": 4096.0,
+          "p50": 4096.0,
+          "p95": 4096.0,
+          "max": 4096.0,
+          "mean": 4096.0
+        }
+      }
+    ]
+  },
+  "results": [
+    {
+      "arm": "lexical",
+      "question_id": "exact-github-partial-runs",
+      "question_type": "exact_recall",
+      "tags": [
+        "github",
+        "exact",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "github://hippocampus/pull/431",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 431 benchmark honesty",
+          "url": "github://hippocampus/pull/431",
+          "relevant": true,
+          "score": 6.030456916050753e-6,
+          "excerpt": "PR 431 sets complete false on partial runs and exits nonzero when any requested arm fails."
+        }
+      ],
+      "latency_ms": 10.541500000000001,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "exact-terminal-test-command",
+      "question_type": "exact_recall",
+      "tags": [
+        "terminal",
+        "exact"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "terminal://zsh/work-memory-tests",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "Focused benchmark tests",
+          "url": "terminal://zsh/work-memory-tests",
+          "relevant": true,
+          "score": 0.000011693253327393904,
+          "excerpt": "Run cargo test -p mci-agent --test work_memory_bench to check the new parser and scoring metrics."
+        }
+      ],
+      "latency_ms": 5.1017090000000005,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "exact-file-no-silent-downgrade",
+      "question_type": "exact_recall",
+      "tags": [
+        "files",
+        "exact",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "file:///docs/eval/work-memory-baseline.json",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "work-memory-baseline.json",
+          "url": "file:///docs/eval/work-memory-baseline.json",
+          "relevant": true,
+          "score": 7.461346740456065e-6,
+          "excerpt": "The baseline report records that a missing model or partial run is a failure and never a silently downgraded result."
+        }
+      ],
+      "latency_ms": 5.367167,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "paraphrase-production-retriever",
+      "question_type": "paraphrase",
+      "tags": [
+        "github",
+        "paraphrase"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 5.065084,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "paraphrase-embeddings-not-facts",
+      "question_type": "paraphrase",
+      "tags": [
+        "browser",
+        "paraphrase"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 4.0569999999999995,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "paraphrase-env-var-model-path",
+      "question_type": "paraphrase",
+      "tags": [
+        "slack",
+        "paraphrase",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 3.819958,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "temporal-right-before-rollback",
+      "question_type": "temporal",
+      "tags": [
+        "terminal",
+        "temporal"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "terminal://zsh/right-before-rollback",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "Right before rollback",
+          "url": "terminal://zsh/right-before-rollback",
+          "relevant": true,
+          "score": 3.2729008197784424,
+          "excerpt": "Right before the rollback we disabled hybrid on empty reports to stop fake green output."
+        }
+      ],
+      "latency_ms": 4.238334,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "temporal-after-opening-linear",
+      "question_type": "temporal",
+      "tags": [
+        "linear",
+        "temporal",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "linear://HIPP-219/comment-2",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-219 comment",
+          "url": "linear://HIPP-219/comment-2",
+          "relevant": true,
+          "score": 0.9818874597549438,
+          "excerpt": "After opening HIPP 219 we added provenance coverage and typed abstention to the scorecard."
+        }
+      ],
+      "latency_ms": 4.7100409999999995,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "temporal-before-app-bundle-model-path",
+      "question_type": "temporal",
+      "tags": [
+        "files",
+        "temporal"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "file:///scripts/eval/work-memory/run.sh",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "run.sh",
+          "url": "file:///scripts/eval/work-memory/run.sh",
+          "relevant": true,
+          "score": 0.00001055330994859105,
+          "excerpt": "Before we switched to the app bundle path the model lived at models ArcticEmbedS INT8 mlmodelc in the repo root."
+        }
+      ],
+      "latency_ms": 4.165292,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "cross-session-slack-and-pr-honesty",
+      "question_type": "cross_session",
+      "tags": [
+        "slack",
+        "github",
+        "cross_session",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 2,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [],
+      "latency_ms": 3.7773749999999997,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "cross-session-file-and-terminal-rerun",
+      "question_type": "cross_session",
+      "tags": [
+        "files",
+        "terminal",
+        "cross_session",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 2,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [],
+      "latency_ms": 7.6609169999999995,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "cross-session-browser-and-linear-nonzero",
+      "question_type": "cross_session",
+      "tags": [
+        "browser",
+        "linear",
+        "cross_session"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 2,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [],
+      "latency_ms": 5.419708,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "changed-fact-current-owner",
+      "question_type": "changed_fact",
+      "tags": [
+        "linear",
+        "changed_fact"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [],
+      "latency_ms": 7.1755830000000005,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "changed-fact-current-model-path",
+      "question_type": "changed_fact",
+      "tags": [
+        "browser",
+        "files",
+        "changed_fact",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "browser://notes/model-history",
+          "app_bundle_id": "com.apple.Safari",
+          "window_title": "model history",
+          "url": "browser://notes/model-history",
+          "relevant": true,
+          "score": 5.833333489135839e-6,
+          "excerpt": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc."
+        }
+      ],
+      "latency_ms": 6.214791,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "changed-fact-case-count",
+      "question_type": "changed_fact",
+      "tags": [
+        "files",
+        "changed_fact"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 5.275042,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "contradiction-final-rule-partial-runs",
+      "question_type": "contradiction",
+      "tags": [
+        "github",
+        "slack",
+        "contradiction",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 4.1980830000000005,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "contradiction-provenance-required",
+      "question_type": "contradiction",
+      "tags": [
+        "linear",
+        "github",
+        "contradiction",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 5.827916,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "contradiction-cutoffs-committed",
+      "question_type": "contradiction",
+      "tags": [
+        "files",
+        "slack",
+        "contradiction",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 4.145666,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "source-which-slack-thread-rollback",
+      "question_type": "source_attribution",
+      "tags": [
+        "slack",
+        "source_attribution",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 3.743458,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "source-which-file-runner",
+      "question_type": "source_attribution",
+      "tags": [
+        "files",
+        "source_attribution",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 3.952125,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "source-which-pr-complete-false",
+      "question_type": "source_attribution",
+      "tags": [
+        "github",
+        "source_attribution",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "missed",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 6.284042,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "unanswerable-vinyl-koala",
+      "question_type": "unanswerable",
+      "tags": [
+        "unanswerable",
+        "github",
+        "slack"
+      ],
+      "unanswerable": true,
+      "outcome": "abstained",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 0,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 3.9394169999999997,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "unanswerable-saffron-orbit",
+      "question_type": "unanswerable",
+      "tags": [
+        "unanswerable",
+        "browser",
+        "files"
+      ],
+      "unanswerable": true,
+      "outcome": "abstained",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 0,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 3.968208,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "lexical",
+      "question_id": "unanswerable-marble-cactus",
+      "question_type": "unanswerable",
+      "tags": [
+        "unanswerable",
+        "linear"
+      ],
+      "unanswerable": true,
+      "outcome": "abstained",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 0,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [],
+      "latency_ms": 3.8560830000000004,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "exact-github-partial-runs",
+      "question_type": "exact_recall",
+      "tags": [
+        "github",
+        "exact",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "github://hippocampus/pull/431",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 431 benchmark honesty",
+          "url": "github://hippocampus/pull/431",
+          "relevant": true,
+          "score": 0.6274826526641846,
+          "excerpt": "PR 431 sets complete false on partial runs and exits nonzero when any requested arm fails."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "terminal://zsh/work-memory-smoke",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "Terminal smoke run",
+          "url": "terminal://zsh/work-memory-smoke",
+          "relevant": false,
+          "score": 0.23099100589752197,
+          "excerpt": "cargo test -p mci-agent --test work_memory_bench finished green after the partial-run guard landed."
+        }
+      ],
+      "latency_ms": 60.577542,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "exact-terminal-test-command",
+      "question_type": "exact_recall",
+      "tags": [
+        "terminal",
+        "exact"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "terminal://zsh/work-memory-tests",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "Focused benchmark tests",
+          "url": "terminal://zsh/work-memory-tests",
+          "relevant": true,
+          "score": 0.6316957473754883,
+          "excerpt": "Run cargo test -p mci-agent --test work_memory_bench to check the new parser and scoring metrics."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "github://hippocampus/pull/430",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 430 parser notes",
+          "url": "github://hippocampus/pull/430",
+          "relevant": false,
+          "score": 0.2330837845802307,
+          "excerpt": "PR 430 adds the dataset envelope parser and the complete field in the JSON report."
+        }
+      ],
+      "latency_ms": 40.013583,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "exact-file-no-silent-downgrade",
+      "question_type": "exact_recall",
+      "tags": [
+        "files",
+        "exact",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "file:///docs/eval/work-memory-baseline.json",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "work-memory-baseline.json",
+          "url": "file:///docs/eval/work-memory-baseline.json",
+          "relevant": true,
+          "score": 0.6373909711837769,
+          "excerpt": "The baseline report records that a missing model or partial run is a failure and never a silently downgraded result."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "browser://adr/0010-fusion",
+          "app_bundle_id": "com.apple.Safari",
+          "window_title": "ADR 0010 recall notes",
+          "url": "browser://adr/0010-fusion",
+          "relevant": false,
+          "score": 0.23951974511146545,
+          "excerpt": "ADR 0010 keeps vector similarity as a recall signal, not truth."
+        }
+      ],
+      "latency_ms": 40.414417,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "paraphrase-production-retriever",
+      "question_type": "paraphrase",
+      "tags": [
+        "github",
+        "paraphrase"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "github://hippocampus/pull/440",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 440 retriever wiring",
+          "url": "github://hippocampus/pull/440",
+          "relevant": true,
+          "score": 0.6269252300262451,
+          "excerpt": "PR 440 switched the benchmark onto the production hybrid retriever and the real SQLCipher store path."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "github://hippocampus/pull/421",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 421 dataset draft",
+          "url": "github://hippocampus/pull/421",
+          "relevant": false,
+          "score": 0.22823214530944824,
+          "excerpt": "PR 421 drafted an earlier synthetic dataset but did not use the production retriever."
+        }
+      ],
+      "latency_ms": 37.025875,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "paraphrase-embeddings-not-facts",
+      "question_type": "paraphrase",
+      "tags": [
+        "browser",
+        "paraphrase"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "browser://adr/0010-fusion",
+          "app_bundle_id": "com.apple.Safari",
+          "window_title": "ADR 0010 fusion",
+          "url": "browser://adr/0010-fusion",
+          "relevant": true,
+          "score": 0.5960714817047119,
+          "excerpt": "ADR 0010 says vector similarity is a recall signal and not truth."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "file:///docs/eval/README.md",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "docs/eval README",
+          "url": "file:///docs/eval/README.md",
+          "relevant": false,
+          "score": 0.19674156606197357,
+          "excerpt": "docs/eval/README.md lists the measurement surfaces but not the fusion caveat."
+        }
+      ],
+      "latency_ms": 36.241,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "paraphrase-env-var-model-path",
+      "question_type": "paraphrase",
+      "tags": [
+        "slack",
+        "paraphrase",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "slack://bench/threads/model-path",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "bench-model-path",
+          "url": "slack://bench/threads/model-path",
+          "relevant": true,
+          "score": 0.6353127956390381,
+          "excerpt": "Slack note says the runner should export MCI_ARCTIC_MODEL_PATH to the bundled ArcticEmbedS path when it is available."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "terminal://zsh/model-check",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "Model check",
+          "url": "terminal://zsh/model-check",
+          "relevant": false,
+          "score": 0.23634560406208038,
+          "excerpt": "The model check command verified the app bundle path exists on disk."
+        }
+      ],
+      "latency_ms": 38.676042,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "temporal-right-before-rollback",
+      "question_type": "temporal",
+      "tags": [
+        "terminal",
+        "temporal"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "terminal://zsh/right-before-rollback",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "Right before rollback",
+          "url": "terminal://zsh/right-before-rollback",
+          "relevant": true,
+          "score": 0.6448428630828857,
+          "excerpt": "Right before the rollback we disabled hybrid on empty reports to stop fake green output."
+        }
+      ],
+      "latency_ms": 57.688875,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "temporal-after-opening-linear",
+      "question_type": "temporal",
+      "tags": [
+        "linear",
+        "temporal",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "linear://HIPP-219/comment-2",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-219 comment",
+          "url": "linear://HIPP-219/comment-2",
+          "relevant": true,
+          "score": 0.58892822265625,
+          "excerpt": "After opening HIPP 219 we added provenance coverage and typed abstention to the scorecard."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "linear://HIPP-219",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-219",
+          "url": "linear://HIPP-219",
+          "relevant": false,
+          "score": 0.549992561340332,
+          "excerpt": "Opened HIPP 219 to track honest provenance coverage in the work-memory benchmark."
+        },
+        {
+          "rank": 3,
+          "event_id": 3,
+          "session_id": "github://hippocampus/pull/418",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 418 benchmark notes",
+          "url": "github://hippocampus/pull/418",
+          "relevant": false,
+          "score": 0.18968503177165985,
+          "excerpt": "PR 418 still reported only hit rate recall and MRR."
+        }
+      ],
+      "latency_ms": 48.167375,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "temporal-before-app-bundle-model-path",
+      "question_type": "temporal",
+      "tags": [
+        "files",
+        "temporal"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "file:///scripts/eval/work-memory/run.sh",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "run.sh",
+          "url": "file:///scripts/eval/work-memory/run.sh",
+          "relevant": true,
+          "score": 0.5722724795341492,
+          "excerpt": "Before we switched to the app bundle path the model lived at models ArcticEmbedS INT8 mlmodelc in the repo root."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "browser://notes/model-history",
+          "app_bundle_id": "com.apple.Safari",
+          "window_title": "model history",
+          "url": "browser://notes/model-history",
+          "relevant": false,
+          "score": 0.17248792946338654,
+          "excerpt": "The model history note says the runner now prefers the installed app bundle model."
+        }
+      ],
+      "latency_ms": 36.510583,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "cross-session-slack-and-pr-honesty",
+      "question_type": "cross_session",
+      "tags": [
+        "slack",
+        "github",
+        "cross_session",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 2,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "slack://bench/threads/honesty-call",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "honesty-call",
+          "url": "slack://bench/threads/honesty-call",
+          "relevant": true,
+          "score": 0.6263717412948608,
+          "excerpt": "Slack decision says a partial benchmark run must be labeled incomplete and should never pass quietly."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "github://hippocampus/pull/431",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 431 benchmark honesty",
+          "url": "github://hippocampus/pull/431",
+          "relevant": true,
+          "score": 0.4897185266017914,
+          "excerpt": "PR 431 implements complete false and exit nonzero for partial benchmark runs."
+        },
+        {
+          "rank": 3,
+          "event_id": 3,
+          "session_id": "terminal://zsh/notes",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "Notes",
+          "url": "terminal://zsh/notes",
+          "relevant": false,
+          "score": 0.23408964276313782,
+          "excerpt": "Local notes mention follow-up thresholds work but not the honesty rule."
+        }
+      ],
+      "latency_ms": 45.779041,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "cross-session-file-and-terminal-rerun",
+      "question_type": "cross_session",
+      "tags": [
+        "files",
+        "terminal",
+        "cross_session",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 2,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "terminal://zsh/work-memory-tests",
+          "app_bundle_id": "com.apple.Terminal",
+          "window_title": "Focused benchmark tests",
+          "url": "terminal://zsh/work-memory-tests",
+          "relevant": true,
+          "score": 0.6316957473754883,
+          "excerpt": "Run cargo test -p mci-agent --test work_memory_bench to verify the focused benchmark suite."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "file:///eval/work-memory/README.md",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "eval/work-memory README",
+          "url": "file:///eval/work-memory/README.md",
+          "relevant": true,
+          "score": 0.4714048504829407,
+          "excerpt": "The work-memory README explains the synthetic corpus and the one-command runner."
+        },
+        {
+          "rank": 3,
+          "event_id": 3,
+          "session_id": "slack://bench/threads/misc",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "misc bench",
+          "url": "slack://bench/threads/misc",
+          "relevant": false,
+          "score": 0.23718085885047913,
+          "excerpt": "Slack misc thread contains a screenshot but no rerun steps."
+        }
+      ],
+      "latency_ms": 57.816959000000004,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "cross-session-browser-and-linear-nonzero",
+      "question_type": "cross_session",
+      "tags": [
+        "browser",
+        "linear",
+        "cross_session"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 2,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "browser://notes/partial-runs",
+          "app_bundle_id": "com.apple.Safari",
+          "window_title": "partial run note",
+          "url": "browser://notes/partial-runs",
+          "relevant": true,
+          "score": 0.592247724533081,
+          "excerpt": "Browser note says keeping partial runs nonzero prevents fake green dashboards."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "linear://HIPP-219",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-219",
+          "url": "linear://HIPP-219",
+          "relevant": true,
+          "score": 0.21593420207500458,
+          "excerpt": "HIPP 219 tracks the requirement that incomplete benchmark arms must fail loudly."
+        },
+        {
+          "rank": 3,
+          "event_id": 3,
+          "session_id": "github://hippocampus/pull/426",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 426 baseline draft",
+          "url": "github://hippocampus/pull/426",
+          "relevant": false,
+          "score": 0.1945449411869049,
+          "excerpt": "PR 426 drafted baseline output without the final nonzero guard."
+        }
+      ],
+      "latency_ms": 51.349625,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "changed-fact-current-owner",
+      "question_type": "changed_fact",
+      "tags": [
+        "linear",
+        "changed_fact"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 3,
+      "events_indexed": 3,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "linear://HIPP-201/comment-priya",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-201 new owner",
+          "url": "linear://HIPP-201/comment-priya",
+          "relevant": true,
+          "score": 0.5716736912727356,
+          "excerpt": "Updated note says Priya owns HIPP 201 now that the benchmark is in implementation."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "linear://HIPP-201/comment-alice",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-201 old owner",
+          "url": "linear://HIPP-201/comment-alice",
+          "relevant": false,
+          "score": 0.5692776441574097,
+          "excerpt": "Earlier note says Alice owns HIPP 201 while the benchmark schema is still in draft."
+        },
+        {
+          "rank": 3,
+          "event_id": 3,
+          "session_id": "slack://bench/threads/ownership",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "ownership thread",
+          "url": "slack://bench/threads/ownership",
+          "relevant": false,
+          "score": 0.19719372689723969,
+          "excerpt": "Slack thread confirms the owner switch but not the issue number."
+        }
+      ],
+      "latency_ms": 46.14775,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "changed-fact-current-model-path",
+      "question_type": "changed_fact",
+      "tags": [
+        "browser",
+        "files",
+        "changed_fact",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "browser://notes/model-history",
+          "app_bundle_id": "com.apple.Safari",
+          "window_title": "model history",
+          "url": "browser://notes/model-history",
+          "relevant": true,
+          "score": 0.6353127956390381,
+          "excerpt": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "file:///scripts/eval/work-memory/run.sh",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "run.sh",
+          "url": "file:///scripts/eval/work-memory/run.sh",
+          "relevant": false,
+          "score": 0.1722724735736847,
+          "excerpt": "Older note says use models ArcticEmbedS INT8 mlmodelc from the repo root."
+        }
+      ],
+      "latency_ms": 34.71962499999999,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "changed-fact-case-count",
+      "question_type": "changed_fact",
+      "tags": [
+        "files",
+        "changed_fact"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "file:///eval/work-memory/README.md",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "eval/work-memory README",
+          "url": "file:///eval/work-memory/README.md",
+          "relevant": true,
+          "score": 0.6365536451339722,
+          "excerpt": "Current README says synthetic v1 ships 24 benchmark cases across eight categories."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "github://hippocampus/pull/421",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 421 dataset draft",
+          "url": "github://hippocampus/pull/421",
+          "relevant": false,
+          "score": 0.18745768070220947,
+          "excerpt": "Draft dataset note says the synthetic work-memory corpus has 18 cases."
+        }
+      ],
+      "latency_ms": 34.449167,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "contradiction-final-rule-partial-runs",
+      "question_type": "contradiction",
+      "tags": [
+        "github",
+        "slack",
+        "contradiction",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "github://hippocampus/pull/431",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 431 benchmark honesty",
+          "url": "github://hippocampus/pull/431",
+          "relevant": true,
+          "score": 0.6274826526641846,
+          "excerpt": "PR 431 replaces that rule: partial runs are incomplete and exit nonzero."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "slack://bench/threads/old-partial-rule",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "old partial rule",
+          "url": "slack://bench/threads/old-partial-rule",
+          "relevant": false,
+          "score": 0.1887413114309311,
+          "excerpt": "Old thread says a partial benchmark run can warn and still count as green."
+        }
+      ],
+      "latency_ms": 34.76025,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "contradiction-provenance-required",
+      "question_type": "contradiction",
+      "tags": [
+        "linear",
+        "github",
+        "contradiction",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "linear://HIPP-219/comment-2",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-219 comment",
+          "url": "linear://HIPP-219/comment-2",
+          "relevant": true,
+          "score": 0.6344953775405884,
+          "excerpt": "HIPP 219 comment says provenance coverage is a required benchmark metric in v1."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "github://hippocampus/pull/418",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 418 benchmark notes",
+          "url": "github://hippocampus/pull/418",
+          "relevant": false,
+          "score": 0.1889282464981079,
+          "excerpt": "Older PR note says provenance coverage is optional and can wait for later."
+        }
+      ],
+      "latency_ms": 34.084791,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "contradiction-cutoffs-committed",
+      "question_type": "contradiction",
+      "tags": [
+        "files",
+        "slack",
+        "contradiction",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 2,
+          "session_id": "file:///docs/eval/work-memory-baseline.json",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "work-memory-baseline.json",
+          "url": "file:///docs/eval/work-memory-baseline.json",
+          "relevant": true,
+          "score": 0.6373909711837769,
+          "excerpt": "The committed scorecard records hit rate and recall at 1 3 5 and 10 plus MRR provenance false positive and latency checks."
+        },
+        {
+          "rank": 2,
+          "event_id": 1,
+          "session_id": "slack://bench/threads/threshold-draft",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "threshold draft",
+          "url": "slack://bench/threads/threshold-draft",
+          "relevant": false,
+          "score": 0.18968503177165985,
+          "excerpt": "Draft threshold thread says only hit at five matters."
+        }
+      ],
+      "latency_ms": 36.622333,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "source-which-slack-thread-rollback",
+      "question_type": "source_attribution",
+      "tags": [
+        "slack",
+        "source_attribution",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "slack://bench/threads/rollback",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "rollback thread",
+          "url": "slack://bench/threads/rollback",
+          "relevant": true,
+          "score": 0.6452088356018066,
+          "excerpt": "Slack rollback thread notes the incomplete benchmark run and links the fix PR."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "slack://bench/threads/model-path",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "bench-model-path",
+          "url": "slack://bench/threads/model-path",
+          "relevant": false,
+          "score": 0.24576033651828766,
+          "excerpt": "The model path thread is about MCI_ARCTIC_MODEL_PATH and not the rollback."
+        }
+      ],
+      "latency_ms": 34.840708,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "source-which-file-runner",
+      "question_type": "source_attribution",
+      "tags": [
+        "files",
+        "source_attribution",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "file:///eval/work-memory/README.md",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "eval/work-memory README",
+          "url": "file:///eval/work-memory/README.md",
+          "relevant": true,
+          "score": 0.6365536451339722,
+          "excerpt": "eval work memory README documents the synthetic corpus and the benchmark runner script."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "file:///docs/eval/README.md",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "docs/eval README",
+          "url": "file:///docs/eval/README.md",
+          "relevant": false,
+          "score": 0.23739093542099,
+          "excerpt": "docs/eval README lists the methodology docs but not the runner details."
+        }
+      ],
+      "latency_ms": 33.937000000000005,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "source-which-pr-complete-false",
+      "question_type": "source_attribution",
+      "tags": [
+        "github",
+        "source_attribution",
+        "provenance"
+      ],
+      "unanswerable": false,
+      "outcome": "matched",
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "provenance_coverage_at": {
+        "1": true,
+        "3": true,
+        "5": true,
+        "10": true
+      },
+      "answer_sessions": 1,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "github://hippocampus/pull/431",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 431 benchmark honesty",
+          "url": "github://hippocampus/pull/431",
+          "relevant": true,
+          "score": 0.6274826526641846,
+          "excerpt": "PR 431 introduced complete false for partial benchmark runs."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "github://hippocampus/pull/440",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 440 retriever wiring",
+          "url": "github://hippocampus/pull/440",
+          "relevant": false,
+          "score": 0.22692519426345825,
+          "excerpt": "PR 440 moved the benchmark onto the production retriever path."
+        }
+      ],
+      "latency_ms": 34.274916000000005,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "unanswerable-vinyl-koala",
+      "question_type": "unanswerable",
+      "tags": [
+        "unanswerable",
+        "github",
+        "slack"
+      ],
+      "unanswerable": true,
+      "outcome": "falsePositive",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 0,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "github://hippocampus/pull/431",
+          "app_bundle_id": "com.github.GitHubClient",
+          "window_title": "PR 431 benchmark honesty",
+          "url": "github://hippocampus/pull/431",
+          "relevant": false,
+          "score": 0.6274826526641846,
+          "excerpt": "PR 431 introduced complete false for partial benchmark runs."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "slack://bench/threads/model-path",
+          "app_bundle_id": "com.tinyspeck.slackmacgap",
+          "window_title": "bench-model-path",
+          "url": "slack://bench/threads/model-path",
+          "relevant": false,
+          "score": 0.23531275987625122,
+          "excerpt": "The model path thread is about exporting MCI_ARCTIC_MODEL_PATH."
+        }
+      ],
+      "latency_ms": 37.41525,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "unanswerable-saffron-orbit",
+      "question_type": "unanswerable",
+      "tags": [
+        "unanswerable",
+        "browser",
+        "files"
+      ],
+      "unanswerable": true,
+      "outcome": "falsePositive",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 0,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "browser://adr/0010-fusion",
+          "app_bundle_id": "com.apple.Safari",
+          "window_title": "ADR 0010 fusion",
+          "url": "browser://adr/0010-fusion",
+          "relevant": false,
+          "score": 0.5960714817047119,
+          "excerpt": "ADR 0010 says vector similarity is a recall signal and not truth."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "file:///eval/work-memory/README.md",
+          "app_bundle_id": "com.microsoft.VSCode",
+          "window_title": "eval/work-memory README",
+          "url": "file:///eval/work-memory/README.md",
+          "relevant": false,
+          "score": 0.23655366897583008,
+          "excerpt": "The work-memory README explains the synthetic corpus."
+        }
+      ],
+      "latency_ms": 34.792084,
+      "index_size_bytes": 4096
+    },
+    {
+      "arm": "hybrid",
+      "question_id": "unanswerable-marble-cactus",
+      "question_type": "unanswerable",
+      "tags": [
+        "unanswerable",
+        "linear"
+      ],
+      "unanswerable": true,
+      "outcome": "falsePositive",
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "provenance_coverage_at": {
+        "1": false,
+        "3": false,
+        "5": false,
+        "10": false
+      },
+      "answer_sessions": 0,
+      "sessions_in_haystack": 2,
+      "events_indexed": 2,
+      "top_hits": [
+        {
+          "rank": 1,
+          "event_id": 1,
+          "session_id": "linear://HIPP-201/comment-alice",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-201 old owner",
+          "url": "linear://HIPP-201/comment-alice",
+          "relevant": false,
+          "score": 0.5885552763938904,
+          "excerpt": "Earlier note says Alice owns HIPP 201 while the benchmark schema is still in draft."
+        },
+        {
+          "rank": 2,
+          "event_id": 2,
+          "session_id": "linear://HIPP-201/comment-priya",
+          "app_bundle_id": "com.linear",
+          "window_title": "HIPP-201 new owner",
+          "url": "linear://HIPP-201/comment-priya",
+          "relevant": false,
+          "score": 0.19134241342544556,
+          "excerpt": "Updated note says Priya owns HIPP 201 now that the benchmark is in implementation."
+        }
+      ],
+      "latency_ms": 34.678042,
+      "index_size_bytes": 4096
+    }
+  ],
+  "failures": [],
+  "regression_thresholds": {
+    "hybrid": {
+      "hit_rate_at_1_min": 0.9,
+      "hit_rate_at_3_min": 0.9,
+      "hit_rate_at_5_min": 0.9,
+      "hit_rate_at_10_min": 0.9,
+      "recall_at_1_min": 0.8357142857142857,
+      "recall_at_3_min": 0.9,
+      "recall_at_5_min": 0.9,
+      "recall_at_10_min": 0.9,
+      "provenance_coverage_at_1_min": 0.9,
+      "provenance_coverage_at_3_min": 0.9,
+      "provenance_coverage_at_5_min": 0.9,
+      "provenance_coverage_at_10_min": 0.9,
+      "false_positive_rate_at_1_max": 1.0,
+      "false_positive_rate_at_3_max": 1.0,
+      "false_positive_rate_at_5_max": 1.0,
+      "false_positive_rate_at_10_max": 1.0,
+      "abstention_separation_at_1_min": 0.0,
+      "abstention_separation_at_3_min": 0.0,
+      "abstention_separation_at_5_min": 0.0,
+      "abstention_separation_at_10_min": 0.0,
+      "mrr_min": 0.9,
+      "latency_p95_ms_max": 115.63391800000001,
+      "index_size_p95_bytes_max": 9625.6
+    },
+    "lexical": {
+      "hit_rate_at_1_min": 0.2833333333333333,
+      "hit_rate_at_3_min": 0.2833333333333333,
+      "hit_rate_at_5_min": 0.2833333333333333,
+      "hit_rate_at_10_min": 0.2833333333333333,
+      "recall_at_1_min": 0.2833333333333333,
+      "recall_at_3_min": 0.2833333333333333,
+      "recall_at_5_min": 0.2833333333333333,
+      "recall_at_10_min": 0.2833333333333333,
+      "provenance_coverage_at_1_min": 0.2833333333333333,
+      "provenance_coverage_at_3_min": 0.2833333333333333,
+      "provenance_coverage_at_5_min": 0.2833333333333333,
+      "provenance_coverage_at_10_min": 0.2833333333333333,
+      "false_positive_rate_at_1_max": 0.1,
+      "false_positive_rate_at_3_max": 0.1,
+      "false_positive_rate_at_5_max": 0.1,
+      "false_positive_rate_at_10_max": 0.1,
+      "abstention_separation_at_1_min": 0.2833333333333333,
+      "abstention_separation_at_3_min": 0.2833333333333333,
+      "abstention_separation_at_5_min": 0.2833333333333333,
+      "abstention_separation_at_10_min": 0.2833333333333333,
+      "mrr_min": 0.2833333333333333,
+      "latency_p95_ms_max": 32.660917,
+      "index_size_p95_bytes_max": 9625.6
+    }
+  },
+  "regression": null,
+  "run": {
+    "captured_at_utc": "2026-09-01T08:18:37Z",
+    "git_commit": "b4c045a66b38c075c238340c2215cc882cb7d438",
+    "branch": "codex/hippocampus-v1",
+    "os": "macos",
+    "arch": "aarch64",
+    "model_path": "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc",
+    "requested_arms": [
+      "lexical",
+      "hybrid"
+    ],
+    "ks": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "limit": null,
+    "workdir": "/var/folders/mh/rmbxwhjs4dj64tyy3wrv87yr0000gn/T/mci-bench"
+  }
+}

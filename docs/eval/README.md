@@ -10,12 +10,16 @@ the eval story. Paired with `../../scripts/eval/` (the runners) and
   (ADR-0018 §7 gate). Rubric, corpus source, scoring.
 - `recall-quality.md` — the recall-quality benchmark methodology
   (paired with `../../scripts/eval/recall/`).
+- `work-memory-baseline.json` — the committed lexical and hybrid
+  baseline report for the synthetic work-memory corpus.
 
 ## Related
 
 - `../../scripts/eval/` — the runners that produce scorecards.
 - `../../core/brief-eval/` — the in-tree Rust brief-eval crate.
 - `../../eval/ner-corpus/` — the NER corpus used by ADR-0029.
+- `../../eval/work-memory/` — the synthetic work-memory corpus and
+  README for the benchmark runner.
 - `../decisions/0018-brief-authoring-approval-pipeline.md`,
   `0029-step2-7-corpus-gate.md`.
 
