@@ -11,7 +11,9 @@ the eval story. Paired with `../../scripts/eval/` (the runners) and
 - `recall-quality.md` — the recall-quality benchmark methodology
   (paired with `../../scripts/eval/recall/`).
 - `work-memory-baseline.json` — the committed lexical and hybrid
-  baseline report for the synthetic work-memory corpus.
+  baseline report for the synthetic work-memory corpus, including reproducible
+  code/model/dataset identity, regression thresholds, fixed launch-quality
+  targets, misses, and explicit answerable/unanswerable denominators.
 
 ## Related
 
