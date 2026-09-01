@@ -89,8 +89,11 @@ python3 assets/installer/generate-background.py
 # EULA.rtf + sla.r (from docs/legal/terms-of-service.md)
 python3 assets/installer/generate-eula.py
 
-# Volume icon (copy from branding)
+# Volume icon mirror (the build verifies it against the canonical icon)
 cp assets/branding/AppIcon.icns assets/installer/volume-icon.icns
+
+# Verify the installer cannot drift from the canonical app identity
+./scripts/build-installer.sh --verify-assets
 ```
 
 Both generators are pure Python stdlib (no Pillow, no external deps). The build script auto-regenerates missing assets.
@@ -100,7 +103,7 @@ Both generators are pure Python stdlib (no Pillow, no external deps). The build 
 | `assets/installer/background.png` | `assets/branding/colors.json` + layered-memory mark | `generate-background.py` |
 | `assets/installer/EULA.rtf` | `docs/legal/terms-of-service.md` | `generate-eula.py` |
 | `assets/installer/sla.r` | `docs/legal/terms-of-service.md` | `generate-eula.py` |
-| `assets/installer/volume-icon.icns` | `assets/branding/AppIcon.icns` | manual copy |
+| `assets/installer/volume-icon.icns` | `assets/branding/AppIcon.icns` | verified mirror; the build stages the canonical file directly |
 
 ### What the DMG contains
 
