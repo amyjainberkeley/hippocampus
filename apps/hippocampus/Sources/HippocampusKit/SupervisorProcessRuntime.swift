@@ -227,14 +227,24 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         }
 
         var deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline, helper?.isRunning == true || agent?.isRunning == true {
+        while SupervisorStopPolicy.shouldWait(
+            now: Date(),
+            deadline: deadline,
+            helperRunning: helper?.isRunning == true,
+            agentRunning: agent?.isRunning == true
+        ) {
             try await Task.sleep(for: .milliseconds(50))
         }
         for process in [helper, agent] where process?.isRunning == true {
             if let process { kill(process.processIdentifier, SIGKILL) }
         }
         deadline = Date().addingTimeInterval(1)
-        while Date() < deadline, helper?.isRunning == true || agent?.isRunning == true {
+        while SupervisorStopPolicy.shouldWait(
+            now: Date(),
+            deadline: deadline,
+            helperRunning: helper?.isRunning == true,
+            agentRunning: agent?.isRunning == true
+        ) {
             try await Task.sleep(for: .milliseconds(25))
         }
         guard helper?.isRunning != true, agent?.isRunning != true else {

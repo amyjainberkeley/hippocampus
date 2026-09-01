@@ -39,6 +39,7 @@ LANES=(
     "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
     "sparkle-keypair-fixtures|bash|test|scripts/test-sparkle-keypair.sh"
     "key-custody-runner|bash|test|scripts/test-agent-key-custody-runner.sh"
+    "supervisor-stop-policy|bash|test|scripts/test-supervisor-stop-policy.sh"
     "changelog-sanity|bash|lint|__changelog_sanity_lane"
 )
 
@@ -77,6 +78,7 @@ LANES
     sparkle-keygen-fixtures bundled Sparkle CLI contract fixture
     sparkle-keypair-fixtures Ed25519 private/public matching fixtures
     key-custody-runner    nonblocking bounded child-process diagnostic fixture
+    supervisor-stop-policy bounded two-child shutdown fixture
     changelog-sanity      gen-changelog.sh --dry-run smoke
 
 BEHAVIOR
