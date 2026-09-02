@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `8a293ab`
+Audited code baseline: `1e77b8c`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -43,6 +43,12 @@ more than this page.
   and backfill has run. The macOS runtime uses CPU Core ML for inference and a
   Rust cosine scan over vectors stored inside SQLCipher; there is no separate
   vector service or shipped sqlite-vec retrieval path.
+- Explicit person, count, duration, and date questions now pass a
+  relation-grounded negative guard before retrieval can be called a match. The
+  guard strips capture headers, keeps values within sentence and topic
+  boundaries, passes all 14 disjoint calibration/validation cases, and rejects
+  all eight adversarial cases containing an unrelated name, number, date, or
+  duration. This guard can veto evidence but cannot promote it by itself.
 - The menu app, onboarding, Recall workspace, icon, installer art, extensions,
   and documented product captures use one light native visual system. Native
   macOS material supplies the translucent top surfaces, dark system appearance
@@ -110,17 +116,17 @@ and is not comparable to LoCoMo or LongMemEval.
 
 | Arm | Answerable outcome | Hit rate @1 | Recall @1 / @3 | MRR | Unanswerable outcome | p95 latency |
 |---|---:|---:|---:|---:|---:|---:|
-| Lexical | 7/21 matched; 14 missed | 33.3% | 33.3% / 33.3% | 0.333 | 3/3 abstained; 0 false positives | 18.40 ms |
-| Hybrid | 21/21 matched; 0 missed | 95.2% | 88.1% / 100% | 0.976 | 3/3 abstained; 0 false positives | 96.54 ms |
+| Lexical | 7/21 matched; 14 missed | 33.3% | 33.3% / 33.3% | 0.333 | 3/3 abstained; 0 false positives | 15.80 ms |
+| Hybrid | 21/21 matched; 0 missed | 95.2% | 88.1% / 100% | 0.976 | 3/3 abstained; 0 false positives | 94.74 ms |
 
 The artifact is complete and publishable but explicitly
 `"launch_qualified": false`. Retrieval abstention now passes the three
 unanswerable cases, but the production evidence-sufficiency policy is not yet
-validation-qualified. Its explicit-value veto also passes through all eight
-held-out cases where an unrelated value of the same type appears in evidence;
-it is type-aware, not relation-grounded. The benchmark exits nonzero for those
-two quality failures even though ranking metrics improved. Evidence calibration
-is a product gate, not benchmark fine print.
+validation-qualified. The explicit relation guard is qualified on its narrow
+person/count/duration/date corpus, leaving the generic verifier as the single
+quality failure. The benchmark exits nonzero even though ranking and typed
+abstention pass. Evidence calibration is a product gate, not benchmark fine
+print.
 
 ## Release Gates
 
