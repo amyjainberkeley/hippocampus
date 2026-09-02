@@ -1,24 +1,27 @@
 //! Integration test for the brief-quality eval framework.
 //!
-//! Two passes per fixture:
+//! Three passes per fixture:
 //!
 //! 1. **Scripted backend (CI default)** — proves the full
 //!    `LlamaBriefAuthor + ScriptedLlamaBackend` path produces a brief
 //!    that passes every metric. This is the deterministic green that
 //!    CI relies on.
-//! 2. **Stub backend (regression check)** — proves that
+//! 2. **Extractive backend (shipping default)** — proves that the
+//!    zero-download author passes the locked source/citation rubric.
+//! 3. **Stub backend (regression check)** — proves that
 //!    [`StubBriefAuthor`] does NOT pass. This is intentional: the stub
 //!    is supposed to fail the eval so that "still on the stub" is a
 //!    loud, visible signal in any future CEO run.
 //!
 //! The Core ML backend (`Qwen3CoreMLBackend`) is opt-in via the
 //! `coreml` feature; integration tests do not invoke it because
-//! running the real model takes ~10-20 s per fixture and requires the
-//! ~950 MB `.mlmodelc` artifact, which `OWNER_TASKS` #17 produces.
+//! the previously measured artifact did not finish a fixture within
+//! 121.5 seconds and is not a release dependency.
 
 use std::sync::Arc;
 
 use mci_brief::author::{BriefAuthor, StubBriefAuthor};
+use mci_brief::extractive_author::ExtractiveBriefAuthor;
 use mci_brief::llama_author::LlamaBriefAuthor;
 use mci_brief::llama_backend::LlamaBackend;
 
@@ -80,6 +83,39 @@ fn every_fixture_passes_with_scripted_backend() {
     assert!(
         failures.is_empty(),
         "expected all fixtures to pass; failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn every_fixture_passes_with_shipping_extractive_author() {
+    let dir = bundled_fixtures_dir();
+    let names = list_fixture_names(&dir).expect("list fixtures");
+    let thresholds = PassThresholds {
+        require_real_model: true,
+        ..PassThresholds::default()
+    };
+    let author = ExtractiveBriefAuthor;
+    let mut failures = Vec::new();
+
+    for name in &names {
+        let fixture = FixtureDay::load(&dir, name).expect("load fixture");
+        let gold = GoldBrief::load(&dir, name).expect("load gold");
+        let brief = author
+            .author(&fixture.to_event_records(), "Daily brief")
+            .expect("extractive author");
+        let outcome = score_brief(&brief, &fixture, &gold, thresholds);
+        if !outcome.pass {
+            failures.push(format!(
+                "{name}: missing={:?} forbidden={:?} unresolved={:?}",
+                outcome.missing_facts, outcome.forbidden_hits, outcome.unresolved_citations
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "shipping extractive baseline regressed:\n{}",
         failures.join("\n")
     );
 }
