@@ -64,8 +64,9 @@ struct OnboardingApp: App {
             fullDiskAccess: fda,
             initialStep: initialStep
         ))
+        let baselineStore = SignedBaselineAllowlistStore()
         _trustVM = StateObject(wrappedValue: TrustPanelViewModel(
-            allowlistStore: StubAllowlistStore(),
+            allowlistStore: baselineStore,
             denylistStore: DiskDenylistEditorStore()
         ))
         _retentionVM = StateObject(wrappedValue: RetentionViewModel(
@@ -96,7 +97,7 @@ struct OnboardingApp: App {
         ))
 
         _allowlistEditorVM = StateObject(wrappedValue: AllowlistEditorViewModel(
-            baselineStore: StubAllowlistStore(),
+            baselineStore: baselineStore,
             userStore: FileUserAllowlistStore(),
             detector: appsDetector,
             fdaPermission: fdaPermission
