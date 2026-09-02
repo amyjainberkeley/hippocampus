@@ -7,7 +7,7 @@ package struct SupervisorProcessGeneration: Sendable, Equatable {
     let readinessURL: URL
     let captureEnabled: Bool
 
-    static func make(captureEnabled: Bool) throws -> SupervisorProcessGeneration {
+    package static func make(captureEnabled: Bool) throws -> SupervisorProcessGeneration {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ai.hippocampus.helper-readiness", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

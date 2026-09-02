@@ -15,6 +15,7 @@ import PackageDescription
 
 let standaloneFixtureSources = [
     "BriefModelPresenceBehavior.swift",
+    "CaptureConsentBehavior.swift",
     "ChildProcessEnvironmentBehavior.swift",
     "KeyCustodyCommandRunnerBehavior.swift",
     "KeyStoreResponsiveness.swift",
@@ -77,6 +78,13 @@ let package = Package(
             path: "Tests/Fixtures",
             exclude: standaloneFixtureSources.filter { $0 != "RuntimeConfigBehavior.swift" },
             sources: ["RuntimeConfigBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "CaptureConsentBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "CaptureConsentBehavior.swift" },
+            sources: ["CaptureConsentBehavior.swift"]
         ),
         .executableTarget(
             name: "SupervisorLifecycleBehavior",

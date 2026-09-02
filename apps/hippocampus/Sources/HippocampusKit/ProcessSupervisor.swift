@@ -23,7 +23,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         return environment
     }
 
-    static func make(
+    package static func make(
         helperURL: URL,
         agentURL: URL,
         dbPath: URL,
@@ -51,6 +51,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
             keyReference: keyReference
         )
         var agentEnvironment = childEnvironment
+        agentEnvironment["MCI_CAPTURE_ENABLED"] = captureEnabled ? "1" : "0"
         if crashReportOptedIn {
             agentEnvironment["MCI_CRASH_REPORT_OPTED_IN"] = "1"
         } else {
@@ -80,6 +81,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private let runtimeConfig: any RuntimeConfiguring
     private let topology: any SupervisorTopologyControlling
     private let keyCustodyPreparer: any KeyCustodyPreparing
+    private let captureConsentAuthority: any CaptureConsentControlling
     private let readinessTimeout: TimeInterval
     private let logger = Logger(subsystem: "ai.hippocampus", category: "supervisor")
     private var retryTask: Task<Void, Never>?
@@ -106,6 +108,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             runtimeConfig: runtimeConfig,
             topology: FoundationSupervisorTopology(),
             keyCustodyPreparer: AgentKeyCustodyPreparer(),
+            captureConsentAuthority: CaptureConsentAuthority(),
             readinessTimeout: 10
         )
     }
@@ -116,6 +119,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         runtimeConfig: any RuntimeConfiguring,
         topology: any SupervisorTopologyControlling,
         keyCustodyPreparer: any KeyCustodyPreparing,
+        captureConsentAuthority: any CaptureConsentControlling = NoopCaptureConsentAuthority(),
         readinessTimeout: TimeInterval
     ) {
         self.locator = locator
@@ -123,6 +127,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.runtimeConfig = runtimeConfig
         self.topology = topology
         self.keyCustodyPreparer = keyCustodyPreparer
+        self.captureConsentAuthority = captureConsentAuthority
         self.readinessTimeout = readinessTimeout
         self.captureEnabled = runtimeConfig.captureEnabled
     }
@@ -151,11 +156,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
         retryCount = 0
         do {
+            try captureConsentAuthority.disable()
             let generationID = try await startTopology(
                 captureEnabled: runtimeConfig.captureEnabled,
                 transitionID: transitionID
             )
             try ensureTransitionIsActive(transitionID)
+            try prepareCaptureBoundary(
+                captureEnabled: runtimeConfig.captureEnabled,
+                generationID: generationID
+            )
             guard transitionGate.commit(
                 generationID: generationID,
                 transitionID: transitionID
@@ -164,7 +174,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             }
             activateTopology(captureEnabled: runtimeConfig.captureEnabled)
         } catch {
-            transitionGate.fail(transitionID: transitionID)
+            stopAncillaryServices()
+            if topology.isRunning {
+                try? await topology.stop(timeout: 2)
+            }
+            if transitionGate.ownsTransition(transitionID) {
+                transitionGate.fail(transitionID: transitionID)
+                state = .crashed(reason: error.localizedDescription)
+            }
             throw error
         }
     }
@@ -194,6 +211,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
+                try self.captureConsentAuthority.disable()
                 try await self.topology.stop(timeout: timeout)
                 self.stopAncillaryServices()
                 self.state = .stopped
@@ -236,6 +254,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let prior = captureEnabled
 
         do {
+            try captureConsentAuthority.disable()
             try await topology.stop(timeout: 5)
             try ensureTransitionIsActive(transitionID)
             stopAncillaryServices()
@@ -253,6 +272,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 transitionID: transitionID
             )
             try ensureTransitionIsActive(transitionID)
+            try prepareCaptureBoundary(
+                captureEnabled: enabled,
+                generationID: generationID
+            )
             try runtimeConfig.setCaptureEnabled(enabled)
             guard transitionGate.commit(
                 generationID: generationID,
@@ -279,6 +302,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     transitionID: transitionID
                 )
                 try ensureTransitionIsActive(transitionID)
+                try prepareCaptureBoundary(
+                    captureEnabled: prior,
+                    generationID: rollbackGenerationID
+                )
                 guard transitionGate.commit(
                     generationID: rollbackGenerationID,
                     transitionID: transitionID
@@ -388,7 +415,24 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.captureEnabled = captureEnabled
         state = .running
         startHealthPolling()
-        startSafariInboxReader()
+    }
+
+    private func prepareCaptureBoundary(
+        captureEnabled: Bool,
+        generationID: String
+    ) throws {
+        guard captureEnabled else {
+            try captureConsentAuthority.disable()
+            return
+        }
+        startSafariInboxReader(expectedGenerationID: generationID)
+        do {
+            try captureConsentAuthority.enable(generationID: generationID)
+        } catch {
+            safariInboxReader?.stop()
+            safariInboxReader = nil
+            throw error
+        }
     }
 
     private func stopUncommittedTopologyIfNeeded() async {
@@ -440,6 +484,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     transitionID: transitionID
                 )
                 try self.ensureTransitionIsActive(transitionID)
+                try self.prepareCaptureBoundary(
+                    captureEnabled: self.runtimeConfig.captureEnabled,
+                    generationID: generationID
+                )
                 guard self.transitionGate.commit(
                     generationID: generationID,
                     transitionID: transitionID
@@ -464,8 +512,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         pendingRetryGenerationID = nil
     }
 
-    private func startSafariInboxReader() {
-        let reader = SafariInboxReader()
+    private func startSafariInboxReader(expectedGenerationID: String) {
+        let reader = SafariInboxReader(expectedGenerationID: expectedGenerationID)
         reader.start()
         safariInboxReader = reader
     }
@@ -479,6 +527,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     private func stopAncillaryServices() {
+        do {
+            try captureConsentAuthority.disable()
+        } catch {
+            logger.error("supervisor: capture consent revocation failed: \(error.localizedDescription)")
+        }
         safariInboxReader?.stop()
         safariInboxReader = nil
         healthTimer?.invalidate()
@@ -531,12 +584,19 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
     public var safariInboxStats: (
         forwarded: UInt64,
+        droppedConsent: UInt64,
         droppedDenylist: UInt64,
         droppedSecret: UInt64,
         failedParse: UInt64
     )? {
         guard let reader = safariInboxReader else { return nil }
-        return (reader.forwarded, reader.droppedDenylist, reader.droppedSecret, reader.failedParse)
+        return (
+            reader.forwarded,
+            reader.droppedConsent,
+            reader.droppedDenylist,
+            reader.droppedSecret,
+            reader.failedParse
+        )
     }
 }
 

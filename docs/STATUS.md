@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-01._
 
-Audited code baseline: `d6b144a`
+Audited code baseline: `bf6ff75`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -23,14 +23,23 @@ more than this page.
   encrypted keyframe blobs. Every retention cycle also reconciles canonical
   crash orphans and stale managed temporary files after a one-hour grace
   period, without following symlinks or deleting unknown entries.
+- The persisted recording setting now reaches every production ingest
+  boundary. The helper receives `--capture` only when enabled; the Rust agent
+  receives an explicit `MCI_CAPTURE_ENABLED` value and keeps stdin, browser
+  sockets, deep hooks, and MCP collection inert while off. Safari additionally
+  requires an enabled App Group authority owned by the live container process,
+  stamps each payload with the committed supervisor generation, and rejects
+  stale or missing generations before socket delivery.
 - Semantic recall works when the Arctic Embed S Core ML artifact is present
   and backfill has run. The macOS runtime uses CPU Core ML for inference and a
   Rust cosine scan over vectors stored inside SQLCipher; there is no separate
   vector service or shipped sqlite-vec retrieval path.
 - The app, capture helper, Recall, and onboarding Swift packages compile on
-  this host through the constrained SwiftPM wrapper. Rust formatting, strict
-  workspace Clippy, the full workspace test suite, and current release
-  contracts pass.
+  this host through the constrained SwiftPM wrapper. The capture-consent
+  behavior fixture, Rust formatting, strict agent Clippy, all 337 agent-library
+  tests, agent binary tests, agent integration tests, and current release
+  contracts pass. Full Hippocampus XCTest execution still requires Xcode on
+  this host; CI now owns an explicit app-test job instead of only compiling it.
 - A throwaway-home E2E installs the engine, starts with capture disabled,
   imports 20 synthetic events, injects one shared-encoder `OCREvent` through
   production `--drain-stdin --strict`, derives episodes, persists and reads
@@ -40,11 +49,21 @@ more than this page.
 
 ## What Is Not Yet Proven
 
-- Real ScreenCaptureKit capture remains off by default. The persisted setting
-  is the only authority, and enable commits only after the expected helper
-  generation reports successful startup. The synthetic wire E2E proves the
-  capture-to-memory seam, not a real all-day screen capture. The required
-  30-minute soak and release-machine permission walkthrough remain open.
+- Real `ScreenCaptureKit` capture remains off by default. Enable commits only
+  after the expected helper generation reports successful startup, and all
+  secondary ingest paths now inherit that decision. The synthetic wire E2E
+  proves the capture-to-memory path, not a real all-day screen capture. The
+  required 30-minute soak and release-machine permission walkthrough remain
+  open.
+- OCR is not yet launch-qualified against cross-window leakage or Safari
+  Private Browsing. The current browser guards are useful defense in depth,
+  not sufficient evidence for a privacy guarantee. Automatic OCR enablement
+  must remain blocked until those behaviors have executable release tests.
+- The TCC and screen-sharing revocation monitors exist but are not yet proven
+  to be instantiated on the production app path. Delete and wipe operations
+  also still need writer quiescence and truthful post-commit error handling;
+  malformed retention configuration currently falls back to forever rather
+  than surfacing a visible configuration fault.
 - Production key custody targets the non-synchronizable macOS file-Keychain
   item `ai.hippocampus.brain` / `database-key-v1`. Migration is fail-closed and
   removes a legacy plaintext key only after Keychain reread plus read-only
@@ -75,8 +94,10 @@ and is not comparable to LoCoMo or LongMemEval.
 
 The artifact is complete and publishable but explicitly
 `"launch_qualified": false`: hybrid retrieval returns a result for every
-unanswerable query. Abstention/calibration is a product gate, not benchmark
-fine print.
+unanswerable query. The production evidence-sufficiency policy is also
+explicitly unqualified, and the benchmark quality gate now fails whenever that
+policy is unqualified even if ranking metrics improve. Abstention/calibration
+is a product gate, not benchmark fine print.
 
 ## Release Gates
 
@@ -85,6 +106,9 @@ fine print.
   commit. Full XCTest remains a full-Xcode gate on this host.
 - Complete a real 30-minute capture soak with frame, OCR, retained-keyframe,
   CPU, memory, disk, pause, and protected-surface observations.
+- Prove cross-window and private-browser exclusion, wire the TCC monitors into
+  the production composition root, and make destructive operations quiesce the
+  writer before claiming completion.
 - Reconstruct the immutable model archive named by `release-models.json` and
   pass every model integrity/completeness check.
 - Install full Xcode, a Developer ID Application identity with private key,

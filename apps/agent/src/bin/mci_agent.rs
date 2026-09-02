@@ -198,6 +198,13 @@ fn page_content_socket_path() -> PathBuf {
     home.join("Library/Application Support/MCI/page_content.sock")
 }
 
+fn capture_ingestion_enabled(environment_value: Option<&str>) -> bool {
+    match environment_value {
+        None => true,
+        Some(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true"),
+    }
+}
+
 fn default_db_path() -> PathBuf {
     // ~/Library/Application Support/MCI/mci.sqlite per ADR-0008 §1.4.
     // Expand $HOME at run-time (no glob-style ~ expansion in env vars).
@@ -535,6 +542,16 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Mode::DrainStdin { db_path, strict } => {
+            let capture_ingestion_enabled =
+                capture_ingestion_enabled(std::env::var("MCI_CAPTURE_ENABLED").ok().as_deref());
+            eprintln!(
+                "mci-agent: observation ingestion {}",
+                if capture_ingestion_enabled {
+                    "enabled"
+                } else {
+                    "disabled; maintenance remains active"
+                }
+            );
             let (device_id, source) = match load_or_generate(args.device_id_path.clone()).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -924,11 +941,13 @@ async fn main() -> ExitCode {
                                 // this is the load-bearing wire — without
                                 // it the V2-P7 + V2-P8 cascade-equivalents
                                 // never see production input.
-                                spawn_pump_supervisor(
-                                    Arc::clone(&store),
-                                    supervisor_embedder,
-                                    shutdown_rx.clone(),
-                                );
+                                if capture_ingestion_enabled {
+                                    spawn_pump_supervisor(
+                                        Arc::clone(&store),
+                                        supervisor_embedder,
+                                        shutdown_rx.clone(),
+                                    );
+                                }
 
                                 // V2-MCP-3 — MCP aggregator.
                                 // Consumes the registry built by
@@ -949,12 +968,14 @@ async fn main() -> ExitCode {
                                 // V2-MCP-3: without it the
                                 // aggregator module would never run
                                 // against production input.
-                                spawn_mcp_aggregator(
-                                    Arc::clone(&mcp_registry),
-                                    Arc::clone(&store),
-                                    None,
-                                    shutdown_rx.clone(),
-                                );
+                                if capture_ingestion_enabled {
+                                    spawn_mcp_aggregator(
+                                        Arc::clone(&mcp_registry),
+                                        Arc::clone(&store),
+                                        None,
+                                        shutdown_rx.clone(),
+                                    );
+                                }
 
                                 Some((pump, store))
                             }
@@ -1032,40 +1053,44 @@ async fn main() -> ExitCode {
             // wire frames from the native messaging host (Chromium) and
             // the container-app Safari inbox reader. Shares the store
             // with the main drain loop via a second BrainPump.
-            let _pc_listener_task = if let Some((_, store)) = brain_pump.as_ref() {
-                let sock = page_content_socket_path();
-                match PageContentListener::bind(&sock) {
-                    Ok((listener, unix_listener)) => {
-                        // Page-content events get the same sync NER tier as
-                        // the OCR drain — share the one resident backend Arc.
-                        let pc_base = BrainPump::new(
-                            Arc::clone(store) as Arc<dyn mci_brain::BrainStore>,
-                            None,
-                        );
-                        let pc_pump_inner = match &ner_sync_backend {
-                            Some(b) => pc_base.with_ner_sync(Arc::clone(b)),
-                            None => pc_base,
-                        };
-                        let pc_pump: Arc<dyn BrainIngestor> = Arc::new(pc_pump_inner);
-                        eprintln!("mci-agent: page-content listener on {}", sock.display());
-                        Some(tokio::spawn(async move {
-                            listener.run(unix_listener, pc_pump).await;
-                        }))
+            let _pc_listener_task = if capture_ingestion_enabled {
+                if let Some((_, store)) = brain_pump.as_ref() {
+                    let sock = page_content_socket_path();
+                    match PageContentListener::bind(&sock) {
+                        Ok((listener, unix_listener)) => {
+                            // Page-content events get the same sync NER tier as
+                            // the OCR drain — share the one resident backend Arc.
+                            let pc_base = BrainPump::new(
+                                Arc::clone(store) as Arc<dyn mci_brain::BrainStore>,
+                                None,
+                            );
+                            let pc_pump_inner = match &ner_sync_backend {
+                                Some(b) => pc_base.with_ner_sync(Arc::clone(b)),
+                                None => pc_base,
+                            };
+                            let pc_pump: Arc<dyn BrainIngestor> = Arc::new(pc_pump_inner);
+                            eprintln!("mci-agent: page-content listener on {}", sock.display());
+                            Some(tokio::spawn(async move {
+                                listener.run(unix_listener, pc_pump).await;
+                            }))
+                        }
+                        Err(e) => {
+                            eprintln!("mci-agent: page-content listener bind failed: {e}");
+                            None
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("mci-agent: page-content listener bind failed: {e}");
-                        None
-                    }
+                } else {
+                    None
                 }
             } else {
                 None
             };
 
-            let drain_result = match brain_pump.as_ref() {
-                Some((pump, _store)) => {
+            let drain_result = match (capture_ingestion_enabled, brain_pump.as_ref()) {
+                (true, Some((pump, _store))) => {
                     drain_to_log_with_brain(&mut stdin, &log, &clock, &device_id, pump).await
                 }
-                None => drain_to_log(&mut stdin, &log, &clock, &device_id).await,
+                _ => drain_to_log(&mut stdin, &log, &clock, &device_id).await,
             };
 
             // Signal shutdown to idle-batch + episode workers.
@@ -2506,5 +2531,24 @@ fn hex_nibble(b: u8) -> Option<u8> {
         b'a'..=b'f' => Some(b - b'a' + 10),
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod capture_consent_tests {
+    use super::capture_ingestion_enabled;
+
+    #[test]
+    fn packaged_app_can_disable_all_observation_ingestion() {
+        assert!(!capture_ingestion_enabled(Some("0")));
+        assert!(!capture_ingestion_enabled(Some("false")));
+        assert!(!capture_ingestion_enabled(Some("unexpected")));
+    }
+
+    #[test]
+    fn explicit_enable_and_direct_cli_default_allow_ingestion() {
+        assert!(capture_ingestion_enabled(Some("1")));
+        assert!(capture_ingestion_enabled(Some("true")));
+        assert!(capture_ingestion_enabled(None));
     }
 }

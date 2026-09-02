@@ -211,6 +211,10 @@ require_pattern "$CHECK" 'retention-policy-contract\|bash\|test\|scripts/test-re
     'the unified local gate runs the picker-to-worker retention contract'
 require_pattern "$CHECK" 'clean-home-contract\|bash\|lint\|scripts/test-e2e-clean-home-contract\.sh' \
     'the unified local gate enforces the clean-home product contract'
+require_pattern "$CHECK" 'swift-test-hippocampus\|swift\|test\|swift test --package-path apps/hippocampus' \
+    'the unified local gate runs the app supervisor and capture-consent tests'
+require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior' \
+    'release CI executes the capture-consent behavior fixture'
 for script in test-release-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
     test-sparkle-keygen.sh test-sparkle-keypair.sh; do
@@ -246,7 +250,10 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift \
     apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift \
     apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift \
+    apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift \
+    apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift \
     apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift \
+    apps/hippocampus/Sources/HippocampusKit/SupervisorProcessRuntime.swift \
     apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift \
     apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift \
     apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift \
@@ -254,9 +261,13 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift \
     apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift \
     apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift \
+    apps/hippocampus/Tests/Fixtures/CaptureConsentBehavior.swift \
     apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift \
     apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift \
     apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift \
+    apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift \
+    apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift \
+    extensions/safari/appex/SafariWebExtensionHandler.swift \
     apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift \

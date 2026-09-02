@@ -13,8 +13,8 @@
 // ADR-0020 §4 invariants preserved:
 //   - URL denylist: same substring/prefix checks as native host
 //   - Secret filter: same 4 regex patterns as native host §6 cascade
-//   - Incognito: Safari disables extensions in Private Browsing by
-//     default (manifest + OS enforcement); no payload files created
+//   - Capture consent: payload generation must match the currently
+//     committed supervisor generation
 //   - Text truncation: same 200 KB cap at sentence boundary
 
 import Foundation
@@ -40,16 +40,19 @@ public final class SafariInboxReader: Sendable {
     public private(set) var forwarded: UInt64 = 0
     public private(set) var droppedDenylist: UInt64 = 0
     public private(set) var droppedSecret: UInt64 = 0
+    public private(set) var droppedConsent: UInt64 = 0
     public private(set) var failedParse: UInt64 = 0
 
     private var source: DispatchSourceFileSystemObject?
     private var dirFD: Int32 = -1
     private var timer: Timer?
     private let socketPath: String
+    private let expectedGenerationID: String
 
-    public init() {
+    public init(expectedGenerationID: String) {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         self.socketPath = "\(home)/Library/Application Support/MCI/page_content.sock"
+        self.expectedGenerationID = expectedGenerationID
     }
 
     public func start() {
@@ -144,6 +147,15 @@ public final class SafariInboxReader: Sendable {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             failedParse += 1
             logger.warning("safari-inbox: invalid JSON, removing")
+            removeFile(fileURL)
+            return
+        }
+
+        guard Self.matchesCaptureGeneration(
+            payload: json,
+            expected: expectedGenerationID
+        ) else {
+            droppedConsent += 1
             removeFile(fileURL)
             return
         }
@@ -278,6 +290,13 @@ public final class SafariInboxReader: Sendable {
     }
 
     // MARK: - URL denylist (mirrors native host is_denied_url)
+
+    package nonisolated static func matchesCaptureGeneration(
+        payload: [String: Any],
+        expected: String
+    ) -> Bool {
+        payload["capture_generation"] as? String == expected
+    }
 
     nonisolated static func isDeniedURL(_ url: String) -> Bool {
         let lower = url.lowercased()

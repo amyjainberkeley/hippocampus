@@ -48,7 +48,10 @@ on:
       - 'apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift'
       - 'apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SupervisorProcessRuntime.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift'
@@ -56,9 +59,13 @@ on:
       - 'apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift'
       - 'apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift'
       - 'apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/CaptureConsentBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift'
+      - 'extensions/safari/appex/SafariWebExtensionHandler.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
@@ -129,7 +136,10 @@ on:
       - 'apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift'
       - 'apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SupervisorProcessRuntime.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift'
@@ -137,9 +147,13 @@ on:
       - 'apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift'
       - 'apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift'
       - 'apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/CaptureConsentBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift'
+      - 'extensions/safari/appex/SafariWebExtensionHandler.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
@@ -187,6 +201,7 @@ jobs:
       - run: scripts/test-keyframe-demo-fixture.sh
       - run: scripts/test-onboarding-product-truth.sh
       - run: scripts/test-screenshot-assets.sh
+      - run: scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior
       - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh
