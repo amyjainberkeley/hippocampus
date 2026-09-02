@@ -164,14 +164,25 @@ contract:
 - Failure policy: overflow, malformed output, model/runtime error, conflicting
   support and contradiction, or an empty cited set fails closed.
 
-The model-independent host side of this contract is now implemented in
+The model-independent host side of this contract is implemented in
 `core/brain/src/evidence_verifier_contract.rs`. It normalizes structured
-subject/predicate/object claims, derives bounded evidence spans from canonical
-events, binds each span to its event ID, UTF-8-safe byte range, exact text, and
-full-event SHA-256 digest, then validates model-selected slot indices before a
-verdict can cross the trust boundary. Citations can be revalidated against the
-current canonical event. This removes model-generated provenance from the
-design, but it does not make the candidate a runtime verifier.
+subject/predicate/object claims, derives byte-bounded evidence spans from
+canonical events, and binds each span to its event ID, UTF-8-safe byte range,
+exact text, brain identity, authorization scope, source kind, and a
+domain-separated provenance digest. One evidence set cannot mix brains or
+cross the claim's scope. The host validates model-selected slot indices and
+can revalidate every citation against the current canonical event.
+
+The native runtime boundary is implemented in
+`adapters/macos/mci-coreml-bridge/src/mobilebert_claim.rs`. It accepts only the
+fixed MobileBERT claim-set tensor contract, proves all 16 paired slot markers
+encode as unique single tokens, makes only fully retained slots citable after
+the 384-token window, and distinguishes model-predicted insufficiency from a
+host-policy abstention. Startup requires a strict manifest that binds the model
+and tokenizer hashes, label order, tensor schema, calibrated thresholds,
+blind-dataset identity, and Core ML parity. Release signing must seal the
+manifest and both artifacts. There is still no task-trained artifact or
+qualified manifest, and production does not construct this verifier.
 
 This is an architecture selection, not a shipped-model claim. Release remains
 blocked until a blind corpus exercises the exact signed runtime, including
