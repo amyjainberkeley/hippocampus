@@ -20,6 +20,7 @@ struct HippocampusApp: App {
                 loginItemVM: loginItemVM,
                 updater: updater,
                 preferencesStore: preferencesStore,
+                onRequestQuit: { appDelegate.requestQuit() },
                 onRequestRestart: { appDelegate.requestRestart() }
             )
             .task {
@@ -181,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// tailing across those transitions).
     private let tccNotifier = TCCRevokedNotifier()
     private var tccStderrTail: TCCHelperStderrTail?
-    private var terminationIntent: ApplicationTerminationIntent = .quit
+    private let terminationRequests = ApplicationTerminationRequestGate()
     private var terminationTask: Task<Void, Never>?
     private var didCleanUpLifecycle = false
     private lazy var terminationCoordinator = ApplicationTerminationCoordinator(
@@ -209,6 +210,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceWillPowerOff(_:)),
+            name: NSWorkspace.willPowerOffNotification,
+            object: nil
+        )
+
         // Hard fail-fast for Intel / Rosetta hosts. Hippocampus's local-AI
         // path (Core ML brief-author + CPU-pinned embeddings) is
         // Apple Silicon-only; on Intel it silently degrades or crashes.
@@ -218,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // process). No env override — Intel is unsupported, period.
         guard MciBootGuards.hostIsAppleSilicon() else {
             Self.presentUnsupportedArchitectureAlert()
-            NSApp.terminate(nil)
+            requestQuit()
             return
         }
 
@@ -395,9 +403,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    func requestQuit() {
+        requestTermination(.quit)
+    }
+
     func requestRestart() {
-        terminationIntent = .restart
+        requestTermination(.restart)
+    }
+
+    private func requestTermination(_ intent: ApplicationTerminationIntent) {
+        terminationRequests.request(intent)
         NSApp.terminate(nil)
+    }
+
+    @objc
+    private func workspaceWillPowerOff(_ notification: Notification) {
+        terminationRequests.request(.quit)
     }
 
     func applicationShouldTerminate(
@@ -405,6 +426,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> NSApplication.TerminateReply {
         if terminationCoordinator.hasVerifiedShutdown { return .terminateNow }
         if terminationTask != nil { return .terminateLater }
+        guard let intent = terminationRequests.takeRequestedIntent() else {
+            return .terminateCancel
+        }
 
         terminationTask = Task { @MainActor [weak self] in
             guard let self else {
@@ -412,12 +436,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             let didTerminate = await self.terminationCoordinator.terminate(
-                intent: self.terminationIntent,
+                intent: intent,
                 reply: { sender.reply(toApplicationShouldTerminate: $0) }
             )
             if !didTerminate {
                 self.terminationTask = nil
-                self.terminationIntent = .quit
             }
         }
         return .terminateLater
@@ -430,6 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func cleanUpLifecycle() {
         guard !didCleanUpLifecycle else { return }
         didCleanUpLifecycle = true
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         cancelSentinelWatcher()
         tccStderrTail?.stop()
         tccStderrTail = nil

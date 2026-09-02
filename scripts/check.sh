@@ -45,6 +45,8 @@ LANES=(
     "key-custody-runner|bash|test|scripts/test-agent-key-custody-runner.sh"
     "supervisor-stop-policy|bash|test|scripts/test-supervisor-stop-policy.sh"
     "clean-home-contract|bash|lint|scripts/test-e2e-clean-home-contract.sh"
+    "development-app-contract|bash|lint|scripts/test-development-app-contract.sh"
+    "app-launch-contract|bash|test|scripts/test-verify-app-launches.sh"
     "changelog-sanity|bash|lint|__changelog_sanity_lane"
 )
 
@@ -89,6 +91,8 @@ LANES
     key-custody-runner    nonblocking bounded child-process diagnostic fixture
     supervisor-stop-policy bounded two-child shutdown fixture
     clean-home-contract     isolated install-to-uninstall product contract
+    development-app-contract debug-only app assembly remains release-safe
+    app-launch-contract     isolated GUI launch and onboarding process contract
     changelog-sanity      gen-changelog.sh --dry-run smoke
 
 BEHAVIOR

@@ -7,6 +7,7 @@ struct StatusMenuView: View {
     @ObservedObject var loginItemVM: LoginItemViewModel
     let updater: SparkleUpdaterService
     @ObservedObject var preferencesStore: PreferencesStore
+    let onRequestQuit: () -> Void
     let onRequestRestart: () -> Void
 
     @State private var crashReportOptedIn: Bool = false
@@ -149,7 +150,7 @@ struct StatusMenuView: View {
             }
 
             Button("Quit Hippocampus") {
-                NSApp.terminate(nil)
+                onRequestQuit()
             }
             .keyboardShortcut("q")
         }

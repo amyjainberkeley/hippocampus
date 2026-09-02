@@ -6,12 +6,28 @@ import HippocampusKit
 struct SupervisorLifecycleBehavior {
     @MainActor
     static func main() async throws {
+        proveTerminationRequiresExplicitIntent()
         try await proveNormalQuitComposition()
         try await proveResistantRestartComposition()
         try await proveShutdownCancelsKeyPreparation()
         try await proveShutdownCancelsReadiness()
         try await proveShutdownCancelsCaptureReconfiguration()
         try await proveShutdownWinsBlockedInitialReconfigurationStop()
+    }
+
+    @MainActor
+    private static func proveTerminationRequiresExplicitIntent() {
+        let requests = ApplicationTerminationRequestGate()
+
+        precondition(requests.takeRequestedIntent() == nil)
+
+        requests.request(.quit)
+        precondition(requests.takeRequestedIntent() == .quit)
+        precondition(requests.takeRequestedIntent() == nil)
+
+        requests.request(.restart)
+        precondition(requests.takeRequestedIntent() == .restart)
+        precondition(requests.takeRequestedIntent() == nil)
     }
 
     @MainActor

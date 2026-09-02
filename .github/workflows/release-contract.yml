@@ -23,6 +23,9 @@ on:
       - 'scripts/test-retention-policy-contract.sh'
       - 'scripts/e2e-clean-home.sh'
       - 'scripts/test-e2e-clean-home-contract.sh'
+      - 'scripts/verify-app-launches.sh'
+      - 'scripts/test-verify-app-launches.sh'
+      - 'scripts/test-development-app-contract.sh'
       - 'scripts/stage-recall-ffi.sh'
       - 'apps/onboarding/Package.swift'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionStore.swift'
@@ -59,6 +62,7 @@ on:
       - 'apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift'
       - 'apps/agent/src/bin/mci_seed_brain.rs'
       - 'apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/ApplicationTerminationCoordinator.swift'
       - 'docs/assets/data-flow-diagram.svg'
       - 'scripts/check.sh'
       - 'CHANGELOG.md'
@@ -88,6 +92,9 @@ on:
       - 'scripts/test-retention-policy-contract.sh'
       - 'scripts/e2e-clean-home.sh'
       - 'scripts/test-e2e-clean-home-contract.sh'
+      - 'scripts/verify-app-launches.sh'
+      - 'scripts/test-verify-app-launches.sh'
+      - 'scripts/test-development-app-contract.sh'
       - 'scripts/stage-recall-ffi.sh'
       - 'apps/onboarding/Package.swift'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionStore.swift'
@@ -124,6 +131,7 @@ on:
       - 'apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift'
       - 'apps/agent/src/bin/mci_seed_brain.rs'
       - 'apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/ApplicationTerminationCoordinator.swift'
       - 'docs/assets/data-flow-diagram.svg'
       - 'scripts/check.sh'
       - 'CHANGELOG.md'
@@ -149,6 +157,9 @@ jobs:
       - run: scripts/test-retention-policy-contract.sh
       - run: scripts/test-e2e-clean-home-contract.sh
       - run: scripts/e2e-clean-home.sh
+      - run: scripts/test-development-app-contract.sh
+      - run: scripts/test-verify-app-launches.sh
+      - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh
       - run: scripts/test-release-model-manifest.sh
