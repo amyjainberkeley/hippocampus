@@ -82,7 +82,7 @@ private enum KeyframeFixtureBuilder {
                     throw FixtureError.conflictingBlob(output.path)
                 }
             } else {
-                try sealed.bytes.write(to: output, options: [.atomic, .completeFileProtection])
+                try sealed.bytes.write(to: output, options: .atomic)
                 try FileManager.default.setAttributes(
                     [.posixPermissions: 0o600],
                     ofItemAtPath: output.path
