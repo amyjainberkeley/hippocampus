@@ -107,6 +107,28 @@ pub enum ComputeUnits {
     All,
 }
 
+/// Safe element-type view of a Core ML `MLMultiArray` constraint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MultiArrayElementType {
+    /// IEEE-754 half precision.
+    Float16,
+    /// IEEE-754 single precision.
+    Float32,
+    /// Signed 32-bit integer.
+    Int32,
+    /// A Core ML element type this bridge does not support.
+    Other(isize),
+}
+
+/// Fixed shape and element type declared by one model feature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MultiArraySchema {
+    /// Declared dimensions in row-major order.
+    pub shape: Vec<usize>,
+    /// Declared scalar representation.
+    pub element_type: MultiArrayElementType,
+}
+
 impl ComputeUnits {
     fn to_ml(self) -> MLComputeUnits {
         match self {
@@ -185,6 +207,24 @@ impl CoreMLModel {
         Some(ty == MLFeatureType::MultiArray)
     }
 
+    /// Read a named input's fixed `MLMultiArray` shape and element type.
+    #[must_use]
+    pub fn input_multi_array_schema(&self, name: &str) -> Option<MultiArraySchema> {
+        let description = unsafe { self.model.modelDescription() };
+        let inputs = unsafe { description.inputDescriptionsByName() };
+        let feature = inputs.objectForKey(&NSString::from_str(name))?;
+        multi_array_schema(&feature)
+    }
+
+    /// Read a named output's fixed `MLMultiArray` shape and element type.
+    #[must_use]
+    pub fn output_multi_array_schema(&self, name: &str) -> Option<MultiArraySchema> {
+        let description = unsafe { self.model.modelDescription() };
+        let outputs = unsafe { description.outputDescriptionsByName() };
+        let feature = outputs.objectForKey(&NSString::from_str(name))?;
+        multi_array_schema(&feature)
+    }
+
     /// Run a prediction with the given named `MLMultiArray` inputs.
     ///
     /// Returns a [`Prediction`] from which named output features can be
@@ -239,6 +279,31 @@ impl CoreMLModel {
 
         Ok(Prediction { provider: output })
     }
+}
+
+fn multi_array_schema(feature: &objc2_core_ml::MLFeatureDescription) -> Option<MultiArraySchema> {
+    if unsafe { feature.r#type() } != MLFeatureType::MultiArray {
+        return None;
+    }
+    let constraint = unsafe { feature.multiArrayConstraint() }?;
+    let shape = unsafe { constraint.shape() }
+        .iter()
+        .map(|number| number.as_usize())
+        .collect();
+    let raw_type = unsafe { constraint.dataType() };
+    let element_type = if raw_type == MLMultiArrayDataType::Float16 {
+        MultiArrayElementType::Float16
+    } else if raw_type == MLMultiArrayDataType::Float32 {
+        MultiArrayElementType::Float32
+    } else if raw_type == MLMultiArrayDataType::Int32 {
+        MultiArrayElementType::Int32
+    } else {
+        MultiArrayElementType::Other(raw_type.0)
+    };
+    Some(MultiArraySchema {
+        shape,
+        element_type,
+    })
 }
 
 /// The output of a [`CoreMLModel::predict`] call. Holds the Core ML

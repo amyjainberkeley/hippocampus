@@ -1127,12 +1127,14 @@ dependencies = [
 name = "mci-coreml-bridge"
 version = "0.0.1"
 dependencies = [
+ "mci-brain",
  "mci-brief",
  "objc2",
  "objc2-core-ml",
  "objc2-foundation",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokenizers",

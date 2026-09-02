@@ -27,6 +27,7 @@
 //! per call site in [`model`]; crates above the seam (`mci-brief`,
 //! `mci-brain`, `mci-agent`) stay `#![forbid(unsafe_code)]`.
 
+pub mod mobilebert_claim;
 pub mod mobilebert_qa;
 pub mod model;
 pub mod qwen3;
@@ -35,5 +36,12 @@ pub mod tokenizer;
 // Backward-compatible crate-root re-exports: consumers keep using
 // `mci_coreml_bridge::Qwen3CoreMLBackend` etc. unchanged — only the
 // crate name moved (was `mci_llama_coreml`).
-pub use model::{ComputeUnits, CoreMLError, CoreMLModel, Prediction};
+pub use mobilebert_claim::{
+    claim_verifier_artifact_sha256, decode_claim_logits, serialize_claim_set,
+    validate_claim_verifier_manifest, ClaimVerifierThresholds, MobileBertClaimError,
+    MobileBertClaimVerifier, SerializedClaimSet, CLAIM_VERIFIER_SEQUENCE_LENGTH,
+};
+pub use model::{
+    ComputeUnits, CoreMLError, CoreMLModel, MultiArrayElementType, MultiArraySchema, Prediction,
+};
 pub use qwen3::{load_backend_or_stub, try_load_qwen3_backend, Qwen3CoreMLBackend};
