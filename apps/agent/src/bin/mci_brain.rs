@@ -6,7 +6,7 @@
 //! terminal.
 //!
 //! All access goes through `SqlCipherBrainStore::open_readonly` — writes
-//! are structurally impossible at the SQLite driver level
+//! are structurally impossible at the `SQLite` driver level
 //! (`SQLITE_OPEN_READ_ONLY`). Calling `put_event` on a read-only handle
 //! returns `SQLITE_READONLY` at the driver level.
 //!
@@ -15,24 +15,27 @@
 //!   mci-brain stats [--json]
 //!   mci-brain recent [--limit N] [--json]
 //!   mci-brain search <QUERY> [--limit N] [--json]
-//!   mci-brain show <EVENT_ID> [--json]
-//!   mci-brain export [--format jsonl|csv] [--out PATH] [--since TS_US]
+//!   mci-brain show <`EVENT_ID`> [--json]
+//!   mci-brain export [--format jsonl|csv] [--out PATH] [--since `TS_US`]
 //!
 //! # Key resolution
 //!
 //!   Production resolves the file-Keychain service/account reference shared
 //!   by the signed Hippocampus executables. Raw/file keys require the explicit
 //!   `MCI_DEVELOPMENT_FILE_KEY=1` development gate.
-//!   --db-path PATH or MCI_DB_PATH env — brain file path.
+//!   --db-path PATH or `MCI_DB_PATH` env — brain file path.
 //!   Default: ~/Library/Application Support/MCI/mci.sqlite
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use mci_agent::brain_cli;
 use mci_brain::{BrainStore, EventId, EventRecord, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
+
+#[cfg(test)]
+use std::fmt::Write as _;
 
 /// Resolve a raw or file key only for explicitly gated local development.
 fn development_key_hex() -> Option<String> {
@@ -127,6 +130,9 @@ fn default_db_path() -> PathBuf {
     home.join("Library/Application Support/MCI/mci.sqlite")
 }
 
+// The read-only CLI deliberately has no argument-parser dependency. Keeping
+// its small command grammar together makes key and path handling auditable.
+#[allow(clippy::too_many_lines)]
 fn parse_args(argv: &[String]) -> ParseOutcome {
     let mut db_path: Option<PathBuf> = None;
     let mut json = false;
@@ -256,15 +262,14 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
         },
         Some("backup") => {
             let mut integrity_check = false;
-            for arg in positionals.iter() {
+            for arg in &positionals {
                 match arg.as_str() {
                     "--integrity-check" => integrity_check = true,
                     other => return ParseOutcome::Error(format!("backup: unknown arg: {other}")),
                 }
             }
-            let out = match out.clone() {
-                Some(p) => p,
-                None => return ParseOutcome::Error("backup: --out PATH is required".into()),
+            let Some(out) = out.clone() else {
+                return ParseOutcome::Error("backup: --out PATH is required".into());
             };
             Command::Backup {
                 out,
@@ -488,7 +493,7 @@ fn run_show(store: &SqlCipherBrainStore, event_id: u64, json: bool) -> ExitCode 
 fn run_export(
     store: &SqlCipherBrainStore,
     format: ExportFormat,
-    out: Option<PathBuf>,
+    out: Option<&Path>,
     since: u64,
 ) -> ExitCode {
     const BATCH: usize = 500;
@@ -556,8 +561,8 @@ fn run_export(
 fn main() -> ExitCode {
     mci_agent::panic_hook::install();
 
-    let argv: Vec<String> = std::env::args().collect();
-    let args = match parse_args(&argv) {
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = match parse_args(&raw_args) {
         ParseOutcome::Help => {
             print_usage();
             return ExitCode::SUCCESS;
@@ -608,7 +613,7 @@ fn main() -> ExitCode {
         Command::Recent { limit, json } => run_recent(&store, limit, json),
         Command::Search { query, limit, json } => run_search(&store, &query, limit, json),
         Command::Show { event_id, json } => run_show(&store, event_id, json),
-        Command::Export { format, out, since } => run_export(&store, format, out, since),
+        Command::Export { format, out, since } => run_export(&store, format, out.as_deref(), since),
         Command::Backup {
             out,
             integrity_check,
@@ -997,7 +1002,10 @@ mod tests {
     #[test]
     fn decode_hex32_round_trip() {
         let bytes = [0xAB_u8; 32];
-        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let mut hex = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
+        }
         assert_eq!(decode_hex32(&hex), Some(bytes));
     }
 

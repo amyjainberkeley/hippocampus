@@ -15,6 +15,7 @@
 //! deliberately read-only and dependency-free: it opens the brain read-only,
 //! and greps logs it already owns.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use mci_brain::{BrainStats, SqlCipherBrainStore};
@@ -80,7 +81,7 @@ fn tail_of(path: &Path, max_bytes: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&data[start..]).into_owned())
 }
 
-/// Did ScreenCaptureKit report a TCC refusal in the helper log?
+/// Did `ScreenCaptureKit` report a TCC refusal in the helper log?
 fn check_screen_recording(log: Option<&str>) -> Check {
     let Some(text) = log else {
         return Check::new(
@@ -236,12 +237,7 @@ pub fn diagnose(db_path: &Path, key: &DbKey) -> Result<Vec<Check>, String> {
 pub fn render(checks: &[Check]) -> String {
     let mut out = String::new();
     for c in checks {
-        out.push_str(&format!(
-            "  [{}] {:<18} {}\n",
-            c.status.marker(),
-            c.name,
-            c.detail
-        ));
+        let _ = writeln!(out, "  [{}] {:<18} {}", c.status.marker(), c.name, c.detail);
     }
 
     let blockers: Vec<&Check> = checks.iter().filter(|c| c.status == Status::Fail).collect();
@@ -258,13 +254,13 @@ pub fn render(checks: &[Check]) -> String {
     if !blockers.is_empty() {
         out.push_str("\nBlocking:\n");
         for c in blockers {
-            out.push_str(&format!("\n  {}\n    {}\n", c.name, c.fix));
+            let _ = write!(out, "\n  {}\n    {}\n", c.name, c.fix);
         }
     }
     if !advisories.is_empty() {
         out.push_str("\nWorth doing:\n");
         for c in advisories {
-            out.push_str(&format!("\n  {}\n    {}\n", c.name, c.fix));
+            let _ = write!(out, "\n  {}\n    {}\n", c.name, c.fix);
         }
     }
     out

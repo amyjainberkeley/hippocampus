@@ -76,7 +76,7 @@ fn read_all(store: &SqlCipherBrainStore) -> Vec<mci_brain::Event> {
     for i in 1u64..500 {
         match store.get_event(EventId(i)) {
             Ok(Some(ev)) => out.push(ev),
-            Ok(None) => continue,
+            Ok(None) => {}
             Err(_) => break,
         }
     }

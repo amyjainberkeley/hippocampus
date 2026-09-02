@@ -132,6 +132,19 @@ fn extract_error(resp: Option<JsonRpcResponse>) -> (i64, String) {
     (err.code, err.message)
 }
 
+fn degraded_context<'a>(
+    result: &'a serde_json::Value,
+    expected_degradation: &str,
+) -> &'a [serde_json::Value] {
+    assert_eq!(result["outcome"], "degraded");
+    assert_eq!(result["degradation"], expected_degradation);
+    assert_eq!(result["hits"], serde_json::json!([]));
+    result
+        .get("related_context")
+        .and_then(serde_json::Value::as_array)
+        .expect("degraded related_context array")
+}
+
 // ---------------------------------------------------------------------------
 // tools/list — exactly 5 tools
 // ---------------------------------------------------------------------------
@@ -176,7 +189,10 @@ fn stats_empty_brain_returns_zero_counts() {
         })),
     )));
     let stats = result.get("stats").expect("stats");
-    assert_eq!(stats.get("event_count").and_then(|v| v.as_u64()), Some(0));
+    assert_eq!(
+        stats.get("event_count").and_then(serde_json::Value::as_u64),
+        Some(0)
+    );
     assert!(stats.get("oldest_ts_us").unwrap().is_null());
     assert!(stats.get("newest_ts_us").unwrap().is_null());
 }
@@ -203,16 +219,20 @@ fn stats_matches_actual_row_count_after_seeding() {
     )));
     let stats = result.get("stats").expect("stats");
     assert_eq!(
-        stats.get("event_count").and_then(|v| v.as_u64()),
+        stats.get("event_count").and_then(serde_json::Value::as_u64),
         Some(7),
         "event_count must match exactly the number of put_event calls"
     );
     assert_eq!(
-        stats.get("oldest_ts_us").and_then(|v| v.as_u64()),
+        stats
+            .get("oldest_ts_us")
+            .and_then(serde_json::Value::as_u64),
         Some(1_000_000)
     );
     assert_eq!(
-        stats.get("newest_ts_us").and_then(|v| v.as_u64()),
+        stats
+            .get("newest_ts_us")
+            .and_then(serde_json::Value::as_u64),
         Some(1_600_000)
     );
 }
@@ -251,12 +271,12 @@ fn recall_fts5_finds_seeded_event_by_keyword() {
             "arguments": {"query": "Rust memory", "limit": 10}
         })),
     )));
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits array");
-    assert!(!hits.is_empty(), "FTS5 should find 'Rust memory'");
-    let snippet = hits[0]
+    let related_context = degraded_context(&result, "embeddings_unavailable");
+    assert!(
+        !related_context.is_empty(),
+        "FTS5 should find 'Rust memory' as related context"
+    );
+    let snippet = related_context[0]
         .get("text_snippet")
         .and_then(|v| v.as_str())
         .unwrap();
@@ -281,11 +301,11 @@ fn recall_fts5_returns_empty_for_unmatched_query() {
             "arguments": {"query": "quantum entanglement", "limit": 10}
         })),
     )));
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits array");
-    assert!(hits.is_empty(), "no match expected for unrelated query");
+    let related_context = degraded_context(&result, "embeddings_unavailable");
+    assert!(
+        related_context.is_empty(),
+        "no related context expected for unrelated query"
+    );
 }
 
 #[test]
@@ -308,10 +328,7 @@ fn recall_respects_limit_parameter() {
             "arguments": {"query": "keyword search", "limit": 5}
         })),
     )));
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits array");
+    let hits = degraded_context(&result, "embeddings_unavailable");
     assert!(
         hits.len() <= 5,
         "limit=5 must be respected, got {}",
@@ -339,10 +356,7 @@ fn recall_default_limit_caps_at_ten() {
             "arguments": {"query": "alpha bravo"}
         })),
     )));
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits array");
+    let hits = degraded_context(&result, "embeddings_unavailable");
     assert!(hits.len() <= 10, "default limit is 10, got {}", hits.len());
 }
 
@@ -374,10 +388,7 @@ fn recall_hyphen_query_works_end_to_end_with_real_fts5() {
             "arguments": {"query": "sqlite-vec", "limit": 10}
         })),
     )));
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits array");
+    let hits = degraded_context(&result, "embeddings_unavailable");
     assert_eq!(
         hits.len(),
         1,
@@ -411,10 +422,7 @@ fn recall_multiple_hyphens_in_query() {
             "arguments": {"query": "all-MiniLM-L6-v2", "limit": 10}
         })),
     )));
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits array");
+    let hits = degraded_context(&result, "embeddings_unavailable");
     assert!(
         !hits.is_empty(),
         "multi-hyphen query should not error or return empty"
@@ -461,14 +469,20 @@ fn recall_hybrid_returns_hits_with_positive_scores() {
             "arguments": {"query": "database optimization", "limit": 10}
         })),
     )));
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits array");
-    assert!(!hits.is_empty(), "hybrid retriever should return hits");
+    let hits = degraded_context(&result, "evidence_sufficiency_unqualified");
+    assert!(
+        !hits.is_empty(),
+        "hybrid retriever should return related context"
+    );
     for hit in hits {
-        let score = hit.get("score").and_then(|v| v.as_f64()).unwrap();
-        assert!(score > 0.0, "fused scores must be positive: {score}");
+        let relevance_score = hit
+            .get("score")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap();
+        assert!(
+            relevance_score > 0.0,
+            "fused scores must be positive: {relevance_score}"
+        );
     }
 }
 
@@ -477,7 +491,7 @@ fn recall_hybrid_returns_hits_with_positive_scores() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn recall_response_carries_content_array_and_hits() {
+fn recall_response_carries_content_and_typed_result_arrays() {
     let (_dir, store) = open_temp_store();
     store
         .put_event(&make_event("recall shape test content", 5_000_000))
@@ -502,7 +516,11 @@ fn recall_response_carries_content_array_and_hits() {
         Some("text")
     );
     assert!(result.get("hits").is_some());
-    assert_eq!(result.get("isError").and_then(|v| v.as_bool()), Some(false));
+    assert!(result.get("related_context").is_some());
+    assert_eq!(
+        result.get("isError").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
 }
 
 #[test]
@@ -526,11 +544,17 @@ fn recall_hit_carries_all_event_fields() {
             "arguments": {"query": "field presence", "limit": 1}
         })),
     )));
-    let hits = result.get("hits").and_then(|v| v.as_array()).expect("hits");
+    let hits = degraded_context(&result, "embeddings_unavailable");
     assert_eq!(hits.len(), 1);
     let hit = &hits[0];
-    assert!(hit.get("event_id").and_then(|v| v.as_u64()).is_some());
-    assert_eq!(hit.get("ts_us").and_then(|v| v.as_u64()), Some(7_000_000));
+    assert!(hit
+        .get("event_id")
+        .and_then(serde_json::Value::as_u64)
+        .is_some());
+    assert_eq!(
+        hit.get("ts_us").and_then(serde_json::Value::as_u64),
+        Some(7_000_000)
+    );
     assert_eq!(
         hit.get("app_bundle_id").and_then(|v| v.as_str()),
         Some("com.apple.Safari")
@@ -543,7 +567,10 @@ fn recall_hit_carries_all_event_fields() {
         hit.get("url").and_then(|v| v.as_str()),
         Some("https://github.com/amyjainberkeley/hippocampus/pull/95")
     );
-    assert!(hit.get("score").and_then(|v| v.as_f64()).is_some());
+    assert!(hit
+        .get("score")
+        .and_then(serde_json::Value::as_f64)
+        .is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -626,7 +653,7 @@ fn events_since_returns_events_after_cursor() {
     assert_eq!(events.len(), 3, "3 events after ts_us=2_500_000");
     let timestamps: Vec<u64> = events
         .iter()
-        .filter_map(|e| e.get("ts_us").and_then(|v| v.as_u64()))
+        .filter_map(|e| e.get("ts_us").and_then(serde_json::Value::as_u64))
         .collect();
     assert_eq!(timestamps, vec![3_000_000, 4_000_000, 5_000_000]);
 }
@@ -658,7 +685,10 @@ fn events_since_pagination_cursor_advances() {
         .expect("page1");
     assert_eq!(page1.len(), 3);
 
-    let last_ts_page1 = page1[2].get("ts_us").and_then(|v| v.as_u64()).unwrap();
+    let last_ts_page1 = page1[2]
+        .get("ts_us")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
 
     // Page 2: next 3 events using last_ts from page 1 as cursor
     let result2 = extract_result(srv.dispatch(req(
@@ -674,14 +704,20 @@ fn events_since_pagination_cursor_advances() {
         .expect("page2");
     assert_eq!(page2.len(), 3);
 
-    let first_ts_page2 = page2[0].get("ts_us").and_then(|v| v.as_u64()).unwrap();
+    let first_ts_page2 = page2[0]
+        .get("ts_us")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
     assert!(
         first_ts_page2 > last_ts_page1,
         "cursor must advance: page2 first ts ({first_ts_page2}) > page1 last ts ({last_ts_page1})"
     );
 
     // Page 3: next 3
-    let last_ts_page2 = page2[2].get("ts_us").and_then(|v| v.as_u64()).unwrap();
+    let last_ts_page2 = page2[2]
+        .get("ts_us")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
     let result3 = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
@@ -696,7 +732,10 @@ fn events_since_pagination_cursor_advances() {
     assert_eq!(page3.len(), 3);
 
     // Page 4: only 1 remaining
-    let last_ts_page3 = page3[2].get("ts_us").and_then(|v| v.as_u64()).unwrap();
+    let last_ts_page3 = page3[2]
+        .get("ts_us")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
     let result4 = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
@@ -711,7 +750,10 @@ fn events_since_pagination_cursor_advances() {
     assert_eq!(page4.len(), 1, "only 1 event remaining after 9 consumed");
 
     // Page 5: exhausted
-    let last_ts_page4 = page4[0].get("ts_us").and_then(|v| v.as_u64()).unwrap();
+    let last_ts_page4 = page4[0]
+        .get("ts_us")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
     let result5 = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
@@ -753,7 +795,7 @@ fn events_since_returns_ascending_order() {
         .expect("events");
     let timestamps: Vec<u64> = events
         .iter()
-        .filter_map(|e| e.get("ts_us").and_then(|v| v.as_u64()))
+        .filter_map(|e| e.get("ts_us").and_then(serde_json::Value::as_u64))
         .collect();
     assert_eq!(
         timestamps,
@@ -805,7 +847,10 @@ fn events_since_response_carries_content_array() {
         content[0].get("type").and_then(|v| v.as_str()),
         Some("text")
     );
-    assert_eq!(result.get("isError").and_then(|v| v.as_bool()), Some(false));
+    assert_eq!(
+        result.get("isError").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -985,7 +1030,7 @@ fn stats_count_consistent_with_events_since_full_scan() {
     let event_count = stats_result
         .get("stats")
         .and_then(|s| s.get("event_count"))
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap();
 
     let events_result = extract_result(srv.dispatch(req(
@@ -1076,14 +1121,14 @@ fn two_brains_are_isolated() {
         stats1
             .get("stats")
             .and_then(|s| s.get("event_count"))
-            .and_then(|v| v.as_u64()),
+            .and_then(serde_json::Value::as_u64),
         Some(1)
     );
     assert_eq!(
         stats2
             .get("stats")
             .and_then(|s| s.get("event_count"))
-            .and_then(|v| v.as_u64()),
+            .and_then(serde_json::Value::as_u64),
         Some(2)
     );
 }
@@ -1184,7 +1229,7 @@ fn recall_surfaces_entities_and_cross_app_linked_event_ids() {
         })),
     )));
 
-    let hits = result.get("hits").and_then(|v| v.as_array()).expect("hits");
+    let hits = degraded_context(&result, "embeddings_unavailable");
     let hit = hits
         .iter()
         .find(|h| h.get("event_id").and_then(serde_json::Value::as_u64) == Some(id1.0))
@@ -1266,17 +1311,28 @@ fn stats_surfaces_graph_counts_through_server() {
         Some(serde_json::json!({"name": "mci_stats", "arguments": {}})),
     )));
     let stats = result.get("stats").expect("stats");
-    assert_eq!(stats.get("entity_count").and_then(|v| v.as_u64()), Some(1));
     assert_eq!(
-        stats.get("entity_mention_count").and_then(|v| v.as_u64()),
+        stats
+            .get("entity_count")
+            .and_then(serde_json::Value::as_u64),
         Some(1)
     );
     assert_eq!(
-        stats.get("entity_identity_count").and_then(|v| v.as_u64()),
+        stats
+            .get("entity_mention_count")
+            .and_then(serde_json::Value::as_u64),
         Some(1)
     );
     assert_eq!(
-        stats.get("episode_edge_count").and_then(|v| v.as_u64()),
+        stats
+            .get("entity_identity_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        stats
+            .get("episode_edge_count")
+            .and_then(serde_json::Value::as_u64),
         Some(1)
     );
 }
@@ -1389,10 +1445,7 @@ fn w_entity_arm_fires_through_fts_sanitizing_store_in_production_recall() {
         })),
     )));
 
-    let hits = result
-        .get("hits")
-        .and_then(|v| v.as_array())
-        .expect("hits array");
+    let hits = degraded_context(&result, "evidence_sufficiency_unqualified");
     let pos = |id: u64| {
         hits.iter()
             .position(|h| h.get("event_id").and_then(serde_json::Value::as_u64) == Some(id))

@@ -1,13 +1,13 @@
-//! End-to-end OCREvent → chunker → encrypted event row wire test
+//! End-to-end `OCREvent` → chunker → encrypted event row wire test
 //! (DOGFOOD v1 #5).
 //!
 //! Drives the **production** path from synthetic `OCREvent` wire frames
 //! through `drain_to_log_with_brain` → `BrainPump` (real
 //! `EventChunker` + deterministic `FixedDimEmbedder`) → real
-//! `SqlCipherBrainStore` (SQLCipher + FTS5 + brute-force vector search)
+//! `SqlCipherBrainStore` (`SQLCipher` + FTS5 + brute-force vector search)
 //! and asserts:
 //!
-//! 1. **N synthetic OCREvent frames produce exactly N event rows** in
+//! 1. **N synthetic `OCREvent` frames produce exactly N event rows** in
 //!    the on-disk encrypted `mci.sqlite`.
 //! 2. Every row carries the ADR-0010 §1.3 context header in
 //!    `events.text` (the prepend the chunker wire installed).
@@ -118,7 +118,7 @@ fn make_ocr_frame(
     )
 }
 
-fn req_call(name: &str, args: serde_json::Value) -> JsonRpcRequest {
+fn req_call(name: &str, args: &serde_json::Value) -> JsonRpcRequest {
     JsonRpcRequest {
         jsonrpc: "2.0".into(),
         method: "tools/call".into(),
@@ -132,6 +132,7 @@ fn req_call(name: &str, args: serde_json::Value) -> JsonRpcRequest {
 // -----------------------------------------------------------------------
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // One end-to-end wire trace is clearer as a single test.
 async fn n_synthetic_ocr_events_become_n_rows_and_typed_recall_context() {
     let (dir, db_path, key, store) = open_temp_store();
     let log = fresh_log(dir.path());
@@ -288,13 +289,15 @@ async fn n_synthetic_ocr_events_become_n_rows_and_typed_recall_context() {
         None,
     )));
     let resp = server
-        .dispatch(req_call("mci_stats", serde_json::json!({})))
+        .dispatch(req_call("mci_stats", &serde_json::json!({})))
         .expect("response");
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
     let result = resp.result.expect("result");
     let stats_obj = result.get("stats").expect("stats");
     assert_eq!(
-        stats_obj.get("event_count").and_then(|v| v.as_u64()),
+        stats_obj
+            .get("event_count")
+            .and_then(serde_json::Value::as_u64),
         Some(fixtures.len() as u64)
     );
 }

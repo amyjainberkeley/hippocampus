@@ -1,4 +1,4 @@
-//! `mci-bench` — run the LongMemEval retrieval benchmark against the real
+//! `mci-bench` — run the `LongMemEval` retrieval benchmark against the real
 //! brain and print numbers that can be published without hedging.
 //!
 //! Deliberately a separate binary. The benchmark pulls in the dataset
@@ -99,10 +99,10 @@ fn captured_at_utc() -> String {
         .output()
     {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        _ => SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| format!("unix:{}", d.as_secs()))
-            .unwrap_or_else(|_| "unknown".to_string()),
+        _ => SystemTime::now().duration_since(UNIX_EPOCH).map_or_else(
+            |_| "unknown".to_string(),
+            |d| format!("unix:{}", d.as_secs()),
+        ),
     }
 }
 
@@ -453,6 +453,7 @@ fn summarize_by_tag(
         .collect()
 }
 
+#[allow(clippy::too_many_lines)] // The CLI keeps its ordered fail-closed gates visible together.
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().collect();
     let mut dataset_path: Option<PathBuf> = None;
@@ -807,7 +808,7 @@ fn main() -> ExitCode {
                     arm.label(),
                     n + 1,
                     dataset.instances.len(),
-                    100.0 * hit as f64 / results.len().max(1) as f64,
+                    100.0 * count_as_f64(hit) / count_as_f64(results.len().max(1)),
                     started.elapsed().as_secs_f64()
                 );
             }
@@ -957,6 +958,10 @@ fn main() -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+fn count_as_f64(value: usize) -> f64 {
+    f64::from(u32::try_from(value).expect("benchmark corpus count exceeds u32"))
 }
 
 fn require_accepted_baseline(canonical_scope: bool, regression: &mut Option<RegressionReport>) {

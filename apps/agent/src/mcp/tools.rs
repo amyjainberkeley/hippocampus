@@ -74,6 +74,7 @@ impl fmt::Display for ToolName {
 /// `{ "name", "description", "inputSchema" }`. We keep the schemas
 /// hand-written here (no `schemars` dep) — they're small and stable.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn tool_definitions() -> serde_json::Value {
     serde_json::json!([
         {

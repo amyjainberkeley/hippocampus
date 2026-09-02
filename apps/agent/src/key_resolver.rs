@@ -1,4 +1,4 @@
-//! SQLCipher database-key resolution through the macOS file-based Keychain.
+//! `SQLCipher` database-key resolution through the macOS file-based Keychain.
 //!
 //! Production uses one non-synchronizable generic-password item. The item is
 //! created with a `SecAccess` ACL for the four executables shipped in the
@@ -15,9 +15,9 @@ use thiserror::Error;
 use mci_brain::SqlCipherBrainStore;
 use mci_core::crypto::DbKey;
 
-/// Keychain service for the production SQLCipher key.
+/// Keychain service for the production `SQLCipher` key.
 pub const DEFAULT_KEYCHAIN_SERVICE: &str = "ai.hippocampus.brain";
-/// Keychain account for the production SQLCipher key.
+/// Keychain account for the production `SQLCipher` key.
 pub const DEFAULT_KEYCHAIN_ACCOUNT: &str = "database-key-v1";
 /// Storage-domain identifier shared by Swift, Rust, and packaging tests.
 pub const KEYCHAIN_STORAGE_MODEL: &str = "file-keychain-acl-v1";
@@ -155,7 +155,7 @@ pub enum KeyResolutionError {
     /// The legacy migration input is not exactly 64 ASCII hex characters.
     #[error("legacy dev.key must be exactly 64 ASCII hex characters")]
     InvalidLegacyKey,
-    /// A candidate key could not open and query the existing SQLCipher schema.
+    /// A candidate key could not open and query the existing `SQLCipher` schema.
     #[error("database key did not open the existing brain read-only")]
     DatabaseValidationFailed,
     /// The mandatory read after an add or duplicate race failed.
@@ -230,7 +230,7 @@ impl LegacyKeyRemover for SystemLegacyKeyRemover {
     }
 }
 
-/// Production read-only SQLCipher validator used by app startup and CLI init.
+/// Production read-only `SQLCipher` validator used by app startup and CLI init.
 pub struct SqlCipherDatabaseKeyValidator;
 
 impl DatabaseKeyValidator for SqlCipherDatabaseKeyValidator {
@@ -256,8 +256,8 @@ fn decode_hex_key(value: &str) -> Option<[u8; 32]> {
     }
     let mut bytes = [0u8; 32];
     for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
-        let high = (chunk[0] as char).to_digit(16)? as u8;
-        let low = (chunk[1] as char).to_digit(16)? as u8;
+        let high = u8::try_from((chunk[0] as char).to_digit(16)?).ok()?;
+        let low = u8::try_from((chunk[1] as char).to_digit(16)?).ok()?;
         bytes[index] = (high << 4) | low;
     }
     Some(bytes)
@@ -276,7 +276,7 @@ impl KeychainReader for SystemKeychainReader {
         {
             let bytes = mci_keychain::read_file_generic_password(service, account)
                 .map_err(|error| map_native_read_error(error, service, account))?;
-            return String::from_utf8(bytes).map_err(|_| KeyResolutionError::InvalidKey);
+            String::from_utf8(bytes).map_err(|_| KeyResolutionError::InvalidKey)
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -288,6 +288,7 @@ impl KeychainReader for SystemKeychainReader {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(clippy::needless_pass_by_value)]
 fn map_native_read_error(
     error: mci_keychain::Error,
     service: &str,
@@ -364,6 +365,7 @@ pub fn resolve_database_key_with_reader<R: KeychainReader>(
 }
 
 /// Initialize only after a typed not-found result. All other reads fail closed.
+#[allow(clippy::too_many_arguments)]
 pub fn initialize_database_key_with<R, W, V, G>(
     reader: &R,
     writer: &W,
@@ -394,6 +396,7 @@ where
 }
 
 /// Initialize with an injectable legacy-key finalizer for failure-path tests.
+#[allow(clippy::too_many_arguments)]
 pub fn initialize_database_key_with_remover<R, W, V, D, G>(
     reader: &R,
     writer: &W,

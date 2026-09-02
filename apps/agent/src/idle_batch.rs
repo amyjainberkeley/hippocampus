@@ -12,8 +12,8 @@
 //! # Privacy invariants
 //!
 //! - §4.2 cascade-twice: the worker ONLY writes to `event_vectors`. No
-//!   new `events` INSERT. No new OCREvent emission site.
-//! - §4.3 cascade_reason=0 wall: untouched. Reads existing events; never
+//!   new `events` INSERT. No new `OCREvent` emission site.
+//! - §4.3 `cascade_reason=0` wall: untouched. Reads existing events; never
 //!   inserts them.
 //! - §4.6 idle-batch worker reads `.allow`-stored events only. Its input
 //!   is `events.text` for events already in the store. It can never see
@@ -154,7 +154,7 @@ pub async fn run_idle_batch_worker(
         if batch.is_empty() {
             // Nothing to do — sleep and re-check.
             tokio::select! {
-                _ = tokio::time::sleep(idle_interval) => continue,
+                () = tokio::time::sleep(idle_interval) => continue,
                 _ = shutdown.changed() => break,
             }
         }

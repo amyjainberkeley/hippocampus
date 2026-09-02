@@ -36,6 +36,7 @@
 use mci_brain::redaction::parsed_mail_header::{
     cascade_equivalent, MailCascadeDecision, MailRedactionReason, ParsedMailHeaders,
 };
+use std::fmt::Write as _;
 
 #[derive(Debug, Clone)]
 enum ExpectedOutcome {
@@ -225,21 +226,23 @@ fn fmt_expected(e: &ExpectedOutcome) -> String {
     }
 }
 
-fn fmt_headers(h: &ParsedMailHeaders) -> String {
-    let f = if h.from_domain.is_empty() {
+fn fmt_headers(headers: &ParsedMailHeaders) -> String {
+    let from = if headers.from_domain.is_empty() {
         "<none>"
     } else {
-        h.from_domain.as_str()
+        headers.from_domain.as_str()
     };
-    let r = h.reply_to_domain.as_deref().unwrap_or("<none>");
-    let s = h.sender_domain.as_deref().unwrap_or("<none>");
-    let l = h.list_id_domain.as_deref().unwrap_or("<none>");
-    let subj = if h.subject.is_empty() {
+    let reply_to = headers.reply_to_domain.as_deref().unwrap_or("<none>");
+    let sender = headers.sender_domain.as_deref().unwrap_or("<none>");
+    let list_id = headers.list_id_domain.as_deref().unwrap_or("<none>");
+    let subject = if headers.subject.is_empty() {
         "<none>".to_owned()
     } else {
-        h.subject.clone()
+        headers.subject.clone()
     };
-    format!("From={f} · Reply-To={r} · Sender={s} · List-ID={l} · Subject={subj:?}")
+    format!(
+        "From={from} · Reply-To={reply_to} · Sender={sender} · List-ID={list_id} · Subject={subject:?}"
+    )
 }
 
 fn main() {
@@ -259,14 +262,15 @@ fn main() {
             CheckOutcome::Pass => "✅ GREEN",
             CheckOutcome::Fail => "❌ RED",
         };
-        rows.push_str(&format!(
-            "| `{id}` | {desc} | `{actual}` | `{expected}` | **{mark}** |\n",
+        let _ = writeln!(
+            rows,
+            "| `{id}` | {desc} | `{actual}` | `{expected}` | **{mark}** |",
             id = h.id,
             desc = h.description,
             actual = fmt_decision(&actual),
             expected = fmt_expected(&h.expected),
             mark = mark,
-        ));
+        );
     }
 
     let total = harnesses.len();
@@ -287,16 +291,8 @@ fn main() {
     println!();
     println!("## Result");
     println!();
-    println!(
-        "- **Pass:** {total_pass}/{total}",
-        total_pass = total_pass,
-        total = total
-    );
-    println!(
-        "- **Fail:** {total_fail}/{total}",
-        total_fail = total_fail,
-        total = total
-    );
+    println!("- **Pass:** {total_pass}/{total}");
+    println!("- **Fail:** {total_fail}/{total}");
     println!("- **Overall gate (CSO audit V2-P8b):** {overall}");
     println!();
     println!("## Per-harness outcomes");

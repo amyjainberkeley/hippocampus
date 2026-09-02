@@ -8,14 +8,14 @@
 //! # What this binary models
 //!
 //! The architectural fix in ADR-0031 is at the OS API boundary
-//! (`SCContentFilter(desktopIndependentWindow:)`). ScreenCaptureKit's
+//! (`SCContentFilter(desktopIndependentWindow:)`). `ScreenCaptureKit`'s
 //! single-window capture surface is documented and CSO-protected; the
 //! `// UNVERIFIED — needs live macOS` shapes in the helper are exercised
 //! by `§11 live-Mac audit`. What is auditable headlessly — and what this
 //! corpus pins — is the *attribution logic* that the focused-window
 //! filter feeds into:
 //!
-//!   - the OCREvent's `app_bundle_id` is the focused window's owning
+//!   - the `OCREvent`'s `app_bundle_id` is the focused window's owning
 //!     app, NOT the polled-frontmost-app id (that was the cycle 8.17
 //!     misattribution channel);
 //!   - the V2-P1 race-consistency gate emits a `focusRaceDropped`
@@ -27,18 +27,18 @@
 //! Each harness defines a synthesized "before / after" comparison:
 //!
 //!   - **Before (pre-V2-P1, display-composite filter)**: the captured
-//!     surface includes every visible window's pixels; the OCREvent's
+//!     surface includes every visible window's pixels; the `OCREvent`'s
 //!     bundle is the polled frontmost — so non-focused text leaks under
 //!     the focused app's tag (the cycle 8.17 finding).
 //!   - **After (V2-P1, focused-window filter)**: the captured surface
-//!     IS the focused window's pixels; the OCREvent's bundle is the
+//!     IS the focused window's pixels; the `OCREvent`'s bundle is the
 //!     focused window's owning app. Non-focused windows' text cannot
-//!     enter the OCREvent by construction.
+//!     enter the `OCREvent` by construction.
 //!
 //! The runner asserts the "after" path on every harness:
 //!   - required tokens (from the focused window) MUST appear,
 //!   - forbidden tokens (from non-focused windows) MUST be absent,
-//!   - on harness 5, the race gate MUST trip and NO OCREvent is emitted.
+//!   - on harness 5, the race gate MUST trip and NO `OCREvent` is emitted.
 //!
 //! # Output
 //!
@@ -90,10 +90,10 @@ struct Harness {
     /// filter excludes. Empty for harnesses 1–4. Harness 5 uses this
     /// shape implicitly via the race-gate outcome.
     denylist: &'static [&'static str],
-    /// Tokens that MUST appear in the V2-P1 OCREvent (from the focused
+    /// Tokens that MUST appear in the V2-P1 `OCREvent` (from the focused
     /// window's pixels).
     required_tokens: Vec<&'static str>,
-    /// Tokens that MUST NOT appear in the V2-P1 OCREvent (from
+    /// Tokens that MUST NOT appear in the V2-P1 `OCREvent` (from
     /// non-focused windows' pixels).
     forbidden_tokens: Vec<&'static str>,
 }
@@ -133,7 +133,7 @@ fn pre_v2p1_display_composite(windows: &[SimWindow], denylist: &[&str]) -> Strin
 /// simulation uses the focused window's bundle as a proxy (in practice
 /// these agreed; the BUG was that the captured pixels were broader
 /// than the bundle implied).
-fn pre_v2p1_frontmost_bundle<'a>(windows: &'a [SimWindow], focused_id: u32) -> Option<&'a str> {
+fn pre_v2p1_frontmost_bundle(windows: &[SimWindow], focused_id: u32) -> Option<&str> {
     windows
         .iter()
         .find(|w| w.window_id == focused_id)
@@ -159,8 +159,8 @@ fn v2p1_focused_window_capture<'a>(
 }
 
 /// Race-consistency gate: when the focus generation observed at the
-/// SCStream callback differs from the generation the live filter was
-/// installed under, the gate trips → no OCREvent emitted, focusRaceDropped
+/// `SCStream` callback differs from the generation the live filter was
+/// installed under, the gate trips → no `OCREvent` emitted, focusRaceDropped
 /// tombstone instead.
 fn race_gate_passes(installed_gen: u64, observed_gen: u64) -> bool {
     installed_gen == observed_gen
@@ -284,6 +284,7 @@ fn assess_no_event(h: &Harness, pre_attribution: String, pre_text: String) -> Ha
 // Harness definitions
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_lines)]
 fn harnesses() -> Vec<Harness> {
     vec![
         // (1) Single-window allowlisted app: only that app's text.
@@ -409,6 +410,7 @@ fn harnesses() -> Vec<Harness> {
 // Output rendering
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_lines)]
 fn main() {
     let hs = harnesses();
     let results: Vec<(Harness, HarnessResult)> = hs

@@ -1,7 +1,7 @@
-//! Pin the **Swift↔Rust OCREvent wire contract** end-to-end with a
+//! Pin the **Swift↔Rust `OCREvent` wire contract** end-to-end with a
 //! byte-exact v0x06 fixture.
 //!
-//! AGENT_QUESTIONS.md 2026-05-23 option C follow-on. The §4 capture-
+//! `AGENT_QUESTIONS.md` 2026-05-23 option C follow-on. The §4 capture-
 //! to-brain spine is code-complete (5/5) and PR #174 already pins the
 //! Rust **consumer** side (`drain_to_log_with_brain` → `BrainPump` →
 //! `SqlCipherBrainStore` → `mci_recall`) using synthetic `OCREvent`

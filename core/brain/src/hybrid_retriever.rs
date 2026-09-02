@@ -1413,7 +1413,7 @@ mod tests {
     #[test]
     fn recency_decay_at_half_life_is_half() {
         let now = 1_000 * MICROS_PER_HOUR;
-        let then = now - (DEFAULT_HALF_LIFE_HOURS as u64) * MICROS_PER_HOUR;
+        let then = now - 24 * MICROS_PER_HOUR;
         let r = recency_decay(now, then, DEFAULT_HALF_LIFE_HOURS);
         assert!((r - 0.5).abs() < 1e-4, "at half-life got {r}, want ~0.5");
     }

@@ -1,4 +1,4 @@
-//! Where the ArcticEmbedS Core ML model is looked for, and how the two
+//! Where the `ArcticEmbedS` Core ML model is looked for, and how the two
 //! embedder flavours are built.
 //!
 //! This lived inside the `mci-agent` binary, which meant anything else
@@ -71,17 +71,18 @@ pub fn arctic_embed_s_model_candidates() -> Vec<std::path::PathBuf> {
 /// paths; falls back to the zero-vector backend when the model isn't
 /// bundled (development builds). Returns `(Arc<dyn Embedder>, is_real)`.
 ///
-/// The ArcticEmbedSEmbedder wrapper applies the model-card prefix
+/// The `ArcticEmbedSEmbedder` wrapper applies the model-card prefix
 /// discipline + L2-norm (ADR-0011 §3). Document-side prefix (empty
 /// for arctic-embed-s) is used for idle-batch embedding.
 #[cfg(target_os = "macos")]
+#[must_use]
 pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
     use mci_embed_coreml::load_backend_or_fallback;
     use std::path::Path;
 
     let candidates = arctic_embed_s_model_candidates();
-    let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
+    let path_refs: Vec<&Path> = candidates.iter().map(std::path::PathBuf::as_path).collect();
     let (backend, is_real) = load_backend_or_fallback(&path_refs);
     let embedder = ArcticEmbedSEmbedder::new_document(backend);
 
@@ -162,13 +163,14 @@ pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
 /// prefer FTS5-only recall in that case rather than feeding a zero
 /// vector into `HybridRetriever`.
 #[cfg(target_os = "macos")]
+#[must_use]
 pub fn load_query_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
     use mci_embed_coreml::load_backend_or_fallback;
     use std::path::Path;
 
     let candidates = arctic_embed_s_model_candidates();
-    let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
+    let path_refs: Vec<&Path> = candidates.iter().map(std::path::PathBuf::as_path).collect();
     let (backend, is_real) = load_backend_or_fallback(&path_refs);
     let embedder = ArcticEmbedSEmbedder::new_query(backend);
 

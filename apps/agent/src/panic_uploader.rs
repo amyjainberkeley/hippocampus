@@ -66,14 +66,13 @@ pub struct PanicUploader {
 impl PanicUploader {
     /// Construct from environment variables. Returns `None` when either
     /// gate is unset — the caller should simply skip the upload pass.
+    #[must_use]
     pub fn from_env() -> Option<Self> {
         let url = std::env::var("MCI_CRASH_REPORT_URL").ok()?;
         if url.is_empty() {
             return None;
         }
-        let opted_in = std::env::var("MCI_CRASH_REPORT_OPTED_IN")
-            .map(|v| v == "1")
-            .unwrap_or(false);
+        let opted_in = std::env::var("MCI_CRASH_REPORT_OPTED_IN").is_ok_and(|v| v == "1");
         if !opted_in {
             return None;
         }
@@ -82,6 +81,7 @@ impl PanicUploader {
 
     /// Construct directly (for tests).
     #[cfg(test)]
+    #[must_use]
     pub fn new(url: String, enabled: bool) -> Self {
         Self { url, enabled }
     }
@@ -110,7 +110,7 @@ pub async fn drain_pending(uploader: &PanicUploader, path: &Path) -> Result<usiz
         return Ok(0);
     }
 
-    let mut uploaded = 0usize;
+    let mut upload_count = 0usize;
     let mut retained: Vec<String> = Vec::new();
 
     for line in contents.lines() {
@@ -118,23 +118,21 @@ pub async fn drain_pending(uploader: &PanicUploader, path: &Path) -> Result<usiz
             continue;
         }
 
-        let report: CrashReport = match serde_json::from_str(line) {
-            Ok(r) => r,
-            Err(_) => {
-                eprintln!("mci-agent: panic_uploader: dropping malformed line");
-                continue;
-            }
+        let report: CrashReport = if let Ok(r) = serde_json::from_str(line) {
+            r
+        } else {
+            eprintln!("mci-agent: panic_uploader: dropping malformed line");
+            continue;
         };
 
         let scrubbed = report.scrubbed();
-        let body = match serde_json::to_string(&scrubbed) {
-            Ok(b) => b,
-            Err(_) => continue,
+        let Ok(body) = serde_json::to_string(&scrubbed) else {
+            continue;
         };
 
         match post_json(&uploader.url, &body).await {
             Ok(status) if (200..300).contains(&status) => {
-                uploaded += 1;
+                upload_count += 1;
             }
             _ => {
                 retained.push(line.to_string());
@@ -152,7 +150,7 @@ pub async fn drain_pending(uploader: &PanicUploader, path: &Path) -> Result<usiz
         tokio::fs::rename(&tmp_path, path).await?;
     }
 
-    Ok(uploaded)
+    Ok(upload_count)
 }
 
 /// The four-field crash report. Must match `panic_hook::PanicRecord`.
@@ -192,12 +190,11 @@ fn scrub_user_paths(s: &str) -> String {
         result.push_str(&remaining[..idx]);
         result.push_str("<redacted-path>");
         let rest = &remaining[idx + 7..];
-        match rest.find(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
-            Some(end) => remaining = &rest[end..],
-            None => {
-                remaining = "";
-                break;
-            }
+        if let Some(end) = rest.find(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
+            remaining = &rest[end..];
+        } else {
+            remaining = "";
+            break;
         }
     }
     result.push_str(remaining);
