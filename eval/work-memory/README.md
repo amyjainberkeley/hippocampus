@@ -46,37 +46,35 @@ for an absent PR approver, test duration, and Linear due date; the corpus does
 not use nonsense-token negatives.
 
 Those three negatives are an acceptance slice, not enough data to fit or tune
-an abstention threshold. `explicit-evidence-veto-v1.json` is a disjoint
+an abstention threshold. `explicit-evidence-relation-v2.json` is a disjoint
 synthetic fixture for the narrow deterministic guard used before the broader
-critic. Its six calibration and eight validation cases cover simple person,
-count, duration, and date type presence without reusing work-memory questions,
-entities, sessions, or software facts. A separate eight-case held-out
-adversarial split puts unrelated names, products, numbers, timestamps, dates,
-and durations into otherwise relevant evidence. The fixture SHA-256 is
-`73d6ef3f3271945abbc5e7a5a6392073825299e1a3390c0ed0dc20d7801fd8a8`.
+critic. Its six calibration and eight validation cases cover person, count,
+duration, and date relations without reusing work-memory questions, entities,
+sessions, or software facts. A separate eight-case adversarial split puts an
+unrelated name, version, clock, prior date, weekday, or duration near the right
+topic without a giveaway phrase saying the answer is missing. The fixture
+SHA-256 is
+`9eb9b90d703a248a8526aebd723672a429f7eabbb4b1f278727c5181f8c2ae3d`.
 
 The guard is negative-only: when a query unambiguously requests one of those
-four value types and no retrieved evidence body contains it, production returns
-`NothingMatched(EvidenceFloor)`. Finding a value type does not certify the
-evidence or promote it to `Matched`; the independently calibrated general
-critic remains authoritative and currently remains unqualified. Ingestion
-headers are removed before the check so app names, titles, URLs, and capture
-timestamps cannot satisfy a question. The committed regression fixture accepts
-all 6/6 calibration and 8/8 validation supporting sets while rejecting all 6/6
-and 8/8 corresponding simple insufficient sets.
+four value types and no evidence body relates a value to the query subject and
+predicate, production returns `NothingMatched(EvidenceFloor)`. A supported
+relation does not promote evidence to `Matched`; the independently calibrated
+general critic remains authoritative and currently remains unqualified.
+Ingestion headers are removed before assessment so app names, titles, URLs, and
+capture timestamps cannot satisfy a question. Sentence boundaries, local topic
+anchors, and answer-type grammar prevent values from unrelated events from
+being joined into an answer.
 
-The held-out adversarial result is **8/8 false pass-throughs (100%)**: every
-unrelated value prevents this document-global veto, including capitalized
-temporal/product tokens for person questions and numbers or dates attached to
-the wrong event. Accordingly, the positive enum value is named
-`ValueTypeObserved`, not `Supported`; the guard is explicitly
-`relation_grounded: false`; and this qualification independently blocks
-`launch_qualified`. The three work-memory unanswerables remain a narrow
-acceptance improvement, not evidence that abstention is solved. Robust positive
-support requires value-to-relation grounding (for example, validated local NER
-plus relation extraction or entailment), which this deterministic guard does
-not implement. These small synthetic counts are regression and qualification
-evidence, not a population-level accuracy claim.
+The committed fixture accepts all 6/6 calibration and 8/8 validation supporting
+sets while rejecting every corresponding insufficient set. It also rejects all
+8/8 unrelated-value adversarial sets, with zero false pass-throughs. The
+positive enum value is therefore `RelationSupported`, and the qualification is
+`relation_grounded: true`. This is evidence for the four explicit answer shapes
+only, not a claim that general evidence sufficiency is solved. The broader
+similarity-based critic still fails its independent validation and continues to
+block `launch_qualified`. These small synthetic counts are regression evidence,
+not a population-level accuracy claim.
 
 Every per-case report includes `retrieval_disposition`, preserving whether the
 production path matched, abstained at a named reason, or returned ranked context

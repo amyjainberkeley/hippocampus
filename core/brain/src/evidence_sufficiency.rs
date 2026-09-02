@@ -20,28 +20,23 @@ pub struct EvidenceCandidate<'a> {
     pub raw_semantic_cosine: f32,
 }
 
-/// Conservative support check for questions with an explicit answer shape.
+/// Conservative relation check for questions with an explicit answer shape.
 ///
-/// This is a negative guard, not an entailment model:
-/// [`ValueTypeObserved`](Self::ValueTypeObserved) means only that some retrieved
-/// evidence contains the requested value type. The value can be unrelated to
-/// the query's requested relation, so this signal never promotes a candidate
-/// to a match by itself.
+/// This is a negative guard, not a general entailment model. A supported signal
+/// requires a value of the requested type to occur locally with the query's
+/// relation or subject. It can veto unsupported evidence but never promotes a
+/// candidate to a match by itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExplicitEvidenceSignal {
     /// The query has no answer shape this guard can assess reliably.
     NotApplicable,
-    /// At least one evidence candidate contains the requested value type.
-    ValueTypeObserved,
-    /// The query requests a known value type and no candidate contains it.
-    ValueTypeAbsent,
+    /// At least one evidence candidate relates a requested value to the query.
+    RelationSupported,
+    /// No evidence candidate relates a requested value to the query.
+    RelationUnsupported,
 }
 
 /// Frozen qualification record for the deterministic explicit-value veto.
-///
-/// The calibration and validation slices cover simple type-presence cases.
-/// The adversarial slice adds unrelated values in otherwise relevant evidence
-/// and shows that type presence is not relation grounding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExplicitEvidenceVetoQualification {
     /// Identifier of the committed synthetic fixture.
@@ -63,13 +58,13 @@ pub struct ExplicitEvidenceVetoQualification {
 /// Current qualification of the explicit-value veto.
 pub const EXPLICIT_EVIDENCE_VETO_QUALIFICATION: ExplicitEvidenceVetoQualification =
     ExplicitEvidenceVetoQualification {
-        fixture_dataset_id: "hippocampus-explicit-evidence-veto-v1",
-        fixture_sha256: "73d6ef3f3271945abbc5e7a5a6392073825299e1a3390c0ed0dc20d7801fd8a8",
+        fixture_dataset_id: "hippocampus-explicit-evidence-relation-v2",
+        fixture_sha256: "9eb9b90d703a248a8526aebd723672a429f7eabbb4b1f278727c5181f8c2ae3d",
         calibration_cases: 6,
         validation_cases: 8,
         adversarial_cases: 8,
-        adversarial_false_pass_throughs: 8,
-        relation_grounded: false,
+        adversarial_false_pass_throughs: 0,
+        relation_grounded: true,
     };
 
 /// Versioned, cross-query-comparable features consumed by the local critic.
@@ -175,9 +170,9 @@ pub fn evidence_features_for_candidates(
     })
 }
 
-/// Check whether retrieved evidence contains an explicitly requested answer
-/// type. The check is deliberately conservative and recognizes only explicit
-/// person, count, duration, and date requests.
+/// Check whether retrieved evidence relates an explicitly requested answer
+/// value to the query. The check is deliberately conservative and recognizes
+/// only person, count, duration, and date requests.
 #[must_use]
 pub fn explicit_evidence_signal(
     query: &str,
@@ -187,13 +182,20 @@ pub fn explicit_evidence_signal(
     let Some(answer_type) = explicit_answer_type(&query_tokens) else {
         return ExplicitEvidenceSignal::NotApplicable;
     };
-    let query_terms: HashSet<String> = query_tokens.into_iter().collect();
+    let query_terms: HashSet<String> = query_tokens.iter().cloned().collect();
+    let query_anchors = relation_anchor_terms(&query_tokens);
     if candidates.iter().any(|candidate| {
-        contains_explicit_value(answer_type, evidence_body(candidate.text), &query_terms)
+        contains_related_value(
+            answer_type,
+            &query_tokens,
+            evidence_body(candidate.text),
+            &query_terms,
+            &query_anchors,
+        )
     }) {
-        ExplicitEvidenceSignal::ValueTypeObserved
+        ExplicitEvidenceSignal::RelationSupported
     } else {
-        ExplicitEvidenceSignal::ValueTypeAbsent
+        ExplicitEvidenceSignal::RelationUnsupported
     }
 }
 
@@ -239,36 +241,67 @@ fn contains_phrase(tokens: &[String], phrase: &[&str]) -> bool {
     })
 }
 
-fn contains_explicit_value(
+fn contains_related_value(
     answer_type: ExplicitAnswerType,
+    query_tokens: &[String],
     evidence: &str,
     query_terms: &HashSet<String>,
+    query_anchors: &HashSet<String>,
 ) -> bool {
     match answer_type {
-        ExplicitAnswerType::Person => contains_novel_person(evidence, query_terms),
-        ExplicitAnswerType::Count => contains_novel_number(evidence, query_terms),
-        ExplicitAnswerType::Duration => contains_duration(evidence, query_terms),
-        ExplicitAnswerType::Date => contains_date(evidence, query_terms),
+        ExplicitAnswerType::Person => {
+            contains_related_person(query_tokens, evidence, query_terms, query_anchors)
+        }
+        ExplicitAnswerType::Count => contains_related_count(evidence, query_terms, query_anchors),
+        ExplicitAnswerType::Duration => {
+            contains_related_duration(evidence, query_terms, query_anchors)
+        }
+        ExplicitAnswerType::Date => {
+            contains_related_date(query_tokens, evidence, query_terms, query_anchors)
+        }
     }
 }
 
-fn contains_novel_person(evidence: &str, query_terms: &HashSet<String>) -> bool {
-    evidence
-        .split(|character: char| {
-            !character.is_alphanumeric() && character != '_' && character != '-'
-        })
-        .filter(|token| !token.is_empty())
-        .any(|token| {
-            let normalized = token.to_ascii_lowercase();
-            let mut letters = token.chars().filter(|character| character.is_alphabetic());
-            let starts_uppercase = letters.next().is_some_and(char::is_uppercase);
-            let has_lowercase = letters.any(char::is_lowercase);
-            starts_uppercase
-                && has_lowercase
-                && !query_terms.contains(&normalized)
-                && !is_person_placeholder(&normalized)
-                && !content_terms(token).is_empty()
-        })
+fn contains_related_person(
+    query_tokens: &[String],
+    evidence: &str,
+    query_terms: &HashSet<String>,
+    query_anchors: &HashSet<String>,
+) -> bool {
+    let tokens = case_preserving_tokens(evidence);
+    let relation_stems = person_relation_stems(query_tokens);
+    let topic_anchors = query_anchors
+        .iter()
+        .filter(|anchor| !relation_stems.contains(&relation_stem(anchor)))
+        .cloned()
+        .collect::<HashSet<_>>();
+    tokens.iter().enumerate().any(|(person_index, token)| {
+        if !is_novel_person_token(token, query_terms) {
+            return false;
+        }
+        let relation_nearby = tokens.iter().enumerate().any(|(index, candidate)| {
+            candidate.segment == token.segment
+                && index.abs_diff(person_index) <= 3
+                && relation_stems.contains(&relation_stem(&candidate.normalized))
+        });
+        let attributed_near_topic = tokens.iter().enumerate().any(|(index, candidate)| {
+            index.abs_diff(person_index) <= 3
+                && matches!(
+                    candidate.normalized.as_str(),
+                    "by" | "from" | "name" | "named" | "names" | "owner" | "technician"
+                )
+        }) && has_anchor_near(&tokens, person_index, query_anchors, 5);
+        (relation_nearby && has_anchor_near(&tokens, person_index, &topic_anchors, 5))
+            || attributed_near_topic
+    })
+}
+
+fn is_novel_person_token(token: &RelationToken, query_terms: &HashSet<String>) -> bool {
+    token.starts_uppercase
+        && token.has_lowercase
+        && !query_terms.contains(&token.normalized)
+        && !is_person_placeholder(&token.normalized)
+        && !content_terms(&token.normalized).is_empty()
 }
 
 fn is_person_placeholder(token: &str) -> bool {
@@ -283,64 +316,220 @@ fn is_person_placeholder(token: &str) -> bool {
                 | "person"
                 | "somebody"
                 | "someone"
+                | "today"
+                | "tomorrow"
+                | "tonight"
                 | "unknown"
+                | "yesterday"
         )
 }
 
-fn contains_novel_number(evidence: &str, query_terms: &HashSet<String>) -> bool {
-    normalized_tokens(evidence).iter().any(|token| {
-        !query_terms.contains(token)
-            && (token.chars().all(|character| character.is_ascii_digit()) || is_number_word(token))
+fn contains_related_count(
+    evidence: &str,
+    query_terms: &HashSet<String>,
+    query_anchors: &HashSet<String>,
+) -> bool {
+    let tokens = case_preserving_tokens(evidence);
+    tokens.iter().enumerate().any(|(index, token)| {
+        !query_terms.contains(&token.normalized)
+            && is_count_value(&tokens, index)
+            && has_anchor_near(&tokens, index, query_anchors, 2)
     })
 }
 
-fn contains_duration(evidence: &str, query_terms: &HashSet<String>) -> bool {
-    let tokens = normalized_tokens(evidence);
-    tokens.windows(2).any(|window| {
-        !query_terms.contains(&window[0])
+fn contains_related_duration(
+    evidence: &str,
+    query_terms: &HashSet<String>,
+    query_anchors: &HashSet<String>,
+) -> bool {
+    let tokens = case_preserving_tokens(evidence);
+    tokens.windows(2).enumerate().any(|(index, window)| {
+        !query_terms.contains(&window[0].normalized)
             && (window[0]
+                .normalized
                 .chars()
                 .all(|character| character.is_ascii_digit())
-                || is_number_word(&window[0]))
-            && is_duration_unit(&window[1])
-    }) || tokens.iter().any(|token| {
+                || is_number_word(&window[0].normalized))
+            && is_duration_unit(&window[1].normalized)
+            && has_anchor_near(&tokens, index, query_anchors, 4)
+    }) || tokens.iter().enumerate().any(|(index, token)| {
         let split = token
+            .normalized
             .find(|character: char| !character.is_ascii_digit())
-            .unwrap_or(token.len());
+            .unwrap_or(token.normalized.len());
         split > 0
-            && split < token.len()
-            && !query_terms.contains(token)
-            && is_duration_unit(&token[split..])
-    }) || tokens.iter().any(|token| {
-        !query_terms.contains(token)
+            && split < token.normalized.len()
+            && !query_terms.contains(&token.normalized)
+            && is_duration_unit(&token.normalized[split..])
+            && has_anchor_near(&tokens, index, query_anchors, 4)
+    }) || tokens.iter().enumerate().any(|(index, token)| {
+        !query_terms.contains(&token.normalized)
             && matches!(
-                token.as_str(),
+                token.normalized.as_str(),
                 "overnight" | "all-day" | "daylong" | "weeklong"
             )
+            && has_anchor_near(&tokens, index, query_anchors, 4)
     })
 }
 
-fn contains_date(evidence: &str, query_terms: &HashSet<String>) -> bool {
-    let tokens = normalized_tokens(evidence);
-    tokens.iter().any(|token| {
-        !query_terms.contains(token)
-            && (is_weekday(token)
-                || matches!(token.as_str(), "today" | "tomorrow" | "tonight")
-                || is_delimited_date(token))
-    }) || tokens.windows(2).any(|window| {
-        is_month(&window[0])
-            && !query_terms.contains(&window[0])
+fn contains_related_date(
+    query_tokens: &[String],
+    evidence: &str,
+    query_terms: &HashSet<String>,
+    query_anchors: &HashSet<String>,
+) -> bool {
+    let tokens = case_preserving_tokens(evidence);
+    let due_question = query_tokens
+        .iter()
+        .any(|token| matches!(token.as_str(), "due" | "deadline"));
+    date_value_indexes(&tokens, query_terms)
+        .into_iter()
+        .any(|index| {
+            if due_question {
+                has_token_near(&tokens, index, 3, |token| {
+                    matches!(token, "by" | "deadline" | "due")
+                }) && has_anchor_near(&tokens, index, query_anchors, 5)
+            } else {
+                has_anchor_near(&tokens, index, query_anchors, 4)
+                    && has_token_near(&tokens, index, 4, |token| {
+                        matches!(token, "at" | "for" | "is" | "on" | "opens" | "scheduled")
+                    })
+            }
+        })
+}
+
+fn date_value_indexes(tokens: &[RelationToken], query_terms: &HashSet<String>) -> Vec<usize> {
+    let mut indexes = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if !query_terms.contains(&token.normalized)
+            && (is_weekday(&token.normalized)
+                || matches!(token.normalized.as_str(), "today" | "tomorrow" | "tonight")
+                || is_delimited_date(&token.normalized))
+        {
+            indexes.push(index);
+        }
+    }
+    for (index, window) in tokens.windows(2).enumerate() {
+        if is_month(&window[0].normalized)
+            && !query_terms.contains(&window[0].normalized)
             && window[1]
+                .normalized
                 .chars()
                 .all(|character| character.is_ascii_digit())
-    }) || evidence.split_whitespace().any(|raw| {
-        let token = raw
-            .trim_matches(|character: char| {
-                !character.is_ascii_digit() && character != '-' && character != '/'
-            })
-            .to_ascii_lowercase();
-        !token.is_empty() && !query_terms.contains(&token) && is_delimited_date(&token)
-    })
+        {
+            indexes.push(index);
+        }
+    }
+    indexes
+}
+
+#[derive(Debug)]
+struct RelationToken {
+    normalized: String,
+    starts_uppercase: bool,
+    has_lowercase: bool,
+    segment: usize,
+}
+
+fn case_preserving_tokens(text: &str) -> Vec<RelationToken> {
+    text.split(['.', ';', '!', '?', '\n'])
+        .enumerate()
+        .flat_map(|(segment, clause)| {
+            clause
+                .split(|character: char| {
+                    !character.is_alphanumeric()
+                        && character != '_'
+                        && character != '-'
+                        && character != '/'
+                        && character != ':'
+                })
+                .filter(|raw| !raw.is_empty())
+                .map(move |raw| {
+                    let mut letters = raw.chars().filter(|character| character.is_alphabetic());
+                    let starts_uppercase = letters.next().is_some_and(char::is_uppercase);
+                    let has_lowercase = letters.any(char::is_lowercase);
+                    RelationToken {
+                        normalized: raw.to_ascii_lowercase(),
+                        starts_uppercase,
+                        has_lowercase,
+                        segment,
+                    }
+                })
+        })
+        .collect()
+}
+
+fn relation_anchor_terms(query_tokens: &[String]) -> HashSet<String> {
+    const GENERIC: &[&str] = &[
+        "count", "date", "deadline", "due", "duration", "long", "many", "number", "set", "total",
+        "who", "whom",
+    ];
+    query_tokens
+        .iter()
+        .filter(|token| !GENERIC.contains(&token.as_str()))
+        .filter(|token| !content_terms(token).is_empty())
+        .cloned()
+        .collect()
+}
+
+fn person_relation_stems(query_tokens: &[String]) -> HashSet<String> {
+    const SKIP: &[&str] = &[
+        "a", "an", "did", "does", "has", "have", "is", "the", "was", "were", "who", "whom",
+    ];
+    query_tokens
+        .iter()
+        .skip_while(|token| !matches!(token.as_str(), "who" | "whom"))
+        .skip(1)
+        .find(|token| !SKIP.contains(&token.as_str()))
+        .map(|token| HashSet::from([relation_stem(token)]))
+        .unwrap_or_default()
+}
+
+fn relation_stem(token: &str) -> String {
+    for suffix in ["ing", "ed", "es", "s"] {
+        if token.len() > suffix.len() + 3 {
+            if let Some(stem) = token.strip_suffix(suffix) {
+                return stem.to_owned();
+            }
+        }
+    }
+    token.to_owned()
+}
+
+fn has_anchor_near(
+    tokens: &[RelationToken],
+    index: usize,
+    anchors: &HashSet<String>,
+    radius: usize,
+) -> bool {
+    has_token_near(tokens, index, radius, |token| anchors.contains(token))
+}
+
+fn has_token_near(
+    tokens: &[RelationToken],
+    index: usize,
+    radius: usize,
+    predicate: impl Fn(&str) -> bool,
+) -> bool {
+    let start = index.saturating_sub(radius);
+    let end = index
+        .saturating_add(radius)
+        .min(tokens.len().saturating_sub(1));
+    tokens[start..=end]
+        .iter()
+        .any(|token| token.segment == tokens[index].segment && predicate(&token.normalized))
+}
+
+fn is_count_value(tokens: &[RelationToken], index: usize) -> bool {
+    let token = &tokens[index].normalized;
+    let value = token.chars().all(|character| character.is_ascii_digit()) || is_number_word(token);
+    value
+        && !tokens.get(index.wrapping_sub(1)).is_some_and(|previous| {
+            matches!(
+                previous.normalized.as_str(),
+                "build" | "issue" | "pr" | "revision" | "version"
+            )
+        })
 }
 
 fn is_number_word(token: &str) -> bool {

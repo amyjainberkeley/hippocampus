@@ -263,12 +263,12 @@ fn explicit_answer_shapes_require_values_in_retrieved_evidence() {
         }];
         assert_eq!(
             explicit_evidence_signal(query, &supported_candidates),
-            ExplicitEvidenceSignal::ValueTypeObserved,
+            ExplicitEvidenceSignal::RelationSupported,
             "supported query: {query}"
         );
         assert_eq!(
             explicit_evidence_signal(query, &unsupported_candidates),
-            ExplicitEvidenceSignal::ValueTypeAbsent,
+            ExplicitEvidenceSignal::RelationUnsupported,
             "unsupported query: {query}"
         );
     }
@@ -284,8 +284,33 @@ fn capture_context_header_values_cannot_satisfy_an_explicit_date_question() {
 
     assert_eq!(
         explicit_evidence_signal("What due date did Priya set for HIPP 201?", &candidates),
-        ExplicitEvidenceSignal::ValueTypeAbsent
+        ExplicitEvidenceSignal::RelationUnsupported
     );
+}
+
+#[test]
+fn explicit_values_do_not_cross_sentence_relation_boundaries() {
+    for (query, evidence) in [
+        (
+            "Who approved the balcony inspection?",
+            "Mara approved the patio permit. The balcony inspection was filed.",
+        ),
+        (
+            "What due date was set for the furnace repair?",
+            "The boiler inspection is due on October 1. The furnace repair was discussed.",
+        ),
+    ] {
+        let candidates = [EvidenceCandidate {
+            stable_id: 1,
+            text: evidence,
+            raw_semantic_cosine: 0.8,
+        }];
+        assert_eq!(
+            explicit_evidence_signal(query, &candidates),
+            ExplicitEvidenceSignal::RelationUnsupported,
+            "query: {query}"
+        );
+    }
 }
 
 #[test]
@@ -319,7 +344,8 @@ struct ExplicitEvidenceCase {
 
 #[test]
 fn explicit_evidence_veto_passes_disjoint_calibration_and_validation_splits() {
-    let fixture_bytes = include_bytes!("../../../eval/work-memory/explicit-evidence-veto-v1.json");
+    let fixture_bytes =
+        include_bytes!("../../../eval/work-memory/explicit-evidence-relation-v2.json");
     let fixture: ExplicitEvidenceFixture =
         serde_json::from_slice(fixture_bytes).expect("explicit evidence fixture parses");
     let qualification = EXPLICIT_EVIDENCE_VETO_QUALIFICATION;
@@ -361,13 +387,13 @@ fn explicit_evidence_veto_passes_disjoint_calibration_and_validation_splits() {
                 .collect::<Vec<_>>();
             assert_eq!(
                 explicit_evidence_signal(&case.query, &supporting),
-                ExplicitEvidenceSignal::ValueTypeObserved,
+                ExplicitEvidenceSignal::RelationSupported,
                 "{} positive",
                 case.id
             );
             assert_eq!(
                 explicit_evidence_signal(&case.query, &insufficient),
-                ExplicitEvidenceSignal::ValueTypeAbsent,
+                ExplicitEvidenceSignal::RelationUnsupported,
                 "{} negative",
                 case.id
             );
@@ -376,9 +402,9 @@ fn explicit_evidence_veto_passes_disjoint_calibration_and_validation_splits() {
 }
 
 #[test]
-fn explicit_evidence_veto_reports_held_out_unrelated_value_false_pass_throughs() {
+fn explicit_evidence_veto_rejects_held_out_unrelated_values() {
     let fixture: ExplicitEvidenceFixture = serde_json::from_str(include_str!(
-        "../../../eval/work-memory/explicit-evidence-veto-v1.json"
+        "../../../eval/work-memory/explicit-evidence-relation-v2.json"
     ))
     .expect("explicit evidence fixture parses");
     let cases = fixture
@@ -402,7 +428,7 @@ fn explicit_evidence_veto_reports_held_out_unrelated_value_false_pass_throughs()
                 })
                 .collect::<Vec<_>>();
             (explicit_evidence_signal(&case.query, &candidates)
-                != ExplicitEvidenceSignal::ValueTypeAbsent)
+                != ExplicitEvidenceSignal::RelationUnsupported)
                 .then_some(case.id.as_str())
         })
         .collect::<Vec<_>>();
@@ -415,5 +441,7 @@ fn explicit_evidence_veto_reports_held_out_unrelated_value_false_pass_throughs()
         "held-out false pass-through behavior changed: {false_pass_throughs:?}"
     );
     assert_eq!(cases.len(), qualification.adversarial_cases);
-    assert!(!qualification.relation_grounded);
+    assert_eq!(false_pass_throughs, Vec::<&str>::new());
+    assert_eq!(qualification.adversarial_false_pass_throughs, 0);
+    assert!(qualification.relation_grounded);
 }
