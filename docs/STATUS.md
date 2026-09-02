@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `2b62ae4`
+Audited code baseline: `0c8e157`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -18,7 +18,10 @@ more than this page.
 - `mci_context` compiles a bounded handoff with typed outcomes, abstentions,
   source priority, and canonical event citations. Claude Code and Codex
   registration is structural, idempotent, ownership-safe, and records only a
-  database path plus Keychain service/account references.
+  database path plus Keychain service/account references. Daemon startup now
+  repairs only existing Hippocampus registrations, migrating stale packaged
+  paths and legacy plaintext-key fields without creating an unsolicited
+  registration or changing unrelated and malformed client configuration.
 - The app and packaged `mci-agent` now share the `0.1.0` release identity.
   The agent derives its displayed version from Cargo package metadata, and a
   regression test compares it with the shipping app's Info.plist.
@@ -65,8 +68,11 @@ more than this page.
   receives an explicit `MCI_CAPTURE_ENABLED` value and keeps stdin, browser
   sockets, deep hooks, and MCP collection inert while off. Safari additionally
   requires an enabled App Group authority owned by the live container process,
-  stamps each payload with the committed supervisor generation, and rejects
-  stale or missing generations before socket delivery.
+  binds that authority to the container's exact process-start identity, stamps
+  each payload with the committed supervisor generation, and rejects stale or
+  missing generations before socket delivery. Chromium performs a content-free
+  native authorization handshake before reading the page DOM. User pause stops
+  the helper and agent process tree; resume starts a fresh supervised generation.
 - The production capture session now owns a live TCC monitor. A permission
   denied before helper startup is applied as an immediate fail-closed pause and
   emits the same content-free, actionable app status as a mid-run revoke;
@@ -99,7 +105,9 @@ more than this page.
   and documented product captures use one light native visual system. Native
   macOS material supplies the translucent top surfaces, dark system appearance
   does not turn the product black, and the retired turquoise identity is not
-  present in the release asset set.
+  present in the release asset set. The Recall product capture is generated from
+  a disposable SQLCipher brain and visibly proves three authenticated encrypted
+  keyframes, 20 synthetic events, and one current synthetic brief.
 - Runlog remains an audited research input rather than a runtime dependency.
   It does use 768-dimensional Gemini vectors and Firestore cosine search; its
   useful hypothesis is hybrid candidate generation plus source-region
@@ -115,10 +123,12 @@ more than this page.
   installation does not include XCTest, so full Swift package test execution
   requires full Xcode or CI; production package builds and executable fixtures
   remain locally runnable.
-- A `178 MB` debug ad-hoc app assembled from the audited code with Arctic Embed
-  S as its only bundled model, passed model validation, and survived the
-  disposable-home first-launch gate with onboarding attached. This proves a
-  runnable development bundle, not a distributable Apple release.
+- The current `177 MB` debug ad-hoc app at
+  `apps/hippocampus/dist/development-20260902-v3/Hippocampus.app` includes Arctic
+  Embed S as its only bundled model, passes signed App Group and model
+  validation, and survives the disposable-home first-launch and owner-death
+  gates. This proves a runnable development bundle, not a distributable Apple
+  release.
 - A throwaway-home E2E installs the engine, starts with capture disabled,
   imports 20 synthetic events, injects one shared-encoder `OCREvent` through
   production `--drain-stdin --strict`, derives episodes, persists and reads
@@ -140,16 +150,14 @@ more than this page.
   requires Screen Recording and Accessibility for that helper, foregrounds a
   synthetic overlapping-window corpus, captures through the bundled helper and
   agent, and proves focused-window recall plus background-window abstention.
-  Its contract is tested and the unlocked-session preflight passes. The first
-  two of three live attempts reached the ScreenCaptureKit first-sample callback,
-  focused-window filter installation, encrypted brain open, and Arctic model
-  load. The third, against `130e5f1`, proved the new startup
-  `tcc_revoked=accessibility` signal and a healthy short page-content socket.
-  All correctly retained no OCR because Accessibility was denied to the exact
-  ad-hoc helper; the privacy cascade paused or suppressed instead of guessing.
-  User Notification Center, WhatsApp, and Codex separately stole focus, so
-  focused-token recall and background-token absence are not yet proven. The
-  harness now uses a short `/tmp` root so its isolated Unix socket remains below
+  Its contract is tested and the unlocked-session preflight passes. Earlier
+  attempts reached the ScreenCaptureKit first-sample callback, focused-window
+  filter installation, encrypted brain open, and Arctic model load, and proved
+  fail-closed Accessibility revocation plus a healthy short page-content socket.
+  The latest attempt against the current app reached live frames and encrypted
+  ingestion, then aborted during capture when Chrome reclaimed focus from the
+  synthetic corpus while Accessibility was denied. No OCR was retained. The
+  harness uses a short `/tmp` root so its isolated Unix socket remains below
   Darwin's 104-byte path limit. A fresh run with Accessibility granted, an
   uninterrupted foreground corpus, and the required 30-minute soak remain open.
 - OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
@@ -157,8 +165,12 @@ more than this page.
   use separate structured capture paths that reject private contexts before
   reading page content, with executable release tests. Automatic OCR enablement
   remains blocked until the overlapping-window corpus and live soak pass.
-- The now-production-wired TCC and screen-sharing revocation monitors are not
-  yet proven by a live grant/revoke/restore run. Delete and wipe operations
+- The production-wired TCC revocation monitor is not yet proven by a live
+  grant/revoke/restore run. macOS exposes no qualified public signal that a
+  different app has started sharing or recording the screen, so Hippocampus
+  does not claim or simulate one; explicit pause, screen lock, TCC loss,
+  denylisting, secure input, and browser-private-mode exclusion are the enforced
+  controls. Delete and wipe operations
   separate committed SQL deletion from post-commit storage-cleanup warnings and
   now quiesce against every other writer through the shared operating-system
   lease.
@@ -173,7 +185,9 @@ more than this page.
   until a stable Developer ID bundle is available.
 - This machine has Command Line Tools rather than full Xcode, zero valid code
   signing identities, and no `notarytool-profile`. It cannot produce or claim a
-  Developer ID-signed, notarized public release.
+  Developer ID-signed, notarized public release. Apple Developer Program
+  membership alone does not place the Developer ID certificate and its private
+  key on this Mac or create notarization credentials.
 - A verified local Arctic Embed S Core ML bundle is present in the gitignored
   development model directory and is included by debug ad-hoc assembly, so that
   artifact supports semantic recall. It is the sole required release model.

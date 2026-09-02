@@ -104,10 +104,12 @@ Apple release.
 
 ### 3. Retrieval ranking is ahead of retrieval judgment
 
-The accepted 24-case work-memory corpus shows that hybrid retrieval finds the
-answerable evidence, but it also returns evidence for every deliberately
-unanswerable query. A memory product that always says something is dangerous.
-Calibrated abstention is a launch gate, not polish.
+The accepted 24-case work-memory corpus shows that hybrid candidate generation
+finds the answerable evidence and, as every nearest-neighbor system will, also
+finds nearby material for deliberately unanswerable queries. The production
+decision path abstains on all three unanswerable cases, but still labels every
+answerable ranking as verifier-unavailable rather than a trusted match. General
+semantic support and contradiction judgment remains a launch gate, not polish.
 
 ### 4. The visual system hides the quality of the engine
 
@@ -123,8 +125,9 @@ The sprint found temporary key custody, readiness publication, private-browser
 handling, and runtime error paths that were weaker than the claims around
 them. Those are being replaced with explicit development capabilities,
 atomic readiness, fail-closed browser context, and supervised terminal failure.
-The remaining destructive-mutation path needs an OS-held writer lease rather
-than a PID-only observation.
+Destructive mutation now takes the same OS-held writer lease as ingestion.
+Remaining release risk is live capture and signed-install verification, not a
+PID-only deletion guard.
 
 ### 6. The code carries process archaeology
 
@@ -336,13 +339,13 @@ The order is based on dependency and falsifiability, not calendar estimates.
 | Order | Gate | Why it gates later work | Current sprint state |
 |---:|---|---|---|
 | 1 | Canonical repository and release truth | No benchmark or release matters if it targets the wrong product | Established |
-| 2 | Reliable supervised runtime and key custody | Capture, deletion, and agent handoff require one healthy local authority | Development path verified; public signing remains external |
-| 3 | Capture privacy and terminal failure | Bad input poisons every later memory layer | Private browser and locked-screen behavior verified; unlocked corpus pending |
-| 4 | Retention, deletion, and writer quiescence | A user must be able to withdraw evidence safely | Atomic deletion exists; process-held writer lease in progress |
-| 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | Deterministic overlap app built; unlocked run and soak pending |
-| 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | Ranking strong; abstention remediation in progress |
-| 7 | Native product experience | A correct engine users cannot understand will not be trusted | Light native redesign in progress |
-| 8 | Signed distribution and update proof | Public use requires identity, notarization, models, and continuity | Blocked on owner/release-machine assets listed in `STATUS.md` |
+| 2 | Reliable supervised runtime and key custody | Capture, deletion, and agent handoff require one healthy local authority | Development path and owner-death shutdown verified; public signing remains external |
+| 3 | Capture privacy and terminal failure | Bad input poisons every later memory layer | Browser authorization, private-context exclusion, pause, lock, and TCC behavior are executable; live frames reached the helper, but exact overlap proof remains blocked by Accessibility and focus stability |
+| 4 | Retention, deletion, and writer quiescence | A user must be able to withdraw evidence safely | Complete, including process-held writer lease and orphan reconciliation |
+| 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | Deterministic overlap app built; current app reaches ScreenCaptureKit frames and encrypted ingestion, but focused-token/background-token proof and soak remain pending |
+| 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | Retrieval ranking and explicit relation veto pass; general semantic verifier remains unqualified |
+| 7 | Native product experience | A correct engine users cannot understand will not be trusted | Light native UI and release assets implemented; the disposable product capture visibly proves three authenticated keyframes, 20 events, and one brief |
+| 8 | Signed distribution and update proof | Public use requires identity, notarization, models, and continuity | Ad-hoc bundle passes launch/owner-death checks; Developer ID and notarization remain external |
 
 ## V1, V2, And V3 Product Boundary
 
