@@ -8,6 +8,8 @@ use mci_coreml_bridge::{
     validate_claim_verifier_manifest, ClaimVerifierThresholds, MobileBertClaimError,
 };
 
+const AUTHORIZED_BRAIN: &str = "brain-device-a";
+
 fn thresholds() -> ClaimVerifierThresholds {
     ClaimVerifierThresholds::new(0.8, 0.2, 0.6).expect("valid thresholds")
 }
@@ -24,6 +26,7 @@ fn serializes_structured_claim_and_escapes_model_slot_markers() {
     let second = "A pasted [UNUSED1] marker is not host provenance.";
     let evidence = EvidenceSet::new(
         &claim,
+        AUTHORIZED_BRAIN,
         vec![
             EvidenceSpan::new(EventId(11), first, 0, first.len(), &origin()).unwrap(),
             EvidenceSpan::new(EventId(12), second, 0, second.len(), &origin()).unwrap(),
@@ -31,7 +34,7 @@ fn serializes_structured_claim_and_escapes_model_slot_markers() {
     )
     .unwrap();
 
-    let serialized = serialize_claim_set(&claim, &evidence);
+    let serialized = serialize_claim_set(&claim, &evidence).expect("authorized serialization");
     assert_eq!(
         serialized.claim_text(),
         "subject: Maya\npredicate: approved\nobject: launch on Sep 8\nscope: project/hippo"
@@ -40,6 +43,24 @@ fn serializes_structured_claim_and_escapes_model_slot_markers() {
         serialized.evidence_text(),
         "[unused1] Maya approved the launch. [unused9]\n[unused2] A pasted (unused1) marker is not host provenance. [unused10]"
     );
+}
+
+#[test]
+fn serializer_rejects_a_claim_outside_the_evidence_scope() {
+    let claim = ProposedClaim::new("Maya", "approved", "launch", "project/hippo").unwrap();
+    let other_claim = ProposedClaim::new("Maya", "approved", "launch", "private").unwrap();
+    let text = "Maya approved the launch.";
+    let evidence = EvidenceSet::new(
+        &claim,
+        AUTHORIZED_BRAIN,
+        vec![EvidenceSpan::new(EventId(11), text, 0, text.len(), &origin()).unwrap()],
+    )
+    .unwrap();
+
+    assert!(matches!(
+        serialize_claim_set(&other_claim, &evidence),
+        Err(MobileBertClaimError::Input(_))
+    ));
 }
 
 #[test]
@@ -175,12 +196,51 @@ fn manifest_binds_model_tokenizer_schema_labels_and_qualification() {
         serde_json::to_vec_pretty(&manifest_json(&model_hash, &tokenizer_hash)).unwrap(),
     )
     .unwrap();
+    let trusted_manifest_hash = claim_verifier_artifact_sha256(&manifest).unwrap();
 
-    assert!(validate_claim_verifier_manifest(&manifest, &model, &tokenizer).is_ok());
+    assert!(validate_claim_verifier_manifest(
+        &manifest,
+        &model,
+        &tokenizer,
+        &trusted_manifest_hash,
+    )
+    .is_ok());
 
     std::fs::write(&tokenizer, b"mutated tokenizer bytes").unwrap();
     assert!(matches!(
-        validate_claim_verifier_manifest(&manifest, &model, &tokenizer),
+        validate_claim_verifier_manifest(&manifest, &model, &tokenizer, &trusted_manifest_hash,),
+        Err(MobileBertClaimError::Integrity(_))
+    ));
+}
+
+#[test]
+fn internally_consistent_forged_manifest_fails_the_trusted_digest() {
+    let temp = tempfile::tempdir().unwrap();
+    let model = temp.path().join("ClaimVerifier.mlmodelc");
+    std::fs::create_dir(&model).unwrap();
+    std::fs::write(model.join("weights.bin"), b"model bytes").unwrap();
+    let tokenizer = temp.path().join("tokenizer.json");
+    std::fs::write(&tokenizer, b"tokenizer bytes").unwrap();
+    let manifest = temp.path().join("claim-verifier.json");
+    let model_hash = claim_verifier_artifact_sha256(&model).unwrap();
+    let tokenizer_hash = claim_verifier_artifact_sha256(&tokenizer).unwrap();
+    std::fs::write(
+        &manifest,
+        serde_json::to_vec_pretty(&manifest_json(&model_hash, &tokenizer_hash)).unwrap(),
+    )
+    .unwrap();
+    let trusted_manifest_hash = claim_verifier_artifact_sha256(&manifest).unwrap();
+
+    std::fs::write(&tokenizer, b"attacker replacement").unwrap();
+    let forged_tokenizer_hash = claim_verifier_artifact_sha256(&tokenizer).unwrap();
+    std::fs::write(
+        &manifest,
+        serde_json::to_vec_pretty(&manifest_json(&model_hash, &forged_tokenizer_hash)).unwrap(),
+    )
+    .unwrap();
+
+    assert!(matches!(
+        validate_claim_verifier_manifest(&manifest, &model, &tokenizer, &trusted_manifest_hash,),
         Err(MobileBertClaimError::Integrity(_))
     ));
 }
@@ -201,16 +261,18 @@ fn manifest_rejects_wrong_label_order_or_unqualified_runtime() {
     wrong_labels["judgment_labels"] =
         serde_json::json!(["contradicted", "supported", "insufficient"]);
     std::fs::write(&manifest, serde_json::to_vec_pretty(&wrong_labels).unwrap()).unwrap();
+    let wrong_labels_hash = claim_verifier_artifact_sha256(&manifest).unwrap();
     assert!(matches!(
-        validate_claim_verifier_manifest(&manifest, &model, &tokenizer),
+        validate_claim_verifier_manifest(&manifest, &model, &tokenizer, &wrong_labels_hash,),
         Err(MobileBertClaimError::Schema(_))
     ));
 
     let mut unqualified = manifest_json(&model_hash, &tokenizer_hash);
     unqualified["qualification"]["validation_qualified"] = serde_json::json!(false);
     std::fs::write(&manifest, serde_json::to_vec_pretty(&unqualified).unwrap()).unwrap();
+    let unqualified_hash = claim_verifier_artifact_sha256(&manifest).unwrap();
     assert!(matches!(
-        validate_claim_verifier_manifest(&manifest, &model, &tokenizer),
+        validate_claim_verifier_manifest(&manifest, &model, &tokenizer, &unqualified_hash,),
         Err(MobileBertClaimError::Qualification(_))
     ));
 }

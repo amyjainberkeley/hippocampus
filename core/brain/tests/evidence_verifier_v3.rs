@@ -12,6 +12,8 @@ fn origin() -> EvidenceOrigin {
     EvidenceOrigin::new("brain-device-a", "project/hippo", "screen_ocr").unwrap()
 }
 
+const AUTHORIZED_BRAIN: &str = "brain-device-a";
+
 #[test]
 fn proposed_claim_requires_one_nonempty_structured_relation() {
     let claim = ProposedClaim::new(
@@ -95,6 +97,10 @@ fn evidence_span_is_utf8_safe_and_bound_to_the_full_event() {
 fn evidence_span_rejects_empty_out_of_bounds_and_whitespace_ranges() {
     let text = "one two";
     assert!(matches!(
+        EvidenceSpan::new(EventId(0), text, 0, text.len(), &origin()),
+        Err(EvidenceContractError::UnpersistedEventId)
+    ));
+    assert!(matches!(
         EvidenceSpan::new(EventId(1), text, 3, 3, &origin()),
         Err(EvidenceContractError::InvalidEvidenceRange)
     ));
@@ -111,7 +117,7 @@ fn evidence_span_rejects_empty_out_of_bounds_and_whitespace_ranges() {
 #[test]
 fn evidence_set_is_nonempty_bounded_and_rejects_duplicate_spans() {
     assert!(matches!(
-        EvidenceSet::new(&claim(), Vec::new()),
+        EvidenceSet::new(&claim(), AUTHORIZED_BRAIN, Vec::new()),
         Err(EvidenceContractError::EmptyEvidenceSet)
     ));
 
@@ -122,14 +128,14 @@ fn evidence_set_is_nonempty_bounded_and_rejects_duplicate_spans() {
         })
         .collect();
     assert!(matches!(
-        EvidenceSet::new(&claim(), spans),
+        EvidenceSet::new(&claim(), AUTHORIZED_BRAIN, spans),
         Err(EvidenceContractError::TooManyEvidenceSpans { .. })
     ));
 
     let text = "Maya approved the launch.";
     let span = EvidenceSpan::new(EventId(7), text, 0, text.len(), &origin()).unwrap();
     assert!(matches!(
-        EvidenceSet::new(&claim(), vec![span.clone(), span]),
+        EvidenceSet::new(&claim(), AUTHORIZED_BRAIN, vec![span.clone(), span]),
         Err(EvidenceContractError::DuplicateEvidenceSpan)
     ));
 }
@@ -143,6 +149,7 @@ fn evidence_set_rejects_cross_scope_or_cross_brain_provenance() {
     assert!(matches!(
         EvidenceSet::new(
             &claim(),
+            AUTHORIZED_BRAIN,
             vec![EvidenceSpan::new(EventId(7), text, 0, text.len(), &private).unwrap()]
         ),
         Err(EvidenceContractError::EvidenceScopeMismatch)
@@ -150,12 +157,23 @@ fn evidence_set_rejects_cross_scope_or_cross_brain_provenance() {
     assert!(matches!(
         EvidenceSet::new(
             &claim(),
+            AUTHORIZED_BRAIN,
             vec![
                 EvidenceSpan::new(EventId(7), text, 0, text.len(), &origin()).unwrap(),
                 EvidenceSpan::new(EventId(8), text, 0, text.len(), &other_brain).unwrap(),
             ]
         ),
         Err(EvidenceContractError::MixedEvidenceBrains)
+    ));
+
+    let wrong_brain = EvidenceOrigin::new("brain-device-b", "project/hippo", "screen_ocr").unwrap();
+    assert!(matches!(
+        EvidenceSet::new(
+            &claim(),
+            AUTHORIZED_BRAIN,
+            vec![EvidenceSpan::new(EventId(9), text, 0, text.len(), &wrong_brain).unwrap()]
+        ),
+        Err(EvidenceContractError::EvidenceBrainMismatch)
     ));
 }
 
@@ -165,6 +183,7 @@ fn evidence_set_exposes_ranked_slots_without_mutation() {
     let second = "The launch date is September 8.";
     let evidence = EvidenceSet::new(
         &claim(),
+        AUTHORIZED_BRAIN,
         vec![
             EvidenceSpan::new(EventId(11), first, 0, first.len(), &origin()).unwrap(),
             EvidenceSpan::new(EventId(12), second, 0, second.len(), &origin()).unwrap(),
@@ -187,6 +206,7 @@ fn host_binding_preserves_every_selected_citation_in_stable_slot_order() {
     let second_text = "Maya approved the September 8 launch date.";
     let evidence = EvidenceSet::new(
         &claim(),
+        AUTHORIZED_BRAIN,
         vec![
             EvidenceSpan::new(EventId(11), first_text, 0, first_text.len(), &origin()).unwrap(),
             EvidenceSpan::new(EventId(12), second_text, 0, second_text.len(), &origin()).unwrap(),
@@ -218,6 +238,7 @@ fn host_binding_rejects_duplicate_unknown_or_missing_citation_slots() {
     let text = "The rollout owner is Maya.";
     let evidence = EvidenceSet::new(
         &claim(),
+        AUTHORIZED_BRAIN,
         vec![EvidenceSpan::new(EventId(11), text, 0, text.len(), &origin()).unwrap()],
     )
     .unwrap();
@@ -250,6 +271,7 @@ fn host_binding_rejects_invalid_confidence() {
     let text = "The rollout owner is Maya.";
     let evidence = EvidenceSet::new(
         &claim(),
+        AUTHORIZED_BRAIN,
         vec![EvidenceSpan::new(EventId(11), text, 0, text.len(), &origin()).unwrap()],
     )
     .unwrap();
@@ -274,6 +296,7 @@ fn bound_citation_revalidates_against_canonical_event_bytes() {
     let start = text.find("Launch").unwrap();
     let evidence = EvidenceSet::new(
         &claim(),
+        AUTHORIZED_BRAIN,
         vec![EvidenceSpan::new(EventId(31), text, start, text.len(), &origin()).unwrap()],
     )
     .unwrap();
