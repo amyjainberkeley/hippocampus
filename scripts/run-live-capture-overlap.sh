@@ -420,7 +420,8 @@ FIFO_GUARD_OPEN=1
 AGENT_PID=$!
 
 generation="live-overlap-$(date +%s)-$$"
-"$HELPER" --capture --probe-debug --output "$CAPTURE_FIFO" \
+"$HELPER" --capture --probe-debug --live-overlap-qualification \
+    --output "$CAPTURE_FIFO" \
     --heartbeat-seconds 2 --readiness-file "$READINESS_FILE" \
     --generation "$generation" >"$HELPER_STDOUT" 2>"$HELPER_STDERR" &
 HELPER_PID=$!

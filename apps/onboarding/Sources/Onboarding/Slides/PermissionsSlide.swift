@@ -15,7 +15,7 @@ import OnboardingKit
 /// After every surface has an outcome the slide shows a compact summary
 /// and the standard `OnboardingFlowView` "Next" affordance advances to
 /// `.primaryHotkey`. `canAdvance` on the flow VM still gates on Screen
-/// Recording being `.granted` (the only hard-required surface).
+/// both Screen Recording and Accessibility being `.granted`.
 struct PermissionsSlide: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @State private var isResetting = false
@@ -405,9 +405,9 @@ private struct PermissionCopy {
                 title: "Accessibility",
                 shortName: "Accessibility",
                 icon: "accessibility",
-                requirementBadge: "Recommended",
-                why: "Lets Hippocampus detect password fields so it knows NOT to capture them. Also improves recall accuracy on native macOS apps. Recommended but not required — you can still use Hippocampus without it.",
-                denialRecovery: "That's OK — Hippocampus still works, but it won't be able to detect password fields automatically. You can grant Accessibility later from Settings if you change your mind."
+                requirementBadge: "Required",
+                why: "Lets Hippocampus identify the focused window and detect password fields before capture. It is required for the screen privacy boundary.",
+                denialRecovery: "Accessibility is required before screen capture can run safely. Use Reset & Retry, or grant it later from Privacy & Security settings."
             )
         case .automation:
             return PermissionCopy(

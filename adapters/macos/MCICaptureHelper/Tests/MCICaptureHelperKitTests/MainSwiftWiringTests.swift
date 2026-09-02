@@ -272,6 +272,20 @@ final class MainSwiftWiringTests: XCTestCase {
         )
     }
 
+    func test_production_startup_only_disengages_ocr_for_the_live_qualification_capability() throws {
+        let src = try Self.readMainSwift()
+
+        XCTAssertFalse(
+            src.contains("activateM4Lift(enabled: captureOptions.captureEnabled)"),
+            "The ordinary --capture path must never lift the OCR privacy switch."
+        )
+        XCTAssertTrue(
+            src.contains("if qualificationAuthorized")
+                && src.contains("CascadeTwiceOCREmitter.activateM4Lift(enabled: true)"),
+            "Only the independently gated live-overlap capability may exercise OCR before launch qualification."
+        )
+    }
+
     func test_race_gate_fails_closed_on_observed_nil_when_installed_is_nonzero() {
         XCTAssertTrue(Self.raceGateFailsClosed(installedGen: 7, observedGen: nil))
     }

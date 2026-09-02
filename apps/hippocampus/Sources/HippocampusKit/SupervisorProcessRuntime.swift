@@ -92,7 +92,6 @@ package protocol SupervisorTopologyControlling: AnyObject {
         timeout: TimeInterval
     ) async throws
     func stop(timeout: TimeInterval) async throws
-    func setPaused(_ paused: Bool) throws
 }
 
 @MainActor
@@ -260,13 +259,6 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
             throw SupervisorProcessRuntimeError.partialStop
         }
         cleanup()
-    }
-
-    func setPaused(_ paused: Bool) throws {
-        guard let helper, helper.isRunning else {
-            throw SupervisorProcessRuntimeError.helperExited(helper?.terminationStatus ?? -1)
-        }
-        kill(helper.processIdentifier, paused ? SIGSTOP : SIGCONT)
     }
 
     private func cleanup() {

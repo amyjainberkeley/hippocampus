@@ -10,20 +10,25 @@ struct CaptureConsentBehavior {
         defer { try? FileManager.default.removeItem(at: sandbox) }
 
         let stateURL = sandbox.appendingPathComponent("capture-consent.json")
-        let authority = CaptureConsentAuthority(stateURL: stateURL, ownerProcessID: 4242)
+        let authority = CaptureConsentAuthority(
+            stateURL: stateURL,
+            ownerProcessID: 4242,
+            ownerStartTimeUs: 123_000_456
+        )
 
         try authority.enable(generationID: "generation-7")
         let enabled = try CaptureConsentAuthority.readState(at: stateURL)
         precondition(enabled.enabled)
         precondition(enabled.generation == "generation-7")
         precondition(enabled.ownerProcessID == 4242)
+        precondition(enabled.ownerStartTimeUs == 123_000_456)
         precondition(CaptureConsentAuthority.allowsCapture(
             state: enabled,
-            ownerIsAlive: { $0 == 4242 }
+            ownerIdentityMatches: { $0 == 4242 && $1 == 123_000_456 }
         ))
         precondition(!CaptureConsentAuthority.allowsCapture(
             state: enabled,
-            ownerIsAlive: { _ in false }
+            ownerIdentityMatches: { _, _ in false }
         ))
 
         try authority.disable()

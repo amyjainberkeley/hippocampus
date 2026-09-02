@@ -23,14 +23,17 @@ mode in MCI.
 
 2. **Cascade runs BEFORE IPC.** The full ADR-0013 cascade
    (denylist, secure-input probe, incognito hint, focused-window
-   scope, screen-share leak detection) MUST evaluate before any
+   scope) MUST evaluate before any
    frame or context payload is serialized to the wire. A frame that
    was captured and then discarded downstream is a leak.
 
-3. **Screen-share leak detection is load-bearing.** If a Zoom/
-   Meet/Teams share is active on the target display, capture MUST
-   pause for the duration of the share, not merely redact. See
-   `docs/research/2026-05-18-macos-secure-surface-detection.md`.
+3. **Do not claim automatic cross-app screen-share detection.** Public
+   macOS APIs do not provide a reliable signal that Zoom, Meet, Teams,
+   or another process is broadcasting a display. `CGDisplayIsCaptured`
+   is deprecated, and app presence is not share state. Capture stops on
+   explicit user pause, screen lock, TCC loss, denylisted focus, secure
+   input, and private browsing. Any future share detector must pass a
+   live multi-app qualification corpus before entering this cascade.
 
 4. **Denylist enforcement is per-frame, not per-window-focus.** A
    denylisted app can briefly become frontmost during a window

@@ -39,7 +39,29 @@ function connectNativeHost() {
   return port;
 }
 
-chrome.runtime.onMessage.addListener((message, sender, _sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "capture_authorization") {
+    if (!isPersistableTab(sender.tab)) {
+      sendResponse({ authorized: false });
+      return false;
+    }
+    try {
+      chrome.runtime.sendNativeMessage(
+        NATIVE_HOST_NAME,
+        { type: "capture_authorization", incognito: false },
+        (response) => {
+          const failed = Boolean(chrome.runtime.lastError);
+          sendResponse({
+            authorized: !failed && response && response.status === "authorized",
+          });
+        },
+      );
+      return true;
+    } catch (_e) {
+      sendResponse({ authorized: false });
+      return false;
+    }
+  }
   if (message.type !== "page_content") return;
 
   // Missing is not evidence of an ordinary tab. Require Chromium's

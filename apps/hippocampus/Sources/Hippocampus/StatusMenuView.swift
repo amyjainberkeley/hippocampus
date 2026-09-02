@@ -128,11 +128,10 @@ struct StatusMenuView: View {
     ///                              but from the menu-bar the entry
     ///                              point is a distinct verb; deep-links
     ///                              to `timeline` tab via MCI_INITIAL_TAB)
-    /// Pause is a USER-initiated pause distinct from the TCC-revoke
-    /// pause (PR #80) and the screen-share-leak pause (PR #75). It
-    /// flips `UserPauseController.shared.isPaused` AND asks the
-    /// supervisor to SIGSTOP the helper via the existing `setPaused`
-    /// path so the visible `MenuBarStatus` derivation flips to
+    /// Pause is a user-initiated stop distinct from the automatic
+    /// TCC-revocation stop. It flips `UserPauseController.shared.isPaused`
+    /// and asks the supervisor to stop the complete owned topology via `setPaused`
+    /// so the visible `MenuBarStatus` derivation flips to
     /// `.paused`. The controller emits a `helper_health
     /// user_paused=<bool>` breadcrumb so the health-log ring
     /// distinguishes user pauses from automated ones.
@@ -163,16 +162,13 @@ struct StatusMenuView: View {
     /// ⌘K Action Panel (PR #74). Keeps the two layers coherent:
     ///   - `UserPauseController.shared` — the user-facing flag +
     ///     breadcrumb emitter.
-    ///   - `supervisor.setPaused(_:)` — the SIGSTOP/SIGCONT gate on
-    ///     the capture helper. Only fired if the supervisor is in a
-    ///     paused-compatible state (`.running` / `.paused`); otherwise
-    ///     we still flip the user flag so a subsequent `.start()`
-    ///     honours it.
+    ///   - `supervisor.setPaused(_:)` — a verified full-topology stop
+    ///     followed by a fresh launch on resume. A pause requested before
+    ///     or during startup is also forwarded so capture cannot race the
+    ///     user's latest intent.
     private func toggleUserPause() {
         let nextPaused = UserPauseController.shared.togglePaused()
-        if supervisor.state == .running || supervisor.state == .paused {
-            supervisor.setPaused(nextPaused)
-        }
+        supervisor.setPaused(nextPaused)
     }
 
     @ViewBuilder

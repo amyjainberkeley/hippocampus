@@ -9,6 +9,10 @@ struct SupervisorLifecycleBehavior {
         proveTerminationRequiresExplicitIntent()
         try await proveNormalQuitComposition()
         try await proveResistantRestartComposition()
+        try await provePauseBeforeStartPreventsLaunch()
+        try await provePauseInterruptsStartup()
+        try await proveUserPauseOwnsNoChildProcesses()
+        try await proveLatestPauseIntentWins()
         try await proveShutdownCancelsKeyPreparation()
         try await proveShutdownCancelsReadiness()
         try await proveShutdownCancelsCaptureReconfiguration()
@@ -74,6 +78,88 @@ struct SupervisorLifecycleBehavior {
         precondition(launcher.observedStoppedBeforeScheduling)
         precondition(launcher.observedDeadChildrenBeforeScheduling)
         precondition(topology.trackedPIDs.allSatisfy { !SupervisorProcessShutdown.pidIsAlive($0) })
+    }
+
+    @MainActor
+    private static func provePauseBeforeStartPreventsLaunch() async throws {
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+
+        supervisor.setPaused(true)
+        try await supervisor.startAndWaitForReadiness()
+
+        precondition(supervisor.state == .paused)
+        precondition(topology.launchCount == 0)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func provePauseInterruptsStartup() async throws {
+        let readinessGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology(readinessGate: readinessGate)
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        let startup = Task { @MainActor in
+            try await supervisor.startAndWaitForReadiness()
+        }
+        await readinessGate.waitUntilEntered()
+
+        supervisor.setPaused(true)
+        await topology.waitUntilStopped()
+        readinessGate.resume()
+        _ = try? await startup.value
+        while supervisor.state != .paused { await Task.yield() }
+
+        precondition(topology.launchCount == 1)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func proveUserPauseOwnsNoChildProcesses() async throws {
+        let topology = RealProcessTopology(resistsTermination: true)
+        let supervisor = makeSupervisor(topology: topology)
+        try await supervisor.startAndWaitForReadiness()
+        let firstGenerationPIDs = topology.trackedPIDs
+
+        try await supervisor.setPausedAndWait(true)
+
+        precondition(supervisor.state == .paused)
+        precondition(!topology.isRunning)
+        precondition(firstGenerationPIDs.allSatisfy { !SupervisorProcessShutdown.pidIsAlive($0) })
+
+        try await supervisor.setPausedAndWait(false)
+
+        precondition(supervisor.state == .running)
+        precondition(topology.isRunning)
+        precondition(Set(topology.trackedPIDs).isDisjoint(with: firstGenerationPIDs))
+        try await supervisor.shutdownAndWait(timeout: 0.1)
+    }
+
+    @MainActor
+    private static func proveLatestPauseIntentWins() async throws {
+        let stopGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        try await supervisor.startAndWaitForReadiness()
+        topology.suspendStop(onCall: 1, at: stopGate)
+
+        supervisor.setPaused(true)
+        await stopGate.waitUntilEntered()
+        supervisor.setPaused(false)
+        stopGate.resume()
+
+        while topology.launchCount < 2 { await Task.yield() }
+        while supervisor.state != .running { await Task.yield() }
+        precondition(topology.isRunning)
+        try await supervisor.shutdownAndWait()
     }
 
     @MainActor

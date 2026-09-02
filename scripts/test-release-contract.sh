@@ -30,6 +30,7 @@ TOML_LICENSE_VERIFIER="$REPO_ROOT/scripts/verify-toml-license-contract.py"
 STAGE_RECALL_FFI="$REPO_ROOT/scripts/stage-recall-ffi.sh"
 E2E="$REPO_ROOT/scripts/e2e-clean-home.sh"
 E2E_CONTRACT="$REPO_ROOT/scripts/test-e2e-clean-home-contract.sh"
+APP_GROUP_CONTRACT_TEST="$REPO_ROOT/scripts/test-app-group-contract.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -239,6 +240,8 @@ reject_pattern "$NOTICE" 'imposes no condition' \
     'model notice does not make an unverified Reuters derivative-rights conclusion'
 require_pattern "$CHECK" 'release-contract\|bash\|lint\|scripts/test-release-contract\.sh' \
     'the unified local gate runs the release contract'
+require_pattern "$CHECK" 'app-group-contract\|bash\|test\|scripts/test-app-group-contract\.sh' \
+    'the unified local gate runs the App Group identity contract'
 require_pattern "$CHECK" 'toml-license-contract\|bash\|lint\|scripts/test-toml-license-contract\.sh' \
     'the unified local gate runs the TOML dependency license contract'
 require_pattern "$CHECK" 'retention-policy-contract\|bash\|test\|scripts/test-retention-policy-contract\.sh' \
@@ -259,7 +262,7 @@ require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path adapt
     'release CI proves readiness publication is private, atomic, and add-only'
 require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior' \
     'release CI executes the durable app-access route fixture'
-for script in test-release-contract.sh test-release-identity.sh \
+for script in test-release-contract.sh test-app-group-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
     test-sparkle-keygen.sh test-sparkle-keypair.sh; do
     require_literal "$RELEASE_CI" "scripts/$script" \
@@ -357,15 +360,20 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/agent/Cargo.toml apps/agent/src/retention_worker.rs \
     apps/agent/src/bin/mci_agent.rs apps/agent/src/bin/mci_e2e_fixture.rs \
     apps/agent/tests/retention_preferences_contract.rs \
+    apps/hippocampus/Sources/HippocampusKit/AppGroupIdentity.swift \
+    apps/hippocampus/Resources/Hippocampus.entitlements \
+    extensions/safari/appex/Info.plist \
+    extensions/safari/appex/HippocampusSafariExtension.entitlements \
+    scripts/test-app-group-contract.sh scripts/lib/app-group-contract.sh \
     CHANGELOG.md docs/STATUS.md rust-toolchain.toml; do
     require_literal "$RELEASE_CI" "'$release_input'" \
         "release CI watches $release_input"
 done
 
-if [[ -x "$E2E" && -x "$E2E_CONTRACT" ]]; then
-    pass 'clean-home executable and contract are committed and executable'
+if [[ -x "$E2E" && -x "$E2E_CONTRACT" && -x "$APP_GROUP_CONTRACT_TEST" ]]; then
+    pass 'clean-home and App Group contracts are committed and executable'
 else
-    fail 'clean-home executable and contract are committed and executable'
+    fail 'clean-home and App Group contracts are committed and executable'
 fi
 require_literal "$RELEASE_CI" "'release-models.json'" \
     'release CI watches the tag-owned model manifest'

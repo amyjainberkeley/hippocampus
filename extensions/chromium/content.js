@@ -99,7 +99,22 @@ function extractPageContent() {
   };
 }
 
-function sendContent() {
+async function requestCaptureAuthorization() {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "capture_authorization",
+    });
+    return response && response.authorized === true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+async function sendContent() {
+  if (!isPersistableContext()) return;
+  if (!(await requestCaptureAuthorization())) return;
+  // Re-check the browser-owned privacy classification after crossing the
+  // asynchronous native boundary and before touching the DOM.
   if (!isPersistableContext()) return;
   const content = extractPageContent();
   if (!content) return;
@@ -155,6 +170,8 @@ debouncedSend();
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     extractPageContent,
+    requestCaptureAuthorization,
+    sendContent,
     isBlockedURL,
     isIncognitoContext,
     isPersistableContext,

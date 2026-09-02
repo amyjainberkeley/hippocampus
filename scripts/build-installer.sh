@@ -17,10 +17,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
+APP_GROUP_CONTRACT="$REPO_ROOT/scripts/lib/app-group-contract.sh"
 INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
 CANONICAL_APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
 GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
+
+if [[ ! -f "$APP_GROUP_CONTRACT" ]]; then
+    echo "FATAL: App Group contract helper missing at $APP_GROUP_CONTRACT" >&2
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "$APP_GROUP_CONTRACT"
 
 SKIP_BUILD=0
 BUILD_PROFILE="release"
@@ -299,7 +307,41 @@ fi
 
 # --- Step 2: Codesign (Developer ID or explicit debug-only ad-hoc) ---
 
-ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements"
+if ! EXPECTED_APP_GROUP_ID=$(hippocampus_resolve_app_group_id "$SIGNING_MODE" "$DEVELOPER_ID"); then
+    echo "FATAL: Unable to resolve the macOS App Group identity." >&2
+    exit 1
+fi
+BUNDLED_APP_GROUP_ID=$(/usr/libexec/PlistBuddy -c \
+    'Print :HippocampusAppGroupIdentifier' \
+    "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)
+if [[ "$BUNDLED_APP_GROUP_ID" != "$EXPECTED_APP_GROUP_ID" ]]; then
+    echo "FATAL: Bundled App Group identity does not match the signing identity." >&2
+    echo "  expected: $EXPECTED_APP_GROUP_ID" >&2
+    echo "  bundled:  ${BUNDLED_APP_GROUP_ID:-missing}" >&2
+    exit 1
+fi
+
+APPEX_PATH="$APP_PATH/Contents/PlugIns/HippocampusSafariExtension.appex"
+if [[ -d "$APPEX_PATH" ]]; then
+    BUNDLED_APPEX_GROUP_ID=$(/usr/libexec/PlistBuddy -c \
+        'Print :HippocampusAppGroupIdentifier' \
+        "$APPEX_PATH/Contents/Info.plist" 2>/dev/null || true)
+    if [[ "$BUNDLED_APPEX_GROUP_ID" != "$EXPECTED_APP_GROUP_ID" ]]; then
+        echo "FATAL: Safari extension App Group identity differs from its host app." >&2
+        exit 1
+    fi
+fi
+
+SIGNING_SCRATCH=$(mktemp -d -t hippocampus-installer-signing)
+trap 'rm -rf "$SIGNING_SCRATCH"' EXIT
+ENTITLEMENTS="$SIGNING_SCRATCH/Hippocampus.entitlements"
+APPEX_ENTITLEMENTS="$SIGNING_SCRATCH/HippocampusSafariExtension.entitlements"
+hippocampus_render_app_group_entitlements \
+    "$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements" \
+    "$ENTITLEMENTS" "$EXPECTED_APP_GROUP_ID"
+hippocampus_render_app_group_entitlements \
+    "$REPO_ROOT/extensions/safari/appex/HippocampusSafariExtension.entitlements" \
+    "$APPEX_ENTITLEMENTS" "$EXPECTED_APP_GROUP_ID"
 
 if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     echo "--- Codesigning with Developer ID (hardened runtime) ---"
@@ -307,8 +349,6 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     # Sign embedded binaries first (inside-out signing order)
 
     # Sign Safari extension .appex (innermost)
-    APPEX_PATH="$APP_PATH/Contents/PlugIns/HippocampusSafariExtension.appex"
-    APPEX_ENTITLEMENTS="$REPO_ROOT/extensions/safari/appex/HippocampusSafariExtension.entitlements"
     if [[ -d "$APPEX_PATH" ]]; then
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
@@ -318,30 +358,25 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
 
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
-        --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/MCICaptureHelper"
 
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
-        --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/mci-agent"
 
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
-        --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/recall-ui"
 
     if [[ -f "$APP_PATH/Contents/MacOS/onboarding" ]]; then
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
-            --entitlements "$ENTITLEMENTS" \
             "$APP_PATH/Contents/MacOS/onboarding"
     fi
 
     if [[ -f "$APP_PATH/Contents/MacOS/hippocampus-native-host" ]]; then
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
-            --entitlements "$ENTITLEMENTS" \
             "$APP_PATH/Contents/MacOS/hippocampus-native-host"
     fi
 
@@ -416,9 +451,25 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     codesign --verify --deep --strict "$APP_PATH"
     echo "  Signature valid."
 else
-    echo "--- Development-only ad-hoc codesigning ---"
-    codesign --force --deep --sign - "$APP_PATH"
+    echo "--- Verifying development-only ad-hoc signature ---"
+    codesign --verify --deep --strict "$APP_PATH"
 fi
+EXPECTED_SIGNED_TEAM_ID=""
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    EXPECTED_SIGNED_TEAM_ID="${EXPECTED_APP_GROUP_ID%%.*}"
+fi
+if ! hippocampus_verify_signed_app_group \
+    "$APP_PATH" "$EXPECTED_APP_GROUP_ID" "$EXPECTED_SIGNED_TEAM_ID"; then
+    echo "FATAL: Signed host App Group does not match its bundle/signing identity." >&2
+    exit 1
+fi
+if [[ -d "$APPEX_PATH" ]] && ! hippocampus_verify_signed_app_group \
+    "$APPEX_PATH" "$EXPECTED_APP_GROUP_ID" "$EXPECTED_SIGNED_TEAM_ID"; then
+    echo "FATAL: Signed Safari App Group does not match its host/signing identity." >&2
+    exit 1
+fi
+rm -rf "$SIGNING_SCRATCH"
+trap - EXIT
 
 # --- Step 2.5: Notarize + staple the .app ITSELF (not just the DMG) ---
 #

@@ -7,7 +7,9 @@ on:
       - '.github/workflows/release*.yml'
       - '.github/workflows/publish-release.yml'
       - 'apps/hippocampus/Resources/Info.plist'
+      - 'apps/hippocampus/Resources/Hippocampus.entitlements'
       - 'apps/hippocampus/Resources/build-app.sh'
+      - 'apps/hippocampus/Sources/HippocampusKit/AppGroupIdentity.swift'
       - 'apps/hippocampus/Package.swift'
       - 'apps/hippocampus/Package.resolved'
       - 'NOTICE'
@@ -15,6 +17,8 @@ on:
       - 'third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt'
       - 'third_party/licenses/toml-license-manifest.json'
       - 'scripts/build-installer.sh'
+      - 'scripts/lib/app-group-contract.sh'
+      - 'scripts/test-app-group-contract.sh'
       - 'scripts/*release*'
       - 'scripts/*sparkle*'
       - 'scripts/test-toml-license-contract.sh'
@@ -85,6 +89,8 @@ on:
       - 'apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift'
       - 'extensions/safari/appex/SafariWebExtensionHandler.swift'
+      - 'extensions/safari/appex/Info.plist'
+      - 'extensions/safari/appex/HippocampusSafariExtension.entitlements'
       - 'extensions/safari/content.js'
       - 'extensions/safari/background.js'
       - 'extensions/safari/manifest.json'
@@ -127,7 +133,9 @@ on:
       - '.github/workflows/release*.yml'
       - '.github/workflows/publish-release.yml'
       - 'apps/hippocampus/Resources/Info.plist'
+      - 'apps/hippocampus/Resources/Hippocampus.entitlements'
       - 'apps/hippocampus/Resources/build-app.sh'
+      - 'apps/hippocampus/Sources/HippocampusKit/AppGroupIdentity.swift'
       - 'apps/hippocampus/Package.swift'
       - 'apps/hippocampus/Package.resolved'
       - 'NOTICE'
@@ -135,6 +143,8 @@ on:
       - 'third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt'
       - 'third_party/licenses/toml-license-manifest.json'
       - 'scripts/build-installer.sh'
+      - 'scripts/lib/app-group-contract.sh'
+      - 'scripts/test-app-group-contract.sh'
       - 'scripts/*release*'
       - 'scripts/*sparkle*'
       - 'scripts/test-toml-license-contract.sh'
@@ -205,6 +215,8 @@ on:
       - 'apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift'
       - 'extensions/safari/appex/SafariWebExtensionHandler.swift'
+      - 'extensions/safari/appex/Info.plist'
+      - 'extensions/safari/appex/HippocampusSafariExtension.entitlements'
       - 'extensions/safari/content.js'
       - 'extensions/safari/background.js'
       - 'extensions/safari/manifest.json'
@@ -254,6 +266,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: scripts/test-release-contract.sh
+      - run: scripts/test-app-group-contract.sh
       - run: scripts/test-toml-license-contract.sh
       - run: scripts/test-task-2-product-truth.sh
       - run: scripts/test-retention-policy-contract.sh

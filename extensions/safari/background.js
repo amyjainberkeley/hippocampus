@@ -16,6 +16,18 @@ function isPersistableTab(tab) {
 }
 
 api.runtime.onMessage.addListener((message, sender, _sendResponse) => {
+  if (message.type === "capture_authorization") {
+    if (!isPersistableTab(sender.tab)) {
+      return Promise.resolve({ authorized: false });
+    }
+    return api.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+      type: "capture_authorization",
+      incognito: false,
+    }).then(
+      (response) => ({ authorized: response && response.status === "authorized" }),
+      () => ({ authorized: false }),
+    );
+  }
   if (message.type !== "page_content") return;
   if (!isPersistableTab(sender.tab)) return;
 

@@ -2,20 +2,18 @@
 //
 // UserPauseController — the user-initiated pause layer.
 //
-// Distinct from the two other pause paths in the app:
+// Distinct from the automatic TCC pause path in the app:
 //   - TCC-revoke pause (PR #80) — the helper self-pauses when
-//     Screen Recording / Accessibility / FDA / Automation is revoked
+//     required Screen Recording or Accessibility access is revoked
 //     mid-run. Handled by TCCHelperStderrTail → notifier + menu-bar
 //     red pill. Not user-initiated; recovers automatically when the
 //     grant is restored.
-//   - Screen-share leak-pause (PR #75) — the helper self-pauses when
-//     the user starts a Zoom/Meet/AirPlay share. Not user-initiated;
-//     recovers automatically when sharing ends.
 //
-// This layer is the third: an explicit "I want to stop being recorded
+// This layer is the explicit "I want to stop being recorded
 // right now" gate the user flips from the menu-bar drop-down (⌘⇧P) or
-// the ⌘K Action Panel. When set, the supervisor is asked to SIGSTOP
-// the helper (existing setPaused path) AND a `helper_health
+// the ⌘K Action Panel. When set, the supervisor stops the owned helper
+// and agent topology completely, then launches a fresh generation on
+// resume. A `helper_health
 // user_paused=true` breadcrumb is emitted so the health-log ring
 // surfaces user-initiated pauses distinctly from the automated ones.
 //

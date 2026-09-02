@@ -82,11 +82,58 @@ function setupDOM(opts = {}) {
 // Re-import the module functions for testing
 const {
   extractPageContent,
+  sendContent,
   isBlockedURL,
   isIncognitoContext,
   isTopFrame,
   MAX_TEXT_LENGTH,
 } = await import("../content.js");
+
+describe("capture authorization", () => {
+  beforeEach(() => {
+    setupDOM();
+    globalThis.chrome.runtime.sendMessage.mockReset();
+  });
+
+  it("does not read document.body unless the native boundary authorizes capture", async () => {
+    globalThis.chrome.runtime.sendMessage.mockResolvedValue({ authorized: false });
+    let bodyReads = 0;
+    Object.defineProperty(globalThis.document, "body", {
+      get() {
+        bodyReads += 1;
+        return { innerText: "must remain unread" };
+      },
+      configurable: true,
+    });
+
+    await sendContent();
+
+    expect(bodyReads).toBe(0);
+    expect(globalThis.chrome.runtime.sendMessage).toHaveBeenCalledOnce();
+    expect(globalThis.chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "capture_authorization",
+    });
+  });
+
+  it("extracts and forwards only after explicit authorization", async () => {
+    globalThis.chrome.runtime.sendMessage
+      .mockResolvedValueOnce({ authorized: true })
+      .mockResolvedValueOnce(undefined);
+
+    await sendContent();
+
+    expect(globalThis.chrome.runtime.sendMessage).toHaveBeenNthCalledWith(1, {
+      type: "capture_authorization",
+    });
+    expect(globalThis.chrome.runtime.sendMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: "page_content",
+        payload: expect.objectContaining({ text: "Hello world" }),
+      }),
+    );
+  });
+});
 
 describe("isBlockedURL", () => {
   it("blocks data: URLs", () => {

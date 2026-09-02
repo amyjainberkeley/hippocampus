@@ -7,7 +7,7 @@
 // writes them to the agent's page_content.sock.
 //
 // Architecture:
-//   Safari .appex → group.ai.hippocampus/safari-inbox/ → [this] →
+//   Safari .appex → signed App Group/safari-inbox/ → [this] →
 //   page_content.sock → mci-agent PageContentListener → BrainPump
 //
 // ADR-0020 §4 invariants preserved:
@@ -27,14 +27,13 @@ public final class SafariInboxReader: Sendable {
         category: "safari-inbox"
     )
 
-    nonisolated(unsafe) private static let groupID = "group.ai.hippocampus"
-    nonisolated(unsafe) private static let inboxDir = "safari-inbox"
-    nonisolated(unsafe) private static let maxTextBytes = 200 * 1024
+    private static let inboxDir = "safari-inbox"
+    private static let maxTextBytes = 200 * 1024
 
     // Wire protocol constants — must match core/src/ipc/wire.rs
-    nonisolated(unsafe) private static let frameMagic: UInt8 = 0x4D
-    nonisolated(unsafe) private static let frameVersion: UInt8 = 0x06
-    nonisolated(unsafe) private static let pageContentEventType: UInt16 = 0x0050
+    nonisolated private static let frameMagic: UInt8 = 0x4D
+    nonisolated private static let frameVersion: UInt8 = 0x06
+    nonisolated private static let pageContentEventType: UInt16 = 0x0050
 
     // Content-free telemetry counters
     public private(set) var forwarded: UInt64 = 0
@@ -138,6 +137,13 @@ public final class SafariInboxReader: Sendable {
     }
 
     private func processPayloadFile(_ fileURL: URL) {
+        processPayloadFile(fileURL, writeFrame: writeToSocket)
+    }
+
+    package func processPayloadFile(
+        _ fileURL: URL,
+        writeFrame: (Data) -> Bool
+    ) {
         guard let data = try? Data(contentsOf: fileURL) else {
             failedParse += 1
             removeFile(fileURL)
@@ -192,7 +198,7 @@ public final class SafariInboxReader: Sendable {
             text, maxBytes: Self.maxTextBytes
         )
 
-        let frame = Self.encodePageContentEvent(
+        guard let frame = Self.encodePageContentEvent(
             seq: forwarded,
             tsUs: tsUs,
             url: url,
@@ -200,9 +206,14 @@ public final class SafariInboxReader: Sendable {
             fullText: truncated,
             sourceBrowser: sourceBrowser,
             tabId: tabId
-        )
+        ) else {
+            failedParse += 1
+            logger.warning("safari-inbox: payload exceeds wire limits, removing")
+            removeFile(fileURL)
+            return
+        }
 
-        if writeToSocket(frame) {
+        if writeFrame(frame) {
             forwarded += 1
             removeFile(fileURL)
         }
@@ -313,7 +324,7 @@ public final class SafariInboxReader: Sendable {
 
     // MARK: - Secret filter (mirrors native host secret_filter.rs §6)
 
-    nonisolated(unsafe) private static let secretPatterns: [NSRegularExpression] = {
+    nonisolated private static let secretPatterns: [NSRegularExpression] = {
         let specs = [
             #"(?i)(?:password|passwd|secret|api[_\-]?key|token|bearer|access[_\-]?token)\s*[:=]\s*\S+"#,
             #"gh[pousr]_[A-Za-z0-9]{36}"#,
@@ -365,36 +376,64 @@ public final class SafariInboxReader: Sendable {
         fullText: String,
         sourceBrowser: String,
         tabId: UInt32
-    ) -> Data {
-        let urlBytes = Array(url.utf8)
-        let titleBytes = Array(title.utf8)
-        let textBytes = Array(fullText.utf8)
-        let browserBytes = Array(sourceBrowser.utf8)
+    ) -> Data? {
+        let urlByteCount = url.utf8.count
+        let titleByteCount = title.utf8.count
+        let textByteCount = fullText.utf8.count
+        let browserByteCount = sourceBrowser.utf8.count
+
+        guard let urlLength = UInt16(exactly: urlByteCount),
+              let titleLength = UInt16(exactly: titleByteCount),
+              let textLength = UInt32(exactly: textByteCount),
+              let browserLength = UInt8(exactly: browserByteCount)
+        else {
+            return nil
+        }
 
         // Payload: seq(8) + ts_us(8) + url_len(2) + title_len(2) +
         // full_text_len(4) + source_browser_len(1) + tab_id(4) +
         // url + title + full_text + source_browser
         let fixedHeader = 8 + 8 + 2 + 2 + 4 + 1 + 4  // 29
-        let payloadLen = fixedHeader + urlBytes.count + titleBytes.count
-            + textBytes.count + browserBytes.count
+        var payloadLen = fixedHeader
+        for fieldLength in [
+            urlByteCount,
+            titleByteCount,
+            textByteCount,
+            browserByteCount,
+        ] {
+            let addition = payloadLen.addingReportingOverflow(fieldLength)
+            guard !addition.overflow else { return nil }
+            payloadLen = addition.partialValue
+        }
+        guard let wirePayloadLength = UInt32(exactly: payloadLen) else {
+            return nil
+        }
+
+        let frameCapacity = 16.addingReportingOverflow(payloadLen)
+        guard !frameCapacity.overflow else { return nil }
+
+        let urlBytes = Array(url.utf8)
+        let titleBytes = Array(title.utf8)
+        let textBytes = Array(fullText.utf8)
+        let browserBytes = Array(sourceBrowser.utf8)
 
         // Frame header: magic(1) + version(1) + msg_type(2) + seq(8) + len(4) = 16
-        var data = Data(capacity: 16 + payloadLen)
+        var data = Data(capacity: frameCapacity.partialValue)
 
         // Frame header
         data.append(frameMagic)
         data.append(frameVersion)
         appendLE(&data, pageContentEventType)
         appendLE(&data, seq)
-        appendLE(&data, UInt32(payloadLen))
+        appendLE(&data, wirePayloadLength)
 
         // Payload
         appendLE(&data, seq)
         appendLE(&data, tsUs)
-        appendLE(&data, UInt16(urlBytes.count))
-        appendLE(&data, UInt16(titleBytes.count))
-        appendLE(&data, UInt32(textBytes.count))
-        data.append(UInt8(browserBytes.count))
+        appendLE(&data, urlLength)
+        appendLE(&data, titleLength)
+        appendLE(&data, textLength)
+        data.append(browserLength)
         appendLE(&data, tabId)
         data.append(contentsOf: urlBytes)
         data.append(contentsOf: titleBytes)
@@ -407,9 +446,9 @@ public final class SafariInboxReader: Sendable {
     // MARK: - Helpers
 
     private func inboxURL() -> URL? {
-        FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: Self.groupID
-        )?.appendingPathComponent(Self.inboxDir, isDirectory: true)
+        AppGroupIdentity.identifier.flatMap {
+            FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0)
+        }?.appendingPathComponent(Self.inboxDir, isDirectory: true)
     }
 
     private func removeFile(_ url: URL) {

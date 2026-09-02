@@ -180,27 +180,11 @@ final class SCStreamCaptureSessionTCCTests: XCTestCase {
     }
 
     // 5
-    func testStopClearsBothPauseFlags() async throws {
+    func testStopClearsTCCPauseState() async throws {
         let session = TCCFixtures.makeSession()
         await session.pauseForTCC(surface: .screenRecording)
-        await session.pauseForScreenShare(actor: "us.zoom.xos")
         try await session.stop()
         XCTAssertFalse(session.isPausedForTCCForTest())
-        XCTAssertFalse(session.isPausedForScreenShareForTest())
         XCTAssertTrue(session.revokedSurfacesForTest().isEmpty)
-    }
-
-    // Independence from screen-share pause: a TCC revoke does NOT
-    // touch the screen-share flag and vice versa. The two reasons
-    // compose (bringUpSCStreamOnly is only reached when BOTH clear).
-    func testTCCAndScreenSharePauseFlagsAreIndependent() async {
-        let session = TCCFixtures.makeSession()
-        await session.pauseForTCC(surface: .screenRecording)
-        XCTAssertTrue(session.isPausedForTCCForTest())
-        XCTAssertFalse(session.isPausedForScreenShareForTest())
-
-        await session.pauseForScreenShare(actor: "us.zoom.xos")
-        XCTAssertTrue(session.isPausedForTCCForTest())
-        XCTAssertTrue(session.isPausedForScreenShareForTest())
     }
 }

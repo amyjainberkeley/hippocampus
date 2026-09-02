@@ -4,6 +4,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const safariRoot = path.resolve(__dirname, "..");
+let backgroundListener;
 
 function installGlobals() {
   global.browser = {
@@ -11,7 +12,7 @@ function installGlobals() {
     runtime: {
       sendMessage() {},
       sendNativeMessage() { return Promise.resolve(); },
-      onMessage: { addListener() {} },
+      onMessage: { addListener(listener) { backgroundListener = listener; } },
     },
   };
   global.chrome = undefined;
@@ -57,4 +58,40 @@ test("Safari background only accepts an explicitly non-private tab", () => {
   assert.equal(background.isPersistableTab({ incognito: true }), false);
   assert.equal(background.isPersistableTab({}), false);
   assert.equal(background.isPersistableTab(null), false);
+});
+
+test("Safari does not read page text when capture authorization is denied", async () => {
+  browser.extension.inIncognitoContext = false;
+  browser.runtime.sendMessage = async () => ({ authorized: false });
+  let bodyReads = 0;
+  Object.defineProperty(global.document, "body", {
+    get() {
+      bodyReads += 1;
+      return { innerText: "must remain unread" };
+    },
+    configurable: true,
+  });
+
+  await content.sendContent();
+
+  assert.equal(bodyReads, 0);
+});
+
+test("Safari background performs content-free native authorization", async () => {
+  let nativeRequest;
+  browser.runtime.sendNativeMessage = async (_name, message) => {
+    nativeRequest = message;
+    return { status: "authorized" };
+  };
+
+  const response = await backgroundListener(
+    { type: "capture_authorization" },
+    { tab: { id: 7, incognito: false } },
+  );
+
+  assert.deepEqual(nativeRequest, {
+    type: "capture_authorization",
+    incognito: false,
+  });
+  assert.deepEqual(response, { authorized: true });
 });

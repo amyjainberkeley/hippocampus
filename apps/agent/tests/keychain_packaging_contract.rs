@@ -61,13 +61,23 @@ fn packaging_places_and_signs_every_acl_consumer_before_sealing_the_app() {
         );
         assert!(ad_hoc_branch.contains(&format!("$MACOS/{executable}")));
     }
-    assert!(
+    assert_eq!(
         developer_branch
             .matches("--entitlements \"$ENTITLEMENTS\"")
-            .count()
-            >= 4
+            .count(),
+        2,
+        "only the host executable and app bundle need the host App Group entitlement"
     );
-    assert!(ad_hoc_branch.contains("codesign --force --deep --sign - \"$APP\""));
+    assert!(developer_branch.contains("--entitlements \"$APPEX_ENTITLEMENTS\""));
+    assert_eq!(
+        ad_hoc_branch
+            .matches("--entitlements \"$ENTITLEMENTS\"")
+            .count(),
+        2
+    );
+    assert!(ad_hoc_branch.contains("--entitlements \"$APPEX_ENTITLEMENTS\""));
+    assert!(!ad_hoc_branch.contains("codesign --force --deep --sign - \"$APP\""));
+    assert!(script.contains("hippocampus_render_app_group_entitlements"));
     assert!(script.contains("--development-ad-hoc"));
     assert!(script.contains("Ad-hoc signing is development-only and requires --debug"));
     assert!(script.contains("Release assembly requires a stable Developer ID Application identity"));

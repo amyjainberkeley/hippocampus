@@ -153,7 +153,21 @@ let args = parseArgs(CommandLine.arguments)
 // `captureEnabled` is true ONLY if the non-default `--capture` flag was
 // explicitly passed. The default path never constructs an `SCStream`.
 let captureOptions = CaptureLaunchOptions.parse(CommandLine.arguments)
-CascadeTwiceOCREmitter.activateM4Lift(enabled: captureOptions.captureEnabled)
+let qualificationRequested = LiveOCRQualification.isRequested(CommandLine.arguments)
+let qualificationAuthorized = LiveOCRQualification.isAuthorized(
+    arguments: CommandLine.arguments,
+    environment: ProcessInfo.processInfo.environment
+)
+if qualificationRequested && !qualificationAuthorized {
+    FileHandle.standardError.write(
+        "mci-capture-helper: incomplete live OCR qualification capability\n"
+            .data(using: .utf8) ?? Data()
+    )
+    exit(64)
+}
+if qualificationAuthorized {
+    CascadeTwiceOCREmitter.activateM4Lift(enabled: true)
+}
 
 let readiness: HelperReadinessReceipt?
 do {

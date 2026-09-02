@@ -256,6 +256,7 @@ final class ProcessSupervisorTests: XCTestCase {
         )
 
         XCTAssertTrue(plan.helperArguments.contains("--capture"))
+        XCTAssertFalse(plan.helperArguments.contains("--live-overlap-qualification"))
         XCTAssertEqual(plan.agentEnvironment["MCI_CAPTURE_ENABLED"], "1")
     }
 
@@ -299,6 +300,79 @@ final class ProcessSupervisorTests: XCTestCase {
         try await supervisor.startAndWaitForReadiness()
 
         XCTAssertNotNil(supervisor.safariInboxStats)
+    }
+
+    func test_pause_requested_before_start_prevents_topology_launch() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+
+        supervisor.setPaused(true)
+        try await supervisor.startAndWaitForReadiness()
+
+        XCTAssertEqual(supervisor.state, .paused)
+        XCTAssertTrue(topology.launchPlans.isEmpty)
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertNil(supervisor.safariInboxStats)
+    }
+
+    func test_pause_requested_during_startup_cancels_uncommitted_topology() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        let readiness = TestSuspension()
+        topology.readinessSuspension = readiness
+        topology.readinessResults = [.success(())]
+        let startup = Task { @MainActor in
+            try await supervisor.startAndWaitForReadiness()
+        }
+        await readiness.waitUntilEntered()
+
+        supervisor.setPaused(true)
+        while topology.stopCalls == 0 { await Task.yield() }
+        readiness.resume()
+        _ = try? await startup.value
+        while supervisor.state != .paused { await Task.yield() }
+
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertNil(supervisor.safariInboxStats)
+    }
+
+    func test_user_pause_stops_the_owned_topology_and_resume_launches_a_fresh_generation() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.success(()), .success(())]
+        try await supervisor.startAndWaitForReadiness()
+
+        try await supervisor.setPausedAndWait(true)
+
+        XCTAssertEqual(supervisor.state, .paused)
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertNil(supervisor.safariInboxStats)
+
+        try await supervisor.setPausedAndWait(false)
+
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertNotEqual(topology.generations[0].id, topology.generations[1].id)
+        XCTAssertTrue(topology.isRunning)
+        XCTAssertNotNil(supervisor.safariInboxStats)
+    }
+
+    func test_latest_resume_intent_wins_while_pause_stop_is_in_flight() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.success(()), .success(())]
+        try await supervisor.startAndWaitForReadiness()
+        let suspension = TestSuspension()
+        topology.stopSuspensionOnCall = 1
+        topology.stopSuspension = suspension
+
+        supervisor.setPaused(true)
+        await suspension.waitUntilEntered()
+        supervisor.setPaused(false)
+        suspension.resume()
+
+        while topology.launchPlans.count < 2 { await Task.yield() }
+        while supervisor.state != .running { await Task.yield() }
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertTrue(topology.isRunning)
     }
 
     func test_startup_denial_never_reaches_running() async {

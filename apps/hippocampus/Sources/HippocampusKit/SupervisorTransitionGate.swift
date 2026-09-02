@@ -20,6 +20,14 @@ struct SupervisorTransitionGate {
         return true
     }
 
+    @discardableResult
+    mutating func commitStopped(transitionID: UUID) -> Bool {
+        guard activeTransitionID == transitionID else { return false }
+        committedGenerationID = nil
+        activeTransitionID = nil
+        return true
+    }
+
     mutating func fail(transitionID: UUID) {
         guard activeTransitionID == transitionID else { return }
         committedGenerationID = nil

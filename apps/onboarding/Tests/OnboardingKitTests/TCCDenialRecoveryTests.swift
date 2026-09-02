@@ -6,7 +6,7 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
     private func makeVM(
         srStatus: TCCStatus = .notRequested,
-        axStatus: TCCStatus = .notRequested
+        axStatus: TCCStatus = .granted
     ) -> (OnboardingFlowViewModel, StubTCCPermission, StubTCCPermission) {
         let sr = StubTCCPermission(kind: .screenRecording, status: srStatus)
         let ax = StubTCCPermission(kind: .accessibility, status: axStatus)
@@ -92,12 +92,12 @@ final class TCCDenialRecoveryTests: XCTestCase {
         XCTAssertEqual(vm.currentStep, .allowlist)
     }
 
-    // MARK: - Accessibility denial (separate row, non-blocking)
+    // MARK: - Accessibility denial (capture-critical)
 
-    func testAccessibilityDeniedDoesNotBlockAdvance() {
+    func testAccessibilityDeniedBlocksAdvance() {
         let (vm, _, _) = makeVM(srStatus: .granted, axStatus: .denied)
         vm.goTo(.permissions)
-        XCTAssertTrue(vm.canAdvance)
+        XCTAssertFalse(vm.canAdvance)
     }
 
     func testAccessibilityResetAndRetry() async {

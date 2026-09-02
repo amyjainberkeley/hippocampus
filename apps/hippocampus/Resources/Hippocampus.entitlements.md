@@ -9,7 +9,17 @@ Each key, in the order it appears in the plist:
 | `com.apple.security.cs.allow-jit` | `false` | JIT compilation is not used. Stated explicitly for audit clarity (false is the hardened-runtime default). |
 | `com.apple.security.cs.allow-unsigned-executable-memory` | `false` | No unsigned executable memory is needed; all code is AOT-compiled. |
 | `com.apple.security.cs.allow-dyld-environment-variables` | `false` | No DYLD env overrides in production. |
-| `com.apple.security.application-groups` | `["group.ai.hippocampus"]` | **REQUIRED for the Safari Web Extension `.appex`** to relay page content events to the container app via a shared App Group container. Mirrors the `.appex`'s own entitlements file at `extensions/safari/appex/HippocampusSafariExtension.entitlements`. |
+| `com.apple.security.application-groups` | rendered at assembly | **REQUIRED for the Safari Web Extension `.appex`** to relay page content events to the container app via a shared App Group container. The checked-in `group.ai.hippocampus` value is a template used by ad-hoc builds. Developer ID assembly replaces it in both host and `.appex` with `<TeamIdentifier>.ai.hippocampus`, then verifies the signed entitlements and bundle configuration agree. |
+
+The App Group is intentionally granted only to the host app and Safari
+extension. The capture helper, agent, Recall UI, onboarding process, and
+Chromium native host do not need shared-container access and are signed without
+it. V1's Developer ID route uses Apple's supported macOS-only
+`<TeamIdentifier>.<group name>` convention, which does not require a
+provisioning profile. Ad-hoc assembly verifies structure but does not establish
+a release-grade App Group container. A future cross-platform `group.` identity
+must be registered and authorized by profiles embedded in both bundles; Apple
+also recommends profiles for stronger entitlement validation on current macOS.
 
 ## Why `com.apple.security.cs.disable-library-validation` was REMOVED
 
@@ -35,9 +45,11 @@ Failed to parse entitlements: AMFIUnserializeXML: syntax error near line 5
 
 ## Related files
 
+- [Configuring app groups](https://developer.apple.com/documentation/xcode/configuring-app-groups) and [Accessing app group containers](https://developer.apple.com/documentation/xcode/accessing-app-group-containers) — Apple's current identity and provisioning rules.
 - `extensions/safari/appex/HippocampusSafariExtension.entitlements` — entitlements for the embedded Safari `.appex` (also comment-free).
 - `adapters/macos/MCICaptureHelper/Resources/MCICaptureHelper.entitlements` — entitlements for the capture helper (if present; check before any future edit).
-- `scripts/build-installer.sh` lines 152–196 — where codesign is invoked with `--entitlements` for each component.
+- `scripts/lib/app-group-contract.sh` — derives, renders, and validates the shared identity.
+- `scripts/build-installer.sh` — preserves and re-verifies the identity while producing the installer.
 
 ## Review history
 
