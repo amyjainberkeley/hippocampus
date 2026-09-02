@@ -2,23 +2,18 @@
 //!
 //! # Purpose
 //!
-//! Phase 3 capture-side helper bugs (see `docs/STATE.md` EOD 2026-05-20 §
-//! "Two known bugs") currently leave the brain store empty even after a
-//! live capture session, which blocks demoing the **read** side of the
-//! pipeline (the recall UI in `apps/recall-ui/`, the localhost MCP server
-//! `mci-agent mcp-serve`, the agent-API loopback in general). Until
-//! Director-Recording's P3.6.7 PR fixes the `.allow` → `OCREvent` emission
-//! gap, this binary writes 20 synthetic [`mci_brain::Event`] rows so the
-//! downstream surfaces have something to read against.
+//! A privacy-safe product demo must not depend on a user's actual capture
+//! history. This binary writes 20 current, fictional [`mci_brain::Event`]
+//! rows so Recall, briefs, episodes, MCP, and screenshot fixtures can be
+//! exercised without copying personal content into development artifacts.
 //!
 //! # What it is NOT
 //!
 //! - It is **not** a production code path. The synthetic events carry
 //!   `app_bundle_id = "com.mci.demo.seed.*"` so they are trivially
 //!   distinguishable from real-capture events in any read pane.
-//! - It is **not** a substitute for fixing the helper. The capture-side
-//!   bug fix (P3.6.7) is the real solution; this binary only unblocks
-//!   demo-time work in parallel.
+//! - It is **not** a substitute for exercising ScreenCaptureKit on a real
+//!   Mac. It exists for deterministic downstream product verification.
 //! - It does **not** introduce any new write path into the brain store.
 //!   It calls [`mci_brain::BrainStore::put_event`] like every other writer
 //!   in the system; the same `cascade_reason = 0` invariant
@@ -38,6 +33,8 @@
 //!   finds these rows; the idle-batch embedder (P3.8) can fill them
 //!   later. This avoids pulling in the Core ML runtime just to seed
 //!   demo content.
+//! - Encrypted keyframe digests are optional and must name blobs already
+//!   written by the real shared codec under the brain's `blobs/` directory.
 //!
 //! # Usage
 //!
@@ -72,14 +69,16 @@ fn print_usage() {
         \n\
         DEMO-ONLY synthetic-event seeder for the encrypted brain. Writes 20\n\
         hand-authored Events with app_bundle_id = \"com.mci.demo.seed.*\" so\n\
-        the recall UI and `mci-agent mcp-serve` have content to read while\n\
-        the P3.6.7 helper fix is in flight.\n\
+        Recall, briefs, episodes, and `mci-agent mcp-serve` have content to\n\
+        read without using a person's actual capture history.\n\
         \n\
         Usage: mci-seed-brain [OPTIONS]\n\
         \n\
         Options:\n\
         \x20 --db-path PATH             default $MCI_DB_PATH or\n\
         \x20                            ~/Library/Application Support/MCI/mci.sqlite\n\
+        \x20 --keyframe-digest SHA256   attach an existing encrypted blob to one\n\
+        \x20                            newest event; repeat for multiple blobs\n\
         \x20 --force                    overwrite-into a non-empty brain (default: refuse)\n\
         \x20 -h, --help                 print this and exit\n\
         \x20 --version                  print version and exit\n\
@@ -96,6 +95,7 @@ fn print_usage() {
 struct Args {
     db_path: PathBuf,
     force: bool,
+    keyframe_digests: Vec<String>,
 }
 
 enum ParseOutcome {
@@ -107,6 +107,7 @@ enum ParseOutcome {
 fn parse_args(argv: &[String]) -> ParseOutcome {
     let mut force = false;
     let mut db_path: Option<PathBuf> = None;
+    let mut keyframe_digests = Vec::new();
     let mut i = 1;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -124,6 +125,20 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                 db_path = Some(PathBuf::from(&argv[i + 1]));
                 i += 2;
             }
+            "--keyframe-digest" => {
+                if i + 1 >= argv.len() {
+                    eprintln!("mci-seed-brain: --keyframe-digest requires a SHA256 digest");
+                    std::process::exit(2);
+                }
+                let Some(digest) = normalize_keyframe_digest(&argv[i + 1]) else {
+                    eprintln!(
+                        "mci-seed-brain: --keyframe-digest must be exactly 64 hexadecimal characters"
+                    );
+                    std::process::exit(2);
+                };
+                keyframe_digests.push(digest);
+                i += 2;
+            }
             other => {
                 eprintln!("mci-seed-brain: unknown argument: {other}");
                 std::process::exit(2);
@@ -133,7 +148,25 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
     let db_path = db_path
         .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
         .unwrap_or_else(default_db_path);
-    ParseOutcome::Run(Args { db_path, force })
+    ParseOutcome::Run(Args {
+        db_path,
+        force,
+        keyframe_digests,
+    })
+}
+
+fn normalize_keyframe_digest(value: &str) -> Option<String> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(value.to_ascii_lowercase())
+}
+
+fn attach_demo_keyframes(events: &mut [Event], digests: &[String]) {
+    let first = events.len().saturating_sub(digests.len());
+    for (event, digest) in events[first..].iter_mut().zip(digests) {
+        event.keyframe_blob = Some(digest.clone());
+    }
 }
 
 fn decode_hex32(s: &str) -> Option<[u8; 32]> {
@@ -178,123 +211,123 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
     let entries: [(&str, &str, &str, &str); 20] = [
         (
             "com.mci.demo.seed.safari",
+            "ScreenCaptureKit — Apple Developer Documentation",
+            "https://developer.apple.com/documentation/screencapturekit",
+            "SCStream provides display frames after the user grants Screen Recording. Hippocampus samples only after opt-in and applies its privacy cascade before an event or encrypted keyframe can reach memory.",
+        ),
+        (
+            "com.mci.demo.seed.vscode",
+            "KeyframeBlobCodec.swift — hippocampus",
+            "",
+            "Selected visual evidence is encoded, sealed with AES-GCM using a per-blob HKDF salt, and named by the SHA-256 digest of the encrypted envelope. Recall authenticates before decoding.",
+        ),
+        (
+            "com.mci.demo.seed.terminal",
+            "Terminal — hippocampus — workspace tests",
+            "",
+            "$ cargo test --workspace\nFinished test profile\nAll memory, privacy, retrieval, MCP, and deletion suites passed with zero failures.",
+        ),
+        (
+            "com.mci.demo.seed.slack",
+            "Slack — #desktop-memory — Today",
+            "",
+            "Maya: Keep only selected visual keyframes after the privacy cascade. Raw screen frames should remain transient, and every retained image must inherit the same deletion policy as its event.",
+        ),
+        (
+            "com.mci.demo.seed.linear",
+            "Linear — HIP-121 · Capture soak — Scheduled",
+            "https://linear.app/atlas/issue/HIP-121/capture-soak",
+            "Run a 30-minute real-machine capture soak. Record frame throughput, OCR latency, retained-keyframe count, memory, CPU, pause behavior, and protected-surface suppression before release qualification.",
+        ),
+        (
+            "com.mci.demo.seed.safari",
+            "Long-horizon memory evaluation — research notes",
+            "https://example.com/research/long-horizon-memory",
+            "A useful retrieval benchmark must measure answerable recall, source provenance, temporal reasoning, and abstention on unanswerable questions. Aggregate hit rate alone hides confident false positives.",
+        ),
+        (
+            "com.mci.demo.seed.vscode",
+            "retrieval_outcomes.rs — hippocampus",
+            "",
+            "Retrieval returns a typed outcome: evidence, no_match, ambiguous, or unavailable. The caller gets event citations and reasons instead of an uncalibrated list of vaguely similar chunks.",
+        ),
+        (
+            "com.mci.demo.seed.notion",
+            "Notion — Hippocampus / V1 launch checklist",
+            "https://www.notion.so/example/hippocampus-v1",
+            "V1 launch checklist: clean-home install, explicit capture opt-in, evidence-backed search, timeline, episodes, daily brief, Claude and Codex registration, local deletion, signed update, and a reproducible retrieval benchmark.",
+        ),
+        (
+            "com.mci.demo.seed.github",
+            "PR #141 · Deliver evidence-backed agent context — hippocampus",
+            "https://github.com/example/hippocampus/pull/141",
+            "Adds mci_context: a bounded context compiler for Claude and Codex with canonical event citations, source priority, typed abstentions, and token budgeting. It never dumps the entire history into a prompt.",
+        ),
+        (
+            "com.mci.demo.seed.vscode",
+            "ClaudeCodeRegistrar.swift — hippocampus",
+            "",
+            "Registration writes only the local mci-agent command, database path, storage model, and Keychain service/account reference. Database key bytes never enter Claude or Codex configuration.",
+        ),
+        (
+            "com.mci.demo.seed.terminal",
+            "Terminal — retrieval benchmark",
+            "",
+            "$ cargo run -p mci-agent -- benchmark-work-memory\n24 cases: 21 answerable, 3 unanswerable\nHybrid recall @3: 100%\nMRR: 0.976\nLaunch qualified: false — all unanswerable cases still returned a result.",
+        ),
+        (
+            "com.mci.demo.seed.safari",
             "Snowflake Arctic Embed S — Hugging Face",
             "https://huggingface.co/Snowflake/snowflake-arctic-embed-s",
-            "Snowflake's Arctic Embed S is a 384-dim sentence-transformer optimized for retrieval. Apache-2.0; the MCI brain pins it per ADR-0011 because the size/quality tradeoff lands inside the on-device CPU+ANE budget.",
-        ),
-        (
-            "com.mci.demo.seed.vscode",
-            "core/brain/src/sqlcipher_brain_store.rs — mci",
-            "",
-            "fn put_event(&self, event: &Event) -> Result<EventId, StoreError> { if event.cascade_reason != 0 { return Err(StoreError::InvalidInput(\"cascade_reason must be 0\".into())); } ... }",
-        ),
-        (
-            "com.mci.demo.seed.terminal",
-            "ao@MacBook-Pro-4 — zsh — 120x36",
-            "",
-            "$ cargo test --workspace --release\n   Compiling mci-brain v0.0.1\n   Compiling mci-agent v0.0.1\n    Finished test [optimized] target(s) in 41.20s\n     Running unittests src/lib.rs (target/release/deps/mci_brain-...)\nrunning 196 tests\ntest result: ok. 196 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
-        ),
-        (
-            "com.mci.demo.seed.slack",
-            "Slack — #mci-team — Today",
-            "",
-            "ao: P3.6.7 should fix the .allow → OCREvent gap. Director-Recording is on it in worktree phase-3-p3.6.7-fix-helper-bugs. ETA ~45 min.",
+            "Arctic Embed S produces 384-dimensional local embeddings. Hippocampus combines them with FTS5 lexical ranking; semantic recall remains explicitly unavailable when the model artifact is absent.",
         ),
         (
             "com.mci.demo.seed.linear",
-            "Linear — MCI · P3.6.7 — In Progress",
-            "https://linear.app/mci/issue/MCI-37/p367-fix-allow-ocrevent-emission-from-mainswift",
-            "P3.6.7 — Fix `.allow` → OCREvent emission from main.swift. SCStreamCaptureSession constructor is missing the `ocrPostAllowEmitter:` argument; the default `nil` makes the cascade-twice path inert at runtime. ADR-0016 §4.2.",
-        ),
-        (
-            "com.mci.demo.seed.safari",
-            "ScreenCaptureKit | Apple Developer Documentation",
-            "https://developer.apple.com/documentation/screencapturekit",
-            "SCStream delivers frames via SCStreamOutput. The MCI helper uses the SCStream path on macOS 14+; cascade runs synchronously in the callback. SCFrameInfo's status field (Complete vs Idle vs Blank) gates the dedupe ladder.",
+            "Linear — HIP-142 · Calibrate abstention — In progress",
+            "https://linear.app/atlas/issue/HIP-142/calibrate-abstention",
+            "Tune retrieval confidence on the synthetic work-memory benchmark. The release gate requires correct abstention on every unanswerable case without materially reducing answerable recall at three.",
         ),
         (
             "com.mci.demo.seed.vscode",
-            "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/OCRPostAllowEmitter.swift — mci",
+            "docs/STATUS.md — hippocampus",
             "",
-            "// Cascade-twice invariant (ADR-0016 §4.2): an `OCREvent` reaches the wire ONLY if BOTH cascade passes returned `.allow`. The IPC seam structurally cannot deliver a `PrivacyTombstone` to the brain ingestor.",
-        ),
-        (
-            "com.mci.demo.seed.notion",
-            "Notion — MCI / Recall UI Spec",
-            "https://www.notion.so/mci/recall-ui-v1",
-            "Recall UI v1 surfaces the last 200 events in a left rail and renders OCR text + window title + URL in the detail pane. Lexical search uses FTS5 BM25 ranking; semantic comes online when the idle-batch embedder fills event_vectors.",
-        ),
-        (
-            "com.mci.demo.seed.github",
-            "PR #84 · docs(state+log): EOD 2026-05-20 handoff — mci",
-            "https://github.com/amyjainberkeley/hippocampus/pull/84",
-            "EOD 2026-05-20 handoff documenting the 30+ PR sprint, Phase 3 90% complete, and the two helper-side bugs (`.allow`→OCREvent silent emission + Bundle.module nil from .app install) blocking the working demo.",
-        ),
-        (
-            "com.mci.demo.seed.vscode",
-            "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift — mci",
-            "",
-            "let captureSession = SCStreamCaptureSession( pipeline: SCStreamPipeline(cascade: cascade, encoder: DeferredVideoToolboxEncoder(), counters: loop.counters, sink: ..., floorIntervalMs: ...), denylist: ..., policy: ..., blackedRegionProbe: ..., contextSnapshot: ..., urlProvider: ... )  // BUG: missing ocrPostAllowEmitter: arg → cascade-twice path inert.",
-        ),
-        (
-            "com.mci.demo.seed.terminal",
-            "ao@MacBook-Pro-4 — zsh — wire decoder",
-            "",
-            "$ python3 tools/wire_decode.py < /tmp/mci-g2.bin | head -40\nseq=1 type=tombstone reason=4 app_bundle=\"\" ts_us=1716185...\nseq=2 type=tombstone reason=7 app_bundle=\"\" ts_us=1716185...\nseq=3 type=tombstone reason=4 app_bundle=\"\" ts_us=1716185...\n... (54 tombstones, 0 OCREvents, 23 seq gaps consistent with .allow decisions)",
+            "The canonical status separates working surfaces from unproven release claims. Capture remains opt-in; model-incomplete builds remain development-only; signing, notarization, and a real capture soak are still open gates.",
         ),
         (
             "com.mci.demo.seed.safari",
-            "Cure53 — Source Code & Penetration Testing",
-            "https://cure53.de/",
-            "Cure53 offers cryptography review, penetration testing, and source-code audits. Independent review is a release gate for validating Hippocampus's local custody and documented threat boundaries.",
-        ),
-        (
-            "com.mci.demo.seed.linear",
-            "Linear — MCI · F-STRAT-002 — Done",
-            "https://linear.app/mci/issue/MCI-31/dual-market-commit-hippocampus-mci-engineering-codename",
-            "Hippocampus is the product name; MCI is the engineering codename. The implemented product is personal local memory. Team sharing and sync remain unshipped design work and are not release behavior.",
-        ),
-        (
-            "com.mci.demo.seed.vscode",
-            "docs/decisions/0019-company-workspace-server-tier-2-store.md — mci",
-            "",
-            "ADR-0019 records an unshipped company-workspace design. It is architecture exploration, not a claim about the current local product or its release guarantees.",
-        ),
-        (
-            "com.mci.demo.seed.safari",
-            "Hybrid recall — lexical ranking plus local embeddings",
-            "",
-            "Hippocampus combines lexical ranking with 384-dimensional local embeddings. The shipped retriever loads candidate vectors and computes cosine similarity in Rust.",
+            "Keychain Services — Apple Developer Documentation",
+            "https://developer.apple.com/documentation/security/keychain_services",
+            "The brain key lives in a non-synchronizing macOS Keychain item authorized for shipped components. A stable Developer ID identity is required before upgrade continuity can be accepted.",
         ),
         (
             "com.mci.demo.seed.slack",
-            "Slack — DMs — Claude Code orchestrator",
+            "Slack — #desktop-memory — Retrieval decision",
             "",
-            "Director-Recording reports back: P3.6.7 PR opened. Two-file diff: main.swift now constructs CascadeTwiceOCREmitter and passes it to SCStreamCaptureSession; AllowlistTOMLLoader.loadBundled() falls back through Bundle.main + sibling-of-executable paths.",
+            "Jon: Do not dump everything into RAG. Compile a small cited packet for the current task, preserve source and time, and abstain when the evidence does not support an answer.",
         ),
         (
             "com.mci.demo.seed.terminal",
-            "ao@MacBook-Pro-4 — zsh — gh pr list",
+            "Terminal — agent context handoff",
             "",
-            "$ gh pr list --state open\nshowing 0 of 0 open pull requests in amyjainberkeley/hippocampus\n$ git log --oneline -5\n3abb9de docs(state+log): EOD 2026-05-20 handoff — 30+ PRs merged; Phase 3 90%; helper-side demo bugs documented\n120b895 feat(agent): P3.10b — localhost MCP server (mci-agent mcp-serve)",
+            "$ mci-context --focus \"release readiness\" --max-tokens 600\nOutcome: evidence\n5 cited events selected\nThe packet includes open signing, model, capture-soak, and retrieval-calibration gates without exposing the database key.",
         ),
         (
             "com.mci.demo.seed.notion",
-            "Notion — MCI / Demo Script — Cycle 5",
-            "https://www.notion.so/mci/demo-script-cycle-5",
-            "Demo script for the local memory flow: (1) Boot the bundled helper. (2) Use the Mac normally for 5 min. (3) Open Recall UI and inspect the timeline. (4) Search 'hybrid recall' and inspect ranked evidence. (5) Connect Claude Code or Codex through the local MCP server.",
+            "Notion — Project Atlas / Daily brief",
+            "https://www.notion.so/example/project-atlas-brief",
+            "Today: the team fixed the launch lifecycle, proved the app under a disposable home, added encrypted visual evidence to the fixture, and documented the remaining signing and retrieval gates.",
         ),
         (
             "com.mci.demo.seed.github",
-            "Issue #37 · Capture-time §1 allowlist not firing in .app install — mci",
-            "https://github.com/amyjainberkeley/hippocampus/issues/37",
-            "Root cause: `Bundle.module` returns nil when the binary is hand-copied into `.app/Contents/MacOS/` without the SwiftPM resource-bundle dir alongside. Loader needs a Bundle.main + sibling-of-executable fallback before returning the empty-allowlist default.",
+            "PR #143 · Fix launch lifecycle and clean-home verification — hippocampus",
+            "https://github.com/example/hippocampus/pull/143",
+            "The menu-bar visibility action can request application termination without an explicit user quit. A termination-request gate now cancels that lifecycle noise and preserves intentional quit and restart behavior.",
         ),
         (
             "com.mci.demo.seed.safari",
-            "MCI — About the local brain",
-            "https://mci.local/about",
-            "Hippocampus keeps captured memory in a local SQLCipher database. Its key is stored in a non-synchronizing macOS Keychain item for the shipped components. Same-user processes and unverified signed-upgrade access remain explicit threat and release boundaries.",
+            "Hippocampus — Local memory architecture",
+            "https://hippocampus.local/architecture",
+            "Hippocampus keeps captured memory in a local SQLCipher database, stores selected screenshots as authenticated encrypted blobs, and serves bounded cited context to local AI clients through stdio MCP.",
         ),
     ];
 
@@ -432,7 +465,8 @@ fn main() -> ExitCode {
         return ExitCode::from(15);
     }
 
-    let events = canned_events(now_us());
+    let mut events = canned_events(now_us());
+    attach_demo_keyframes(&mut events, &args.keyframe_digests);
     let mut written = 0_usize;
     for event in &events {
         match store.put_event(event) {
@@ -523,6 +557,38 @@ mod tests {
     }
 
     #[test]
+    fn canned_events_are_current_and_do_not_embed_personal_identifiers() {
+        let corpus = canned_events(1_716_240_000_000_000_u64)
+            .into_iter()
+            .map(|event| {
+                format!(
+                    "{} {} {}",
+                    event.window_title.unwrap_or_default(),
+                    event.url.unwrap_or_default(),
+                    event.text
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for forbidden in [
+            "amyjainberkeley",
+            "ao@MacBook",
+            "Director-Recording",
+            "P3.6.7",
+            "Phase 3 90%",
+        ] {
+            assert!(
+                !corpus.contains(forbidden),
+                "synthetic corpus leaked stale or personal-looking token: {forbidden}"
+            );
+        }
+        assert!(corpus.contains("retrieval benchmark"));
+        assert!(corpus.contains("mci_context"));
+        assert!(corpus.contains("launch lifecycle"));
+    }
+
+    #[test]
     fn decode_hex32_round_trips() {
         let bytes = [0xab_u8; 32];
         let hex: String = bytes.iter().fold(String::new(), |mut s, b| {
@@ -538,6 +604,38 @@ mod tests {
         assert!(decode_hex32("").is_none());
         assert!(decode_hex32(&"a".repeat(63)).is_none());
         assert!(decode_hex32(&"a".repeat(65)).is_none());
+    }
+
+    #[test]
+    fn demo_keyframe_digest_is_validated_and_normalized() {
+        let uppercase = "AB".repeat(32);
+        assert_eq!(normalize_keyframe_digest(&uppercase), Some("ab".repeat(32)));
+        assert!(normalize_keyframe_digest(&"a".repeat(63)).is_none());
+        assert!(normalize_keyframe_digest(&"g".repeat(64)).is_none());
+    }
+
+    #[test]
+    fn demo_keyframes_attach_to_newest_events_in_order() {
+        let mut events = canned_events(1_716_240_000_000_000_u64);
+        let digests = vec!["11".repeat(32), "22".repeat(32), "33".repeat(32)];
+
+        attach_demo_keyframes(&mut events, &digests);
+
+        assert!(events[..17]
+            .iter()
+            .all(|event| event.keyframe_blob.is_none()));
+        assert_eq!(
+            events[17].keyframe_blob.as_deref(),
+            Some(digests[0].as_str())
+        );
+        assert_eq!(
+            events[18].keyframe_blob.as_deref(),
+            Some(digests[1].as_str())
+        );
+        assert_eq!(
+            events[19].keyframe_blob.as_deref(),
+            Some(digests[2].as_str())
+        );
     }
 
     #[test]

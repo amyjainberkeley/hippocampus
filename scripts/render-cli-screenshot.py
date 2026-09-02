@@ -19,23 +19,31 @@ except ImportError:
     sys.exit(1)
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BRAIN = os.path.join(REPO, "target", "release", "mci-brain")
+BRAIN = os.environ.get(
+    "MCI_BRAIN_BIN",
+    os.path.join(REPO, "target", "release", "mci-brain"),
+)
 OUT = os.path.join(REPO, "assets", "screenshots", "hero-cli.png")
 
-KEY_FILE = "/tmp/mci-demo-key.hex"
-DB_PATH = os.path.expanduser("~/Library/Application Support/MCI/mci.sqlite")
+KEY_FILE = os.environ.get("MCI_DB_KEY_FILE", "/tmp/mci-demo-key.hex")
+DB_PATH = os.environ.get(
+    "MCI_DB_PATH",
+    os.path.expanduser("~/Library/Application Support/MCI/mci.sqlite"),
+)
 
 if not os.path.exists(BRAIN):
     print(f"ERROR: {BRAIN} not found. Run: cargo build --release --bin mci-brain", file=sys.stderr)
     sys.exit(1)
 
-if not os.path.exists(KEY_FILE):
+if "MCI_DB_KEY_HEX" not in os.environ and not os.path.exists(KEY_FILE):
     print(f"ERROR: {KEY_FILE} not found. Run: scripts/demo.sh seed", file=sys.stderr)
     sys.exit(1)
 
 env = os.environ.copy()
 env["MCI_DEVELOPMENT_FILE_KEY"] = "1"
-env["MCI_DB_KEY_HEX"] = open(KEY_FILE).read().strip()
+if "MCI_DB_KEY_HEX" not in env:
+    with open(KEY_FILE, encoding="ascii") as key_file:
+        env["MCI_DB_KEY_HEX"] = key_file.read().strip()
 env["MCI_DB_PATH"] = DB_PATH
 
 
@@ -45,8 +53,8 @@ def run_brain(*args):
 
 
 stats_out = run_brain("stats")
-search1_out = run_brain("search", "snowflake arctic embed", "--limit", "3")
-search2_out = run_brain("search", "zero-knowledge", "--limit", "3")
+search1_out = run_brain("search", "retrieval benchmark", "--limit", "3")
+search2_out = run_brain("search", "agent context handoff", "--limit", "3")
 
 if not stats_out:
     print("ERROR: mci-brain stats returned empty. Check seed brain.", file=sys.stderr)
@@ -55,12 +63,12 @@ if not stats_out:
 # --- Render ---
 
 WIDTH, HEIGHT = 1280, 800
-BG = (13, 13, 13)
-FG = (204, 204, 204)
-GREEN = (0, 204, 102)
-CYAN = (102, 204, 255)
-YELLOW = (229, 192, 80)
-DIM = (128, 128, 128)
+BG = (246, 248, 251)
+FG = (24, 33, 43)
+GREEN = (45, 139, 87)
+CYAN = (53, 104, 212)
+YELLOW = (196, 86, 73)
+DIM = (95, 105, 117)
 
 FONT_SIZE = 14
 LINE_HEIGHT = 20
@@ -78,11 +86,16 @@ img = Image.new("RGB", (WIDTH, HEIGHT), BG)
 draw = ImageDraw.Draw(img)
 
 TITLE_BAR_H = 28
-draw.rectangle([0, 0, WIDTH, TITLE_BAR_H], fill=(40, 40, 40))
+draw.rectangle([0, 0, WIDTH, TITLE_BAR_H], fill=(232, 236, 242))
 for i, color in enumerate([(255, 96, 92), (255, 189, 46), (39, 201, 63)]):
     draw.ellipse([12 + i * 22, 8, 24 + i * 22, 20], fill=color)
 title_font = ImageFont.truetype(FONT_PATH, 12) if FONT_PATH else ImageFont.load_default()
-draw.text((WIDTH // 2 - 80, 8), "ao@MacBook-Pro — zsh", fill=(180, 180, 180), font=title_font)
+draw.text(
+    (WIDTH // 2 - 96, 8),
+    "hippocampus — local memory",
+    fill=DIM,
+    font=title_font,
+)
 
 x = 16
 y = TITLE_BAR_H + 16
@@ -159,12 +172,12 @@ blank()
 render_output(stats_out)
 blank()
 
-prompt('mci-brain search "snowflake arctic embed" --limit 3')
+prompt('mci-brain search "retrieval benchmark" --limit 3')
 blank()
 render_output(search1_out)
 blank()
 
-prompt('mci-brain search "zero-knowledge" --limit 3')
+prompt('mci-brain search "agent context handoff" --limit 3')
 blank()
 render_output(search2_out)
 blank()

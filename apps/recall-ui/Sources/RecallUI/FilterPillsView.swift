@@ -171,7 +171,7 @@ struct FilterPillsView: View {
             onChanged()
         } label: {
             HStack(spacing: 4) {
-                Text(displayName(for: app.appBundleId))
+                Text(Formatters.appDisplayName(app.appBundleId))
                 if app.count > 0 {
                     Text("\(app.count)")
                         .font(.system(.caption2, design: .monospaced))
@@ -209,7 +209,7 @@ struct FilterPillsView: View {
                         if filters.appBundleIds.contains(app.appBundleId) {
                             Image(systemName: "checkmark")
                         }
-                        Text(displayName(for: app.appBundleId))
+                        Text(Formatters.appDisplayName(app.appBundleId))
                         Spacer()
                         Text("\(app.count)").foregroundStyle(Color.brandFgMuted)
                     }
@@ -256,12 +256,4 @@ struct FilterPillsView: View {
             .foregroundStyle(active ? Color.brandMint : Color.brandFgSecondary)
     }
 
-    /// Strip a known `com.apple.X` / `com.microsoft.X` prefix so pills
-    /// stay readable. Falls back to the raw bundle id.
-    private func displayName(for bundleId: String) -> String {
-        if let last = bundleId.split(separator: ".").last, !last.isEmpty {
-            return String(last)
-        }
-        return bundleId
-    }
 }

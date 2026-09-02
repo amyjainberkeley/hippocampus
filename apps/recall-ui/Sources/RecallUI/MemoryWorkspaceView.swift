@@ -16,6 +16,8 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
 
     init(initialTab: RecallTab) {
         switch initialTab {
+        case .now:
+            self = .now
         case .search:
             self = .search
         case .timeline, .timelineStrip:
@@ -499,7 +501,7 @@ private struct SourcesWorkspaceView: View {
                         Image(systemName: "app.dashed")
                             .foregroundStyle(Color.brandMintDim)
                         VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-                            Text(displayName(app.appBundleId))
+                            Text(Formatters.appDisplayName(app.appBundleId))
                                 .mciFont(.bodyStrong)
                                 .foregroundStyle(Color.brandFgPrimary)
                             Text(app.appBundleId)
@@ -540,10 +542,4 @@ private struct SourcesWorkspaceView: View {
         }
     }
 
-    private func displayName(_ bundleId: String) -> String {
-        guard let last = bundleId.split(separator: ".").last, !last.isEmpty else {
-            return bundleId
-        }
-        return String(last)
-    }
 }

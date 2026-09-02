@@ -89,9 +89,10 @@ struct DetailPaneView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: MCI.Spacing.s) {
             HStack(alignment: .firstTextBaseline) {
-                Text(hit.appBundleId ?? "(no app)")
+                Text(Formatters.appDisplayName(hit.appBundleId))
                     .mciFont(.title2)
                     .foregroundStyle(Color.brandFgPrimary)
+                    .help(hit.appBundleId ?? "No bundle identifier")
                 Spacer()
                 if reader != nil, !hit.linkedEventIds.isEmpty {
                     relatedBadge

@@ -11,6 +11,7 @@
 import Foundation
 
 public enum RecallTab: Int, Hashable, Sendable {
+    case now = 0
     case search = 1
     case timeline = 2
     case episodes = 3
@@ -45,6 +46,7 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// Pinned by `BriefDeepLinkRoutingTests`.
     public static func from(deepLinkValue: String) -> RecallTab? {
         switch deepLinkValue.lowercased() {
+        case "now":      return .now
         case "search":   return .search
         case "timeline": return .timeline
         case "episodes": return .episodes

@@ -7,6 +7,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "MCIKeyframeCodec", targets: ["MCIKeyframeCodec"]),
+        .executable(name: "KeyframeFixtureBuilder", targets: ["KeyframeFixtureBuilder"]),
     ],
     targets: [
         .target(
@@ -17,6 +18,10 @@ let package = Package(
             name: "KeyframeCodecBehavior",
             dependencies: ["MCIKeyframeCodec"],
             path: "Tests/Fixtures/KeyframeCodecBehavior"
+        ),
+        .executableTarget(
+            name: "KeyframeFixtureBuilder",
+            dependencies: ["MCIKeyframeCodec"]
         ),
         .testTarget(
             name: "MCIKeyframeCodecTests",

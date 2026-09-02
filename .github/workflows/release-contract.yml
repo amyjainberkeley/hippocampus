@@ -26,8 +26,18 @@ on:
       - 'scripts/verify-app-launches.sh'
       - 'scripts/test-verify-app-launches.sh'
       - 'scripts/test-development-app-contract.sh'
+      - 'scripts/test-keyframe-demo-fixture.sh'
+      - 'scripts/test-onboarding-product-truth.sh'
+      - 'scripts/test-screenshot-assets.sh'
       - 'scripts/stage-recall-ffi.sh'
+      - 'assets/screenshots/**'
+      - 'adapters/macos/MCIKeyframeCodec/**'
       - 'apps/onboarding/Package.swift'
+      - 'apps/onboarding/Sources/Onboarding/Slides/**'
+      - 'apps/recall-ui/Package.swift'
+      - 'apps/recall-ui/Sources/RecallUI/**'
+      - 'apps/recall-ui/Sources/RecallUIKit/**'
+      - 'apps/recall-ui/Tests/**'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionStore.swift'
       - 'apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift'
@@ -95,8 +105,18 @@ on:
       - 'scripts/verify-app-launches.sh'
       - 'scripts/test-verify-app-launches.sh'
       - 'scripts/test-development-app-contract.sh'
+      - 'scripts/test-keyframe-demo-fixture.sh'
+      - 'scripts/test-onboarding-product-truth.sh'
+      - 'scripts/test-screenshot-assets.sh'
       - 'scripts/stage-recall-ffi.sh'
+      - 'assets/screenshots/**'
+      - 'adapters/macos/MCIKeyframeCodec/**'
       - 'apps/onboarding/Package.swift'
+      - 'apps/onboarding/Sources/Onboarding/Slides/**'
+      - 'apps/recall-ui/Package.swift'
+      - 'apps/recall-ui/Sources/RecallUI/**'
+      - 'apps/recall-ui/Sources/RecallUIKit/**'
+      - 'apps/recall-ui/Tests/**'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionStore.swift'
       - 'apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift'
@@ -159,6 +179,9 @@ jobs:
       - run: scripts/e2e-clean-home.sh
       - run: scripts/test-development-app-contract.sh
       - run: scripts/test-verify-app-launches.sh
+      - run: scripts/test-keyframe-demo-fixture.sh
+      - run: scripts/test-onboarding-product-truth.sh
+      - run: scripts/test-screenshot-assets.sh
       - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh
