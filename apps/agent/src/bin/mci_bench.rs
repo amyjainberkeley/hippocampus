@@ -18,6 +18,7 @@ use mci_agent::bench_longmemeval::{
     LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, ScratchRun, Summary,
 };
 use mci_agent::child_command_environment::sanitized_command;
+use mci_brain::EVIDENCE_SUFFICIENCY_POLICY;
 
 const CANONICAL_WORK_MEMORY_DATASET: &str = "eval/work-memory/synthetic-v1.json";
 const CANONICAL_WORK_MEMORY_DATASET_ID: &str = "synthetic-work-memory-v1";
@@ -914,7 +915,11 @@ fn main() -> ExitCode {
         && !metadata.git_dirty_at_start
         && metadata.model_checksum_sha256.is_some();
     let absolute_quality_targets = absolute_quality_targets();
-    let quality_gate = evaluate_quality_gate(&overall, &absolute_quality_targets);
+    let mut quality_gate = evaluate_quality_gate(&overall, &absolute_quality_targets);
+    require_qualified_evidence_policy(
+        EVIDENCE_SUFFICIENCY_POLICY.validation_qualified,
+        &mut quality_gate,
+    );
     let launch_qualified = publishable && quality_gate.passed;
 
     let report = Report {
@@ -972,6 +977,15 @@ fn require_accepted_baseline(canonical_scope: bool, regression: &mut Option<Regr
                 "canonical work-memory reports require the accepted baseline comparison".into(),
             ],
         });
+    }
+}
+
+fn require_qualified_evidence_policy(qualified: bool, quality_gate: &mut RegressionReport) {
+    if !qualified {
+        quality_gate.passed = false;
+        quality_gate
+            .failures
+            .push("production evidence-sufficiency policy is not validation-qualified".into());
     }
 }
 
@@ -1074,6 +1088,22 @@ mod tests {
         let mut noncanonical_regression = None;
         require_accepted_baseline(false, &mut noncanonical_regression);
         assert!(noncanonical_regression.is_none());
+    }
+
+    #[test]
+    fn unqualified_evidence_policy_blocks_launch_quality() {
+        let mut quality_gate = RegressionReport {
+            passed: true,
+            failures: Vec::new(),
+        };
+
+        require_qualified_evidence_policy(false, &mut quality_gate);
+
+        assert!(!quality_gate.passed);
+        assert_eq!(
+            quality_gate.failures,
+            ["production evidence-sufficiency policy is not validation-qualified"]
+        );
     }
 
     #[test]
