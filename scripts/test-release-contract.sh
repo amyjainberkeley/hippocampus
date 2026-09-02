@@ -19,6 +19,7 @@ PREFERENCES="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.s
 NOTICE="$REPO_ROOT/NOTICE"
 TOML_LICENSE_TEST="$REPO_ROOT/scripts/test-toml-license-contract.sh"
 TOML_LICENSE_VERIFIER="$REPO_ROOT/scripts/verify-toml-license-contract.py"
+STAGE_RECALL_FFI="$REPO_ROOT/scripts/stage-recall-ffi.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -78,6 +79,8 @@ require_pattern "$RELEASE" 'scripts/publish-appcast\.sh' \
     'release workflow signs the Sparkle appcast'
 require_pattern "$RELEASE" 'fetch-depth:[[:space:]]*0' \
     'release checkout includes full history for status provenance'
+require_literal "$RELEASE" 'MACOSX_DEPLOYMENT_TARGET: "14.0"' \
+    'release workflow pins Rust binaries to the supported macOS 14 deployment target'
 for package in apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding; do
     require_literal "$RELEASE" "--package-path $package" \
         "release workflow builds ${package}"
@@ -158,6 +161,8 @@ require_pattern "$INSTALLER" 'spctl --assess --type open --context context:prima
     'installer runs the Gatekeeper disk-image assessment'
 require_pattern "$INSTALLER" '--wait --output-format json' \
     'installer records structured notarization submission results'
+require_literal "$STAGE_RECALL_FFI" 'export MACOSX_DEPLOYMENT_TARGET=14.0' \
+    'Recall FFI staging pins native objects to the supported macOS 14 deployment target'
 require_pattern "$INSTALLER" 'notarytool log' \
     'installer retrieves Apple notarization logs'
 require_pattern "$INSTALLER" 'notary-\$\{label\}-submission\.json' \
@@ -221,17 +226,29 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt \
     third_party/licenses/toml-license-manifest.json \
     scripts/verify-toml-license-contract.py scripts/test-toml-license-contract.sh \
-    scripts/test-retention-policy-contract.sh \
+    scripts/test-retention-policy-contract.sh scripts/stage-recall-ffi.sh \
+    apps/onboarding/Package.swift \
+    apps/onboarding/Sources/OnboardingKit/RetentionStore.swift \
+    apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift \
+    apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift \
+    apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift \
+    apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift \
+    apps/onboarding/Tests/Fixtures/RetentionPersistenceBehavior/main.swift \
+    apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift \
+    apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift \
     apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift \
     apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift \
+    apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift \
     apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift \
     apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift \
     apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift \
     apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift \
     apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift \
     apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift \
+    apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift \
     apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift \
     apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift \
+    apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift \
     apps/agent/src/retention_worker.rs apps/agent/src/bin/mci_agent.rs \
