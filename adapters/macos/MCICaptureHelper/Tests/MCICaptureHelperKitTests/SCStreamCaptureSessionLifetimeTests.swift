@@ -133,6 +133,46 @@ private enum LifetimeFixtures {
             ocrPostAllowEmitter: StubOCREmitter()
         )
     }
+
+    /// A thread-safe recorder for the terminal runtime-failure contract.
+    /// The SCStream delegate runs on a framework-owned queue, so the
+    /// observer needs the same cross-thread discipline as production.
+    final class RuntimeFailureRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var failures: [CaptureRuntimeFailure] = []
+
+        func record(_ failure: CaptureRuntimeFailure) {
+            lock.lock(); defer { lock.unlock() }
+            failures.append(failure)
+        }
+
+        func snapshot() -> [CaptureRuntimeFailure] {
+            lock.lock(); defer { lock.unlock() }
+            return failures
+        }
+    }
+
+    static func makeSession(
+        runtimeFailureHandler: @escaping @Sendable (CaptureRuntimeFailure) -> Void
+    ) -> SCStreamCaptureSession {
+        let cascade = SuppressionCascade(
+            secureEventInput: NoSEI(),
+            axSecureSubrole: AXNonSecure(),
+            denylist: NoApps(),
+            blackedRegion: NoBlack(),
+            knownSafeAppBundles: []
+        )
+        let pipeline = SCStreamPipeline(
+            cascade: cascade,
+            encoder: NoopEncoder(),
+            sink: NoopSink()
+        )
+        return SCStreamCaptureSession(
+            pipeline: pipeline,
+            denylist: Denylist(entries: []),
+            runtimeFailureHandler: runtimeFailureHandler
+        )
+    }
 }
 
 final class SCStreamCaptureSessionLifetimeTests: XCTestCase {
@@ -304,6 +344,38 @@ final class SCStreamCaptureSessionLifetimeTests: XCTestCase {
             trueObservations, 1,
             "exactly one caller across \(iterations) concurrent invocations must observe true"
         )
+    }
+
+    /// A live SCStream may die after readiness when Screen Recording TCC
+    /// is revoked, a display disappears, or ScreenCaptureKit reports a
+    /// runtime error. That must become a terminal owner-visible fact,
+    /// exactly once: continuing to emit healthy heartbeats would lie.
+    func testUnexpectedStreamTerminationNotifiesOwnerExactlyOnce() async {
+        let recorder = LifetimeFixtures.RuntimeFailureRecorder()
+        let session = LifetimeFixtures.makeSession { failure in
+            recorder.record(failure)
+        }
+
+        XCTAssertFalse(session.hasRuntimeFailureForTest())
+
+        session.recordUnexpectedStreamTerminationForTest()
+        session.recordUnexpectedStreamTerminationForTest()
+
+        XCTAssertTrue(session.hasRuntimeFailureForTest())
+        XCTAssertEqual(
+            recorder.snapshot(),
+            [.streamStoppedUnexpectedly],
+            "a terminal SCStream loss must surface once; duplicate delegate callbacks must not restart shutdown"
+        )
+
+        do {
+            try await session.start()
+            XCTFail("a session with a terminal stream loss must reject a silent restart")
+        } catch let failure as CaptureRuntimeFailure {
+            XCTAssertEqual(failure, .streamStoppedUnexpectedly)
+        } catch {
+            XCTFail("expected CaptureRuntimeFailure, got \(error)")
+        }
     }
 }
 
