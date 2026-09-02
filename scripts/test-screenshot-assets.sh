@@ -98,6 +98,7 @@ xcrun swift - \
     "$SCREENSHOTS/hero-onboarding-welcome.png" "Your memory, on your Mac" \
     "$SCREENSHOTS/hero-onboarding-trust-panel.png" "Built for trust" \
     "$SCREENSHOTS/hero-recall-ui.png" "Latest memory" \
+    "$SCREENSHOTS/hero-recall-ui.png" "3 keyframes" \
     "$SCREENSHOTS/hero-cli.png" "Launch qualified: false" \
     "$SCREENSHOTS/hero-cli.png" "false positives" \
     "$SCREENSHOTS/hero-cli.png" "local evidence verifier is not validation-qualified" <<'SWIFT' \
@@ -124,6 +125,10 @@ for offset in stride(from: 0, to: arguments.count, by: 2) {
         .compactMap { $0.topCandidates(1).first?.string }
         .joined(separator: " ")
     guard text.localizedCaseInsensitiveContains(expected) else { exit(4) }
+    if path.hasSuffix("hero-recall-ui.png"),
+       text.localizedCaseInsensitiveContains("No recent keyframes") {
+        exit(6)
+    }
     if path.hasSuffix("hero-cli.png"),
        text.localizedCaseInsensitiveContains("all unanswerable cases still returned a result") {
         exit(5)
