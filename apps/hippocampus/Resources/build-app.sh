@@ -889,12 +889,17 @@ else
     exit 1
 fi
 
-# Validate model bundling (non-fatal — prints warnings only)
+# Validate model bundling. Only the explicit development-lite profile may
+# authorize omissions; every other assembly treats verifier failures as fatal.
 VERIFY_SCRIPT="$REPO_ROOT/scripts/verify-models.sh"
 if [[ -x "$VERIFY_SCRIPT" ]]; then
     echo ""
     echo "=== Model validation ==="
-    "$VERIFY_SCRIPT" --app "$APP" || true
+    if [[ "$DEVELOPMENT_LITE" -eq 1 ]]; then
+        "$VERIFY_SCRIPT" --app "$APP" --allow-missing-bundled
+    else
+        "$VERIFY_SCRIPT" --app "$APP"
+    fi
 fi
 
 # Launch-verify gate — FATAL.
