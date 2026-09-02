@@ -241,6 +241,16 @@ fn synthetic_work_memory_dataset_reports_extended_metrics() {
         "answerable-only metrics are undefined on an unanswerable-only slice"
     );
     assert_eq!(report["by_type"]["unanswerable"][0]["mrr"], Value::Null);
+    assert_eq!(
+        report["results"][0]["retrieval_disposition"],
+        Value::String("matched".into()),
+        "per-case results must preserve the production retrieval outcome"
+    );
+    assert_eq!(
+        report["results"][1]["retrieval_disposition"],
+        Value::String("nothingMatchedEvidenceFloor".into()),
+        "an abstention must retain its production reason"
+    );
 }
 
 #[test]

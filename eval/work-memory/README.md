@@ -45,6 +45,30 @@ same projects, people, applications, and vocabulary as their evidence. They ask
 for an absent PR approver, test duration, and Linear due date; the corpus does
 not use nonsense-token negatives.
 
+Those three negatives are an acceptance slice, not enough data to fit or tune
+an abstention threshold. `explicit-evidence-veto-v1.json` is a disjoint
+synthetic fixture for the narrow deterministic guard used before the broader
+critic. Its six calibration and eight validation cases cover person, count,
+duration, and date requests without reusing work-memory questions, entities,
+sessions, or software facts. The fixture SHA-256 is
+`9d4ae81303209e3dcba6a167a87972c86e5eceb5edf90648cf2238df0d2770fd`.
+
+The guard is negative-only: when a query unambiguously requests one of those
+four value types and no retrieved evidence body contains it, production returns
+`NothingMatched(EvidenceFloor)`. Finding a value type does not certify the
+evidence or promote it to `Matched`; the independently calibrated general
+critic remains authoritative and currently remains unqualified. Ingestion
+headers are removed before the check so app names, titles, URLs, and capture
+timestamps cannot satisfy a question. The committed regression fixture accepts
+all 6/6 calibration and 8/8 validation supporting sets while rejecting all 6/6
+and 8/8 corresponding insufficient sets. These small synthetic counts are a
+regression contract, not a population-level accuracy claim.
+
+Every per-case report includes `retrieval_disposition`, preserving whether the
+production path matched, abstained at a named reason, or returned ranked context
+under the unqualified general critic. Benchmark outcome labels therefore remain
+auditable without treating a fused rank score as confidence.
+
 `complete` means every case in the requested run executed. `publishable` also
 requires all 24 cases, both lexical and hybrid arms, `k=1,3,5,10`, a clean
 committed code tree, and a checksummed Core ML model. `launch_qualified` is a

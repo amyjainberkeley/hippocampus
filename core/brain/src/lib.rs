@@ -256,8 +256,9 @@ pub mod hybrid_retriever;
 
 pub use episode_segmenter::EpisodeId;
 pub use evidence_sufficiency::{
-    evidence_features_for_candidates, EvidenceCandidate, EvidenceFeatures,
-    EvidenceSufficiencyPolicy, EVIDENCE_SUFFICIENCY_POLICY,
+    evidence_features_for_candidates, explicit_evidence_support, EvidenceCandidate,
+    EvidenceFeatures, EvidenceSufficiencyPolicy, ExplicitEvidenceSupport,
+    EVIDENCE_SUFFICIENCY_POLICY,
 };
 pub use hybrid_retriever::{
     lexical_retrieval_outcome, FusionWeights, HybridRetriever, NothingMatchedReason,

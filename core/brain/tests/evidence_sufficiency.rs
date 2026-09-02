@@ -1,6 +1,6 @@
 use mci_brain::{
-    evidence_features_for_candidates, EvidenceCandidate, EvidenceFeatures,
-    EVIDENCE_SUFFICIENCY_POLICY,
+    evidence_features_for_candidates, explicit_evidence_support, EvidenceCandidate,
+    EvidenceFeatures, ExplicitEvidenceSupport, EVIDENCE_SUFFICIENCY_POLICY,
 };
 
 fn assert_close(actual: f32, expected: f32) {
@@ -228,4 +228,140 @@ fn committed_calibration_artifact_matches_frozen_policy() {
         artifact["validation"]["negative_false_positive_rate"],
         2.0 / 6.0
     );
+}
+
+#[test]
+fn explicit_answer_shapes_require_values_in_retrieved_evidence() {
+    for (query, supported, unsupported) in [
+        (
+            "How many cases are in the release corpus?",
+            "The release corpus contains 24 cases.",
+            "The release corpus is documented in the README.",
+        ),
+        (
+            "How long did the focused test run take?",
+            "The focused test run completed in 42 seconds.",
+            "The focused test run completed successfully.",
+        ),
+        (
+            "What due date was set for the migration?",
+            "The migration is due on September 18.",
+            "The migration has an assigned owner.",
+        ),
+    ] {
+        let supported_candidates = [EvidenceCandidate {
+            stable_id: 1,
+            text: supported,
+            raw_semantic_cosine: 0.8,
+        }];
+        let unsupported_candidates = [EvidenceCandidate {
+            stable_id: 2,
+            text: unsupported,
+            raw_semantic_cosine: 0.8,
+        }];
+        assert_eq!(
+            explicit_evidence_support(query, &supported_candidates),
+            ExplicitEvidenceSupport::Supported,
+            "supported query: {query}"
+        );
+        assert_eq!(
+            explicit_evidence_support(query, &unsupported_candidates),
+            ExplicitEvidenceSupport::Unsupported,
+            "unsupported query: {query}"
+        );
+    }
+}
+
+#[test]
+fn capture_context_header_values_cannot_satisfy_an_explicit_date_question() {
+    let candidates = [EvidenceCandidate {
+        stable_id: 1,
+        text: "[app=com.linear | title=HIPP-201 new owner | url=linear://HIPP-201 | ts=2026-09-02T08:15:00.000Z]\nUpdated note says Priya owns HIPP 201.",
+        raw_semantic_cosine: 0.8,
+    }];
+
+    assert_eq!(
+        explicit_evidence_support("What due date did Priya set for HIPP 201?", &candidates),
+        ExplicitEvidenceSupport::Unsupported
+    );
+}
+
+#[test]
+fn non_explicit_questions_are_left_to_the_calibrated_critic() {
+    let candidates = [EvidenceCandidate {
+        stable_id: 1,
+        text: "The rollback changed partial benchmark runs to fail closed.",
+        raw_semantic_cosine: 0.8,
+    }];
+
+    assert_eq!(
+        explicit_evidence_support("Why did partial benchmark runs change?", &candidates),
+        ExplicitEvidenceSupport::NotApplicable
+    );
+}
+
+#[derive(serde::Deserialize)]
+struct ExplicitEvidenceFixture {
+    dataset_id: String,
+    cases: Vec<ExplicitEvidenceCase>,
+}
+
+#[derive(serde::Deserialize)]
+struct ExplicitEvidenceCase {
+    id: String,
+    split: String,
+    query: String,
+    supporting_documents: Vec<String>,
+    insufficient_documents: Vec<String>,
+}
+
+#[test]
+fn explicit_evidence_veto_passes_disjoint_calibration_and_validation_splits() {
+    let fixture: ExplicitEvidenceFixture = serde_json::from_str(include_str!(
+        "../../../eval/work-memory/explicit-evidence-veto-v1.json"
+    ))
+    .expect("explicit evidence fixture parses");
+    assert_eq!(fixture.dataset_id, "hippocampus-explicit-evidence-veto-v1");
+    for (split, expected_cases) in [("calibration", 6), ("validation", 8)] {
+        let cases = fixture
+            .cases
+            .iter()
+            .filter(|case| case.split == split)
+            .collect::<Vec<_>>();
+        assert_eq!(cases.len(), expected_cases, "{split} split size changed");
+        for case in cases {
+            let supporting = case
+                .supporting_documents
+                .iter()
+                .enumerate()
+                .map(|(index, text)| EvidenceCandidate {
+                    stable_id: index as u64,
+                    text,
+                    raw_semantic_cosine: 0.8,
+                })
+                .collect::<Vec<_>>();
+            let insufficient = case
+                .insufficient_documents
+                .iter()
+                .enumerate()
+                .map(|(index, text)| EvidenceCandidate {
+                    stable_id: index as u64,
+                    text,
+                    raw_semantic_cosine: 0.8,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                explicit_evidence_support(&case.query, &supporting),
+                ExplicitEvidenceSupport::Supported,
+                "{} positive",
+                case.id
+            );
+            assert_eq!(
+                explicit_evidence_support(&case.query, &insufficient),
+                ExplicitEvidenceSupport::Unsupported,
+                "{} negative",
+                case.id
+            );
+        }
+    }
 }

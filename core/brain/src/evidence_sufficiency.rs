@@ -20,6 +20,21 @@ pub struct EvidenceCandidate<'a> {
     pub raw_semantic_cosine: f32,
 }
 
+/// Conservative support check for questions with an explicit answer shape.
+///
+/// This is a negative guard, not an entailment model: [`Supported`](Self::Supported)
+/// means only that retrieved evidence contains the requested value type. It
+/// never promotes a candidate to a match by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExplicitEvidenceSupport {
+    /// The query has no answer shape this guard can assess reliably.
+    NotApplicable,
+    /// At least one evidence candidate contains the requested value type.
+    Supported,
+    /// The query requests a known value type and no candidate contains it.
+    Unsupported,
+}
+
 /// Versioned, cross-query-comparable features consumed by the local critic.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EvidenceFeatures {
@@ -121,6 +136,290 @@ pub fn evidence_features_for_candidates(
         lexical_semantic_agreement: f32::from(lexical_order[0].0.stable_id == top.stable_id),
         novel_specificity: novel_specificity(query, lexical_order[0].0.text),
     })
+}
+
+/// Check whether retrieved evidence contains an explicitly requested answer
+/// type. The check is deliberately conservative and recognizes only explicit
+/// person, count, duration, and date requests.
+#[must_use]
+pub fn explicit_evidence_support(
+    query: &str,
+    candidates: &[EvidenceCandidate<'_>],
+) -> ExplicitEvidenceSupport {
+    let query_tokens = normalized_tokens(query);
+    let Some(answer_type) = explicit_answer_type(&query_tokens) else {
+        return ExplicitEvidenceSupport::NotApplicable;
+    };
+    let query_terms: HashSet<String> = query_tokens.into_iter().collect();
+    if candidates.iter().any(|candidate| {
+        contains_explicit_value(answer_type, evidence_body(candidate.text), &query_terms)
+    }) {
+        ExplicitEvidenceSupport::Supported
+    } else {
+        ExplicitEvidenceSupport::Unsupported
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExplicitAnswerType {
+    Person,
+    Count,
+    Duration,
+    Date,
+}
+
+fn explicit_answer_type(query_tokens: &[String]) -> Option<ExplicitAnswerType> {
+    if contains_phrase(query_tokens, &["how", "long"])
+        || query_tokens.iter().any(|token| token == "duration")
+    {
+        Some(ExplicitAnswerType::Duration)
+    } else if contains_phrase(query_tokens, &["how", "many"])
+        || query_tokens.iter().any(|token| token == "count")
+    {
+        Some(ExplicitAnswerType::Count)
+    } else if contains_phrase(query_tokens, &["due", "date"])
+        || query_tokens
+            .iter()
+            .any(|token| token == "deadline" || token == "date")
+    {
+        Some(ExplicitAnswerType::Date)
+    } else if query_tokens
+        .iter()
+        .any(|token| token == "who" || token == "whom")
+    {
+        Some(ExplicitAnswerType::Person)
+    } else {
+        None
+    }
+}
+
+fn contains_phrase(tokens: &[String], phrase: &[&str]) -> bool {
+    tokens.windows(phrase.len()).any(|window| {
+        window
+            .iter()
+            .zip(phrase.iter())
+            .all(|(token, expected)| token == expected)
+    })
+}
+
+fn contains_explicit_value(
+    answer_type: ExplicitAnswerType,
+    evidence: &str,
+    query_terms: &HashSet<String>,
+) -> bool {
+    match answer_type {
+        ExplicitAnswerType::Person => contains_novel_person(evidence, query_terms),
+        ExplicitAnswerType::Count => contains_novel_number(evidence, query_terms),
+        ExplicitAnswerType::Duration => contains_duration(evidence, query_terms),
+        ExplicitAnswerType::Date => contains_date(evidence, query_terms),
+    }
+}
+
+fn contains_novel_person(evidence: &str, query_terms: &HashSet<String>) -> bool {
+    evidence
+        .split(|character: char| {
+            !character.is_alphanumeric() && character != '_' && character != '-'
+        })
+        .filter(|token| !token.is_empty())
+        .any(|token| {
+            let normalized = token.to_ascii_lowercase();
+            let mut letters = token.chars().filter(|character| character.is_alphabetic());
+            let starts_uppercase = letters.next().is_some_and(char::is_uppercase);
+            let has_lowercase = letters.any(char::is_lowercase);
+            starts_uppercase
+                && has_lowercase
+                && !query_terms.contains(&normalized)
+                && !is_person_placeholder(&normalized)
+                && !content_terms(token).is_empty()
+        })
+}
+
+fn is_person_placeholder(token: &str) -> bool {
+    is_month(token)
+        || is_weekday(token)
+        || matches!(
+            token,
+            "anybody"
+                | "anyone"
+                | "nobody"
+                | "no-one"
+                | "person"
+                | "somebody"
+                | "someone"
+                | "unknown"
+        )
+}
+
+fn contains_novel_number(evidence: &str, query_terms: &HashSet<String>) -> bool {
+    normalized_tokens(evidence).iter().any(|token| {
+        !query_terms.contains(token)
+            && (token.chars().all(|character| character.is_ascii_digit()) || is_number_word(token))
+    })
+}
+
+fn contains_duration(evidence: &str, query_terms: &HashSet<String>) -> bool {
+    let tokens = normalized_tokens(evidence);
+    tokens.windows(2).any(|window| {
+        !query_terms.contains(&window[0])
+            && (window[0]
+                .chars()
+                .all(|character| character.is_ascii_digit())
+                || is_number_word(&window[0]))
+            && is_duration_unit(&window[1])
+    }) || tokens.iter().any(|token| {
+        let split = token
+            .find(|character: char| !character.is_ascii_digit())
+            .unwrap_or(token.len());
+        split > 0
+            && split < token.len()
+            && !query_terms.contains(token)
+            && is_duration_unit(&token[split..])
+    }) || tokens.iter().any(|token| {
+        !query_terms.contains(token)
+            && matches!(
+                token.as_str(),
+                "overnight" | "all-day" | "daylong" | "weeklong"
+            )
+    })
+}
+
+fn contains_date(evidence: &str, query_terms: &HashSet<String>) -> bool {
+    let tokens = normalized_tokens(evidence);
+    tokens.iter().any(|token| {
+        !query_terms.contains(token)
+            && (is_weekday(token)
+                || matches!(token.as_str(), "today" | "tomorrow" | "tonight")
+                || is_delimited_date(token))
+    }) || tokens.windows(2).any(|window| {
+        is_month(&window[0])
+            && !query_terms.contains(&window[0])
+            && window[1]
+                .chars()
+                .all(|character| character.is_ascii_digit())
+    }) || evidence.split_whitespace().any(|raw| {
+        let token = raw
+            .trim_matches(|character: char| {
+                !character.is_ascii_digit() && character != '-' && character != '/'
+            })
+            .to_ascii_lowercase();
+        !token.is_empty() && !query_terms.contains(&token) && is_delimited_date(&token)
+    })
+}
+
+fn is_number_word(token: &str) -> bool {
+    matches!(
+        token,
+        "zero"
+            | "one"
+            | "two"
+            | "three"
+            | "four"
+            | "five"
+            | "six"
+            | "seven"
+            | "eight"
+            | "nine"
+            | "ten"
+            | "eleven"
+            | "twelve"
+            | "thirteen"
+            | "fourteen"
+            | "fifteen"
+            | "sixteen"
+            | "seventeen"
+            | "eighteen"
+            | "nineteen"
+            | "twenty"
+            | "thirty"
+            | "forty"
+            | "fifty"
+            | "sixty"
+            | "seventy"
+            | "eighty"
+            | "ninety"
+            | "hundred"
+            | "thousand"
+    )
+}
+
+fn is_duration_unit(token: &str) -> bool {
+    matches!(
+        token,
+        "ms" | "millisecond"
+            | "milliseconds"
+            | "second"
+            | "seconds"
+            | "sec"
+            | "secs"
+            | "minute"
+            | "minutes"
+            | "min"
+            | "mins"
+            | "hour"
+            | "hours"
+            | "hr"
+            | "hrs"
+            | "day"
+            | "days"
+            | "week"
+            | "weeks"
+    )
+}
+
+fn is_month(token: &str) -> bool {
+    matches!(
+        token,
+        "january"
+            | "february"
+            | "march"
+            | "april"
+            | "may"
+            | "june"
+            | "july"
+            | "august"
+            | "september"
+            | "october"
+            | "november"
+            | "december"
+    )
+}
+
+fn is_weekday(token: &str) -> bool {
+    matches!(
+        token,
+        "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday"
+    )
+}
+
+fn is_delimited_date(token: &str) -> bool {
+    for delimiter in ['-', '/'] {
+        let pieces = token.split(delimiter).collect::<Vec<_>>();
+        if pieces.len() == 3
+            && pieces.iter().all(|piece| {
+                !piece.is_empty() && piece.chars().all(|character| character.is_ascii_digit())
+            })
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn evidence_body(text: &str) -> &str {
+    text.strip_prefix("[app=")
+        .and_then(|_| text.split_once("]\n"))
+        .map_or(text, |(_, body)| body)
+}
+
+fn normalized_tokens(text: &str) -> Vec<String> {
+    text.split(|character: char| {
+        !character.is_alphanumeric() && character != '_' && character != '-'
+    })
+    .filter_map(|raw| {
+        let token = raw.trim().to_ascii_lowercase();
+        (!token.is_empty()).then_some(token)
+    })
+    .collect()
 }
 
 fn novel_specificity(query: &str, evidence: &str) -> f32 {
