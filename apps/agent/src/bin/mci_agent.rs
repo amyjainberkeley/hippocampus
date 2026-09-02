@@ -36,7 +36,7 @@ use mci_agent::alias_resolver_worker;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::brief_worker;
 use mci_agent::client_registry::{
-    ClientRegistration, ClientRegistry, RegistrationChange, RegistrationStatus,
+    ClientRegistration, ClientRegistry, RegistrationChange, RegistrationRepair, RegistrationStatus,
 };
 use mci_agent::consolidator_worker;
 use mci_agent::crash_recovery::{acquire_lock, lock_path_for_brain, LockAcquireOutcome, LockError};
@@ -543,6 +543,7 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Mode::DrainStdin { db_path, strict } => {
+            repair_existing_client_registrations(&db_path);
             let capture_ingestion_enabled =
                 capture_ingestion_enabled(std::env::var("MCI_CAPTURE_ENABLED").ok().as_deref());
             eprintln!(
@@ -1591,6 +1592,31 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn repair_existing_client_registrations(db_path: &Path) {
+    let registry = match ClientRegistry::discover() {
+        Ok(registry) => registry,
+        Err(error) => {
+            eprintln!("mci-agent: existing client registration repair skipped ({error})");
+            return;
+        }
+    };
+    let report = registry.repair_existing_registrations(db_path);
+    for (name, result) in [("Claude Code", report.claude), ("Codex", report.codex)] {
+        match result {
+            Ok(RegistrationRepair::Updated) => {
+                eprintln!("mci-agent: repaired existing {name} registration");
+            }
+            Ok(RegistrationRepair::AlreadyCurrent | RegistrationRepair::NotRegistered) => {}
+            Err(error) => {
+                eprintln!(
+                    "mci-agent: existing {name} registration repair skipped ({:?})",
+                    error.kind
+                );
+            }
+        }
+    }
 }
 
 fn run_connect_all_cmd(db_path: &Path) -> Result<(), u8> {
