@@ -3,6 +3,7 @@ use mci_brain::{
     EvidenceFeatures, ExplicitEvidenceSignal, EVIDENCE_SUFFICIENCY_POLICY,
     EXPLICIT_EVIDENCE_VETO_QUALIFICATION,
 };
+use sha2::{Digest, Sha256};
 
 fn assert_close(actual: f32, expected: f32) {
     assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
@@ -318,12 +319,19 @@ struct ExplicitEvidenceCase {
 
 #[test]
 fn explicit_evidence_veto_passes_disjoint_calibration_and_validation_splits() {
-    let fixture: ExplicitEvidenceFixture = serde_json::from_str(include_str!(
-        "../../../eval/work-memory/explicit-evidence-veto-v1.json"
-    ))
-    .expect("explicit evidence fixture parses");
-    assert_eq!(fixture.dataset_id, "hippocampus-explicit-evidence-veto-v1");
-    for (split, expected_cases) in [("calibration", 6), ("validation", 8)] {
+    let fixture_bytes = include_bytes!("../../../eval/work-memory/explicit-evidence-veto-v1.json");
+    let fixture: ExplicitEvidenceFixture =
+        serde_json::from_slice(fixture_bytes).expect("explicit evidence fixture parses");
+    let qualification = EXPLICIT_EVIDENCE_VETO_QUALIFICATION;
+    assert_eq!(fixture.dataset_id, qualification.fixture_dataset_id);
+    assert_eq!(
+        format!("{:x}", Sha256::digest(fixture_bytes)),
+        qualification.fixture_sha256
+    );
+    for (split, expected_cases) in [
+        ("calibration", qualification.calibration_cases),
+        ("validation", qualification.validation_cases),
+    ] {
         let cases = fixture
             .cases
             .iter()
