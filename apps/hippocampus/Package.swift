@@ -73,6 +73,13 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "BriefModelPresenceBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "BriefModelPresenceBehavior.swift" },
+            sources: ["BriefModelPresenceBehavior.swift"]
+        ),
+        .executableTarget(
             name: "RuntimeConfigBehavior",
             dependencies: ["HippocampusKit"],
             path: "Tests/Fixtures",

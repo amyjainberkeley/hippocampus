@@ -1,8 +1,10 @@
 import Foundation
+import HippocampusKit
 
 @main
 struct BriefModelPresenceBehavior {
-    static func main() throws {
+    @MainActor
+    static func main() async throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory
             .appendingPathComponent("hippocampus-brief-presence-\(UUID().uuidString)")
@@ -63,5 +65,76 @@ struct BriefModelPresenceBehavior {
             BriefModelPresence.isQwen3Installed(modelsDir: seededRoot),
             "seeding must copy both the model and tokenizer.json"
         )
+
+        // A first launch must not run the potentially multi-gigabyte model
+        // copy on AppKit's main thread. Repeated launch/menu events must join
+        // the first request instead of scheduling competing copies.
+        let invocation = ProvisioningInvocation()
+        let provisioner = BriefModelProvisioner {
+            dispatchPrecondition(condition: .notOnQueue(.main))
+            await invocation.record()
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            return .seeded
+        }
+        provisioner.startIfNeeded()
+        provisioner.startIfNeeded()
+        precondition(
+            provisioner.state == .provisioning,
+            "the UI must truthfully report that the bundled model is preparing"
+        )
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        precondition(
+            provisioner.state == .ready,
+            "a completed seed must make Daily Briefs available without a relaunch"
+        )
+        let calls = await invocation.calls
+        precondition(calls == 1, "duplicate starts must share one provisioning job")
+
+        // A development-lite app has no bundled Qwen model. That is an
+        // expected unavailable state, not a misleading failed download.
+        let unavailableProvisioner = BriefModelProvisioner {
+            .noBundle
+        }
+        unavailableProvisioner.startIfNeeded()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        precondition(
+            unavailableProvisioner.state == .unavailable,
+            "a missing bundled model must be reported as unavailable"
+        )
+
+        // A user can remove Application Support while the app is still
+        // running. The menu must detect that loss and restart provisioning
+        // instead of leaving a stale enabled Daily Briefs control behind.
+        let replacement = ProvisioningInvocation()
+        let replacementProvisioner = BriefModelProvisioner(
+            isInstalled: { false },
+            provision: {
+                await replacement.record()
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                return .seeded
+            }
+        )
+        replacementProvisioner.startIfNeeded()
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        precondition(replacementProvisioner.state == .ready, "fixture seed should complete")
+        replacementProvisioner.refreshIfMissing()
+        precondition(
+            replacementProvisioner.state == .provisioning,
+            "a removed model must immediately leave the ready UI state"
+        )
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        let replacementCalls = await replacement.calls
+        precondition(
+            replacementCalls == 2,
+            "recovery must schedule one replacement provisioning job"
+        )
+    }
+}
+
+private actor ProvisioningInvocation {
+    private(set) var calls = 0
+
+    func record() {
+        calls += 1
     }
 }
