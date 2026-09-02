@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `b3120bb`
+Audited code baseline: `30c7580`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -143,6 +143,14 @@ more than this page.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status
+
+The shipping extractive brief author passes all eight committed synthetic
+workdays: 37/37 required facts, 69/69 valid citations, zero unresolved
+citations, zero forbidden terms, and 3.20 ms total measured author time on the
+audit Mac. This is a source-preservation baseline, not a human usefulness
+claim; the corpus does not yet score importance, personal/work separation,
+contradiction resolution, or repeated-OCR suppression. The reproducible result
+and limitations are in `docs/eval/brief-extractive-baseline.md`.
 
 The accepted, reproducible 24-case synthetic work-memory retrieval artifact is
 `docs/eval/work-memory-baseline.json`. It covers 21 answerable and three

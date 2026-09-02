@@ -8,6 +8,8 @@ the eval story. Paired with `../../scripts/eval/` (the runners) and
 
 - `brief-quality.md` — the brief-authoring eval scorecard
   (ADR-0018 §7 gate). Rubric, corpus source, scoring.
+- `brief-extractive-baseline.md` — the measured shipping-author baseline and
+  its explicit limits.
 - `recall-quality.md` — the recall-quality benchmark methodology
   (paired with `../../scripts/eval/recall/`).
 - `work-memory-baseline.json` — the committed lexical and hybrid
