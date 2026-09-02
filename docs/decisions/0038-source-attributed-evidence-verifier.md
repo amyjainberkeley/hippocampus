@@ -164,6 +164,15 @@ contract:
 - Failure policy: overflow, malformed output, model/runtime error, conflicting
   support and contradiction, or an empty cited set fails closed.
 
+The model-independent host side of this contract is now implemented in
+`core/brain/src/evidence_verifier_contract.rs`. It normalizes structured
+subject/predicate/object claims, derives bounded evidence spans from canonical
+events, binds each span to its event ID, UTF-8-safe byte range, exact text, and
+full-event SHA-256 digest, then validates model-selected slot indices before a
+verdict can cross the trust boundary. Citations can be revalidated against the
+current canonical event. This removes model-generated provenance from the
+design, but it does not make the candidate a runtime verifier.
+
 This is an architecture selection, not a shipped-model claim. Release remains
 blocked until a blind corpus exercises the exact signed runtime, including
 counterfactual swaps, negation, deleted evidence hops, distractors, source

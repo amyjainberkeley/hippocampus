@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `363461a`
+Audited code baseline: `48f18fa`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -103,6 +103,14 @@ more than this page.
   or contradiction verdict. The
   retired score critic remains available to tests but is no longer installed
   by production construction.
+- The claim-verifier boundary now has a host-owned v3 evidence contract. A
+  proposed claim is a normalized subject/predicate/object tuple; at most eight
+  evidence spans are cut from canonical events with UTF-8-safe byte ranges,
+  exact text, and a SHA-256 digest of the complete event. The future model can
+  select only host-assigned slot indices. The host rejects non-finite
+  confidence, duplicate or unknown slots, and stale or modified citations, so
+  model output cannot invent provenance. This contract is implemented and
+  tested; the task-trained model and production Core ML adapter are not.
 - The first compact native verifier candidate has a reproducible Core ML
   conversion and a memory-safe Rust inference adapter. MobileBERT SQuAD2 FP32
   matches its PyTorch logits within `0.00014687` and runs in 23.49 ms median,
@@ -117,7 +125,9 @@ more than this page.
   asset set. The asset contract now runs in the unified gate. The Recall product
   capture is generated from a disposable SQLCipher brain and visibly proves
   three authenticated encrypted keyframes, 20 synthetic events, and one current
-  synthetic brief.
+  synthetic brief. Recall's recent-evidence strip now shows sharp 16:9 source
+  previews, cleaned two-line evidence summaries, source/time context, and an
+  inspectable detail popover instead of blurred passive thumbnails.
 - Runlog remains an audited research input rather than a runtime dependency.
   It does use 768-dimensional Gemini vectors and Firestore cosine search; its
   useful hypothesis is hybrid candidate generation plus source-region
@@ -135,7 +145,7 @@ more than this page.
   full Swift package test execution requires full Xcode or CI; production
   package builds and executable fixtures remain locally runnable.
 - The current `178 MB` debug ad-hoc app at
-  `apps/hippocampus/dist/development-20260902-v3/Hippocampus.app` includes Arctic
+  `apps/hippocampus/dist/development-20260902-v4/Hippocampus.app` includes Arctic
   Embed S as its only bundled model, passes signed App Group and model
   validation, and survives the disposable-home first-launch and owner-death
   gates. This proves a runnable development bundle, not a distributable Apple
