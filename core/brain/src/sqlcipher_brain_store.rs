@@ -77,6 +77,56 @@ pub struct SqlCipherBrainStore {
     blob_dir: PathBuf,
 }
 
+/// A best-effort maintenance stage that runs only after deletion commits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeletionCleanupStage {
+    /// Reclaim free database pages with `VACUUM`.
+    Vacuum,
+    /// Remove encrypted keyframe blobs that no surviving event references.
+    KeyframeBlobs,
+}
+
+/// One non-fatal maintenance warning from a committed deletion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletionCleanupWarning {
+    /// Maintenance stage that did not finish.
+    pub stage: DeletionCleanupStage,
+    /// Content-free diagnostic for local logs and engineering support.
+    pub diagnostic: String,
+}
+
+/// Durable outcome of a deletion transaction and its post-commit maintenance.
+///
+/// Returning this value means the SQL transaction committed. Cleanup warnings
+/// never change that fact and must not be presented as a rolled-back deletion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletionOutcome {
+    /// Rows removed from the `events` table.
+    pub events_deleted: u64,
+    /// Independent best-effort maintenance failures observed after commit.
+    pub cleanup_warnings: Vec<DeletionCleanupWarning>,
+}
+
+impl DeletionOutcome {
+    /// Whether database free-page reclamation completed.
+    #[must_use]
+    pub fn vacuum_ok(&self) -> bool {
+        !self
+            .cleanup_warnings
+            .iter()
+            .any(|warning| warning.stage == DeletionCleanupStage::Vacuum)
+    }
+
+    /// Whether stale encrypted keyframe candidates were removed.
+    #[must_use]
+    pub fn blob_cleanup_ok(&self) -> bool {
+        !self
+            .cleanup_warnings
+            .iter()
+            .any(|warning| warning.stage == DeletionCleanupStage::KeyframeBlobs)
+    }
+}
+
 impl SqlCipherBrainStore {
     pub(crate) fn remove_unreferenced_keyframe_candidates(
         &self,
@@ -1270,13 +1320,26 @@ impl SqlCipherBrainStore {
     // corresponding projection inside the same transaction first.
     // ---------------------------------------------------------------
 
-    /// Delete one event by id. Returns the number of `events` rows
-    /// deleted (0 or 1). `VACUUM`s after commit.
+    /// Delete one event by id. Returns the number of committed `events`
+    /// rows deleted (0 or 1).
     ///
     /// # Errors
     /// [`StoreError::Backend`] on any driver failure (missing row is
     /// NOT an error — it returns 0).
     pub fn delete_event(&self, id: EventId) -> Result<u64, StoreError> {
+        self.delete_event_with_outcome(id)
+            .map(|outcome| outcome.events_deleted)
+    }
+
+    /// Delete one event and report post-commit maintenance separately.
+    ///
+    /// An `Ok` value proves the deletion transaction committed. A failed
+    /// `VACUUM` or keyframe unlink is recorded in `cleanup_warnings` rather
+    /// than converted into an error that could falsely imply rollback.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] when work fails before or during commit.
+    pub fn delete_event_with_outcome(&self, id: EventId) -> Result<DeletionOutcome, StoreError> {
         let mut guard = self.db.lock().expect("brain store mutex poisoned");
         let tx = guard
             .conn_mut()
@@ -1305,12 +1368,12 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("DELETE events: {e}")))?;
         tx.commit()
             .map_err(|e| StoreError::Backend(format!("commit delete_event tx: {e}")))?;
-        guard
-            .conn()
-            .execute_batch("VACUUM")
-            .map_err(|e| StoreError::Backend(format!("VACUUM after delete_event: {e}")))?;
-        remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, &blob_digests)?;
-        Ok(n as u64)
+        Ok(run_post_delete_cleanup(
+            guard.conn(),
+            &self.blob_dir,
+            &blob_digests,
+            n as u64,
+        ))
     }
 
     /// Delete every event whose `ts_us` falls in the inclusive range
@@ -1328,6 +1391,19 @@ impl SqlCipherBrainStore {
         start_ts_us: u64,
         end_ts_us: u64,
     ) -> Result<u64, StoreError> {
+        self.delete_events_in_range_with_outcome(start_ts_us, end_ts_us)
+            .map(|outcome| outcome.events_deleted)
+    }
+
+    /// Delete an inclusive event range and report post-commit maintenance.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on invalid bounds or failure before commit.
+    pub fn delete_events_in_range_with_outcome(
+        &self,
+        start_ts_us: u64,
+        end_ts_us: u64,
+    ) -> Result<DeletionOutcome, StoreError> {
         if start_ts_us > end_ts_us {
             return Err(StoreError::Backend(
                 "delete_events_in_range: start_ts_us > end_ts_us".into(),
@@ -1363,12 +1439,12 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("DELETE events range: {e}")))?;
         tx.commit()
             .map_err(|e| StoreError::Backend(format!("commit delete_range tx: {e}")))?;
-        guard
-            .conn()
-            .execute_batch("VACUUM")
-            .map_err(|e| StoreError::Backend(format!("VACUUM after delete_range: {e}")))?;
-        remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, &blob_digests)?;
-        Ok(n as u64)
+        Ok(run_post_delete_cleanup(
+            guard.conn(),
+            &self.blob_dir,
+            &blob_digests,
+            n as u64,
+        ))
     }
 
     /// Wipe every user-content row from the brain. Returns the number of
@@ -1385,6 +1461,15 @@ impl SqlCipherBrainStore {
     /// atomically — the store is either fully wiped or unchanged, never
     /// partially wiped.
     pub fn wipe_all(&self) -> Result<u64, StoreError> {
+        self.wipe_all_with_outcome()
+            .map(|outcome| outcome.events_deleted)
+    }
+
+    /// Wipe user content and report post-commit maintenance separately.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] when any transactional wipe step fails.
+    pub fn wipe_all_with_outcome(&self) -> Result<DeletionOutcome, StoreError> {
         let mut guard = self.db.lock().expect("brain store mutex poisoned");
         let tx = guard
             .conn_mut()
@@ -1425,12 +1510,37 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("DELETE episodes: {e}")))?;
         tx.commit()
             .map_err(|e| StoreError::Backend(format!("commit wipe_all tx: {e}")))?;
-        guard
-            .conn()
-            .execute_batch("VACUUM")
-            .map_err(|e| StoreError::Backend(format!("VACUUM after wipe_all: {e}")))?;
-        remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, &blob_digests)?;
-        Ok(n as u64)
+        Ok(run_post_delete_cleanup(
+            guard.conn(),
+            &self.blob_dir,
+            &blob_digests,
+            n as u64,
+        ))
+    }
+}
+
+fn run_post_delete_cleanup(
+    connection: &rusqlite::Connection,
+    blob_dir: &Path,
+    blob_digests: &[String],
+    events_deleted: u64,
+) -> DeletionOutcome {
+    let mut cleanup_warnings = Vec::new();
+    if let Err(error) = connection.execute_batch("VACUUM") {
+        cleanup_warnings.push(DeletionCleanupWarning {
+            stage: DeletionCleanupStage::Vacuum,
+            diagnostic: format!("VACUUM after committed deletion: {error}"),
+        });
+    }
+    if let Err(error) = remove_unreferenced_keyframe_blobs(connection, blob_dir, blob_digests) {
+        cleanup_warnings.push(DeletionCleanupWarning {
+            stage: DeletionCleanupStage::KeyframeBlobs,
+            diagnostic: format!("keyframe cleanup after committed deletion: {error}"),
+        });
+    }
+    DeletionOutcome {
+        events_deleted,
+        cleanup_warnings,
     }
 }
 

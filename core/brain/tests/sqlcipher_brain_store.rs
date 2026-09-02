@@ -1348,6 +1348,37 @@ fn delete_event_removes_its_unreferenced_encrypted_keyframe_blob() {
 }
 
 #[test]
+fn delete_event_reports_post_commit_blob_cleanup_failure_without_lying_about_deletion() {
+    let (_dir, path) = tmp("delete_event_blob_cleanup_failure.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let digest = "e".repeat(64);
+    let invalid_blob_path = blob_dir.join(format!("{digest}.bin"));
+    std::fs::create_dir(&invalid_blob_path).expect("create non-file blob candidate");
+
+    let mut event = blank_event(100, "delete despite cleanup failure");
+    event.keyframe_blob = Some(digest);
+    let id = store.put_event(&event).expect("put event");
+
+    let outcome = store
+        .delete_event_with_outcome(id)
+        .expect("delete transaction committed");
+    assert_eq!(outcome.events_deleted, 1);
+    assert!(outcome.vacuum_ok());
+    assert!(!outcome.blob_cleanup_ok());
+    assert!(
+        store.get_event(id).expect("read after delete").is_none(),
+        "a post-commit cleanup warning must not conceal the committed deletion"
+    );
+    assert!(
+        invalid_blob_path.is_dir(),
+        "non-regular evidence artifacts remain fail-closed for manual inspection"
+    );
+}
+
+#[test]
 fn delete_event_keeps_a_keyframe_blob_until_its_last_reference_is_deleted() {
     let (_dir, path) = tmp("delete_shared_blob.sqlite");
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");

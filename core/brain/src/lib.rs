@@ -129,7 +129,10 @@ pub use memory_delta::{
 };
 pub use memory_projector::{project_event, retract_event};
 pub use retention_purger::{PurgeStats, RetentionConfig};
-pub use sqlcipher_brain_store::{IntegrityError, SqlCipherBrainStore};
+pub use sqlcipher_brain_store::{
+    DeletionCleanupStage, DeletionCleanupWarning, DeletionOutcome, IntegrityError,
+    SqlCipherBrainStore,
+};
 
 pub mod integrity_scheduler;
 pub use integrity_scheduler::{

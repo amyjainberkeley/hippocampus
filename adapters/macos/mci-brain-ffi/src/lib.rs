@@ -50,12 +50,12 @@
 #![allow(unsafe_code)]
 
 use std::ffi::{c_char, CStr, CString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use mci_brain::{BrainStore, EventId, SqlCipherBrainStore};
+use mci_brain::{BrainStore, DeletionOutcome, EventId, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 use serde::{Deserialize, Serialize};
 
@@ -297,6 +297,8 @@ pub struct TimelineEventJson {
 /// removed even if disk space wasn't yet reclaimed).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeleteResultJson {
+    /// Always `true` for a returned payload. Pre-commit failures return null.
+    pub committed: bool,
     /// Rows removed from the `events` table. CASCADE-deleted child rows
     /// (`event_vectors`, `chunks`, `entity_mentions`) are NOT counted here.
     pub events_deleted: u64,
@@ -305,6 +307,8 @@ pub struct DeleteResultJson {
     /// succeeded, so callers should treat `events_deleted > 0 &&
     /// !vacuum_ok` as "data gone, disk not yet reclaimed".
     pub vacuum_ok: bool,
+    /// Whether unreferenced encrypted keyframe cleanup succeeded.
+    pub blob_cleanup_ok: bool,
 }
 
 /// Content-free aggregate returned by [`mci_brain_ffi_summary_stats`].
@@ -351,6 +355,9 @@ pub struct Handle {
     /// writer connection when the recall UI's Privacy Dashboard fires a
     /// destructive action.
     brain_path: PathBuf,
+    /// Agent run sentinel paired with this brain. Mutation checks it before
+    /// and after opening a writer and fails closed on live/ambiguous state.
+    run_lock_path: PathBuf,
     /// Retained `SQLCipher` key. Needed so the mutation entry points can
     /// briefly open a *writer* connection to run DELETE + VACUUM. The
     /// underlying `DbKey` type zeroizes on drop; the key material was
@@ -453,6 +460,7 @@ pub unsafe extern "C" fn mci_brain_ffi_open(
     let h = Box::new(Handle {
         store: Arc::new(store),
         blob_dir,
+        run_lock_path: mutation_run_lock_path(&p),
         brain_path: p,
         db_key,
         pending_wipe: Mutex::new(None),
@@ -1238,15 +1246,10 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
             return ptr::null_mut();
         }
     };
-    match with_writer(handle, |writer| writer.delete_event(EventId(q.event_id))) {
-        Ok(deleted) => json_to_c_string(&DeleteResultJson {
-            events_deleted: deleted,
-            // `SqlCipherBrainStore::delete_event` VACUUMs on the same
-            // writer connection; if that VACUUM had failed, `delete_event`
-            // would have returned an Err, so surfacing `vacuum_ok: true`
-            // here is accurate. (See docs on `delete_event`.)
-            vacuum_ok: true,
-        }),
+    match with_writer(handle, |writer| {
+        writer.delete_event_with_outcome(EventId(q.event_id))
+    }) {
+        Ok(outcome) => json_to_c_string(&delete_result_json(&outcome)),
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_delete_event: {e}"));
             ptr::null_mut()
@@ -1278,12 +1281,9 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_events_in_range(
     // Safety: caller guarantees a live handle.
     let handle = unsafe { &*h };
     match with_writer(handle, |writer| {
-        writer.delete_events_in_range(start_ts_us, end_ts_us)
+        writer.delete_events_in_range_with_outcome(start_ts_us, end_ts_us)
     }) {
-        Ok(deleted) => json_to_c_string(&DeleteResultJson {
-            events_deleted: deleted,
-            vacuum_ok: true,
-        }),
+        Ok(outcome) => json_to_c_string(&delete_result_json(&outcome)),
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_delete_events_in_range: {e}"));
             ptr::null_mut()
@@ -1399,11 +1399,8 @@ pub unsafe extern "C" fn mci_brain_ffi_wipe_brain(
         set_last_error("mci_brain_ffi_wipe_brain: wipe token mismatch");
         return ptr::null_mut();
     }
-    match with_writer(handle, SqlCipherBrainStore::wipe_all) {
-        Ok(deleted) => json_to_c_string(&DeleteResultJson {
-            events_deleted: deleted,
-            vacuum_ok: true,
-        }),
+    match with_writer(handle, SqlCipherBrainStore::wipe_all_with_outcome) {
+        Ok(outcome) => json_to_c_string(&delete_result_json(&outcome)),
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_wipe_brain: {e}"));
             ptr::null_mut()
@@ -1839,22 +1836,20 @@ fn json_null_c_string() -> *mut c_char {
 /// The recall-ui's long-lived FFI handle is read-only by construction
 /// (ADR-0016 §4.3). The four cycle-8.47 mutation methods are the
 /// enumerated exceptions; they open a writer only for the duration of
-/// one DELETE + VACUUM, then drop it. This keeps the read-only invariant
+/// one DELETE + maintenance pass, then drop it. This keeps the read-only invariant
 /// intact for every other call and confines the writer's blast radius
 /// to a single stack frame.
 ///
 /// The `DbKey` retained on `Handle` (a clone of the same bytes already
 /// held by the read-only store) is the credential; we open a fresh
 /// `SqlCipherBrainStore::new` connection with it, run the mutation, and
-/// let RAII close the writer at end-of-scope. `VACUUM` runs inside the
-/// store's mutation method (after the transaction commits), so a VACUUM
-/// failure propagates through `body`'s `Err` — the DELETE tx and the
-/// VACUUM are transactionally decoupled but reported as a single
-/// unit here.
+/// let RAII close the writer at end-of-scope. Maintenance runs after the
+/// transaction commits, so its warnings remain part of a successful outcome.
 fn with_writer<F, T>(handle: &Handle, body: F) -> Result<T, String>
 where
     F: FnOnce(&SqlCipherBrainStore) -> Result<T, mci_brain::StoreError>,
 {
+    ensure_agent_writer_quiescent(&handle.run_lock_path)?;
     // Open a fresh writer. SqlCipherBrainStore::new does the migration
     // (idempotent — every DDL is IF NOT EXISTS) so a delete on an
     // already-migrated store is safe. On a first-run edge case where
@@ -1862,7 +1857,66 @@ where
     // migration runs here and the DELETE targets an empty schema.
     let writer = SqlCipherBrainStore::new(&handle.brain_path, &handle.db_key)
         .map_err(|e| format!("open writer: {e}"))?;
+    // Re-check after open to close the ordinary check/open race. SQLite still
+    // serializes a process that appears after this point, but Recall refuses
+    // every agent state it can observe rather than weakening user intent.
+    ensure_agent_writer_quiescent(&handle.run_lock_path)?;
     body(&writer).map_err(|e| format!("{e}"))
+}
+
+fn mutation_run_lock_path(brain_path: &Path) -> PathBuf {
+    let Some(parent) = brain_path.parent() else {
+        return PathBuf::from(".running");
+    };
+    if parent.file_name().is_some_and(|name| name == "MCI") {
+        return parent.parent().map_or_else(
+            || parent.join(".running"),
+            |support| support.join("Hippocampus/.running"),
+        );
+    }
+    parent.join(".running")
+}
+
+fn ensure_agent_writer_quiescent(run_lock_path: &Path) -> Result<(), String> {
+    let contents = match std::fs::read_to_string(run_lock_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "MCI_MUTATION_BLOCKED: cannot verify agent writer state: {error}"
+            ))
+        }
+    };
+    let pid = contents.trim().parse::<i32>().map_err(|_| {
+        "MCI_MUTATION_BLOCKED: agent run sentinel is malformed; refusing mutation".to_owned()
+    })?;
+    let Some(pid) = rustix::process::Pid::from_raw(pid) else {
+        return Err(
+            "MCI_MUTATION_BLOCKED: agent run sentinel has an invalid pid; refusing mutation"
+                .to_owned(),
+        );
+    };
+    match rustix::process::test_kill_process(pid) {
+        Ok(()) => {
+            Err("MCI_MUTATION_BLOCKED: agent writer is active; stop it before deleting".to_owned())
+        }
+        Err(rustix::io::Errno::SRCH) => Ok(()),
+        Err(error) => Err(format!(
+            "MCI_MUTATION_BLOCKED: cannot verify agent process state: {error}"
+        )),
+    }
+}
+
+fn delete_result_json(outcome: &DeletionOutcome) -> DeleteResultJson {
+    for warning in &outcome.cleanup_warnings {
+        eprintln!("mci-brain-ffi: committed deletion cleanup warning: {warning:?}");
+    }
+    DeleteResultJson {
+        committed: true,
+        events_deleted: outcome.events_deleted,
+        vacuum_ok: outcome.vacuum_ok(),
+        blob_cleanup_ok: outcome.blob_cleanup_ok(),
+    }
 }
 
 /// Generate a fresh 32-byte random wipe-confirmation token, hex-encoded.
@@ -2485,8 +2539,10 @@ mod tests {
     #[test]
     fn delete_result_json_serde_round_trip() {
         let r = DeleteResultJson {
+            committed: true,
             events_deleted: 42,
             vacuum_ok: true,
+            blob_cleanup_ok: false,
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: DeleteResultJson = serde_json::from_str(&s).unwrap();
@@ -2494,6 +2550,24 @@ mod tests {
         // Wire is snake_case for Swift Codable interop.
         assert!(s.contains("\"events_deleted\""), "got: {s}");
         assert!(s.contains("\"vacuum_ok\""), "got: {s}");
+        assert!(s.contains("\"blob_cleanup_ok\""), "got: {s}");
+    }
+
+    #[test]
+    fn production_brain_uses_the_agents_existing_run_sentinel() {
+        let brain = Path::new("/Users/test/Library/Application Support/MCI/mci.sqlite");
+        assert_eq!(
+            mutation_run_lock_path(brain),
+            PathBuf::from("/Users/test/Library/Application Support/Hippocampus/.running")
+        );
+    }
+
+    #[test]
+    fn custom_brain_uses_a_sibling_run_sentinel() {
+        assert_eq!(
+            mutation_run_lock_path(Path::new("/tmp/fixture/brain.sqlite")),
+            PathBuf::from("/tmp/fixture/.running")
+        );
     }
 
     #[test]

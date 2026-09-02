@@ -141,10 +141,11 @@ char *mci_brain_ffi_summary_stats(McibrainHandle *h);
  * typed-word ("DELETE" / "DELETE EVERYTHING") confirmation flow.
  * wipe_brain additionally requires a 60s-TTL token from prepare_wipe.
  *
- * Every mutation opens a transient writer connection, runs DELETE
- * (CASCADE-clean via migrations 0001/0004/0005) + VACUUM, then closes.
- * Returns a UTF-8 JSON DeleteResultJson: {"events_deleted": N,
- * "vacuum_ok": bool}. NULL on error; caller must free via string_free. */
+ * Every mutation opens a transient writer connection, commits DELETE,
+ * then attempts storage cleanup before closing. Returns UTF-8 JSON:
+ * {"committed": true, "events_deleted": N, "vacuum_ok": bool,
+ * "blob_cleanup_ok": bool}. Cleanup flags may be false after commit.
+ * NULL means no committed outcome; caller must free via string_free. */
 
 /* Delete a single event by id. `event_id_json` is
  * {"event_id": <u64>}. */

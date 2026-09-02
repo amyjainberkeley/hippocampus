@@ -328,20 +328,56 @@ public enum BrainReaderError: Error, Equatable {
     case openFailed(String)
     case queryFailed(String)
     case decodeFailed(String)
+    /// A live or ambiguous ingestion writer prevented mutation before commit.
+    case mutationBlocked
 }
 
 /// Content-free result of a Privacy Dashboard destructive action.
 /// Mirrors the FFI's `DeleteResultJson`.
 public struct DeleteResult: Sendable, Equatable, Codable {
+    /// The database transaction committed. The FFI returns no result otherwise.
+    public let committed: Bool
     /// Rows removed from the `events` table (CASCADE children not counted).
     public let eventsDeleted: UInt64
     /// Whether the post-delete VACUUM succeeded. `false` here still means
     /// the DELETE landed — disk-space reclamation may be pending.
     public let vacuumOk: Bool
+    /// Whether encrypted keyframe artifacts were reconciled after commit.
+    public let blobCleanupOk: Bool
 
-    public init(eventsDeleted: UInt64, vacuumOk: Bool) {
+    public init(
+        committed: Bool = true,
+        eventsDeleted: UInt64,
+        vacuumOk: Bool,
+        blobCleanupOk: Bool = true
+    ) {
+        self.committed = committed
         self.eventsDeleted = eventsDeleted
         self.vacuumOk = vacuumOk
+        self.blobCleanupOk = blobCleanupOk
+    }
+
+    /// Whether any best-effort storage maintenance remains after commit.
+    public var cleanupPending: Bool { !vacuumOk || !blobCleanupOk }
+}
+
+/// Truthful, jargon-free presentation of destructive-action outcomes.
+public enum DeletionPresentation {
+    /// Banner for an outcome returned after a committed transaction.
+    public static func successBanner(for result: DeleteResult) -> String {
+        let noun = result.eventsDeleted == 1 ? "event" : "events"
+        let committed = "Removed \(result.eventsDeleted) \(noun)."
+        return result.cleanupPending
+            ? committed + " Storage cleanup is still pending."
+            : committed
+    }
+
+    /// Banner for a mutation that did not return a committed outcome.
+    public static func failureBanner(for error: Error) -> String {
+        if case BrainReaderError.mutationBlocked = error {
+            return UserFacingCopy.deleteBlockedBanner
+        }
+        return UserFacingCopy.deleteFailedBanner
     }
 }
 

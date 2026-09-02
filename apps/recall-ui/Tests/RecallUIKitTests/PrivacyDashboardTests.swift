@@ -194,10 +194,32 @@ final class PrivacyDashboardTests: XCTestCase {
     }
 
     func testDeleteResultRoundTripsThroughCodable() throws {
-        let r = DeleteResult(eventsDeleted: 42, vacuumOk: true)
+        let r = DeleteResult(
+            eventsDeleted: 42,
+            vacuumOk: false,
+            blobCleanupOk: false
+        )
         let data = try JSONEncoder().encode(r)
         let back = try JSONDecoder().decode(DeleteResult.self, from: data)
         XCTAssertEqual(r, back)
+        XCTAssertTrue(back.committed)
+        XCTAssertTrue(back.cleanupPending)
+    }
+
+    func testDeletionPresentationSeparatesCommitFromCleanupAndBlocking() {
+        let result = DeleteResult(
+            eventsDeleted: 1,
+            vacuumOk: true,
+            blobCleanupOk: false
+        )
+        XCTAssertEqual(
+            DeletionPresentation.successBanner(for: result),
+            "Removed 1 event. Storage cleanup is still pending."
+        )
+        XCTAssertEqual(
+            DeletionPresentation.failureBanner(for: BrainReaderError.mutationBlocked),
+            UserFacingCopy.deleteBlockedBanner
+        )
     }
 
     func testMutatorSpyDeleteEventTracksCallSequence() async throws {
