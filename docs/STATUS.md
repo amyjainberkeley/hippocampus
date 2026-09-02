@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `3647f2e`
+Audited code baseline: `8a293ab`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -93,10 +93,11 @@ more than this page.
   signing identities, and no `notarytool-profile`. It cannot produce or claim a
   Developer ID-signed, notarized public release.
 - The three release Core ML bundles are absent from this worktree. Release
-  assembly must continue to fail without the complete Arctic Embed S, BERT NER,
-  and Qwen3 plus tokenizer artifacts. A debug-only ad-hoc lite bundle may omit
-  them for local UI verification, but it is not distributable and generated
-  briefs/semantic recall remain unavailable in that artifact.
+  assembly and strict model verification fail without the complete Arctic
+  Embed S, BERT NER, and Qwen3 plus tokenizer artifacts. Only a debug ad-hoc
+  lite bundle can explicitly authorize those omissions for local UI
+  verification; it is not distributable, semantic recall remains lexical-only,
+  and generated briefs remain unavailable in that artifact.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status
