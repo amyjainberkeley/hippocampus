@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RELEASE="$REPO_ROOT/.github/workflows/release.yml"
 PUBLISH="$REPO_ROOT/.github/workflows/publish-release.yml"
 CARGO="$REPO_ROOT/.github/workflows/cargo.yml"
+SWIFT_CI="$REPO_ROOT/.github/workflows/swift.yml"
 CHECK="$REPO_ROOT/scripts/check.sh"
 INFO_PLIST="$REPO_ROOT/apps/hippocampus/Resources/Info.plist"
 RELEASE_CI="$REPO_ROOT/.github/workflows/release-contract.yml"
@@ -213,8 +214,14 @@ require_pattern "$CHECK" 'clean-home-contract\|bash\|lint\|scripts/test-e2e-clea
     'the unified local gate enforces the clean-home product contract'
 require_pattern "$CHECK" 'swift-test-hippocampus\|swift\|test\|swift test --package-path apps/hippocampus' \
     'the unified local gate runs the app supervisor and capture-consent tests'
+require_literal "$SWIFT_CI" 'swift test --package-path apps/hippocampus' \
+    'Swift CI runs the Hippocampus app tests'
+require_literal "$SWIFT_CI" 'swift test --package-path apps/onboarding' \
+    'Swift CI runs the onboarding tests'
 require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior' \
     'release CI executes the capture-consent behavior fixture'
+require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior' \
+    'release CI executes the durable app-access route fixture'
 for script in test-release-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
     test-sparkle-keygen.sh test-sparkle-keypair.sh; do
@@ -245,10 +252,15 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift \
     apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift \
     apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift \
+    apps/onboarding/Sources/Onboarding/OnboardingApp.swift \
+    apps/onboarding/Sources/OnboardingKit/OnboardingFlowViewModel.swift \
+    apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift \
     apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift \
     apps/onboarding/Tests/Fixtures/RetentionPersistenceBehavior/main.swift \
     apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift \
     apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift \
+    apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift \
+    apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift \
     apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift \
     apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift \
     apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift \

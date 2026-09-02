@@ -620,6 +620,22 @@ final class ProcessSupervisorTests: XCTestCase {
         locator.onboardingURL = URL(fileURLWithPath: "/bundle/onboarding")
         XCTAssertTrue(supervisor.hasOnboarding)
     }
+
+    func test_onboarding_environment_routes_to_real_allowlist_editor() {
+        let environment = ProcessSupervisorLaunchPlan.onboardingEnvironment(
+            baseEnvironment: [
+                "MCI_DB_KEY_HEX": "ef".repeat(32),
+                "UNRELATED": "kept",
+            ],
+            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey,
+            initialStep: "allowlist"
+        )
+
+        XCTAssertEqual(environment["MCI_ONBOARDING_STEP"], "allowlist")
+        XCTAssertEqual(environment["UNRELATED"], "kept")
+        XCTAssertNil(environment["MCI_DB_KEY_HEX"])
+    }
 }
 
 private func XCTAssertThrowsErrorAsync<T>(

@@ -114,23 +114,6 @@ public final class PreferencesStore: ObservableObject {
         didSet { defaults.set(defaultRecallTab.rawValue, forKey: Keys.defaultRecallTab) }
     }
 
-    // MARK: Capture
-
-    /// Deep-hook plugin toggles. Each plugin is a named boolean; the
-    /// values default to whatever the plugin ships with (`Messages`
-    /// and `Mail` are on by default; future `Calendar`, `Notes`,
-    /// `Reminders` default off until they ship).
-    ///
-    /// Stored as a small `[String: Bool]` dict under a single key so
-    /// adding a new plugin doesn't require a new key + migration.
-    @Published public var deepHookPlugins: [String: Bool] {
-        didSet {
-            if let data = try? JSONEncoder().encode(deepHookPlugins) {
-                defaults.set(data, forKey: Keys.deepHookPlugins)
-            }
-        }
-    }
-
     // MARK: Privacy
 
     /// Retention window applied by the brain-pruner. Defaults to
@@ -204,13 +187,6 @@ public final class PreferencesStore: ObservableObject {
 
         let rawTab = defaults.string(forKey: Keys.defaultRecallTab) ?? PreferredRecallTab.search.rawValue
         self.defaultRecallTab = PreferredRecallTab(rawValue: rawTab) ?? .search
-
-        if let data = defaults.data(forKey: Keys.deepHookPlugins),
-           let decoded = try? JSONDecoder().decode([String: Bool].self, from: data) {
-            self.deepHookPlugins = decoded
-        } else {
-            self.deepHookPlugins = PreferencesStore.defaultDeepHookPlugins
-        }
 
         self.retentionPolicy = .forever
         self.retentionCustomDays = nil
@@ -346,27 +322,6 @@ public final class PreferencesStore: ObservableObject {
         }
     }
 
-    // MARK: - Known plugin catalog
-
-    /// The set of deep-hook plugins the app knows about. Shipping
-    /// plugins default to enabled; future ones default off so a new
-    /// row appearing in the list is a deliberate opt-in. Extending
-    /// this dict is a single-line change; no migration required
-    /// because the store rehydrates any missing key on next read.
-    public static let defaultDeepHookPlugins: [String: Bool] = [
-        "Messages": true,
-        "Mail": true,
-        "Calendar": false,
-        "Notes": false,
-        "Reminders": false,
-    ]
-
-    /// Stable display ordering for UI. Alphabetical + shipping-first
-    /// keeps the list scannable regardless of dict iteration order.
-    public static let deepHookPluginOrder: [String] = [
-        "Messages", "Mail", "Calendar", "Notes", "Reminders",
-    ]
-
     // MARK: - Keys
 
     /// Every UserDefaults key the store owns. The `ai.hippocampus.prefs.`
@@ -375,7 +330,6 @@ public final class PreferencesStore: ObservableObject {
     enum Keys {
         static let showMenuBarIcon = "ai.hippocampus.prefs.showMenuBarIcon"
         static let defaultRecallTab = "ai.hippocampus.prefs.defaultRecallTab"
-        static let deepHookPlugins = "ai.hippocampus.prefs.deepHookPlugins"
         static let retentionPolicy = "ai.hippocampus.prefs.retentionPolicy"
         static let ollamaEndpoint = "ai.hippocampus.prefs.ollamaEndpoint"
         static let customDatabasePath = "ai.hippocampus.prefs.customDatabasePath"

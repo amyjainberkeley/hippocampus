@@ -98,18 +98,13 @@ struct HippocampusApp: App {
                 }
             },
             onOpenDenylistEditor: {
-                // Deep-link into the onboarding executable's denylist
-                // editor. `hippocampus://onboarding` re-opens the flow;
-                // a future PR will add a dedicated `?slide=denylist`
-                // route. For now the button lands the user on
-                // onboarding, from which they can navigate.
                 Task { @MainActor in
-                    _ = supervisor.openOnboarding()
+                    _ = supervisor.openOnboarding(initialStep: "trust")
                 }
             },
             onOpenAllowlistEditor: {
                 Task { @MainActor in
-                    _ = supervisor.openOnboarding()
+                    _ = supervisor.openOnboarding(initialStep: "allowlist")
                 }
             },
             onExportDebugBundle: {

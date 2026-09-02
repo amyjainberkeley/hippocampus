@@ -53,5 +53,10 @@ let package = Package(
             dependencies: ["OnboardingKit"],
             path: "Tests/Fixtures/RetentionPersistenceBehavior"
         ),
+        .executableTarget(
+            name: "OnboardingRouteBehavior",
+            dependencies: ["OnboardingKit"],
+            path: "Tests/Fixtures/OnboardingRouteBehavior"
+        ),
     ]
 )

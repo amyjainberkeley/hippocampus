@@ -1,4 +1,4 @@
-name: Swift — MCICaptureHelper + recall-ui + installer
+name: Swift — app packages and installer
 
 on:
   push:
@@ -99,6 +99,21 @@ jobs:
           restore-keys: swift-hippocampus-${{ runner.os }}-
 
       - run: swift test --package-path apps/hippocampus
+
+  onboarding:
+    name: Onboarding tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Cache SwiftPM .build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/onboarding/.build
+          key: swift-onboarding-${{ runner.os }}-${{ hashFiles('apps/onboarding/Package.resolved') }}
+          restore-keys: swift-onboarding-${{ runner.os }}-
+
+      - run: swift test --package-path apps/onboarding
 
   installer-smoke:
     name: Installer script smoke test

@@ -62,12 +62,6 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertEqual(store.customDatabasePath, "",
                        "DB path defaults empty (canonical location)")
 
-        // Shipping plugins on by default; future plugins off.
-        XCTAssertEqual(store.deepHookPlugins["Messages"], true)
-        XCTAssertEqual(store.deepHookPlugins["Mail"], true)
-        XCTAssertEqual(store.deepHookPlugins["Calendar"], false)
-        XCTAssertEqual(store.deepHookPlugins["Notes"], false)
-        XCTAssertEqual(store.deepHookPlugins["Reminders"], false)
     }
 
     // MARK: - Round-trip
@@ -84,8 +78,6 @@ final class PreferencesStoreTests: XCTestCase {
             XCTAssertTrue(store.setRetentionPolicy(.thirtyDays))
             store.ollamaEndpoint = "http://localhost:11434"
             store.customDatabasePath = "/tmp/custom.sqlite"
-            store.deepHookPlugins["Messages"] = false
-            store.deepHookPlugins["Calendar"] = true
         }
         // New instance, same defaults — should re-read the persisted values.
         let reloaded = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
@@ -94,8 +86,6 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.retentionPolicy, .thirtyDays)
         XCTAssertEqual(reloaded.ollamaEndpoint, "http://localhost:11434")
         XCTAssertEqual(reloaded.customDatabasePath, "/tmp/custom.sqlite")
-        XCTAssertEqual(reloaded.deepHookPlugins["Messages"], false)
-        XCTAssertEqual(reloaded.deepHookPlugins["Calendar"], true)
     }
 
     // MARK: - Defensive enum coercion
@@ -110,17 +100,6 @@ final class PreferencesStoreTests: XCTestCase {
         let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
         XCTAssertEqual(store.defaultRecallTab, .search)
         XCTAssertEqual(store.retentionPolicy, .forever)
-    }
-
-    /// Corrupted deep-hook plugin blob must not crash — the store
-    /// falls back to the shipped `defaultDeepHookPlugins` catalog.
-    func testCorruptedDeepHookBlob_fallsBackToDefaults() {
-        defaults.set(Data([0xFF, 0x00, 0x42]),
-                     forKey: PreferencesStore.Keys.deepHookPlugins)
-
-        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
-        XCTAssertEqual(store.deepHookPlugins,
-                       PreferencesStore.defaultDeepHookPlugins)
     }
 
     // MARK: - Enum display metadata
@@ -195,7 +174,6 @@ final class PreferencesStoreTests: XCTestCase {
         let allKeys = [
             PreferencesStore.Keys.showMenuBarIcon,
             PreferencesStore.Keys.defaultRecallTab,
-            PreferencesStore.Keys.deepHookPlugins,
             PreferencesStore.Keys.retentionPolicy,
             PreferencesStore.Keys.ollamaEndpoint,
             PreferencesStore.Keys.customDatabasePath,
@@ -210,19 +188,4 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertEqual(Set(allKeys).count, allKeys.count)
     }
 
-    // MARK: - Plugin ordering
-
-    /// The order array must include every default plugin exactly once
-    /// so the UI never silently drops a row (e.g. when a new plugin is
-    /// added to `defaultDeepHookPlugins` but the developer forgets the
-    /// order array).
-    func testDeepHookPluginOrder_coversDefaults() {
-        let ordered = Set(PreferencesStore.deepHookPluginOrder)
-        let defaults = Set(PreferencesStore.defaultDeepHookPlugins.keys)
-        XCTAssertEqual(ordered, defaults,
-                       "deepHookPluginOrder must match defaultDeepHookPlugins keys")
-        XCTAssertEqual(PreferencesStore.deepHookPluginOrder.count,
-                       ordered.count,
-                       "no duplicates in deepHookPluginOrder")
-    }
 }

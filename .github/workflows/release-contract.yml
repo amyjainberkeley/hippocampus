@@ -44,9 +44,14 @@ on:
       - 'apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift'
       - 'apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift'
+      - 'apps/onboarding/Sources/Onboarding/OnboardingApp.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/OnboardingFlowViewModel.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift'
       - 'apps/onboarding/Tests/Fixtures/RetentionPersistenceBehavior/main.swift'
       - 'apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift'
       - 'apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift'
+      - 'apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift'
+      - 'apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift'
@@ -132,9 +137,14 @@ on:
       - 'apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift'
       - 'apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift'
+      - 'apps/onboarding/Sources/Onboarding/OnboardingApp.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/OnboardingFlowViewModel.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift'
       - 'apps/onboarding/Tests/Fixtures/RetentionPersistenceBehavior/main.swift'
       - 'apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift'
       - 'apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift'
+      - 'apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift'
+      - 'apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift'
@@ -202,6 +212,7 @@ jobs:
       - run: scripts/test-onboarding-product-truth.sh
       - run: scripts/test-screenshot-assets.sh
       - run: scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior
+      - run: scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior
       - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh

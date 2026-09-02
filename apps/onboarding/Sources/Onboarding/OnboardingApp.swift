@@ -55,11 +55,14 @@ struct OnboardingApp: App {
         let fda: any FullDiskAccessPermission = StubFullDiskAccessPermission()
         #endif
 
+        let initialStep = ProcessInfo.processInfo.environment["MCI_ONBOARDING_STEP"]
+            .flatMap(OnboardingStep.init(launchRoute:))
         _flowVM = StateObject(wrappedValue: OnboardingFlowViewModel(
             screenRecording: sr,
             accessibility: ax,
             automation: am,
-            fullDiskAccess: fda
+            fullDiskAccess: fda,
+            initialStep: initialStep
         ))
         _trustVM = StateObject(wrappedValue: TrustPanelViewModel(
             allowlistStore: StubAllowlistStore(),

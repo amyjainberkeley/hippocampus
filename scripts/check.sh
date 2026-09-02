@@ -34,6 +34,7 @@ LANES=(
     "swift-test-onboarding|swift|test|swift test --package-path apps/onboarding"
     "swift-test-hippocampus|swift|test|swift test --package-path apps/hippocampus"
     "capture-consent-behavior|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior"
+    "onboarding-route-behavior|swift|test|scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior"
     "bash-syntax|bash|lint|__bash_syntax_lane"
     "release-contract|bash|lint|scripts/test-release-contract.sh"
     "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
@@ -86,6 +87,7 @@ LANES
     swift-test-onboarding swift test in apps/onboarding
     swift-test-hippocampus swift test in apps/hippocampus
     capture-consent-behavior executable capture authority and generation fixture
+    onboarding-route-behavior executable route to the durable app-access editor
     bash-syntax           bash -n across repo *.sh files
     release-contract      release graph and artifact identity contract
     toml-license-contract pinned TOML dependency license contract
