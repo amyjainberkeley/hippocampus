@@ -1695,7 +1695,11 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     tx.execute_batch(sql_0005)
         .map_err(|e| StoreError::Backend(format!("apply migration 0005: {e}")))?;
     if matches!(starting_version.as_deref(), Some("6" | "7")) {
-        upgrade_memory_schema_to_v8(&tx, sql_0006)?;
+        upgrade_memory_schema_to_v8(
+            &tx,
+            sql_0006,
+            starting_version.as_deref().expect("matched legacy version"),
+        )?;
     } else {
         tx.execute_batch(sql_0006)
             .map_err(|e| StoreError::Backend(format!("apply migration 0006: {e}")))?;
@@ -1715,13 +1719,19 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
 fn upgrade_memory_schema_to_v8(
     tx: &rusqlite::Transaction<'_>,
     canonical_schema: &str,
+    starting_version: &str,
 ) -> Result<(), StoreError> {
-    backup_legacy_memory_rows(tx)?;
-    clear_legacy_memory_rows(tx)?;
+    let has_event_retractions = backup_legacy_memory_rows(tx, starting_version)?;
+    clear_legacy_memory_rows(tx, has_event_retractions)?;
+    if has_event_retractions {
+        tx.execute_batch("DROP TABLE memory_event_retractions;")
+            .map_err(|error| {
+                StoreError::Backend(format!("replace legacy retraction ledger: {error}"))
+            })?;
+    }
     tx.execute_batch(
         "DROP TABLE memory_claim_transitions;
          DROP TABLE memory_claim_evidence;
-         DROP TABLE memory_event_retractions;
          DROP TABLE memory_claims;
          DROP TABLE memory_evidence;
          DROP TABLE memory_deltas;",
@@ -1732,7 +1742,10 @@ fn upgrade_memory_schema_to_v8(
     restore_legacy_memory_rows(tx)
 }
 
-fn backup_legacy_memory_rows(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+fn backup_legacy_memory_rows(
+    tx: &rusqlite::Transaction<'_>,
+    starting_version: &str,
+) -> Result<bool, StoreError> {
     tx.execute_batch(
         "CREATE TEMP TABLE memory_deltas_v7_backup AS
              SELECT id, source_event_id, asserted_at_us, projector_version
@@ -1751,13 +1764,60 @@ fn backup_legacy_memory_rows(tx: &rusqlite::Transaction<'_>) -> Result<(), Store
          CREATE TEMP TABLE memory_claim_transitions_v7_backup AS
              SELECT id, claim_id, status, asserted_at_us, effective_at_us, reason,
                     source_event_id, projector_version
-             FROM memory_claim_transitions;
-         CREATE TEMP TABLE memory_event_retractions_v7_backup AS
-             SELECT id, target_event_id, retraction_event_id, asserted_at_us,
-                    effective_at_us, reason, projector_version
-             FROM memory_event_retractions;",
+             FROM memory_claim_transitions;",
     )
-    .map_err(|error| StoreError::Backend(format!("backup migration 0007 rows: {error}")))
+    .map_err(|error| StoreError::Backend(format!("backup legacy memory rows: {error}")))?;
+
+    let has_event_retractions = table_exists(tx, "memory_event_retractions")?;
+    match (starting_version, has_event_retractions) {
+        ("6", false) => tx
+            .execute_batch(
+                "CREATE TEMP TABLE memory_event_retractions_v7_backup (
+                     id TEXT,
+                     target_event_id INTEGER,
+                     retraction_event_id INTEGER,
+                     asserted_at_us INTEGER,
+                     effective_at_us INTEGER,
+                     reason TEXT,
+                     projector_version TEXT
+                 );",
+            )
+            .map_err(|error| {
+                StoreError::Backend(format!("create empty v6 retraction backup: {error}"))
+            })?,
+        ("6" | "7", true) => tx
+            .execute_batch(
+                "CREATE TEMP TABLE memory_event_retractions_v7_backup AS
+                     SELECT id, target_event_id, retraction_event_id, asserted_at_us,
+                            effective_at_us, reason, projector_version
+                     FROM memory_event_retractions;",
+            )
+            .map_err(|error| {
+                StoreError::Backend(format!("backup legacy retraction rows: {error}"))
+            })?,
+        ("7", false) => {
+            return Err(StoreError::Backend(
+                "schema v7 is missing memory_event_retractions".into(),
+            ));
+        }
+        (version, _) => {
+            return Err(StoreError::Backend(format!(
+                "unsupported legacy memory schema version {version}"
+            )));
+        }
+    }
+    Ok(has_event_retractions)
+}
+
+fn table_exists(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<bool, StoreError> {
+    tx.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1
+         )",
+        params![table],
+        |row| row.get(0),
+    )
+    .map_err(|error| StoreError::Backend(format!("probe legacy table {table}: {error}")))
 }
 
 fn restore_legacy_memory_rows(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
@@ -1830,13 +1890,18 @@ fn restore_legacy_memory_rows(tx: &rusqlite::Transaction<'_>) -> Result<(), Stor
     .map_err(|error| StoreError::Backend(format!("restore migration 0008 rows: {error}")))
 }
 
-fn clear_legacy_memory_rows(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
-    tx.execute_batch(
-        "DELETE FROM memory_claim_transitions;
-         DELETE FROM memory_claim_evidence;
-         DELETE FROM memory_event_retractions;",
-    )
-    .map_err(|error| StoreError::Backend(format!("clear migration 0007 children: {error}")))?;
+fn clear_legacy_memory_rows(
+    tx: &rusqlite::Transaction<'_>,
+    has_event_retractions: bool,
+) -> Result<(), StoreError> {
+    tx.execute_batch("DELETE FROM memory_claim_transitions; DELETE FROM memory_claim_evidence;")
+        .map_err(|error| StoreError::Backend(format!("clear migration 0007 children: {error}")))?;
+    if has_event_retractions {
+        tx.execute("DELETE FROM memory_event_retractions", [])
+            .map_err(|error| {
+                StoreError::Backend(format!("clear legacy event retractions: {error}"))
+            })?;
+    }
     loop {
         let remaining: i64 = tx
             .query_row("SELECT COUNT(*) FROM memory_claims", [], |row| row.get(0))
@@ -1870,7 +1935,6 @@ fn clear_legacy_memory_rows(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreE
 type ColumnShape = (&'static str, &'static str, bool, Option<&'static str>, i64);
 type TableShape = (&'static str, &'static [ColumnShape]);
 type ForeignKeyShape = (&'static str, &'static [&'static str]);
-type ConstraintShape = (&'static str, &'static [&'static str], usize);
 type IndexShape = (&'static str, &'static [&'static str]);
 type TableIndexShape = (&'static str, &'static [IndexShape]);
 
@@ -1990,26 +2054,6 @@ const MEMORY_FOREIGN_KEYS: &[ForeignKeyShape] = &[
             "retraction_event_id:events:id:NO ACTION:RESTRICT:NONE",
         ],
     ),
-];
-
-const MEMORY_CONSTRAINTS: &[ConstraintShape] = &[
-    ("memory_deltas", &[], 0),
-    ("memory_evidence", &[], 0),
-    (
-        "memory_claims",
-        &[
-            "check (confidence >= 0.0 and confidence <= 1.0)",
-            "check (initial_status in ('proposed', 'active'))",
-        ],
-        2,
-    ),
-    ("memory_claim_evidence", &[], 0),
-    (
-        "memory_claim_transitions",
-        &["check (status in ('superseded', 'retracted', 'contradicted'))"],
-        1,
-    ),
-    ("memory_event_retractions", &[], 0),
 ];
 
 const MEMORY_INDEX_SHAPES: &[TableIndexShape] = &[
@@ -2150,36 +2194,141 @@ fn validate_memory_foreign_keys(tx: &rusqlite::Transaction<'_>) -> Result<(), St
 }
 
 fn validate_memory_constraints(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
-    for (table, fragments, expected_check_count) in MEMORY_CONSTRAINTS {
-        let sql: String = tx
+    tx.execute_batch("SAVEPOINT memory_constraint_validation")
+        .map_err(|error| format!("start memory constraint probes: {error}"))?;
+    let result = run_memory_constraint_probes(tx);
+    let rollback = tx
+        .execute_batch(
+            "ROLLBACK TO memory_constraint_validation;
+             RELEASE memory_constraint_validation;",
+        )
+        .map_err(|error| format!("roll back memory constraint probes: {error}"));
+    result.and(rollback)
+}
+
+fn run_memory_constraint_probes(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    let event_id = constraint_probe_event(tx)?;
+    let proposed_id = unused_memory_id(tx, "memory_claims", "proposed")?;
+    let active_id = unused_memory_id(tx, "memory_claims", "active")?;
+
+    insert_constraint_probe_claim(tx, &proposed_id, event_id, "", 0.0, "proposed")
+        .map_err(|error| format!("canonical proposed claim was rejected: {error}"))?;
+    insert_constraint_probe_claim(tx, &active_id, event_id, "subject", 1.0, "active")
+        .map_err(|error| format!("canonical active claim was rejected: {error}"))?;
+
+    for (label, confidence, status) in [
+        ("negative confidence", -0.01, "active"),
+        ("confidence above one", 1.01, "active"),
+        ("invalid initial status", 0.5, "invalid"),
+    ] {
+        let claim_id = unused_memory_id(tx, "memory_claims", label)?;
+        expect_check_rejection(
+            insert_constraint_probe_claim(tx, &claim_id, event_id, "subject", confidence, status),
+            label,
+        )?;
+    }
+
+    for status in ["superseded", "retracted", "contradicted"] {
+        let transition_id = unused_memory_id(tx, "memory_claim_transitions", status)?;
+        insert_constraint_probe_transition(tx, &transition_id, &active_id, event_id, status)
+            .map_err(|error| {
+                format!("canonical transition status {status} was rejected: {error}")
+            })?;
+    }
+    let transition_id = unused_memory_id(tx, "memory_claim_transitions", "invalid")?;
+    expect_check_rejection(
+        insert_constraint_probe_transition(tx, &transition_id, &active_id, event_id, "invalid"),
+        "invalid transition status",
+    )
+}
+
+fn constraint_probe_event(tx: &rusqlite::Transaction<'_>) -> Result<i64, String> {
+    if let Some(event_id) = tx
+        .query_row("SELECT id FROM events ORDER BY id LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|error| format!("read constraint probe event: {error}"))?
+    {
+        return Ok(event_id);
+    }
+    tx.execute(
+        "INSERT INTO events (id, ts_us, text, cascade_reason)
+         VALUES (0, 0, 'memory schema constraint probe', 0)",
+        [],
+    )
+    .map_err(|error| format!("insert constraint probe event: {error}"))?;
+    Ok(0)
+}
+
+fn unused_memory_id(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    label: &str,
+) -> Result<String, String> {
+    for suffix in 0..1_000 {
+        let id = format!("__memory_schema_probe_{label}_{suffix}");
+        let exists = tx
             .query_row(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
-                params![table],
-                |row| row.get(0),
+                &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?1)"),
+                params![&id],
+                |row| row.get::<_, bool>(0),
             )
-            .map_err(|error| format!("read {table} DDL: {error}"))?;
-        let normalized = sql
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .to_ascii_lowercase();
-        if normalized.contains(" collate ") {
-            return Err(format!("{table} has a noncanonical column collation"));
-        }
-        for fragment in *fragments {
-            if !normalized.contains(fragment) {
-                return Err(format!("{table} is missing constraint {fragment}"));
-            }
-        }
-        let actual_check_count = normalized
-            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-            .filter(|token| *token == "check")
-            .count();
-        if actual_check_count != *expected_check_count {
-            return Err(format!("{table} has an incompatible CHECK constraint set"));
+            .map_err(|error| format!("probe {table} identity: {error}"))?;
+        if !exists {
+            return Ok(id);
         }
     }
-    Ok(())
+    Err(format!(
+        "could not allocate a constraint probe id in {table}"
+    ))
+}
+
+fn insert_constraint_probe_claim(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    event_id: i64,
+    subject: &str,
+    confidence: f64,
+    status: &str,
+) -> rusqlite::Result<usize> {
+    tx.execute(
+        "INSERT INTO memory_claims
+         (id, delta_id, source_event_id, subject, predicate, object, scope,
+          attribution, confidence, asserted_at_us, valid_from_us, valid_to_us,
+          projector_version, initial_status, supersedes_claim_id)
+         VALUES (?1, NULL, ?2, ?3, 'predicate', 'object', 'scope', NULL, ?4,
+                 0, 0, NULL, 'schema-probe', ?5, NULL)",
+        params![id, event_id, subject, confidence, status],
+    )
+}
+
+fn insert_constraint_probe_transition(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    claim_id: &str,
+    event_id: i64,
+    status: &str,
+) -> rusqlite::Result<usize> {
+    tx.execute(
+        "INSERT INTO memory_claim_transitions
+         (id, delta_id, claim_id, status, asserted_at_us, effective_at_us, reason,
+          source_event_id, projector_version)
+         VALUES (?1, NULL, ?2, ?3, 0, 0, 'schema probe', ?4, 'schema-probe')",
+        params![id, claim_id, status, event_id],
+    )
+}
+
+fn expect_check_rejection(result: rusqlite::Result<usize>, label: &str) -> Result<(), String> {
+    match result {
+        Err(rusqlite::Error::SqliteFailure(code, _))
+            if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_CHECK =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(format!("{label} hit a non-CHECK error: {error}")),
+        Ok(_) => Err(format!("{label} was accepted")),
+    }
 }
 
 fn validate_memory_indexes(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {

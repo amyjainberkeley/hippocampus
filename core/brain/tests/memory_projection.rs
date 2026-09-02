@@ -1324,26 +1324,24 @@ fn migration_upgrades_and_reopens_every_prior_brain_schema() {
     }
 }
 
-fn create_populated_v6_memory_schema(path: &Path, key: &DbKey) {
+fn create_populated_historical_memory_schema(path: &Path, key: &DbKey, version: u8) {
     create_prior_schema(path, key, 5);
     let mut db = raw_open(path, key).unwrap();
     let tx = db.conn_mut().transaction().unwrap();
-    let old_v6 = include_str!("../migrations/0006_memory_claims.sql")
-        .replace("TEXT NOT NULL PRIMARY KEY", "TEXT PRIMARY KEY")
-        .replace("    delta_id            TEXT,\n", "")
-        .replace(
-            "    FOREIGN KEY (delta_id) REFERENCES memory_deltas(id) ON DELETE RESTRICT,\n",
-            "",
+    let historical_schema = match version {
+        6 => include_str!("fixtures/memory_schema_v6_462060a.sql"),
+        7 => include_str!("fixtures/memory_schema_v7_dd960ad.sql"),
+        _ => panic!("unsupported historical memory schema {version}"),
+    };
+    tx.execute_batch(historical_schema).unwrap();
+    if version == 7 {
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value)
+             VALUES ('brain_schema_version', '7')",
+            [],
         )
-        .replace(
-            "CREATE INDEX IF NOT EXISTS memory_claims_delta\n    ON memory_claims(delta_id, id);\n",
-            "",
-        )
-        .replace(
-            "CREATE INDEX IF NOT EXISTS memory_claim_transitions_delta\n    ON memory_claim_transitions(delta_id, id);\n",
-            "",
-        );
-    tx.execute_batch(&old_v6).unwrap();
+        .unwrap();
+    }
     tx.execute_batch(
         "INSERT INTO events (id, ts_us, text, cascade_reason)
                  VALUES (1, 10, 'old source', 0), (2, 20, 'correction source', 0);
@@ -1360,24 +1358,28 @@ fn create_populated_v6_memory_schema(path: &Path, key: &DbKey) {
                   0.9, 20, 20, NULL, 'projector-v1', 'active', 'c1');
              INSERT INTO memory_claim_evidence VALUES ('c1', 'e1'), ('c2', 'e2');
              INSERT INTO memory_claim_transitions VALUES
-                 ('t1', 'c1', 'superseded', 20, 20, 'corrected', 2, 'projector-v1');
-             INSERT INTO memory_event_retractions VALUES
-                 ('r1', 1, 2, 30, 30, 'withdrawn', 'projector-v1');
-             INSERT OR REPLACE INTO meta (key, value)
-                 VALUES ('brain_schema_version', '6');",
+                 ('t1', 'c1', 'superseded', 20, 20, 'corrected', 2, 'projector-v1');",
     )
     .unwrap();
+    if version == 7 {
+        tx.execute(
+            "INSERT INTO memory_event_retractions VALUES
+             ('r1', 1, 2, 30, 30, 'withdrawn', 'projector-v1')",
+            [],
+        )
+        .unwrap();
+    }
     tx.commit().unwrap();
 }
 
-#[test]
-fn migration_v8_rebuilds_v6_identity_constraints_and_adds_delta_ownership() {
+fn assert_populated_historical_memory_migration(version: u8, expected_retractions: i64) {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("brain-v6.sqlite");
+    let path = dir.path().join(format!("brain-v{version}.sqlite"));
     let key = test_key();
-    create_populated_v6_memory_schema(&path, &key);
+    create_populated_historical_memory_schema(&path, &key, version);
 
-    let store = SqlCipherBrainStore::new(&path, &key).expect("upgrade populated v6 store");
+    let store = SqlCipherBrainStore::new(&path, &key)
+        .unwrap_or_else(|error| panic!("upgrade populated historical v{version} store: {error}"));
     drop(store);
     let db = raw_open(&path, &key).unwrap();
     let version: String = db
@@ -1395,7 +1397,7 @@ fn migration_v8_rebuilds_v6_identity_constraints_and_adds_delta_ownership() {
         ("memory_claims", 2),
         ("memory_claim_evidence", 2),
         ("memory_claim_transitions", 1),
-        ("memory_event_retractions", 1),
+        ("memory_event_retractions", expected_retractions),
     ] {
         let count: i64 = db
             .conn()
@@ -1437,6 +1439,76 @@ fn migration_v8_rebuilds_v6_identity_constraints_and_adds_delta_ownership() {
         )
         .unwrap();
     assert_eq!(transition_owner, "d2");
+}
+
+#[test]
+fn migration_v8_preserves_populated_historical_v6_without_retraction_ledger() {
+    assert_populated_historical_memory_migration(6, 0);
+}
+
+#[test]
+fn migration_v8_preserves_populated_historical_v7_with_retraction_ledger() {
+    assert_populated_historical_memory_migration(7, 1);
+}
+
+#[test]
+fn failed_historical_v7_restore_rolls_back_schema_and_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("brain-v7-orphan.sqlite");
+    let key = test_key();
+    create_populated_historical_memory_schema(&path, &key, 7);
+    {
+        let db = raw_open(&path, &key).unwrap();
+        db.conn()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO memory_event_retractions VALUES
+                 ('orphan', 999, 2, 40, 40, 'invalid historical row', 'projector-v1')",
+                [],
+            )
+            .unwrap();
+    }
+
+    let error = expect_open_error(&path, &key, "orphaned v7 restore must fail");
+    assert!(matches!(error, StoreError::Backend(_)));
+    let db = raw_open(&path, &key).unwrap();
+    let version: String = db
+        .conn()
+        .query_row(
+            "SELECT value FROM meta WHERE key='brain_schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, "7");
+    for (table, expected) in [
+        ("memory_deltas", 2_i64),
+        ("memory_claims", 2),
+        ("memory_claim_transitions", 1),
+        ("memory_event_retractions", 2),
+    ] {
+        let count: i64 = db
+            .conn()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, expected, "rollback changed {table}");
+    }
+    let delta_column: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('memory_claims') WHERE name='delta_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        delta_column, 0,
+        "failed restore must keep the v7 table shape"
+    );
 }
 
 #[test]
@@ -2607,4 +2679,97 @@ fn migration_rejects_an_extra_check_constraint_regardless_of_spacing() {
         "an extra CHECK must not be accepted as the canonical schema",
     );
     assert!(matches!(error, StoreError::Backend(_)));
+}
+
+#[test]
+fn migration_rejects_check_constraints_that_exist_only_in_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("comment-spoofed-checks.sqlite");
+    let key = test_key();
+    create_prior_schema(&path, &key, 5);
+    {
+        let db = raw_open(&path, &key).unwrap();
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE memory_claims (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    delta_id TEXT,
+                    source_event_id INTEGER NOT NULL,
+                    subject TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    attribution TEXT,
+                    confidence REAL NOT NULL
+                        /* CHECK (confidence >= 0.0 AND confidence <= 1.0) */,
+                    asserted_at_us INTEGER NOT NULL,
+                    valid_from_us INTEGER NOT NULL,
+                    valid_to_us INTEGER,
+                    projector_version TEXT NOT NULL,
+                    initial_status TEXT NOT NULL
+                        /* CHECK (initial_status IN ('proposed', 'active')) */,
+                    supersedes_claim_id TEXT,
+                    FOREIGN KEY (delta_id) REFERENCES memory_deltas(id) ON DELETE RESTRICT,
+                    FOREIGN KEY (source_event_id) REFERENCES events(id) ON DELETE RESTRICT,
+                    FOREIGN KEY (supersedes_claim_id) REFERENCES memory_claims(id) ON DELETE RESTRICT
+                );
+                CREATE TABLE memory_claim_transitions (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    delta_id TEXT,
+                    claim_id TEXT NOT NULL,
+                    status TEXT NOT NULL
+                        /* CHECK (status IN ('superseded', 'retracted', 'contradicted')) */,
+                    asserted_at_us INTEGER NOT NULL,
+                    effective_at_us INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    source_event_id INTEGER NOT NULL,
+                    projector_version TEXT NOT NULL,
+                    FOREIGN KEY (delta_id) REFERENCES memory_deltas(id) ON DELETE RESTRICT,
+                    FOREIGN KEY (claim_id) REFERENCES memory_claims(id) ON DELETE RESTRICT,
+                    FOREIGN KEY (source_event_id) REFERENCES events(id) ON DELETE RESTRICT
+                );",
+            )
+            .unwrap();
+    }
+
+    let error = expect_open_error(
+        &path,
+        &key,
+        "comment-only CHECK expressions must not be stamped canonical",
+    );
+    assert!(matches!(error, StoreError::Backend(_)));
+    let db = raw_open(&path, &key).unwrap();
+    let version: String = db
+        .conn()
+        .query_row(
+            "SELECT value FROM meta WHERE key='brain_schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, "5");
+    db.conn()
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    db.conn()
+        .execute(
+            "INSERT INTO memory_claims
+             (id, delta_id, source_event_id, subject, predicate, object, scope,
+              attribution, confidence, asserted_at_us, valid_from_us, valid_to_us,
+              projector_version, initial_status, supersedes_claim_id)
+             VALUES ('invalid-claim', NULL, 999, '', 'predicate', 'object', 'scope',
+                     NULL, 2.0, 1, 1, NULL, 'projector-v1', 'invalid', NULL)",
+            [],
+        )
+        .expect("comment-only claim checks accept invalid confidence and status");
+    db.conn()
+        .execute(
+            "INSERT INTO memory_claim_transitions
+             (id, delta_id, claim_id, status, asserted_at_us, effective_at_us,
+              reason, source_event_id, projector_version)
+             VALUES ('invalid-transition', NULL, 'invalid-claim', 'invalid', 2, 2,
+                     'comment spoof', 999, 'projector-v1')",
+            [],
+        )
+        .expect("comment-only transition check accepts an invalid status");
 }
