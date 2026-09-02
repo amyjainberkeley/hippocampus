@@ -26,6 +26,7 @@ const CANONICAL_WORK_MEMORY_INSTANCES: usize = 24;
 const CANONICAL_WORK_MEMORY_BASELINE: &str = "docs/eval/work-memory-baseline.json";
 const CANONICAL_WORK_MEMORY_BASELINE_SHA256: &str =
     include_str!("../../../../docs/eval/work-memory-baseline.sha256");
+const BENCH_REPO_ROOT_ENV: &str = "MCI_BENCH_REPO_ROOT";
 
 fn usage() {
     println!(
@@ -62,10 +63,16 @@ fn dataset_fallback_id(path: &Path) -> String {
 }
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .unwrap_or_else(|_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+    let compiled_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let selected = select_repo_root(
+        std::env::var_os(BENCH_REPO_ROOT_ENV).map(PathBuf::from),
+        compiled_root,
+    );
+    selected.canonicalize().unwrap_or(selected)
+}
+
+fn select_repo_root(explicit: Option<PathBuf>, compiled_root: PathBuf) -> PathBuf {
+    explicit.unwrap_or(compiled_root)
 }
 
 fn command_value(program: &str, args: &[&str]) -> String {
@@ -1205,6 +1212,17 @@ mod tests {
         assert_eq!(
             logical_path(Path::new("/Users/alice/tmp/report.json"), root, "report"),
             "external-report://report.json"
+        );
+    }
+
+    #[test]
+    fn explicit_runner_repository_root_overrides_the_compile_checkout() {
+        assert_eq!(
+            select_repo_root(
+                Some(PathBuf::from("/tmp/clean-benchmark-worktree")),
+                PathBuf::from("/Users/amy/dirty-compile-checkout"),
+            ),
+            PathBuf::from("/tmp/clean-benchmark-worktree")
         );
     }
 }

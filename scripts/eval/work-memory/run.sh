@@ -45,6 +45,7 @@ while (($# > 0)); do
 done
 
 cd "$REPO_ROOT"
+export MCI_BENCH_REPO_ROOT="$REPO_ROOT"
 
 REQUESTED_ARM="both"
 for ((i = 0; i < ${#PASS_ARGS[@]}; i++)); do
