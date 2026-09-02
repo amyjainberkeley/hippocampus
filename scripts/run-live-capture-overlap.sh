@@ -415,7 +415,7 @@ exec 9<> "$CAPTURE_FIFO"
 FIFO_GUARD_OPEN=1
 
 "$AGENT" --device-id-path "$DEVICE_ID" --log-path "$HEALTH_LOG" \
-    --db-path "$DB_PATH" --drain-stdin --strict < "$CAPTURE_FIFO" \
+    --db-path "$DB_PATH" --drain-stdin --strict 9>&- < "$CAPTURE_FIFO" \
     >"$AGENT_STDOUT" 2>"$AGENT_STDERR" &
 AGENT_PID=$!
 
@@ -423,7 +423,7 @@ generation="live-overlap-$(date +%s)-$$"
 "$HELPER" --capture --probe-debug --live-overlap-qualification \
     --output "$CAPTURE_FIFO" \
     --heartbeat-seconds 2 --readiness-file "$READINESS_FILE" \
-    --generation "$generation" >"$HELPER_STDOUT" 2>"$HELPER_STDERR" &
+    --generation "$generation" 9>&- >"$HELPER_STDOUT" 2>"$HELPER_STDERR" &
 HELPER_PID=$!
 
 runtime_diagnostic() {
@@ -522,7 +522,7 @@ CAPTURE_FIFO=""
 if rg -qi 'BRAIN OPEN FAILED|CAPTURE IS NOT BEING SAVED|integrity_check FAILED|another writer owns' "$AGENT_STDERR"; then
     runtime_fail "agent diagnostics show that capture was not safely committed"
 fi
-if ! rg -Eq 'drained [0-9]+ frame\(s\); [0-9]+ logged, [0-9]+ non-health, [1-9][0-9]* to brain' "$AGENT_STDERR"; then
+if ! rg -q 'drained [0-9]+ frame\(s\); [0-9]+ logged, [0-9]+ non-health, [1-9][0-9]* to brain' "$AGENT_STDERR"; then
     runtime_fail "agent completed without proving that at least one content frame reached the brain"
 fi
 
