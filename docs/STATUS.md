@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `56c9569`
+Audited code baseline: `a87a85f`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -95,6 +95,13 @@ more than this page.
   back a brief, verifies MCP recall/timeline/episodes/cited context, registers
   both supported clients without key material, deletes the injected event,
   and uninstalls without isolated product residue.
+- The disposable visual demo now runs the production enrichment pipeline over
+  its 20 synthetic events before launch, producing 13 entity mentions, 20
+  embeddings, and 20 inspectable work episodes on the audited Mac. Its MCP
+  trace exercises recall, cited context, stats, and episodes. MCP copy says
+  capture begins only after opt-in and distinguishes the absence of a
+  Hippocampus cloud copy from the policy of whichever AI client receives a
+  user-requested handoff.
 
 ## What Is Not Yet Proven
 
