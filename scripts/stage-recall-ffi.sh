@@ -5,6 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROFILE="${1:-debug}"
 
+# Rust otherwise stamps native objects with the build host's current macOS
+# version. Recall links this archive into an app that supports macOS 14, so
+# every C/Rust object in the archive must carry the same minimum target.
+export MACOSX_DEPLOYMENT_TARGET=14.0
+
 case "$PROFILE" in
     debug)
         cargo build --locked -p mci-brain-ffi

@@ -87,6 +87,8 @@ jobs:
             --output models
 
       - name: Build all binaries
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "14.0"
         run: |
           cargo build --workspace --release --locked
           scripts/swift-package.sh build -c release --package-path apps/recall-ui
