@@ -59,6 +59,56 @@ pub enum RetentionWorkerError {
     Fatal(String),
 }
 
+/// Errors while reading the user-owned retention policy.
+#[derive(Debug, thiserror::Error)]
+pub enum RetentionConfigError {
+    /// The policy file exists but could not be read.
+    #[error("could not read retention configuration at {}: {source}", path.display())]
+    Read {
+        /// Location of the unreadable configuration file.
+        path: PathBuf,
+        /// Filesystem error returned while reading the file.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The policy file exists but is not valid JSON.
+    #[error("malformed retention configuration at {}: {source}", path.display())]
+    Malformed {
+        /// Location of the malformed configuration file.
+        path: PathBuf,
+        /// JSON parsing error returned for the file contents.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// The persisted policy uses a mode this agent does not understand.
+    #[error("unknown retention mode {mode:?} at {}", path.display())]
+    UnknownMode {
+        /// Location of the unsupported configuration file.
+        path: PathBuf,
+        /// Persisted mode value that this agent does not recognize.
+        mode: String,
+    },
+    /// A custom policy is missing a valid finite duration.
+    #[error("invalid custom retention duration {days:?} at {}", path.display())]
+    InvalidCustomDays {
+        /// Location of the invalid configuration file.
+        path: PathBuf,
+        /// Missing or out-of-range persisted duration.
+        days: Option<u64>,
+    },
+}
+
+/// Errors that prevent a retention cycle from running.
+#[derive(Debug, thiserror::Error)]
+pub enum RetentionCycleError {
+    /// The user-owned retention configuration could not be trusted.
+    #[error("retention configuration unavailable: {0}")]
+    Configuration(#[from] RetentionConfigError),
+    /// The encrypted store could not complete the cycle.
+    #[error("retention store failure: {0}")]
+    Store(#[from] StoreError),
+}
+
 #[derive(Deserialize)]
 struct PersistedRetention {
     mode: String,
@@ -67,25 +117,43 @@ struct PersistedRetention {
 
 /// Parse `retention.json` into a [`RetentionConfig`].
 ///
-/// Missing file, unreadable file, or unrecognized mode all default to
-/// [`RetentionConfig::Forever`] — the safest fallback (never deletes).
-#[must_use]
-pub fn load_retention_config(path: &Path) -> RetentionConfig {
-    let Ok(data) = std::fs::read(path) else {
-        return RetentionConfig::Forever;
+/// A missing file is the deliberate fresh-install default of
+/// [`RetentionConfig::Forever`]. Any existing but unreadable, malformed, or
+/// unsupported file is an error: the worker must not silently reinterpret a
+/// user's finite retention policy as `forever`.
+pub fn load_retention_config(path: &Path) -> Result<RetentionConfig, RetentionConfigError> {
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(RetentionConfig::Forever);
+        }
+        Err(source) => {
+            return Err(RetentionConfigError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
     };
-    let parsed: PersistedRetention = match serde_json::from_slice(&data) {
-        Ok(p) => p,
-        Err(_) => return RetentionConfig::Forever,
-    };
+    let parsed: PersistedRetention =
+        serde_json::from_slice(&data).map_err(|source| RetentionConfigError::Malformed {
+            path: path.to_path_buf(),
+            source,
+        })?;
     match parsed.mode.as_str() {
-        "thirtyDays" => RetentionConfig::Days(30),
-        "sevenDays" => RetentionConfig::Days(7),
+        "forever" => Ok(RetentionConfig::Forever),
+        "thirtyDays" => Ok(RetentionConfig::Days(30)),
+        "sevenDays" => Ok(RetentionConfig::Days(7)),
         "custom" => match parsed.days {
-            Some(d) if (1..=365).contains(&d) => RetentionConfig::Days(d),
-            _ => RetentionConfig::Forever,
+            Some(days) if (1..=365).contains(&days) => Ok(RetentionConfig::Days(days)),
+            days => Err(RetentionConfigError::InvalidCustomDays {
+                path: path.to_path_buf(),
+                days,
+            }),
         },
-        _ => RetentionConfig::Forever,
+        _ => Err(RetentionConfigError::UnknownMode {
+            path: path.to_path_buf(),
+            mode: parsed.mode,
+        }),
     }
 }
 
@@ -106,8 +174,8 @@ pub fn run_retention_cycle(
     retention_json_path: &Path,
     orphan_grace: Duration,
     current_time_us: u64,
-) -> Result<(PurgeStats, BlobReconciliationStats), StoreError> {
-    let config = load_retention_config(retention_json_path);
+) -> Result<(PurgeStats, BlobReconciliationStats), RetentionCycleError> {
+    let config = load_retention_config(retention_json_path)?;
     let purge = retention_purger::purge_once(store, &config, current_time_us)?;
     let blobs = store.reconcile_keyframe_blobs(orphan_grace)?;
     Ok((purge, blobs))
@@ -186,7 +254,7 @@ pub async fn run_retention_worker(
             }
             Err(e) => {
                 stats.cycle_errors += 1;
-                eprintln!("mci-agent: retention purge error: {e}");
+                eprintln!("mci-agent: retention cycle skipped: {e}");
             }
         }
 
@@ -212,7 +280,10 @@ mod tests {
             r#"{"mode":"forever","days":null,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
-        assert_eq!(load_retention_config(&path), RetentionConfig::Forever);
+        assert_eq!(
+            load_retention_config(&path).expect("valid forever config"),
+            RetentionConfig::Forever
+        );
     }
 
     #[test]
@@ -224,7 +295,10 @@ mod tests {
             r#"{"mode":"thirtyDays","days":null,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
-        assert_eq!(load_retention_config(&path), RetentionConfig::Days(30));
+        assert_eq!(
+            load_retention_config(&path).expect("valid 30-day config"),
+            RetentionConfig::Days(30)
+        );
     }
 
     #[test]
@@ -236,7 +310,10 @@ mod tests {
             r#"{"mode":"sevenDays","days":null,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
-        assert_eq!(load_retention_config(&path), RetentionConfig::Days(7));
+        assert_eq!(
+            load_retention_config(&path).expect("valid seven-day config"),
+            RetentionConfig::Days(7)
+        );
     }
 
     #[test]
@@ -248,11 +325,14 @@ mod tests {
             r#"{"mode":"custom","days":14,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
-        assert_eq!(load_retention_config(&path), RetentionConfig::Days(14));
+        assert_eq!(
+            load_retention_config(&path).expect("valid custom config"),
+            RetentionConfig::Days(14)
+        );
     }
 
     #[test]
-    fn load_custom_no_days_defaults_forever() {
+    fn load_custom_no_days_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("retention.json");
         std::fs::write(
@@ -260,11 +340,14 @@ mod tests {
             r#"{"mode":"custom","days":null,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
-        assert_eq!(load_retention_config(&path), RetentionConfig::Forever);
+        assert!(matches!(
+            load_retention_config(&path),
+            Err(RetentionConfigError::InvalidCustomDays { .. })
+        ));
     }
 
     #[test]
-    fn custom_days_outside_closed_schema_default_forever() {
+    fn custom_days_outside_closed_schema_are_errors() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("retention.json");
         for invalid in [
@@ -274,9 +357,8 @@ mod tests {
             r#"{"mode":"custom","days":18446744073709551616}"#,
         ] {
             std::fs::write(&path, invalid).unwrap();
-            assert_eq!(
-                load_retention_config(&path),
-                RetentionConfig::Forever,
+            assert!(
+                load_retention_config(&path).is_err(),
                 "invalid payload {invalid}"
             );
         }
@@ -286,19 +368,25 @@ mod tests {
     fn missing_file_defaults_forever() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nonexistent.json");
-        assert_eq!(load_retention_config(&path), RetentionConfig::Forever);
+        assert_eq!(
+            load_retention_config(&path).expect("missing config uses fresh-install default"),
+            RetentionConfig::Forever
+        );
     }
 
     #[test]
-    fn malformed_json_defaults_forever() {
+    fn malformed_json_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("retention.json");
         std::fs::write(&path, "not json").unwrap();
-        assert_eq!(load_retention_config(&path), RetentionConfig::Forever);
+        assert!(matches!(
+            load_retention_config(&path),
+            Err(RetentionConfigError::Malformed { .. })
+        ));
     }
 
     #[test]
-    fn unknown_mode_defaults_forever() {
+    fn unknown_mode_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("retention.json");
         std::fs::write(
@@ -306,7 +394,64 @@ mod tests {
             r#"{"mode":"unknownMode","days":5,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
-        assert_eq!(load_retention_config(&path), RetentionConfig::Forever);
+        assert!(matches!(
+            load_retention_config(&path),
+            Err(RetentionConfigError::UnknownMode { .. })
+        ));
+    }
+
+    #[test]
+    fn unreadable_existing_path_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("retention.json");
+        std::fs::create_dir(&path).unwrap();
+
+        assert!(matches!(
+            load_retention_config(&path),
+            Err(RetentionConfigError::Read { .. })
+        ));
+    }
+
+    #[test]
+    fn malformed_configuration_skips_retention_deletion() {
+        use mci_brain::{BrainStore, Event, EventId};
+        use mci_core::crypto::DbKey;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let brain_path = dir.path().join("mci.sqlite");
+        let store = SqlCipherBrainStore::new(&brain_path, &DbKey::from_bytes([0x62; 32]))
+            .expect("open store");
+        let event_id = EventId(1);
+        store
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 100,
+                app_bundle_id: None,
+                window_title: None,
+                url: None,
+                text: "must survive an invalid retention policy".into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: None,
+                tab_id: None,
+                embedding: None,
+            })
+            .expect("put event");
+        let config = dir.path().join("retention.json");
+        std::fs::write(&config, "not json").expect("write malformed config");
+
+        assert!(matches!(
+            run_retention_cycle(&store, &config, std::time::Duration::ZERO, 7_200_000_000),
+            Err(RetentionCycleError::Configuration(
+                RetentionConfigError::Malformed { .. }
+            ))
+        ));
+        assert!(
+            store.get_event(event_id).expect("read event").is_some(),
+            "an invalid policy must skip deletion rather than imply forever"
+        );
     }
 
     #[test]
