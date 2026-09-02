@@ -21,8 +21,8 @@ increasing. Numbers are allocated on merge, not on draft — check
 
 ## Contents (as of 2026-09-02)
 
-38 ratified ADRs from ADR-0001 (privacy posture: local-first + E2E)
-through ADR-0038 (source-attributed evidence verification). Load-
+39 numbered ADRs from ADR-0001 (privacy posture: local-first + E2E)
+through ADR-0039 (zero-download evidence-cited briefs). Load-
 bearing ones agents cite most often:
 
 - `0001-privacy-posture-local-first-e2e.md` — the privacy thesis.
@@ -38,6 +38,7 @@ bearing ones agents cite most often:
   model.
 - `0034-fleet-authored-pr-merge-policy.md` — Track A / Track B.
 - `0038-source-attributed-evidence-verifier.md` — trusted recall boundary.
+- `0039-zero-download-evidence-briefs.md` — default brief and release model boundary.
 
 ## Related
 
