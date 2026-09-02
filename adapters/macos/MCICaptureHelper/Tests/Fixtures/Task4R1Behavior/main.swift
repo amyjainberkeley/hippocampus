@@ -11,6 +11,8 @@ struct Task4R1Behavior {
         print("session_publication_ownership=pass")
         try await verifyOwnedOCRLifecycle()
         print("owned_ocr_lifecycle=pass")
+        try await verifyBoundedVisionTimeout()
+        print("bounded_vision_timeout=pass")
         try await verifyConfirmedRetentionAndCleanup()
         print("confirmed_retention_cleanup=pass")
     }
@@ -148,6 +150,57 @@ struct Task4R1Behavior {
         let countAfterStop = await cancelledSink.count()
         precondition(countAfterStop == countAtStop)
         precondition(countAtStop == 0, "cancelled OCR publication must not outlive stop")
+    }
+
+    private static func verifyBoundedVisionTimeout() async throws {
+        let harness = CancellationIgnoringVisionHarness()
+        let runner = VisionOCRRunner(synchronousPerform: harness.perform)
+        let worker = VisionOCRWorker(engine: runner, capacity: 2, timeoutMs: 40)
+        let ledger = OCRCompletionLedger()
+        await worker.start()
+
+        let started = ContinuousClock.now
+        await worker.submit(
+            input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: unitROI),
+            completion: { result in ledger.record(ordinal: 1, result: result) }
+        )
+        precondition(
+            ledger.waitForCount(1, timeout: .milliseconds(300)),
+            "cancellation-insensitive Vision work must not hold the timeout result"
+        )
+        let elapsed = started.duration(to: .now)
+        precondition(elapsed < .milliseconds(300), "OCR timeout exceeded its wall-clock bound")
+        precondition(ledger.result(for: 1)?.timedOut == true)
+
+        await worker.submit(
+            input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: unitROI),
+            completion: { result in ledger.record(ordinal: 2, result: result) }
+        )
+        precondition(ledger.waitForCount(2, timeout: .milliseconds(300)))
+        precondition(ledger.result(for: 2)?.timedOut == true)
+        precondition(
+            harness.callCount == 1,
+            "a quarantined Vision lane must not accumulate blocked operations"
+        )
+
+        harness.releaseFirstCall()
+        precondition(harness.waitUntilFirstCallReturns(timeout: .milliseconds(300)))
+        try? await Task.sleep(for: .milliseconds(20))
+
+        await worker.submit(
+            input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: unitROI),
+            completion: { result in ledger.record(ordinal: 3, result: result) }
+        )
+        precondition(ledger.waitForCount(3, timeout: .milliseconds(300)))
+        precondition(ledger.result(for: 3)?.timedOut == false)
+        precondition(harness.callCount == 2, "Vision lane must recover after late completion")
+
+        try? await Task.sleep(for: .milliseconds(80))
+        precondition(
+            ledger.ordinals == [1, 2, 3],
+            "OCR completions must remain ordered and exactly once"
+        )
+        await worker.stopAndDrain()
     }
 
     private static func verifyConfirmedRetentionAndCleanup() async throws {
@@ -343,5 +396,78 @@ private struct CancellationResistantOCREngine: OCREngine {
             durationMs: 1,
             timedOut: false
         )
+    }
+}
+
+private final class CancellationIgnoringVisionHarness: @unchecked Sendable {
+    private let lock = NSLock()
+    private let releaseFirst = DispatchSemaphore(value: 0)
+    private let firstReturned = DispatchSemaphore(value: 0)
+    private var calls = 0
+
+    var callCount: Int { lock.withLock { calls } }
+
+    func perform(input _: OCREngineInput, languages _: [String]) -> OCRResult {
+        let ordinal = lock.withLock { () -> Int in
+            calls += 1
+            return calls
+        }
+        if ordinal == 1 {
+            releaseFirst.wait()
+            firstReturned.signal()
+        }
+        return OCRResult(
+            recognizedLines: [
+                OCRLine(text: "vision-\(ordinal)", boundingBox: .zero, confidence: 1)
+            ],
+            durationMs: 0,
+            timedOut: false
+        )
+    }
+
+    func releaseFirstCall() {
+        releaseFirst.signal()
+    }
+
+    func waitUntilFirstCallReturns(timeout: Duration) -> Bool {
+        firstReturned.wait(timeout: .now() + timeout.timeInterval) == .success
+    }
+}
+
+private final class OCRCompletionLedger: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var entries: [(Int, OCRResult)] = []
+
+    var ordinals: [Int] {
+        condition.withLock { entries.map(\.0) }
+    }
+
+    func record(ordinal: Int, result: OCRResult) {
+        condition.withLock {
+            precondition(!entries.contains(where: { $0.0 == ordinal }), "duplicate OCR completion")
+            entries.append((ordinal, result))
+            condition.broadcast()
+        }
+    }
+
+    func result(for ordinal: Int) -> OCRResult? {
+        condition.withLock { entries.first(where: { $0.0 == ordinal })?.1 }
+    }
+
+    func waitForCount(_ count: Int, timeout: Duration) -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(timeout.timeInterval)
+        while entries.count < count {
+            if !condition.wait(until: deadline) { return false }
+        }
+        return true
+    }
+}
+
+private extension Duration {
+    var timeInterval: TimeInterval {
+        let parts = components
+        return TimeInterval(parts.seconds) + TimeInterval(parts.attoseconds) / 1e18
     }
 }
