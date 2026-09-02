@@ -50,13 +50,20 @@
 #![allow(unsafe_code)]
 
 use std::ffi::{c_char, CStr, CString};
+use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
 use mci_brain::{BrainStore, DeletionOutcome, EventId, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
+#[cfg(unix)]
+use rustix::fs::{flock, FlockOperation, OFlags};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -355,8 +362,8 @@ pub struct Handle {
     /// writer connection when the recall UI's Privacy Dashboard fires a
     /// destructive action.
     brain_path: PathBuf,
-    /// Agent run sentinel paired with this brain. Mutation checks it before
-    /// and after opening a writer and fails closed on live/ambiguous state.
+    /// Agent run sentinel paired with this brain. Its stable `.writer.lock`
+    /// sibling is held exclusively across each complete mutation scope.
     run_lock_path: PathBuf,
     /// Retained `SQLCipher` key. Needed so the mutation entry points can
     /// briefly open a *writer* connection to run DELETE + VACUUM. The
@@ -1849,7 +1856,7 @@ fn with_writer<F, T>(handle: &Handle, body: F) -> Result<T, String>
 where
     F: FnOnce(&SqlCipherBrainStore) -> Result<T, mci_brain::StoreError>,
 {
-    ensure_agent_writer_quiescent(&handle.run_lock_path)?;
+    let _mutation_lease = acquire_mutation_lease(&handle.run_lock_path)?;
     // Open a fresh writer. SqlCipherBrainStore::new does the migration
     // (idempotent — every DDL is IF NOT EXISTS) so a delete on an
     // already-migrated store is safe. On a first-run edge case where
@@ -1857,10 +1864,6 @@ where
     // migration runs here and the DELETE targets an empty schema.
     let writer = SqlCipherBrainStore::new(&handle.brain_path, &handle.db_key)
         .map_err(|e| format!("open writer: {e}"))?;
-    // Re-check after open to close the ordinary check/open race. SQLite still
-    // serializes a process that appears after this point, but Recall refuses
-    // every agent state it can observe rather than weakening user intent.
-    ensure_agent_writer_quiescent(&handle.run_lock_path)?;
     body(&writer).map_err(|e| format!("{e}"))
 }
 
@@ -1877,34 +1880,72 @@ fn mutation_run_lock_path(brain_path: &Path) -> PathBuf {
     parent.join(".running")
 }
 
-fn ensure_agent_writer_quiescent(run_lock_path: &Path) -> Result<(), String> {
-    let contents = match std::fs::read_to_string(run_lock_path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(format!(
-                "MCI_MUTATION_BLOCKED: cannot verify agent writer state: {error}"
-            ))
-        }
-    };
-    let pid = contents.trim().parse::<i32>().map_err(|_| {
-        "MCI_MUTATION_BLOCKED: agent run sentinel is malformed; refusing mutation".to_owned()
-    })?;
-    let Some(pid) = rustix::process::Pid::from_raw(pid) else {
+#[derive(Debug)]
+struct MutationLease {
+    _file: File,
+}
+
+fn writer_lease_path(run_lock_path: &Path) -> PathBuf {
+    run_lock_path.with_file_name(".writer.lock")
+}
+
+#[cfg(unix)]
+fn acquire_mutation_lease(run_lock_path: &Path) -> Result<MutationLease, String> {
+    let lease_path = writer_lease_path(run_lock_path);
+    if let Some(parent) = lease_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!("MCI_MUTATION_BLOCKED: cannot prepare writer lease: {error}")
+        })?;
+    }
+    if lease_path
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
         return Err(
-            "MCI_MUTATION_BLOCKED: agent run sentinel has an invalid pid; refusing mutation"
+            "MCI_MUTATION_BLOCKED: writer lease path is unsafe; refusing mutation".to_owned(),
+        );
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(
+            i32::try_from((OFlags::NOFOLLOW | OFlags::CLOEXEC).bits())
+                .expect("open flags fit platform c_int"),
+        )
+        .open(&lease_path)
+        .map_err(|error| format!("MCI_MUTATION_BLOCKED: cannot open writer lease: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("MCI_MUTATION_BLOCKED: cannot inspect writer lease: {error}"))?;
+    if !metadata.is_file()
+        || metadata.uid() != rustix::process::getuid().as_raw()
+        || metadata.nlink() != 1
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err(
+            "MCI_MUTATION_BLOCKED: writer lease is not a private current-user regular file"
                 .to_owned(),
         );
-    };
-    match rustix::process::test_kill_process(pid) {
-        Ok(()) => {
-            Err("MCI_MUTATION_BLOCKED: agent writer is active; stop it before deleting".to_owned())
-        }
-        Err(rustix::io::Errno::SRCH) => Ok(()),
+    }
+    match flock(&file, FlockOperation::NonBlockingLockExclusive) {
+        Ok(()) => Ok(MutationLease { _file: file }),
+        Err(error) if error == rustix::io::Errno::WOULDBLOCK => Err(
+            "MCI_MUTATION_BLOCKED: writer lease is active; stop Hippocampus before deleting"
+                .to_owned(),
+        ),
         Err(error) => Err(format!(
-            "MCI_MUTATION_BLOCKED: cannot verify agent process state: {error}"
+            "MCI_MUTATION_BLOCKED: cannot acquire writer lease: {}",
+            io::Error::from_raw_os_error(error.raw_os_error())
         )),
     }
+}
+
+#[cfg(not(unix))]
+fn acquire_mutation_lease(_run_lock_path: &Path) -> Result<MutationLease, String> {
+    Err("MCI_MUTATION_BLOCKED: writer lease is unavailable on this platform".to_owned())
 }
 
 fn delete_result_json(outcome: &DeletionOutcome) -> DeleteResultJson {
@@ -2568,6 +2609,22 @@ mod tests {
             mutation_run_lock_path(Path::new("/tmp/fixture/brain.sqlite")),
             PathBuf::from("/tmp/fixture/.running")
         );
+    }
+
+    #[test]
+    fn mutation_lease_excludes_every_other_writer_for_its_scope() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let run_path = root.path().join(".running");
+        let first = acquire_mutation_lease(&run_path).expect("first mutation lease");
+
+        let error = acquire_mutation_lease(&run_path).expect_err("second writer must be blocked");
+        assert!(
+            error.contains("MCI_MUTATION_BLOCKED: writer lease is active"),
+            "got: {error}"
+        );
+
+        drop(first);
+        acquire_mutation_lease(&run_path).expect("lease released when guard drops");
     }
 
     #[test]
