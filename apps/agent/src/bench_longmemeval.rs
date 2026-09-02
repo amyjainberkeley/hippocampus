@@ -1075,6 +1075,13 @@ fn typed_outcome_hits(
             .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
             .collect()),
         RetrievalOutcome::NothingMatched { .. } => Ok(Vec::new()),
+        RetrievalOutcome::Degraded {
+            degradation: mci_brain::RetrievalDegradation::EvidenceSufficiencyUnqualified,
+            fallback_matches,
+        } => Ok(fallback_matches
+            .into_iter()
+            .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
+            .collect()),
         RetrievalOutcome::Degraded { degradation, .. } => Err(format!(
             "{question_id}: production retrieval degraded: {degradation:?}"
         )),
@@ -1930,6 +1937,19 @@ mod tests {
         );
 
         assert_eq!(event.text.as_bytes(), expected.as_bytes());
+    }
+
+    #[test]
+    fn benchmark_scores_unqualified_evidence_fallback_without_certifying_it() {
+        let result = typed_outcome_hits(
+            RetrievalOutcome::Degraded {
+                degradation: mci_brain::RetrievalDegradation::EvidenceSufficiencyUnqualified,
+                fallback_matches: Vec::new(),
+            },
+            "unqualified-evidence",
+        );
+
+        assert_eq!(result.expect("ranking remains measurable"), Vec::new());
     }
 
     #[test]
