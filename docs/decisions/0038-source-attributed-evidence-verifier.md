@@ -53,6 +53,11 @@ candidate to trusted evidence.
    coverage, false-support confidence bounds, citation precision/recall, and
    calibration. The work-memory benchmark remains acceptance-only and cannot
    tune the verifier.
+7. Retrieval and display budgets are separate. The verifier receives at most
+   eight ranked canonical events by default even when the caller requests one
+   visible result. Only after a well-formed verdict cites immutable candidate
+   IDs does the retrieval boundary filter to those citations and apply the
+   caller's display limit.
 
 ## Public v2 fixture audit
 
@@ -128,6 +133,40 @@ The candidate therefore remains unqualified. The committed report is
 nonzero. The result proves that a small native QA model fits the interactive
 latency budget. It also proves that span confidence from generic SQuAD2 training
 is not a sufficient authorization rule for durable personal memory.
+
+### DeBERTa-v3-xsmall NLI: promising behavior, rejected Core ML path
+
+`cross-encoder/nli-deberta-v3-xsmall` revision
+`a150876415327c80daeff35ca6f68f5ed8cf5c24` produced useful entailment and
+contradiction probabilities on hand-authored Hippocampus examples in PyTorch.
+It was not accepted on those examples alone. An FP16 conversion with the
+repository's pinned Core ML toolchain first required replacing an integer
+attention-scale square root, then failed on dynamic integer conversion inside
+DeBERTa's relative-position attention. No Core ML artifact was produced or
+bundled. Patching a second transformer family would add release/runtime risk
+without solving task calibration, so this path is rejected for the immediate
+Mac release.
+
+### Selected next candidate: task-trained MobileBERT claim-set verifier
+
+The next implementation candidate reuses the fixed-shape MobileBERT encoder
+architecture already proven to convert and run natively, but discards the
+generic SQuAD2 answer head. It will be trained for Hippocampus's actual
+contract:
+
+- Input: one atomic proposed claim plus a canonical, bounded set of ranked
+  evidence slots.
+- Judgment: `Supported`, `Contradicted`, or `Insufficient` with calibrated
+  abstention.
+- Attribution: a multi-label citation-slot mask. The host binds each slot to
+  an immutable event ID; model-generated IDs are impossible by construction.
+- Failure policy: overflow, malformed output, model/runtime error, conflicting
+  support and contradiction, or an empty cited set fails closed.
+
+This is an architecture selection, not a shipped-model claim. Release remains
+blocked until a blind corpus exercises the exact signed runtime, including
+counterfactual swaps, negation, deleted evidence hops, distractors, source
+authority, OCR corruption, and candidate-order metamorphics.
 
 ## Evidence
 
