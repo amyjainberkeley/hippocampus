@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `1de21f0`
+Audited code baseline: `3647f2e`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -26,6 +26,12 @@ more than this page.
   retention file receives the fresh-install `forever` default; an existing
   unreadable, malformed, or unknown-value file fails closed and skips both
   expiry and reconciliation instead of silently changing policy.
+- A process-lifetime operating-system writer lease now covers the daemon,
+  every one-shot writer command, and Recall delete/wipe. The `.running` crash
+  marker is separate, private, owner-checked, and opened without following
+  symlinks. Existing brains pass a read-only integrity preflight before any
+  writer open or schema migration; stale shutdowns require two successful
+  passes. Integrity failure blocks the mutation with a dedicated exit path.
 - The persisted recording setting now reaches every production ingest
   boundary. The helper receives `--capture` only when enabled; the Rust agent
   receives an explicit `MCI_CAPTURE_ENABLED` value and keeps stdin, browser
@@ -37,12 +43,17 @@ more than this page.
   and backfill has run. The macOS runtime uses CPU Core ML for inference and a
   Rust cosine scan over vectors stored inside SQLCipher; there is no separate
   vector service or shipped sqlite-vec retrieval path.
+- The menu app, onboarding, Recall workspace, icon, installer art, extensions,
+  and documented product captures use one light native visual system. Native
+  macOS material supplies the translucent top surfaces, dark system appearance
+  does not turn the product black, and the retired turquoise identity is not
+  present in the release asset set.
 - The app, capture helper, Recall, and onboarding Swift packages compile on
   this host through the constrained SwiftPM wrapper. The capture-consent
-  behavior fixture, Rust formatting, strict agent Clippy, all 337 agent-library
-  tests, agent binary tests, agent integration tests, and current release
+  behavior fixture, focused writer/FFI suites, Rust formatting, strict agent
+  Clippy, visual contracts, agent integration tests, and current release
   contracts pass. Full Hippocampus XCTest execution still requires Xcode on
-  this host; CI now owns an explicit app-test job instead of only compiling it.
+  this host; CI owns an explicit app-test job instead of only compiling it.
 - A throwaway-home E2E installs the engine, starts with capture disabled,
   imports 20 synthetic events, injects one shared-encoder `OCREvent` through
   production `--drain-stdin --strict`, derives episodes, persists and reads
@@ -52,21 +63,23 @@ more than this page.
 
 ## What Is Not Yet Proven
 
-- Real `ScreenCaptureKit` capture remains off by default. Enable commits only
-  after the expected helper generation reports successful startup, and all
-  secondary ingest paths now inherit that decision. The synthetic wire E2E
-  proves the capture-to-memory path, not a real all-day screen capture. The
-  required 30-minute soak and release-machine permission walkthrough remain
-  open.
-- OCR is not yet launch-qualified against cross-window leakage. Ambient
+- Real `ScreenCaptureKit` capture remains off by default. The executable
+  `scripts/run-live-capture-overlap.sh` gate now assembles an exact ad-hoc app,
+  requires Screen Recording and Accessibility for that helper, foregrounds a
+  synthetic overlapping-window corpus, captures through the bundled helper and
+  agent, and proves focused-window recall plus background-window abstention.
+  Its contract is tested, but the live run is pending because this Mac session
+  is locked. The required 30-minute soak and release-machine permission
+  walkthrough also remain open.
+- OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
   ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
   use separate structured capture paths that reject private contexts before
   reading page content, with executable release tests. Automatic OCR enablement
   remains blocked until the overlapping-window corpus and live soak pass.
 - The TCC and screen-sharing revocation monitors exist but are not yet proven
-  by a live permission-revocation run. Delete and wipe operations now separate
-  committed SQL deletion from post-commit storage-cleanup warnings, but still
-  need a generation-bound writer-quiescence lease for seamless in-app use.
+  by a live permission-revocation run. Delete and wipe operations separate
+  committed SQL deletion from post-commit storage-cleanup warnings and now
+  quiesce against every other writer through the shared operating-system lease.
 - Production key custody targets the non-synchronizable macOS file-Keychain
   item `ai.hippocampus.brain` / `database-key-v1`. Migration is fail-closed and
   removes a legacy plaintext key only after Keychain reread plus read-only
@@ -96,14 +109,16 @@ and is not comparable to LoCoMo or LongMemEval.
 
 | Arm | Answerable outcome | Hit rate @1 | Recall @1 / @3 | MRR | Unanswerable outcome | p95 latency |
 |---|---:|---:|---:|---:|---:|---:|
-| Lexical | 7/21 matched; 14 missed | 33.3% | 33.3% / 33.3% | 0.333 | 3/3 abstained; 0 false positives | 4.04 ms |
-| Hybrid | 21/21 matched; 0 missed | 95.2% | 88.1% / 100% | 0.976 | 0/3 abstained; 3/3 false positives | 50.62 ms |
+| Lexical | 7/21 matched; 14 missed | 33.3% | 33.3% / 33.3% | 0.333 | 3/3 abstained; 0 false positives | 18.40 ms |
+| Hybrid | 21/21 matched; 0 missed | 95.2% | 88.1% / 100% | 0.976 | 3/3 abstained; 0 false positives | 96.54 ms |
 
 The artifact is complete and publishable but explicitly
-`"launch_qualified": false`: hybrid retrieval returns a result for every
-unanswerable query. The production evidence-sufficiency policy is also
-explicitly unqualified, and the benchmark quality gate now fails whenever that
-policy is unqualified even if ranking metrics improve. Abstention/calibration
+`"launch_qualified": false`. Retrieval abstention now passes the three
+unanswerable cases, but the production evidence-sufficiency policy is not yet
+validation-qualified. Its explicit-value veto also passes through all eight
+held-out cases where an unrelated value of the same type appears in evidence;
+it is type-aware, not relation-grounded. The benchmark exits nonzero for those
+two quality failures even though ranking metrics improved. Evidence calibration
 is a product gate, not benchmark fine print.
 
 ## Release Gates
@@ -113,9 +128,8 @@ is a product gate, not benchmark fine print.
   commit. Full XCTest remains a full-Xcode gate on this host.
 - Complete a real 30-minute capture soak with frame, OCR, retained-keyframe,
   CPU, memory, disk, pause, and protected-surface observations.
-- Prove cross-window and private-browser exclusion, wire the TCC monitors into
-  the production composition root, and make destructive operations quiesce the
-  writer before claiming completion.
+- Run the focused-window overlap gate on an unlocked Mac, prove live TCC
+  revocation behavior, then complete the 30-minute resource and privacy soak.
 - Reconstruct the immutable model archive named by `release-models.json` and
   pass every model integrity/completeness check.
 - Install full Xcode, a Developer ID Application identity with private key,
