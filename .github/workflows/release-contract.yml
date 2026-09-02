@@ -28,6 +28,8 @@ on:
       - 'scripts/test-development-app-contract.sh'
       - 'scripts/test-development-file-key-contract.sh'
       - 'scripts/test-no-quarantine-bypass.sh'
+      - 'scripts/test-capture-overlap-corpus.sh'
+      - 'tools/capture-overlap-corpus/**'
       - 'scripts/demo.sh'
       - 'scripts/test-demo-contract.sh'
       - 'scripts/test-keyframe-demo-fixture.sh'
@@ -141,6 +143,8 @@ on:
       - 'scripts/test-development-app-contract.sh'
       - 'scripts/test-development-file-key-contract.sh'
       - 'scripts/test-no-quarantine-bypass.sh'
+      - 'scripts/test-capture-overlap-corpus.sh'
+      - 'tools/capture-overlap-corpus/**'
       - 'scripts/demo.sh'
       - 'scripts/test-demo-contract.sh'
       - 'scripts/test-keyframe-demo-fixture.sh'
@@ -258,6 +262,7 @@ jobs:
       - run: scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior
       - run: scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior
       - run: scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior
+      - run: scripts/test-capture-overlap-corpus.sh
       - run: scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior
       - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
       - run: scripts/test-release-identity.sh
