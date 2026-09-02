@@ -254,6 +254,7 @@ do_boot() {
 
     echo "Launching the packaged app with a disposable home..."
     HOME="$DEMO_HOME" \
+        CFFIXED_USER_HOME="$DEMO_HOME" \
         "$APP_PATH/Contents/MacOS/Hippocampus" \
         >"$LOG_DIR/hippocampus.stdout.log" \
         2>"$LOG_DIR/hippocampus.stderr.log" &
@@ -459,6 +460,7 @@ do_screenshot_auto() {
         dim "  Packaged Recall UI not built. Run: ./scripts/demo.sh boot"
     else
         HOME="$DEMO_HOME" \
+            CFFIXED_USER_HOME="$DEMO_HOME" \
             MCI_DEVELOPMENT_FILE_KEY=1 \
             MCI_DB_KEY_HEX="$MCI_DB_KEY_HEX" \
             MCI_DB_PATH="$DB_PATH" \
