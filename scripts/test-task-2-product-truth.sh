@@ -16,6 +16,7 @@ RETENTION_WORKER="$REPO_ROOT/apps/agent/src/retention_worker.rs"
 AGENT_MAIN="$REPO_ROOT/apps/agent/src/bin/mci_agent.rs"
 STATUS_MENU="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"
 APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift"
+README="$REPO_ROOT/README.md"
 ONBOARDING_RETENTION_STORE="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift"
 ONBOARDING_RETENTION_MODEL="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift"
 ONBOARDING_FLOW="$REPO_ROOT/apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift"
@@ -23,6 +24,14 @@ ONBOARDING_APP="$REPO_ROOT/apps/onboarding/Sources/Onboarding/OnboardingApp.swif
 ONBOARDING_STEP="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift"
 
 python3 "$GENERATOR" --check
+
+rg -Fq 'Hippocampus itself has no cloud service.' "$README"
+rg -Fq 'a connected AI client sends only the context it requests to its selected provider' \
+    "$README"
+if rg -Fq 'nothing is sent anywhere' "$README"; then
+    echo "FAIL: README hides the connected AI provider boundary" >&2
+    exit 1
+fi
 
 rg -Fq 'Deleted memories are removed as database rows and local storage is compacted.' \
     "$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift"
@@ -33,9 +42,9 @@ rg -Fq 'replaceItemAt(' "$PREFERENCES_STORE"
 rg -Fq '[.posixPermissions: 0o600]' "$PREFERENCES_STORE"
 rg -Fq 'home.join("Library/Application Support/MCI/retention.json")' "$AGENT_MAIN"
 rg -Fq 'setRetentionPolicy(' "$PREFERENCES_WINDOW"
-rg -Fq '"thirtyDays" => RetentionConfig::Days(30)' "$RETENTION_WORKER"
-rg -Fq '"sevenDays" => RetentionConfig::Days(7)' "$RETENTION_WORKER"
-rg -Fq 'Some(d) if (1..=365).contains(&d)' "$RETENTION_WORKER"
+rg -Fq '"thirtyDays" => Ok(RetentionConfig::Days(30))' "$RETENTION_WORKER"
+rg -Fq '"sevenDays" => Ok(RetentionConfig::Days(7))' "$RETENTION_WORKER"
+rg -Fq 'Some(days) if (1..=365).contains(&days)' "$RETENTION_WORKER"
 rg -Fq 'try writer.write(data, to: fileURL)' "$ONBOARDING_RETENTION_STORE"
 rg -Fq 'cached = (policy, validatedDays)' "$ONBOARDING_RETENTION_STORE"
 rg -Fq 'public func saveThen(' "$ONBOARDING_RETENTION_MODEL"
