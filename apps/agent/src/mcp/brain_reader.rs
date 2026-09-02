@@ -50,6 +50,11 @@ pub enum McpRecallOutcome {
         /// Evidence-backed rows safe to present as retrieval hits.
         hits: Vec<McpHit>,
     },
+    /// Evidence directly contradicts an asserted query.
+    Contradicted {
+        /// Verifier-cited rows carrying the contradictory evidence.
+        evidence: Vec<McpHit>,
+    },
     /// Retrieval completed normally but did not find supporting evidence.
     NothingMatched {
         /// Inspectable reason retrieval abstained.

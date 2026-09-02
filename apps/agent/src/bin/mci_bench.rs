@@ -18,14 +18,14 @@ use mci_agent::bench_longmemeval::{
     LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, ScratchRun, Summary,
 };
 use mci_agent::child_command_environment::sanitized_command;
-use mci_brain::{EVIDENCE_SUFFICIENCY_POLICY, EXPLICIT_EVIDENCE_VETO_QUALIFICATION};
+use mci_brain::{EVIDENCE_VERIFIER_QUALIFICATION, EXPLICIT_EVIDENCE_VETO_QUALIFICATION};
 
 const CANONICAL_WORK_MEMORY_DATASET: &str = "eval/work-memory/synthetic-v1.json";
 const CANONICAL_WORK_MEMORY_DATASET_ID: &str = "synthetic-work-memory-v1";
 const CANONICAL_WORK_MEMORY_INSTANCES: usize = 24;
 const CANONICAL_WORK_MEMORY_BASELINE: &str = "docs/eval/work-memory-baseline.json";
 const CANONICAL_WORK_MEMORY_BASELINE_SHA256: &str =
-    "ef79d74ba792acbfe6c5655b6459e81d405fbb3ae54c293b412d5b5c81bf9179";
+    include_str!("../../../../docs/eval/work-memory-baseline.sha256");
 
 fn usage() {
     println!(
@@ -875,7 +875,7 @@ fn main() -> ExitCode {
         canonical_dataset_scope,
         baseline_path.as_deref(),
         &repo_root(),
-        CANONICAL_WORK_MEMORY_BASELINE_SHA256,
+        CANONICAL_WORK_MEMORY_BASELINE_SHA256.trim(),
     );
     let mut regression = match (baseline_identity, baseline_path.as_deref()) {
         (Err(error), _) => Some(RegressionReport {
@@ -916,8 +916,8 @@ fn main() -> ExitCode {
         && metadata.model_checksum_sha256.is_some();
     let absolute_quality_targets = absolute_quality_targets();
     let mut quality_gate = evaluate_quality_gate(&overall, &absolute_quality_targets);
-    require_qualified_evidence_policy(
-        EVIDENCE_SUFFICIENCY_POLICY.validation_qualified,
+    require_qualified_evidence_verifier(
+        EVIDENCE_VERIFIER_QUALIFICATION.validation_qualified,
         &mut quality_gate,
     );
     require_relation_grounded_explicit_evidence_veto(
@@ -986,12 +986,12 @@ fn require_accepted_baseline(canonical_scope: bool, regression: &mut Option<Regr
     }
 }
 
-fn require_qualified_evidence_policy(qualified: bool, quality_gate: &mut RegressionReport) {
+fn require_qualified_evidence_verifier(qualified: bool, quality_gate: &mut RegressionReport) {
     if !qualified {
         quality_gate.passed = false;
         quality_gate
             .failures
-            .push("production evidence-sufficiency policy is not validation-qualified".into());
+            .push("local evidence verifier is not validation-qualified".into());
     }
 }
 
@@ -1111,18 +1111,18 @@ mod tests {
     }
 
     #[test]
-    fn unqualified_evidence_policy_blocks_launch_quality() {
+    fn unqualified_evidence_verifier_blocks_launch_quality() {
         let mut quality_gate = RegressionReport {
             passed: true,
             failures: Vec::new(),
         };
 
-        require_qualified_evidence_policy(false, &mut quality_gate);
+        require_qualified_evidence_verifier(false, &mut quality_gate);
 
         assert!(!quality_gate.passed);
         assert_eq!(
             quality_gate.failures,
-            ["production evidence-sufficiency policy is not validation-qualified"]
+            ["local evidence verifier is not validation-qualified"]
         );
     }
 
@@ -1171,6 +1171,14 @@ mod tests {
             verify_accepted_baseline_identity(true, Some(&accepted), root.path(), &expected_sha)
                 .expect_err("the accepted path must retain its pinned digest");
         assert!(digest_error.contains("SHA-256"));
+    }
+
+    #[test]
+    fn committed_baseline_matches_the_single_pinned_digest() {
+        let root = repo_root();
+        let actual = sha256_file(&root.join(CANONICAL_WORK_MEMORY_BASELINE))
+            .expect("hash committed baseline");
+        assert_eq!(actual, CANONICAL_WORK_MEMORY_BASELINE_SHA256.trim());
     }
 
     #[test]

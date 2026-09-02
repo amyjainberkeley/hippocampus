@@ -586,6 +586,13 @@ fn recall_wire_result(outcome: McpRecallOutcome) -> serde_json::Value {
             "outcome": "matched",
             "hits": hits.iter().map(hit_json).collect::<Vec<_>>(),
             "related_context": [],
+            "contradicting_context": [],
+        }),
+        McpRecallOutcome::Contradicted { evidence } => serde_json::json!({
+            "outcome": "contradicted",
+            "hits": [],
+            "related_context": [],
+            "contradicting_context": evidence.iter().map(hit_json).collect::<Vec<_>>(),
         }),
         McpRecallOutcome::NothingMatched { reason } => serde_json::json!({
             "outcome": "nothing_matched",
@@ -596,6 +603,7 @@ fn recall_wire_result(outcome: McpRecallOutcome) -> serde_json::Value {
             },
             "hits": [],
             "related_context": [],
+            "contradicting_context": [],
         }),
         McpRecallOutcome::Degraded {
             degradation,
@@ -607,9 +615,11 @@ fn recall_wire_result(outcome: McpRecallOutcome) -> serde_json::Value {
                 mci_brain::RetrievalDegradation::LexicalUnavailable => "lexical_unavailable",
                 mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable => "lexical_and_embeddings_unavailable",
                 mci_brain::RetrievalDegradation::EvidenceSufficiencyUnqualified => "evidence_sufficiency_unqualified",
+                mci_brain::RetrievalDegradation::EvidenceVerifierUnavailable => "evidence_verifier_unavailable",
             },
             "hits": [],
             "related_context": related_context.iter().map(hit_json).collect::<Vec<_>>(),
+            "contradicting_context": [],
         }),
     };
     let text = serde_json::to_string(&payload).unwrap_or_else(|_| {

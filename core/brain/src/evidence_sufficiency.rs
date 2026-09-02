@@ -9,6 +9,8 @@
 
 use std::collections::HashSet;
 
+use thiserror::Error;
+
 /// One candidate's text and raw semantic score before query-local ranking.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EvidenceCandidate<'a> {
@@ -19,6 +21,128 @@ pub struct EvidenceCandidate<'a> {
     /// Raw query-document cosine from the embedding model.
     pub raw_semantic_cosine: f32,
 }
+
+/// One source-attributed evidence excerpt presented to a semantic verifier.
+///
+/// Retrieval scores are deliberately absent. A verifier must assess whether
+/// the text supports the query, not learn to relabel ranking confidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvidenceExcerpt<'a> {
+    /// Stable event identity used for source attribution.
+    pub stable_id: u64,
+    /// Canonical evidence text stored for that event.
+    pub text: &'a str,
+}
+
+/// A verifier's source-attributed semantic judgment.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EvidenceVerdict {
+    /// The evidence answers or supports the query.
+    Supported {
+        /// Calibrated confidence in `[0, 1]`.
+        confidence: f32,
+        /// Events that directly support the judgment.
+        evidence_ids: Vec<u64>,
+    },
+    /// The evidence directly contradicts an asserted query.
+    Contradicted {
+        /// Calibrated confidence in `[0, 1]`.
+        confidence: f32,
+        /// Events that directly contradict the assertion.
+        evidence_ids: Vec<u64>,
+    },
+    /// The retrieved set does not contain enough evidence to answer safely.
+    Insufficient {
+        /// Calibrated confidence in `[0, 1]`.
+        confidence: f32,
+    },
+}
+
+impl EvidenceVerdict {
+    /// Validate confidence and ensure every cited event belongs to the input.
+    #[must_use]
+    pub fn is_well_formed(&self, candidates: &[EvidenceExcerpt<'_>]) -> bool {
+        let candidate_ids = candidates
+            .iter()
+            .map(|candidate| candidate.stable_id)
+            .collect::<HashSet<_>>();
+        match self {
+            Self::Supported {
+                confidence,
+                evidence_ids,
+            }
+            | Self::Contradicted {
+                confidence,
+                evidence_ids,
+            } => {
+                valid_confidence(*confidence)
+                    && !evidence_ids.is_empty()
+                    && evidence_ids
+                        .iter()
+                        .all(|event_id| candidate_ids.contains(event_id))
+            }
+            Self::Insufficient { confidence } => valid_confidence(*confidence),
+        }
+    }
+}
+
+fn valid_confidence(confidence: f32) -> bool {
+    confidence.is_finite() && (0.0..=1.0).contains(&confidence)
+}
+
+/// Fail-closed errors from a local evidence verifier.
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+pub enum EvidenceVerifierError {
+    /// The verifier model or its runtime is not available.
+    #[error("evidence verifier unavailable: {0}")]
+    Unavailable(String),
+    /// The verifier could not produce a valid structured judgment.
+    #[error("evidence verifier invalid output: {0}")]
+    InvalidOutput(String),
+}
+
+/// Local semantic boundary between retrieval ranking and trusted evidence.
+pub trait EvidenceVerifier: Send + Sync + std::fmt::Debug {
+    /// Judge a query against the ranked, source-attributed evidence set.
+    fn verify(
+        &self,
+        query: &str,
+        candidates: &[EvidenceExcerpt<'_>],
+    ) -> Result<EvidenceVerdict, EvidenceVerifierError>;
+}
+
+/// Frozen release-readiness record for the semantic evidence verifier.
+///
+/// This is intentionally separate from the retired score critic. A verifier
+/// qualifies only after one concrete, redistributable model passes the locked
+/// semantic corpus and its shipped Core ML artifact matches the reference
+/// runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvidenceVerifierQualification {
+    /// Selected release model, or `None` while no candidate has qualified.
+    pub verifier_id: Option<&'static str>,
+    /// Locked qualification corpus, or `None` before that corpus is ratified.
+    pub validation_dataset_id: Option<&'static str>,
+    /// Number of untouched scenarios in the qualification split.
+    pub validation_cases: usize,
+    /// Whether the shipped Core ML artifact matches the reference runtime.
+    pub core_ml_parity_verified: bool,
+    /// Whether every predeclared semantic, provenance, and latency gate passed.
+    pub validation_qualified: bool,
+}
+
+/// Current release-readiness record for semantic evidence verification.
+///
+/// No candidate is selected yet. Production recall therefore remains useful
+/// as explicitly untrusted related context and cannot become trusted support.
+pub const EVIDENCE_VERIFIER_QUALIFICATION: EvidenceVerifierQualification =
+    EvidenceVerifierQualification {
+        verifier_id: None,
+        validation_dataset_id: None,
+        validation_cases: 0,
+        core_ml_parity_verified: false,
+        validation_qualified: false,
+    };
 
 /// Conservative relation check for questions with an explicit answer shape.
 ///

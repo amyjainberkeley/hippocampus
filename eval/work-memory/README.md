@@ -59,8 +59,8 @@ SHA-256 is
 The guard is negative-only: when a query unambiguously requests one of those
 four value types and no evidence body relates a value to the query subject and
 predicate, production returns `NothingMatched(EvidenceFloor)`. A supported
-relation does not promote evidence to `Matched`; the independently calibrated
-general critic remains authoritative and currently remains unqualified.
+relation does not promote evidence to `Matched`; only the source-attributed
+semantic verifier may do that, and no release verifier is qualified yet.
 Ingestion headers are removed before assessment so app names, titles, URLs, and
 capture timestamps cannot satisfy a question. Sentence boundaries, local topic
 anchors, and answer-type grammar prevent values from unrelated events from
@@ -71,15 +71,17 @@ sets while rejecting every corresponding insufficient set. It also rejects all
 8/8 unrelated-value adversarial sets, with zero false pass-throughs. The
 positive enum value is therefore `RelationSupported`, and the qualification is
 `relation_grounded: true`. This is evidence for the four explicit answer shapes
-only, not a claim that general evidence sufficiency is solved. The broader
-similarity-based critic still fails its independent validation and continues to
-block `launch_qualified`. These small synthetic counts are regression evidence,
-not a population-level accuracy claim.
+only, not a claim that general evidence sufficiency is solved. The retired
+similarity-based critic remains inspectable behind test/stub hooks but cannot
+authorize production evidence. The absent release verifier continues to block
+`launch_qualified`. These small synthetic counts are regression evidence, not a
+population-level accuracy claim.
 
 Every per-case report includes `retrieval_disposition`, preserving whether the
-production path matched, abstained at a named reason, or returned ranked context
-under the unqualified general critic. Benchmark outcome labels therefore remain
-auditable without treating a fused rank score as confidence.
+production path matched, contradicted, abstained at a named reason, or returned
+ranked context while the semantic verifier was unavailable. Benchmark outcome
+labels therefore remain auditable without treating a fused rank score as
+confidence.
 
 `complete` means every case in the requested run executed. `publishable` also
 requires all 24 cases, both lexical and hybrid arms, `k=1,3,5,10`, a clean
@@ -113,6 +115,10 @@ Update the committed baseline after an intentional benchmark change:
 scripts/eval/work-memory/run.sh --update-baseline
 ```
 
+The update promotes the canonical report and refreshes its single pinned
+SHA-256 sidecar. A normal run refuses a missing, malformed, or mismatched
+sidecar before invoking the benchmark.
+
 Baseline generation pins `eval/work-memory/synthetic-v1.json` and refuses
 dataset overrides, limited or single-arm runs, noncanonical k values, dirty
 trees, any dataset id other than `synthetic-work-memory-v1`, and any count
@@ -123,7 +129,7 @@ still return nonzero when the separate launch-quality gate fails.
 For an intentional one-case smoke run that may exit zero:
 
 ```bash
-scripts/eval/work-memory/run.sh --no-baseline --allow-smoke --limit 1 --arm lexical
+scripts/eval/work-memory/run.sh --allow-smoke --limit 1 --arm lexical
 ```
 
 Smoke reports always set `complete=false` and `publishable=false` and cannot be
