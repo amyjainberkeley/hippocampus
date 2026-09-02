@@ -508,6 +508,7 @@ if captureOptions.captureEnabled {
     // supervisor argv; capture-off launches never construct these resources.
     let focusedWindowStore = FocusedWindowStore()
     let focusTracker = FocusTracker(store: focusedWindowStore)
+    let tccStatusMonitor = TCCStatusMonitor()
     let captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
@@ -537,7 +538,8 @@ if captureOptions.captureEnabled {
         // focus changes at 200 ms cadence; the race-consistency gate
         // covers residual buffer-delivery races.
         focusedWindowStore: focusedWindowStore,
-        focusTracker: focusTracker
+        focusTracker: focusTracker,
+        tccStatusMonitor: tccStatusMonitor
     )
     captureRuntime = CaptureRuntime(
         session: captureSession,
