@@ -2897,11 +2897,12 @@ mod writer_command_lease_tests {
 
     #[test]
     fn existing_brain_is_verified_readonly_before_writer_open() {
+        type SeedStore = SqlCipherBrainStore;
+
         let root = tempfile::tempdir().expect("temporary root");
         let brain = root.path().join("brain.sqlite");
         let correct_key = DbKey::from_bytes([0x41; 32]);
         let wrong_key = DbKey::from_bytes([0x42; 32]);
-        type SeedStore = SqlCipherBrainStore;
         let store = SeedStore::new(&brain, &correct_key).expect("seed encrypted brain");
         drop(store);
 
