@@ -132,8 +132,7 @@ text(
     SUCCESS if scorecard["quality_gate"]["passed"] else FAILURE,
 )
 text(f"Launch qualified: {str(scorecard['launch_qualified']).lower()}", FAILURE)
-wrapped("Reason: production evidence critic is not validation-qualified.")
-wrapped("Reason: explicit-value veto is not relation-grounded.")
+wrapped("Reason: general evidence critic is not validation-qualified.")
 blank()
 
 prompt("jq '.quality_gate, .launch_qualified' docs/eval/work-memory-baseline.json")

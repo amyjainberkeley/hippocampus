@@ -763,7 +763,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             .is_some_and(|features| self.evidence_policy.is_sufficient(features));
         let explicitly_unsupported = matches!(
             explicit_evidence_signal(&query.text, &candidates),
-            ExplicitEvidenceSignal::ValueTypeAbsent
+            ExplicitEvidenceSignal::RelationUnsupported
         );
         matches.sort_by(|left, right| {
             right

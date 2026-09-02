@@ -133,7 +133,7 @@ SWIFT
 rg -Fq 'Launch qualified: {str(scorecard['"'"'launch_qualified'"'"']).lower()}' \
     "$REPO_ROOT/scripts/render-cli-screenshot.py" \
     || fail "CLI renderer must preserve the benchmark launch-qualified field"
-rg -Fq 'explicit-value veto is not relation-grounded' \
+rg -Fq 'general evidence critic is not validation-qualified' \
     "$REPO_ROOT/scripts/render-cli-screenshot.py" \
     || fail "CLI renderer must preserve the remaining evidence-policy gap"
 
