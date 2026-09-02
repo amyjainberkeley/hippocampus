@@ -7,7 +7,7 @@ DATASET="eval/work-memory/synthetic-v1.json"
 BASELINE="docs/eval/work-memory-baseline.json"
 BASELINE_NEXT="docs/eval/work-memory-baseline.next.json"
 DATASET_SHA256="96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f"
-BASELINE_SHA256="35fbebff470f957caf7ea17b456ba0708d48521858061470a2c51dfccc7691c9"
+BASELINE_SHA256="ef79d74ba792acbfe6c5655b6459e81d405fbb3ae54c293b412d5b5c81bf9179"
 DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
 
 UPDATE_BASELINE=0

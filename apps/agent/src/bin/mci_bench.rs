@@ -25,7 +25,7 @@ const CANONICAL_WORK_MEMORY_DATASET_ID: &str = "synthetic-work-memory-v1";
 const CANONICAL_WORK_MEMORY_INSTANCES: usize = 24;
 const CANONICAL_WORK_MEMORY_BASELINE: &str = "docs/eval/work-memory-baseline.json";
 const CANONICAL_WORK_MEMORY_BASELINE_SHA256: &str =
-    "35fbebff470f957caf7ea17b456ba0708d48521858061470a2c51dfccc7691c9";
+    "ef79d74ba792acbfe6c5655b6459e81d405fbb3ae54c293b412d5b5c81bf9179";
 
 fn usage() {
     println!(
