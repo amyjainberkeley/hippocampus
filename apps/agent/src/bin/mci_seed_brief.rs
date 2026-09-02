@@ -353,11 +353,13 @@ mod tests {
             "--date".to_owned(),
             "2026-09-02".to_owned(),
         ];
-        let ParseOutcome::Run(args) = parse_args(&argv) else {
+        let ParseOutcome::Run(parsed_args) = parse_args(&argv) else {
             panic!("minimal seed arguments should parse");
         };
 
-        assert_eq!(args.model_id, "hippocampus-extractive");
-        assert!(!args.body.contains("before the Qwen3 author pipeline lands"));
+        assert_eq!(parsed_args.model_id, "hippocampus-extractive");
+        assert!(!parsed_args
+            .body
+            .contains("before the Qwen3 author pipeline lands"));
     }
 }

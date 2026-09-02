@@ -41,8 +41,8 @@ use mci_brain::{
 use mci_core::crypto::DbKey;
 
 use crate::context_packet::{
-    compile_context_packet, ContextBudget, ContextEvidence, ContextPacket, ContextSources,
-    EvidencePriority,
+    compile_context_packet, ContextBudget, ContextEvidence, ContextFocusRetrieval, ContextPacket,
+    ContextSources, EvidencePriority,
 };
 use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 
@@ -518,6 +518,7 @@ impl BrainReader for LiveBrainReader {
             .memory_claims_as_of(now_us, now_us, claim_limit)
             .map_err(|error| BrainReaderError::Backend(format!("read current claims: {error}")))?;
         let mut evidence = Vec::new();
+        let mut focus_retrieval = None;
 
         for claim in &claims {
             for reference in &claim.evidence {
@@ -535,12 +536,25 @@ impl BrainReader for LiveBrainReader {
         let candidate_limit = budget.max_evidence.saturating_mul(2).clamp(1, 100);
         if let Some(focus) = focus.map(str::trim).filter(|value| !value.is_empty()) {
             let recall_candidates = match self.recall(focus, candidate_limit)? {
-                McpRecallOutcome::Matched { hits } => hits,
-                McpRecallOutcome::Contradicted { evidence } => evidence,
+                McpRecallOutcome::Matched { hits } => {
+                    focus_retrieval = Some(ContextFocusRetrieval::matched());
+                    hits
+                }
+                McpRecallOutcome::Contradicted { evidence } => {
+                    focus_retrieval = Some(ContextFocusRetrieval::contradicted());
+                    evidence
+                }
                 McpRecallOutcome::Degraded {
-                    related_context, ..
-                } => related_context,
-                McpRecallOutcome::NothingMatched { .. } => Vec::new(),
+                    degradation,
+                    related_context,
+                } => {
+                    focus_retrieval = Some(ContextFocusRetrieval::degraded(degradation));
+                    related_context
+                }
+                McpRecallOutcome::NothingMatched { reason } => {
+                    focus_retrieval = Some(ContextFocusRetrieval::nothing_matched(reason));
+                    Vec::new()
+                }
             };
             for hit in &recall_candidates {
                 if let Some(candidate) = self.context_evidence_from_hit(hit)? {
@@ -559,12 +573,10 @@ impl BrainReader for LiveBrainReader {
             );
         }
 
-        Ok(compile_context_packet(
-            focus,
-            now_us,
-            budget,
-            ContextSources { claims, evidence },
-        ))
+        let mut packet =
+            compile_context_packet(focus, now_us, budget, ContextSources { claims, evidence });
+        packet.focus_retrieval = focus_retrieval;
+        Ok(packet)
     }
 }
 

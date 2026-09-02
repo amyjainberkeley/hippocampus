@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mci_brain::{ClaimStatus, Event, MemoryClaim};
+use mci_brain::{ClaimStatus, Event, MemoryClaim, NothingMatchedReason, RetrievalDegradation};
 use serde::Serialize;
 
 const MIN_GROUNDED_CONFIDENCE: f32 = 0.65;
@@ -110,6 +110,84 @@ pub enum ContextPacketOutcome {
     NothingAvailable,
 }
 
+/// Truth state of the focused retrieval that supplied packet observations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextFocusStatus {
+    /// A qualified verifier found supporting evidence.
+    Matched,
+    /// A qualified verifier found contradictory evidence.
+    Contradicted,
+    /// Retrieval completed normally and abstained.
+    NothingMatched,
+    /// Ranking produced related context without qualified answerability.
+    Degraded,
+}
+
+/// Additive retrieval provenance for a focused context request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContextFocusRetrieval {
+    /// High-level retrieval truth state.
+    pub status: ContextFocusStatus,
+    /// Stable abstention or degradation reason, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl ContextFocusRetrieval {
+    /// Record a qualified supporting retrieval.
+    #[must_use]
+    pub const fn matched() -> Self {
+        Self {
+            status: ContextFocusStatus::Matched,
+            reason: None,
+        }
+    }
+
+    /// Record a qualified contradictory retrieval.
+    #[must_use]
+    pub const fn contradicted() -> Self {
+        Self {
+            status: ContextFocusStatus::Contradicted,
+            reason: None,
+        }
+    }
+
+    /// Record a normal retrieval abstention and its stable reason.
+    #[must_use]
+    pub fn nothing_matched(reason: NothingMatchedReason) -> Self {
+        let reason = match reason {
+            NothingMatchedReason::NoCandidates => "no_candidates",
+            NothingMatchedReason::EvidenceFloor => "evidence_floor",
+            NothingMatchedReason::ZeroLimit => "zero_limit",
+        };
+        Self {
+            status: ContextFocusStatus::NothingMatched,
+            reason: Some(reason.into()),
+        }
+    }
+
+    /// Record an unqualified fallback ranking and its missing capability.
+    #[must_use]
+    pub fn degraded(degradation: RetrievalDegradation) -> Self {
+        let reason = match degradation {
+            RetrievalDegradation::EmbeddingsUnavailable => "embeddings_unavailable",
+            RetrievalDegradation::LexicalUnavailable => "lexical_unavailable",
+            RetrievalDegradation::LexicalAndEmbeddingsUnavailable => {
+                "lexical_and_embeddings_unavailable"
+            }
+            RetrievalDegradation::EvidenceSufficiencyUnqualified => {
+                "evidence_sufficiency_unqualified"
+            }
+            RetrievalDegradation::EvidenceVerifierUnavailable => "evidence_verifier_unavailable",
+        };
+        Self {
+            status: ContextFocusStatus::Degraded,
+            reason: Some(reason.into()),
+        }
+    }
+}
+
 /// Stable section identifiers in their product hierarchy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -199,6 +277,10 @@ pub struct ContextPacket {
     /// Caller-supplied focus, normalized only for surrounding whitespace.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus: Option<String>,
+    /// Retrieval truth state for a focused request. Absent for recent-context
+    /// packets that did not perform retrieval.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub focus_retrieval: Option<ContextFocusRetrieval>,
     /// Deterministic packet timestamp supplied by the caller.
     pub generated_at_us: u64,
     /// Fixed-order context sections.
@@ -371,6 +453,7 @@ pub fn compile_context_packet(
     ContextPacket {
         outcome,
         focus,
+        focus_retrieval: None,
         generated_at_us,
         sections: section_order()
             .into_iter()

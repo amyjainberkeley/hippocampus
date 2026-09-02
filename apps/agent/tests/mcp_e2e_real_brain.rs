@@ -201,6 +201,40 @@ fn context_over_recent_real_events_is_typed_and_cited() {
 }
 
 #[test]
+fn focused_context_preserves_degraded_retrieval_status_for_agents() {
+    let (_dir, store) = open_temp_store();
+    let event_id = store
+        .put_event(&make_event(
+            "Implemented a bounded context packet for Hippocampus",
+            1_000_000,
+        ))
+        .unwrap();
+    let server = server_fts_only(store);
+
+    let result = extract_result(server.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({
+            "name": "mci_context",
+            "arguments": {
+                "focus": "bounded context packet",
+                "max_tokens": 256,
+                "max_evidence": 8
+            }
+        })),
+    )));
+
+    assert_eq!(
+        result["packet"]["focus_retrieval"],
+        serde_json::json!({
+            "status": "degraded",
+            "reason": "embeddings_unavailable"
+        })
+    );
+    assert_eq!(result["packet"]["citations"][0]["event_id"], event_id.0);
+    assert_eq!(result["packet"]["outcome"], "observations_only");
+}
+
+#[test]
 fn context_promotes_only_a_governed_claim_from_the_real_projection() {
     let (_dir, store) = open_temp_store();
     let mut source = make_event("Decided to ship bounded context packets", 1_000_000);
