@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `4d838d3`
+Audited code baseline: `363461a`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -112,10 +112,12 @@ more than this page.
 - The menu app, onboarding, Recall workspace, icon, installer art, extensions,
   and documented product captures use one light native visual system. Native
   macOS material supplies the translucent top surfaces, dark system appearance
-  does not turn the product black, and the retired turquoise identity is not
-  present in the release asset set. The Recall product capture is generated from
-  a disposable SQLCipher brain and visibly proves three authenticated encrypted
-  keyframes, 20 synthetic events, and one current synthetic brief.
+  does not turn the product black, including the native Preferences panel and
+  toolbar, and the retired turquoise identity is not present in the release
+  asset set. The asset contract now runs in the unified gate. The Recall product
+  capture is generated from a disposable SQLCipher brain and visibly proves
+  three authenticated encrypted keyframes, 20 synthetic events, and one current
+  synthetic brief.
 - Runlog remains an audited research input rather than a runtime dependency.
   It does use 768-dimensional Gemini vectors and Firestore cosine search; its
   useful hypothesis is hybrid candidate generation plus source-region
