@@ -7,6 +7,7 @@ BRAND="$REPO_ROOT/assets/branding"
 ONBOARDING="$REPO_ROOT/apps/onboarding/Sources/Onboarding"
 RECALL_APP="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/MCIRecallApp.swift"
 ONBOARDING_APP="$ONBOARDING/OnboardingApp.swift"
+PREFERENCES_APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -28,10 +29,13 @@ if rg -q 'RadialGradient|LinearGradient' "$ONBOARDING"; then
     fail "onboarding must not restore a decorative gradient backdrop"
 fi
 
-for root in "$RECALL_APP" "$ONBOARDING_APP"; do
+for root in "$RECALL_APP" "$ONBOARDING_APP" "$PREFERENCES_APP"; do
     rg -q '\.preferredColorScheme\(\.light\)' "$root" \
         || fail "$(basename "$root") does not pin the V1 window to light appearance"
 done
+
+rg -q 'panel\.appearance = NSAppearance\(named: \.aqua\)' "$PREFERENCES_APP" \
+    || fail "Preferences native panel chrome does not pin the V1 Aqua appearance"
 
 if rg -q 'Use System Appearance|follows the current macOS light or dark appearance' "$RECALL_APP"; then
     fail "Recall still advertises the retired adaptive appearance control"
