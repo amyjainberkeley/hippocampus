@@ -25,14 +25,33 @@ public enum RetentionPolicy: String, Sendable, Equatable, CaseIterable, Identifi
         case .custom: return nil
         }
     }
+
+    public static let customDaysRange = 1...365
+
+    public func validatedCustomDays(_ customDays: Int?) throws -> Int? {
+        guard self == .custom else { return nil }
+        guard let customDays, Self.customDaysRange.contains(customDays) else {
+            throw RetentionStoreError.invalidCustomDays
+        }
+        return customDays
+    }
 }
 
-// Real impl persists to ~/Library/Application Support/MCI/state.json.
-// This PR: protocol only. Saves nothing.
+public enum RetentionStoreError: LocalizedError, Equatable {
+    case invalidCustomDays
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidCustomDays:
+            return "Custom retention must be between 1 and 365 days."
+        }
+    }
+}
+
 public protocol RetentionStore: Sendable {
     func currentPolicy() async -> RetentionPolicy
     func currentCustomDays() async -> Int?
-    func setPolicy(_ policy: RetentionPolicy, customDays: Int?) async
+    func setPolicy(_ policy: RetentionPolicy, customDays: Int?) async throws
 }
 
 public actor StubRetentionStore: RetentionStore {
@@ -52,8 +71,9 @@ public actor StubRetentionStore: RetentionStore {
         customDays
     }
 
-    public func setPolicy(_ newPolicy: RetentionPolicy, customDays newDays: Int?) async {
+    public func setPolicy(_ newPolicy: RetentionPolicy, customDays newDays: Int?) async throws {
+        let validatedDays = try newPolicy.validatedCustomDays(newDays)
         policy = newPolicy
-        customDays = newDays
+        customDays = validatedDays
     }
 }

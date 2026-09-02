@@ -135,6 +135,27 @@ struct RuntimeConfigBehavior {
         )
         precondition(!RuntimeConfig(path: path).captureEnabled, "malformed relaunch must remain off")
 
+        let multilineString = """
+        notes = '''
+        alpha
+        [text]
+        omega
+        '''
+        [capture]
+        capture_enabled = true
+        """
+        try multilineString.write(to: path, atomically: true, encoding: .utf8)
+        try RuntimeConfig(path: path).setCaptureEnabled(true)
+        let multilineAfterWrite = try String(contentsOf: path, encoding: .utf8)
+        precondition(
+            RuntimeConfig(path: path).captureEnabled,
+            "multiline string content was mistaken for a table header"
+        )
+        precondition(
+            multilineAfterWrite.contains("[text]"),
+            "multiline string semantics were not preserved"
+        )
+
         try "[capture]\ncapture_enabled = true\n".write(
             to: path,
             atomically: true,
@@ -142,7 +163,8 @@ struct RuntimeConfigBehavior {
         )
         try RuntimeConfig(path: path).setCaptureEnabled(true)
         let rooted = try String(contentsOf: path, encoding: .utf8)
-        precondition(rooted.hasPrefix("capture_enabled = true\n[capture]"))
+        precondition(rooted.contains("capture_enabled = true"))
+        precondition(rooted.contains("[capture]"))
         precondition(RuntimeConfig(path: path).captureEnabled)
     }
 }

@@ -11,6 +11,7 @@ struct SupervisorLifecycleBehavior {
         try await proveShutdownCancelsKeyPreparation()
         try await proveShutdownCancelsReadiness()
         try await proveShutdownCancelsCaptureReconfiguration()
+        try await proveShutdownWinsBlockedInitialReconfigurationStop()
     }
 
     @MainActor
@@ -141,6 +142,32 @@ struct SupervisorLifecycleBehavior {
     }
 
     @MainActor
+    private static func proveShutdownWinsBlockedInitialReconfigurationStop() async throws {
+        let stopGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        try await supervisor.startAndWaitForReadiness()
+        topology.suspendStop(onCall: 1, at: stopGate)
+
+        let reconfiguration = Task { @MainActor in
+            try await supervisor.applyCaptureEnabled(true)
+        }
+        await stopGate.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        await topology.waitUntilStopped(minimumCount: 2)
+        try await shutdown.value
+        precondition(supervisor.state == .stopped)
+
+        stopGate.resume()
+        _ = try? await reconfiguration.value
+        precondition(supervisor.state == .stopped)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
     private static func makeSupervisor(
         topology: any SupervisorTopologyControlling,
         keyCustodyPreparer: any KeyCustodyPreparing
@@ -227,6 +254,8 @@ private final class SuspendingKeyCustodyPreparer: KeyCustodyPreparing {
 @MainActor
 private final class SuspendingLifecycleTopology: SupervisorTopologyControlling {
     private var readinessGate: FixtureSuspension?
+    private var blockedStopCall: Int?
+    private var stopGate: FixtureSuspension?
     private(set) var isRunning = false
     private(set) var launchCount = 0
     private(set) var stopCount = 0
@@ -237,6 +266,11 @@ private final class SuspendingLifecycleTopology: SupervisorTopologyControlling {
 
     func suspendNextReadiness(on gate: FixtureSuspension) {
         readinessGate = gate
+    }
+
+    func suspendStop(onCall call: Int, at gate: FixtureSuspension) {
+        blockedStopCall = call
+        stopGate = gate
     }
 
     func launch(
@@ -263,6 +297,10 @@ private final class SuspendingLifecycleTopology: SupervisorTopologyControlling {
     func stop(timeout: TimeInterval) async throws {
         _ = timeout
         stopCount += 1
+        if stopCount == blockedStopCall, let stopGate {
+            self.stopGate = nil
+            await stopGate.suspend()
+        }
         isRunning = false
     }
 

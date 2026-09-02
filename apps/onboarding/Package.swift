@@ -48,5 +48,10 @@ let package = Package(
                 .copy("Fixtures"),
             ]
         ),
+        .executableTarget(
+            name: "RetentionPersistenceBehavior",
+            dependencies: ["OnboardingKit"],
+            path: "Tests/Fixtures/RetentionPersistenceBehavior"
+        ),
     ]
 )

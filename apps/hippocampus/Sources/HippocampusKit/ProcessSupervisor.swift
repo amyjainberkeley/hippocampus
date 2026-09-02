@@ -240,8 +240,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             try ensureTransitionIsActive(transitionID)
             stopAncillaryServices()
         } catch {
-            transitionGate.fail(transitionID: transitionID)
-            state = .crashed(reason: error.localizedDescription)
+            if transitionGate.ownsTransition(transitionID) {
+                transitionGate.fail(transitionID: transitionID)
+                state = .crashed(reason: error.localizedDescription)
+            }
             throw error
         }
 

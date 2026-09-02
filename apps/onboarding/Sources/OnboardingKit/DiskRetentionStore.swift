@@ -1,20 +1,82 @@
 import Foundation
 
+public protocol RetentionFileWriting: Sendable {
+    func write(_ data: Data, to fileURL: URL) throws
+}
+
+public struct AtomicRetentionFileWriter: RetentionFileWriting {
+    public init() {}
+
+    public func write(_ data: Data, to fileURL: URL) throws {
+        let fileManager = FileManager.default
+        let directory = fileURL.deletingLastPathComponent()
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+
+        let temporaryURL = directory.appendingPathComponent(
+            ".retention.json.\(UUID().uuidString).tmp"
+        )
+        do {
+            try data.write(to: temporaryURL, options: .withoutOverwriting)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: temporaryURL.path
+            )
+            let handle = try FileHandle(forWritingTo: temporaryURL)
+            do {
+                try handle.synchronize()
+                try handle.close()
+            } catch {
+                try? handle.close()
+                throw error
+            }
+
+            if fileManager.fileExists(atPath: fileURL.path) {
+                _ = try fileManager.replaceItemAt(fileURL, withItemAt: temporaryURL)
+            } else {
+                try fileManager.moveItem(at: temporaryURL, to: fileURL)
+            }
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+}
+
 public actor DiskRetentionStore: RetentionStore {
     private struct Persisted: Codable {
         var mode: String
         var days: Int?
         var updated_at: String
+
+        private enum CodingKeys: String, CodingKey {
+            case mode, days, updated_at
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(mode, forKey: .mode)
+            try container.encode(days, forKey: .days)
+            try container.encode(updated_at, forKey: .updated_at)
+        }
     }
 
     private let fileURL: URL
+    private let writer: any RetentionFileWriting
     private var cached: (policy: RetentionPolicy, days: Int?)?
 
-    public init(directory: URL? = nil) {
+    public init(
+        directory: URL? = nil,
+        writer: any RetentionFileWriting = AtomicRetentionFileWriter()
+    ) {
         let dir = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("MCI")
         self.fileURL = dir.appendingPathComponent("retention.json")
+        self.writer = writer
     }
 
     public func currentPolicy() -> RetentionPolicy {
@@ -27,9 +89,11 @@ public actor DiskRetentionStore: RetentionStore {
         return cached?.days
     }
 
-    public func setPolicy(_ policy: RetentionPolicy, customDays: Int?) {
-        cached = (policy, customDays)
-        writeToDisk(policy: policy, days: customDays)
+    public func setPolicy(_ policy: RetentionPolicy, customDays: Int?) throws {
+        let validatedDays = try policy.validatedCustomDays(customDays)
+        let data = try encodedPolicy(policy, days: validatedDays)
+        try writer.write(data, to: fileURL)
+        cached = (policy, validatedDays)
     }
 
     private func loadIfNeeded() {
@@ -40,10 +104,15 @@ public actor DiskRetentionStore: RetentionStore {
             cached = (.forever, nil)
             return
         }
-        cached = (policy, persisted.days)
+        do {
+            let validatedDays = try policy.validatedCustomDays(persisted.days)
+            cached = (policy, validatedDays)
+        } catch {
+            cached = (.forever, nil)
+        }
     }
 
-    private func writeToDisk(policy: RetentionPolicy, days: Int?) {
+    private func encodedPolicy(_ policy: RetentionPolicy, days: Int?) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let persisted = Persisted(
@@ -51,17 +120,6 @@ public actor DiskRetentionStore: RetentionStore {
             days: days,
             updated_at: ISO8601DateFormatter().string(from: Date())
         )
-        guard let data = try? encoder.encode(persisted) else { return }
-
-        let dir = fileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-
-        let tmp = dir.appendingPathComponent("retention.json.\(UUID().uuidString).tmp")
-        do {
-            try data.write(to: tmp, options: .atomic)
-            _ = try FileManager.default.replaceItemAt(fileURL, withItemAt: tmp)
-        } catch {
-            try? FileManager.default.removeItem(at: tmp)
-        }
+        return try encoder.encode(persisted)
     }
 }

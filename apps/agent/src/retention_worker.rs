@@ -56,21 +56,20 @@ struct PersistedRetention {
 ///
 /// Missing file, unreadable file, or unrecognized mode all default to
 /// [`RetentionConfig::Forever`] — the safest fallback (never deletes).
+#[must_use]
 pub fn load_retention_config(path: &Path) -> RetentionConfig {
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(_) => return RetentionConfig::Forever,
+    let Ok(data) = std::fs::read(path) else {
+        return RetentionConfig::Forever;
     };
     let parsed: PersistedRetention = match serde_json::from_slice(&data) {
         Ok(p) => p,
         Err(_) => return RetentionConfig::Forever,
     };
     match parsed.mode.as_str() {
-        "forever" => RetentionConfig::Forever,
         "thirtyDays" => RetentionConfig::Days(30),
         "sevenDays" => RetentionConfig::Days(7),
         "custom" => match parsed.days {
-            Some(d) if d > 0 => RetentionConfig::Days(d),
+            Some(d) if (1..=365).contains(&d) => RetentionConfig::Days(d),
             _ => RetentionConfig::Forever,
         },
         _ => RetentionConfig::Forever,
@@ -78,10 +77,13 @@ pub fn load_retention_config(path: &Path) -> RetentionConfig {
 }
 
 fn now_us() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as u64
+    u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros(),
+    )
+    .unwrap_or(u64::MAX)
 }
 
 /// Run the retention-purger daily loop.
@@ -138,7 +140,7 @@ pub async fn run_retention_worker(
         }
 
         tokio::select! {
-            () = tokio::time::sleep(check_interval) => continue,
+            () = tokio::time::sleep(check_interval) => {}
             _ = shutdown.changed() => break,
         }
     }
@@ -208,6 +210,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load_retention_config(&path), RetentionConfig::Forever);
+    }
+
+    #[test]
+    fn custom_days_outside_closed_schema_default_forever() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("retention.json");
+        for invalid in [
+            r#"{"mode":"custom","days":0}"#,
+            r#"{"mode":"custom","days":366}"#,
+            r#"{"mode":"custom"}"#,
+            r#"{"mode":"custom","days":18446744073709551616}"#,
+        ] {
+            std::fs::write(&path, invalid).unwrap();
+            assert_eq!(
+                load_retention_config(&path),
+                RetentionConfig::Forever,
+                "invalid payload {invalid}"
+            );
+        }
     }
 
     #[test]

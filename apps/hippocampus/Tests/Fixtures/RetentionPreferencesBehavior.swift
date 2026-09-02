@@ -18,7 +18,9 @@ struct RetentionPreferencesBehavior {
             ("forever", .forever, nil, "forever", nil),
             ("thirty-days", .thirtyDays, nil, "thirtyDays", nil),
             ("seven-days", .sevenDays, nil, "sevenDays", nil),
+            ("custom-one", .custom, 1, "custom", 1),
             ("custom", .custom, 90, "custom", 90),
+            ("custom-365", .custom, 365, "custom", 365),
         ]
         for (name, policy, customDays, expectedMode, expectedDays) in cases {
             let directory = outputDirectory.appendingPathComponent(name, isDirectory: true)
@@ -112,6 +114,31 @@ struct RetentionPreferencesBehavior {
         precondition(malformedStore.retentionWriteError != nil)
         let malformedContents = try String(contentsOf: malformedURL, encoding: .utf8)
         precondition(malformedContents == "not json")
+
+        let invalidCustomPayloads = [
+            ("custom-zero", #"{"mode":"custom","days":0}"#),
+            ("custom-366", #"{"mode":"custom","days":366}"#),
+            ("custom-missing", #"{"mode":"custom"}"#),
+            ("custom-overflow", #"{"mode":"custom","days":18446744073709551616}"#),
+        ]
+        for (name, payload) in invalidCustomPayloads {
+            let directory = outputDirectory.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let retentionURL = directory.appendingPathComponent("retention.json")
+            try Data(payload.utf8).write(to: retentionURL)
+            let suite = "retention-invalid-\(UUID().uuidString)"
+            guard let defaults = UserDefaults(suiteName: suite) else {
+                preconditionFailure("invalid retention defaults")
+            }
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+            precondition(store.retentionPolicy == .forever, "invalid case \(name)")
+            precondition(store.retentionCustomDays == nil, "invalid case \(name)")
+            precondition(store.retentionWriteError != nil, "invalid case \(name)")
+        }
 
         let blockedParent = outputDirectory.appendingPathComponent("blocked-parent")
         try Data("not a directory".utf8).write(to: blockedParent)
