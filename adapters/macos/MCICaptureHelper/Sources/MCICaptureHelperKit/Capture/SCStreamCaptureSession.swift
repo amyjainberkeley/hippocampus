@@ -96,6 +96,19 @@ public struct InCallbackSample: Sendable, Equatable {
     }
 }
 
+/// A terminal loss of the live ScreenCaptureKit stream after the helper has
+/// become ready. This deliberately carries no framework error text: Apple
+/// errors can contain host-specific detail, while the owner only needs the
+/// fact that capture is no longer live.
+public enum CaptureRuntimeFailure: Error, Sendable, Equatable {
+    case streamStoppedUnexpectedly
+}
+
+/// The owner action for a terminal capture failure. Production uses the
+/// fail-loud default, which terminates the helper nonzero so its supervisor
+/// cannot continue reporting a healthy capture child. Tests inject a recorder.
+public typealias CaptureRuntimeFailureHandler = @Sendable (CaptureRuntimeFailure) -> Void
+
 /// The live SCStream session. `@unchecked Sendable`: its only mutable
 /// state is the prior-dHash, guarded by an `NSLock`; the SCStream is
 /// set once on `start()`.
@@ -141,6 +154,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// headless tests + the live SCStream path before the OCR worker
     /// is wired up.
     private let ocrPostAllowEmitter: (any OCRPostAllowEmitter)?
+
+    /// Invoked once when ScreenCaptureKit terminates an active stream without
+    /// the session initiating the stop. The default exits the helper, which is
+    /// the production owner signal available without keeping a dead capture
+    /// process alive just to emit later heartbeats.
+    private let runtimeFailureHandler: CaptureRuntimeFailureHandler
 
     /// ADR-0031 §5 V2-P1 — focused-window observation store. When
     /// non-`nil`, `start()` builds a focused-window `SCContentFilter`
@@ -200,6 +219,17 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private var priorDHash: DHash?
     private var captureOrdinal: UInt64 = 0
     private var stream: SCStream?
+
+    /// The first unexpected delegate termination is terminal for this
+    /// session. Guarded by `lock`: ScreenCaptureKit may deliver more than one
+    /// error callback while its internal teardown is in flight.
+    private var runtimeFailure: CaptureRuntimeFailure?
+
+    /// Streams this session deliberately stopped for shutdown or a privacy
+    /// pause. Keep a small, strong, bounded list until their delegate callback
+    /// arrives so an expected stop cannot be mistaken for a runtime failure;
+    /// strong retention also prevents `ObjectIdentifier` reuse.
+    private var expectedTerminatedStreams: [SCStream] = []
 
     /// ADR-0031 §5.3 — the focus generation the currently-installed
     /// SCStream `SCContentFilter` was rebound under. Guarded by `lock`.
@@ -277,7 +307,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         focusedWindowStore: FocusedWindowStore? = nil,
         focusTracker: FocusTracker? = nil,
         screenShareDetector: ScreenShareDetector? = nil,
-        tccStatusMonitor: TCCStatusMonitor? = nil
+        tccStatusMonitor: TCCStatusMonitor? = nil,
+        runtimeFailureHandler: @escaping CaptureRuntimeFailureHandler = { failure in
+            SCStreamCaptureSession.terminateHelper(for: failure)
+        }
     ) {
         self.pipeline = pipeline
         self.denylist = denylist
@@ -290,6 +323,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         self.focusTracker = focusTracker
         self.screenShareDetector = screenShareDetector
         self.tccStatusMonitor = tccStatusMonitor
+        self.runtimeFailureHandler = runtimeFailureHandler
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
         // The detector / monitor hold `weak` observers, so this create-
@@ -335,6 +369,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// pre-V2-P1 display-filter behaviour byte-for-byte (legacy /
     /// headless test path).
     public func start() async throws {
+        if let failure = currentRuntimeFailure() {
+            // A terminal callback means the session is no longer a valid
+            // capture owner. Requiring a fresh session prevents a caller from
+            // silently turning a failed capture back into a healthy status.
+            throw failure
+        }
         // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         // Force the §2 probe back to its fail-safe initial state so a
         // stale flag from a prior session cannot bleed into this one.
@@ -436,7 +476,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         focusTracker?.stop()
         screenShareDetector?.stop()
         tccStatusMonitor?.stop()
-        let s = takeStream()
+        let s = takeStreamExpectingTermination()
         let streamStopResult: Result<Void, Error>
         do {
             try await s?.stopCapture()
@@ -469,11 +509,25 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         lock.lock(); stream = s; lock.unlock()
     }
 
-    private func takeStream() -> SCStream? {
+    private func takeStreamExpectingTermination() -> SCStream? {
         lock.lock(); defer { lock.unlock() }
         let s = stream
         stream = nil
+        if let s {
+            // A stop delegate callback may be delivered asynchronously after
+            // `stopCapture()` returns. Bound this list so repeated
+            // pause/resume cycles cannot retain streams indefinitely.
+            expectedTerminatedStreams.append(s)
+            if expectedTerminatedStreams.count > 4 {
+                expectedTerminatedStreams.removeFirst()
+            }
+        }
         return s
+    }
+
+    private func currentRuntimeFailure() -> CaptureRuntimeFailure? {
+        lock.lock(); defer { lock.unlock() }
+        return runtimeFailure
     }
 
     /// Roll the prior-dHash window and return the previous value.
@@ -770,7 +824,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         )
 
         // UNVERIFIED — needs live macOS; do not claim working.
-        let s = takeStream()
+        let s = takeStreamExpectingTermination()
         try? await s?.stopCapture()
     }
 
@@ -895,7 +949,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         guard !wasPaused else { return }
 
         // UNVERIFIED — needs live macOS; do not claim working.
-        let s = takeStream()
+        let s = takeStreamExpectingTermination()
         try? await s?.stopCapture()
     }
 
@@ -1256,12 +1310,72 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     // MARK: - SCStreamDelegate
 
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
-    public func stream(_: SCStream, didStopWithError error: Error) {
+    public func stream(_ stream: SCStream, didStopWithError _: Error) {
         // UNVERIFIED — needs live macOS; do not claim working.
+        guard claimUnexpectedStreamTermination(stream) else { return }
+
+        // Stop every in-process source of post-failure work before the owner
+        // action. The handler's production default exits immediately; the
+        // detached drain remains useful for an embedding owner that replaces
+        // it with a notification during integration.
+        cancelRebindTask()
+        focusTracker?.stop()
+        screenShareDetector?.stop()
+        tccStatusMonitor?.stop()
+        let dispatcher = captureDispatcher
+        let emitter = ocrPostAllowEmitter
+        Task {
+            await dispatcher.cancelAndDrain()
+            await emitter?.stopAndDrain()
+        }
+
+        runtimeFailureHandler(.streamStoppedUnexpectedly)
+    }
+
+    /// Test seam for the shared state transition behind the framework-only
+    /// delegate callback. Live ScreenCaptureKit cannot be instantiated in a
+    /// headless XCTest process; this executes the exact one-shot owner signal.
+    internal func recordUnexpectedStreamTerminationForTest() {
+        guard claimUnexpectedStreamTermination(nil) else { return }
+        runtimeFailureHandler(.streamStoppedUnexpectedly)
+    }
+
+    /// Test-only read of the terminal runtime state. The production behavior
+    /// is the default handler's nonzero helper exit, not a polling surface.
+    internal func hasRuntimeFailureForTest() -> Bool {
+        currentRuntimeFailure() != nil
+    }
+
+    /// Returns true only for the first unexpected stop. Expected stops are
+    /// consumed by identity, so TCC/share/privacy shutdown cannot accidentally
+    /// terminate the helper.
+    private func claimUnexpectedStreamTermination(_ stoppedStream: SCStream?) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if let stoppedStream,
+           let expectedIndex = expectedTerminatedStreams.firstIndex(where: { $0 === stoppedStream })
+        {
+            expectedTerminatedStreams.remove(at: expectedIndex)
+            return false
+        }
+        guard runtimeFailure == nil else { return false }
+        runtimeFailure = .streamStoppedUnexpectedly
+        if let stoppedStream, stream === stoppedStream {
+            stream = nil
+        }
+        return true
+    }
+
+    /// Terminate immediately on a capture loss after readiness. Continuing
+    /// would leave the supervisor with a live helper that cannot capture, so
+    /// process death is the fail-closed truth signal. The line is deliberately
+    /// content-free; it exposes no ScreenCaptureKit error detail.
+    @usableFromInline
+    static func terminateHelper(for failure: CaptureRuntimeFailure) -> Never {
         FileHandle.standardError.write(
-            "mci-capture-helper: SCStream stopped with error: \(error)\n"
+            "mci-capture-helper: helper_health capture_runtime_failed=\(failure)\n"
                 .data(using: .utf8) ?? Data()
         )
+        exit(81)
     }
 
     // MARK: - In-callback OS extraction (UNVERIFIED)
