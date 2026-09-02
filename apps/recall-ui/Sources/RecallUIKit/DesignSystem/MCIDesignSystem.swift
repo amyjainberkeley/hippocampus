@@ -7,9 +7,9 @@
 // Design language:
 //   - Typography: native SF roles with regular + semibold weight only
 //     and zero letter spacing so macOS controls keep their native fit.
-//   - Color: approved memory palette — snow canvas, clear surface, ink,
-//     graphite, cobalt action, and coral change marker. Dark appearance
-//     uses semantic companions rather than forcing the whole app dark.
+//   - Color: quiet macOS neutrals with cobalt reserved for actions and
+//     brick red reserved for destructive or failed states. Light mode is
+//     the product's primary expression; dark mode remains fully adaptive.
 //   - Spacing: 8pt base grid — 2, 4, 8, 12, 16, 24, 32, 48, 64.
 //   - Motion: opacity + transform only, ≤ 300ms, ease-in-out, no
 //     bounce. `Motion.standard` (250ms) is the default; use `snap`
@@ -48,36 +48,36 @@ public extension MCI {
     /// time via `NSColor(name:dynamicProvider:)`.
     enum Color {
         public struct ApprovedPalette: Sendable, Equatable {
-            public let snowCanvas: UInt32 = 0xF6F8FB
+            public let snowCanvas: UInt32 = 0xF7F8FA
             public let clearSurface: UInt32 = 0xFFFFFF
-            public let ink: UInt32 = 0x18212B
-            public let graphite: UInt32 = 0x5F6975
-            public let cobaltAction: UInt32 = 0x3568D4
-            public let coralChangeMarker: UInt32 = 0xD96C5F
+            public let ink: UInt32 = 0x1D1D1F
+            public let graphite: UInt32 = 0x6E6E73
+            public let cobaltAction: UInt32 = 0x0A66D8
+            public let coralChangeMarker: UInt32 = 0xC7473A
         }
 
         public static let approvedPalette = ApprovedPalette()
 
         // Semantic tokens — call these, not the raw hexes.
-        public static let accent = dynamic(light: 0x3568D4, dark: 0x8AADFF)
-        public static let accentSubtle = dynamic(light: 0xEAF1FF, dark: 0x182848)
-        public static let accentDim = dynamic(light: 0x6F89C8, dark: 0xAEC4FF)
+        public static let accent = dynamic(light: 0x0A66D8, dark: 0x6EA8FF)
+        public static let accentSubtle = dynamic(light: 0xEAF2FC, dark: 0x172A42)
+        public static let accentDim = dynamic(light: 0x527EAE, dark: 0x9DC2F5)
 
-        public static let background = dynamic(light: 0xF6F8FB, dark: 0x10151B)
-        public static let surface = dynamic(light: 0xFFFFFF, dark: 0x171D24)
-        public static let surfaceElevated = dynamic(light: 0xFFFFFF, dark: 0x202833)
+        public static let background = dynamic(light: 0xF7F8FA, dark: 0x17191D)
+        public static let surface = dynamic(light: 0xFFFFFF, dark: 0x202226)
+        public static let surfaceElevated = dynamic(light: 0xFFFFFF, dark: 0x292C31)
 
-        public static let foreground = dynamic(light: 0x18212B, dark: 0xF0F4F8)
-        public static let foregroundSecondary = dynamic(light: 0x5F6975, dark: 0xADB7C3)
-        public static let foregroundMuted = dynamic(light: 0x8B96A3, dark: 0x7B8794)
+        public static let foreground = dynamic(light: 0x1D1D1F, dark: 0xF5F5F7)
+        public static let foregroundSecondary = dynamic(light: 0x6E6E73, dark: 0xB8B8BD)
+        public static let foregroundMuted = dynamic(light: 0x8E8E93, dark: 0x85858B)
 
-        public static let border = dynamic(light: 0xDDE4EC, dark: 0x323C48)
-        public static let borderStrong = dynamic(light: 0xC8D2DE, dark: 0x465262)
+        public static let border = dynamic(light: 0xE2E4E8, dark: 0x383A3F)
+        public static let borderStrong = dynamic(light: 0xC9CCD2, dark: 0x51545B)
 
-        public static let change = dynamic(light: 0xD96C5F, dark: 0xFF9A8F)
-        public static let error = dynamic(light: 0xD96C5F, dark: 0xFF9A8F)
-        public static let warning = dynamic(light: 0xB9822E, dark: 0xE7B767)
-        public static let success = dynamic(light: 0x3568D4, dark: 0xAEC4FF)
+        public static let change = dynamic(light: 0xC7473A, dark: 0xFF8B7F)
+        public static let error = dynamic(light: 0xC7473A, dark: 0xFF8B7F)
+        public static let warning = dynamic(light: 0x9A6700, dark: 0xE9B949)
+        public static let success = dynamic(light: 0x247A47, dark: 0x67C58A)
 
         // Raw hex accessor used only for tests + docs. Prefer the
         // semantic tokens above at call sites.
@@ -298,21 +298,21 @@ public extension MCI.Color {
     /// token via a merge-conflict resolve. Keep in sync with the
     /// declared static tokens above.
     static let allTokens: [(name: String, light: UInt32, dark: UInt32)] = [
-        ("accent", 0x3568D4, 0x8AADFF),
-        ("accentSubtle", 0xEAF1FF, 0x182848),
-        ("accentDim", 0x6F89C8, 0xAEC4FF),
-        ("background", 0xF6F8FB, 0x10151B),
-        ("surface", 0xFFFFFF, 0x171D24),
-        ("surfaceElevated", 0xFFFFFF, 0x202833),
-        ("foreground", 0x18212B, 0xF0F4F8),
-        ("foregroundSecondary", 0x5F6975, 0xADB7C3),
-        ("foregroundMuted", 0x8B96A3, 0x7B8794),
-        ("border", 0xDDE4EC, 0x323C48),
-        ("borderStrong", 0xC8D2DE, 0x465262),
-        ("change", 0xD96C5F, 0xFF9A8F),
-        ("error", 0xD96C5F, 0xFF9A8F),
-        ("warning", 0xB9822E, 0xE7B767),
-        ("success", 0x3568D4, 0xAEC4FF),
+        ("accent", 0x0A66D8, 0x6EA8FF),
+        ("accentSubtle", 0xEAF2FC, 0x172A42),
+        ("accentDim", 0x527EAE, 0x9DC2F5),
+        ("background", 0xF7F8FA, 0x17191D),
+        ("surface", 0xFFFFFF, 0x202226),
+        ("surfaceElevated", 0xFFFFFF, 0x292C31),
+        ("foreground", 0x1D1D1F, 0xF5F5F7),
+        ("foregroundSecondary", 0x6E6E73, 0xB8B8BD),
+        ("foregroundMuted", 0x8E8E93, 0x85858B),
+        ("border", 0xE2E4E8, 0x383A3F),
+        ("borderStrong", 0xC9CCD2, 0x51545B),
+        ("change", 0xC7473A, 0xFF8B7F),
+        ("error", 0xC7473A, 0xFF8B7F),
+        ("warning", 0x9A6700, 0xE9B949),
+        ("success", 0x247A47, 0x67C58A),
     ]
 }
 

@@ -40,7 +40,7 @@ struct DetailPaneView: View {
             }
             .padding(MCI.Spacing.l)
         }
-        .background(Color.brandBgSecondary)
+        .background(.thinMaterial)
         .focusable()
         .onCopyCommand {
             [NSItemProvider(object: displayBody as NSString)]

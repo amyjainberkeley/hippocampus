@@ -1,36 +1,27 @@
 import SwiftUI
 
-/// A calm, appearance-adaptive backdrop — a soft accent glow that fades to
-/// the window background. On dark appearance it reads as a Raycast-style
-/// hero glow; on light it's a whisper. Opacity is capped low (≤ 0.14) so it
-/// never competes with content. Static (no animation) by design.
-struct GradientBackdrop: View {
-    /// 0…1 multiplier. Hero slides (`Welcome`, hotkey moment) use ~1.0;
-    /// the always-on flow chrome uses ~0.45 for a barely-there wash.
+/// A calm window plane for the V1 light appearance. Native material adds
+/// depth without decorative gradients or glows.
+struct OnboardingMaterialBackdrop: View {
     var intensity: Double = 1.0
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         ZStack {
             Rectangle().fill(.background)
-
-            RadialGradient(
-                gradient: Gradient(colors: [
-                    OnboardingDesign.Palette.accentBright.opacity(0.14 * intensity),
-                    OnboardingDesign.Palette.accent.opacity(0.05 * intensity),
-                    .clear,
-                ]),
-                center: UnitPoint(x: 0.5, y: -0.05),
-                startRadius: 0,
-                endRadius: 680
-            )
+            if !reduceTransparency {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.72 + (0.08 * intensity))
+            }
         }
         .ignoresSafeArea()
     }
 }
 
 extension View {
-    /// Places a `GradientBackdrop` behind the view.
+    /// Places the native material backdrop behind the view.
     func onboardingBackdrop(intensity: Double = 0.45) -> some View {
-        background(GradientBackdrop(intensity: intensity))
+        background(OnboardingMaterialBackdrop(intensity: intensity))
     }
 }

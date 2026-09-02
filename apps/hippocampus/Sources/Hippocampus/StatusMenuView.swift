@@ -27,20 +27,6 @@ struct StatusMenuView: View {
 
             Divider()
 
-            if supervisor.captureEnabled {
-                if let health = supervisor.health {
-                    Text(health.displayText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if supervisor.state.isActive {
-                    Text("Waiting for first capture…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Divider()
-
             quickActionsSection
 
             switch RecordingControl.derive(
@@ -82,73 +68,18 @@ struct StatusMenuView: View {
             }
             .disabled(mcpRegistering)
 
-            Button("Send Feedback") {
-                sendFeedback()
-            }
-
             Divider()
+
+            Button("Preferences…") {
+                openPreferencesWindow()
+            }
+            .keyboardShortcut(",", modifiers: [.command])
 
             troubleshootSection
 
-            Divider()
-
-            Toggle("Launch at Login", isOn: Binding(
-                get: { loginItemVM.isEnabled },
-                set: { _ in loginItemVM.toggle() }
-            ))
+            Button("Send Feedback…") { sendFeedback() }
 
             Divider()
-
-            Button("Check for Updates…") {
-                updater.checkForUpdates()
-            }
-            .disabled(!updater.canCheckForUpdates)
-
-            Toggle("Auto-Check for Updates", isOn: Binding(
-                get: { updater.automaticallyChecksForUpdates },
-                set: { updater.automaticallyChecksForUpdates = $0 }
-            ))
-
-            Divider()
-
-            Toggle("Send Crash Reports", isOn: $crashReportOptedIn)
-                .onChange(of: crashReportOptedIn) { _, newValue in
-                    supervisor.setCrashReportOptedIn(newValue)
-                }
-
-            Button("View Logs in Console") {
-                let logDir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Logs/MCI")
-                NSWorkspace.shared.open(logDir)
-            }
-
-            Divider()
-
-            // Freemium tier indicator (cycle 8.48). Non-interactive
-            // trust signal. See `docs/business/tier-structure.md` — in
-            // v1.0 every user is on the Free tier forever; Pro is a
-            // v1.5+ addition that never retroactively gates a shipped
-            // feature (trust invariant #1). Rendered as a disabled
-            // menu row so it visually reads as a status label rather
-            // than an actionable button.
-            Text("You're on Free forever")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Button("About Hippocampus") {
-                openPreferencesWindow()
-            }
-
-            // "Learn more" — public landing page. Cotypist parity: an
-            // always-visible link out to marketing / docs so a user
-            // who's never opened the app before still has a discovery
-            // path to features they haven't found yet. See brief §Steps
-            // "Learn more — opens landing page".
-            Button("Learn more") {
-                if let url = URL(string: "https://hippocampus-swart.vercel.app") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
 
             Button("Quit Hippocampus") {
                 onRequestQuit()
@@ -218,22 +149,14 @@ struct StatusMenuView: View {
         )
     }
 
-    /// Cotypist-style always-visible quick-action block. The six
-    /// verbs a user needs at their fingertips regardless of what the
-    /// current state is:
+    /// Always-visible quick actions a user needs regardless of state:
     ///
     ///   - Pause / Resume Capture  ⌘⇧P  (toggle; label flips per state)
-    ///   - Open Recall Popup       ⇧⌘Space (global spotlight-style
-    ///                              popup already registered by
-    ///                              PR #79 — this menu item is a
-    ///                              visible fallback + discovery hint)
-    ///   - Show Recall Window      ⌘R
-    ///   - Show Timeline           ⌘T  (⌘8 in the recall-ui window,
+    ///   - Open Recall             ⌘R
+    ///   - Open Timeline           ⌘T  (⌘8 in the recall-ui window,
     ///                              but from the menu-bar the entry
     ///                              point is a distinct verb; deep-links
     ///                              to `timeline` tab via MCI_INITIAL_TAB)
-    ///   - Preferences             ⌘,  (opens About/Prefs sheet)
-    ///
     /// Pause is a USER-initiated pause distinct from the TCC-revoke
     /// pause (PR #80) and the screen-share-leak pause (PR #75). It
     /// flips `UserPauseController.shared.isPaused` AND asks the
@@ -247,36 +170,22 @@ struct StatusMenuView: View {
         let paused = (supervisor.state == .paused)
             || UserPauseController.shared.isPaused
 
+        Button("Open Recall") {
+            supervisor.openRecallUI()
+        }
+        .keyboardShortcut("r", modifiers: [.command])
+
+        Button("Open Timeline") {
+            supervisor.openRecallUI(initialTab: "timeline")
+        }
+        .keyboardShortcut("t", modifiers: [.command])
+
         if supervisor.captureEnabled {
             Button(paused ? "Resume Capture" : "Pause Capture") {
                 toggleUserPause()
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
         }
-
-        Button("Open Recall Popup") {
-            supervisor.openRecallUI()
-        }
-        .keyboardShortcut(.space, modifiers: [.command, .shift])
-
-        Divider()
-
-        Button("Show Recall Window") {
-            supervisor.openRecallUI()
-        }
-        .keyboardShortcut("r", modifiers: [.command])
-
-        Button("Show Timeline") {
-            supervisor.openRecallUI(initialTab: "timeline")
-        }
-        .keyboardShortcut("t", modifiers: [.command])
-
-        Button("Preferences…") {
-            openPreferencesWindow()
-        }
-        .keyboardShortcut(",", modifiers: [.command])
-
-        Divider()
     }
 
     /// Flip user pause state. Called from menu-bar ⌘⇧P and from the
@@ -297,13 +206,36 @@ struct StatusMenuView: View {
 
     @ViewBuilder
     private var statusHeader: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(menuBarStatus.indicatorColor)
-                .frame(width: 8, height: 8)
-            Text(menuBarStatus.displayText)
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Text("Hippocampus")
+                    .font(.headline)
+                Spacer(minLength: 12)
+                Circle()
+                    .fill(menuBarStatus.indicatorColor)
+                    .frame(width: 7, height: 7)
+                Text(menuBarStatus.displayText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if supervisor.captureEnabled {
+                if let health = supervisor.health {
+                    Text(health.displayText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if supervisor.state.isActive {
+                    Text("Waiting for first capture…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Screen capture is off")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
@@ -322,6 +254,18 @@ struct StatusMenuView: View {
             Button("Reset TCC Permissions…") {
                 showTCCResetConfirm = true
             }
+
+            Divider()
+
+            Button("Check for Updates…") {
+                updater.checkForUpdates()
+            }
+            .disabled(!updater.canCheckForUpdates)
+
+            Toggle("Send Crash Reports", isOn: $crashReportOptedIn)
+                .onChange(of: crashReportOptedIn) { _, newValue in
+                    supervisor.setCrashReportOptedIn(newValue)
+                }
 
             Divider()
 

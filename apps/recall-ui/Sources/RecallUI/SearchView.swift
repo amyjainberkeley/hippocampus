@@ -33,7 +33,7 @@ struct SearchView: View {
             Divider().background(Color.brandCardBorder)
             content
         }
-        .background(reduceTransparency ? Color.brandBgPrimary : Color.brandBgPrimary.opacity(0.92))
+        .background(Color.brandBgPrimary)
         .task {
             await viewModel.reloadObservedApps()
         }
@@ -84,9 +84,13 @@ struct SearchView: View {
                 .accessibilityHint("Clears the query and any active filters")
             }
         }
-        .padding(.horizontal, MCI.Spacing.m)
-        .padding(.vertical, MCI.Spacing.m - 2)
-        .background(Color.brandBgPrimary)
+        .padding(.horizontal, MCI.Spacing.xl)
+        .padding(.vertical, MCI.Spacing.m)
+        .background(
+            reduceTransparency
+                ? AnyShapeStyle(Color.brandBgSecondary)
+                : AnyShapeStyle(.ultraThinMaterial)
+        )
     }
 
     @ViewBuilder

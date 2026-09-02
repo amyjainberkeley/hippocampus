@@ -25,14 +25,14 @@ struct WelcomeSlide: View {
                 // — Apple SF Symbols License §2(b) prohibits SF Symbol use
                 // as a logo / app identifier on a notarized public DMG.
                 HeroHeader(
-                    title: "Welcome to Hippocampus",
-                    subtitle: "Your memory, on your machine.",
+                    title: "Hippocampus",
+                    subtitle: "Your memory, on your Mac.",
                     titleStyle: .display
                 ) {
                     Image(nsImage: Self.heroIcon)
                         .resizable()
                         .interpolation(.high)
-                        .frame(width: 76, height: 76)
+                        .frame(width: 88, height: 88)
                 }
 
                 VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
@@ -47,10 +47,10 @@ struct WelcomeSlide: View {
                     // Cycle 8.54 copy audit — "brain" → "memory".
                     IconTextRow(
                         icon: "key.fill",
-                        title: "Hippocampus does not upload captured memory. Connected AI tools use their own provider terms."
+                        title: OnboardingCopy.welcomeAIHandoff
                     )
                 }
-                .frame(maxWidth: 460)
+                .frame(maxWidth: 500)
                 .glassCard(padding: OnboardingDesign.Space.xl)
                 .padding(.top, OnboardingDesign.Space.xs)
             }

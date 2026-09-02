@@ -60,7 +60,6 @@ struct EpisodesView: View {
         List(viewModel.episodes, selection: $viewModel.selectedEpisodeId) { episode in
             EpisodeCard(episode: episode)
                 .tag(episode.id)
-                .listRowSeparator(.hidden)
                 .listRowBackground(
                     viewModel.selectedEpisodeId == episode.id
                         ? Color.brandMintSubtle : Color.clear
@@ -107,16 +106,10 @@ private struct EpisodeCard: View {
                     .foregroundStyle(Color.brandFgSecondary)
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                .fill(isHovered ? Color.brandBgElevated : Color.brandCardBg)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                .stroke(Color.brandCardBorder, lineWidth: 0.5)
-        )
-        .padding(.vertical, 4)
+        .padding(.vertical, MCI.Spacing.s)
+        .padding(.horizontal, MCI.Spacing.xs)
+        .background(isHovered ? Color.brandBgElevated.opacity(0.7) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.s, style: .continuous))
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .animation(MCI.Motion.snap, value: isHovered)

@@ -113,7 +113,7 @@ struct MemoryWorkspaceView: View {
     private var workspaceDetail: some View {
         VStack(spacing: 0) {
             WorkspaceFilmstrip(reader: reader)
-                .frame(minHeight: 92, idealHeight: 112, maxHeight: 128)
+                .frame(minHeight: 100, idealHeight: 116, maxHeight: 132)
             Divider().overlay(Color.brandCardBorder)
 
             Group {
@@ -211,16 +211,16 @@ private struct WorkspaceFilmstrip: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        HStack(spacing: MCI.Spacing.m) {
+        HStack(spacing: MCI.Spacing.l) {
             VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-                Text("Recent keyframes")
-                    .mciFont(.caption)
-                    .foregroundStyle(Color.brandFgSecondary)
+                Label("Recent evidence", systemImage: "photo.on.rectangle.angled")
+                    .mciFont(.bodyStrong)
+                    .foregroundStyle(Color.brandFgPrimary)
                 Text(countLabel)
-                    .font(MCI.Font.mono)
+                    .mciFont(.caption)
                     .foregroundStyle(Color.brandFgMuted)
             }
-            .frame(width: 132, alignment: .leading)
+            .frame(width: 142, alignment: .leading)
 
             if isLoading {
                 ProgressView()
@@ -247,8 +247,12 @@ private struct WorkspaceFilmstrip: View {
                 }
             }
         }
-        .padding(.horizontal, MCI.Spacing.l)
-        .background(reduceTransparency ? AnyShapeStyle(Color.brandBgPrimary) : AnyShapeStyle(.regularMaterial))
+        .padding(.horizontal, MCI.Spacing.xl)
+        .background(
+            reduceTransparency
+                ? AnyShapeStyle(Color.brandBgSecondary)
+                : AnyShapeStyle(.ultraThinMaterial)
+        )
         .task {
             await load()
         }
@@ -283,8 +287,8 @@ private struct FilmstripCard: View {
         VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
             EvidenceThumbnail(
                 url: hit.thumbnailURL,
-                size: CGSize(width: 76, height: 48),
-                maxPixelSize: 192
+                size: CGSize(width: 88, height: 55),
+                maxPixelSize: 220
             )
             Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
                 .font(MCI.Font.mono)
@@ -295,8 +299,9 @@ private struct FilmstripCard: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .frame(width: 96, alignment: .leading)
-        .padding(MCI.Spacing.s)
+        .frame(width: 108, alignment: .leading)
+        .padding(.vertical, MCI.Spacing.s)
+        .padding(.horizontal, MCI.Spacing.xs)
         .background(isHovered ? Color.brandBgElevated : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous))
         .onHover { isHovered = $0 }
@@ -318,34 +323,31 @@ private struct NowWorkspaceView: View {
         let storedEvents = summary.map(MCI.Workspace.historicalEventMetric(for:))
 
         ScrollView {
-            VStack(alignment: .leading, spacing: MCI.Spacing.l) {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 180), spacing: MCI.Spacing.l)],
-                    alignment: .leading,
-                    spacing: MCI.Spacing.l
-                ) {
-                    MetricPanel(
-                        title: storedEvents?.title ?? "Stored events",
-                        value: historicalEventValue,
-                        detail: storedEvents?.detail ?? "Historical memory rows",
-                        systemImage: "tray.full",
-                        tint: Color.brandMint
-                    )
-                    MetricPanel(
-                        title: "Recent events",
-                        value: recentEventValue,
-                        detail: "Latest rows returned from memory",
-                        systemImage: "clock.arrow.circlepath",
-                        tint: Color.brandFgSecondary
-                    )
-                    MetricPanel(
-                        title: "Brief",
-                        value: briefValue,
-                        detail: briefDetail,
-                        systemImage: "doc.text",
-                        tint: Color.brandFgSecondary
-                    )
+            VStack(alignment: .leading, spacing: MCI.Spacing.xl) {
+                VStack(alignment: .leading, spacing: MCI.Spacing.m) {
+                    Text("Today")
+                        .mciFont(.title)
+                        .foregroundStyle(Color.brandFgPrimary)
+                    Text("A live view of the memory available to you and your connected tools.")
+                        .mciFont(.body)
+                        .foregroundStyle(Color.brandFgSecondary)
                 }
+
+                WorkspaceSummaryBar(
+                    items: [
+                        .init(
+                            label: storedEvents?.title ?? "Stored events",
+                            value: historicalEventValue,
+                            detail: storedEvents?.detail ?? "Historical memory rows"
+                        ),
+                        .init(
+                            label: "Recent events",
+                            value: recentEventValue,
+                            detail: "Latest memory rows"
+                        ),
+                        .init(label: "Latest brief", value: briefValue, detail: briefDetail),
+                    ]
+                )
 
                 if isLoading {
                     ShimmerLoadingView(isLoading: true)
@@ -359,22 +361,28 @@ private struct NowWorkspaceView: View {
                 } else if recentHits.isEmpty {
                     MCIEmptyState.noTimelineEvents()
                 } else {
-                    VStack(alignment: .leading, spacing: MCI.Spacing.s) {
-                        Text("What happened most recently")
+                    VStack(alignment: .leading, spacing: MCI.Spacing.m) {
+                        Text("Latest memory")
                             .mciFont(.title2)
                             .foregroundStyle(Color.brandFgPrimary)
-                        ForEach(recentHits.prefix(5)) { hit in
-                            HitRow(hit: hit)
-                                .padding(.horizontal, MCI.Spacing.m)
-                                .background(Color.brandCardBg)
-                                .clipShape(
-                                    RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                                        .stroke(Color.brandCardBorder, lineWidth: 0.5)
-                                )
+                        VStack(spacing: 0) {
+                            ForEach(Array(recentHits.prefix(5).enumerated()), id: \.element.id) { index, hit in
+                                HitRow(hit: hit)
+                                    .padding(.horizontal, MCI.Spacing.m)
+                                    .padding(.vertical, MCI.Spacing.xs)
+                                if index < min(recentHits.count, 5) - 1 {
+                                    Divider().padding(.leading, 92)
+                                }
+                            }
                         }
+                        .background(Color.brandCardBg)
+                        .clipShape(
+                            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
+                                .stroke(Color.brandCardBorder, lineWidth: 0.5)
+                        )
                     }
                 }
             }
@@ -434,40 +442,49 @@ private struct NowWorkspaceView: View {
     }
 }
 
-private struct MetricPanel: View {
-    let title: String
+private struct WorkspaceSummaryItem: Identifiable {
+    let label: String
     let value: String
     let detail: String
-    let systemImage: String
-    let tint: Color
+    var id: String { label }
+}
+
+private struct WorkspaceSummaryBar: View {
+    let items: [WorkspaceSummaryItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MCI.Spacing.s) {
-            HStack {
-                Image(systemName: systemImage)
-                    .foregroundStyle(tint)
-                Text(title)
-                    .mciFont(.caption)
-                    .foregroundStyle(Color.brandFgSecondary)
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
+                    Text(item.label)
+                        .mciFont(.caption)
+                        .foregroundStyle(Color.brandFgSecondary)
+                    Text(item.value)
+                        .mciFont(.title2)
+                        .foregroundStyle(Color.brandFgPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                    Text(item.detail)
+                        .mciFont(.footnote)
+                        .foregroundStyle(Color.brandFgMuted)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MCI.Spacing.l)
+
+                if index < items.count - 1 {
+                    Divider()
+                        .frame(height: 64)
+                }
             }
-            Text(value)
-                .mciFont(.title2)
-                .foregroundStyle(Color.brandFgPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(detail)
-                .mciFont(.caption)
-                .foregroundStyle(Color.brandFgMuted)
-                .lineLimit(2)
         }
-        .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
-        .padding(MCI.Spacing.l)
-        .background(Color.brandCardBg)
+        .padding(.vertical, MCI.Spacing.l)
+        .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous))
-        .overlay(
+        .overlay {
             RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
                 .stroke(Color.brandCardBorder, lineWidth: 0.5)
-        )
+        }
     }
 }
 

@@ -111,6 +111,7 @@ struct OnboardingApp: App {
     var body: some Scene {
         WindowGroup {
             OnboardingFlowView()
+                .preferredColorScheme(.light)
                 .environmentObject(flowVM)
                 .environmentObject(trustVM)
                 .environmentObject(retentionVM)

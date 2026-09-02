@@ -42,8 +42,6 @@ struct HitRow: View {
                     if let reason = Formatters.matchReason(hit.source) {
                         Text(reason)
                             .font(MCI.Font.footnote)
-                            .textCase(.uppercase)
-                            .tracking(0.4)
                             .foregroundStyle(Color.brandMintDim)
                             .accessibilityLabel(reason)
                     }
@@ -104,7 +102,7 @@ struct EntityChipStrip: View {
     }
 }
 
-/// Single pill-shaped chip. Uniform mint styling; a subtly dimmer palette
+/// Single compact chip. A subtly dimmer palette
 /// distinguishes the overflow chip from real entity names.
 struct EntityChip: View {
     let label: String
@@ -119,11 +117,11 @@ struct EntityChip: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(
-                Capsule()
+                RoundedRectangle(cornerRadius: MCI.Radius.xs, style: .continuous)
                     .fill(Color.brandMintSubtle.opacity(isOverflow ? 0.4 : 1.0))
             )
             .overlay(
-                Capsule()
+                RoundedRectangle(cornerRadius: MCI.Radius.xs, style: .continuous)
                     .stroke(
                         isOverflow ? Color.brandCardBorder : Color.brandMintDim,
                         lineWidth: 0.5
@@ -149,7 +147,7 @@ struct LinkedEventsBadge: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(
-            Capsule()
+            RoundedRectangle(cornerRadius: MCI.Radius.xs, style: .continuous)
                 .stroke(Color.brandMintDim, lineWidth: 0.5)
         )
         .accessibilityElement(children: .combine)

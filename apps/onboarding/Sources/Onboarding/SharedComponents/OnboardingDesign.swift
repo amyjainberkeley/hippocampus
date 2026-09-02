@@ -10,9 +10,8 @@ import SwiftUI
 ///   • **Two-weight typography.** Headings are semibold/bold; body is
 ///     regular. Intermediate weights are avoided on new surfaces — Stripe's
 ///     "editorial air" comes from restraint, not a wall of `.medium`.
-///   • **Negative-tracking curve.** Letter-spacing tightens with size
-///     (≈ −1.3pt at display down to ≈ −0.2pt at 20pt), matching the Stripe
-///     tracking ramp. Body stays at neutral tracking.
+///   • **Native type rhythm.** Every role keeps zero letter spacing so long
+///     words remain stable across Dynamic Type and localized copy.
 ///   • **One decisive accent.** The historical `OnboardingTheme.accentBlue`
 ///     (#2563EB) stays the single hero hue — one filled CTA per screen.
 ///   • **8pt spacing grid** and **6–12pt radii** on all containers.
@@ -31,20 +30,15 @@ enum OnboardingDesign {
 
     enum Palette {
         /// The single decisive accent. Byte-for-byte the historical
-        /// `OnboardingTheme.accentBlue` (#2563EB) so existing call sites,
-        /// the app icon, and marketing screenshots stay in lockstep.
+        /// Shared with the Recall workspace and the app icon.
         static let accent = Color(
-            red: Double(0x25) / 255,
-            green: Double(0x63) / 255,
-            blue: Double(0xEB) / 255
+            red: Double(0x0A) / 255,
+            green: Double(0x66) / 255,
+            blue: Double(0xD8) / 255
         )
 
         /// A lighter accent for gradients / glows on dark backdrops.
-        static let accentBright = Color(
-            red: Double(0x5B) / 255,
-            green: Double(0x8D) / 255,
-            blue: Double(0xF7) / 255
-        )
+        static let accentBright = accent
 
         /// Tint fills for soft chips, selected key-caps, assurance rows.
         static let accentSoft = accent.opacity(0.12)
@@ -57,8 +51,8 @@ enum OnboardingDesign {
         /// Default calm card fill. Sits a hair above the window background
         /// without the muddy `secondary.opacity` look the slides used to
         /// reach for ad-hoc.
-        static let cardFill = Color.primary.opacity(0.035)
-        static let cardFillHover = Color.primary.opacity(0.06)
+        static let cardFill = Color.primary.opacity(0.025)
+        static let cardFillHover = Color.primary.opacity(0.05)
 
         /// Semantic status hues (kept sparse — success/attention/danger).
         static let success = Color.green
@@ -73,16 +67,11 @@ enum OnboardingDesign {
 
     // MARK: - Typography
 
-    /// Stripe-style tracking ramp: letter-spacing tightens as size grows.
-    /// Anchored at (20pt → −0.2), (56pt → −1.3); linearly interpolated and
-    /// clamped so tiny body text keeps neutral spacing and display text
-    /// never over-tightens.
+    /// Keep native letter spacing at every size. This avoids clipped long
+    /// words and respects the platform's optical sizing.
     static func tracking(forSize size: CGFloat) -> CGFloat {
-        let minSize: CGFloat = 20, maxSize: CGFloat = 56
-        let minTrack: CGFloat = -0.2, maxTrack: CGFloat = -1.3
-        if size <= minSize { return 0 }
-        let t = min(1, (size - minSize) / (maxSize - minSize))
-        return minTrack + t * (maxTrack - minTrack)
+        _ = size
+        return 0
     }
 
     enum TypeRamp {
@@ -90,7 +79,7 @@ enum OnboardingDesign {
         /// `hero`, à la Raycast's "Your Mac. But Better."
         static func display(_ text: String) -> Text {
             Text(text)
-                .font(.system(size: 52, weight: .bold))
+                .font(.system(size: 40, weight: .semibold))
                 .tracking(OnboardingDesign.tracking(forSize: 52))
         }
 
@@ -99,14 +88,14 @@ enum OnboardingDesign {
         /// feeling loose. Used on sub-hero surfaces (Permissions, hotkey).
         static func hero(_ text: String) -> Text {
             Text(text)
-                .font(.system(size: 44, weight: .bold))
+                .font(.system(size: 36, weight: .semibold))
                 .tracking(OnboardingDesign.tracking(forSize: 44))
         }
 
         /// Standard slide title. Replaces the old flat 28/bold.
         static func title(_ text: String) -> Text {
             Text(text)
-                .font(.system(size: 30, weight: .semibold))
+                .font(.system(size: 28, weight: .semibold))
                 .tracking(OnboardingDesign.tracking(forSize: 30))
         }
 
@@ -169,9 +158,9 @@ enum OnboardingDesign {
 
     enum Radius {
         static let control: CGFloat = 8
-        static let card: CGFloat = 12
-        static let large: CGFloat = 16
-        static let pill: CGFloat = 999
+        static let card: CGFloat = 8
+        static let large: CGFloat = 8
+        static let pill: CGFloat = 8
     }
 
     // MARK: - Layout width clamps
@@ -194,7 +183,7 @@ enum OnboardingDesign {
     enum Motion {
         static let quick: Animation = .easeOut(duration: 0.18)
         static let standard: Animation = .easeOut(duration: 0.28)
-        static let gentle: Animation = .easeOut(duration: 0.4)
+        static let gentle: Animation = .easeOut(duration: 0.3)
 
         /// Returns `nil` (no animation) when the user has asked for
         /// reduced motion, otherwise the supplied animation.

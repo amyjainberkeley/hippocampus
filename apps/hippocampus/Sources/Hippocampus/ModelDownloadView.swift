@@ -25,19 +25,29 @@ struct ModelDownloadView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("Download AI Model")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles.rectangle.stack")
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Daily Briefs")
+                        .font(.title3.weight(.semibold))
+                    Text("On-device model")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
-            Text("Daily briefs summarize your day using an on-device AI model.")
+            Text("Download the local model that turns your captured day into a private brief.")
                 .font(.body)
-                .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 4) {
-                Label("Download size: ~2.5 GB", systemImage: "arrow.down.circle")
+                Label("About 2.5 GB", systemImage: "arrow.down.circle")
                 Label("Runs entirely on your Mac", systemImage: "desktopcomputer")
-                Label("No data leaves your device", systemImage: "lock.shield")
+                Label("Brief generation does not upload your memory", systemImage: "lock.shield")
             }
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -81,6 +91,7 @@ struct ModelDownloadView: View {
                     Button("Download") {
                         startDownload()
                     }
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                 case .downloading:
                     Button("Cancel Download") {
@@ -90,6 +101,7 @@ struct ModelDownloadView: View {
                     Button("Retry") {
                         startDownload()
                     }
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                 case .verifying:
                     EmptyView()
@@ -99,7 +111,9 @@ struct ModelDownloadView: View {
             }
         }
         .padding(24)
-        .frame(width: 360)
+        .frame(width: 380)
+        .background(.ultraThinMaterial)
+        .preferredColorScheme(.light)
     }
 
     private func startDownload() {
