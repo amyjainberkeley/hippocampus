@@ -110,6 +110,10 @@ require_literal 'trap on_signal INT TERM HUP' \
     "runner must clean up after interruption"
 require_literal 'mkfifo "$CAPTURE_FIFO"' \
     "runner must use an isolated capture FIFO"
+require_literal '9>&- < "$CAPTURE_FIFO"' \
+    "ingest agent must not inherit the FIFO guard writer"
+require_literal '9>&- >"$HELPER_STDOUT"' \
+    "capture helper must not inherit the FIFO guard writer"
 require_literal 'MCI_DEVELOPMENT_FILE_KEY=1' \
     "runner must explicitly gate development file custody"
 require_literal 'MCI_DB_KEY_FILE="$KEY_FILE"' \
@@ -142,6 +146,9 @@ require_literal 'Evidence retained at:' \
 if rg -n 'tccutil[[:space:]]+(reset|insert)|xattr[[:space:]].*(-d|-c)|spctl[[:space:]]+--add|pkill' \
     "$RUNNER" "$SESSION_CHECK" "$MEMORY_CHECK"; then
     fail "runner must not mutate TCC/Gatekeeper state or kill unowned processes"
+fi
+if rg -Fq 'rg -Eq' "$RUNNER"; then
+    fail "runner must not pass grep-style combined flags to ripgrep"
 fi
 
 if command -v shellcheck >/dev/null 2>&1; then
