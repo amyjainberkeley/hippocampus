@@ -259,6 +259,42 @@ fn qualified_verifier_returns_only_the_events_it_cites_as_support() {
 }
 
 #[test]
+fn verifier_evidence_set_is_independent_of_the_display_limit() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    let distractor_id = store
+        .put_event(&event(
+            "The cedar chest was discussed during the move.",
+            Some("file:///notes/move.txt"),
+        ))
+        .unwrap();
+    let support_id = store
+        .put_event(&event(
+            "The cedar chest is beside the window.",
+            Some("file:///notes/room.txt"),
+        ))
+        .unwrap();
+    let verifier = FixedEvidenceVerifier {
+        result: Ok(EvidenceVerdict::Supported {
+            confidence: 0.97,
+            evidence_ids: vec![support_id.0],
+        }),
+    };
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20)
+        .with_evidence_verifier(Arc::new(verifier));
+    let mut one_result_query = query("Where is the cedar chest?");
+    one_result_query.limit = 1;
+
+    let RetrievalOutcome::Matched { matches } =
+        retriever.retrieve_outcome(&one_result_query).unwrap()
+    else {
+        panic!("verification must not lose evidence hidden by the display limit");
+    };
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].evidence.event_id, support_id);
+    assert_ne!(matches[0].evidence.event_id, distractor_id);
+}
+
+#[test]
 fn verifier_insufficient_abstains_even_when_retrieval_rank_is_high() {
     let store = Arc::new(InMemoryBrainStore::new());
     store
