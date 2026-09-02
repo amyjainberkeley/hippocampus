@@ -10,6 +10,7 @@ struct OnboardingFlowView: View {
     @EnvironmentObject var retentionVM: RetentionViewModel
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,18 +21,15 @@ struct OnboardingFlowView: View {
 
             navigationBar
         }
-        .background(
-            // Hero steps get a fuller glow; working steps a calm wash.
-            GradientBackdrop(intensity: backdropIntensity)
-        )
+        .background(OnboardingMaterialBackdrop(intensity: backdropIntensity))
         .animation(
             OnboardingDesign.Motion.resolve(OnboardingDesign.Motion.standard, reduceMotion: reduceMotion),
             value: flowVM.currentStep
         )
     }
 
-    /// Welcome, the hotkey moment, and the finish line read as "moments" and
-    /// earn a stronger backdrop; everything else stays quiet under content.
+    /// The material stays quiet on working steps and slightly more translucent
+    /// at the three bookends. There is no decorative color wash.
     private var backdropIntensity: Double {
         switch flowVM.currentStep {
         case .welcome, .primaryHotkey, .done: return 0.95
@@ -109,6 +107,14 @@ struct OnboardingFlowView: View {
         }
         .padding(.horizontal, OnboardingDesign.Space.xxl)
         .padding(.vertical, OnboardingDesign.Space.lg)
+        .background(
+            reduceTransparency
+                ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
+                : AnyShapeStyle(.ultraThinMaterial)
+        )
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 
     /// Steps whose in-content action is the screen's real filled CTA (e.g.

@@ -49,25 +49,25 @@ final class MCIDesignSystemTests: XCTestCase {
 
     func testApprovedMemoryPaletteIsPinned() {
         let palette = MCI.Color.approvedPalette
-        XCTAssertEqual(palette.snowCanvas, 0xF6F8FB)
+        XCTAssertEqual(palette.snowCanvas, 0xF7F8FA)
         XCTAssertEqual(palette.clearSurface, 0xFFFFFF)
-        XCTAssertEqual(palette.ink, 0x18212B)
-        XCTAssertEqual(palette.graphite, 0x5F6975)
-        XCTAssertEqual(palette.cobaltAction, 0x3568D4)
-        XCTAssertEqual(palette.coralChangeMarker, 0xD96C5F)
+        XCTAssertEqual(palette.ink, 0x1D1D1F)
+        XCTAssertEqual(palette.graphite, 0x6E6E73)
+        XCTAssertEqual(palette.cobaltAction, 0x0A66D8)
+        XCTAssertEqual(palette.coralChangeMarker, 0xC7473A)
     }
 
     func testSemanticTokensUseApprovedPaletteInLightAppearance() {
         let tokens = Dictionary(uniqueKeysWithValues: MCI.Color.allTokens.map {
             ($0.name, $0.light)
         })
-        XCTAssertEqual(tokens["background"], 0xF6F8FB)
+        XCTAssertEqual(tokens["background"], 0xF7F8FA)
         XCTAssertEqual(tokens["surface"], 0xFFFFFF)
         XCTAssertEqual(tokens["surfaceElevated"], 0xFFFFFF)
-        XCTAssertEqual(tokens["foreground"], 0x18212B)
-        XCTAssertEqual(tokens["foregroundSecondary"], 0x5F6975)
-        XCTAssertEqual(tokens["accent"], 0x3568D4)
-        XCTAssertEqual(tokens["change"], 0xD96C5F)
+        XCTAssertEqual(tokens["foreground"], 0x1D1D1F)
+        XCTAssertEqual(tokens["foregroundSecondary"], 0x6E6E73)
+        XCTAssertEqual(tokens["accent"], 0x0A66D8)
+        XCTAssertEqual(tokens["change"], 0xC7473A)
         XCTAssertFalse(tokens.values.contains(0x7AFFC1))
         XCTAssertFalse(tokens.values.contains(0x3AFDC8))
     }
@@ -87,7 +87,7 @@ final class MCIDesignSystemTests: XCTestCase {
             resolved = NSColor(MCI.Color.background).usingColorSpace(.sRGB)
         }
         let got = try XCTUnwrap(resolved)
-        let expected = try XCTUnwrap(NSColor(hex: 0x10151B).usingColorSpace(.sRGB))
+        let expected = try XCTUnwrap(NSColor(hex: 0x17191D).usingColorSpace(.sRGB))
         XCTAssertEqual(got.redComponent, expected.redComponent, accuracy: 0.02)
         XCTAssertEqual(got.greenComponent, expected.greenComponent, accuracy: 0.02)
         XCTAssertEqual(got.blueComponent, expected.blueComponent, accuracy: 0.02)
@@ -122,12 +122,15 @@ final class MCIDesignSystemTests: XCTestCase {
         let templateURL = root.appendingPathComponent("assets/branding/AppIcon-template.svg")
         let icon = try String(contentsOf: iconURL, encoding: .utf8)
         let template = try String(contentsOf: templateURL, encoding: .utf8)
-        for forbidden in ["#7AFFC1", "#3AFDC8", "face", "brain", "squiggle"] {
+        for forbidden in [
+            "#7AFFC1", "#3AFDC8", "#18212B", "#10151B", "rotate(",
+            "face", "brain", "squiggle",
+        ] {
             XCTAssertFalse(icon.localizedCaseInsensitiveContains(forbidden))
             XCTAssertFalse(template.localizedCaseInsensitiveContains(forbidden))
         }
-        XCTAssertTrue(icon.localizedCaseInsensitiveContains("layered memory mark"))
-        XCTAssertTrue(template.localizedCaseInsensitiveContains("layered memory mark"))
+        XCTAssertTrue(icon.localizedCaseInsensitiveContains("memory aperture mark"))
+        XCTAssertTrue(template.localizedCaseInsensitiveContains("memory aperture mark"))
     }
 
     // MARK: - Shadow presets

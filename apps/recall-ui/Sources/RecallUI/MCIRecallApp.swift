@@ -60,11 +60,12 @@ struct MCIRecallApp: App {
     fileprivate static let reader: BrainReader = Self.makeReader()
 
     var body: some Scene {
-        WindowGroup("Hippocampus Recall") {
+        WindowGroup("Hippocampus") {
             RootView(
                 reader: MCIRecallApp.reader,
                 initialTab: MCIRecallApp.initialTabFromEnv()
             )
+            .preferredColorScheme(.light)
             .frame(minWidth: 720, minHeight: 480)
             .background(Color.brandBgPrimary)
             .onOpenURL { url in
@@ -197,15 +198,6 @@ struct RootView: View {
                 selection = .settings
             },
             .init(
-                id: "app.useSystemAppearance",
-                title: "Use System Appearance",
-                shortcut: "⌘⇧D",
-                category: .app,
-                description: "Recall follows the current macOS light or dark appearance."
-            ) {
-                ToastNotifier.shared.notify("Recall follows System Appearance")
-            },
-            .init(
                 id: "app.togglePlayback",
                 title: "Toggle Playback",
                 shortcut: "Space",
@@ -316,7 +308,6 @@ struct RootView: View {
                 }
             }
         )
-        .padding(.top, 6)
         .background(Color.brandBgPrimary)
         .focusable(true, interactions: .automatic)
         .onKeyPress(

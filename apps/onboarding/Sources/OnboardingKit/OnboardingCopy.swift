@@ -35,4 +35,11 @@ public enum OnboardingCopy {
     /// promises. Do NOT add hotkey copy back unless `HippocampusApp`
     /// actually binds a global hotkey (recall-UI audit PR-5).
     public static let doneMenuBarHint = "You can open Hippocampus from the menu bar icon anytime."
+
+    /// Captured memory has no Hippocampus cloud copy, but a user can request
+    /// context through a connected third-party AI client. These strings keep
+    /// that provider boundary visible in both the welcome and trust screens.
+    public static let welcomeAIHandoff = "Hippocampus keeps no cloud copy. Context you request through a connected AI tool follows that provider's terms."
+
+    public static let trustAIHandoff = "Connected AI tools receive only context you request and follow their provider terms."
 }
