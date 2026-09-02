@@ -118,6 +118,8 @@ require_literal 'unset MCI_DB_KEY_HEX' \
     "runner must not fall back to a raw key environment variable"
 require_literal 'CFFIXED_USER_HOME="$ISOLATED_HOME"' \
     "runner must isolate Foundation user-domain paths as well as HOME"
+require_literal 'mktemp -d "/tmp/hippo-live.XXXXXX"' \
+    "runner must keep isolated Unix socket paths below macOS SUN_LEN"
 require_literal '"$HELPER" --capture' \
     "runner must exercise the explicit live helper path"
 require_literal '"$AGENT" --db-path "$DB_PATH" mcp-serve' \
