@@ -258,6 +258,30 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertEqual(plan.agentEnvironment["MCI_CAPTURE_ENABLED"], "1")
     }
 
+    func test_development_launch_plan_passes_only_marker_and_fixed_file_reference() {
+        let keyURL = URL(fileURLWithPath: "/tmp/MCI/dev.key")
+        let plan = ProcessSupervisorLaunchPlan.make(
+            helperURL: URL(fileURLWithPath: "/bundle/MCICaptureHelper"),
+            agentURL: URL(fileURLWithPath: "/bundle/mci-agent"),
+            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey,
+            developmentKeyMode: DevelopmentFileKeyMode(keyURL: keyURL),
+            knownSafeAppsURL: nil,
+            captureEnabled: true,
+            crashReportOptedIn: false,
+            generation: generation(captureEnabled: true),
+            baseEnvironment: ["MCI_DB_KEY_HEX": "ef".repeat(32)]
+        )
+
+        for environment in [plan.helperEnvironment, plan.agentEnvironment] {
+            XCTAssertEqual(environment["MCI_DEVELOPMENT_FILE_KEY"], "1")
+            XCTAssertEqual(environment["MCI_DB_KEY_FILE"], keyURL.path)
+            XCTAssertNil(environment["MCI_DB_KEY_HEX"])
+            XCTAssertNil(environment["MCI_DB_KEYCHAIN_SERVICE"])
+            XCTAssertNil(environment["MCI_DB_KEYCHAIN_ACCOUNT"])
+        }
+    }
+
     func test_start_with_capture_disabled_does_not_start_safari_ingestion() async throws {
         let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: false)
         topology.readinessResults = [.success(())]

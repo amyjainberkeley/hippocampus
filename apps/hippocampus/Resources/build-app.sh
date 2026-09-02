@@ -342,6 +342,10 @@ cp "$NATIVE_HOST_BIN" "$MACOS/hippocampus-native-host"
 
 # Copy resources
 cp "$INFO_PLIST" "$CONTENTS/Info.plist"
+if [[ "$SIGNING_MODE" == "ad-hoc" ]]; then
+    /usr/libexec/PlistBuddy -c 'Add :MCIDevelopmentFileKeyEnabled bool true' \
+        "$CONTENTS/Info.plist"
+fi
 if [[ -f "$KNOWN_SAFE" ]]; then
     cp "$KNOWN_SAFE" "$RESOURCES/known-safe-apps.toml"
 fi

@@ -69,4 +69,33 @@ final class KeychainDatabaseKeyResolverTests: XCTestCase {
             XCTAssertEqual(error as? KeychainDatabaseKeyError, .malformed)
         }
     }
+
+    func test_development_file_key_requires_explicit_marker_and_expected_path() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("helper-development-key-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let path = dir.appendingPathComponent("dev.key")
+        try Data(String(repeating: "cd", count: 32).utf8).write(to: path)
+
+        let resolver = KeychainDatabaseKeyResolver(
+            client: FakeClient(result: .failure(errSecItemNotFound))
+        )
+
+        XCTAssertThrowsError(try resolver.resolveBytes(
+            environment: ["MCI_DB_KEY_FILE": path.path],
+            developmentKeyPath: path
+        ))
+        XCTAssertEqual(
+            try resolver.resolveBytes(
+                environment: [
+                    "MCI_DEVELOPMENT_FILE_KEY": "1",
+                    "MCI_DB_KEY_FILE": path.path,
+                ],
+                developmentKeyPath: path
+            ),
+            Array(repeating: 0xcd, count: 32)
+        )
+    }
 }

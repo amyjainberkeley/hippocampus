@@ -13,10 +13,16 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
     static func sanitizedEnvironment(
         baseEnvironment: [String: String],
         dbPath: URL,
-        keyReference: KeychainKeyReference
+        keyReference: KeychainKeyReference,
+        developmentKeyMode: DevelopmentFileKeyMode? = nil
     ) -> [String: String] {
         var environment = ChildProcessEnvironment.scrubbingReusableKeys(from: baseEnvironment)
         environment["MCI_DB_PATH"] = dbPath.path
+        if let developmentKeyMode {
+            environment["MCI_DEVELOPMENT_FILE_KEY"] = "1"
+            environment["MCI_DB_KEY_FILE"] = developmentKeyMode.keyURL.path
+            return environment
+        }
         environment["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
         environment["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
         environment["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
@@ -47,6 +53,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         agentURL: URL,
         dbPath: URL,
         keyReference: KeychainKeyReference,
+        developmentKeyMode: DevelopmentFileKeyMode? = nil,
         knownSafeAppsURL: URL?,
         captureEnabled: Bool,
         crashReportOptedIn: Bool,
@@ -67,7 +74,8 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         let childEnvironment = sanitizedEnvironment(
             baseEnvironment: baseEnvironment,
             dbPath: dbPath,
-            keyReference: keyReference
+            keyReference: keyReference,
+            developmentKeyMode: developmentKeyMode
         )
         var agentEnvironment = childEnvironment
         agentEnvironment["MCI_CAPTURE_ENABLED"] = captureEnabled ? "1" : "0"
@@ -97,6 +105,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private let locator: BinaryLocator
     private let keyStore: KeyStore
+    private let developmentKeyMode: DevelopmentFileKeyMode?
     private let runtimeConfig: any RuntimeConfiguring
     private let topology: any SupervisorTopologyControlling
     private let keyCustodyPreparer: any KeyCustodyPreparing
@@ -121,14 +130,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         keyStore: KeyStore,
         runtimeConfig: any RuntimeConfiguring = RuntimeConfig()
     ) {
+        let developmentKeyMode = DevelopmentFileKeyMode.active()
         self.init(
             locator: locator,
-            keyStore: keyStore,
+            keyStore: developmentKeyMode.map { FileKeyStore(path: $0.keyURL) } ?? keyStore,
             runtimeConfig: runtimeConfig,
             topology: FoundationSupervisorTopology(),
             keyCustodyPreparer: AgentKeyCustodyPreparer(),
             captureConsentAuthority: CaptureConsentAuthority(),
-            readinessTimeout: 10
+            readinessTimeout: 10,
+            developmentKeyMode: developmentKeyMode
         )
     }
 
@@ -139,10 +150,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         topology: any SupervisorTopologyControlling,
         keyCustodyPreparer: any KeyCustodyPreparing,
         captureConsentAuthority: any CaptureConsentControlling = NoopCaptureConsentAuthority(),
-        readinessTimeout: TimeInterval
+        readinessTimeout: TimeInterval,
+        developmentKeyMode: DevelopmentFileKeyMode? = nil
     ) {
         self.locator = locator
-        self.keyStore = keyStore
+        self.keyStore = developmentKeyMode.map { FileKeyStore(path: $0.keyURL) } ?? keyStore
+        self.developmentKeyMode = developmentKeyMode
         self.runtimeConfig = runtimeConfig
         self.topology = topology
         self.keyCustodyPreparer = keyCustodyPreparer
@@ -366,11 +379,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             ?? .defaultDatabaseKey
         var launched = false
         do {
-            try await keyCustodyPreparer.prepare(
-                agentURL: agentURL,
-                databaseURL: dbPath,
-                keyReference: reference
-            )
+            if let developmentKeyMode {
+                try FileKeyStore(path: developmentKeyMode.keyURL).ensureDevelopmentKey()
+            } else {
+                try await keyCustodyPreparer.prepare(
+                    agentURL: agentURL,
+                    databaseURL: dbPath,
+                    keyReference: reference
+                )
+            }
             try ensureTransitionIsActive(transitionID)
             _ = try await KeyStoreAccess.readValidatedKey(from: keyStore)
             try ensureTransitionIsActive(transitionID)
@@ -384,6 +401,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 agentURL: agentURL,
                 dbPath: dbPath,
                 keyReference: reference,
+                developmentKeyMode: developmentKeyMode,
                 knownSafeAppsURL: locator.knownSafeAppsPath(),
                 captureEnabled: requestedCapture,
                 crashReportOptedIn: runtimeConfig.crashReportOptedIn,

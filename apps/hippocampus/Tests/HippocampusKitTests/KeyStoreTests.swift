@@ -71,6 +71,22 @@ final class KeyStoreTests: XCTestCase {
         XCTAssertEqual(store.path.path, path.path)
     }
 
+    func test_development_mode_requires_the_signed_bundle_capability() {
+        let support = URL(fileURLWithPath: "/tmp/Application Support")
+
+        XCTAssertNil(DevelopmentFileKeyMode.from(
+            infoDictionary: [:],
+            applicationSupportDirectory: support
+        ))
+        XCTAssertEqual(
+            DevelopmentFileKeyMode.from(
+                infoDictionary: [DevelopmentFileKeyMode.infoPlistKey: true],
+                applicationSupportDirectory: support
+            )?.keyURL.path,
+            "/tmp/Application Support/MCI/dev.key"
+        )
+    }
+
     func test_keychain_read_distinguishes_not_found_from_access_denied() {
         let client = FakeKeychainClient()
         client.readResult = .failure(errSecAuthFailed)

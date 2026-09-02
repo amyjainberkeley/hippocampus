@@ -49,6 +49,7 @@ LANES=(
     "supervisor-stop-policy|bash|test|scripts/test-supervisor-stop-policy.sh"
     "clean-home-contract|bash|lint|scripts/test-e2e-clean-home-contract.sh"
     "development-app-contract|bash|lint|scripts/test-development-app-contract.sh"
+    "development-file-key-contract|bash|test|scripts/test-development-file-key-contract.sh"
     "app-launch-contract|bash|test|scripts/test-verify-app-launches.sh"
     "demo-contract|bash|lint|scripts/test-demo-contract.sh"
     "keyframe-demo-fixture|bash|test|scripts/test-keyframe-demo-fixture.sh"
@@ -102,6 +103,7 @@ LANES
     supervisor-stop-policy bounded two-child shutdown fixture
     clean-home-contract     isolated install-to-uninstall product contract
     development-app-contract debug-only app assembly remains release-safe
+    development-file-key-contract signed ad-hoc file-key capability remains release-safe
     app-launch-contract     isolated GUI launch and onboarding process contract
     demo-contract           demo uses disposable state and bundled UI artifacts
     keyframe-demo-fixture   encrypted visual fixture uses the production codec
