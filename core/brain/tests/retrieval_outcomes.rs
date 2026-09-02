@@ -180,6 +180,35 @@ fn unqualified_production_critic_returns_named_degradation_with_ranked_fallback(
 }
 
 #[test]
+fn explicit_person_question_abstains_when_ranked_context_contains_no_person_answer() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    store
+        .put_event(&event(
+            "PR 431 introduced complete false for partial benchmark runs.",
+            Some("github://hippocampus/pull/431"),
+        ))
+        .unwrap();
+    store
+        .put_event(&event(
+            "The model path thread documents the bundled embedder.",
+            Some("slack://bench/model-path"),
+        ))
+        .unwrap();
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20);
+
+    let outcome = retriever
+        .retrieve_outcome(&query("Who approved PR 431 after the rollback discussion?"))
+        .unwrap();
+
+    assert!(matches!(
+        outcome,
+        RetrievalOutcome::NothingMatched {
+            reason: mci_brain::NothingMatchedReason::EvidenceFloor
+        }
+    ));
+}
+
+#[test]
 fn legacy_retrieve_rejects_unqualified_ranked_context() {
     let store = Arc::new(InMemoryBrainStore::new());
     store
@@ -260,6 +289,24 @@ fn empty_store_returns_nothing_matched() {
             .retrieve_outcome(&query("where is the decision"))
             .unwrap(),
         RetrievalOutcome::NothingMatched { .. }
+    ));
+}
+
+#[test]
+fn explicit_question_against_empty_store_reports_no_candidates() {
+    let retriever = HybridRetriever::new(
+        Arc::new(InMemoryBrainStore::new()),
+        Arc::new(PerfectEmbedder),
+        20,
+    );
+
+    assert!(matches!(
+        retriever
+            .retrieve_outcome(&query("Who approved the balcony inspection?"))
+            .unwrap(),
+        RetrievalOutcome::NothingMatched {
+            reason: mci_brain::NothingMatchedReason::NoCandidates
+        }
     ));
 }
 

@@ -55,7 +55,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use mci_brain::{
     lexical_retrieval_outcome, BrainStore, Embedder, Event, EventChunker, EventId, HybridRetriever,
-    RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore,
+    NothingMatchedReason, RetrievalDegradation, RetrievalOutcome, RetrievalQuery,
+    SqlCipherBrainStore,
 };
 use mci_core::crypto::DbKey;
 
@@ -190,6 +191,10 @@ pub struct InstanceResult {
     pub unanswerable: bool,
     /// Evaluation outcome at the max scored depth.
     pub outcome: Outcome,
+    /// Exact production retrieval disposition before benchmark labels are
+    /// applied. This keeps ranked unqualified fallback distinguishable from
+    /// evidence-floor abstention in the report.
+    pub retrieval_disposition: RetrievalDisposition,
     /// Rank (1-based) of the first answer session in the ranked session
     /// list, or `None` if no answer session was retrieved at all.
     pub first_hit_rank: Option<usize>,
@@ -291,13 +296,24 @@ pub struct Report {
 }
 
 #[allow(missing_docs)]
-#[derive(serde::Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, serde::Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Outcome {
     Matched,
     Missed,
     Abstained,
     FalsePositive,
+}
+
+#[allow(missing_docs)]
+#[derive(Debug, serde::Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RetrievalDisposition {
+    Matched,
+    NothingMatchedNoCandidates,
+    NothingMatchedEvidenceFloor,
+    NothingMatchedZeroLimit,
+    DegradedEvidenceSufficiencyUnqualified,
 }
 
 #[allow(missing_docs)]
@@ -918,7 +934,7 @@ pub fn run_instance(
         app_filter: None,
     };
 
-    let hits: Vec<(u64, f64)> = match arm {
+    let retrieval = match arm {
         // No embedder at all, rather than a zero-vector stub fed into
         // fusion: against a zero query every document scores an identical
         // cosine, which would add uniform noise on top of the lexical
@@ -970,7 +986,7 @@ pub fn run_instance(
     let answer_sessions: BTreeSet<&str> =
         inst.answer_session_ids.iter().map(String::as_str).collect();
     let mut top_hits: Vec<RankedHit> = Vec::new();
-    for (id, score) in hits {
+    for (id, score) in retrieval.hits {
         if let Some(meta) = owner.get(&id) {
             if !ranked.iter().any(|s| s == &meta.session_id) {
                 ranked.push(meta.session_id.clone());
@@ -1053,6 +1069,7 @@ pub fn run_instance(
         tags: inst.tags.clone(),
         unanswerable: is_unanswerable,
         outcome,
+        retrieval_disposition: retrieval.disposition,
         first_hit_rank,
         recall_at,
         provenance_coverage_at,
@@ -1065,23 +1082,45 @@ pub fn run_instance(
     })
 }
 
+struct RetrievalMeasurement {
+    hits: Vec<(u64, f64)>,
+    disposition: RetrievalDisposition,
+}
+
 fn typed_outcome_hits(
     outcome: RetrievalOutcome,
     question_id: &str,
-) -> Result<Vec<(u64, f64)>, String> {
+) -> Result<RetrievalMeasurement, String> {
     match outcome {
-        RetrievalOutcome::Matched { matches } => Ok(matches
-            .into_iter()
-            .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
-            .collect()),
-        RetrievalOutcome::NothingMatched { .. } => Ok(Vec::new()),
+        RetrievalOutcome::Matched { matches } => Ok(RetrievalMeasurement {
+            hits: matches
+                .into_iter()
+                .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
+                .collect(),
+            disposition: RetrievalDisposition::Matched,
+        }),
+        RetrievalOutcome::NothingMatched { reason } => Ok(RetrievalMeasurement {
+            hits: Vec::new(),
+            disposition: match reason {
+                NothingMatchedReason::NoCandidates => {
+                    RetrievalDisposition::NothingMatchedNoCandidates
+                }
+                NothingMatchedReason::EvidenceFloor => {
+                    RetrievalDisposition::NothingMatchedEvidenceFloor
+                }
+                NothingMatchedReason::ZeroLimit => RetrievalDisposition::NothingMatchedZeroLimit,
+            },
+        }),
         RetrievalOutcome::Degraded {
-            degradation: mci_brain::RetrievalDegradation::EvidenceSufficiencyUnqualified,
+            degradation: RetrievalDegradation::EvidenceSufficiencyUnqualified,
             fallback_matches,
-        } => Ok(fallback_matches
-            .into_iter()
-            .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
-            .collect()),
+        } => Ok(RetrievalMeasurement {
+            hits: fallback_matches
+                .into_iter()
+                .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
+                .collect(),
+            disposition: RetrievalDisposition::DegradedEvidenceSufficiencyUnqualified,
+        }),
         RetrievalOutcome::Degraded { degradation, .. } => Err(format!(
             "{question_id}: production retrieval degraded: {degradation:?}"
         )),
@@ -1947,9 +1986,14 @@ mod tests {
                 fallback_matches: Vec::new(),
             },
             "unqualified-evidence",
-        );
+        )
+        .expect("ranking remains measurable");
 
-        assert_eq!(result.expect("ranking remains measurable"), Vec::new());
+        assert_eq!(result.hits, Vec::new());
+        assert_eq!(
+            result.disposition,
+            RetrievalDisposition::DegradedEvidenceSufficiencyUnqualified
+        );
     }
 
     #[test]
@@ -2187,6 +2231,7 @@ mod tests {
             } else {
                 Outcome::Missed
             },
+            retrieval_disposition: RetrievalDisposition::Matched,
             first_hit_rank: rank,
             recall_at: [(5usize, Some(rec))].into_iter().collect(),
             provenance_coverage_at: [(5usize, Some(rank.is_some()))].into_iter().collect(),
@@ -2219,6 +2264,7 @@ mod tests {
             tags: Vec::new(),
             unanswerable: false,
             outcome: Outcome::Matched,
+            retrieval_disposition: RetrievalDisposition::Matched,
             first_hit_rank: Some(7),
             recall_at: BTreeMap::new(),
             provenance_coverage_at: BTreeMap::new(),
@@ -2253,6 +2299,7 @@ mod tests {
             tags: vec!["temporal".into()],
             unanswerable: false,
             outcome: Outcome::Matched,
+            retrieval_disposition: RetrievalDisposition::Matched,
             first_hit_rank: Some(1),
             recall_at: [(1usize, Some(1.0))].into_iter().collect(),
             provenance_coverage_at: [(1usize, Some(true))].into_iter().collect(),
@@ -2280,6 +2327,7 @@ mod tests {
             tags: vec!["contradiction".into()],
             unanswerable: true,
             outcome: Outcome::Abstained,
+            retrieval_disposition: RetrievalDisposition::NothingMatchedEvidenceFloor,
             first_hit_rank: None,
             recall_at: [(1usize, None)].into_iter().collect(),
             provenance_coverage_at: [(1usize, None)].into_iter().collect(),

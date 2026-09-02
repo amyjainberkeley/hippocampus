@@ -85,9 +85,9 @@ use std::sync::Arc;
 use crate::extraction::tier1::{Tier1Extractor, KIND_REDACTED_TOKEN};
 use crate::extraction::tier2::{KIND_LOCATION, KIND_ORGANIZATION, KIND_PERSON_NAME};
 use crate::{
-    evidence_features_for_candidates, BrainStore, Embedder, EntityId, EventId, EvidenceCandidate,
-    EvidenceSufficiencyPolicy, RetrievalHit, RetrievalQuery, RetrieveError, Retriever, TimeRange,
-    EVIDENCE_SUFFICIENCY_POLICY,
+    evidence_features_for_candidates, explicit_evidence_support, BrainStore, Embedder, EntityId,
+    EventId, EvidenceCandidate, EvidenceSufficiencyPolicy, ExplicitEvidenceSupport, RetrievalHit,
+    RetrievalQuery, RetrieveError, Retriever, TimeRange, EVIDENCE_SUFFICIENCY_POLICY,
 };
 
 // ---------------------------------------------------------------------------
@@ -716,10 +716,12 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 signals,
             });
         }
-        let evidence_is_sufficient = self.rank_and_assess(query, &mut matches, &critic_rows);
+        let (evidence_is_sufficient, evidence_is_explicitly_unsupported) =
+            self.rank_and_assess(query, &mut matches, &critic_rows);
         Ok(self.finalize_retrieval_outcome(
             matches,
             evidence_is_sufficient,
+            evidence_is_explicitly_unsupported,
             lex_map.is_empty() && sem_map.is_empty(),
         ))
     }
@@ -748,7 +750,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         query: &RetrievalQuery,
         matches: &mut Vec<RetrievalMatch>,
         critic_rows: &[(EventId, String, f32)],
-    ) -> bool {
+    ) -> (bool, bool) {
         let candidates = critic_rows
             .iter()
             .map(|(event_id, text, raw_semantic_cosine)| EvidenceCandidate {
@@ -759,6 +761,10 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             .collect::<Vec<_>>();
         let sufficient = evidence_features_for_candidates(&query.text, &candidates)
             .is_some_and(|features| self.evidence_policy.is_sufficient(features));
+        let explicitly_unsupported = matches!(
+            explicit_evidence_support(&query.text, &candidates),
+            ExplicitEvidenceSupport::Unsupported
+        );
         matches.sort_by(|left, right| {
             right
                 .hit
@@ -767,7 +773,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 .then_with(|| left.hit.event_id.cmp(&right.hit.event_id))
         });
         matches.truncate(query.limit);
-        sufficient
+        (sufficient, explicitly_unsupported)
     }
 
     fn candidate_arms(
@@ -832,23 +838,35 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         &self,
         matches: Vec<RetrievalMatch>,
         evidence_is_sufficient: bool,
+        evidence_is_explicitly_unsupported: bool,
         candidate_arms_empty: bool,
     ) -> RetrievalOutcome {
+        if matches.is_empty() {
+            return RetrievalOutcome::NothingMatched {
+                reason: if candidate_arms_empty {
+                    NothingMatchedReason::NoCandidates
+                } else {
+                    NothingMatchedReason::EvidenceFloor
+                },
+            };
+        }
+        if evidence_is_explicitly_unsupported {
+            return RetrievalOutcome::NothingMatched {
+                reason: NothingMatchedReason::EvidenceFloor,
+            };
+        }
         if !self.evidence_policy.validation_qualified {
             return RetrievalOutcome::Degraded {
                 degradation: RetrievalDegradation::EvidenceSufficiencyUnqualified,
                 fallback_matches: matches,
             };
         }
-        if matches.is_empty() || !evidence_is_sufficient {
-            let reason = if candidate_arms_empty {
-                NothingMatchedReason::NoCandidates
-            } else {
-                NothingMatchedReason::EvidenceFloor
-            };
-            RetrievalOutcome::NothingMatched { reason }
-        } else {
+        if evidence_is_sufficient {
             RetrievalOutcome::Matched { matches }
+        } else {
+            RetrievalOutcome::NothingMatched {
+                reason: NothingMatchedReason::EvidenceFloor,
+            }
         }
     }
 

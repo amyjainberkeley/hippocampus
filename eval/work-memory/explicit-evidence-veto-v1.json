@@ -1,0 +1,104 @@
+{
+  "dataset_id": "hippocampus-explicit-evidence-veto-v1",
+  "description": "Disjoint synthetic regression fixture for conservative person, count, duration, and date evidence vetoes. It contains no work-memory acceptance questions, entities, sessions, or software-work facts.",
+  "cases": [
+    {
+      "id": "calibration-pottery-signer",
+      "split": "calibration",
+      "query": "Who signed for the pottery delivery?",
+      "supporting_documents": ["The delivery receipt says Mara signed for the pottery."],
+      "insufficient_documents": ["The signed delivery receipt was filed with the pottery invoice."]
+    },
+    {
+      "id": "calibration-lantern-count",
+      "split": "calibration",
+      "query": "How many lanterns were packed for the picnic?",
+      "supporting_documents": ["Seven lanterns were packed for the picnic."],
+      "insufficient_documents": ["Several lanterns were packed for the picnic."]
+    },
+    {
+      "id": "calibration-kiln-duration",
+      "split": "calibration",
+      "query": "How long did the kiln take to cool?",
+      "supporting_documents": ["The kiln took three hours to cool."],
+      "insufficient_documents": ["The kiln was cool before it was opened."]
+    },
+    {
+      "id": "calibration-roof-date",
+      "split": "calibration",
+      "query": "What due date was set for the roof repair?",
+      "supporting_documents": ["The roof repair is due on October 12."],
+      "insufficient_documents": ["The roof repair has an assigned contractor."]
+    },
+    {
+      "id": "calibration-piano-technician",
+      "split": "calibration",
+      "query": "Who tuned the rehearsal piano?",
+      "supporting_documents": ["A service note names Felix as the piano technician."],
+      "insufficient_documents": ["The rehearsal piano was tuned before the recital."]
+    },
+    {
+      "id": "calibration-garden-deadline",
+      "split": "calibration",
+      "query": "What is the deadline for submitting the garden plan?",
+      "supporting_documents": ["The garden plan must be submitted by Friday."],
+      "insufficient_documents": ["The garden plan is ready for submission."]
+    },
+    {
+      "id": "validation-inspection-approver",
+      "split": "validation",
+      "query": "Who approved the balcony inspection?",
+      "supporting_documents": ["Leila approved the balcony inspection yesterday."],
+      "insufficient_documents": ["Nobody is identified as the balcony inspection approver."]
+    },
+    {
+      "id": "validation-crate-count",
+      "split": "validation",
+      "query": "How many seed crates reached the greenhouse?",
+      "supporting_documents": ["Twelve seed crates reached the greenhouse."],
+      "insufficient_documents": ["Several seed crates reached the greenhouse."]
+    },
+    {
+      "id": "validation-ferry-duration",
+      "split": "validation",
+      "query": "How long was the ferry crossing?",
+      "supporting_documents": ["The ferry crossing lasted 90 minutes."],
+      "insufficient_documents": ["The ferry crossing ended before sunset."]
+    },
+    {
+      "id": "validation-curing-duration",
+      "split": "validation",
+      "query": "How long did the glaze need to cure?",
+      "supporting_documents": ["The glaze needed to cure overnight."],
+      "insufficient_documents": ["The glaze was fully cured before handling."]
+    },
+    {
+      "id": "validation-permit-date",
+      "split": "validation",
+      "query": "What date is the permit review?",
+      "supporting_documents": ["The permit review is scheduled for 11/04/2026."],
+      "insufficient_documents": ["[app=com.notes | title=permit review | url=notes://permit | ts=2026-10-01T09:00:00.000Z]\nThe permit review has been scheduled."]
+    },
+    {
+      "id": "validation-receipt-countersigner",
+      "split": "validation",
+      "query": "Who countersigned the equipment receipt?",
+      "supporting_documents": ["The equipment receipt was countersigned by Omar."],
+      "insufficient_documents": ["The equipment receipt was filed Tuesday; its countersignature field is blank."]
+    },
+    {
+      "id": "validation-sample-count",
+      "split": "validation",
+      "query": "How many water samples failed inspection?",
+      "supporting_documents": ["Zero water samples failed inspection."],
+      "insufficient_documents": ["The water samples completed inspection."]
+    },
+    {
+      "id": "validation-market-date",
+      "split": "validation",
+      "query": "What date is the winter market opening?",
+      "supporting_documents": ["The winter market opens on Tuesday."],
+      "insufficient_documents": ["The winter market opening has been announced."]
+    }
+  ]
+}
