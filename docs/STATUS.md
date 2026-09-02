@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `a87a85f`
+Audited code baseline: `3306385`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -24,6 +24,16 @@ more than this page.
   Foundation an isolated `HOME` and `CFFIXED_USER_HOME`, and its seeder and
   app share the exact fixed development-key path, so demo runs cannot touch
   the user's real brain or silently exercise a different key.
+- The supervised capture topology now has a kernel-enforced parent-lifetime
+  lease. If the visible app quits, crashes, is force-quit, or receives
+  `SIGKILL`, the helper observes EOF, drains capture, exits, and closes the
+  existing helper-to-agent pipe so the agent releases its clean-run marker and
+  exits too. Ad-hoc app assembly runs this owner-death proof against the real
+  packaged process tree in a disposable home.
+- The read-only `mci-brain` development fallback now normalizes a
+  newline-terminated `dev.key` before validating it, matching the file emitted
+  by the canonical demo while leaving production Keychain resolution
+  unchanged and fail-closed.
 - Daily briefs work without a model download. The deterministic extractive
   author removes capture headers and duplicate OCR churn, prioritizes explicit
   changes and open loops, caps output at nine bullets, and cites the exact
