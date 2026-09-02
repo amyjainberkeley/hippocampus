@@ -25,6 +25,7 @@ struct ThumbnailProviderBehavior {
     static func main() async throws {
         try proveDevelopmentKeyRequiresExplicitGate()
         try proveDevelopmentKeyCanUseSupervisorFileReference()
+        await proveStoredBriefDoesNotDependOnOptionalModel()
         proveAppDisplayNames()
         precondition(RecallTab.from(deepLinkValue: "now") == .now)
 
@@ -110,6 +111,19 @@ struct ThumbnailProviderBehavior {
         ])
 
         precondition(resolved == raw.lowercased())
+    }
+
+    @MainActor
+    private static func proveStoredBriefDoesNotDependOnOptionalModel() async {
+        let viewModel = BriefViewModel(
+            reader: StubBrainReader()
+        )
+
+        await viewModel.reload()
+
+        guard case .brief = viewModel.scene else {
+            preconditionFailure("stored extractive brief must render without an optional model")
+        }
     }
 
     private static func proveAppDisplayNames() {

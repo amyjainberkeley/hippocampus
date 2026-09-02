@@ -11,12 +11,6 @@ import SwiftUI
 
 struct BriefView: View {
     @StateObject var viewModel: BriefViewModel
-    /// Callback fired when the empty-state "Enable on-device brief
-    /// model" button is tapped. The Recall UI does NOT own the model
-    /// download UI (that lives in Hippocampus.app per PR #134) — this
-    /// is the deep-link out. App wires it to launch Hippocampus.app
-    /// with a URL the menu-bar surfaces.
-    var onRequestModelDownload: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -35,26 +29,11 @@ struct BriefView: View {
         .task {
             await viewModel.reload()
         }
-        // While the model is missing (user is actively downloading from
-        // the menu-bar Daily Briefs flow), re-poll every 3 s so the
-        // scene transitions out of `.modelMissing` the moment the
-        // download finishes — without requiring the user to switch tabs
-        // or relaunch the Recall window (CEO dogfood 2026-05-26).
-        .task(id: viewModel.scene == .modelMissing) {
-            guard viewModel.scene == .modelMissing else { return }
-            while !Task.isCancelled, viewModel.scene == .modelMissing {
-                try? await Task.sleep(for: .seconds(3))
-                guard !Task.isCancelled, viewModel.scene == .modelMissing else { return }
-                await viewModel.reload()
-            }
-        }
     }
 
     @ViewBuilder
     private var sceneBody: some View {
         switch viewModel.scene {
-        case .modelMissing:
-            modelMissingView
         case .captureCoverageUnknown:
             captureCoverageUnknownView
         case .awaitingFirstFullDay(let hoursSoFar):
@@ -70,34 +49,6 @@ struct BriefView: View {
         case .error(let message):
             errorView(message: message)
         }
-    }
-
-    private var modelMissingView: some View {
-        VStack(spacing: 16) {
-            ContentUnavailableView(
-                "Daily briefs aren't enabled yet",
-                systemImage: "doc.text",
-                description: Text(
-                    "Daily briefs are written by an on-device AI model (Qwen3-1.7B, ≈ 2.5 GB). One-time download, runs entirely on your Mac — nothing leaves your device."
-                )
-            )
-            .foregroundStyle(Color.brandFgSecondary)
-
-            // The download flow lives in Hippocampus.app's menu bar:
-            // clicking "Daily Briefs: Off — Download Model…" opens
-            // ModelDownloadView, fetches the tarball from HuggingFace,
-            // SHA-verifies, and unpacks under
-            // `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/`.
-            // brief_worker picks it up on its next 06:00 cycle or the
-            // first-launch fast path. Once enabled, BriefViewModel
-            // re-evaluates scene and this view is replaced.
-            Text("Click the Hippocampus icon in your menu bar → \"Daily Briefs: Off — Download Model…\" to enable.")
-                .font(.caption)
-                .foregroundStyle(Color.brandFgMuted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-        }
-        .padding(24)
     }
 
     private var captureCoverageUnknownView: some View {
