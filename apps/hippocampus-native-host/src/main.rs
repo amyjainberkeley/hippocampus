@@ -22,9 +22,9 @@
 //!   older JS (top-frame-only) hits the same code path with
 //!   `frame_url == parent_url == url`.
 //! - Secret-pattern filter runs before any content reaches the socket.
-//! - Incognito exclusion: drop any message with `incognito: true` BEFORE
-//!   denylist / filter / socket write. Belt-and-suspenders with the JS
-//!   guards in `extensions/chromium/content.js` and `background.js` so a
+//! - Incognito exclusion: require the privacy field during deserialization,
+//!   then drop `incognito: true` BEFORE denylist / filter / socket write.
+//!   Belt-and-suspenders with the JS guards in `extensions/chromium/` so a
 //!   JS regression cannot reach the brain. Per docs/DESIGN.md, incognito
 //!   exclusion ships WITH capture, not as a later phase.
 //! - No local cache of page content — strictly forward-and-forget.
@@ -56,11 +56,9 @@ struct BrowserMessage {
     tab_id: u32,
     #[serde(default = "default_browser")]
     source_browser: String,
-    /// Set true by `background.js` when the tab is incognito. Defaults
-    /// to false so the host fails-closed only on an explicit positive
-    /// signal — a missing field (older JS) is treated as non-incognito,
-    /// consistent with how the field was added.
-    #[serde(default)]
+    /// Required privacy classification from `background.js`. Omitting or
+    /// mistyping this field makes deserialization fail before persistence;
+    /// only an explicit false value reaches normal processing.
     incognito: bool,
     /// The frame's own URL. Set by `background.js` from `sender.url`
     /// (Chromium fills this with the frame URL, even cross-origin).
@@ -349,7 +347,8 @@ mod tests {
             "text": "Hello",
             "ts_us": 1000000,
             "tab_id": 5,
-            "source_browser": "safari"
+            "source_browser": "safari",
+            "incognito": false
         }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         assert_eq!(msg.url, "https://example.com");
@@ -358,20 +357,29 @@ mod tests {
     }
 
     #[test]
-    fn browser_message_defaults() {
+    fn browser_message_rejects_missing_incognito_classification() {
         let json = r#"{
             "url": "https://example.com",
             "title": "Ex",
             "text": "hi",
             "ts_us": 0
         }"#;
+        let result = serde_json::from_str::<BrowserMessage>(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn browser_message_defaults_non_privacy_fields() {
+        let json = r#"{
+            "url": "https://example.com",
+            "title": "Ex",
+            "text": "hi",
+            "ts_us": 0,
+            "incognito": false
+        }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         assert_eq!(msg.source_browser, "chrome");
         assert_eq!(msg.tab_id, 0);
-        // CSO invariant: a missing `incognito` field defaults to false.
-        // An older JS client that does not forward the flag must NOT be
-        // treated as incognito (would suppress everything). The block
-        // arms only on an explicit positive signal.
         assert!(!msg.incognito);
     }
 
@@ -489,7 +497,8 @@ mod tests {
             "url": "https://example.com",
             "title": "Ex",
             "text": "hi",
-            "ts_us": 0
+            "ts_us": 0,
+            "incognito": false
         }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         // CSO invariant: an older background.js (no per-frame fields)
@@ -512,7 +521,8 @@ mod tests {
             "frame_url": "https://js.stripe.com/v3/elements-inner-payment.html",
             "parent_url": "https://merchant.example.com/checkout",
             "is_top_frame": false,
-            "frame_id": 3
+            "frame_id": 3,
+            "incognito": false
         }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         assert!(!msg.is_top_frame);

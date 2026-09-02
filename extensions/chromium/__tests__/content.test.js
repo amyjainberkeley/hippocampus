@@ -300,6 +300,21 @@ describe("incognito exclusion (CSO invariant)", () => {
     expect(result).toBeNull();
   });
 
+  it("rejects a missing privacy classification before reading document.body", () => {
+    delete globalThis.chrome.extension.inIncognitoContext;
+    let bodyReads = 0;
+    Object.defineProperty(globalThis.document, "body", {
+      get() {
+        bodyReads += 1;
+        return { innerText: "private draft" };
+      },
+      configurable: true,
+    });
+
+    expect(extractPageContent()).toBeNull();
+    expect(bodyReads).toBe(0);
+  });
+
   it("extractPageContent works again once the flag clears", () => {
     globalThis.chrome.extension.inIncognitoContext = true;
     expect(extractPageContent()).toBeNull();
