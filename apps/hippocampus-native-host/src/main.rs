@@ -88,6 +88,28 @@ struct BrowserMessage {
     frame_id: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct CaptureAuthorizationRequest {
+    incognito: bool,
+}
+
+#[derive(Debug)]
+enum NativeRequest {
+    CaptureAuthorization { incognito: bool },
+    PageContent(BrowserMessage),
+}
+
+fn parse_native_request(raw: &[u8]) -> serde_json::Result<NativeRequest> {
+    let value = serde_json::from_slice::<serde_json::Value>(raw)?;
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("capture_authorization") {
+        let request = serde_json::from_value::<CaptureAuthorizationRequest>(value)?;
+        return Ok(NativeRequest::CaptureAuthorization {
+            incognito: request.incognito,
+        });
+    }
+    serde_json::from_value::<BrowserMessage>(value).map(NativeRequest::PageContent)
+}
+
 fn default_is_top_frame() -> bool {
     true
 }
@@ -265,18 +287,31 @@ fn main() {
     let mut stdout = io::stdout().lock();
 
     while let Some(raw) = read_native_message(&mut stdin).unwrap_or(None) {
-        let Ok(msg) = serde_json::from_slice::<BrowserMessage>(&raw) else {
+        let Ok(request) = parse_native_request(&raw) else {
             let ack = serde_json::json!({"status": "error", "reason": "invalid_json"});
             let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
             continue;
         };
 
-        if process_message(&msg, &mut socket).is_ok() {
-            let ack = serde_json::json!({"status": "ok"});
-            let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
-        } else {
-            let ack = serde_json::json!({"status": "error", "reason": "socket_write"});
-            let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+        match request {
+            NativeRequest::CaptureAuthorization { incognito } => {
+                let status = if incognito {
+                    "capture_disabled"
+                } else {
+                    "authorized"
+                };
+                let ack = serde_json::json!({"status": status});
+                let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+            }
+            NativeRequest::PageContent(msg) => {
+                if process_message(&msg, &mut socket).is_ok() {
+                    let ack = serde_json::json!({"status": "ok"});
+                    let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+                } else {
+                    let ack = serde_json::json!({"status": "error", "reason": "socket_write"});
+                    let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+                }
+            }
         }
     }
 }
@@ -354,6 +389,23 @@ mod tests {
         assert_eq!(msg.url, "https://example.com");
         assert_eq!(msg.source_browser, "safari");
         assert_eq!(msg.tab_id, 5);
+    }
+
+    #[test]
+    fn authorization_request_contains_no_page_content() {
+        let request =
+            parse_native_request(br#"{"type":"capture_authorization","incognito":false}"#)
+                .expect("parse authorization request");
+
+        assert!(matches!(
+            request,
+            NativeRequest::CaptureAuthorization { incognito: false }
+        ));
+    }
+
+    #[test]
+    fn authorization_request_requires_privacy_classification() {
+        assert!(parse_native_request(br#"{"type":"capture_authorization"}"#).is_err());
     }
 
     #[test]

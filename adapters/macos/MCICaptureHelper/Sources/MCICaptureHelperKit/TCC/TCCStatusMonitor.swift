@@ -10,11 +10,8 @@
 // Signals (all read-only OS probes):
 //   - Screen Recording — `CGPreflightScreenCaptureAccess()`
 //   - Accessibility    — `AXIsProcessTrusted()`
-//   - Full Disk Access — indirect: try to read `~/Library/Safari/
-//                        Bookmarks.plist` (a well-known FDA-protected
-//                        location). A successful open ⇒ granted; a
-//                        POSIX EPERM ⇒ denied; missing-file / other
-//                        errors ⇒ unknown (safer than a false-denied).
+//   - Full Disk Access — available to explicit deep-hook callers, but
+//                        not monitored as a global capture requirement.
 //   - Automation       — STUBBED for follow-up per mission constraint
 //                        (per-target `AEDeterminePermissionToAutomateTarget`
 //                        is high-implementation-cost + Apple-Events
@@ -181,10 +178,10 @@ public final class TCCStatusMonitor: @unchecked Sendable {
 
     private let probe: TCCProbe
     private let pollIntervalNs: UInt64
-    /// The surfaces the monitor polls. Automation is included so a
-    /// future PR flipping `DefaultTCCProbe.probeAutomation()` from
-    /// `.unknown` to a real verdict starts firing transitions with no
-    /// wiring change. Callers can shrink the set for tests.
+    /// The surfaces the monitor polls. Production defaults to the two
+    /// permissions required to apply the screen-capture privacy policy.
+    /// Optional deep-hook permissions are scoped to those hooks and must not
+    /// globally pause screen capture.
     private let surfaces: [TCCSurface]
 
     private let lock = NSLock()
@@ -204,7 +201,7 @@ public final class TCCStatusMonitor: @unchecked Sendable {
     public init(
         probe: TCCProbe = DefaultTCCProbe(),
         pollIntervalNs: UInt64 = 2_000_000_000, // 0.5 Hz per mission constraint
-        surfaces: [TCCSurface] = TCCSurface.allCases,
+        surfaces: [TCCSurface] = [.screenRecording, .accessibility],
         observer: (any Observer)? = nil
     ) {
         self.probe = probe

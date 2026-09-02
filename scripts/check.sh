@@ -43,6 +43,7 @@ LANES=(
     "safari-private-context|bash|test|node --test extensions/safari/__tests__/content.test.cjs"
     "bash-syntax|bash|lint|__bash_syntax_lane"
     "release-contract|bash|lint|scripts/test-release-contract.sh"
+    "app-group-contract|bash|test|scripts/test-app-group-contract.sh"
     "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
     "task-2-product-truth|bash|lint|scripts/test-task-2-product-truth.sh"
     "retention-policy-contract|bash|test|scripts/test-retention-policy-contract.sh"

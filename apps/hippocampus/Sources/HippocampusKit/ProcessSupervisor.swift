@@ -124,6 +124,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var pendingRetryGenerationID: String?
     private var shutdownTask: Task<Void, Error>?
     private var shutdownRequested = false
+    private var requestedPauseState = false
+    private var pauseTask: Task<Void, Never>?
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -185,6 +187,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     package func startAndWaitForReadiness() async throws {
         guard !shutdownRequested, shutdownTask == nil else {
             throw SupervisorError.transitionInProgress
+        }
+        if requestedPauseState {
+            try captureConsentAuthority.disable()
+            stopAncillaryServices()
+            state = .paused
+            return
         }
         guard let transitionID = transitionGate.beginTransition() else {
             throw SupervisorError.transitionInProgress
@@ -268,12 +276,116 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func setPaused(_ paused: Bool) {
-        guard state == .running || state == .paused else { return }
+        requestedPauseState = paused
+        guard !shutdownRequested, shutdownTask == nil else { return }
+        guard state == .starting || state == .running || state == .paused || pauseTask != nil else {
+            return
+        }
+        guard pauseTask == nil else { return }
+        pauseTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pauseTask = nil }
+            while !Task.isCancelled {
+                let requested = self.requestedPauseState
+                let alreadyApplied = requested
+                    ? self.state == .paused
+                    : self.state == .running
+                if alreadyApplied { return }
+                do {
+                    try await self.setPausedAndWait(requested)
+                } catch {
+                    self.logger.error("supervisor: verified pause transition failed: \(error.localizedDescription)")
+                    return
+                }
+                if requested == self.requestedPauseState { return }
+            }
+        }
+    }
+
+    /// A user pause owns no child processes. Stopping the full topology keeps
+    /// the helper's parent-lifetime lease responsive and makes owner death
+    /// fail closed; resume starts and verifies a fresh generation.
+    package func setPausedAndWait(_ paused: Bool) async throws {
+        guard !shutdownRequested, shutdownTask == nil else {
+            throw SupervisorError.transitionInProgress
+        }
+
+        if paused {
+            guard state == .starting || state == .running else { return }
+            cancelPendingRetry()
+            if state == .starting {
+                transitionGate.reset()
+                do {
+                    try captureConsentAuthority.disable()
+                    try await topology.stop(timeout: 5)
+                    try Task.checkCancellation()
+                    guard !shutdownRequested, shutdownTask == nil else {
+                        throw SupervisorError.transitionInProgress
+                    }
+                    stopAncillaryServices()
+                    state = .paused
+                } catch {
+                    if !shutdownRequested {
+                        state = .crashed(reason: error.localizedDescription)
+                    }
+                    throw error
+                }
+                return
+            }
+            guard let transitionID = transitionGate.beginTransition() else {
+                throw SupervisorError.transitionInProgress
+            }
+            do {
+                try captureConsentAuthority.disable()
+                try await topology.stop(timeout: 5)
+                try ensureTransitionIsActive(transitionID)
+                stopAncillaryServices()
+                guard transitionGate.commitStopped(transitionID: transitionID) else {
+                    throw SupervisorError.transitionInProgress
+                }
+                state = .paused
+            } catch {
+                if transitionGate.ownsTransition(transitionID) {
+                    transitionGate.fail(transitionID: transitionID)
+                    state = .crashed(reason: error.localizedDescription)
+                } else {
+                    await stopUncommittedTopologyIfNeeded()
+                }
+                throw error
+            }
+            return
+        }
+
+        guard state == .paused else { return }
+        cancelPendingRetry()
+        guard let transitionID = transitionGate.beginTransition() else {
+            throw SupervisorError.transitionInProgress
+        }
         do {
-            try topology.setPaused(paused)
-            state = paused ? .paused : .running
+            let generationID = try await startTopology(
+                captureEnabled: captureEnabled,
+                transitionID: transitionID
+            )
+            try ensureTransitionIsActive(transitionID)
+            try prepareCaptureBoundary(
+                captureEnabled: captureEnabled,
+                generationID: generationID
+            )
+            guard transitionGate.commit(
+                generationID: generationID,
+                transitionID: transitionID
+            ) else {
+                throw SupervisorError.transitionInProgress
+            }
+            activateTopology(captureEnabled: captureEnabled)
         } catch {
-            state = .crashed(reason: error.localizedDescription)
+            if transitionGate.ownsTransition(transitionID) {
+                transitionGate.fail(transitionID: transitionID)
+                state = .crashed(reason: error.localizedDescription)
+            } else {
+                await stopUncommittedTopologyIfNeeded()
+            }
+            throw error
         }
     }
 

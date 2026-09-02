@@ -300,14 +300,12 @@ final class OnboardingE2ETests: XCTestCase {
         XCTAssertEqual(vm.currentStep, .primaryHotkey)
     }
 
-    // MARK: - Test 8: Deny-then-continue path
+    // MARK: - Test 8: Accessibility denial path
 
     /// User denies Accessibility. The choreography records the outcome
-    /// as `.denied` and advances (drives the inline "Screen capture is
-    /// optional; grant later in Settings" recovery banner in the slide).
-    /// AX denial is a soft-fail — the sequence completes and canAdvance
-    /// unblocks once SR is granted.
-    func testDeferredPermissionChoreographyDenyAccessibilityThenContinue() {
+    /// as `.denied` and advances the explanatory choreography, but screen
+    /// capture remains blocked because secure-field detection is unavailable.
+    func testDeferredPermissionChoreographyDenyAccessibilityBlocksCapture() {
         let vm = OnboardingFlowViewModel(
             screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
             accessibility: StubTCCPermission(kind: .accessibility, status: .notRequested),
@@ -326,8 +324,8 @@ final class OnboardingE2ETests: XCTestCase {
             "Denial-with-Continue must record .denied — not .pending.")
         XCTAssertNil(vm.currentPermissionSurface,
             "Denial resolves the sub-step; sequence must complete.")
-        XCTAssertTrue(vm.canAdvance,
-            "AX denial is a soft-fail; SR is granted — nav-bar must unblock.")
+        XCTAssertFalse(vm.canAdvance,
+            "Accessibility denial must block screen capture until the privacy boundary is available.")
     }
 
     // MARK: - Test 9: Skip path
@@ -346,7 +344,7 @@ final class OnboardingE2ETests: XCTestCase {
         vm.recordPermissionOutcome(.screenRecording, .skipped)
         XCTAssertEqual(vm.permissionResults[.screenRecording], .skipped)
         XCTAssertFalse(vm.canAdvance,
-            "SR skipped ⇒ still blocked (only required surface).")
+            "Skipping required Screen Recording must keep the flow blocked.")
 
         // User skips AX too.
         vm.recordPermissionOutcome(.accessibility, .skipped)
@@ -359,8 +357,8 @@ final class OnboardingE2ETests: XCTestCase {
     // MARK: - Test 10: Mixed grants (Cotypist P0 pattern #2)
 
     /// User grants SR, skips AX, marks Automation applicable then denies,
-    /// FDA stays notApplicable. Assert every outcome is recorded and the
-    /// nav-bar unblocks.
+    /// and leaves FDA notApplicable. Outcomes remain inspectable, but the
+    /// capture-critical AX skip keeps the nav bar blocked.
     func testDeferredPermissionChoreographyMixedOutcomes() {
         let vm = OnboardingFlowViewModel(
             screenRecording: StubTCCPermission(kind: .screenRecording, status: .notRequested),
@@ -387,8 +385,8 @@ final class OnboardingE2ETests: XCTestCase {
         // FDA stays notApplicable — no deep-hooks toggled.
         XCTAssertNil(vm.currentPermissionSurface)
         XCTAssertTrue(vm.permissionChoreographyComplete)
-        XCTAssertTrue(vm.canAdvance,
-            "Mixed outcomes with SR granted must unblock nav-bar advance.")
+        XCTAssertFalse(vm.canAdvance,
+            "Skipping capture-critical Accessibility must keep capture blocked.")
 
         // Snapshot the results map — used by settings-pane re-enable flow.
         XCTAssertEqual(vm.permissionResults[.screenRecording], .granted)

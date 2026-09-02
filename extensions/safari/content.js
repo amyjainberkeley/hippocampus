@@ -56,7 +56,21 @@ function extractPageContent() {
   };
 }
 
-function sendContent() {
+async function requestCaptureAuthorization() {
+  const api = typeof browser !== "undefined" ? browser : chrome;
+  try {
+    const response = await api.runtime.sendMessage({
+      type: "capture_authorization",
+    });
+    return response && response.authorized === true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+async function sendContent() {
+  if (isPrivateContext()) return;
+  if (!(await requestCaptureAuthorization())) return;
   if (isPrivateContext()) return;
   const content = extractPageContent();
   if (!content) return;
@@ -113,6 +127,8 @@ debouncedSend();
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     extractPageContent,
+    requestCaptureAuthorization,
+    sendContent,
     isBlockedURL,
     isPrivateContext,
     MAX_TEXT_LENGTH,

@@ -56,7 +56,7 @@ Episodes have a deterministic measured tier before any model participates: appli
 ## Capture And Condensation
 
 - Capture is explicit and visible. `capture_enabled = false` prevents `--capture` from being passed and prevents `SCStream` construction.
-- The helper applies the suppression cascade before serialization. Denylisted applications, secure input, private browsing, and screen sharing fail closed.
+- The helper applies the suppression cascade before serialization. Denylisted applications, secure input, and private browsing fail closed. Screen lock and required-TCC loss stop the stream; arbitrary cross-app screen-share detection is not claimed because macOS exposes no qualified public signal.
 - Consecutive frames are deduplicated using perceptual similarity and window identity before OCR or durable storage.
 - A keyframe is retained when the active work changes materially, a task boundary is detected, or an evidence-bearing state would otherwise be lost.
 - OCR and structured application metadata are stored as evidence. A compact summary may be generated later, never substituted for the source.

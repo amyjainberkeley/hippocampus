@@ -122,6 +122,10 @@ require_literal 'mktemp -d "/tmp/hippo-live.XXXXXX"' \
     "runner must keep isolated Unix socket paths below macOS SUN_LEN"
 require_literal '"$HELPER" --capture' \
     "runner must exercise the explicit live helper path"
+require_literal '--live-overlap-qualification' \
+    "runner must use the narrow pre-release OCR qualification capability"
+require_literal 'MCI_OCR_TRACE=1' \
+    "runner must keep diagnostic OCR tracing on during qualification"
 require_literal '"$AGENT" --db-path "$DB_PATH" mcp-serve' \
     "runner must query through the assembled agent"
 require_literal 'FOCUSED_EVIDENCE_ZEPHYR_9241' \

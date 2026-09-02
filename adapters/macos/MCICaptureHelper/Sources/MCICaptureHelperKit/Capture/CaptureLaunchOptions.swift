@@ -45,3 +45,26 @@ public struct CaptureLaunchOptions: Sendable, Equatable {
         return CaptureLaunchOptions(captureEnabled: argv.contains(captureFlag))
     }
 }
+
+/// Narrow capability for the live overlap verifier to exercise OCR while the
+/// production kill switch remains engaged. This is diagnostic authorization,
+/// not a persisted setting: every independent signal must be present on the
+/// helper process that owns the isolated test brain.
+public enum LiveOCRQualification {
+    public static let flag = "--live-overlap-qualification"
+
+    public static func isRequested(_ argv: [String]) -> Bool {
+        argv.contains(flag)
+    }
+
+    public static func isAuthorized(
+        arguments: [String],
+        environment: [String: String]
+    ) -> Bool {
+        isRequested(arguments)
+            && arguments.contains(CaptureLaunchOptions.captureFlag)
+            && arguments.contains("--probe-debug")
+            && environment["MCI_DEVELOPMENT_FILE_KEY"] == "1"
+            && environment["MCI_OCR_TRACE"] == "1"
+    }
+}

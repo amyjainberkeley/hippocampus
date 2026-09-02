@@ -41,7 +41,7 @@ final class PermissionsSlideChoreographyTests: XCTestCase {
         let vm = makeVM()
         XCTAssertEqual(vm.permissionSequenceIndex, 0)
         XCTAssertEqual(vm.currentPermissionSurface, .screenRecording,
-            "Cold-start choreography must open with Screen Recording (only required surface).")
+            "Cold-start choreography must open with Screen Recording before Accessibility.")
     }
 
     func testColdStartAutomationAndFDAAreNotApplicable() {
@@ -200,8 +200,8 @@ final class PermissionsSlideChoreographyTests: XCTestCase {
     // MARK: - Sequence order invariant
 
     func testPermissionSequenceIsRequiredFirst() {
-        // Order is load-bearing — Screen Recording must come first (only
-        // required surface); soft-fail surfaces trail.
+        // Order is load-bearing: the two capture-critical permissions come
+        // first; optional deep-hook surfaces trail.
         XCTAssertEqual(OnboardingFlowViewModel.permissionSequence,
                        [.screenRecording, .accessibility, .automation, .fullDiskAccess])
     }
@@ -227,17 +227,13 @@ final class PermissionsSlideChoreographyTests: XCTestCase {
             "canAdvance must still gate on SR granted (PR #44 invariant).")
         vm.recordPermissionOutcome(.screenRecording, .skipped)
         XCTAssertFalse(vm.canAdvance,
-            "Skipping SR is not enough — SR is the only hard-required surface.")
+            "Skipping required Screen Recording must keep the flow blocked.")
     }
 
-    func testCanAdvanceAllowsPartialChoreographyWhenSRGranted() {
-        // Cotypist "skip and re-enable later" — a user with SR granted
-        // but AX still pending can exit via the nav bar. The slide
-        // choreography drives them through AX first; the flow VM only
-        // enforces the SR invariant.
+    func testCanAdvanceRequiresAccessibilityAfterScreenRecordingGrant() {
         let vm = makeVM(srStatus: .granted, axStatus: .notRequested)
         vm.goTo(.permissions)
-        XCTAssertTrue(vm.canAdvance,
-            "SR granted must unblock advance regardless of AX outcome (soft-fail).")
+        XCTAssertFalse(vm.canAdvance,
+            "Screen capture must remain blocked until Accessibility can enforce the privacy policy.")
     }
 }

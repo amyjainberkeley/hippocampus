@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 
 let messageListener;
 const postMessage = vi.fn();
+const sendNativeMessage = vi.fn();
 
 globalThis.chrome = {
   runtime: {
+    sendNativeMessage,
     connectNative: vi.fn(() => ({
       onDisconnect: { addListener: vi.fn() },
       postMessage,
@@ -49,7 +51,41 @@ function sender(tab) {
 describe("Chromium private-context relay", () => {
   beforeEach(() => {
     postMessage.mockClear();
+    sendNativeMessage.mockReset();
     globalThis.chrome.runtime.connectNative.mockClear();
+  });
+
+  it("authorizes without sending page content to the native boundary", () => {
+    sendNativeMessage.mockImplementation((_name, message, callback) => {
+      expect(message).toEqual({
+        type: "capture_authorization",
+        incognito: false,
+      });
+      callback({ status: "authorized" });
+    });
+    const sendResponse = vi.fn();
+
+    const keepsChannelOpen = messageListener(
+      { type: "capture_authorization" },
+      sender({ incognito: false }),
+      sendResponse,
+    );
+
+    expect(keepsChannelOpen).toBe(true);
+    expect(sendResponse).toHaveBeenCalledWith({ authorized: true });
+  });
+
+  it("rejects authorization before native messaging for unknown privacy state", () => {
+    const sendResponse = vi.fn();
+
+    messageListener(
+      { type: "capture_authorization" },
+      sender({}),
+      sendResponse,
+    );
+
+    expect(sendNativeMessage).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ authorized: false });
   });
 
   it("accepts only an explicitly non-incognito tab", () => {

@@ -187,15 +187,11 @@ public final class OnboardingFlowViewModel: ObservableObject {
     public var canAdvance: Bool {
         if currentStep == .done { return false }
         if currentStep == .permissions {
-            // Cotypist P0 #2 preserves the PR #44 invariant: advance
-            // out of `.permissions` requires Screen Recording granted
-            // (the only hard-required surface). The choreography's
-            // per-sub-step gating is a slide-level UX concern; the flow
-            // VM only enforces the load-bearing invariant here so a
-            // partially-walked user with SR granted can still exit via
-            // the nav-bar Continue if they choose to (matches Cotypist
-            // "skip and re-enable later from Settings" affordance).
+            // Screen Recording supplies pixels; Accessibility supplies the
+            // focused/secure-field signal needed to apply the privacy policy.
+            // Optional Automation and Full Disk Access remain per-feature.
             return screenRecordingPermission.status == .granted
+                && accessibilityPermission.status == .granted
         }
         if currentStep == .primaryHotkey {
             // The slide's Continue button binds `.disabled(!canAdvance)`;

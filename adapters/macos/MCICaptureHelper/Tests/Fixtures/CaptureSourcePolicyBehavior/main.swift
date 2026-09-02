@@ -21,6 +21,33 @@ private struct NoBlackRegion: BlackedRegionProbe {
 @main
 struct CaptureSourcePolicyBehavior {
     static func main() {
+        let qualificationArguments = [
+            "mci-capture-helper",
+            "--capture",
+            "--probe-debug",
+            LiveOCRQualification.flag,
+        ]
+        let qualificationEnvironment = [
+            "MCI_DEVELOPMENT_FILE_KEY": "1",
+            "MCI_OCR_TRACE": "1",
+        ]
+        precondition(LiveOCRQualification.isAuthorized(
+            arguments: qualificationArguments,
+            environment: qualificationEnvironment
+        ))
+        for omittedArgument in qualificationArguments.dropFirst() {
+            precondition(!LiveOCRQualification.isAuthorized(
+                arguments: qualificationArguments.filter { $0 != omittedArgument },
+                environment: qualificationEnvironment
+            ))
+        }
+        for omittedVariable in qualificationEnvironment.keys {
+            precondition(!LiveOCRQualification.isAuthorized(
+                arguments: qualificationArguments,
+                environment: qualificationEnvironment.filter { $0.key != omittedVariable }
+            ))
+        }
+
         let cascade = SuppressionCascade(
             secureEventInput: SecureInput(),
             axSecureSubrole: NonSecureAX(),
