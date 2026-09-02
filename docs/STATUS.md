@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `1e77b8c`
+Audited code baseline: `1a85e70`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -55,11 +55,13 @@ more than this page.
   does not turn the product black, and the retired turquoise identity is not
   present in the release asset set.
 - The app, capture helper, Recall, and onboarding Swift packages compile on
-  this host through the constrained SwiftPM wrapper. The capture-consent
-  behavior fixture, focused writer/FFI suites, Rust formatting, strict agent
-  Clippy, visual contracts, agent integration tests, and current release
-  contracts pass. Full Hippocampus XCTest execution still requires Xcode on
-  this host; CI owns an explicit app-test job instead of only compiling it.
+  this host through the constrained SwiftPM wrapper. The complete Rust gate
+  passes formatting, all-target workspace Clippy, every workspace test, and
+  dependency audit. All 24 shell and executable behavior lanes pass, including
+  capture/privacy, release identity, model integrity, product truth, clean-home,
+  app launch, and visual contracts. Full Hippocampus XCTest execution still
+  requires Xcode on this host; CI owns an explicit app-test job instead of only
+  compiling it.
 - A throwaway-home E2E installs the engine, starts with capture disabled,
   imports 20 synthetic events, injects one shared-encoder `OCREvent` through
   production `--drain-stdin --strict`, derives episodes, persists and reads
