@@ -659,6 +659,17 @@ async fn main() -> ExitCode {
                                 return ExitCode::from(21);
                             }
                         };
+                        if let Err(code) = verify_existing_brain_before_writer_open(
+                            "daemon",
+                            &db_path,
+                            &key,
+                            unclean_prior_shutdown,
+                        ) {
+                            if let Some(lock) = writer_run_lock.take() {
+                                let _ = lock.release();
+                            }
+                            return ExitCode::from(code);
+                        }
                         match SqlCipherBrainStore::new(&db_path, &key) {
                             Ok(store) => {
                                 let store = Arc::new(store);
@@ -1496,6 +1507,42 @@ where
     Ok(())
 }
 
+fn verify_existing_brain_before_writer_open(
+    command_label: &str,
+    db_path: &Path,
+    key: &DbKey,
+    unclean_prior_shutdown: bool,
+) -> Result<(), u8> {
+    match db_path.try_exists() {
+        Ok(false) => return Ok(()),
+        Ok(true) => {}
+        Err(error) => {
+            eprintln!(
+                "mci-agent {command_label}: cannot inspect existing brain before writer open: {error}"
+            );
+            return Err(COMMAND_INTEGRITY_FAILURE_EXIT_CODE);
+        }
+    }
+
+    let store = SqlCipherBrainStore::open_readonly(db_path, key).map_err(|error| {
+        eprintln!(
+            "mci-agent {command_label}: read-only integrity preflight could not open {}: {error}",
+            db_path.display()
+        );
+        COMMAND_INTEGRITY_FAILURE_EXIT_CODE
+    })?;
+    let pass_count = if unclean_prior_shutdown { 2 } else { 1 };
+    for pass in 1..=pass_count {
+        if let Err(error) = store.verify_integrity_on_boot() {
+            eprintln!(
+                "mci-agent {command_label}: read-only integrity preflight failed before writer open (pass {pass}/{pass_count}): {error}"
+            );
+            return Err(COMMAND_INTEGRITY_FAILURE_EXIT_CODE);
+        }
+    }
+    Ok(())
+}
+
 fn open_command_writer(
     command: WriterCommand,
     db_path: &Path,
@@ -1503,6 +1550,12 @@ fn open_command_writer(
     lease: &CommandWriterLease,
 ) -> Result<SqlCipherBrainStore, u8> {
     let command_label = command.label();
+    verify_existing_brain_before_writer_open(
+        command_label,
+        db_path,
+        key,
+        lease.unclean_prior_shutdown,
+    )?;
     let store = SqlCipherBrainStore::new(db_path, key).map_err(|error| {
         eprintln!(
             "mci-agent {command_label}: open brain at {}: {error}",
@@ -2762,10 +2815,12 @@ mod capture_consent_tests {
 #[cfg(test)]
 mod writer_command_lease_tests {
     use super::{
-        acquire_command_writer_lease, verify_command_writer_integrity, WriterCommand,
-        COMMAND_INTEGRITY_FAILURE_EXIT_CODE,
+        acquire_command_writer_lease, open_command_writer, verify_command_writer_integrity,
+        WriterCommand, COMMAND_INTEGRITY_FAILURE_EXIT_CODE,
     };
     use mci_agent::crash_recovery::{acquire_lock, lock_path_for_brain, LockError};
+    use mci_brain::SqlCipherBrainStore;
+    use mci_core::crypto::DbKey;
     use std::cell::Cell;
     use std::path::Path;
     use std::process::{Command, Stdio};
@@ -2838,6 +2893,23 @@ mod writer_command_lease_tests {
         .expect("two successful passes");
 
         assert_eq!(passes.get(), 2);
+    }
+
+    #[test]
+    fn existing_brain_is_verified_readonly_before_writer_open() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let brain = root.path().join("brain.sqlite");
+        let correct_key = DbKey::from_bytes([0x41; 32]);
+        let wrong_key = DbKey::from_bytes([0x42; 32]);
+        type SeedStore = SqlCipherBrainStore;
+        let store = SeedStore::new(&brain, &correct_key).expect("seed encrypted brain");
+        drop(store);
+
+        let lease =
+            acquire_command_writer_lease(WriterCommand::Enrich, &brain).expect("command lease");
+        let result = open_command_writer(WriterCommand::Enrich, &brain, &wrong_key, &lease);
+
+        assert!(matches!(result, Err(COMMAND_INTEGRITY_FAILURE_EXIT_CODE)));
     }
 
     #[test]
