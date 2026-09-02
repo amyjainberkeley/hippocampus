@@ -531,7 +531,10 @@ through the pinned Core ML toolchain, so it was rejected as the immediate Mac
 path. ADR-0038 now fixes the architecture: a verifier sees atomic claims,
 canonical event slots, and host-bound event identities but no retrieval scores;
 trusted support must select slots from that set; malformed output and runtime
-failure degrade instead of becoming hits. The next candidate is a task-trained
+failure degrade instead of becoming hits. The model-independent host contract
+is implemented: evidence slots carry exact canonical spans, full-event hashes,
+and host-assigned indices that are validated and can be revalidated before a
+verdict becomes trusted. The next candidate is a task-trained
 three-way classifier and citation-slot head on the already convertible
 fixed-shape MobileBERT encoder. It still needs a blind claim-level corpus, Core
 ML parity, redistribution clearance, signed-runtime execution, and minimum-Mac
