@@ -59,6 +59,34 @@ final class KeychainDatabaseKeyResolverTests: XCTestCase {
         XCTAssertEqual(reference.account, "test-account")
     }
 
+    func test_development_key_requires_explicit_fixture_gate() throws {
+        let raw = String(repeating: "aB", count: 32)
+
+        XCTAssertNil(try DevelopmentDatabaseKeyMaterial.hex(from: [
+            "MCI_DB_KEY_HEX": raw,
+        ]))
+        XCTAssertNil(try DevelopmentDatabaseKeyMaterial.hex(from: [
+            "MCI_DEVELOPMENT_FILE_KEY": "0",
+            "MCI_DB_KEY_HEX": raw,
+        ]))
+        XCTAssertEqual(
+            try DevelopmentDatabaseKeyMaterial.hex(from: [
+                "MCI_DEVELOPMENT_FILE_KEY": "1",
+                "MCI_DB_KEY_HEX": raw,
+            ]),
+            raw.lowercased()
+        )
+    }
+
+    func test_development_key_rejects_malformed_material_when_enabled() {
+        XCTAssertThrowsError(try DevelopmentDatabaseKeyMaterial.hex(from: [
+            "MCI_DEVELOPMENT_FILE_KEY": "1",
+            "MCI_DB_KEY_HEX": "not-a-key",
+        ])) { error in
+            XCTAssertEqual(error as? KeychainDatabaseKeyError, .malformed)
+        }
+    }
+
     func test_query_pins_file_based_non_synchronizable_keychain_domain() {
         XCTAssertEqual(
             KeychainDatabaseKeyQuery(reference: .defaultDatabaseKey),

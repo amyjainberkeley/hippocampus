@@ -34,7 +34,11 @@ struct TrustSlide: View {
                     )
                     IconTextRow(
                         icon: "network.slash",
-                        title: "Zero network — your data never leaves this Mac."
+                        title: "No Hippocampus cloud copy — captured memory stays on this Mac."
+                    )
+                    IconTextRow(
+                        icon: "arrow.up.right.square",
+                        title: "A connected AI client controls where requested context goes under its provider terms."
                     )
                 }
                 .glassCard(padding: OnboardingDesign.Space.lg)

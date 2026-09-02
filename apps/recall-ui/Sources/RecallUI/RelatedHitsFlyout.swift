@@ -189,7 +189,7 @@ private struct RelatedHitRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(appShortName(hit.appBundleId))
+                Text(Formatters.appDisplayName(hit.appBundleId))
                     .font(.system(.caption, design: .default).weight(.semibold))
                     .foregroundStyle(Color.brandFgPrimary)
                     .lineLimit(1)
@@ -212,12 +212,6 @@ private struct RelatedHitRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Trim `com.foo.Bar` → `Bar` so the width-constrained flyout row
-    /// stays readable. Falls back to "(no app)" on nil.
-    private func appShortName(_ bundleId: String?) -> String {
-        guard let bid = bundleId, !bid.isEmpty else { return "(no app)" }
-        return bid.split(separator: ".").last.map(String.init) ?? bid
-    }
 }
 
 // ---------------------------------------------------------------------------

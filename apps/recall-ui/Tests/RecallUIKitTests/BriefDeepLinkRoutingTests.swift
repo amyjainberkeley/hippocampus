@@ -9,6 +9,7 @@ final class BriefDeepLinkRoutingTests: XCTestCase {
     // MARK: known values
 
     func testKnownDeepLinkValuesRouteToTheRightTab() {
+        XCTAssertEqual(RecallTab.from(deepLinkValue: "now"),      .now)
         XCTAssertEqual(RecallTab.from(deepLinkValue: "brief"),    .brief)
         XCTAssertEqual(RecallTab.from(deepLinkValue: "search"),   .search)
         XCTAssertEqual(RecallTab.from(deepLinkValue: "timeline"), .timeline)

@@ -43,7 +43,8 @@ public actor ThumbnailDataProvider: ThumbnailDataProviding {
             .appendingPathComponent("blobs", isDirectory: true)
         let reference = KeychainDatabaseKeyReference.from(environment: environment)
         return ThumbnailDataProvider(blobRoot: root) {
-            try KeychainDatabaseKeyResolver().resolveBytes(reference: reference)
+            try DevelopmentDatabaseKeyMaterial.bytes(from: environment)
+                ?? KeychainDatabaseKeyResolver().resolveBytes(reference: reference)
         }
     }
 

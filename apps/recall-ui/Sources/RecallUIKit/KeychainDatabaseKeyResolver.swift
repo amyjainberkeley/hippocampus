@@ -98,6 +98,39 @@ public enum KeychainDatabaseKeyError: Error, Sendable, Equatable {
     case readFailure(OSStatus)
 }
 
+/// Explicit escape hatch for deterministic local fixtures launched directly
+/// from a developer shell. Hippocampus.app strips both variables from every
+/// child process, so the shipped app path continues to resolve only Keychain
+/// references.
+public enum DevelopmentDatabaseKeyMaterial {
+    public static func hex(from environment: [String: String]) throws -> String? {
+        guard environment["MCI_DEVELOPMENT_FILE_KEY"] == "1" else { return nil }
+        guard let value = environment["MCI_DB_KEY_HEX"] else { return nil }
+        guard value.utf8.count == 64,
+              value.utf8.allSatisfy(\.isASCIIHexDigit)
+        else {
+            throw KeychainDatabaseKeyError.malformed
+        }
+        return value.lowercased()
+    }
+
+    public static func bytes(from environment: [String: String]) throws -> Data? {
+        guard let value = try hex(from: environment) else { return nil }
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(32)
+        var offset = value.startIndex
+        for _ in 0 ..< 32 {
+            let end = value.index(offset, offsetBy: 2)
+            guard let byte = UInt8(value[offset ..< end], radix: 16) else {
+                throw KeychainDatabaseKeyError.malformed
+            }
+            bytes.append(byte)
+            offset = end
+        }
+        return Data(bytes)
+    }
+}
+
 extension KeychainDatabaseKeyError: LocalizedError {
     public var errorDescription: String? {
         switch self {
@@ -188,7 +221,7 @@ public struct UnavailableBrainReader: BrainReader {
     public func summaryStats() async throws -> SummaryStats { throw unavailable() }
 }
 
-private extension UInt8 {
+extension UInt8 {
     var isASCIIHexDigit: Bool {
         (48...57).contains(self) || (65...70).contains(self) || (97...102).contains(self)
     }

@@ -39,14 +39,13 @@ struct PermissionsSlide: View {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 OnboardingTheme.title("macOS requires your permission")
 
-                // The Cotypist "neither stored nor sent" moment — turn the
-                // scariest ask (Screen Recording) into a reassurance. The
-                // claim is exact: frames are OCR'd in memory and discarded;
-                // only the extracted text is persisted, encrypted, locally.
+                // Describe the exact storage boundary before asking for the
+                // broadest permission: raw frames are transient, while a
+                // selected post-privacy subset may become encrypted evidence.
                 ReassuranceBanner(
                     systemImage: "eye.slash.fill",
-                    message: "Screen frames are OCR'd in memory and instantly discarded — the picture is never saved or sent anywhere. Only the extracted text stays, encrypted, on this Mac.",
-                    highlight: "never saved or sent anywhere"
+                    message: "Raw screen frames are OCR'd in memory and discarded. Extracted text and selected encrypted visual keyframes stay on this Mac under your retention setting.",
+                    highlight: "selected encrypted visual keyframes"
                 )
 
                 // The Raycast "Ask anything" assurance strip — three short
@@ -60,7 +59,7 @@ struct PermissionsSlide: View {
                     AssuranceItem(
                         icon: "icloud.slash",
                         title: "No collection",
-                        detail: "Nothing is uploaded. Hippocampus makes zero network calls with your captured content."
+                        detail: "Hippocampus does not upload captured memory. Connected AI tools may send requested context under their provider terms."
                     ),
                     AssuranceItem(
                         icon: "lock.fill",
@@ -398,7 +397,7 @@ private struct PermissionCopy {
                 shortName: "Screen Recording",
                 icon: "rectangle.inset.filled.and.person.filled",
                 requirementBadge: "Required",
-                why: "Lets Hippocampus see what's on your screen so we can OCR it in memory and index the text. Frames are discarded — only the extracted text is stored, and everything stays on your Mac.",
+                why: "Lets Hippocampus OCR what is on your screen. Raw frames are discarded; extracted text and selected encrypted keyframes are retained locally according to your settings.",
                 denialRecovery: "Screen Recording is required for Hippocampus to work. macOS won't re-prompt automatically — use Reset & Retry to clear the old TCC entry and try again."
             )
         case .accessibility:

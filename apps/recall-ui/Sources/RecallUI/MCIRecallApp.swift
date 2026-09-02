@@ -115,7 +115,8 @@ struct MCIRecallApp: App {
         let environment = ProcessInfo.processInfo.environment
         let reference = KeychainDatabaseKeyReference.from(environment: environment)
         do {
-            let keyHex = try KeychainDatabaseKeyResolver().resolveHex(reference: reference)
+            let keyHex = try DevelopmentDatabaseKeyMaterial.hex(from: environment)
+                ?? KeychainDatabaseKeyResolver().resolveHex(reference: reference)
             let path = environment["MCI_DB_PATH"] ?? defaultBrainPath()
             return try FFIBrainReader(path: path, keyHex: keyHex)
         } catch {

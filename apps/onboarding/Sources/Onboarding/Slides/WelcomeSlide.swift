@@ -38,7 +38,7 @@ struct WelcomeSlide: View {
                 VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
                     IconTextRow(
                         icon: "lock.fill",
-                        title: "Everything stays on this Mac — zero network, fully encrypted."
+                        title: "Your memory database stays on this Mac, fully encrypted."
                     )
                     IconTextRow(
                         icon: "eye.slash.fill",
@@ -47,7 +47,7 @@ struct WelcomeSlide: View {
                     // Cycle 8.54 copy audit — "brain" → "memory".
                     IconTextRow(
                         icon: "key.fill",
-                        title: "Your memory is encrypted on disk. Only you hold the key."
+                        title: "Hippocampus does not upload captured memory. Connected AI tools use their own provider terms."
                     )
                 }
                 .frame(maxWidth: 460)

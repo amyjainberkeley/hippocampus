@@ -23,6 +23,10 @@ private final class LockedCounter: @unchecked Sendable {
 @main
 struct ThumbnailProviderBehavior {
     static func main() async throws {
+        try proveDevelopmentKeyRequiresExplicitGate()
+        proveAppDisplayNames()
+        precondition(RecallTab.from(deepLinkValue: "now") == .now)
+
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("hippocampus-thumbnail-provider-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -77,6 +81,28 @@ struct ThumbnailProviderBehavior {
             symlinkThumbnail == nil,
             "symlink blobs must fail closed"
         )
+    }
+
+    private static func proveDevelopmentKeyRequiresExplicitGate() throws {
+        let raw = String(repeating: "aB", count: 32)
+        let disabled = try DevelopmentDatabaseKeyMaterial.hex(from: [
+            "MCI_DB_KEY_HEX": raw,
+        ])
+        let enabled = try DevelopmentDatabaseKeyMaterial.hex(from: [
+            "MCI_DEVELOPMENT_FILE_KEY": "1",
+            "MCI_DB_KEY_HEX": raw,
+        ])
+        precondition(disabled == nil)
+        precondition(enabled == raw.lowercased())
+    }
+
+    private static func proveAppDisplayNames() {
+        precondition(Formatters.appDisplayName("com.apple.Safari") == "Safari")
+        precondition(Formatters.appDisplayName("com.microsoft.VSCode") == "VS Code")
+        precondition(Formatters.appDisplayName("com.tinyspeck.slackmacgap") == "Slack")
+        precondition(Formatters.appDisplayName("com.mci.demo.seed.github") == "GitHub")
+        precondition(Formatters.appDisplayName("com.example.my-app") == "My App")
+        precondition(Formatters.appDisplayName(nil) == "Unknown app")
     }
 
     private static func imageData() throws -> Data {
