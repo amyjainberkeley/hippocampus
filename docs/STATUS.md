@@ -98,8 +98,9 @@ more than this page.
   `EvidenceVerifierUnavailable` degradation. Supported and contradictory
   outputs retain only the exact canonical events cited by the verifier. The
   verifier receives a bounded internal set of up to eight ranked events before
-  the caller's display limit is applied, so a one-result UI request cannot
-  discard supporting or contradictory evidence before verification. The
+  the caller's display limit is applied to untrusted fallback context, so a
+  one-result UI request cannot discard any event required by a trusted support
+  or contradiction verdict. The
   retired score critic remains available to tests but is no longer installed
   by production construction.
 - The first compact native verifier candidate has a reproducible Core ML

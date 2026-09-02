@@ -295,6 +295,46 @@ fn verifier_evidence_set_is_independent_of_the_display_limit() {
 }
 
 #[test]
+fn verified_multi_event_support_never_returns_a_partial_citation_set() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    let first_support_id = store
+        .put_event(&event(
+            "The rollout owner is Maya.",
+            Some("linear://rollout/owner"),
+        ))
+        .unwrap();
+    let second_support_id = store
+        .put_event(&event(
+            "Maya approved the September 8 launch date.",
+            Some("github://rollout/approval"),
+        ))
+        .unwrap();
+    let verifier = FixedEvidenceVerifier {
+        result: Ok(EvidenceVerdict::Supported {
+            confidence: 0.97,
+            evidence_ids: vec![first_support_id.0, second_support_id.0],
+        }),
+    };
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20)
+        .with_evidence_verifier(Arc::new(verifier));
+    let mut one_result_query = query("Who approved the rollout and when does it launch?");
+    one_result_query.limit = 1;
+
+    let RetrievalOutcome::Matched { matches } =
+        retriever.retrieve_outcome(&one_result_query).unwrap()
+    else {
+        panic!("multi-event support should be returned with complete provenance");
+    };
+    let cited_ids = matches
+        .iter()
+        .map(|value| value.evidence.event_id)
+        .collect::<Vec<_>>();
+    assert_eq!(cited_ids.len(), 2);
+    assert!(cited_ids.contains(&first_support_id));
+    assert!(cited_ids.contains(&second_support_id));
+}
+
+#[test]
 fn verifier_insufficient_abstains_even_when_retrieval_rank_is_high() {
     let store = Arc::new(InMemoryBrainStore::new());
     store

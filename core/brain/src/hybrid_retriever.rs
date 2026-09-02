@@ -960,12 +960,10 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         match assessment {
             EvidenceAssessment::Supported(evidence_ids) => {
                 retain_cited_matches(&mut matches, &evidence_ids);
-                matches.truncate(display_limit);
                 RetrievalOutcome::Matched { matches }
             }
             EvidenceAssessment::Contradicted(evidence_ids) => {
                 retain_cited_matches(&mut matches, &evidence_ids);
-                matches.truncate(display_limit);
                 RetrievalOutcome::Contradicted { matches }
             }
             EvidenceAssessment::Unsupported => RetrievalOutcome::NothingMatched {
