@@ -1,8 +1,8 @@
 # Hippocampus Status
 
-_Audited on 2026-09-01._
+_Audited on 2026-09-02._
 
-Audited code baseline: `bf6ff75`
+Audited code baseline: `1de21f0`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -22,7 +22,10 @@ more than this page.
 - Event, range, retention, and full-brain deletion remove last-reference
   encrypted keyframe blobs. Every retention cycle also reconciles canonical
   crash orphans and stale managed temporary files after a one-hour grace
-  period, without following symlinks or deleting unknown entries.
+  period, without following symlinks or deleting unknown entries. A missing
+  retention file receives the fresh-install `forever` default; an existing
+  unreadable, malformed, or unknown-value file fails closed and skips both
+  expiry and reconciliation instead of silently changing policy.
 - The persisted recording setting now reaches every production ingest
   boundary. The helper receives `--capture` only when enabled; the Rust agent
   receives an explicit `MCI_CAPTURE_ENABLED` value and keeps stdin, browser
@@ -55,20 +58,24 @@ more than this page.
   proves the capture-to-memory path, not a real all-day screen capture. The
   required 30-minute soak and release-machine permission walkthrough remain
   open.
-- OCR is not yet launch-qualified against cross-window leakage or Safari
-  Private Browsing. The current browser guards are useful defense in depth,
-  not sufficient evidence for a privacy guarantee. Automatic OCR enablement
-  must remain blocked until those behaviors have executable release tests.
+- OCR is not yet launch-qualified against cross-window leakage. Ambient
+  ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
+  use separate structured capture paths that reject private contexts before
+  reading page content, with executable release tests. Automatic OCR enablement
+  remains blocked until the overlapping-window corpus and live soak pass.
 - The TCC and screen-sharing revocation monitors exist but are not yet proven
-  to be instantiated on the production app path. Delete and wipe operations
-  also still need writer quiescence and truthful post-commit error handling;
-  malformed retention configuration currently falls back to forever rather
-  than surfacing a visible configuration fault.
+  by a live permission-revocation run. Delete and wipe operations now separate
+  committed SQL deletion from post-commit storage-cleanup warnings, but still
+  need a generation-bound writer-quiescence lease for seamless in-app use.
 - Production key custody targets the non-synchronizable macOS file-Keychain
   item `ai.hippocampus.brain` / `database-key-v1`. Migration is fail-closed and
   removes a legacy plaintext key only after Keychain reread plus read-only
-  database validation. Signed clean-install and cross-version ACL continuity
-  cannot be accepted until a stable Developer ID bundle is available.
+  database validation. Ad-hoc development bundles carry a build-injected
+  capability that permits the fixed user-owned `dev.key` path, and pass child
+  processes only that path plus an explicit development marker, never raw key
+  bytes. Developer ID bundles omit the capability and remain Keychain-only.
+  Signed clean-install and cross-version ACL continuity cannot be accepted
+  until a stable Developer ID bundle is available.
 - This machine has Command Line Tools rather than full Xcode, zero valid code
   signing identities, and no `notarytool-profile`. It cannot produce or claim a
   Developer ID-signed, notarized public release.

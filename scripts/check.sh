@@ -34,7 +34,11 @@ LANES=(
     "swift-test-onboarding|swift|test|swift test --package-path apps/onboarding"
     "swift-test-hippocampus|swift|test|swift test --package-path apps/hippocampus"
     "capture-consent-behavior|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior"
+    "child-process-environment|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior"
+    "capture-source-policy-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior"
+    "helper-readiness-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior"
     "onboarding-route-behavior|swift|test|scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior"
+    "safari-private-context|bash|test|node --test extensions/safari/__tests__/content.test.cjs"
     "bash-syntax|bash|lint|__bash_syntax_lane"
     "release-contract|bash|lint|scripts/test-release-contract.sh"
     "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
@@ -50,6 +54,7 @@ LANES=(
     "clean-home-contract|bash|lint|scripts/test-e2e-clean-home-contract.sh"
     "development-app-contract|bash|lint|scripts/test-development-app-contract.sh"
     "development-file-key-contract|bash|test|scripts/test-development-file-key-contract.sh"
+    "no-quarantine-bypass|bash|test|scripts/test-no-quarantine-bypass.sh"
     "app-launch-contract|bash|test|scripts/test-verify-app-launches.sh"
     "demo-contract|bash|lint|scripts/test-demo-contract.sh"
     "keyframe-demo-fixture|bash|test|scripts/test-keyframe-demo-fixture.sh"
@@ -88,7 +93,11 @@ LANES
     swift-test-onboarding swift test in apps/onboarding
     swift-test-hippocampus swift test in apps/hippocampus
     capture-consent-behavior executable capture authority and generation fixture
+    child-process-environment prepared file-key authority reaches supervised children
+    capture-source-policy-behavior browser pixels stay outside ambient OCR
+    helper-readiness-behavior readiness publication is private, atomic, and add-only
     onboarding-route-behavior executable route to the durable app-access editor
+    safari-private-context structured browser capture fails closed in private tabs
     bash-syntax           bash -n across repo *.sh files
     release-contract      release graph and artifact identity contract
     toml-license-contract pinned TOML dependency license contract
@@ -104,6 +113,7 @@ LANES
     clean-home-contract     isolated install-to-uninstall product contract
     development-app-contract debug-only app assembly remains release-safe
     development-file-key-contract signed ad-hoc file-key capability remains release-safe
+    no-quarantine-bypass runtime leaves Gatekeeper provenance enforcement to macOS
     app-launch-contract     isolated GUI launch and onboarding process contract
     demo-contract           demo uses disposable state and bundled UI artifacts
     keyframe-demo-fixture   encrypted visual fixture uses the production codec

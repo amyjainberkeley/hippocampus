@@ -107,5 +107,12 @@ let package = Package(
             exclude: standaloneFixtureSources.filter { $0 != "RetentionPreferencesBehavior.swift" },
             sources: ["RetentionPreferencesBehavior.swift"]
         ),
+        .executableTarget(
+            name: "ChildProcessEnvironmentBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "ChildProcessEnvironmentBehavior.swift" },
+            sources: ["ChildProcessEnvironmentBehavior.swift"]
+        ),
     ]
 )
