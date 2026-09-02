@@ -12,14 +12,20 @@
 
 ---
 
-Hippocampus is a Mac app that remembers what was on your screen, so you can ask for it later in plain language.
+Hippocampus is a Mac app that turns what happened on your screen into small,
+cited context you can recall later or hand to an agent.
 
 Not "what file was that in." **"That pricing page I looked at last Tuesday, when I was annoyed."** You remember situations. Your computer remembers filenames. This closes that gap.
 
-It runs entirely on your machine. There is no server to trust, because there is no server.
+Hippocampus itself has no cloud service. Capture, extraction, indexing, and the
+encrypted brain run on your Mac. When you use an optional connected AI tool,
+a connected AI client sends only the context it requests to its selected provider
+under that provider's terms; Hippocampus does not upload or mirror your brain.
 
 - Canonical shipped status lives in [docs/STATUS.md](docs/STATUS.md).
-- **Local by construction, not by policy.** Screen text is parsed on-device, embedded through Core ML with the current runtime pinned to CPU, and kept on your Mac. No API key is needed and nothing is sent anywhere.
+- **Local by construction, not by policy.** Screen text is parsed on-device,
+  embedded through Core ML with the current runtime pinned to CPU, and kept on
+  your Mac. The local memory engine needs no API key.
 - **One local store, plus local blobs.** Rows, FTS, and stored vectors live in SQLCipher; keyframes stay as local blobs referenced from the database. Production database-key custody uses the non-synchronizable macOS file-Keychain item `ai.hippocampus.brain` / `database-key-v1` with a `SecAccess` ACL for the four stable Developer-ID-signed consumers. Legacy `dev.key` is migration input only and is removed after the Keychain value is re-read and proven against the existing database.
 - **Search the way you remember.** Keyword search for exact things like an error code, Rust-side cosine search for vague things like "that pricing discussion," fused into one ranked list when the embedder and backfill are present. (The CLI below exposes the keyword half. See [what works](#what-works-and-what-doesnt).)
 - **Blocked at the source.** Ambient OCR excludes browser windows; Safari and Chromium admit structured page content only from explicitly non-private tabs. Password prompts and DRM surfaces are refused before a frame is encoded, not scrubbed afterwards.
@@ -435,10 +441,15 @@ mci-agent stats --source safari
 
 ## Privacy, concretely
 
-The promise is "nothing leaves your machine," so here is what enforces it rather than my word for it.
+The promise is local custody with an explicit agent-handoff boundary. Here is
+what enforces it rather than asking you to trust a slogan.
 
 - **One encrypted local store** via SQLCipher, plus local keyframe blobs referenced from it. Production consumers resolve Keychain service `ai.hippocampus.brain`, account `database-key-v1`, in the non-synchronizable file-Keychain domain. Durable releases require stable Developer ID designated requirements; ad-hoc bundles are disposable development artifacts.
 - **No separate vector service.** Today semantic recall does a Rust-side cosine scan over vectors stored in SQLCipher. The bundled sqlite-vec path is still deferred, so there is no extra vector daemon or cloud index to trust.
+- **Agent handoff is narrow and visible.** Claude Code and Codex receive only
+  the bounded memory packet they request. Their model provider can receive that
+  packet under the provider's terms; neither client receives the database key
+  or an automatic copy of the brain.
 - **Blocked at the source, not scrubbed after.** Ambient OCR excludes browser windows, and browser extensions reject private tabs before reading page content. Password prompts and DRM surfaces are refused before a frame is encoded. Scrubbing afterwards means the data existed.
 - **A second layer for text.** Extracted text is checked for one-time codes, bank alerts, and API keys and refused. Tested against a synthetic corpus of 133 message shapes built from public security writeups, NIST guidance, and OWASP fixtures, in [core/brain/fixtures/](core/brain/fixtures/). Those fixtures contain no real messages.
 - **Delete is direct and local.** Removing a memory deletes the rows, cascades dependent tables, and runs `VACUUM`. Crypto-shredded range deletion remains a design target rather than the current shipped path.
