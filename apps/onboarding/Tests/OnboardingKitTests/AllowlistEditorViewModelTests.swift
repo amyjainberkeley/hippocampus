@@ -112,6 +112,69 @@ final class AllowlistEditorViewModelTests: XCTestCase {
         XCTAssertFalse(persisted.contains { $0.bundleId == baselineBundle })
     }
 
+    func testBaselineDeepHookUsesMutableUserConsentWithoutChangingBaselineCapture() async {
+        let messages = AllowlistEntry(
+            bundleId: "com.apple.MobileSMS",
+            rationale: "Messages"
+        )
+        let priorConsent = UserAllowlistEntry(
+            bundleId: "com.apple.MobileSMS",
+            captureEnabled: true,
+            deepHookEnabled: true,
+            addedAt: "2026-05-28"
+        )
+        let (vm, userStore, fda) = makeVM(
+            baselineEntries: [messages],
+            userEntries: [priorConsent],
+            detectedApps: []
+        )
+
+        await vm.load()
+        XCTAssertEqual(
+            vm.rows.first?.posture,
+            .captureAndDeepHook,
+            "A baseline app must render the user's persisted deep-hook consent."
+        )
+
+        await vm.setPosture(for: "com.apple.MobileSMS", to: .captureOnly)
+        XCTAssertEqual(vm.rows.first?.posture, .captureOnly)
+        var persisted = await userStore.entriesForTest()
+        XCTAssertEqual(persisted.count, 1)
+        XCTAssertEqual(persisted.first?.captureEnabled, true)
+        XCTAssertEqual(persisted.first?.deepHookEnabled, false)
+
+        await vm.setPosture(for: "com.apple.MobileSMS", to: .captureAndDeepHook)
+        persisted = await userStore.entriesForTest()
+        XCTAssertEqual(persisted.first?.captureEnabled, true)
+        XCTAssertEqual(persisted.first?.deepHookEnabled, true)
+        XCTAssertEqual(await fda.status(), .requested)
+    }
+
+    func testBaselineDeepHookOptInCreatesMutableConsent() async {
+        let messages = AllowlistEntry(
+            bundleId: "com.apple.MobileSMS",
+            rationale: "Messages"
+        )
+        let (vm, userStore, _) = makeVM(
+            baselineEntries: [messages],
+            userEntries: [],
+            detectedApps: []
+        )
+
+        await vm.load()
+        await vm.setPosture(for: "com.apple.MobileSMS", to: .captureAndDeepHook)
+
+        let persisted = await userStore.entriesForTest()
+        XCTAssertEqual(persisted, [
+            UserAllowlistEntry(
+                bundleId: "com.apple.MobileSMS",
+                captureEnabled: true,
+                deepHookEnabled: true,
+                addedAt: "2026-05-29"
+            ),
+        ])
+    }
+
     // MARK: - Custom add
 
     func testAddCustomBundleSucceedsAndPersists() async {
