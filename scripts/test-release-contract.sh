@@ -20,6 +20,8 @@ NOTICE="$REPO_ROOT/NOTICE"
 TOML_LICENSE_TEST="$REPO_ROOT/scripts/test-toml-license-contract.sh"
 TOML_LICENSE_VERIFIER="$REPO_ROOT/scripts/verify-toml-license-contract.py"
 STAGE_RECALL_FFI="$REPO_ROOT/scripts/stage-recall-ffi.sh"
+E2E="$REPO_ROOT/scripts/e2e-clean-home.sh"
+E2E_CONTRACT="$REPO_ROOT/scripts/test-e2e-clean-home-contract.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -207,6 +209,8 @@ require_pattern "$CHECK" 'toml-license-contract\|bash\|lint\|scripts/test-toml-l
     'the unified local gate runs the TOML dependency license contract'
 require_pattern "$CHECK" 'retention-policy-contract\|bash\|test\|scripts/test-retention-policy-contract\.sh' \
     'the unified local gate runs the picker-to-worker retention contract'
+require_pattern "$CHECK" 'clean-home-contract\|bash\|lint\|scripts/test-e2e-clean-home-contract\.sh' \
+    'the unified local gate enforces the clean-home product contract'
 for script in test-release-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
     test-sparkle-keygen.sh test-sparkle-keypair.sh; do
@@ -217,6 +221,10 @@ require_literal "$RELEASE_CI" 'scripts/test-task-2-product-truth.sh' \
     'release CI runs the legal drift and product-truth contract'
 require_literal "$RELEASE_CI" 'scripts/test-retention-policy-contract.sh' \
     'release CI runs the picker-to-worker retention contract'
+require_literal "$RELEASE_CI" 'scripts/test-e2e-clean-home-contract.sh' \
+    'release CI runs the clean-home source contract'
+require_literal "$RELEASE_CI" 'scripts/e2e-clean-home.sh' \
+    'release CI executes the clean-home product path'
 require_literal "$RELEASE_CI" 'scripts/test-toml-license-contract.sh' \
     'release CI runs the TOML dependency license contract'
 for release_input in .github/workflows/publish-release.yml scripts/build-installer.sh \
@@ -227,6 +235,7 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     third_party/licenses/toml-license-manifest.json \
     scripts/verify-toml-license-contract.py scripts/test-toml-license-contract.sh \
     scripts/test-retention-policy-contract.sh scripts/stage-recall-ffi.sh \
+    scripts/e2e-clean-home.sh scripts/test-e2e-clean-home-contract.sh \
     apps/onboarding/Package.swift \
     apps/onboarding/Sources/OnboardingKit/RetentionStore.swift \
     apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift \
@@ -251,12 +260,19 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift \
-    apps/agent/src/retention_worker.rs apps/agent/src/bin/mci_agent.rs \
+    apps/agent/Cargo.toml apps/agent/src/retention_worker.rs \
+    apps/agent/src/bin/mci_agent.rs apps/agent/src/bin/mci_e2e_fixture.rs \
     apps/agent/tests/retention_preferences_contract.rs \
     CHANGELOG.md docs/STATUS.md rust-toolchain.toml; do
     require_literal "$RELEASE_CI" "'$release_input'" \
         "release CI watches $release_input"
 done
+
+if [[ -x "$E2E" && -x "$E2E_CONTRACT" ]]; then
+    pass 'clean-home executable and contract are committed and executable'
+else
+    fail 'clean-home executable and contract are committed and executable'
+fi
 require_literal "$RELEASE_CI" "'release-models.json'" \
     'release CI watches the tag-owned model manifest'
 reject_pattern "$CARGO" 'continue-on-error:[[:space:]]*true' \

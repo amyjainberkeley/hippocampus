@@ -50,6 +50,11 @@ path = "src/bin/mci_brain.rs"
 name = "mci-seed-brief"
 path = "src/bin/mci_seed_brief.rs"
 
+# Hermetic release fixture. Not copied into Hippocampus.app.
+[[bin]]
+name = "mci-e2e-fixture"
+path = "src/bin/mci_e2e_fixture.rs"
+
 [lints]
 workspace = true
 
