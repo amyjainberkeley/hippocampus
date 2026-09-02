@@ -298,6 +298,7 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     scripts/test-retention-policy-contract.sh scripts/stage-recall-ffi.sh \
     scripts/e2e-clean-home.sh scripts/test-e2e-clean-home-contract.sh \
     scripts/test-development-file-key-contract.sh scripts/test-no-quarantine-bypass.sh \
+    scripts/verify-parent-lifetime.sh \
     scripts/test-capture-overlap-corpus.sh 'tools/capture-overlap-corpus/**' \
     scripts/run-live-capture-overlap.sh scripts/test-live-capture-overlap-contract.sh \
     'scripts/live-capture/**' \

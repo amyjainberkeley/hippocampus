@@ -44,6 +44,10 @@ struct Args {
     /// No wire-schema change. Pairs with `--capture` (which is what
     /// actually drives the cascade per-frame).
     var probeDebug: Bool
+
+    /// Monitor stdin as an inherited parent-lifetime lease. Used only by the
+    /// packaged supervisor; EOF means the owning UI no longer exists.
+    var parentLeaseStdin: Bool
 }
 
 struct CaptureRuntime {
@@ -69,7 +73,8 @@ func parseArgs(_ argv: [String]) -> Args {
         denylistPath: defaultDenylistPath(),
         heartbeatSeconds: 30,
         oneShot: false,
-        probeDebug: false
+        probeDebug: false,
+        parentLeaseStdin: false
     )
     var i = 1
     while i < argv.count {
@@ -92,6 +97,8 @@ func parseArgs(_ argv: [String]) -> Args {
             // Dev-only STEP-2-FINDING-001 instrumentation. Logs every
             // AXSubroleProbe call to stderr. No wire-schema change.
             args.probeDebug = true
+        case "--parent-lease-stdin":
+            args.parentLeaseStdin = true
         case "--version":
             print("mci-capture-helper \(helperVersion)")
             exit(0)
@@ -120,6 +127,7 @@ func printUsage() {
       --denylist <path>         Read denylist TOML here. Default:
                                 ~/Library/Application Support/MCI/denylist.toml
       --heartbeat-seconds <n>   Emit HelperHealth every n seconds. Default 30.
+      --parent-lease-stdin      Exit and drain capture when stdin reaches EOF.
       --readiness-file <path>   Write a generation-bound startup receipt.
       --generation <token>      Expected supervisor process generation.
       --once                    Emit one frame and exit (CI smoke).
@@ -602,11 +610,17 @@ do {
     exit(80)
 }
 
-// Long-running mode. Cycle 3 adds SIGTERM/SIGINT handling +
-// real inbound IPC. For now Ctrl-C from a shell delivers SIGINT
-// which terminates the process; SIGPIPE on output close also kills.
 do {
-    try await loop.run()
+    if args.parentLeaseStdin {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await loop.run() }
+            group.addTask { try await ParentLifetimeLease.waitForEOF() }
+            _ = try await group.next()
+            group.cancelAll()
+        }
+    } else {
+        try await loop.run()
+    }
 } catch is CancellationError {
     // graceful shutdown
 } catch {
