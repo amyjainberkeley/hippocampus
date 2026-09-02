@@ -87,6 +87,7 @@ public struct SuppressionCascade: Sendable {
     private let blackedRegion: any BlackedRegionProbe
     private let denylistDrift: any DenylistDriftProbe
     private let knownSafeAppBundles: Set<String>
+    private let rawPixelExcludedAppBundles: Set<String>
 
     /// Construct a cascade orchestrator.
     ///
@@ -108,7 +109,8 @@ public struct SuppressionCascade: Sendable {
         denylist: any DenylistProbe,
         blackedRegion: any BlackedRegionProbe,
         denylistDrift: any DenylistDriftProbe = NoDenylistDrift(),
-        knownSafeAppBundles: Set<String> = []
+        knownSafeAppBundles: Set<String> = [],
+        rawPixelExcludedAppBundles: Set<String> = []
     ) {
         self.secureEventInput = secureEventInput
         self.axSecureSubrole = axSecureSubrole
@@ -116,6 +118,7 @@ public struct SuppressionCascade: Sendable {
         self.blackedRegion = blackedRegion
         self.denylistDrift = denylistDrift
         self.knownSafeAppBundles = knownSafeAppBundles
+        self.rawPixelExcludedAppBundles = rawPixelExcludedAppBundles
     }
 
     /// Apply the ADR-0013 cascade in binding order. First match wins.
@@ -189,6 +192,16 @@ public struct SuppressionCascade: Sendable {
         }
         if let title = context.windowTitle, denylist.windowTitleIsDenied(title) {
             return .suppress(reason: .denylistSource)
+        }
+
+        // Browser content has a structured WebExtension path with an explicit
+        // private-tab bit. ScreenCaptureKit has no equivalent private-window
+        // classification, so configured browser bundles fail closed before
+        // the callback obtains or retains a raw pixel buffer.
+        if let bundle = context.appBundleId,
+           rawPixelExcludedAppBundles.contains(bundle)
+        {
+            return .suppress(reason: .failsafeUnknown)
         }
 
         // §2 — OS-already-blacked-out region.

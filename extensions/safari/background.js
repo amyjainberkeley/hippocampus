@@ -9,13 +9,15 @@ const NATIVE_HOST_NAME = "ai.hippocampus.native_messaging";
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 
+function isPersistableTab(tab) {
+  // `undefined` is not evidence that a tab is non-private. Safari users can
+  // grant extensions access in Private Browsing, so require an explicit false.
+  return Boolean(tab) && tab.incognito === false;
+}
+
 api.runtime.onMessage.addListener((message, sender, _sendResponse) => {
   if (message.type !== "page_content") return;
-  if (!sender.tab) return;
-
-  // Defense-in-depth: Safari disables extensions in Private Browsing by
-  // default, but guard at runtime too (parity with Chromium extension).
-  if (sender.tab.incognito) return;
+  if (!isPersistableTab(sender.tab)) return;
 
   const nativeMessage = {
     url: message.payload.url,
@@ -24,8 +26,13 @@ api.runtime.onMessage.addListener((message, sender, _sendResponse) => {
     ts_us: message.payload.ts_us,
     tab_id: sender.tab.id || 0,
     source_browser: "safari",
+    incognito: false,
   };
 
   api.runtime.sendNativeMessage(NATIVE_HOST_NAME, nativeMessage)
     .catch(() => {});
 });
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { isPersistableTab };
+}

@@ -36,6 +36,7 @@
 
 use std::ffi::{CStr, CString};
 use std::path::PathBuf;
+use std::{fs, process};
 
 use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
 use mci_brain_ffi::{
@@ -728,6 +729,111 @@ fn ffi_delete_event_also_removes_the_events_encrypted_keyframe_blob() {
         "FFI deletion must unlink the keyframe blob"
     );
     unsafe { mci_brain_ffi_close(h) };
+}
+
+#[test]
+fn ffi_delete_event_returns_committed_outcome_when_blob_cleanup_warns() {
+    let (_dir, path, raw_key) = make_test_db();
+    let digest = "f".repeat(64);
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    fs::create_dir(&blob_dir).expect("create blobs");
+    fs::create_dir(blob_dir.join(format!("{digest}.bin"))).expect("create non-file blob candidate");
+
+    let id = {
+        let key = DbKey::from_bytes(raw_key);
+        let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+        writer
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 100,
+                app_bundle_id: Some("com.apple.Safari".into()),
+                window_title: Some("Delete me".into()),
+                url: None,
+                text: "event with malformed keyframe candidate".into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: Some(digest),
+                tab_id: None,
+                embedding: None,
+            })
+            .expect("put event")
+    };
+
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null());
+    let query = CString::new(format!(r#"{{"event_id":{}}}"#, id.0)).unwrap();
+    let raw = unsafe { mci_brain_ffi_delete_event(h, query.as_ptr()) };
+    assert!(
+        !raw.is_null(),
+        "post-commit cleanup warnings must return a deletion result: {}",
+        last_error_string()
+    );
+    let payload = unsafe { CStr::from_ptr(raw) }.to_string_lossy();
+    let result: DeleteResultJson = serde_json::from_str(&payload).expect("delete result");
+    unsafe { mci_brain_ffi_string_free(raw) };
+    assert_eq!(result.events_deleted, 1);
+    assert!(result.vacuum_ok);
+    assert!(!result.blob_cleanup_ok);
+    unsafe { mci_brain_ffi_close(h) };
+}
+
+#[test]
+fn ffi_delete_event_fails_closed_while_agent_run_sentinel_is_live() {
+    let (_dir, path, raw_key) = make_test_db();
+    let id = {
+        let key = DbKey::from_bytes(raw_key);
+        let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+        seed_event(&writer, 100, "app", "T", "", "must survive")
+    };
+    fs::write(
+        path.parent().unwrap().join(".running"),
+        process::id().to_string(),
+    )
+    .expect("write live sentinel");
+
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null());
+    let query = CString::new(format!(r#"{{"event_id":{}}}"#, id.0)).unwrap();
+    let raw = unsafe { mci_brain_ffi_delete_event(h, query.as_ptr()) };
+    assert!(raw.is_null(), "live ingestion must block Recall mutation");
+    assert!(last_error_string().contains("MCI_MUTATION_BLOCKED"));
+    unsafe { mci_brain_ffi_close(h) };
+
+    let key = DbKey::from_bytes(raw_key);
+    let reader = SqlCipherBrainStore::open_readonly(&path, &key).expect("reader open");
+    assert!(reader.get_event(id).expect("read event").is_some());
+}
+
+#[test]
+fn ffi_delete_event_fails_closed_on_malformed_run_sentinel() {
+    let (_dir, path, raw_key) = make_test_db();
+    let id = {
+        let key = DbKey::from_bytes(raw_key);
+        let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+        seed_event(&writer, 100, "app", "T", "", "must survive")
+    };
+    fs::write(path.parent().unwrap().join(".running"), "not-a-pid")
+        .expect("write malformed sentinel");
+
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null());
+    let query = CString::new(format!(r#"{{"event_id":{}}}"#, id.0)).unwrap();
+    let raw = unsafe { mci_brain_ffi_delete_event(h, query.as_ptr()) };
+    assert!(raw.is_null(), "ambiguous writer state must fail closed");
+    assert!(last_error_string().contains("MCI_MUTATION_BLOCKED"));
+    unsafe { mci_brain_ffi_close(h) };
+
+    let key = DbKey::from_bytes(raw_key);
+    let reader = SqlCipherBrainStore::open_readonly(&path, &key).expect("reader open");
+    assert!(reader.get_event(id).expect("read event").is_some());
 }
 
 // ---------------------------------------------------------------------------

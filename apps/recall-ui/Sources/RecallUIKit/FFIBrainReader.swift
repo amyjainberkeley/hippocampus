@@ -629,7 +629,7 @@ extension FFIBrainReader: PrivacyMutator {
             mci_brain_ffi_delete_event(h, q)
         }
         guard let rawJson else {
-            throw BrainReaderError.queryFailed(Self.consumeLastError())
+            throw Self.mutationError(Self.consumeLastError())
         }
         defer { mci_brain_ffi_string_free(rawJson) }
         return try Self.decodeDeleteResult(rawJson)
@@ -644,7 +644,7 @@ extension FFIBrainReader: PrivacyMutator {
         }
         guard let rawJson = mci_brain_ffi_delete_events_in_range(h, startTsUs, endTsUs)
         else {
-            throw BrainReaderError.queryFailed(Self.consumeLastError())
+            throw Self.mutationError(Self.consumeLastError())
         }
         defer { mci_brain_ffi_string_free(rawJson) }
         return try Self.decodeDeleteResult(rawJson)
@@ -678,7 +678,7 @@ extension FFIBrainReader: PrivacyMutator {
             mci_brain_ffi_wipe_brain(h, t)
         }
         guard let rawJson else {
-            throw BrainReaderError.queryFailed(Self.consumeLastError())
+            throw Self.mutationError(Self.consumeLastError())
         }
         defer { mci_brain_ffi_string_free(rawJson) }
         return try Self.decodeDeleteResult(rawJson)
@@ -693,13 +693,26 @@ extension FFIBrainReader: PrivacyMutator {
         }
         do {
             let wire = try JSONDecoder().decode(DeleteResultWire.self, from: data)
+            guard wire.committed else {
+                throw BrainReaderError.decodeFailed(
+                    "FFIBrainReader.delete: non-committed result payload"
+                )
+            }
             return DeleteResult(
+                committed: wire.committed,
                 eventsDeleted: wire.events_deleted,
-                vacuumOk: wire.vacuum_ok
+                vacuumOk: wire.vacuum_ok,
+                blobCleanupOk: wire.blob_cleanup_ok
             )
         } catch {
             throw BrainReaderError.decodeFailed("FFIBrainReader.delete: \(error)")
         }
+    }
+
+    private static func mutationError(_ message: String) -> BrainReaderError {
+        message.contains("MCI_MUTATION_BLOCKED")
+            ? .mutationBlocked
+            : .queryFailed(message)
     }
 }
 
@@ -708,6 +721,8 @@ private struct DeleteEventPayload: Encodable {
 }
 
 private struct DeleteResultWire: Decodable {
+    let committed: Bool
     let events_deleted: UInt64
     let vacuum_ok: Bool
+    let blob_cleanup_ok: Bool
 }

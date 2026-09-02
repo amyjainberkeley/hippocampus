@@ -29,6 +29,9 @@ serde_json = "1"
 # Cycle 8.47 — `getrandom` for the wipe-confirmation token (32 random
 # bytes hex-encoded). Already on the workspace lockfile via mci-core.
 getrandom  = "0.3.4"
+# Reuses the agent's safe `kill(pid, 0)` wrapper to honor its `.running`
+# writer sentinel before Recall opens a transient mutation connection.
+rustix = { version = "1.1.4", default-features = false, features = ["process", "std"] }
 
 [dev-dependencies]
 # Stub feature on mci-brain gives us NoopChunker / FixedDimEmbedder /

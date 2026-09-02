@@ -325,7 +325,8 @@ let cascade = SuppressionCascade(
     axSecureSubrole: AXSubroleProbe(debugLog: axProbeDebugSink),
     denylist: Denylist(entries: denylistEntries),
     blackedRegion: blackedRegionProbe,
-    knownSafeAppBundles: cascadeEligibleBundles
+    knownSafeAppBundles: cascadeEligibleBundles,
+    rawPixelExcludedAppBundles: BrowserPixelCapturePolicy.excludedBundleIds
 )
 
 let loop = HelperMainLoop(

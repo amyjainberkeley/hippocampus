@@ -9,6 +9,13 @@
 
 const MAX_TEXT_LENGTH = 200000;
 
+function isPrivateContext() {
+  const api = typeof browser !== "undefined" ? browser : chrome;
+  return Boolean(
+    api && api.extension && api.extension.inIncognitoContext === true,
+  );
+}
+
 const BLOCKED_PROTOCOLS = new Set([
   "data:",
   "safari-extension:",
@@ -26,6 +33,9 @@ function isBlockedURL(url) {
 }
 
 function extractPageContent() {
+  // Safari 17+ lets users grant an extension access in Private Browsing.
+  // Refuse before touching document.body so private text is never extracted.
+  if (isPrivateContext()) return null;
   if (isBlockedURL(window.location.href)) return null;
 
   const text = (document.body && document.body.innerText) || "";
@@ -47,6 +57,7 @@ function extractPageContent() {
 }
 
 function sendContent() {
+  if (isPrivateContext()) return;
   const content = extractPageContent();
   if (!content) return;
   if (!content.text && !content.title) return;
@@ -98,3 +109,12 @@ window.addEventListener("popstate", () => {
 });
 
 debouncedSend();
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    extractPageContent,
+    isBlockedURL,
+    isPrivateContext,
+    MAX_TEXT_LENGTH,
+  };
+}

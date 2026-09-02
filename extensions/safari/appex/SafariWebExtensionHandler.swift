@@ -39,6 +39,12 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 
     @discardableResult
     private func forward(_ message: [String: Any]) -> Bool {
+        // Require the browser-owned tab classification to say non-private.
+        // Missing or malformed state fails closed, before App Group storage.
+        guard message["incognito"] as? Bool == false else {
+            return false
+        }
+
         guard let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: Self.groupID
         ) else {

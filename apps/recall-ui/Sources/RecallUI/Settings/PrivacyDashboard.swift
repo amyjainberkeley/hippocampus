@@ -160,6 +160,8 @@ struct PrivacyDashboard: View {
                     details: [
                         "count": "\(result.eventsDeleted)",
                         "range_hours": "24",
+                        "vacuum_ok": "\(result.vacuumOk)",
+                        "blob_cleanup_ok": "\(result.blobCleanupOk)",
                     ]
                 )
             case .deleteEverything:
@@ -167,17 +169,17 @@ struct PrivacyDashboard: View {
                 result = try await mutator.wipeBrain(token: token)
                 AuditLog.shared.record(
                     action: .wipeBrain,
-                    details: ["count": "\(result.eventsDeleted)"]
+                    details: [
+                        "count": "\(result.eventsDeleted)",
+                        "vacuum_ok": "\(result.vacuumOk)",
+                        "blob_cleanup_ok": "\(result.blobCleanupOk)",
+                    ]
                 )
             }
-            banner =
-                "Removed \(result.eventsDeleted) events."
-                + (result.vacuumOk ? "" : " (disk space will reclaim on next VACUUM)")
+            banner = DeletionPresentation.successBanner(for: result)
             await reloadAll()
         } catch {
-            // Cycle 8.54 copy audit — reassuring copy (nothing was
-            // removed) instead of leaking the raw `\(error)`.
-            errorMessage = UserFacingCopy.deleteFailedBanner
+            errorMessage = DeletionPresentation.failureBanner(for: error)
         }
         isMutating = false
     }

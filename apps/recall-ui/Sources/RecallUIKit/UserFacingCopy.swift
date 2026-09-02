@@ -52,6 +52,9 @@ public enum UserFacingCopy {
     public static let deleteFailedBanner =
         "Delete didn\u{2019}t go through. Nothing was removed — "
         + "your captures are unchanged. Try again in a moment."
+    public static let deleteBlockedBanner =
+        "Hippocampus is updating your memory. Quit Hippocampus, leave "
+        + "this window open, then try deleting again."
     public static let dashboardLoadFailedBanner =
         "The Privacy Dashboard couldn\u{2019}t load right now. "
         + "Try relaunching Hippocampus."
