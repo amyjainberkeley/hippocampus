@@ -237,6 +237,7 @@ final class ProcessSupervisorTests: XCTestCase {
             XCTAssertNil(environment["MCI_DEVELOPMENT_FILE_KEY"])
             XCTAssertNil(environment["HIPPOCAMPUS_ENABLE_V2P1"])
         }
+        XCTAssertEqual(plan.agentEnvironment["MCI_CAPTURE_ENABLED"], "0")
     }
 
     func test_launch_plan_includes_capture_only_for_explicit_setting() {
@@ -254,6 +255,25 @@ final class ProcessSupervisorTests: XCTestCase {
         )
 
         XCTAssertTrue(plan.helperArguments.contains("--capture"))
+        XCTAssertEqual(plan.agentEnvironment["MCI_CAPTURE_ENABLED"], "1")
+    }
+
+    func test_start_with_capture_disabled_does_not_start_safari_ingestion() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: false)
+        topology.readinessResults = [.success(())]
+
+        try await supervisor.startAndWaitForReadiness()
+
+        XCTAssertNil(supervisor.safariInboxStats)
+    }
+
+    func test_start_with_capture_enabled_starts_safari_ingestion() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.success(())]
+
+        try await supervisor.startAndWaitForReadiness()
+
+        XCTAssertNotNil(supervisor.safariInboxStats)
     }
 
     func test_startup_denial_never_reaches_running() async {

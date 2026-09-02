@@ -4,6 +4,21 @@ import XCTest
 
 final class SafariInboxReaderTests: XCTestCase {
 
+    func testCaptureGenerationMustMatchCurrentTopology() {
+        XCTAssertTrue(SafariInboxReader.matchesCaptureGeneration(
+            payload: ["capture_generation": "generation-2"],
+            expected: "generation-2"
+        ))
+        XCTAssertFalse(SafariInboxReader.matchesCaptureGeneration(
+            payload: ["capture_generation": "generation-1"],
+            expected: "generation-2"
+        ))
+        XCTAssertFalse(SafariInboxReader.matchesCaptureGeneration(
+            payload: [:],
+            expected: "generation-2"
+        ))
+    }
+
     // MARK: - URL Denylist
 
     func testDeniedURLsBlocked() {

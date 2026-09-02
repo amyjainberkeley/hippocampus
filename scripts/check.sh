@@ -32,6 +32,8 @@ LANES=(
     "swift-test-helper|swift|test|swift test --package-path adapters/macos/MCICaptureHelper"
     "swift-test-recall-ui|swift|test|swift test --package-path apps/recall-ui"
     "swift-test-onboarding|swift|test|swift test --package-path apps/onboarding"
+    "swift-test-hippocampus|swift|test|swift test --package-path apps/hippocampus"
+    "capture-consent-behavior|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior"
     "bash-syntax|bash|lint|__bash_syntax_lane"
     "release-contract|bash|lint|scripts/test-release-contract.sh"
     "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
@@ -82,6 +84,8 @@ LANES
     swift-test-helper     swift test in adapters/macos/MCICaptureHelper
     swift-test-recall-ui  swift test in apps/recall-ui
     swift-test-onboarding swift test in apps/onboarding
+    swift-test-hippocampus swift test in apps/hippocampus
+    capture-consent-behavior executable capture authority and generation fixture
     bash-syntax           bash -n across repo *.sh files
     release-contract      release graph and artifact identity contract
     toml-license-contract pinned TOML dependency license contract
