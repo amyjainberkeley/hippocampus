@@ -47,6 +47,7 @@ LANES=(
     "clean-home-contract|bash|lint|scripts/test-e2e-clean-home-contract.sh"
     "development-app-contract|bash|lint|scripts/test-development-app-contract.sh"
     "app-launch-contract|bash|test|scripts/test-verify-app-launches.sh"
+    "demo-contract|bash|lint|scripts/test-demo-contract.sh"
     "keyframe-demo-fixture|bash|test|scripts/test-keyframe-demo-fixture.sh"
     "onboarding-product-truth|bash|lint|scripts/test-onboarding-product-truth.sh"
     "screenshot-assets|bash|lint|scripts/test-screenshot-assets.sh"
@@ -96,6 +97,7 @@ LANES
     clean-home-contract     isolated install-to-uninstall product contract
     development-app-contract debug-only app assembly remains release-safe
     app-launch-contract     isolated GUI launch and onboarding process contract
+    demo-contract           demo uses disposable state and bundled UI artifacts
     keyframe-demo-fixture   encrypted visual fixture uses the production codec
     onboarding-product-truth onboarding copy preserves local/provider boundaries
     screenshot-assets       screenshots stay light, non-placeholder, and 1280x800
