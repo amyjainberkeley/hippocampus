@@ -112,7 +112,7 @@ struct MemoryWorkspaceView: View {
     private var workspaceDetail: some View {
         VStack(spacing: 0) {
             WorkspaceFilmstrip(reader: reader)
-                .frame(minHeight: 100, idealHeight: 116, maxHeight: 132)
+                .frame(minHeight: 168, idealHeight: 184, maxHeight: 200)
             Divider().overlay(Color.brandCardBorder)
 
             Group {
@@ -203,19 +203,21 @@ private struct WorkspaceFilmstrip: View {
     @State private var hits: [Hit] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var selectedHit: Hit?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        HStack(spacing: MCI.Spacing.l) {
+        HStack(alignment: .center, spacing: MCI.Spacing.l) {
             VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
                 Label("Recent evidence", systemImage: "photo.on.rectangle.angled")
                     .mciFont(.bodyStrong)
                     .foregroundStyle(Color.brandFgPrimary)
+                    .lineLimit(1)
                 Text(countLabel)
                     .mciFont(.caption)
                     .foregroundStyle(Color.brandFgMuted)
             }
-            .frame(width: 142, alignment: .leading)
+            .frame(width: 148, alignment: .leading)
 
             if isLoading {
                 ProgressView()
@@ -235,7 +237,13 @@ private struct WorkspaceFilmstrip: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: MCI.Spacing.s) {
                         ForEach(hits) { hit in
-                            FilmstripCard(hit: hit)
+                            Button {
+                                selectedHit = hit
+                            } label: {
+                                FilmstripCard(hit: hit)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Inspect source evidence")
                         }
                     }
                     .padding(.vertical, MCI.Spacing.s)
@@ -248,6 +256,10 @@ private struct WorkspaceFilmstrip: View {
                 ? AnyShapeStyle(Color.brandBgSecondary)
                 : AnyShapeStyle(.ultraThinMaterial)
         )
+        .popover(item: $selectedHit, arrowEdge: .top) { hit in
+            DetailPaneView(hit: hit, reader: reader)
+                .frame(width: 440, height: 520)
+        }
         .task {
             await load()
         }
@@ -282,27 +294,50 @@ private struct FilmstripCard: View {
         VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
             EvidenceThumbnail(
                 url: hit.thumbnailURL,
-                size: CGSize(width: 88, height: 55),
-                maxPixelSize: 220
+                size: CGSize(width: 152, height: 86),
+                maxPixelSize: 384
             )
-            Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
-                .font(MCI.Font.mono)
-                .foregroundStyle(Color.brandMint)
+            HStack(spacing: MCI.Spacing.s) {
+                Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
+                    .font(MCI.Font.mono)
+                    .foregroundStyle(Color.brandMint)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Color.brandFgMuted)
+            }
             Text(Formatters.contextLine(hit))
                 .font(MCI.Font.footnote)
-                .foregroundStyle(Color.brandFgSecondary)
+                .foregroundStyle(Color.brandFgPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            Text(Formatters.evidenceSummary(hit))
+                .mciFont(.caption)
+                .foregroundStyle(Color.brandFgSecondary)
+                .lineLimit(2)
         }
-        .frame(width: 108, alignment: .leading)
-        .padding(.vertical, MCI.Spacing.s)
-        .padding(.horizontal, MCI.Spacing.xs)
-        .background(isHovered ? Color.brandBgElevated : Color.clear)
+        .frame(width: 152, height: 154, alignment: .topLeading)
+        .padding(MCI.Spacing.s)
+        .background(
+            isHovered
+                ? Color.brandBgElevated.opacity(0.96)
+                : Color.brandCardBg.opacity(0.54)
+        )
         .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
+                .stroke(
+                    isHovered ? Color.brandMintDim.opacity(0.55) : Color.brandCardBorder,
+                    lineWidth: 0.5
+                )
+        }
+        .shadow(color: Color.black.opacity(isHovered ? 0.08 : 0.03), radius: 8, y: 3)
+        .scaleEffect(isHovered ? 1.01 : 1)
         .onHover { isHovered = $0 }
         .animation(MCI.Motion.snap, value: isHovered)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Formatters.contextLine(hit))
+        .accessibilityHint("Opens the source evidence")
     }
 }
 
