@@ -535,28 +535,21 @@ final class BuildAppScriptTests: XCTestCase {
         )
     }
 
-    func test_missing_ner_exits_with_convert_command() throws {
+    func test_missing_ner_uses_tier_one_extraction_instead_of_blocking_release() throws {
         let fixture = try makeFixture(
             includeChangelog: true,
             includeManifest: true,
             includeEmbedder: true
         )
         let result = try runFixture(fixture)
+        XCTAssertEqual(result.status, 0, "missing optional NER must not block: \(result.output)")
         XCTAssertTrue(
-            result.status != 0,
-            "missing NER model must fail the build, got: \(result.output)"
-        )
-        XCTAssertTrue(
-            result.output.contains("FATAL: bert_base_NER_INT8"),
-            "expected NER failure, got: \(result.output)"
-        )
-        XCTAssertTrue(
-            result.output.contains("python scripts/convert_ner.py"),
-            "missing NER must name convert_ner.py, got: \(result.output)"
+            result.output.contains("BERT NER is unavailable; Tier 1 entity extraction remains active"),
+            "expected truthful NER fallback, got: \(result.output)"
         )
     }
 
-    func test_missing_qwen_exits_with_download_command() throws {
+    func test_missing_qwen_uses_extractive_briefs_instead_of_blocking_release() throws {
         let fixture = try makeFixture(
             includeChangelog: true,
             includeManifest: true,
@@ -564,17 +557,10 @@ final class BuildAppScriptTests: XCTestCase {
             includeNER: true
         )
         let result = try runFixture(fixture)
+        XCTAssertEqual(result.status, 0, "missing optional Qwen must not block: \(result.output)")
         XCTAssertTrue(
-            result.status != 0,
-            "missing Qwen model must fail the build, got: \(result.output)"
-        )
-        XCTAssertTrue(
-            result.output.contains("FATAL: Qwen3-1.7B-FP16"),
-            "expected Qwen failure, got: \(result.output)"
-        )
-        XCTAssertTrue(
-            result.output.contains("curl -L"),
-            "missing Qwen must name the documented download command, got: \(result.output)"
+            result.output.contains("Qwen3 is unavailable; evidence-cited extractive briefs remain active"),
+            "expected truthful brief fallback, got: \(result.output)"
         )
     }
 

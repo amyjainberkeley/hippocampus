@@ -502,14 +502,8 @@ elif [[ -d "$NER_PACKAGE" ]]; then
     mkdir -p "$NER_DEST_DIR"
     rm -rf "$NER_DEST"
     xcrun coremlcompiler compile "$NER_PACKAGE" "$NER_DEST_DIR"
-elif [[ "$DEVELOPMENT_LITE" -eq 1 ]]; then
-    echo "DEVELOPMENT LITE: BERT NER is unavailable; sync entity extraction stays disabled."
 else
-    fatal \
-        "bert_base_NER_INT8.{mlpackage,mlmodelc} missing under $REPO_ROOT/models" \
-        "Run: pip install -r scripts/requirements-ml.txt" \
-        "Then: python scripts/convert_ner.py --verify --compile" \
-        "Refusing to ship a bundle whose sync NER tier is disabled."
+    echo "BERT NER is unavailable; Tier 1 entity extraction remains active."
 fi
 
 # Fail-loud NER-model gate — FATAL.
@@ -548,34 +542,10 @@ if [[ "$NER_SOURCE_PRESENT" -eq 1 ]]; then
     echo "  bert-base-NER bundled OK → $NER_DEST"
 fi
 
-# --- Bundle Qwen3-1.7B-FP16 Core ML brief-author model (cycle 8.42) ---
-#
-# Cycle 8.42 EnviousWispr peer-study finding — see
-# docs/research/2026-07-13-enviouswispr-peer-study.md §5. Prior to this
-# change, Qwen3-1.7B (~2.5 GB tarball, ~3.4 GB extracted) was fetched
-# from HuggingFace at first-run via `RealModelDownloader.download()`
-# with no fallback. A HuggingFace CDN throttle / 5xx (as EnviousWispr
-# experienced 2026-07-05, killing multiple installs at 15-min hangs)
-# would hang MCI's first-run onboarding at the "Prepare your brain"
-# slide with the same failure mode. Baking the model into the DMG
-# eliminates the first-run network dependency entirely, matching the
-# pattern bert-base-NER + Arctic Embed S already use above.
-#
-# The compiled `.mlmodelc` lives at `$REPO_ROOT/models/Qwen3-1.7B-FP16
-# .mlmodelc/` and is .gitignored (~3.4 GB — far too big to checkin).
-# For worktree builds, copy it from the primary checkout before
-# running: `cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/`.
-#
-# At runtime the brief worker resolves the model from
-# `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/
-# Qwen3-1.7B-FP16.mlmodelc/` — see `apps/agent/src/brief_worker.rs
-# ::default_model_dir()`. `BriefModelPresence.seedBundledQwen3IfNeeded()`
-# copies the bundled model from Contents/Resources/Models/qwen3-1.7b-fp16/
-# into that Application Support path on first launch, so the Rust
-# runtime finds the model at the same path it did after the pre-fix
-# HF download — zero runtime resolution change. The network-fetch
-# code path in `RealModelDownloader` is preserved as a fallback for
-# any future "lite edition" DMG variant that ships without the model.
+# --- Optional Qwen3-1.7B-FP16 Core ML prose model ---
+# Evidence-cited extractive briefs are the zero-download default. Custom builds
+# may include Qwen source artifacts; when present, validate and bundle the
+# model with its tokenizer as an optional wording upgrade.
 QWEN3_MODEL_ID="qwen3-1.7b-fp16"
 QWEN3_BASENAME="Qwen3-1.7B-FP16.mlmodelc"
 QWEN3_PACKAGE="$REPO_ROOT/models/Qwen3-1.7B-FP16.mlpackage"
@@ -585,29 +555,6 @@ QWEN3_DEST_DIR="$RESOURCES/Models/$QWEN3_MODEL_ID"
 QWEN3_DEST="$QWEN3_DEST_DIR/$QWEN3_BASENAME"
 QWEN3_TOKENIZER_DEST="$QWEN3_DEST_DIR/tokenizer.json"
 QWEN3_SOURCE_PRESENT=0
-QWEN3_DOWNLOAD_URL="$(
-    python3 - "$MODELS_MANIFEST_SRC" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as fh:
-    manifest = json.load(fh)
-
-for model in manifest.get("models", []):
-    if model.get("modelID") == "qwen3-1.7b-fp16":
-        print(model.get("downloadURL", ""))
-        break
-PY
-)"
-QWEN3_DOWNLOAD_CMD="mkdir -p models && curl -L \"$QWEN3_DOWNLOAD_URL\" -o /tmp/Qwen3-1.7B-FP16.mlmodelc.tar.gz && tar -xzf /tmp/Qwen3-1.7B-FP16.mlmodelc.tar.gz -C models"
-
-if [[ ! -f "$QWEN3_TOKENIZER" && "$DEVELOPMENT_LITE" -ne 1 ]]; then
-    fatal \
-        "Qwen tokenizer.json missing at $QWEN3_TOKENIZER" \
-        "Run: python scripts/convert_brief_model.py --output models/Qwen3-1.7B-FP16.mlpackage --verify" \
-        "Or reconstruct the immutable release archive, which must include models/tokenizer.json."
-fi
-
 if [[ -d "$QWEN3_COMPILED" ]]; then
     echo "Bundling pre-compiled $QWEN3_BASENAME (~3.4 GB — this may take ~30s)"
     QWEN3_SOURCE_PRESENT=1
@@ -620,29 +567,23 @@ elif [[ -d "$QWEN3_PACKAGE" ]]; then
     mkdir -p "$QWEN3_DEST_DIR"
     rm -rf "$QWEN3_DEST"
     xcrun coremlcompiler compile "$QWEN3_PACKAGE" "$QWEN3_DEST_DIR"
-elif [[ "$DEVELOPMENT_LITE" -eq 1 ]]; then
-    echo "DEVELOPMENT LITE: Qwen3 is unavailable; generated briefs stay disabled."
 else
-    fatal \
-        "$QWEN3_BASENAME missing under $REPO_ROOT/models" \
-        "Run: $QWEN3_DOWNLOAD_CMD" \
-        "Refusing to ship a bundle whose daily briefs silently fall back to run_disabled_idle."
+    echo "Qwen3 is unavailable; evidence-cited extractive briefs remain active."
 fi
 
-# Fail-loud Qwen3-model gate — FATAL.
-# Mirror of the NER gate above. Codified-WARNs-are-stops discipline
-# (cycle 8.25). If we attempted the copy/compile above, the compiled
-# model MUST be present in the bundle afterward. A silent cp failure
-# here would ship a DMG whose daily-brief tab hangs at the "Prepare
-# your brain" slide — the exact EnviousWispr failure class this fix
-# closes.
+# A custom build that provides Qwen must provide one complete, runnable unit.
 if [[ "$QWEN3_SOURCE_PRESENT" -eq 1 ]]; then
+    if [[ ! -f "$QWEN3_TOKENIZER" ]]; then
+        fatal \
+            "Qwen tokenizer.json missing at $QWEN3_TOKENIZER" \
+            "Run: python scripts/convert_brief_model.py --output models/Qwen3-1.7B-FP16.mlpackage --verify" \
+            "The optional Qwen model is present but cannot run without its tokenizer."
+    fi
     if [[ ! -d "$QWEN3_DEST" ]]; then
         echo "FATAL: $QWEN3_BASENAME missing at:"
         echo "         $QWEN3_DEST"
         echo "       after attempting to bundle it from the source model."
-        echo "       Refusing to ship a DMG whose daily-brief generation would silently"
-        echo "       fall back to run_disabled_idle on an installed app."
+        echo "       Refusing to advertise a richer prose model that cannot run."
         exit 1
     fi
     # Structural sanity: same .mlmodelc invariants as NER — model.mil,

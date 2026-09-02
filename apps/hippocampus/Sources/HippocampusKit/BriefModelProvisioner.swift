@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: TBD-private
 //
-// Coordinates first-launch provisioning of the bundled Qwen brief model.
-// The model bundle can be several gigabytes, so the copy must never occupy
-// AppKit's main actor or delay onboarding from appearing.
+// Coordinates first-launch provisioning when a custom build includes the
+// optional Qwen brief author. The multi-gigabyte copy must never occupy
+// AppKit's main actor or delay launch.
 
 import Combine
 import Foundation
@@ -16,7 +16,7 @@ public final class BriefModelProvisioner: ObservableObject {
         case provisioning
         /// The full model and tokenizer are available to the brief worker.
         case ready
-        /// This build does not include the bundled model (development-lite).
+        /// This build does not include the optional prose model.
         case unavailable
         /// Provisioning attempted and did not produce a usable model.
         case failed(String)
@@ -46,7 +46,7 @@ public final class BriefModelProvisioner: ObservableObject {
     }
 
     /// The disk remains authoritative even after a prior seed completed.
-    /// This protects the menu from claiming Daily Briefs are available after
+    /// This protects the menu from claiming richer wording is available after
     /// a user or cleanup tool removes Application Support while the app runs.
     public var isReadyOnDisk: Bool {
         state == .ready && isInstalled()

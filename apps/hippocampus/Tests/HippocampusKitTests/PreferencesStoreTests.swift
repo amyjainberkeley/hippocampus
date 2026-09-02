@@ -57,8 +57,6 @@ final class PreferencesStoreTests: XCTestCase {
                        "recall UI defaults to Search tab")
         XCTAssertEqual(store.retentionPolicy, .forever,
                        "retention defaults to forever (pruner idle)")
-        XCTAssertEqual(store.ollamaEndpoint, "",
-                       "Ollama endpoint defaults empty (bundled Qwen3)")
         XCTAssertEqual(store.customDatabasePath, "",
                        "DB path defaults empty (canonical location)")
 
@@ -76,7 +74,6 @@ final class PreferencesStoreTests: XCTestCase {
             store.showMenuBarIcon = false
             store.defaultRecallTab = .brief
             XCTAssertTrue(store.setRetentionPolicy(.thirtyDays))
-            store.ollamaEndpoint = "http://localhost:11434"
             store.customDatabasePath = "/tmp/custom.sqlite"
         }
         // New instance, same defaults — should re-read the persisted values.
@@ -84,7 +81,6 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.showMenuBarIcon)
         XCTAssertEqual(reloaded.defaultRecallTab, .brief)
         XCTAssertEqual(reloaded.retentionPolicy, .thirtyDays)
-        XCTAssertEqual(reloaded.ollamaEndpoint, "http://localhost:11434")
         XCTAssertEqual(reloaded.customDatabasePath, "/tmp/custom.sqlite")
     }
 
@@ -175,7 +171,6 @@ final class PreferencesStoreTests: XCTestCase {
             PreferencesStore.Keys.showMenuBarIcon,
             PreferencesStore.Keys.defaultRecallTab,
             PreferencesStore.Keys.retentionPolicy,
-            PreferencesStore.Keys.ollamaEndpoint,
             PreferencesStore.Keys.customDatabasePath,
         ]
         for key in allKeys {

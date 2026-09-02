@@ -128,7 +128,7 @@ public actor ModelDownloadManager {
 
             try Task.checkCancellation()
 
-            await self.setState(modelID: modelID, state: .verifying)
+            self.setState(modelID: modelID, state: .verifying)
 
             if let expectedHash = entry.sha256, expectedHash != "PLACEHOLDER_UNTIL_MODEL_IS_CONVERTED" {
                 let fileHash = try Self.sha256Hash(of: tempURL)
@@ -151,8 +151,7 @@ public actor ModelDownloadManager {
                 try FileManager.default.moveItem(at: tempURL, to: destFile)
             }
 
-            await self.setState(modelID: modelID, state: .ready)
-            UserDefaults.standard.set(true, forKey: "MCIBriefModelDownloaded")
+            self.setState(modelID: modelID, state: .ready)
             self.logger.info("model-download: \(modelID) ready")
         }
 
@@ -183,14 +182,6 @@ public actor ModelDownloadManager {
             try FileManager.default.removeItem(at: dir)
         }
         states[modelID] = .notStarted
-        // The brief author currently surfaces a single `qwen3-*` model
-        // to users. Any matching modelID clears the cross-process
-        // "downloaded" flag that StatusMenuView reads. Bundled models
-        // (e.g. arctic-embed-s-int8) never set this flag, so they
-        // can't accidentally clear it either.
-        if modelID.hasPrefix("qwen3-") {
-            UserDefaults.standard.set(false, forKey: "MCIBriefModelDownloaded")
-        }
         logger.info("model-download: deleted \(modelID)")
     }
 

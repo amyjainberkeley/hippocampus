@@ -49,32 +49,6 @@ struct HippocampusApp: App {
             MenuBarIcon(supervisor: appDelegate.supervisor)
         }
 
-        // Separate Window scene for the Daily Briefs model download.
-        // Previously this was a `.sheet(isPresented:)` attached to the
-        // menu view, but SwiftUI dismisses a MenuBarExtra menu on item
-        // tap BEFORE the sheet can present — the user saw "nothing
-        // happens" when clicking "Daily Briefs: Off — Download Model…"
-        // (CEO dogfood 2026-05-26). A real `Window` scene survives the
-        // menu close. `openWindow(id: "model-download")` from
-        // StatusMenuView triggers it.
-        Window("Download AI Model", id: "model-download") {
-            ModelDownloadView(
-                onDismiss: {
-                    closeModelDownloadWindow()
-                },
-                onComplete: {
-                    closeModelDownloadWindow()
-                }
-            )
-        }
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
-    }
-
-    private func closeModelDownloadWindow() {
-        for window in NSApp.windows where window.identifier?.rawValue == "model-download" {
-            window.close()
-        }
     }
 
     /// Wire the process-wide `PreferencesWindowController.shared` with
@@ -275,10 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.installBrowserHostManifests()
             self.startSupervisorOrDeferUntilOnboarded()
             self.armTCCStderrTail()
-            // Opening the product comes first. The bundled Qwen model can be
-            // several gigabytes, so BriefModelProvisioner performs its
-            // idempotent seed on a utility task and publishes a truthful
-            // state to the menu while onboarding is already visible.
+            // Custom builds may include the optional Qwen model. Seed it on a
+            // utility task without delaying the default extractive brief path.
             self.modelProvisioner.startIfNeeded()
         }
     }
@@ -435,11 +407,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Hippocampus main process has multiple window-creating
     /// surfaces:
     ///
-    ///   - The `Window("Download AI Model", id: "model-download")`
-    ///     SwiftUI Scene declared in `HippocampusApp.body`, opened by
-    ///     `openWindow(id:)` from the "Daily Briefs: Off — Download
-    ///     Model…" menu item and closed by
-    ///     `closeModelDownloadWindow()`.
     ///   - `NSAlert.runModal()` panels in `StatusMenuView`: About
     ///     (`openAboutWindow`), Reset TCC confirmation, error
     ///     alerts via `showAlert`, `KeyWrapAuditView` sheet.
