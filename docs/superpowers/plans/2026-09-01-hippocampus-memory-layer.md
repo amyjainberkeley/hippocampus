@@ -121,6 +121,7 @@
 - [ ] **Step 4: Implement bounded keyframe condensation** after privacy approval and before OCR persistence; protected frames never reach the policy.
 - [ ] **Step 5: Implement one asynchronous thumbnail loader** with cancellation, image downsampling, aspect-fill cropping, and no full-resolution retention in view state.
 - [ ] **Step 6: Replace the timeline placeholder** with decoded evidence and meaningful app/time metadata.
+- [x] **Step 6a: Complete privacy deletion.** Event, range, scheduled retention, and full-brain deletion remove their unreferenced encrypted blobs; every retention cycle safely reconciles canonical crash orphans and stale temp files after a one-hour grace period.
 - [ ] **Step 7: Run focused suites and a 30-minute synthetic soak** to measure frame, OCR, retained-keyframe, CPU, and disk counters.
 - [ ] **Step 8: Commit** `feat: retain and render useful visual evidence`.
 

@@ -1193,8 +1193,9 @@ pub unsafe extern "C" fn mci_brain_ffi_summary_stats(h: *mut Handle) -> *mut c_c
 
 /// Delete a single event by id. CASCADE removes `event_vectors`, `chunks`,
 /// `entity_mentions` rows referencing this event id (per the migration-0001
-/// / migration-0004 ON DELETE CASCADE clauses). Also `VACUUM`s so the
-/// freed pages are returned to the OS immediately.
+/// / migration-0004 ON DELETE CASCADE clauses). The transient writer also
+/// removes the event's encrypted keyframe file when no surviving event shares
+/// its digest. Finally, it `VACUUM`s so freed database pages return to the OS.
 ///
 /// `event_id_json` is a UTF-8 JSON string of shape `{"event_id":<u64>}`.
 ///
@@ -1254,8 +1255,8 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
 }
 
 /// Delete all events whose `ts_us` falls in the inclusive range
-/// `[start_ts_us, end_ts_us]`. CASCADE + VACUUM per the single-event
-/// path. Powers the Privacy Dashboard's "Delete last 24 hours" +
+/// `[start_ts_us, end_ts_us]`. CASCADE + encrypted keyframe cleanup + VACUUM
+/// follow the single-event path. Powers the Privacy Dashboard's "Delete last 24 hours" +
 /// "Delete this hour / day" range actions.
 ///
 /// # Safety
@@ -1331,7 +1332,8 @@ pub unsafe extern "C" fn mci_brain_ffi_prepare_wipe(h: *mut Handle) -> *mut c_ch
     json_to_c_string(&token)
 }
 
-/// Wipe every user-content row from the brain and VACUUM.
+/// Wipe every user-content row and referenced encrypted keyframe blob from the
+/// brain, then VACUUM the database.
 ///
 /// Requires `token` to match the token most recently returned by
 /// [`mci_brain_ffi_prepare_wipe`], not yet expired (60s TTL). The token

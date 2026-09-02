@@ -116,7 +116,7 @@ Strategic note (per `docs/STATE.md` 2026-05-20 FIRE ALARM): screenpipe shipped a
     entities        TEXT
   );
   ```
-- **Blob store (keyframes).** Per ADR-0008 §1.5 the keyframe binary lives in a content-addressed encrypted blob file under the user's app-support dir; `events.keyframe_blob` is the relative path. Per-blob key derived HKDF(master, content_hash). Phase 3 P3.5 (OCR pipeline) writes the keyframe only when the cascade `.allow`s — never for `.suppress` paths.
+- **Blob store (keyframes).** Per ADR-0008 §1.5 the keyframe binary lives in a content-addressed encrypted blob file under the user's app-support dir; `events.keyframe_blob` stores its lowercase SHA-256 digest and resolves to `blobs/<digest>.bin`. Per-blob key derived HKDF(master, content_hash). Phase 3 P3.5 (OCR pipeline) writes the keyframe only when the cascade `.allow`s — never for `.suppress` paths.
 - **One file, one writer** discipline preserved (ADR-0008 §1.4 + CLAUDE.md "PGLite is single-writer" note for the gbrain analogy). The agent process owns the single write connection; recall UI + agent API loopback use read-only connections.
 
 #### 1.5 Retriever — hybrid FTS5 + sqlite-vec + min-max CC fusion + query router per ADR-0010

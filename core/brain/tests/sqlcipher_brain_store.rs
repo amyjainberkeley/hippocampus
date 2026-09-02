@@ -1321,6 +1321,59 @@ fn delete_event_removes_the_row_and_cascades_vectors() {
 }
 
 #[test]
+fn delete_event_removes_its_unreferenced_encrypted_keyframe_blob() {
+    let (_dir, path) = tmp("delete_event_blob.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let digest = "a".repeat(64);
+    let unrelated_digest = "b".repeat(64);
+    let blob_path = blob_dir.join(format!("{digest}.bin"));
+    let unrelated_path = blob_dir.join(format!("{unrelated_digest}.bin"));
+    std::fs::write(&blob_path, b"encrypted-keyframe").expect("write keyframe");
+    std::fs::write(&unrelated_path, b"unrelated").expect("write unrelated blob");
+
+    let mut event = blank_event(100, "delete me with my keyframe");
+    event.keyframe_blob = Some(digest);
+    let id = store.put_event(&event).expect("put event");
+
+    assert_eq!(store.delete_event(id).expect("delete event"), 1);
+    assert!(!blob_path.exists(), "deleted event blob must be unlinked");
+    assert!(
+        unrelated_path.exists(),
+        "targeted deletion must not sweep unrelated files"
+    );
+}
+
+#[test]
+fn delete_event_keeps_a_keyframe_blob_until_its_last_reference_is_deleted() {
+    let (_dir, path) = tmp("delete_shared_blob.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+    let digest = "7".repeat(64);
+    let blob_path = blob_dir.join(format!("{digest}.bin"));
+    std::fs::write(&blob_path, b"shared encrypted keyframe").expect("write blob");
+
+    let mut first = blank_event(100, "first reference");
+    first.keyframe_blob = Some(digest.clone());
+    let first_id = store.put_event(&first).expect("put first");
+    let mut second = blank_event(200, "second reference");
+    second.keyframe_blob = Some(digest);
+    let second_id = store.put_event(&second).expect("put second");
+
+    assert_eq!(store.delete_event(first_id).expect("delete first"), 1);
+    assert!(
+        blob_path.exists(),
+        "shared blob must remain while referenced"
+    );
+    assert_eq!(store.delete_event(second_id).expect("delete second"), 1);
+    assert!(!blob_path.exists(), "last-reference deletion removes blob");
+}
+
+#[test]
 fn delete_event_returns_zero_for_missing_id() {
     let (_dir, path) = tmp("delete_missing.sqlite");
     let key = test_key();
@@ -1356,6 +1409,37 @@ fn delete_events_in_range_removes_only_events_in_window() {
 }
 
 #[test]
+fn delete_events_in_range_removes_only_unreferenced_in_window_blobs() {
+    let (_dir, path) = tmp("delete_range_blobs.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let deleted_digest = "c".repeat(64);
+    let kept_digest = "d".repeat(64);
+    let deleted_path = blob_dir.join(format!("{deleted_digest}.bin"));
+    let kept_path = blob_dir.join(format!("{kept_digest}.bin"));
+    std::fs::write(&deleted_path, b"delete").expect("write deleted blob");
+    std::fs::write(&kept_path, b"keep").expect("write kept blob");
+
+    let mut inside = blank_event(200, "inside");
+    inside.keyframe_blob = Some(deleted_digest);
+    store.put_event(&inside).expect("put inside");
+    let mut outside = blank_event(400, "outside");
+    outside.keyframe_blob = Some(kept_digest);
+    store.put_event(&outside).expect("put outside");
+
+    assert_eq!(
+        store
+            .delete_events_in_range(150, 300)
+            .expect("delete range"),
+        1
+    );
+    assert!(!deleted_path.exists(), "in-window blob must be removed");
+    assert!(kept_path.exists(), "out-of-window blob must remain");
+}
+
+#[test]
 fn delete_events_in_range_rejects_inverted_window() {
     let (_dir, path) = tmp("delete_range_bad.sqlite");
     let key = test_key();
@@ -1385,12 +1469,141 @@ fn wipe_all_clears_events_and_leaves_meta_schema_intact() {
 }
 
 #[test]
+fn wipe_all_removes_every_referenced_encrypted_keyframe_blob() {
+    let (_dir, path) = tmp("wipe_blobs.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let first_digest = "e".repeat(64);
+    let second_digest = "f".repeat(64);
+    let first_path = blob_dir.join(format!("{first_digest}.bin"));
+    let second_path = blob_dir.join(format!("{second_digest}.bin"));
+    std::fs::write(&first_path, b"first").expect("write first blob");
+    std::fs::write(&second_path, b"second").expect("write second blob");
+
+    let mut first = blank_event(100, "first");
+    first.keyframe_blob = Some(first_digest);
+    store.put_event(&first).expect("put first");
+    let mut second = blank_event(200, "second");
+    second.keyframe_blob = Some(second_digest);
+    store.put_event(&second).expect("put second");
+
+    assert_eq!(store.wipe_all().expect("wipe all"), 2);
+    assert!(!first_path.exists(), "first wiped blob must be removed");
+    assert!(!second_path.exists(), "second wiped blob must be removed");
+}
+
+#[test]
 fn wipe_all_on_empty_store_returns_zero() {
     let (_dir, path) = tmp("wipe_empty.sqlite");
     let key = test_key();
     let store = SqlCipherBrainStore::new(&path, &key).expect("open");
     let n = store.wipe_all().expect("wipe_all");
     assert_eq!(n, 0);
+}
+
+#[test]
+fn reconcile_keyframe_blobs_removes_only_managed_orphans() {
+    let (_dir, path) = tmp("reconcile_blobs.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let referenced_digest = "3".repeat(64);
+    let orphan_digest = "4".repeat(64);
+    let referenced_path = blob_dir.join(format!("{referenced_digest}.bin"));
+    let orphan_path = blob_dir.join(format!("{orphan_digest}.bin"));
+    let unknown_path = blob_dir.join("do-not-touch.txt");
+    let stale_temp_path = blob_dir.join(format!(
+        ".{}.00000000-0000-4000-8000-000000000000.tmp",
+        "5".repeat(64)
+    ));
+    std::fs::write(&referenced_path, b"referenced").expect("write referenced blob");
+    std::fs::write(&orphan_path, b"orphan").expect("write orphan blob");
+    std::fs::write(&unknown_path, b"unknown").expect("write unknown file");
+    std::fs::write(&stale_temp_path, b"partial").expect("write stale temp");
+
+    let mut event = blank_event(100, "referenced");
+    event.keyframe_blob = Some(referenced_digest);
+    store.put_event(&event).expect("put referenced event");
+
+    let stats = store
+        .reconcile_keyframe_blobs(std::time::Duration::ZERO)
+        .expect("reconcile blobs");
+
+    assert_eq!(stats.orphaned_blobs_deleted, 1);
+    assert_eq!(stats.stale_temporary_files_deleted, 1);
+    assert!(referenced_path.exists(), "referenced blob must remain");
+    assert!(!orphan_path.exists(), "managed orphan must be removed");
+    assert!(
+        !stale_temp_path.exists(),
+        "stale managed temp must be removed"
+    );
+    assert!(unknown_path.exists(), "unknown files must never be removed");
+}
+
+#[test]
+fn reconcile_keyframe_blobs_retains_recent_orphans_inside_the_grace_period() {
+    let (_dir, path) = tmp("reconcile_recent_blob.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+    let orphan = blob_dir.join(format!("{}.bin", "8".repeat(64)));
+    std::fs::write(&orphan, b"possibly in flight").expect("write recent orphan");
+
+    let stats = store
+        .reconcile_keyframe_blobs(std::time::Duration::from_secs(3_600))
+        .expect("reconcile blobs");
+
+    assert_eq!(stats.recent_orphans_retained, 1);
+    assert!(
+        orphan.exists(),
+        "recent orphan must survive the grace period"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn reconcile_keyframe_blobs_never_follows_a_managed_name_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let (_dir, path) = tmp("reconcile_symlink_blob.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+    let external = path.parent().expect("brain parent").join("external.bin");
+    std::fs::write(&external, b"external").expect("write external target");
+    let link = blob_dir.join(format!("{}.bin", "9".repeat(64)));
+    symlink(&external, &link).expect("create symlink");
+
+    let stats = store
+        .reconcile_keyframe_blobs(std::time::Duration::ZERO)
+        .expect("reconcile blobs");
+
+    assert_eq!(stats.orphaned_blobs_deleted, 0);
+    assert!(
+        link.symlink_metadata().is_ok(),
+        "symlink must remain untouched"
+    );
+    assert_eq!(std::fs::read(&external).expect("read target"), b"external");
+}
+
+#[test]
+fn reconcile_keyframe_blobs_counts_missing_live_references_without_creating_files() {
+    let (_dir, path) = tmp("reconcile_missing_blob.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let mut event = blank_event(100, "missing keyframe evidence");
+    event.keyframe_blob = Some("a".repeat(64));
+    store.put_event(&event).expect("put event");
+
+    let stats = store
+        .reconcile_keyframe_blobs(std::time::Duration::ZERO)
+        .expect("reconcile blobs");
+
+    assert_eq!(stats.referenced_blobs_missing, 1);
+    assert_eq!(stats.orphaned_blobs_deleted, 0);
+    assert!(!path.parent().expect("brain parent").join("blobs").exists());
 }
 
 // ---------------------------------------------------------------------------
