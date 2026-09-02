@@ -56,8 +56,9 @@ candidate to trusted evidence.
 7. Retrieval and display budgets are separate. The verifier receives at most
    eight ranked canonical events by default even when the caller requests one
    visible result. Only after a well-formed verdict cites immutable candidate
-   IDs does the retrieval boundary filter to those citations and apply the
-   caller's display limit.
+   IDs does the retrieval boundary filter to those citations. The complete
+   bounded citation set is preserved; the caller's display limit applies only
+   to untrusted related-context fallback.
 
 ## Public v2 fixture audit
 
