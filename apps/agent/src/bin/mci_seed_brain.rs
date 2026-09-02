@@ -12,7 +12,7 @@
 //! - It is **not** a production code path. The synthetic events carry
 //!   `app_bundle_id = "com.mci.demo.seed.*"` so they are trivially
 //!   distinguishable from real-capture events in any read pane.
-//! - It is **not** a substitute for exercising ScreenCaptureKit on a real
+//! - It is **not** a substitute for exercising `ScreenCaptureKit` on a real
 //!   Mac. It exists for deterministic downstream product verification.
 //! - It does **not** introduce any new write path into the brain store.
 //!   It calls [`mci_brain::BrainStore::put_event`] like every other writer
