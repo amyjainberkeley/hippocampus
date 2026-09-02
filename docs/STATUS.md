@@ -242,18 +242,16 @@ fixture has only six validation scenarios and lacks contradiction, temporal,
 synthesis, provenance, and order-metamorphic coverage. Evidence calibration is
 a product gate, not benchmark fine print.
 
-The locked v2 semantic-verifier corpus is
+The public v2 semantic-verifier fixture is
 `eval/evidence-verifier/v2-corpus.json` with SHA-256
 `d612bf537fbaa8453cd0a83075722f4e7fe8ff30afab86c5a2c33e4ea42041e4`.
-It has 48 cases across 24 split-exclusive scenarios, with 16 cases and
-eight scenarios in each of fit, calibration, and validation. Every split
-covers direct answers, paraphrase/coreference, temporal change,
-contradiction, cross-document synthesis, provenance enforcement, absent
-answers, concrete distractors, and both supporting and insufficient
-candidate-order metamorphics. The standard-library qualifier fails closed on
-malformed or invented provenance and passes its oracle/adversarial self-test.
-This qualifies the corpus harness, not a model; no production verifier has
-passed it yet.
+It has 48 cases across 24 short synthetic scenarios and usefully fails closed
+on malformed or invented provenance. A fresh audit found that its answer key
+is public, its partitions repeat templates, and it never scores a proposed
+answer. The scorer now labels success `fixture_passed`, sets
+`evaluation_scope` to `public_regression_smoke`, and always keeps
+`release_qualified` false. A blind claim-level corpus executed against the
+immutable signed runtime is required before a production verifier can qualify.
 
 ## Release Gates
 

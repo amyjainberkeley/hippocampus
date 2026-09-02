@@ -43,12 +43,26 @@ candidate to trusted evidence.
    degradation. The old score critic stays inspectable behind test/stub hooks
    for regression archaeology, but production construction does not install it
    and it cannot ship as the authority.
-6. A release verifier must pass a locked, scenario-disjoint corpus covering
+6. A release verifier must pass a blind, scenario-disjoint corpus covering
    direct answers, paraphrase/coreference, temporal changes, contradictions,
    cross-document synthesis, provenance, absent answers, concrete distractor
-   values, and candidate-order metamorphics. Qualification reports both
-   positive coverage and negative false-positive confidence bounds. The work
-   memory benchmark remains acceptance-only and cannot tune the verifier.
+   values, mixed evidence, source authority, OCR corruption, and adversarial
+   untrusted content. Inputs include a proposed answer decomposed into atomic
+   claims; outputs cite exact source spans or image regions for each claim.
+   Qualification invokes the immutable signed runtime and reports positive
+   coverage, false-support confidence bounds, citation precision/recall, and
+   calibration. The work-memory benchmark remains acceptance-only and cannot
+   tune the verifier.
+
+## Public v2 fixture audit
+
+The checked-in v2 corpus is retained only as a regression smoke test. Its
+answer key is public, its 48 cases reduce to 24 short synthetic scenarios, and
+its fit, calibration, and validation partitions repeat category and wording
+templates. It also does not contain the proposed answer whose claims need
+verification. Passing v2 therefore cannot set `validation_qualified` and
+cannot authorize production `Matched` outcomes. The v2 scorer reports
+`fixture_passed` separately and always reports `release_qualified: false`.
 
 ## Model decisions
 

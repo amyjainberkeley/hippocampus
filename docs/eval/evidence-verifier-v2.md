@@ -1,4 +1,10 @@
-# Evidence verifier v2 qualification
+# Evidence verifier v2 public regression smoke
+
+This fixture cannot qualify a release verifier. Its answer key is public, its
+scenario families repeat across splits, and it does not receive or score a
+proposed answer. It exists to test the three-way verdict and exact-citation
+contract quickly. Release qualification requires the blind, claim-level,
+signed-runtime evaluation defined by ADR-0038.
 
 The v2 evaluation separates evidence verification from retrieval and model
 execution. A candidate system receives each case's query, ordered
@@ -54,7 +60,9 @@ Malformed JSON, duplicate or missing case results, unknown case IDs, invalid
 verdict labels, and non-array citations return exit 2. Structurally valid but
 unsafe output, including invented citations, non-candidate citations, wrong
 verdicts, or order-sensitive answers, produces a report and returns exit 1.
-Only a qualified result returns exit 0.
+Only a result that passes this public fixture returns exit 0. Every score report
+sets `evaluation_scope` to `public_regression_smoke`, reports the result as
+`fixture_passed`, and keeps `release_qualified` false.
 
 ## Commands
 
@@ -76,10 +84,10 @@ python3 scripts/eval/evidence-verifier/test_qualify_v2.py
 `--skip-lock` exists only for focused temporary-corpus tests. Qualification
 runs should always use the checked-in SHA-256 lock.
 
-## Metrics
+## Smoke Metrics
 
-The report computes every metric for fit, calibration, and validation, but
-qualification thresholds apply to validation only:
+The report computes every metric for fit, calibration, and validation, but the
+fixture thresholds apply to the public validation partition only:
 
 | Metric | Validation threshold |
 |---|---:|
@@ -96,6 +104,6 @@ invented, non-candidate, missing, extra, or verdict-incompatible citations.
 Metamorphic consistency requires a reordered pair to preserve its verdict and
 citation set.
 
-The corpus is synthetic and deterministic. It is a release qualification gate,
-not a claim that these fixtures represent real user prevalence or retrieval
-quality.
+The corpus is synthetic and deterministic. It is a regression smoke test, not a
+claim about real user prevalence, retrieval quality, answer correctness, or
+release readiness.
