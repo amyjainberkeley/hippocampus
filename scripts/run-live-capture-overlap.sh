@@ -262,7 +262,11 @@ if (( PREFLIGHT_ONLY == 1 )); then
     exit 0
 fi
 
-RUN_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-live-overlap.XXXXXX")"
+# The agent's page-content endpoint is an AF_UNIX socket below the isolated
+# home. Darwin limits sockaddr_un paths to 104 bytes, while the per-user
+# TMPDIR prefix alone can exceed 60. Keep this verifier root intentionally
+# short so unrelated socket startup never degrades the capture proof.
+RUN_ROOT="$(mktemp -d "/tmp/hippo-live.XXXXXX")"
 chmod 700 "$RUN_ROOT"
 EVIDENCE_CREATED=1
 LOG_DIR="$RUN_ROOT/logs"
