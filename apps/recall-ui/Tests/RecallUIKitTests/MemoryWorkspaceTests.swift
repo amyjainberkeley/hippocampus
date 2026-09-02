@@ -53,6 +53,31 @@ final class MemoryWorkspaceTests: XCTestCase {
         XCTAssertEqual(MCI.Workspace.keyframeCountLabel(12), "12 keyframes")
     }
 
+    func testEvidenceSummaryStripsCaptureHeaderAndNormalizesWhitespace() {
+        let hit = Hit(
+            eventId: 9,
+            tsUs: 9,
+            appBundleId: "com.apple.Safari",
+            windowTitle: "Architecture",
+            url: "https://hippocampus.local/architecture",
+            ocrTextSnippet: "[app=Safari | title=Architecture | url=https://hippocampus.local/architecture | ts=2026-09-02T10:00:00Z]\nLocal   memory\nkeeps exact evidence.",
+            source: "timeline",
+            score: nil
+        )
+
+        XCTAssertEqual(
+            Formatters.evidenceSummary(hit),
+            "Local memory keeps exact evidence."
+        )
+    }
+
+    func testEvidenceSummaryNamesAKeyframeWithNoText() {
+        XCTAssertEqual(
+            Formatters.evidenceSummary(makeHit(id: 4, ocr: "", thumbnailPath: "/tmp/4.bin")),
+            "Visual evidence"
+        )
+    }
+
     func testWorkspaceShortcutMapIsUniqueAndResolvesSourcesToCommandSix() {
         let destinations = MCI.Workspace.primaryDestinations + MCI.Workspace.secondaryDestinations
         XCTAssertEqual(destinations.map(\.keyboardShortcut), ["1", "2", "3", "4", "5", "6", "7", "8"])

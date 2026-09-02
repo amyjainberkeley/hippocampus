@@ -94,6 +94,17 @@ public enum Formatters {
         return app
     }
 
+    /// Compact source-derived body shown under visual evidence previews.
+    /// Context headers and OCR whitespace churn are presentation-only noise;
+    /// the canonical stored event remains unchanged.
+    public static func evidenceSummary(_ hit: Hit, maxLen: Int = 120) -> String {
+        let body = stripContextHeader(hit.ocrTextSnippet)
+            .split(whereSeparator: \Character.isWhitespace)
+            .joined(separator: " ")
+        guard !body.isEmpty else { return "Visual evidence" }
+        return snippet(body, maxLen: maxLen)
+    }
+
     /// Render the source tag the row was retrieved with into a short
     /// display label. Keep the strings stable — tests assert on them.
     ///

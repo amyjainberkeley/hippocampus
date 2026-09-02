@@ -20,8 +20,6 @@ struct EvidenceThumbnail: View {
                     .aspectRatio(contentMode: .fill)
                     .frame(width: size.width, height: size.height)
                     .clipped()
-                    .blur(radius: 0.7)
-                    .saturation(0.9)
                     .accessibilityHidden(true)
             } else {
                 ZStack {
