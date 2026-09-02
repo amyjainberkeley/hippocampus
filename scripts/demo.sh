@@ -199,7 +199,7 @@ do_seed() {
 
     echo "Building the synthetic memory and brief seeders..."
     cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release \
-        --bin mci-seed-brain --bin mci-seed-brief 2>&1 | tail -3
+        --bin mci-agent --bin mci-seed-brain --bin mci-seed-brief 2>&1 | tail -3
 
     echo "Sealing three fixture images with the production keyframe codec..."
     local blob_dir="$MCI_DIR/blobs"
@@ -228,6 +228,9 @@ do_seed() {
         seed_args+=(--keyframe-digest "$digest")
     done
     "$REPO_ROOT/target/release/mci-seed-brain" "${seed_args[@]}"
+
+    echo "Running the production understanding pipeline..."
+    "$REPO_ROOT/target/release/mci-agent" enrich --db-path "$DB_PATH"
 
     echo "Seeding a synthetic daily brief..."
     "$REPO_ROOT/target/release/mci-seed-brief" \
@@ -332,8 +335,9 @@ do_mcp_demo() {
     RECALL_REQ='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mci_recall","arguments":{"query":"agent context handoff","limit":3}}}'
     CONTEXT_REQ='{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mci_context","arguments":{"focus":"agent context handoff","max_tokens":600,"max_evidence":5}}}'
     STATS_REQ='{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"mci_stats","arguments":{}}}'
+    EPISODES_REQ='{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"mci_episodes","arguments":{"limit":5}}}'
 
-    RESPONSES=$(printf '%s\n%s\n%s\n%s\n%s\n' "$INIT_REQ" "$LIST_REQ" "$RECALL_REQ" "$CONTEXT_REQ" "$STATS_REQ" | \
+    RESPONSES=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$INIT_REQ" "$LIST_REQ" "$RECALL_REQ" "$CONTEXT_REQ" "$STATS_REQ" "$EPISODES_REQ" | \
         "$AGENT" mcp-serve 2>/dev/null || true)
 
     if [[ -z "$RESPONSES" ]]; then
@@ -359,6 +363,10 @@ do_mcp_demo() {
 
     bold "--- mci_stats ---"
     echo "$RESPONSES" | sed -n '5p' | python3 -m json.tool 2>/dev/null || echo "$RESPONSES" | sed -n '5p'
+    echo ""
+
+    bold "--- mci_episodes ---"
+    echo "$RESPONSES" | sed -n '6p' | python3 -m json.tool 2>/dev/null || echo "$RESPONSES" | sed -n '6p'
     echo ""
 
     green "mcp-demo done."

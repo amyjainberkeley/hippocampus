@@ -24,6 +24,8 @@ grep -Fq '"name":"mci_context"' "$DEMO" || fail "MCP demo must request the bound
 grep -Fq -- '--keyframe-digest' "$DEMO" || fail "demo seed must include authenticated visual evidence"
 grep -Fq 'mci-seed-brief' "$DEMO" || fail "demo seed must include a daily brief"
 grep -Fq -- '--model-id "hippocampus-extractive"' "$DEMO" || fail "demo brief must disclose extractive provenance"
+grep -Fq 'target/release/mci-agent" enrich' "$DEMO" || fail "demo seed must run the production understanding pipeline"
+grep -Fq '"name":"mci_episodes"' "$DEMO" || fail "MCP demo must exercise derived work episodes"
 
 if grep -Fq 'MCI_DIR="$HOME/Library/Application Support/MCI"' "$DEMO"; then
     fail "demo must never point at the real memory database"

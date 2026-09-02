@@ -84,9 +84,9 @@ pub fn tool_definitions() -> serde_json::Value {
     serde_json::json!([
         {
             "name": ToolName::Recall.as_str(),
-            "description": "Search your screen memory. Hippocampus continuously captures \
-                             what you see on your Mac — apps, windows, browser tabs, page \
-                             content — and stores it in a private, encrypted local brain. \
+            "description": "Search your local work memory. Hippocampus records permitted \
+                             app, window, browser-tab, and page context after you opt in, \
+                             then stores it in a private, encrypted brain on this Mac. \
                              Use this tool to recall anything you've seen or done. Query \
                              with natural language: 'that article about Rust I read \
                              yesterday', 'what was I working on this morning', 'the URL \
@@ -267,5 +267,23 @@ mod tests {
             assert!(tool.get("description").is_some(), "missing description");
             assert!(tool.get("inputSchema").is_some(), "missing inputSchema");
         }
+    }
+
+    #[test]
+    fn recall_description_is_explicitly_opt_in() {
+        let definitions = tool_definitions();
+        let recall = definitions
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|tool| tool.get("name").and_then(|name| name.as_str()) == Some("mci_recall"))
+            .expect("recall definition");
+        let description = recall
+            .get("description")
+            .and_then(|value| value.as_str())
+            .expect("recall description");
+
+        assert!(description.contains("after you opt in"));
+        assert!(!description.contains("continuously captures"));
     }
 }

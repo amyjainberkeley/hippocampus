@@ -273,7 +273,7 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
             "com.mci.demo.seed.terminal",
             "Terminal — retrieval benchmark",
             "",
-            "$ cargo run -p mci-agent -- benchmark-work-memory\n24 cases: 21 answerable, 3 unanswerable\nHybrid recall @3: 100%\nMRR: 0.976\nLaunch qualified: false — all unanswerable cases still returned a result.",
+            "$ cargo run -p mci-agent -- benchmark-work-memory\n24 cases: 21 answerable, 3 unanswerable\nHybrid recall @3: 100%\nMRR: 0.976\nUnanswerable: 3/3 abstained, 0 false positives\nLaunch qualified: false — the evidence verifier remains validation-unqualified.",
         ),
         (
             "com.mci.demo.seed.safari",
@@ -285,7 +285,7 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
             "com.mci.demo.seed.linear",
             "Linear — HIP-142 · Calibrate abstention — In progress",
             "https://linear.app/atlas/issue/HIP-142/calibrate-abstention",
-            "Tune retrieval confidence on the synthetic work-memory benchmark. The release gate requires correct abstention on every unanswerable case without materially reducing answerable recall at three.",
+            "Validate the source-attributed evidence verifier on a held-out synthetic corpus. Ranking and relation-grounded abstention pass; trusted semantic matches remain gated until verifier calibration passes.",
         ),
         (
             "com.mci.demo.seed.vscode",
@@ -309,7 +309,7 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
             "com.mci.demo.seed.terminal",
             "Terminal — agent context handoff",
             "",
-            "$ mci-context --focus \"release readiness\" --max-tokens 600\nOutcome: evidence\n5 cited events selected\nThe packet includes open signing, model, capture-soak, and retrieval-calibration gates without exposing the database key.",
+            "$ mci-context --focus \"agent context handoff\" --max-tokens 600\nOutcome: observations_only\nCanonical evidence cited\nThe bounded packet preserves source and time without exposing the database key.",
         ),
         (
             "com.mci.demo.seed.notion",
@@ -586,6 +586,9 @@ mod tests {
         assert!(corpus.contains("retrieval benchmark"));
         assert!(corpus.contains("mci_context"));
         assert!(corpus.contains("launch lifecycle"));
+        assert!(corpus.contains("3/3 abstained, 0 false positives"));
+        assert!(corpus.contains("evidence verifier remains validation-unqualified"));
+        assert!(!corpus.contains("all unanswerable cases still returned a result"));
     }
 
     #[test]
