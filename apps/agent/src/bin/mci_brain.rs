@@ -38,12 +38,17 @@ use mci_core::crypto::DbKey;
 use std::fmt::Write as _;
 
 /// Resolve a raw or file key only for explicitly gated local development.
+fn normalized_development_key(value: &str) -> Option<String> {
+    let value = value.trim_matches(|character: char| character.is_ascii_whitespace());
+    mci_agent::key_resolver::is_valid_database_key(value).then(|| value.to_owned())
+}
+
 fn development_key_hex() -> Option<String> {
     if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
         return None;
     }
     if let Ok(key) = std::env::var("MCI_DB_KEY_HEX") {
-        if mci_agent::key_resolver::is_valid_database_key(&key) {
+        if let Some(key) = normalized_development_key(&key) {
             return Some(key);
         }
     }
@@ -51,7 +56,7 @@ fn development_key_hex() -> Option<String> {
     let path = PathBuf::from(home).join("Library/Application Support/MCI/dev.key");
     std::fs::read_to_string(&path)
         .ok()
-        .filter(|key| mci_agent::key_resolver::is_valid_database_key(key))
+        .and_then(|key| normalized_development_key(&key))
 }
 
 fn resolve_key_hex() -> Result<String, mci_agent::key_resolver::KeyResolutionError> {
@@ -704,6 +709,12 @@ fn run_restore(from: &std::path::Path, to: &std::path::Path, force: bool, key: &
 mod tests {
     use super::*;
     use mci_brain::{BrainStats, Event, EventId, EventRecord};
+
+    #[test]
+    fn development_key_accepts_a_newline_terminated_file_value() {
+        let key = "ab".repeat(32);
+        assert_eq!(normalized_development_key(&format!("{key}\n")), Some(key));
+    }
 
     fn argv(args: &[&str]) -> Vec<String> {
         std::iter::once("mci-brain")
