@@ -1384,6 +1384,107 @@ fn resolve_key_for_command(command: &str) -> Result<String, u8> {
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WriterCommand {
+    Init,
+    ImportSessions,
+    Enrich,
+    Brief,
+    McpSync,
+    EmbedBackfill,
+}
+
+impl WriterCommand {
+    #[cfg(test)]
+    const ALL: [Self; 6] = [
+        Self::Init,
+        Self::ImportSessions,
+        Self::Enrich,
+        Self::Brief,
+        Self::McpSync,
+        Self::EmbedBackfill,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Init => "init",
+            Self::ImportSessions => "import-sessions",
+            Self::Enrich => "enrich",
+            Self::Brief => "brief",
+            Self::McpSync => "mcp-sync",
+            Self::EmbedBackfill => "embed-backfill",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CommandWriterLease {
+    command: WriterCommand,
+    lock: Option<mci_agent::crash_recovery::RunLock>,
+}
+
+impl Drop for CommandWriterLease {
+    fn drop(&mut self) {
+        if let Some(lock) = self.lock.take() {
+            if let Err(error) = lock.release() {
+                eprintln!(
+                    "mci-agent {}: writer lease clean-release failed: {error}",
+                    self.command.label()
+                );
+            }
+        }
+    }
+}
+
+fn acquire_command_writer_lease(
+    command: WriterCommand,
+    db_path: &Path,
+) -> Result<CommandWriterLease, u8> {
+    let command_label = command.label();
+    let run_lock_path = lock_path_for_brain(db_path);
+    match acquire_lock(&run_lock_path) {
+        Ok((outcome, lock)) => {
+            if let LockAcquireOutcome::UncleanShutdown { stale_pid } = outcome {
+                eprintln!(
+                    "mci-agent {command_label}: prior writer ended uncleanly (stale pid {stale_pid:?})"
+                );
+            }
+            Ok(CommandWriterLease {
+                command,
+                lock: Some(lock),
+            })
+        }
+        Err(LockError::WriterLeaseHeld { owner_pid }) => {
+            eprintln!(
+                "mci-agent {command_label}: another writer owns the brain lease (pid {owner_pid:?}); refusing to mutate"
+            );
+            Err(26)
+        }
+        Err(error) => {
+            eprintln!(
+                "mci-agent {command_label}: cannot establish exclusive brain writer lease: {error}"
+            );
+            Err(26)
+        }
+    }
+}
+
+fn open_command_writer(
+    command: WriterCommand,
+    db_path: &Path,
+    key: &DbKey,
+    _lease: &CommandWriterLease,
+) -> Result<SqlCipherBrainStore, u8> {
+    let command_label = command.label();
+    SqlCipherBrainStore::new(db_path, key).map_err(|error| {
+        eprintln!(
+            "mci-agent {command_label}: open brain at {}: {error}",
+            db_path.display()
+        );
+        12
+    })
+}
+
 /// Register Hippocampus as an MCP server in Claude Code's MCP config
 /// (`~/.claude.json`). Merges the `hippocampus` entry under
 /// `mcpServers` without clobbering other servers. Includes an `env`
@@ -1546,6 +1647,15 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
 /// already has on disk, and indexes only the conversation text, never tool
 /// output or model reasoning.
 fn run_import_sessions_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
+    let lease = acquire_command_writer_lease(WriterCommand::ImportSessions, db_path)?;
+    run_import_sessions_with_lease(db_path, root, &lease)
+}
+
+fn run_import_sessions_with_lease(
+    db_path: &Path,
+    root: &Path,
+    lease: &CommandWriterLease,
+) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("import-sessions")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
         eprintln!("mci-agent import-sessions: resolved database key is malformed.");
@@ -1553,16 +1663,7 @@ fn run_import_sessions_cmd(db_path: &std::path::Path, root: &std::path::Path) ->
     };
     let key = DbKey::from_bytes(key_bytes);
 
-    let store = match SqlCipherBrainStore::new(db_path, &key) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "mci-agent import-sessions: open brain at {}: {e}",
-                db_path.display()
-            );
-            return Err(12);
-        }
-    };
+    let store = open_command_writer(WriterCommand::ImportSessions, db_path, &key, lease)?;
 
     eprintln!("mci-agent import-sessions: reading {}", root.display());
     let stats = match mci_agent::import_sessions::import_sessions(&store, root, |s| {
@@ -1728,6 +1829,8 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
 /// Safe to re-run. It never overwrites an existing key, because doing so
 /// would make an existing brain permanently unreadable.
 fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
+    let lease = acquire_command_writer_lease(WriterCommand::Init, db_path)?;
+
     // 1. Key. This is the same migration/validation path the app runs before
     // starting capture, so CLI initialization cannot fork custody behavior.
     run_ensure_key_cmd(db_path)?;
@@ -1735,7 +1838,7 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
     // 2. Import. Missing transcripts is not an error: plenty of people have
     // never run Claude Code, and they should still get a working install.
     if root.exists() {
-        match run_import_sessions_cmd(db_path, root) {
+        match run_import_sessions_with_lease(db_path, root, &lease) {
             Ok(()) => {}
             Err(code) => return Err(code),
         }
@@ -1747,7 +1850,7 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
     }
 
     // 3. Index.
-    run_enrich_cmd(db_path, DEFAULT_EMBED_BATCH_SIZE)?;
+    run_enrich_with_lease(db_path, DEFAULT_EMBED_BATCH_SIZE, &lease)?;
 
     // 4. Register every detected local client with reference-only custody.
     run_connect_all_cmd(db_path)?;
@@ -1803,6 +1906,15 @@ fn run_doctor_cmd(db_path: &std::path::Path) -> Result<(), u8> {
 /// note and everything else still runs, because entities, episodes and
 /// identities need no model.
 fn run_enrich_cmd(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8> {
+    let lease = acquire_command_writer_lease(WriterCommand::Enrich, db_path)?;
+    run_enrich_with_lease(db_path, batch_size, &lease)
+}
+
+fn run_enrich_with_lease(
+    db_path: &Path,
+    batch_size: usize,
+    lease: &CommandWriterLease,
+) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("enrich")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
         eprintln!("mci-agent enrich: resolved database key is malformed.");
@@ -1810,13 +1922,7 @@ fn run_enrich_cmd(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8
     };
     let key = DbKey::from_bytes(key_bytes);
 
-    let store = match SqlCipherBrainStore::new(db_path, &key) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("mci-agent enrich: open brain at {}: {e}", db_path.display());
-            return Err(12);
-        }
-    };
+    let store = open_command_writer(WriterCommand::Enrich, db_path, &key, lease)?;
 
     let (embedder, is_real) = load_embedder_backend();
     let embedder_ref: Option<&dyn mci_brain::Embedder> = if is_real {
@@ -1914,6 +2020,8 @@ fn run_brief_cmd(
         return Err(21);
     }
 
+    let lease = acquire_command_writer_lease(WriterCommand::Brief, db_path)?;
+
     let key_hex = resolve_key_for_command("brief")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
         eprintln!("mci-agent brief: resolved database key is malformed.");
@@ -1922,13 +2030,7 @@ fn run_brief_cmd(
     let key = DbKey::from_bytes(key_bytes);
 
     // Read-write: this writes a `briefs` row. It never touches `events`.
-    let store = match SqlCipherBrainStore::new(db_path, &key) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("mci-agent brief: open brain at {}: {e}", db_path.display());
-            return Err(12);
-        }
-    };
+    let store = open_command_writer(WriterCommand::Brief, db_path, &key, &lease)?;
 
     let topic = match date {
         Some(d) => format!("Daily brief for {d}"),
@@ -2015,6 +2117,7 @@ async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
         SyncOutcome,
     };
 
+    let lease = acquire_command_writer_lease(WriterCommand::McpSync, db_path)?;
     let key_hex = resolve_key_for_command("mcp-sync")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
         eprintln!("mci-agent mcp-sync: resolved database key is malformed.");
@@ -2022,16 +2125,12 @@ async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
     };
     let key = DbKey::from_bytes(key_bytes);
 
-    let store = match SqlCipherBrainStore::new(db_path, &key) {
-        Ok(s) => Arc::new(s),
-        Err(e) => {
-            eprintln!(
-                "mci-agent mcp-sync: open brain at {}: {e}",
-                db_path.display()
-            );
-            return Err(12);
-        }
-    };
+    let store = Arc::new(open_command_writer(
+        WriterCommand::McpSync,
+        db_path,
+        &key,
+        &lease,
+    )?);
 
     let config_path = default_config_path();
     match run_mcp_sync(&config_path, store).await {
@@ -2115,16 +2214,9 @@ fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<()
         return Err(20);
     }
 
-    let store = match SqlCipherBrainStore::new(db_path, &key) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "mci-agent embed-backfill: open brain at {}: {e}",
-                db_path.display()
-            );
-            return Err(12);
-        }
-    };
+    let lease = acquire_command_writer_lease(WriterCommand::EmbedBackfill, db_path)?;
+
+    let store = open_command_writer(WriterCommand::EmbedBackfill, db_path, &key, &lease)?;
 
     // Reuses the same read-embed-write sequence as the live-capture
     // idle-batch worker, in its one-shot form. See `idle_batch`.
@@ -2635,5 +2727,122 @@ mod capture_consent_tests {
             development_key_hex_from(Some("1"), None, Some(&key_path), None),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod writer_command_lease_tests {
+    use super::{acquire_command_writer_lease, WriterCommand};
+    use mci_agent::crash_recovery::{acquire_lock, lock_path_for_brain, LockError};
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    #[test]
+    fn one_shot_writer_lease_blocks_daemon_startup_for_its_scope() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let brain = root.path().join("brain.sqlite");
+        let lease =
+            acquire_command_writer_lease(WriterCommand::Enrich, &brain).expect("command lease");
+
+        assert!(matches!(
+            acquire_lock(&lock_path_for_brain(&brain)),
+            Err(LockError::WriterLeaseHeld { .. })
+        ));
+
+        drop(lease);
+        let (_outcome, daemon) =
+            acquire_lock(&lock_path_for_brain(&brain)).expect("lease released at scope end");
+        daemon.release().expect("clean daemon release");
+    }
+
+    #[test]
+    fn every_one_shot_writer_command_is_explicitly_enumerated() {
+        let labels = WriterCommand::ALL.map(WriterCommand::label);
+        assert_eq!(
+            labels,
+            [
+                "init",
+                "import-sessions",
+                "enrich",
+                "brief",
+                "mcp-sync",
+                "embed-backfill",
+            ]
+        );
+    }
+
+    #[test]
+    fn direct_store_writer_opens_are_daemon_or_leased_factory_only() {
+        let source = include_str!("mci_agent.rs");
+        let writer_open_token = ["SqlCipherBrainStore", "::new("].concat();
+        let writer_open_lines: Vec<_> = source
+            .lines()
+            .filter(|line| line.contains(&writer_open_token))
+            .collect();
+        assert_eq!(
+            writer_open_lines.len(),
+            2,
+            "new writer entry point bypassed the daemon or leased factory: {writer_open_lines:?}"
+        );
+    }
+
+    #[test]
+    fn one_shot_writer_lease_excludes_another_process_until_owner_dies() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let brain = root.path().join("brain.sqlite");
+        let ready = root.path().join("ready");
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "writer_command_lease_tests::child_holds_one_shot_writer_lease",
+                "--nocapture",
+            ])
+            .env("MCI_TEST_COMMAND_LEASE_BRAIN", &brain)
+            .env("MCI_TEST_COMMAND_LEASE_READY", &ready)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn command lease holder");
+
+        for _ in 0..250 {
+            if ready.exists() {
+                break;
+            }
+            assert!(
+                child.try_wait().expect("poll child").is_none(),
+                "command lease holder exited before readiness"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(ready.exists(), "command lease holder never became ready");
+        assert_eq!(
+            acquire_command_writer_lease(WriterCommand::McpSync, &brain)
+                .expect_err("concurrent one-shot writer must fail closed"),
+            26
+        );
+
+        child.kill().expect("kill command lease holder");
+        child.wait().expect("reap command lease holder");
+        let recovered = acquire_command_writer_lease(WriterCommand::McpSync, &brain)
+            .expect("kernel releases command lease on process death");
+        drop(recovered);
+        assert!(
+            !lock_path_for_brain(&brain).exists(),
+            "clean recovery removes crash marker"
+        );
+    }
+
+    #[test]
+    fn child_holds_one_shot_writer_lease() {
+        let Some(brain) = std::env::var_os("MCI_TEST_COMMAND_LEASE_BRAIN") else {
+            return;
+        };
+        let ready =
+            std::env::var_os("MCI_TEST_COMMAND_LEASE_READY").expect("command lease ready path");
+        let _lease = acquire_command_writer_lease(WriterCommand::ImportSessions, Path::new(&brain))
+            .expect("child command lease");
+        std::fs::write(ready, b"ready").expect("publish command lease readiness");
+        std::thread::sleep(Duration::from_secs(60));
     }
 }
