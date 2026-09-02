@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" role="img" aria-label="Hippocampus layered memory mark template">
-  <g fill="#000" fill-rule="evenodd">
-    <path opacity="0.22" d="M5.1 5.8c0-.7.5-1.2 1.2-1.2h7.5c.7 0 1.2.5 1.2 1.2v10.4c0 .7-.5 1.2-1.2 1.2H6.3c-.7 0-1.2-.5-1.2-1.2V5.8z"/>
-    <path opacity="0.5" d="M7.1 4.3c0-.7.5-1.2 1.2-1.2h7.4c.7 0 1.2.5 1.2 1.2v10.5c0 .7-.5 1.2-1.2 1.2H8.3c-.7 0-1.2-.5-1.2-1.2V4.3z"/>
-    <path d="M9 5.9c0-.7.5-1.2 1.2-1.2h5.5c.7 0 1.2.5 1.2 1.2v9.2c0 .7-.5 1.2-1.2 1.2h-5.5c-.7 0-1.2-.5-1.2-1.2V5.9zm1.5 1.4v1.2h4.9V7.3h-4.9zm0 3v1.2h4.9v-1.2h-4.9z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" role="img" aria-label="Hippocampus memory aperture mark template">
+  <g fill="#000">
+    <rect x="3" y="2" width="16" height="18" rx="5" fill="none" stroke="#000" stroke-width="1.5" opacity="0.28"/>
+    <rect x="6.5" y="5.5" width="2.5" height="11" rx="1.25"/>
+    <rect x="13" y="5.5" width="2.5" height="11" rx="1.25"/>
+    <rect x="8" y="9.75" width="6" height="2.5" rx="1.25"/>
   </g>
 </svg>

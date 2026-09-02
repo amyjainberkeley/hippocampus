@@ -6,8 +6,8 @@ External product name: **Hippocampus**. Engineering codename: **MCI**.
 
 | File | Purpose |
 |---|---|
-| `AppIcon.svg` | Canonical full-color app icon: three layered evidence sheets on a quiet light surface. |
-| `AppIcon-template.svg` | Canonical monochrome menu-bar version of the same layered-memory mark. |
+| `AppIcon.svg` | Canonical full-color app icon: the symmetric memory-aperture mark on a quiet light surface. |
+| `AppIcon-template.svg` | Canonical monochrome menu-bar version of the same memory-aperture mark. |
 | `AppIcon.iconset/` | macOS app-icon PNGs from 16 through 1024 px. |
 | `AppIcon.icns` | Compiled Finder, Dock, Launchpad, Cmd-Tab, DMG, and Gatekeeper icon. |
 | `hippocampus-icon.svg` | Compact secondary layered-memory mark for web and installer use. |
@@ -16,19 +16,21 @@ External product name: **Hippocampus**. Engineering codename: **MCI**.
 | `colors.json` | Canonical adaptive product and semantic color tokens. |
 
 The app icon, compact mark, menu-bar template, UI, and installer all use one
-identity: layered evidence becoming usable memory. The retired black-and-mint
-head/brain artwork is not part of the current product system.
+identity: a bounded aperture through which memory becomes useful. The two
+graphite pillars form an H; the cobalt bridge is the context selected for the
+current task. The retired black-and-mint head/brain and rotated-paper artwork
+are not part of the current product system.
 
 ## Palette
 
 Light mode is the primary presentation:
 
-- Snow canvas: `#F6F8FB`
+- Snow canvas: `#F7F8FA`
 - Clear surface: `#FFFFFF`
-- Ink: `#18212B`
-- Graphite: `#5F6975`
-- Cobalt action: `#3568D4`
-- Coral change marker: `#D96C5F`
+- Ink: `#1D1D1F`
+- Graphite: `#6E6E73`
+- Cobalt action: `#0A66D8`
+- Coral change marker: `#C7473A`
 
 Dark mode is adaptive support, not the brand's default backdrop. Cobalt marks
 actions, coral marks changes or attention, and neutral grays carry structure.
@@ -37,16 +39,17 @@ default product surface.
 
 ## Design Intent
 
-The overlapping sheets represent the product contract:
+The memory aperture represents the product contract:
 
-1. observed evidence remains intact;
-2. context is condensed into a bounded working set;
+1. observed evidence remains bounded on the device;
+2. only useful context crosses the cobalt bridge into the current task;
 3. the current memory view stays traceable to its sources.
 
-The mark is deliberately abstract and geometric. It avoids anatomical imagery,
-third-party icon assets, and SF Symbols in trademark-bearing artwork. The
-source paths in this directory are original project assets and are not traced
-from Apple's symbol library.
+The mark is deliberately symmetric and geometric so it remains legible at
+16 px. It avoids anatomical imagery, rotated decoration, third-party icon
+assets, and SF Symbols in trademark-bearing artwork. The source paths in this
+directory are original project assets and are not traced from Apple's symbol
+library.
 
 ## Regenerating Assets
 
