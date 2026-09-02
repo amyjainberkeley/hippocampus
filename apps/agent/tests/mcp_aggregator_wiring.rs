@@ -55,16 +55,16 @@ mod stub_server;
 use stub_server::{StubMcpServer, StubResource};
 
 /// Best-effort sweep of every event the in-memory store holds. We do
-/// not have a typed "list_all" API on the trait; production stores
+/// not have a typed "`list_all`" API on the trait; production stores
 /// use FTS5 or vector search. For tests we pull events by sequential
-/// id from 1 upward; the InMemoryBrainStore assigns ids monotonically
+/// id from 1 upward; the `InMemoryBrainStore` assigns ids monotonically
 /// from 1.
 fn read_all(store: &InMemoryBrainStore) -> Vec<mci_brain::Event> {
     let mut out = Vec::new();
     for i in 1u64..1000 {
         match store.get_event(EventId(i)) {
             Ok(Some(ev)) => out.push(ev),
-            Ok(None) => continue,
+            Ok(None) => {}
             Err(_) => break,
         }
     }
@@ -465,7 +465,7 @@ async fn n_5_servers_with_idle_loop_holds_steady_state() {
         let url = format!("http://127.0.0.1:{}/sse", server.port());
         let host = LoopbackHost::parse(&url).await.unwrap();
         let _h = registry
-            .register(ServerRegistration::http(&format!("svc{i}"), host, None))
+            .register(ServerRegistration::http(format!("svc{i}"), host, None))
             .await;
         servers.push(server);
     }

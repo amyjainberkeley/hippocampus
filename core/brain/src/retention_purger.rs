@@ -153,6 +153,7 @@ pub fn purge_once(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::episode_segmenter::EpisodeWriter;
     use crate::{
         project_event, BrainStore, ClaimStatus, Event, EventId, EvidenceRef, MemoryClaim,
         MemoryDelta,
@@ -202,9 +203,9 @@ mod tests {
         let now = 60 * day_us;
 
         // Insert 100 events spanning 60 days (one per day).
-        for i in 0..100 {
+        for i in 0_u64..100 {
             // Events at day 0, day 0.6, day 1.2, ... day 59.4
-            let ts = (i as u64) * (60 * day_us / 100);
+            let ts = i * (60 * day_us / 100);
             store
                 .put_event(&make_event(ts, &format!("event {i}")))
                 .unwrap();
@@ -351,8 +352,8 @@ mod tests {
         let now = 60 * day_us;
 
         // Insert 60 events, one per day.
-        for i in 0..60 {
-            let ts = (i as u64) * day_us;
+        for i in 0_u64..60 {
+            let ts = i * day_us;
             store
                 .put_event(&make_event(ts, &format!("day {i}")))
                 .unwrap();
@@ -369,8 +370,8 @@ mod tests {
         let (store, _dir) = temp_store();
         let day_us: u64 = 86_400_000_000;
 
-        for i in 0..100 {
-            let ts = (i as u64) * day_us;
+        for i in 0_u64..100 {
+            let ts = i * day_us;
             store
                 .put_event(&make_event(ts, &format!("event {i}")))
                 .unwrap();
@@ -437,7 +438,6 @@ mod tests {
             .put_event(&make_event(2_000_000, "old ep event 2"))
             .unwrap();
 
-        use crate::episode_segmenter::EpisodeWriter;
         let ep_id = store
             .create_episode(1_000_000, 2_000_000, Some("com.test.app"))
             .unwrap();

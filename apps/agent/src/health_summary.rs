@@ -107,7 +107,7 @@ pub struct HealthSummary {
     pub frames_dropped_late_ack_latest: u64,
     /// Sum of per-step positive deltas for `frames_encode_failed`. The
     /// CRS Telemetry-Gap trip-wire that the ocr-emit-silence fix
-    /// installed: a non-zero delta means VideoToolbox HEVC throws are
+    /// installed: a non-zero delta means `VideoToolbox` HEVC throws are
     /// reaching the cascade `.allow` branch, which historically silently
     /// muted the OCR brain.
     pub frames_encode_failed_delta: u64,
@@ -115,8 +115,8 @@ pub struct HealthSummary {
     pub frames_encode_failed_latest: u64,
     /// Sum of per-step positive deltas for `frames_focus_race_dropped`.
     /// The ADR-0031 V2-P1 race-consistency gate trip-wire: a non-zero
-    /// delta means the FocusedWindowStore's generation drifted from
-    /// the installed SCStream filter's generation at sample time.
+    /// delta means the `FocusedWindowStore`'s generation drifted from
+    /// the installed `SCStream` filter's generation at sample time.
     pub frames_focus_race_dropped_delta: u64,
     /// Absolute `frames_focus_race_dropped` from the latest sample.
     pub frames_focus_race_dropped_latest: u64,
@@ -136,7 +136,7 @@ pub struct HealthSummary {
     /// cascade silence into per-app attribution. Empty on an `0x08`-
     /// or earlier-era helper (back-compat: absent key → empty Vec).
     pub failsafe_by_app_latest: Vec<(String, u64)>,
-    /// Instantaneous helper CPU sample (microfraction; 1_000_000 =
+    /// Instantaneous helper CPU sample (microfraction; `1_000_000` =
     /// 100% of one core) from the latest in-window sample. Promoted
     /// by the `0x08 → 0x09` bump. `0` on legacy lines.
     pub cpu_pct_micro_latest: u32,
@@ -517,7 +517,9 @@ where
         summary.frames_dropped_late_ack_latest = rec.frames_dropped_late_ack;
         summary.frames_encode_failed_latest = rec.frames_encode_failed;
         summary.frames_focus_race_dropped_latest = rec.frames_focus_race_dropped;
-        summary.failsafe_by_app_latest = rec.failsafe_by_app.clone();
+        summary
+            .failsafe_by_app_latest
+            .clone_from(&rec.failsafe_by_app);
         summary.cpu_pct_micro_latest = rec.cpu_pct_micro;
         summary.rss_bytes_latest = rec.rss_bytes;
         summary.tracker_alive_at_us_latest = rec.tracker_alive_at_us;

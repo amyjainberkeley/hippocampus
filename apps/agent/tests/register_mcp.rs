@@ -66,7 +66,7 @@ fn register_mcp_writes_to_claude_json_not_settings_json() {
         hippo
             .get("args")
             .and_then(|v| v.as_array())
-            .map(|a| a.len()),
+            .map(std::vec::Vec::len),
         Some(1)
     );
 }

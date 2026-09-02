@@ -933,10 +933,10 @@ fn mci_recall_with_embedder_calls_hybrid_retriever() {
         "hybrid retriever should return hits (lexical + semantic)"
     );
     for hit in hits {
-        let score = hit.get("score").and_then(|v| v.as_f64());
-        assert!(score.is_some(), "each hit should have a score");
+        let relevance_score = hit.get("score").and_then(serde_json::Value::as_f64);
+        assert!(relevance_score.is_some(), "each hit should have a score");
         assert!(
-            score.unwrap() > 0.0,
+            relevance_score.unwrap() > 0.0,
             "hybrid fused scores should be positive"
         );
     }

@@ -3,7 +3,7 @@
 //! Tests pinned by ADR-0018 §4:
 //! - lifecycle happy path (5-state traversal)
 //! - lifecycle rejects skipping states
-//! - lifecycle blocks approval without human_approver_id
+//! - lifecycle blocks approval without `human_approver_id`
 //! - tripwire blocks bogus citation
 //! - tripwire blocks orphan claim (body with no citations)
 //! - stub author produces brief with all citations present

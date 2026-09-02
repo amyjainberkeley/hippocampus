@@ -89,8 +89,9 @@ fn main() {
         let mean3 = if hits.is_empty() {
             0.0
         } else {
-            hits.iter().map(|h| h.1).sum::<f32>() / hits.len() as f32
+            hits.iter().map(|h| h.1).sum::<f32>()
+                / f32::from(u16::try_from(hits.len()).expect("probe hit count exceeds u16"))
         };
-        println!("{q:<48} {top:>8.4} {mean3:>8.4} {:>8}", in_brain);
+        println!("{q:<48} {top:>8.4} {mean3:>8.4} {in_brain:>8}");
     }
 }

@@ -1,4 +1,4 @@
-//! LongMemEval retrieval benchmark, run against the real brain.
+//! `LongMemEval` retrieval benchmark, run against the real brain.
 //!
 //! # Why this exists
 //!
@@ -11,7 +11,7 @@
 //!
 //! # What is measured, and what is not
 //!
-//! This measures **retrieval**, not question answering. LongMemEval's full
+//! This measures **retrieval**, not question answering. `LongMemEval`'s full
 //! task is: read a long chat history, then answer a question about it.
 //! That end-to-end score is dominated by whichever LLM writes the answer,
 //! which is not the part Hippocampus supplies. Hippocampus supplies the
@@ -28,7 +28,7 @@
 //! # Why it runs the production path
 //!
 //! Every instance gets a real `SqlCipherBrainStore`, the real
-//! `HybridRetriever`, and the real ArcticEmbedS Core ML embedder loaded
+//! `HybridRetriever`, and the real `ArcticEmbedS` Core ML embedder loaded
 //! through the same resolver `mcp-serve` uses. A benchmark that
 //! reimplements retrieval measures the reimplementation. The cost is that
 //! a run is slow, roughly 250,000 events embedded across 500 instances.
@@ -59,12 +59,12 @@ use mci_brain::{
 };
 use mci_core::crypto::DbKey;
 
-/// One LongMemEval instance: a question plus the haystack it hides in.
+/// One `LongMemEval` instance: a question plus the haystack it hides in.
 #[derive(serde::Deserialize, Clone)]
 pub struct Instance {
     /// Dataset-assigned identifier, unique across the 500 instances.
     pub question_id: String,
-    /// One of the six LongMemEval categories, e.g. `multi-session`.
+    /// One of the six `LongMemEval` categories, e.g. `multi-session`.
     pub question_type: String,
     /// The question asked of the history.
     pub question: String,
@@ -106,7 +106,7 @@ pub struct Turn {
     pub content: String,
 }
 
-/// Synthetic work-memory corpus envelope. LongMemEval remains supported
+/// Synthetic work-memory corpus envelope. `LongMemEval` remains supported
 /// through the legacy top-level array format.
 #[allow(missing_docs)]
 #[derive(serde::Deserialize)]
@@ -133,7 +133,7 @@ pub struct LoadedDataset {
     pub instances: Vec<Instance>,
 }
 
-/// Parse either the legacy LongMemEval top-level array or the synthetic
+/// Parse either the legacy `LongMemEval` top-level array or the synthetic
 /// work-memory envelope.
 ///
 /// # Errors
@@ -182,7 +182,7 @@ pub struct InstanceResult {
     pub arm: String,
     /// Which instance this scores.
     pub question_id: String,
-    /// Its LongMemEval category.
+    /// Its `LongMemEval` category.
     pub question_type: String,
     /// Optional slice tags carried through from the dataset.
     pub tags: Vec<String>,
@@ -208,7 +208,7 @@ pub struct InstanceResult {
     pub top_hits: Vec<RankedHit>,
     /// Per-instance end-to-end latency.
     pub latency_ms: f64,
-    /// Size of the temporary SQLite file for this instance.
+    /// Size of the temporary `SQLite` file for this instance.
     pub index_size_bytes: u64,
 }
 
@@ -270,7 +270,7 @@ pub struct Report {
     pub dataset_description: Option<String>,
     /// One summary per arm, over every instance.
     pub overall: Vec<Summary>,
-    /// question_type -> one summary per arm.
+    /// `question_type` -> one summary per arm.
     pub by_type: BTreeMap<String, Vec<Summary>>,
     /// tag -> one summary per arm.
     pub by_tag: BTreeMap<String, Vec<Summary>>,
@@ -875,6 +875,7 @@ fn resolved_arctic_model_path() -> Option<PathBuf> {
 ///
 /// # Errors
 /// Any store, embed or retrieval failure, with the instance id attached.
+#[allow(clippy::too_many_lines)] // One instance's resource lifecycle is clearest in one scope.
 pub fn run_instance(
     inst: &Instance,
     arm: Arm,
@@ -995,7 +996,7 @@ pub fn run_instance(
     } else {
         ranked
             .iter()
-            .position(|s| answers.iter().any(|a| *a == s))
+            .position(|s| answers.contains(&s))
             .map(|p| p + 1)
     };
 
@@ -1012,7 +1013,7 @@ pub fn run_instance(
             if is_unanswerable {
                 None
             } else {
-                Some(found as f64 / answers.len() as f64)
+                Some(count_as_f64(found) / count_as_f64(answers.len()))
             },
         );
         provenance_coverage_at.insert(
@@ -1102,7 +1103,7 @@ pub struct AbstentionSample {
 ///
 /// # Why this is a separate probe
 ///
-/// LongMemEval contains no unanswerable questions: every one of the 500 is
+/// `LongMemEval` contains no unanswerable questions: every one of the 500 is
 /// answerable from its own haystack. So the dataset can score retrieval
 /// but cannot, on its own, say when a system should decline to answer.
 ///
@@ -1173,7 +1174,7 @@ pub fn best_threshold(samples: &[AbstentionSample]) -> Option<ThresholdReport> {
 
     let mut best: Option<ThresholdReport> = None;
     for w in vals.windows(2) {
-        let t = f32::midpoint(w[0], w[1]);
+        let t = w[0] + (w[1] - w[0]) * 0.5;
         // Answer when cosine >= t.
         let kept_answerable = samples
             .iter()
@@ -1187,12 +1188,12 @@ pub fn best_threshold(samples: &[AbstentionSample]) -> Option<ThresholdReport> {
         let tpr = if pos == 0 {
             0.0
         } else {
-            kept_answerable as f64 / pos as f64
+            count_as_f64(kept_answerable) / count_as_f64(pos)
         };
         let fpr = if neg == 0 {
             0.0
         } else {
-            kept_junk as f64 / neg as f64
+            count_as_f64(kept_junk) / count_as_f64(neg)
         };
         let j = tpr - fpr;
         if best.as_ref().is_none_or(|b| j > b.youden_j) {
@@ -1233,18 +1234,37 @@ fn distribution(values: &[f64]) -> DistributionStats {
     }
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).expect("no NaN distribution values"));
-    let pick = |p: f64| -> f64 {
-        let idx = ((sorted.len() - 1) as f64 * p).round() as usize;
-        sorted[idx.min(sorted.len() - 1)]
-    };
+    let p50_index = nearest_percentile_index(sorted.len(), 50, 100);
+    let p95_index = nearest_percentile_index(sorted.len(), 95, 100);
     let sum: f64 = sorted.iter().sum();
     DistributionStats {
         min: sorted[0],
-        p50: pick(0.50),
-        p95: pick(0.95),
+        p50: sorted[p50_index],
+        p95: sorted[p95_index],
         max: sorted[sorted.len() - 1],
-        mean: sum / sorted.len() as f64,
+        mean: sum / count_as_f64(sorted.len()),
     }
+}
+
+fn nearest_percentile_index(len: usize, numerator: usize, denominator: usize) -> usize {
+    debug_assert!(len > 0);
+    debug_assert!(denominator > 0);
+    let last = len.saturating_sub(1);
+    last.saturating_mul(numerator)
+        .saturating_add(denominator / 2)
+        .checked_div(denominator)
+        .unwrap_or(0)
+        .min(last)
+}
+
+fn count_as_f64(value: usize) -> f64 {
+    f64::from(u32::try_from(value).expect("benchmark corpus count exceeds u32"))
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn byte_count_as_f64(value: u64) -> f64 {
+    // Distribution summaries are approximate above f64's exact integer range.
+    value as f64
 }
 
 fn counts(results: &[InstanceResult], outcome: Outcome) -> usize {
@@ -1522,6 +1542,7 @@ fn validate_threshold_shape(
 
 /// Compare measured summaries against a compatible committed baseline.
 #[must_use]
+#[allow(clippy::too_many_lines)] // The contract reads more safely as one ordered checklist.
 pub fn compare_against_baseline(
     summaries: &[Summary],
     baseline: &BaselineFile,
@@ -1771,8 +1792,8 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
     let n = results.len();
     let answerable: Vec<&InstanceResult> = results.iter().filter(|r| !r.unanswerable).collect();
     let unanswerable: Vec<&InstanceResult> = results.iter().filter(|r| r.unanswerable).collect();
-    let answerable_denom = (!answerable.is_empty()).then_some(answerable.len() as f64);
-    let unanswerable_denom = (!unanswerable.is_empty()).then_some(unanswerable.len() as f64);
+    let answerable_denom = (!answerable.is_empty()).then(|| count_as_f64(answerable.len()));
+    let unanswerable_denom = (!unanswerable.is_empty()).then(|| count_as_f64(unanswerable.len()));
 
     let mut hit_rate_at = BTreeMap::new();
     let mut recall_at = BTreeMap::new();
@@ -1784,7 +1805,7 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
             .iter()
             .filter(|r| r.first_hit_rank.is_some_and(|rank| rank <= k))
             .count();
-        let hit_rate = answerable_denom.map(|denom| hits as f64 / denom);
+        let hit_rate = answerable_denom.map(|denom| count_as_f64(hits) / denom);
         hit_rate_at.insert(k, hit_rate);
         let rec: f64 = answerable
             .iter()
@@ -1803,13 +1824,13 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
             .count();
         provenance_coverage_at.insert(
             k,
-            answerable_denom.map(|denom| provenance_hits as f64 / denom),
+            answerable_denom.map(|denom| count_as_f64(provenance_hits) / denom),
         );
         let false_positives = unanswerable
             .iter()
             .filter(|r| r.top_hits.iter().take(k).next().is_some())
             .count();
-        let fpr = unanswerable_denom.map(|denom| false_positives as f64 / denom);
+        let fpr = unanswerable_denom.map(|denom| count_as_f64(false_positives) / denom);
         false_positive_rate_at.insert(k, fpr);
         abstention_separation_at.insert(
             k,
@@ -1822,7 +1843,10 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
     let mrr = answerable_denom.map(|denom| {
         answerable
             .iter()
-            .map(|r| r.first_hit_rank.map_or(0.0, |rank| 1.0 / rank as f64))
+            .map(|r| {
+                r.first_hit_rank
+                    .map_or(0.0, |rank| 1.0 / count_as_f64(rank))
+            })
             .sum::<f64>()
             / denom
     });
@@ -1830,7 +1854,7 @@ pub fn summarize(results: &[InstanceResult], arm: Arm, ks: &[usize]) -> Summary 
     let index_size_bytes = distribution(
         &results
             .iter()
-            .map(|r| r.index_size_bytes as f64)
+            .map(|r| byte_count_as_f64(r.index_size_bytes))
             .collect::<Vec<_>>(),
     );
 

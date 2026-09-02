@@ -579,7 +579,7 @@ fn recency_decay_exponential_with_default_half_life() {
     assert!((recency_decay(now, now, hl) - 1.0).abs() < 1e-6);
 
     // At exactly the half-life (24h) → 0.5.
-    let at_hl = now - (hl as u64) * MICROS_PER_HOUR;
+    let at_hl = now - 24 * MICROS_PER_HOUR;
     let r_hl = recency_decay(now, at_hl, hl);
     assert!(
         (r_hl - 0.5).abs() < 1e-4,
@@ -671,7 +671,8 @@ fn xorshift64(state: &mut u64) -> u64 {
 }
 
 fn rand_f32_unit(state: &mut u64) -> f32 {
-    (xorshift64(state) % 10_001) as f32 / 10_000.0
+    let sample = u16::try_from(xorshift64(state) % 10_001).expect("sample fits u16");
+    f32::from(sample) / 10_000.0
 }
 
 // ---------------------------------------------------------------------------
@@ -684,17 +685,18 @@ fn property_fused_score_in_unit_interval_for_unit_weights() {
     let mut rng = 0xDEAD_BEEF_CAFE_BABEu64;
     for _ in 0..256 {
         // Split a unit budget across all FIVE convex arms.
-        let a = rand_f32_unit(&mut rng);
-        let b = rand_f32_unit(&mut rng) * (1.0 - a);
-        let c = rand_f32_unit(&mut rng) * (1.0 - a - b);
-        let en = rand_f32_unit(&mut rng) * (1.0 - a - b - c);
-        let d = 1.0 - a - b - c - en;
-        let w = FusionWeights {
-            w_sem: a,
-            w_lex: b,
-            w_rec: c,
-            w_entity: en,
-            w_src: d,
+        let semantic_weight = rand_f32_unit(&mut rng);
+        let lexical_weight = rand_f32_unit(&mut rng) * (1.0 - semantic_weight);
+        let recency_weight = rand_f32_unit(&mut rng) * (1.0 - semantic_weight - lexical_weight);
+        let entity_weight =
+            rand_f32_unit(&mut rng) * (1.0 - semantic_weight - lexical_weight - recency_weight);
+        let source_weight = 1.0 - semantic_weight - lexical_weight - recency_weight - entity_weight;
+        let weights = FusionWeights {
+            w_sem: semantic_weight,
+            w_lex: lexical_weight,
+            w_rec: recency_weight,
+            w_entity: entity_weight,
+            w_src: source_weight,
         };
 
         let sem = rand_f32_unit(&mut rng);
@@ -703,17 +705,18 @@ fn property_fused_score_in_unit_interval_for_unit_weights() {
         let entity = rand_f32_unit(&mut rng);
         let src = rand_f32_unit(&mut rng);
 
-        let fused = w.w_sem.mul_add(
+        let fused = weights.w_sem.mul_add(
             sem,
-            w.w_lex.mul_add(
+            weights.w_lex.mul_add(
                 lex,
-                w.w_rec
-                    .mul_add(rec, w.w_entity.mul_add(entity, w.w_src * src)),
+                weights
+                    .w_rec
+                    .mul_add(rec, weights.w_entity.mul_add(entity, weights.w_src * src)),
             ),
         );
         assert!(
-            fused >= -1e-6 && fused <= 1.0 + 1e-6,
-            "fused {fused} out of [0,1] for w={w:?} scores=({sem},{lex},{rec},{entity},{src})"
+            (-1e-6..=1.0 + 1e-6).contains(&fused),
+            "fused {fused} out of [0,1] for w={weights:?} scores=({sem},{lex},{rec},{entity},{src})"
         );
     }
 }

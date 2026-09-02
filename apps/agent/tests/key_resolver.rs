@@ -1,4 +1,4 @@
-//! Privacy gate tests for SQLCipher key custody.
+//! Privacy gate tests for `SQLCipher` key custody.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -286,7 +286,10 @@ fn clean_install_generates_only_when_no_database_exists_and_rereads_keychain() {
 
     assert_eq!(outcome, KeyInitializationOutcome::Created);
     assert_eq!(generated_calls.get(), 1);
-    assert_eq!(keychain.writes.borrow().as_slice(), &[generated.clone()]);
+    assert_eq!(
+        keychain.writes.borrow().as_slice(),
+        std::slice::from_ref(&generated)
+    );
     assert_eq!(keychain.value.borrow().as_ref(), Some(&generated));
     assert!(validator.calls.borrow().is_empty());
 }
@@ -407,7 +410,10 @@ fn valid_legacy_upgrade_validates_adds_rereads_revalidates_and_removes_plaintext
     .expect("valid legacy database should migrate");
 
     assert_eq!(outcome, KeyInitializationOutcome::MigratedLegacyKey);
-    assert_eq!(keychain.writes.borrow().as_slice(), &[legacy_key.clone()]);
+    assert_eq!(
+        keychain.writes.borrow().as_slice(),
+        std::slice::from_ref(&legacy_key)
+    );
     assert_eq!(
         validator.calls.borrow().as_slice(),
         &[legacy_key.clone(), legacy_key]

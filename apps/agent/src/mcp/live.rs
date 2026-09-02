@@ -311,14 +311,11 @@ impl LiveBrainReader {
                 reason: NothingMatchedReason::NoCandidates,
             });
         }
-        let raw = match self.store.fts5_search(&sanitized, limit) {
-            Ok(raw) => raw,
-            Err(_) => {
-                return Ok(McpRecallOutcome::Degraded {
-                    degradation: mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
-                    related_context: Vec::new(),
-                })
-            }
+        let Ok(raw) = self.store.fts5_search(&sanitized, limit) else {
+            return Ok(McpRecallOutcome::Degraded {
+                degradation: mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                related_context: Vec::new(),
+            });
         };
 
         let mut out: Vec<McpHit> = Vec::with_capacity(raw.len());

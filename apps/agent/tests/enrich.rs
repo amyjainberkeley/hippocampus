@@ -42,8 +42,8 @@ fn store_with(events: Vec<Event>) -> (TempDir, SqlCipherBrainStore) {
     let path = dir.path().join("brain.sqlite");
     let key = DbKey::generate().expect("csprng");
     let store = SqlCipherBrainStore::new(&path, &key).expect("open store");
-    for e in &events {
-        store.put_event(e).expect("put_event");
+    for event in events {
+        store.put_event(&event).expect("put_event");
     }
     (dir, store)
 }

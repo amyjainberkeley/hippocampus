@@ -5,7 +5,7 @@
 //! brain filled any other way the worker never ran, and no command existed
 //! that produced a brief at all.
 //!
-//! Two halves, because no CoreML model exists on a dev machine or in CI:
+//! Two halves, because no `CoreML` model exists on a dev machine or in CI:
 //!
 //! - The generation half drives `brief_worker::generate_brief_once` — the
 //!   exact function the `brief` CLI arm calls — with the `StubBriefAuthor`
@@ -60,8 +60,8 @@ fn store_with(events: Vec<Event>) -> (TempDir, SqlCipherBrainStore) {
     let path = dir.path().join("brain.sqlite");
     let key = DbKey::generate().expect("csprng");
     let store = SqlCipherBrainStore::new(&path, &key).expect("open store");
-    for e in &events {
-        store.put_event(e).expect("put_event");
+    for event in events {
+        store.put_event(&event).expect("put_event");
     }
     (dir, store)
 }

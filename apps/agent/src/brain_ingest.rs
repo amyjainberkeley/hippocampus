@@ -453,7 +453,7 @@ impl BrainIngestor for BrainPump {
                 source_browser,
                 tab_id,
             } => {
-                let app = browser_bundle_id(source_browser);
+                let app = Some(browser_bundle_id(source_browser));
                 let t = if title.is_empty() {
                     None
                 } else {
@@ -690,7 +690,7 @@ pub fn compose_context_header(
 }
 
 /// Map a `source_browser` string from the extension to a macOS bundle id.
-fn browser_bundle_id(source: &str) -> Option<String> {
+fn browser_bundle_id(source: &str) -> String {
     let id = match source {
         "safari" => "com.apple.Safari",
         "chrome" => "com.google.Chrome",
@@ -698,9 +698,9 @@ fn browser_bundle_id(source: &str) -> Option<String> {
         "edge" => "com.microsoft.edgemac",
         "brave" => "com.brave.Browser",
         "firefox" => "org.mozilla.firefox",
-        _ => return Some(source.to_owned()),
+        _ => return source.to_owned(),
     };
-    Some(id.to_owned())
+    id.to_owned()
 }
 
 /// Decode the wire's null-padded 64-byte app-bundle-id field into an
@@ -867,9 +867,9 @@ mod tests {
     // V2-P2 tab_id plumb
     // -----------------------------------------------------------
 
-    /// Round-trip pin: two PageContentEvents with the same URL but
+    /// Round-trip pin: two `PageContentEvents` with the same URL but
     /// distinct `tab_id` values land as DISTINCT brain rows that
-    /// each carry their own tab_id back through `get_event`. This
+    /// each carry their own `tab_id` back through `get_event`. This
     /// is the load-bearing V2-P2 fix (memo `docs/research/tab-
     /// attribution-mix-2026-05-29.md` §3 + §5 secondary).
     #[test]
@@ -944,7 +944,7 @@ mod tests {
         );
     }
 
-    /// OCREvent ingest does NOT populate tab_id — the helper has no
+    /// `OCREvent` ingest does NOT populate `tab_id` — the helper has no
     /// per-tab signal.
     #[test]
     fn pump_leaves_tab_id_none_for_ocr_event_ingest() {

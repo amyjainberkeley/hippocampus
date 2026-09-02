@@ -81,6 +81,7 @@ fn project_label(dir_name: &str) -> String {
 /// Hand-rolled to avoid taking a date dependency for one field. Returns
 /// `None` on anything unexpected, so a malformed record is skipped rather
 /// than silently stamped with the wrong time and sorted into the wrong day.
+#[allow(clippy::many_single_char_names)]
 fn parse_ts_us(ts: &str) -> Option<u64> {
     // Expect YYYY-MM-DDTHH:MM:SS[.fff]Z
     let b = ts.as_bytes();

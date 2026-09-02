@@ -25,7 +25,9 @@ use std::time::Instant;
 use mci_brief::author::BriefAuthor;
 use mci_brief::author::StubBriefAuthor;
 use mci_brief::llama_author::LlamaBriefAuthor;
-use mci_brief::llama_backend::{LlamaBackend, StubLlamaBackend};
+use mci_brief::llama_backend::LlamaBackend;
+#[cfg(not(feature = "coreml"))]
+use mci_brief::llama_backend::StubLlamaBackend;
 
 use mci_brief_eval::{
     bundled_fixtures_dir, list_fixture_names, score_brief, EvalReport, FixtureDay, GoldBrief,

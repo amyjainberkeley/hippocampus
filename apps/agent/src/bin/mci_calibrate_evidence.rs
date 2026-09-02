@@ -127,6 +127,10 @@ fn extract_features(
         .ok_or_else(|| "feature extraction returned no finite candidates".into())
 }
 
+fn count_as_f64(count: usize) -> f64 {
+    f64::from(u32::try_from(count).expect("calibration fixture count exceeds u32::MAX"))
+}
+
 fn standardization(rows: &[([f64; 6], f64)]) -> ([f64; 6], [f64; 6]) {
     let mut means = [0.0; 6];
     for (features, _) in rows {
@@ -135,7 +139,7 @@ fn standardization(rows: &[([f64; 6], f64)]) -> ([f64; 6], [f64; 6]) {
         }
     }
     for mean in &mut means {
-        *mean /= rows.len() as f64;
+        *mean /= count_as_f64(rows.len());
     }
     let mut scales = [0.0; 6];
     for (features, _) in rows {
@@ -144,7 +148,7 @@ fn standardization(rows: &[([f64; 6], f64)]) -> ([f64; 6], [f64; 6]) {
         }
     }
     for scale in &mut scales {
-        *scale = (*scale / rows.len() as f64).sqrt().max(1e-6);
+        *scale = (*scale / count_as_f64(rows.len())).sqrt().max(1e-6);
     }
     (means, scales)
 }
@@ -178,7 +182,7 @@ fn fit_logistic(rows: &[([f64; 6], f64)], means: [f64; 6], scales: [f64; 6]) -> 
                 weight_gradient[index] += error * features[index];
             }
         }
-        let count = normalized.len() as f64;
+        let count = count_as_f64(normalized.len());
         intercept -= LEARNING_RATE * intercept_gradient / count;
         for index in 0..6 {
             let gradient = weight_gradient[index] / count + L2_PENALTY * weights[index];
@@ -216,7 +220,16 @@ fn lower_positive_threshold(scores: &mut [f64], target_coverage: f64) -> Result<
     }
     scores.sort_by(f64::total_cmp);
     let alpha = 1.0 - target_coverage;
-    let rank = (((scores.len() as f64 + 1.0) * alpha) + 1e-12).floor() as usize;
+    let adjusted_rank = count_as_f64(
+        scores
+            .len()
+            .checked_add(1)
+            .expect("calibration score count overflow"),
+    ) * alpha
+        + 1e-12;
+    let rank = (1..=scores.len())
+        .take_while(|candidate| count_as_f64(*candidate) <= adjusted_rank)
+        .count();
     if rank == 0 {
         return Err(format!(
             "requested {target_coverage:.3} one-sided coverage is unattainable with {} calibration positives",
@@ -245,8 +258,8 @@ fn metrics(observations: &[Observation], split: &str) -> SplitMetrics {
     SplitMetrics {
         positives,
         negatives,
-        positive_coverage: accepted_positives as f64 / positives as f64,
-        negative_false_positive_rate: accepted_negatives as f64 / negatives as f64,
+        positive_coverage: count_as_f64(accepted_positives) / count_as_f64(positives),
+        negative_false_positive_rate: count_as_f64(accepted_negatives) / count_as_f64(negatives),
     }
 }
 
@@ -287,6 +300,7 @@ fn sha256(bytes: &[u8]) -> Result<String, String> {
         .ok_or_else(|| "shasum returned no digest".into())
 }
 
+#[allow(clippy::too_many_lines)] // This is a linear, auditable calibration transcript.
 fn run(fixture_path: &Path, output_path: &Path) -> Result<(), String> {
     let bytes = fs::read(fixture_path)
         .map_err(|error| format!("read {}: {error}", fixture_path.display()))?;
@@ -430,7 +444,7 @@ mod tests {
     fn split_conformal_accepts_minimum_valid_sample_size_and_uses_first_order_statistic() {
         let mut scores = vec![0.9, 0.3, 0.8, 0.1, 0.7, 0.6, 0.5, 0.4, 0.2];
         let threshold = lower_positive_threshold(&mut scores, 0.90).unwrap();
-        assert_eq!(threshold, 0.1);
+        assert!((threshold - 0.1).abs() <= f64::EPSILON);
     }
 
     #[test]
@@ -440,7 +454,7 @@ mod tests {
             .map(|value| f64::from(value) / 20.0)
             .collect::<Vec<_>>();
         let threshold = lower_positive_threshold(&mut scores, 0.90).unwrap();
-        assert_eq!(threshold, 0.10);
+        assert!((threshold - 0.10).abs() <= f64::EPSILON);
     }
 
     #[test]

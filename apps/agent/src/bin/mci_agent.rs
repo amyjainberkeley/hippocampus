@@ -24,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use mci_agent::embedder_load::{load_embedder_backend, load_query_embedder_backend};
@@ -164,7 +165,7 @@ enum Mode {
     /// reported `.installed` even when no event ever reached the
     /// brain).
     ///
-    /// Opens the SQLCipher brain read-only, counts events whose
+    /// Opens the `SQLCipher` brain read-only, counts events whose
     /// `app_bundle_id` belongs to `source`'s bundle set and whose
     /// `ts_us > now - since_seconds`, prints the integer count to
     /// stdout, exits 0. Stderr carries diagnostics. Exit 0 with
@@ -209,6 +210,7 @@ const DEFAULT_STATS_WINDOW_SECONDS: u64 = 30;
 /// per-call Core ML overhead.
 const DEFAULT_EMBED_BATCH_SIZE: usize = 32;
 
+#[allow(clippy::too_many_lines)] // One two-pass parser keeps option precedence explicit.
 fn parse_args(argv: &[String]) -> Args {
     // Two-pass: first scan resolves the mode flag, second scan binds
     // mode-specific options. Keeps `--window-seconds 600
@@ -277,7 +279,7 @@ fn parse_args(argv: &[String]) -> Args {
                 }
             }
             "--source" if i + 1 < argv.len() => {
-                stats_source = argv[i + 1].clone();
+                stats_source.clone_from(&argv[i + 1]);
                 i += 1;
             }
             "--since-seconds" if i + 1 < argv.len() => {
@@ -311,10 +313,8 @@ fn parse_args(argv: &[String]) -> Args {
             // ships-out-of-step outage the flag rule exists to avoid. The
             // decision is deferred until the whole argv has been read, and
             // taken only if no mode was recognised anywhere in it.
-            other if !other.starts_with('-') => {
-                if unknown_command.is_none() {
-                    unknown_command = Some(other.to_owned());
-                }
+            other if !other.starts_with('-') && unknown_command.is_none() => {
+                unknown_command = Some(other.to_owned());
             }
             _ => {}
         }
@@ -583,403 +583,402 @@ async fn main() -> ExitCode {
             let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> = match resolve_key_hex()
             {
                 Ok(key_hex) => {
-                    match decode_hex32(&key_hex) {
-                        Some(key_bytes) => {
-                            if let Some(parent) = db_path.parent() {
-                                if !parent.exists() {
-                                    if let Err(e) = std::fs::create_dir_all(parent) {
-                                        eprintln!(
-                                            "mci-agent: create_dir_all({}): {e}",
-                                            parent.display()
-                                        );
-                                        return ExitCode::from(20);
-                                    }
+                    if let Some(key_bytes) = decode_hex32(&key_hex) {
+                        if let Some(parent) = db_path.parent() {
+                            if !parent.exists() {
+                                if let Err(e) = std::fs::create_dir_all(parent) {
+                                    eprintln!(
+                                        "mci-agent: create_dir_all({}): {e}",
+                                        parent.display()
+                                    );
+                                    return ExitCode::from(20);
                                 }
                             }
-                            let key = DbKey::from_bytes(key_bytes);
-                            // Cycle 8.44 audit — breakage risk #3 wiring #3:
-                            // acquire the run-lock BEFORE opening the store
-                            // so a live sibling instance aborts us early
-                            // (ADR-0008 §1.4 "one file, one writer" — two
-                            // writers on the same SQLCipher DB corrupt the
-                            // store). A stale lock (unclean prior shutdown)
-                            // triggers an extra integrity check after open.
-                            let lock_path = default_lock_path();
-                            let unclean_prior_shutdown = match acquire_lock(&lock_path) {
-                                Ok(LockAcquireOutcome::CleanBoot) => false,
-                                Ok(LockAcquireOutcome::UncleanShutdown { stale_pid }) => {
-                                    eprintln!(
-                                        "mci-agent: unclean prior shutdown detected (stale pid {stale_pid}) — will run extra integrity_check",
-                                    );
-                                    true
-                                }
-                                Ok(LockAcquireOutcome::AnotherInstanceRunning { live_pid }) => {
-                                    eprintln!(
-                                        "mci-agent: another mci-agent instance is running (pid {live_pid}) — refusing to open store (ADR-0008 §1.4 one-writer invariant)",
-                                    );
-                                    return ExitCode::from(21);
-                                }
-                                Err(e) => {
-                                    eprintln!("mci-agent: crash_recovery::acquire_lock: {e}");
-                                    // Treat lock-file I/O failure as unclean
-                                    // — safer to run the extra check than
-                                    // to skip it.
-                                    true
-                                }
-                            };
-                            match SqlCipherBrainStore::new(&db_path, &key) {
-                                Ok(store) => {
-                                    let store = Arc::new(store);
-                                    // Cycle 8.44 audit — breakage risk #3
-                                    // wiring #1: verify SQLCipher integrity
-                                    // BEFORE serving any read/write. On
-                                    // failure the agent refuses to spawn
-                                    // ingest pumps or the MCP surface.
-                                    if let Err(e) = store.verify_integrity_on_boot() {
-                                        match &e {
-                                            IntegrityError::Corrupted(rows) => {
-                                                eprintln!(
-                                                    "mci-agent: brain integrity_check FAILED — refusing to serve. rows={rows:?}",
-                                                );
-                                            }
-                                            IntegrityError::Backend(msg) => {
-                                                eprintln!(
-                                                    "mci-agent: brain integrity_check backend error — refusing to serve. err={msg}",
-                                                );
-                                            }
+                        }
+                        let key = DbKey::from_bytes(key_bytes);
+                        // Cycle 8.44 audit — breakage risk #3 wiring #3:
+                        // acquire the run-lock BEFORE opening the store
+                        // so a live sibling instance aborts us early
+                        // (ADR-0008 §1.4 "one file, one writer" — two
+                        // writers on the same SQLCipher DB corrupt the
+                        // store). A stale lock (unclean prior shutdown)
+                        // triggers an extra integrity check after open.
+                        let lock_path = default_lock_path();
+                        let unclean_prior_shutdown = match acquire_lock(&lock_path) {
+                            Ok(LockAcquireOutcome::CleanBoot) => false,
+                            Ok(LockAcquireOutcome::UncleanShutdown { stale_pid }) => {
+                                eprintln!(
+                                    "mci-agent: unclean prior shutdown detected (stale pid {stale_pid}) — will run extra integrity_check",
+                                );
+                                true
+                            }
+                            Ok(LockAcquireOutcome::AnotherInstanceRunning { live_pid }) => {
+                                eprintln!(
+                                    "mci-agent: another mci-agent instance is running (pid {live_pid}) — refusing to open store (ADR-0008 §1.4 one-writer invariant)",
+                                );
+                                return ExitCode::from(21);
+                            }
+                            Err(e) => {
+                                eprintln!("mci-agent: crash_recovery::acquire_lock: {e}");
+                                // Treat lock-file I/O failure as unclean
+                                // — safer to run the extra check than
+                                // to skip it.
+                                true
+                            }
+                        };
+                        match SqlCipherBrainStore::new(&db_path, &key) {
+                            Ok(store) => {
+                                let store = Arc::new(store);
+                                // Cycle 8.44 audit — breakage risk #3
+                                // wiring #1: verify SQLCipher integrity
+                                // BEFORE serving any read/write. On
+                                // failure the agent refuses to spawn
+                                // ingest pumps or the MCP surface.
+                                if let Err(e) = store.verify_integrity_on_boot() {
+                                    match &e {
+                                        IntegrityError::Corrupted(rows) => {
+                                            eprintln!(
+                                                "mci-agent: brain integrity_check FAILED — refusing to serve. rows={rows:?}",
+                                            );
                                         }
-                                        // Emit a structured helper_health-adjacent
-                                        // line so the launchd log picks it up.
+                                        IntegrityError::Backend(msg) => {
+                                            eprintln!(
+                                                "mci-agent: brain integrity_check backend error — refusing to serve. err={msg}",
+                                            );
+                                        }
+                                    }
+                                    // Emit a structured helper_health-adjacent
+                                    // line so the launchd log picks it up.
+                                    eprintln!(
+                                        "mci-agent: helper_health integrity_check_failed=true",
+                                    );
+                                    // Release the lock so a follow-up
+                                    // repair boot doesn't false-positive
+                                    // as "another instance running".
+                                    let _ = release_lock(&lock_path);
+                                    return ExitCode::from(22);
+                                }
+                                // Post-crash-recovery re-check (wiring #3):
+                                // an unclean prior shutdown MAY have
+                                // left the DB in a torn state that a
+                                // single boot check misses if pages
+                                // were half-written. Run a second pass;
+                                // treat any failure the same as boot.
+                                if unclean_prior_shutdown {
+                                    if let Err(e) = store.verify_integrity_on_boot() {
                                         eprintln!(
-                                            "mci-agent: helper_health integrity_check_failed=true",
+                                            "mci-agent: post-crash integrity_check FAILED — refusing to serve. err={e}",
                                         );
-                                        // Release the lock so a follow-up
-                                        // repair boot doesn't false-positive
-                                        // as "another instance running".
+                                        eprintln!(
+                                            "mci-agent: helper_health integrity_check_failed=true (post-crash)",
+                                        );
                                         let _ = release_lock(&lock_path);
                                         return ExitCode::from(22);
                                     }
-                                    // Post-crash-recovery re-check (wiring #3):
-                                    // an unclean prior shutdown MAY have
-                                    // left the DB in a torn state that a
-                                    // single boot check misses if pages
-                                    // were half-written. Run a second pass;
-                                    // treat any failure the same as boot.
-                                    if unclean_prior_shutdown {
-                                        if let Err(e) = store.verify_integrity_on_boot() {
+                                }
+                                let embedder = load_embedder_backend();
+                                // V2-P5+ construction-graph wire: build
+                                // the sync BERT NER backend and inject it
+                                // into the ingest pump. THIS is the
+                                // production caller `git grep
+                                // NerTier2Backend` must surface on the
+                                // live ingest path (per
+                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                // — without this the backend is dead code).
+                                ner_sync_backend = load_ner_sync_backend();
+                                let base_pump = BrainPump::new(
+                                    Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
+                                    None,
+                                );
+                                let pump = match &ner_sync_backend {
+                                    Some(b) => base_pump.with_ner_sync(Arc::clone(b)),
+                                    None => base_pump,
+                                };
+                                eprintln!(
+                                    "mci-agent: brain ingest + idle-batch enabled. db={} embedder={} sync_ner={}",
+                                    db_path.display(),
+                                    if embedder.1 { "CoreML" } else { "zero-fallback" },
+                                    if pump.ner_sync_enabled() { "bert-base-NER/cpu_only" } else { "off" },
+                                );
+
+                                let worker_store = Arc::clone(&store);
+                                // Clone the embedder Arc BEFORE moving
+                                // it into the idle-batch task — the
+                                // V2-P10 pump supervisor shares the
+                                // same embedder for the deep-hook
+                                // Allow path.
+                                let supervisor_embedder = Arc::clone(&embedder.0);
+                                let worker_embedder = embedder.0;
+                                let worker_shutdown = shutdown_rx.clone();
+                                tokio::spawn(async move {
+                                    match idle_batch::run_idle_batch_worker(
+                                        worker_store,
+                                        worker_embedder,
+                                        32,
+                                        std::time::Duration::from_secs(5),
+                                        worker_shutdown,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats) => {
                                             eprintln!(
-                                                "mci-agent: post-crash integrity_check FAILED — refusing to serve. err={e}",
+                                                "mci-agent: idle-batch exited. embedded={} batches={} embed_errors={} store_errors={}",
+                                                stats.events_embedded, stats.batches_run,
+                                                stats.embed_errors, stats.store_errors,
                                             );
-                                            eprintln!(
-                                                "mci-agent: helper_health integrity_check_failed=true (post-crash)",
-                                            );
-                                            let _ = release_lock(&lock_path);
-                                            return ExitCode::from(22);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("mci-agent: idle-batch error: {e}");
                                         }
                                     }
-                                    let embedder = load_embedder_backend();
-                                    // V2-P5+ construction-graph wire: build
-                                    // the sync BERT NER backend and inject it
-                                    // into the ingest pump. THIS is the
-                                    // production caller `git grep
-                                    // NerTier2Backend` must surface on the
-                                    // live ingest path (per
-                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                    // — without this the backend is dead code).
-                                    ner_sync_backend = load_ner_sync_backend();
-                                    let base_pump = BrainPump::new(
-                                        Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
-                                        None,
-                                    );
-                                    let pump = match &ner_sync_backend {
-                                        Some(b) => base_pump.with_ner_sync(Arc::clone(b)),
-                                        None => base_pump,
-                                    };
-                                    eprintln!(
-                                        "mci-agent: brain ingest + idle-batch enabled. db={} embedder={} sync_ner={}",
-                                        db_path.display(),
-                                        if embedder.1 { "CoreML" } else { "zero-fallback" },
-                                        if pump.ner_sync_enabled() { "bert-base-NER/cpu_only" } else { "off" },
-                                    );
+                                });
 
-                                    let worker_store = Arc::clone(&store);
-                                    // Clone the embedder Arc BEFORE moving
-                                    // it into the idle-batch task — the
-                                    // V2-P10 pump supervisor shares the
-                                    // same embedder for the deep-hook
-                                    // Allow path.
-                                    let supervisor_embedder = Arc::clone(&embedder.0);
-                                    let worker_embedder = embedder.0;
-                                    let worker_shutdown = shutdown_rx.clone();
-                                    tokio::spawn(async move {
-                                        match idle_batch::run_idle_batch_worker(
-                                            worker_store,
-                                            worker_embedder,
-                                            32,
-                                            std::time::Duration::from_secs(5),
-                                            worker_shutdown,
-                                        )
-                                        .await
-                                        {
-                                            Ok(stats) => {
-                                                eprintln!(
-                                                    "mci-agent: idle-batch exited. embedded={} batches={} embed_errors={} store_errors={}",
-                                                    stats.events_embedded, stats.batches_run,
-                                                    stats.embed_errors, stats.store_errors,
-                                                );
-                                            }
-                                            Err(e) => {
-                                                eprintln!("mci-agent: idle-batch error: {e}");
-                                            }
+                                let ep_store = Arc::clone(&store);
+                                let ep_shutdown = shutdown_rx.clone();
+                                tokio::spawn(async move {
+                                    let segmenter = Arc::new(
+                                        mci_brain::episode_segmenter::HeuristicEpisodeSegmenter::new(),
+                                    );
+                                    match episode_worker::run_episode_worker(
+                                        ep_store,
+                                        segmenter,
+                                        64,
+                                        std::time::Duration::from_secs(5),
+                                        ep_shutdown,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats) => {
+                                            eprintln!(
+                                                "mci-agent: episode-worker exited. assigned={} created={} batches={}",
+                                                stats.events_assigned, stats.episodes_created,
+                                                stats.batches_run,
+                                            );
                                         }
-                                    });
-
-                                    let ep_store = Arc::clone(&store);
-                                    let ep_shutdown = shutdown_rx.clone();
-                                    tokio::spawn(async move {
-                                        let segmenter = Arc::new(
-                                            mci_brain::episode_segmenter::HeuristicEpisodeSegmenter::new(),
-                                        );
-                                        match episode_worker::run_episode_worker(
-                                            ep_store,
-                                            segmenter,
-                                            64,
-                                            std::time::Duration::from_secs(5),
-                                            ep_shutdown,
-                                        )
-                                        .await
-                                        {
-                                            Ok(stats) => {
-                                                eprintln!(
-                                                    "mci-agent: episode-worker exited. assigned={} created={} batches={}",
-                                                    stats.events_assigned, stats.episodes_created,
-                                                    stats.batches_run,
-                                                );
-                                            }
-                                            Err(e) => {
-                                                eprintln!("mci-agent: episode-worker error: {e}");
-                                            }
+                                        Err(e) => {
+                                            eprintln!("mci-agent: episode-worker error: {e}");
                                         }
-                                    });
-
-                                    // V2-P6 construction-graph wire: the
-                                    // AliasResolver idle worker. THIS is the
-                                    // production caller `git grep
-                                    // run_alias_resolver_worker` must surface
-                                    // on the live agent path — without it the
-                                    // resolver is dead code (the
-                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                    // lesson). Runs off the hot path: a cheap
-                                    // watermark gates the full resolve, so a
-                                    // steady-state session does one watermark
-                                    // query per interval and no more.
-                                    let alias_store = Arc::clone(&store);
-                                    let alias_shutdown = shutdown_rx.clone();
-                                    tokio::spawn(async move {
-                                        match alias_resolver_worker::run_alias_resolver_worker(
-                                            alias_store,
-                                            std::time::Duration::from_secs(30),
-                                            alias_shutdown,
-                                        )
-                                        .await
-                                        {
-                                            Ok(stats) => {
-                                                eprintln!(
-                                                    "mci-agent: alias-resolver exited. cycles={} memberships_written={} memberships_pruned={} identities_last={} store_errors={}",
-                                                    stats.cycles_run, stats.memberships_written,
-                                                    stats.memberships_pruned,
-                                                    stats.identities_last, stats.store_errors,
-                                                );
-                                            }
-                                            Err(e) => {
-                                                eprintln!("mci-agent: alias-resolver error: {e}");
-                                            }
-                                        }
-                                    });
-
-                                    // V2-P6 construction-graph wire: the
-                                    // episode-edge Consolidator idle worker
-                                    // — the LAST graph-construction step
-                                    // before the Phase-6 dot-connect demo.
-                                    // THIS is the production caller `git grep
-                                    // run_consolidator_worker` must surface on
-                                    // the live agent path; without it the
-                                    // consolidator is dead code (the
-                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                    // lesson). Runs AFTER identities resolve
-                                    // (it reads `entity_identities`), off the
-                                    // hot path: a cheap watermark gates the
-                                    // derive, so a steady-state session does
-                                    // one watermark query per interval.
-                                    let consolidator_store = Arc::clone(&store);
-                                    let consolidator_shutdown = shutdown_rx.clone();
-                                    tokio::spawn(async move {
-                                        match consolidator_worker::run_consolidator_worker(
-                                            consolidator_store,
-                                            std::time::Duration::from_secs(60),
-                                            consolidator_shutdown,
-                                        )
-                                        .await
-                                        {
-                                            Ok(stats) => {
-                                                eprintln!(
-                                                    "mci-agent: consolidator exited. cycles={} edges_written={} edges_pruned={} edges_derived_last={} store_errors={}",
-                                                    stats.cycles_run, stats.edges_written,
-                                                    stats.edges_pruned, stats.edges_derived_last,
-                                                    stats.store_errors,
-                                                );
-                                            }
-                                            Err(e) => {
-                                                eprintln!("mci-agent: consolidator error: {e}");
-                                            }
-                                        }
-                                    });
-
-                                    let retention_store = Arc::clone(&store);
-                                    let retention_shutdown = shutdown_rx.clone();
-                                    let retention_json = default_retention_json_path();
-                                    tokio::spawn(async move {
-                                        match retention_worker::run_retention_worker(
-                                            retention_store,
-                                            retention_json,
-                                            std::time::Duration::from_secs(86_400),
-                                            retention_shutdown,
-                                        )
-                                        .await
-                                        {
-                                            Ok(stats) => {
-                                                eprintln!(
-                                                    "mci-agent: retention worker exited. cycles={} events_deleted={} vectors_deleted={} episodes_deleted={} errors={}",
-                                                    stats.cycles_run, stats.total_events_deleted,
-                                                    stats.total_vectors_deleted, stats.total_episodes_deleted,
-                                                    stats.cycle_errors,
-                                                );
-                                            }
-                                            Err(e) => {
-                                                eprintln!("mci-agent: retention worker error: {e}");
-                                            }
-                                        }
-                                    });
-
-                                    // ADR-0028 — daily brief worker. Fires at
-                                    // 06:00 local. Disabled-idle if the Qwen3
-                                    // model is not present OR
-                                    // MCI_BRIEFS_DISABLED=1.
-                                    spawn_brief_worker(Arc::clone(&store), shutdown_rx.clone());
-
-                                    // V2-P5 — Tier 2 Qwen NER idle-batch
-                                    // worker (FORK 8 = A; CTO Phase 6 PR 9).
-                                    // Reuses the brief author's Qwen3-1.7B
-                                    // Core ML model when present on disk.
-                                    // Polls
-                                    // `SqlCipherBrainStore::events_pending_tier2`
-                                    // for events lacking the
-                                    // (extractor_status,
-                                    // qwen_tier2_processed) sentinel
-                                    // mention, runs each through a
-                                    // `Tier2Extractor` (cascade-marker SKIP
-                                    // + V2-P4 token-REDACT downstream SKIP
-                                    // filters applied above the Qwen
-                                    // backend), writes
-                                    // (extractor_kind = "qwen") mentions to
-                                    // `entity_mentions`. Disabled-idle when
-                                    // the Qwen .mlmodelc is not downloaded
-                                    // (same UX as brief worker); V2-P4
-                                    // Tier 1 regex mentions continue on the
-                                    // hot path regardless. Construction-
-                                    // graph wiring at integration site —
-                                    // per
-                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                    // this is the load-bearing wire.
-                                    spawn_tier2_worker(Arc::clone(&store), shutdown_rx.clone());
-
-                                    // V2-P10 — deep-hook pump supervisor.
-                                    // Reads ~/Library/Application Support/MCI/
-                                    // user-allowlist.toml, probes FDA per
-                                    // bundle, starts MessagesPluginPump +
-                                    // MailIngestPump for any allowlist row
-                                    // with capture_enabled=true AND
-                                    // deep_hook_enabled=true. Driver-CSO
-                                    // audit row 7: construction-graph wiring
-                                    // at integration site. Per
-                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                    // this is the load-bearing wire — without
-                                    // it the V2-P7 + V2-P8 cascade-equivalents
-                                    // never see production input.
-                                    spawn_pump_supervisor(
-                                        Arc::clone(&store),
-                                        supervisor_embedder,
-                                        shutdown_rx.clone(),
-                                    );
-
-                                    // V2-MCP-3 — MCP aggregator.
-                                    // Consumes the registry built by
-                                    // `mcp_client_supervisor::boot_default()`
-                                    // above; runs the hybrid materialize-
-                                    // or-catalog policy against each
-                                    // registered server's resources.
-                                    // Persists Events with
-                                    // `app_bundle_id = "mcp:<name>"` so
-                                    // V2-P12 (Phase 7 chat surface) can
-                                    // structurally apply prompt-injection
-                                    // mitigation per CRS Fork-6 = A.
-                                    // Driver-CSO audit row 7
-                                    // (construction-graph wiring at
-                                    // integration site) — per
-                                    // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                    // this is the load-bearing wire for
-                                    // V2-MCP-3: without it the
-                                    // aggregator module would never run
-                                    // against production input.
-                                    spawn_mcp_aggregator(
-                                        Arc::clone(&mcp_registry),
-                                        Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
-                                        None,
-                                        shutdown_rx.clone(),
-                                    );
-
-                                    Some((pump, store))
-                                }
-                                Err(e) => {
-                                    eprintln!("\n========================================================");
-                                    eprintln!(
-                                        "WARNING: BRAIN OPEN FAILED — CAPTURE IS NOT BEING SAVED"
-                                    );
-                                    eprintln!(
-                                        "========================================================"
-                                    );
-                                    eprintln!("  Error: {e}");
-                                    eprintln!("  Path:  {}", db_path.display());
-                                    eprintln!();
-                                    eprintln!(
-                                        "  Hippocampus is running but your screen activity is NOT"
-                                    );
-                                    eprintln!("  being stored in the brain. Possible causes:");
-                                    eprintln!("    * Stale brain encrypted with old key");
-                                    eprintln!("    * Database and Keychain item do not match");
-                                    eprintln!("    * Permissions issue on brain file");
-                                    eprintln!();
-                                    eprintln!(
-                                        "  Quit and relaunch Hippocampus.app after confirming"
-                                    );
-                                    eprintln!("  Keychain access. Do not replace an existing key.");
-                                    eprintln!("========================================================\n");
-                                    if strict {
-                                        return ExitCode::from(21);
                                     }
-                                    None
+                                });
+
+                                // V2-P6 construction-graph wire: the
+                                // AliasResolver idle worker. THIS is the
+                                // production caller `git grep
+                                // run_alias_resolver_worker` must surface
+                                // on the live agent path — without it the
+                                // resolver is dead code (the
+                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                // lesson). Runs off the hot path: a cheap
+                                // watermark gates the full resolve, so a
+                                // steady-state session does one watermark
+                                // query per interval and no more.
+                                let alias_store = Arc::clone(&store);
+                                let alias_shutdown = shutdown_rx.clone();
+                                tokio::spawn(async move {
+                                    match alias_resolver_worker::run_alias_resolver_worker(
+                                        alias_store,
+                                        std::time::Duration::from_secs(30),
+                                        alias_shutdown,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats) => {
+                                            eprintln!(
+                                                "mci-agent: alias-resolver exited. cycles={} memberships_written={} memberships_pruned={} identities_last={} store_errors={}",
+                                                stats.cycles_run, stats.memberships_written,
+                                                stats.memberships_pruned,
+                                                stats.identities_last, stats.store_errors,
+                                            );
+                                        }
+                                        Err(e) => {
+                                            eprintln!("mci-agent: alias-resolver error: {e}");
+                                        }
+                                    }
+                                });
+
+                                // V2-P6 construction-graph wire: the
+                                // episode-edge Consolidator idle worker
+                                // — the LAST graph-construction step
+                                // before the Phase-6 dot-connect demo.
+                                // THIS is the production caller `git grep
+                                // run_consolidator_worker` must surface on
+                                // the live agent path; without it the
+                                // consolidator is dead code (the
+                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                // lesson). Runs AFTER identities resolve
+                                // (it reads `entity_identities`), off the
+                                // hot path: a cheap watermark gates the
+                                // derive, so a steady-state session does
+                                // one watermark query per interval.
+                                let consolidator_store = Arc::clone(&store);
+                                let consolidator_shutdown = shutdown_rx.clone();
+                                tokio::spawn(async move {
+                                    match consolidator_worker::run_consolidator_worker(
+                                        consolidator_store,
+                                        std::time::Duration::from_secs(60),
+                                        consolidator_shutdown,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats) => {
+                                            eprintln!(
+                                                "mci-agent: consolidator exited. cycles={} edges_written={} edges_pruned={} edges_derived_last={} store_errors={}",
+                                                stats.cycles_run, stats.edges_written,
+                                                stats.edges_pruned, stats.edges_derived_last,
+                                                stats.store_errors,
+                                            );
+                                        }
+                                        Err(e) => {
+                                            eprintln!("mci-agent: consolidator error: {e}");
+                                        }
+                                    }
+                                });
+
+                                let retention_store = Arc::clone(&store);
+                                let retention_shutdown = shutdown_rx.clone();
+                                let retention_json = default_retention_json_path();
+                                tokio::spawn(async move {
+                                    match retention_worker::run_retention_worker(
+                                        retention_store,
+                                        retention_json,
+                                        std::time::Duration::from_secs(86_400),
+                                        retention_shutdown,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats) => {
+                                            eprintln!(
+                                                "mci-agent: retention worker exited. cycles={} events_deleted={} vectors_deleted={} episodes_deleted={} errors={}",
+                                                stats.cycles_run, stats.total_events_deleted,
+                                                stats.total_vectors_deleted, stats.total_episodes_deleted,
+                                                stats.cycle_errors,
+                                            );
+                                        }
+                                        Err(e) => {
+                                            eprintln!("mci-agent: retention worker error: {e}");
+                                        }
+                                    }
+                                });
+
+                                // ADR-0028 — daily brief worker. Fires at
+                                // 06:00 local. Disabled-idle if the Qwen3
+                                // model is not present OR
+                                // MCI_BRIEFS_DISABLED=1.
+                                spawn_brief_worker(Arc::clone(&store), shutdown_rx.clone());
+
+                                // V2-P5 — Tier 2 Qwen NER idle-batch
+                                // worker (FORK 8 = A; CTO Phase 6 PR 9).
+                                // Reuses the brief author's Qwen3-1.7B
+                                // Core ML model when present on disk.
+                                // Polls
+                                // `SqlCipherBrainStore::events_pending_tier2`
+                                // for events lacking the
+                                // (extractor_status,
+                                // qwen_tier2_processed) sentinel
+                                // mention, runs each through a
+                                // `Tier2Extractor` (cascade-marker SKIP
+                                // + V2-P4 token-REDACT downstream SKIP
+                                // filters applied above the Qwen
+                                // backend), writes
+                                // (extractor_kind = "qwen") mentions to
+                                // `entity_mentions`. Disabled-idle when
+                                // the Qwen .mlmodelc is not downloaded
+                                // (same UX as brief worker); V2-P4
+                                // Tier 1 regex mentions continue on the
+                                // hot path regardless. Construction-
+                                // graph wiring at integration site —
+                                // per
+                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                // this is the load-bearing wire.
+                                spawn_tier2_worker(Arc::clone(&store), shutdown_rx.clone());
+
+                                // V2-P10 — deep-hook pump supervisor.
+                                // Reads ~/Library/Application Support/MCI/
+                                // user-allowlist.toml, probes FDA per
+                                // bundle, starts MessagesPluginPump +
+                                // MailIngestPump for any allowlist row
+                                // with capture_enabled=true AND
+                                // deep_hook_enabled=true. Driver-CSO
+                                // audit row 7: construction-graph wiring
+                                // at integration site. Per
+                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                // this is the load-bearing wire — without
+                                // it the V2-P7 + V2-P8 cascade-equivalents
+                                // never see production input.
+                                spawn_pump_supervisor(
+                                    Arc::clone(&store),
+                                    supervisor_embedder,
+                                    shutdown_rx.clone(),
+                                );
+
+                                // V2-MCP-3 — MCP aggregator.
+                                // Consumes the registry built by
+                                // `mcp_client_supervisor::boot_default()`
+                                // above; runs the hybrid materialize-
+                                // or-catalog policy against each
+                                // registered server's resources.
+                                // Persists Events with
+                                // `app_bundle_id = "mcp:<name>"` so
+                                // V2-P12 (Phase 7 chat surface) can
+                                // structurally apply prompt-injection
+                                // mitigation per CRS Fork-6 = A.
+                                // Driver-CSO audit row 7
+                                // (construction-graph wiring at
+                                // integration site) — per
+                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
+                                // this is the load-bearing wire for
+                                // V2-MCP-3: without it the
+                                // aggregator module would never run
+                                // against production input.
+                                spawn_mcp_aggregator(
+                                    Arc::clone(&mcp_registry),
+                                    Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
+                                    None,
+                                    shutdown_rx.clone(),
+                                );
+
+                                Some((pump, store))
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "\n========================================================"
+                                );
+                                eprintln!(
+                                    "WARNING: BRAIN OPEN FAILED — CAPTURE IS NOT BEING SAVED"
+                                );
+                                eprintln!(
+                                    "========================================================"
+                                );
+                                eprintln!("  Error: {e}");
+                                eprintln!("  Path:  {}", db_path.display());
+                                eprintln!();
+                                eprintln!(
+                                    "  Hippocampus is running but your screen activity is NOT"
+                                );
+                                eprintln!("  being stored in the brain. Possible causes:");
+                                eprintln!("    * Stale brain encrypted with old key");
+                                eprintln!("    * Database and Keychain item do not match");
+                                eprintln!("    * Permissions issue on brain file");
+                                eprintln!();
+                                eprintln!("  Quit and relaunch Hippocampus.app after confirming");
+                                eprintln!("  Keychain access. Do not replace an existing key.");
+                                eprintln!(
+                                    "========================================================\n"
+                                );
+                                if strict {
+                                    return ExitCode::from(21);
                                 }
+                                None
                             }
                         }
-                        None => {
-                            eprintln!(
-                                "mci-agent: brain key must be 64 hex chars (32 bytes). Falling back to health-only drain."
-                            );
-                            if strict {
-                                return ExitCode::from(22);
-                            }
-                            None
+                    } else {
+                        eprintln!(
+                            "mci-agent: brain key must be 64 hex chars (32 bytes). Falling back to health-only drain."
+                        );
+                        if strict {
+                            return ExitCode::from(22);
                         }
+                        None
                     }
                 }
                 Err(error) => {
@@ -1029,7 +1028,7 @@ async fn main() -> ExitCode {
                             None => pc_base,
                         };
                         let pc_pump: Arc<dyn BrainIngestor> = Arc::new(pc_pump_inner);
-                        eprintln!("mci-agent: page-content listener on {}", sock.display(),);
+                        eprintln!("mci-agent: page-content listener on {}", sock.display());
                         Some(tokio::spawn(async move {
                             listener.run(unix_listener, pc_pump).await;
                         }))
@@ -1194,7 +1193,7 @@ fn bundle_ids_for_source(source: &str) -> Option<Vec<&'static str>> {
 
 /// Cycle 8.29 P0 #3 — empirical delivery probe.
 ///
-/// Opens the brain SQLCipher store **read-only** (per
+/// Opens the brain `SQLCipher` store **read-only** (per
 /// `SqlCipherBrainStore::open_readonly`, ADR-0017 §5), aggregates events
 /// inserted since `now - since_seconds` whose `app_bundle_id` belongs to
 /// the bundle set associated with `source`, prints the integer total to
@@ -1215,9 +1214,8 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
         return ExitCode::from(2);
     };
 
-    let key_hex = match resolve_key_for_command("stats") {
-        Ok(key) => key,
-        Err(_) => return ExitCode::from(3),
+    let Ok(key_hex) = resolve_key_for_command("stats") else {
+        return ExitCode::from(3);
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
         eprintln!("mci-agent stats: brain key is not a 32-byte hex string");
@@ -1235,8 +1233,7 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
 
     let now_us: u64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
-        .unwrap_or(0);
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX));
     let window_us = since_seconds.saturating_mul(1_000_000);
     let since_us = now_us.saturating_sub(window_us);
 
@@ -1382,9 +1379,7 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
     // rename(2) replaces the destination's mode with the temp file's.
     // Carry the old mode across; a file we are creating starts at 0600
     // so future client metadata can stay private by default.
-    let mode = std::fs::metadata(&settings_path)
-        .map(|m| m.permissions().mode() & 0o777)
-        .unwrap_or(0o600);
+    let mode = std::fs::metadata(&settings_path).map_or(0o600, |m| m.permissions().mode() & 0o777);
     if let Err(e) = std::fs::set_permissions(&tmp_path, Permissions::from_mode(mode)) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(format!("set mode on {}: {e}", tmp_path.display()));
@@ -1589,12 +1584,11 @@ impl key_resolver::KeychainWriter for NativeKeychainWriter {
 }
 
 fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
-    let home = match std::env::var("HOME") {
-        Ok(home) => PathBuf::from(home),
-        Err(_) => {
-            eprintln!("hippocampus ensure-key: HOME is not set.");
-            return Err(30);
-        }
+    let home = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home)
+    } else {
+        eprintln!("hippocampus ensure-key: HOME is not set.");
+        return Err(30);
     };
     let support = home.join("Library/Application Support/MCI");
     if let Err(error) = std::fs::create_dir_all(&support) {
@@ -1627,7 +1621,11 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
                         reason: error.to_string(),
                     }
                 })?;
-                Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+                let mut encoded = String::with_capacity(bytes.len() * 2);
+                for byte in bytes {
+                    write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+                }
+                Ok(encoded)
             },
         )
         .map_err(|error| {
@@ -1637,19 +1635,19 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
 
         match outcome {
             key_resolver::KeyInitializationOutcome::AlreadyPresent => {
-                println!("  key      existing Keychain item validated")
+                println!("  key      existing Keychain item validated");
             }
             key_resolver::KeyInitializationOutcome::Created => {
-                println!("  key      created in macOS Keychain with bundled-executable ACL")
+                println!("  key      created in macOS Keychain with bundled-executable ACL");
             }
             key_resolver::KeyInitializationOutcome::MigratedLegacyKey => {
-                println!("  key      legacy database key migrated and validated")
+                println!("  key      legacy database key migrated and validated");
             }
             key_resolver::KeyInitializationOutcome::ConcurrentItemValidated => {
-                println!("  key      concurrent Keychain item re-read and validated")
+                println!("  key      concurrent Keychain item re-read and validated");
             }
             key_resolver::KeyInitializationOutcome::CompletedInterruptedMigration => {
-                println!("  key      interrupted legacy migration completed and plaintext removed")
+                println!("  key      interrupted legacy migration completed and plaintext removed");
             }
         }
         Ok(())
@@ -1692,9 +1690,7 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
     }
 
     // 3. Index.
-    if let Err(code) = run_enrich_cmd(db_path, DEFAULT_EMBED_BATCH_SIZE) {
-        return Err(code);
-    }
+    run_enrich_cmd(db_path, DEFAULT_EMBED_BATCH_SIZE)?;
 
     // 4. Register with Claude Code.
     match register_mcp(db_path) {
@@ -1838,18 +1834,18 @@ fn run_brief_cmd(
     let tz_offset = brief_worker::current_tz_offset_secs();
     let now_us: u64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
-        .unwrap_or(0);
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX));
     let window = match date {
-        Some(d) => match brief_worker::BriefWindow::for_local_date(d, tz_offset) {
-            Some(w) => w,
-            None => {
+        Some(d) => {
+            if let Some(w) = brief_worker::BriefWindow::for_local_date(d, tz_offset) {
+                w
+            } else {
                 eprintln!(
                     "mci-agent brief: --date wants a real calendar date as YYYY-MM-DD, got '{d}'."
                 );
                 return Err(2);
             }
-        },
+        }
         None => brief_worker::BriefWindow::trailing_24h(now_us, tz_offset),
     };
 
@@ -2086,7 +2082,7 @@ fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<()
             eprintln!(
                 "mci-agent embed-backfill: {} embedded so far",
                 s.events_embedded
-            )
+            );
         },
     ) {
         Ok(s) => s,
@@ -2116,7 +2112,7 @@ fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<()
 /// Resolve + load the V2-P5+ SYNC BERT NER backend (`dslim/bert-base-NER`,
 /// INT8, `cpu_only`). Returns `None` when no `.mlmodelc` is found on disk
 /// (opt-in download — Tier 1 + the async Qwen tier still run regardless) or
-/// the load fails. The bundled WordPiece tokenizer travels inside
+/// the load fails. The bundled `WordPiece` tokenizer travels inside
 /// `mci-brain` (`load_bundled`), so only the model path is resolved here.
 /// Compute units are pinned to CPU inside `NerTier2Backend::load` — never
 /// the `all` latency trap ([[reference-coreml-computeunits-all-trap]]).
@@ -2408,8 +2404,8 @@ fn spawn_tier2_worker(
 ///
 /// Constructs a [`PumpSupervisor`] over the same `SqlCipherBrainStore`
 /// + embedder the wire-frame brain pump uses, points it at the
-/// canonical user-allowlist path, and runs the reconcile loop until
-/// shutdown.
+///   canonical user-allowlist path, and runs the reconcile loop until
+///   shutdown.
 #[cfg(target_os = "macos")]
 fn spawn_pump_supervisor(
     store: Arc<mci_brain::SqlCipherBrainStore>,

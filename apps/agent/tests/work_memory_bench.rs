@@ -134,6 +134,7 @@ fn eligible_fake_baseline() -> Value {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // Keep the complete benchmark contract visible in one trace.
 fn synthetic_work_memory_dataset_reports_extended_metrics() {
     let dataset = r#"{
       "dataset_id": "synthetic-v1-test",

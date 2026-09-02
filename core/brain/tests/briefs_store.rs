@@ -11,7 +11,7 @@
 //!     version,
 //!   • migration is reversible (down → up round-trip),
 //!   • `put_brief` → `brief_for_date` round-trip preserves every column,
-//!   • UNIQUE(date_local) makes regeneration an upsert,
+//!   • `UNIQUE(date_local)` makes regeneration an upsert,
 //!   • `latest_brief` returns the most-recently-generated row,
 //!   • `brief_dates` returns the date strings ordered most-recent first.
 

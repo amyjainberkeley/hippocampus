@@ -174,7 +174,7 @@ pub const DEFAULT_PER_SERVER_TIMEOUT: Duration = Duration::from_secs(30);
 /// the reverse-DNS shape of real Apple bundle ids).
 pub const MCP_SOURCE_PREFIX: &str = "mcp:";
 
-/// Marker prepended to the `Event.text` of a CATALOG_ONLY row.
+/// Marker prepended to the `Event.text` of a `CATALOG_ONLY` row.
 /// V2-P12 (Phase 7) pattern-matches this prefix to render a "fetch
 /// the full content" affordance on the chat surface, then calls
 /// `resources/read` live (which is OUT OF SCOPE here per the dispatch's
@@ -376,7 +376,7 @@ impl McpAggregator {
 
     /// Snapshot the per-server tool catalog. V2-MCP-4 (Phase 7) will
     /// consume this to surface tools in the chat router. The returned
-    /// map is a clone (cheap — ToolDefs are small) so callers do not
+    /// map is a clone (cheap — `ToolDefs` are small) so callers do not
     /// hold the aggregator's lock.
     pub async fn tool_catalog(&self) -> HashMap<String, Vec<ToolDef>> {
         let state = self.state.lock().await;
@@ -431,7 +431,7 @@ impl McpAggregator {
 
             // Race the sleep against shutdown so a SIGINT lands quickly.
             tokio::select! {
-                _ = tokio::time::sleep(self.reconcile_interval) => {},
+                () = tokio::time::sleep(self.reconcile_interval) => {},
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
                         break;
@@ -500,7 +500,7 @@ impl McpAggregator {
         // is emitted (CSO row 4).
         let tools = match client.tools_list().await {
             Ok(t) => t,
-            Err(McpError::Rpc(_)) | Err(McpError::SchemaMismatch(_)) => Vec::new(),
+            Err(McpError::Rpc(_) | McpError::SchemaMismatch(_)) => Vec::new(),
             Err(e) => return Err(e),
         };
         let tool_count = tools.len();
@@ -513,7 +513,7 @@ impl McpAggregator {
         // or-catalog policy below.
         let resources = match client.resources_list().await {
             Ok(r) => r,
-            Err(McpError::Rpc(_)) | Err(McpError::SchemaMismatch(_)) => Vec::new(),
+            Err(McpError::Rpc(_) | McpError::SchemaMismatch(_)) => Vec::new(),
             Err(e) => return Err(e),
         };
         self.stats
@@ -550,61 +550,58 @@ impl McpAggregator {
 
             let ts_us = now_us();
             let read_outcome = client.resources_read(&resource.uri).await;
-            match read_outcome {
-                Ok(read_result) => {
-                    let body = concat_text(&read_result.contents);
-                    if body.len() <= self.materialize_max_bytes {
-                        let event = self.materialize_event(server_name, resource, &body, ts_us);
-                        match self.store.put_event(&event) {
-                            Ok(id) => {
-                                self.stats
-                                    .resources_materialized
-                                    .fetch_add(1, Ordering::Relaxed);
-                                // V2-P4 Tier 1 entity extraction —
-                                // mirror the
-                                // `BrainPump::ingest_ocr_event` Allow-
-                                // arm path so MCP-sourced events
-                                // participate in the entity-graph the
-                                // same way OCR / browser events do.
-                                // Per the scoping memo §3.2 this is
-                                // the load-bearing piece that makes
-                                // the "John was in this Slack thread
-                                // AND this Safari tab" cross-app
-                                // dot-connecting query work.
-                                //
-                                // Best-effort per the brain_ingest
-                                // discipline (line 487): a Tier 1
-                                // persistence failure does NOT roll
-                                // back the event row — the event
-                                // lives; mentions can be backfilled
-                                // later because every Tier 1 writer
-                                // is idempotent on PK by construction.
-                                self.run_tier1_extraction(server_name, id, &event);
-                            }
-                            Err(e) => {
-                                self.stats.put_event_errors.fetch_add(1, Ordering::Relaxed);
-                                tracing::warn!(
-                                    target: "mci_agent::mcp_aggregator",
-                                    server = %server_name,
-                                    "put_event failed for materialize: {e}",
-                                );
-                            }
+            if let Ok(read_result) = read_outcome {
+                let body = concat_text(&read_result.contents);
+                if body.len() <= self.materialize_max_bytes {
+                    let event = Self::materialize_event(server_name, resource, &body, ts_us);
+                    match self.store.put_event(&event) {
+                        Ok(id) => {
+                            self.stats
+                                .resources_materialized
+                                .fetch_add(1, Ordering::Relaxed);
+                            // V2-P4 Tier 1 entity extraction —
+                            // mirror the
+                            // `BrainPump::ingest_ocr_event` Allow-
+                            // arm path so MCP-sourced events
+                            // participate in the entity-graph the
+                            // same way OCR / browser events do.
+                            // Per the scoping memo §3.2 this is
+                            // the load-bearing piece that makes
+                            // the "John was in this Slack thread
+                            // AND this Safari tab" cross-app
+                            // dot-connecting query work.
+                            //
+                            // Best-effort per the brain_ingest
+                            // discipline (line 487): a Tier 1
+                            // persistence failure does NOT roll
+                            // back the event row — the event
+                            // lives; mentions can be backfilled
+                            // later because every Tier 1 writer
+                            // is idempotent on PK by construction.
+                            self.run_tier1_extraction(server_name, id, &event);
                         }
-                    } else {
-                        let event =
-                            self.catalog_only_event(server_name, resource, Some(body.len()), ts_us);
-                        self.persist_catalog_event(server_name, &event);
+                        Err(e) => {
+                            self.stats.put_event_errors.fetch_add(1, Ordering::Relaxed);
+                            tracing::warn!(
+                                target: "mci_agent::mcp_aggregator",
+                                server = %server_name,
+                                "put_event failed for materialize: {e}",
+                            );
+                        }
                     }
-                    tick_materialized += 1;
-                }
-                Err(_) => {
-                    // `resources/read` failed — persist a CATALOG_ONLY
-                    // row anyway so V2-P12 can still surface the
-                    // resource. No body; size unknown.
-                    let event = self.catalog_only_event(server_name, resource, None, ts_us);
+                } else {
+                    let event =
+                        Self::catalog_only_event(server_name, resource, Some(body.len()), ts_us);
                     self.persist_catalog_event(server_name, &event);
-                    tick_materialized += 1;
                 }
+                tick_materialized += 1;
+            } else {
+                // `resources/read` failed — persist a CATALOG_ONLY
+                // row anyway so V2-P12 can still surface the
+                // resource. No body; size unknown.
+                let event = Self::catalog_only_event(server_name, resource, None, ts_us);
+                self.persist_catalog_event(server_name, &event);
+                tick_materialized += 1;
             }
         }
 
@@ -674,7 +671,6 @@ impl McpAggregator {
     /// `BrainStore::put_event`'s belt-and-suspenders check (the events
     /// ARE Allow-arm even though no cascade ran — Fork F6 = A).
     fn materialize_event(
-        &self,
         server_name: &str,
         resource: &ResourceDef,
         body: &str,
@@ -704,12 +700,11 @@ impl McpAggregator {
         }
     }
 
-    /// Construct a CATALOG_ONLY Event — no body bytes, only the URI +
+    /// Construct a `CATALOG_ONLY` Event — no body bytes, only the URI +
     /// metadata. V2-P12 (Phase 7) pattern-matches the
     /// [`CATALOG_ONLY_MARKER`] prefix to render a "fetch the full
     /// content" affordance + call `resources/read` live on user click.
     fn catalog_only_event(
-        &self,
         server_name: &str,
         resource: &ResourceDef,
         approx_size: Option<usize>,
@@ -756,7 +751,7 @@ pub fn is_mcp_source(app_bundle_id: &str) -> bool {
     app_bundle_id.starts_with(MCP_SOURCE_PREFIX)
 }
 
-/// Body of a CATALOG_ONLY event. Stable shape so V2-P12 can parse it
+/// Body of a `CATALOG_ONLY` event. Stable shape so V2-P12 can parse it
 /// reliably. Format:
 ///
 /// ```text
@@ -890,9 +885,14 @@ mod tests {
 
     #[test]
     fn materialize_event_carries_source_tag_and_zero_cascade_reason() {
-        let (_reg, _store, agg) = aggregator_with_empty_registry();
+        let (_reg, _store, _agg) = aggregator_with_empty_registry();
         let resource = make_resource("slack://channels/C123", "design-review", "text/plain");
-        let event = agg.materialize_event("slack", &resource, "hello world", 1_700_000_000_000_000);
+        let event = McpAggregator::materialize_event(
+            "slack",
+            &resource,
+            "hello world",
+            1_700_000_000_000_000,
+        );
         assert_eq!(event.app_bundle_id.as_deref(), Some("mcp:slack"));
         assert_eq!(event.cascade_reason, 0);
         assert!(event.text.contains("hello world"));
@@ -906,10 +906,14 @@ mod tests {
 
     #[test]
     fn catalog_event_carries_marker_and_source_tag() {
-        let (_reg, _store, agg) = aggregator_with_empty_registry();
+        let (_reg, _store, _agg) = aggregator_with_empty_registry();
         let resource = make_resource("notion://page/abc", "Q4 Plan", "text/html");
-        let event =
-            agg.catalog_only_event("notion", &resource, Some(1_500_000), 1_700_000_000_000_000);
+        let event = McpAggregator::catalog_only_event(
+            "notion",
+            &resource,
+            Some(1_500_000),
+            1_700_000_000_000_000,
+        );
         assert_eq!(event.app_bundle_id.as_deref(), Some("mcp:notion"));
         assert_eq!(event.cascade_reason, 0);
         assert!(event.text.contains(CATALOG_ONLY_MARKER));
@@ -921,9 +925,10 @@ mod tests {
 
     #[test]
     fn catalog_event_with_unknown_size() {
-        let (_reg, _store, agg) = aggregator_with_empty_registry();
+        let (_reg, _store, _agg) = aggregator_with_empty_registry();
         let resource = make_resource_minimal("linear://issue/MCI-1");
-        let event = agg.catalog_only_event("linear", &resource, None, 1_700_000_000_000_000);
+        let event =
+            McpAggregator::catalog_only_event("linear", &resource, None, 1_700_000_000_000_000);
         assert_eq!(event.app_bundle_id.as_deref(), Some("mcp:linear"));
         assert!(event.text.contains("bytes=unknown"));
         // Defaults — both unset.

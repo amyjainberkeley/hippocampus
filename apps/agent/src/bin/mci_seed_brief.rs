@@ -65,6 +65,9 @@ fn default_db_path() -> PathBuf {
     home.join("Library/Application Support/MCI/mci.sqlite")
 }
 
+// This parser intentionally stays dependency-free and keeps the complete CLI
+// grammar in one place so the demo binary remains easy to audit.
+#[allow(clippy::too_many_lines)]
 fn parse_args(argv: &[String]) -> ParseOutcome {
     let mut db_path: Option<PathBuf> = None;
     let mut date_local: Option<String> = None;
@@ -117,14 +120,14 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                 if i >= argv.len() {
                     return ParseOutcome::Error("--model-id requires STRING".into());
                 }
-                model_id = argv[i].clone();
+                model_id.clone_from(&argv[i]);
             }
             "--model-version" => {
                 i += 1;
                 if i >= argv.len() {
                     return ParseOutcome::Error("--model-version requires STRING".into());
                 }
-                model_version = argv[i].clone();
+                model_version.clone_from(&argv[i]);
             }
             "--source-events" => {
                 i += 1;
@@ -151,13 +154,10 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
         .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
         .unwrap_or_else(default_db_path);
 
-    let date_local = match date_local {
-        Some(d) => d,
-        None => {
-            return ParseOutcome::Error(
-                "--date YYYY-MM-DD is required (the brief's local date)".into(),
-            )
-        }
+    let Some(date_local) = date_local else {
+        return ParseOutcome::Error(
+            "--date YYYY-MM-DD is required (the brief's local date)".into(),
+        );
     };
     let title = title.unwrap_or_else(|| format!("Demo brief for {date_local}"));
     let body = body.unwrap_or_else(|| {
@@ -238,8 +238,8 @@ fn now_us() -> u64 {
 fn main() -> ExitCode {
     mci_agent::panic_hook::install();
 
-    let argv: Vec<String> = std::env::args().collect();
-    let args = match parse_args(&argv) {
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = match parse_args(&raw_args) {
         ParseOutcome::Help => {
             print_usage();
             return ExitCode::SUCCESS;

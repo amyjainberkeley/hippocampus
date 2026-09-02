@@ -84,13 +84,13 @@ fn filter_chain_completes_under_per_event_burst_budget() {
     let _ = ex.extract(&text).expect("warmup");
 
     // 1000 iterations to get a stable average.
-    let n = 1000;
+    let n: u32 = 1000;
     let start = Instant::now();
     for _ in 0..n {
         let _ = ex.extract(&text).expect("iter");
     }
     let elapsed = start.elapsed();
-    let per_call_us = elapsed.as_micros() / n as u128;
+    let per_call_us = elapsed.as_micros() / u128::from(n);
 
     // Print for the PR body. cargo test --nocapture surfaces it.
     eprintln!(
