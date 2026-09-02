@@ -188,7 +188,9 @@ pub fn tool_definitions() -> serde_json::Value {
             "description": "Compile a bounded, evidence-backed handoff for your current work. \
                              Governed claims are kept separate from raw screen observations; \
                              weak or missing sections abstain explicitly, and every rendered \
-                             item cites a canonical local event.",
+                             item cites a canonical local event. Focused packets preserve whether \
+                             retrieval matched, contradicted, abstained, or returned degraded \
+                             related context.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
