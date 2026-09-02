@@ -62,6 +62,7 @@ use mci_core::crypto::DbKey;
 const VERSION: &str = "0.0.3-phase1-cycle2-iter12";
 
 const DEFAULT_HEALTH_SUMMARY_WINDOW_SECONDS: u64 = 3_600; // 1 hour
+const COMMAND_INTEGRITY_FAILURE_EXIT_CODE: u8 = 22;
 
 struct Args {
     device_id_path: PathBuf,
@@ -1420,6 +1421,7 @@ impl WriterCommand {
 #[derive(Debug)]
 struct CommandWriterLease {
     command: WriterCommand,
+    unclean_prior_shutdown: bool,
     lock: Option<mci_agent::crash_recovery::RunLock>,
 }
 
@@ -1444,6 +1446,8 @@ fn acquire_command_writer_lease(
     let run_lock_path = lock_path_for_brain(db_path);
     match acquire_lock(&run_lock_path) {
         Ok((outcome, lock)) => {
+            let unclean_prior_shutdown =
+                matches!(outcome, LockAcquireOutcome::UncleanShutdown { .. });
             if let LockAcquireOutcome::UncleanShutdown { stale_pid } = outcome {
                 eprintln!(
                     "mci-agent {command_label}: prior writer ended uncleanly (stale pid {stale_pid:?})"
@@ -1451,6 +1455,7 @@ fn acquire_command_writer_lease(
             }
             Ok(CommandWriterLease {
                 command,
+                unclean_prior_shutdown,
                 lock: Some(lock),
             })
         }
@@ -1469,20 +1474,44 @@ fn acquire_command_writer_lease(
     }
 }
 
+fn verify_command_writer_integrity<E, F>(
+    command: WriterCommand,
+    lease: &CommandWriterLease,
+    mut verify: F,
+) -> Result<(), u8>
+where
+    E: std::fmt::Display,
+    F: FnMut() -> Result<(), E>,
+{
+    let pass_count = if lease.unclean_prior_shutdown { 2 } else { 1 };
+    for pass in 1..=pass_count {
+        if let Err(error) = verify() {
+            eprintln!(
+                "mci-agent {}: integrity_check failed before mutation (pass {pass}/{pass_count}): {error}",
+                command.label()
+            );
+            return Err(COMMAND_INTEGRITY_FAILURE_EXIT_CODE);
+        }
+    }
+    Ok(())
+}
+
 fn open_command_writer(
     command: WriterCommand,
     db_path: &Path,
     key: &DbKey,
-    _lease: &CommandWriterLease,
+    lease: &CommandWriterLease,
 ) -> Result<SqlCipherBrainStore, u8> {
     let command_label = command.label();
-    SqlCipherBrainStore::new(db_path, key).map_err(|error| {
+    let store = SqlCipherBrainStore::new(db_path, key).map_err(|error| {
         eprintln!(
             "mci-agent {command_label}: open brain at {}: {error}",
             db_path.display()
         );
         12
-    })
+    })?;
+    verify_command_writer_integrity(command, lease, || store.verify_integrity_on_boot())?;
+    Ok(store)
 }
 
 /// Register Hippocampus as an MCP server in Claude Code's MCP config
@@ -2732,8 +2761,12 @@ mod capture_consent_tests {
 
 #[cfg(test)]
 mod writer_command_lease_tests {
-    use super::{acquire_command_writer_lease, WriterCommand};
+    use super::{
+        acquire_command_writer_lease, verify_command_writer_integrity, WriterCommand,
+        COMMAND_INTEGRITY_FAILURE_EXIT_CODE,
+    };
     use mci_agent::crash_recovery::{acquire_lock, lock_path_for_brain, LockError};
+    use std::cell::Cell;
     use std::path::Path;
     use std::process::{Command, Stdio};
     use std::time::Duration;
@@ -2754,6 +2787,57 @@ mod writer_command_lease_tests {
         let (_outcome, daemon) =
             acquire_lock(&lock_path_for_brain(&brain)).expect("lease released at scope end");
         daemon.release().expect("clean daemon release");
+    }
+
+    #[test]
+    fn unclean_writer_integrity_failure_stops_before_mutation_body() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let brain = root.path().join("brain.sqlite");
+        let marker = lock_path_for_brain(&brain);
+        std::fs::create_dir_all(marker.parent().expect("marker parent")).expect("create parent");
+        std::fs::write(&marker, "999999999").expect("seed unclean marker");
+        let lease = acquire_command_writer_lease(WriterCommand::Enrich, &brain)
+            .expect("recover unclean lease");
+        let passes = Cell::new(0_u8);
+        let body_reached = Cell::new(false);
+
+        let result = (|| {
+            verify_command_writer_integrity(WriterCommand::Enrich, &lease, || {
+                passes.set(passes.get() + 1);
+                Err("injected integrity failure")
+            })?;
+            body_reached.set(true);
+            Ok::<(), u8>(())
+        })();
+
+        assert_eq!(result, Err(COMMAND_INTEGRITY_FAILURE_EXIT_CODE));
+        assert_eq!(passes.get(), 1, "first failed pass aborts immediately");
+        assert!(!body_reached.get(), "mutation body must not be reached");
+        drop(lease);
+        assert!(
+            !marker.exists(),
+            "failure releases the command lease cleanly"
+        );
+    }
+
+    #[test]
+    fn unclean_writer_requires_two_successful_integrity_passes() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let brain = root.path().join("brain.sqlite");
+        let marker = lock_path_for_brain(&brain);
+        std::fs::create_dir_all(marker.parent().expect("marker parent")).expect("create parent");
+        std::fs::write(&marker, "999999999").expect("seed unclean marker");
+        let lease = acquire_command_writer_lease(WriterCommand::ImportSessions, &brain)
+            .expect("recover unclean lease");
+        let passes = Cell::new(0_u8);
+
+        verify_command_writer_integrity(WriterCommand::ImportSessions, &lease, || {
+            passes.set(passes.get() + 1);
+            Ok::<(), &str>(())
+        })
+        .expect("two successful passes");
+
+        assert_eq!(passes.get(), 2);
     }
 
     #[test]

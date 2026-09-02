@@ -1856,7 +1856,8 @@ fn with_writer<F, T>(handle: &Handle, body: F) -> Result<T, String>
 where
     F: FnOnce(&SqlCipherBrainStore) -> Result<T, mci_brain::StoreError>,
 {
-    let _mutation_lease = acquire_mutation_lease(&handle.run_lock_path)?;
+    let mutation_lease = acquire_mutation_lease(&handle.run_lock_path)?;
+    verify_mutation_integrity(&mutation_lease, || handle.store.verify_integrity_on_boot())?;
     // Open a fresh writer. SqlCipherBrainStore::new does the migration
     // (idempotent — every DDL is IF NOT EXISTS) so a delete on an
     // already-migrated store is safe. On a first-run edge case where
@@ -1883,6 +1884,7 @@ fn mutation_run_lock_path(brain_path: &Path) -> PathBuf {
 #[derive(Debug)]
 struct MutationLease {
     _file: File,
+    unclean_prior_shutdown: bool,
 }
 
 fn writer_lease_path(run_lock_path: &Path) -> PathBuf {
@@ -1931,7 +1933,21 @@ fn acquire_mutation_lease(run_lock_path: &Path) -> Result<MutationLease, String>
         );
     }
     match flock(&file, FlockOperation::NonBlockingLockExclusive) {
-        Ok(()) => Ok(MutationLease { _file: file }),
+        Ok(()) => {
+            let unclean_prior_shutdown = match std::fs::symlink_metadata(run_lock_path) {
+                Ok(_) => true,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                Err(error) => {
+                    return Err(format!(
+                        "MCI_MUTATION_BLOCKED: cannot inspect crash marker: {error}"
+                    ));
+                }
+            };
+            Ok(MutationLease {
+                _file: file,
+                unclean_prior_shutdown,
+            })
+        }
         Err(error) if error == rustix::io::Errno::WOULDBLOCK => Err(
             "MCI_MUTATION_BLOCKED: writer lease is active; stop Hippocampus before deleting"
                 .to_owned(),
@@ -1946,6 +1962,22 @@ fn acquire_mutation_lease(run_lock_path: &Path) -> Result<MutationLease, String>
 #[cfg(not(unix))]
 fn acquire_mutation_lease(_run_lock_path: &Path) -> Result<MutationLease, String> {
     Err("MCI_MUTATION_BLOCKED: writer lease is unavailable on this platform".to_owned())
+}
+
+fn verify_mutation_integrity<E, F>(lease: &MutationLease, mut verify: F) -> Result<(), String>
+where
+    E: std::fmt::Display,
+    F: FnMut() -> Result<(), E>,
+{
+    let pass_count = if lease.unclean_prior_shutdown { 2 } else { 1 };
+    for pass in 1..=pass_count {
+        if let Err(error) = verify() {
+            return Err(format!(
+                "MCI_MUTATION_BLOCKED: integrity verification failed before mutation (pass {pass}/{pass_count}): {error}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn delete_result_json(outcome: &DeletionOutcome) -> DeleteResultJson {
@@ -2625,6 +2657,52 @@ mod tests {
 
         drop(first);
         acquire_mutation_lease(&run_path).expect("lease released when guard drops");
+    }
+
+    #[test]
+    fn unclean_mutation_integrity_failure_stops_before_body() {
+        use std::cell::Cell;
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let run_path = root.path().join(".running");
+        std::fs::write(&run_path, "999999999").expect("seed unclean marker");
+        let lease = acquire_mutation_lease(&run_path).expect("mutation lease");
+        let passes = Cell::new(0_u8);
+        let body_reached = Cell::new(false);
+
+        let result = (|| {
+            verify_mutation_integrity(&lease, || {
+                passes.set(passes.get() + 1);
+                Err("injected integrity failure")
+            })?;
+            body_reached.set(true);
+            Ok::<(), String>(())
+        })();
+
+        let error = result.expect_err("integrity failure must block mutation");
+        assert!(error.starts_with("MCI_MUTATION_BLOCKED: integrity verification failed"));
+        assert!(!error.contains("committed deletion cleanup warning"));
+        assert_eq!(passes.get(), 1);
+        assert!(!body_reached.get());
+    }
+
+    #[test]
+    fn unclean_mutation_requires_two_successful_integrity_passes() {
+        use std::cell::Cell;
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let run_path = root.path().join(".running");
+        std::fs::write(&run_path, "999999999").expect("seed unclean marker");
+        let lease = acquire_mutation_lease(&run_path).expect("mutation lease");
+        let passes = Cell::new(0_u8);
+
+        verify_mutation_integrity(&lease, || {
+            passes.set(passes.get() + 1);
+            Ok::<(), &str>(())
+        })
+        .expect("two successful passes");
+
+        assert_eq!(passes.get(), 2);
     }
 
     #[test]
