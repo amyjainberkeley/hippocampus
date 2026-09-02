@@ -24,8 +24,8 @@
 //! 4. **Tool catalog persistence** — `tools/list` results are stashed
 //!    in-memory per server; no `tools/call` is emitted.
 //!
-//! 5. **Per-tick dedupe** — running two reconcile ticks against the
-//!    same server only materializes each resource once.
+//! 5. **Per-tick revision dedupe** — running two reconcile ticks against the
+//!    same unchanged server only materializes each resource once.
 //!
 //! 6. **Cross-server isolation** — registering two servers under
 //!    different names produces two distinct source tags.
@@ -223,7 +223,7 @@ async fn large_resource_yields_catalog_only_row() {
 
 #[tokio::test]
 async fn second_reconcile_does_not_re_materialize_seen_resources() {
-    // Per-tick dedupe via in-memory seen-set keyed by `(server, uri)`.
+    // Per-tick dedupe via in-memory revision map keyed by `(server, uri)`.
     let resources = vec![
         StubResource::new("g://r1", "r1", "first"),
         StubResource::new("g://r2", "r2", "second"),
@@ -540,5 +540,9 @@ fn construction_graph_wiring_at_integration_site() {
         AGENT_BIN.contains("mci_registry: Arc<mci_mcp_client::ServerRegistry>")
             || AGENT_BIN.contains("registry: Arc<mci_mcp_client::ServerRegistry>"),
         "spawn_mcp_aggregator should take an Arc<ServerRegistry>",
+    );
+    assert!(
+        AGENT_BIN.contains("seed_resource_revisions_from_store"),
+        "the app-owned aggregator must seed persisted revisions before its first reconcile",
     );
 }

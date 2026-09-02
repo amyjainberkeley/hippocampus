@@ -127,6 +127,7 @@ use mci_brain::{BrainStore, Embedder, Event, EventId};
 use mci_mcp_client::{
     McpError, ResourceContent, ResourceDef, ServerRegistration, ServerRegistry, ToolDef,
 };
+use sha2::{Digest, Sha256};
 use tokio::sync::{watch, Mutex};
 
 use crate::brain_ingest::compose_context_header;
@@ -180,6 +181,10 @@ pub const MCP_SOURCE_PREFIX: &str = "mcp:";
 /// `resources/read` live (which is OUT OF SCOPE here per the dispatch's
 /// scope bind).
 pub const CATALOG_ONLY_MARKER: &str = "[CATALOG_ONLY";
+
+/// Marker stored at the start of each successfully read MCP resource event.
+/// The URI is stable identity; this digest is the content revision.
+pub const MCP_RESOURCE_REVISION_MARKER: &str = "[MCP_RESOURCE revision_sha256=";
 
 /// Cumulative stats for one [`McpAggregator`]. Every field is a
 /// content-free counter (`u64`) — no MCP server URLs, no server tool
@@ -259,16 +264,17 @@ pub struct AggregatorStatsSnapshot {
 /// - `tools` is the in-memory snapshot of the last `tools/list` result
 ///   for this server. V2-MCP-4 (Phase 7) reads this to surface tools
 ///   in the chat router.
-/// - `seen_resource_uris` is the dedupe set for materialized resources
-///   across ticks within ONE agent lifetime. Cold-start posture
-///   matches the V2-P10 `MessagesPluginPump`: a fresh process starts
-///   with an empty set, so a server's CURRENT resource list is
-///   materialized on the first tick. v2+ can persist this set to a
-///   `mcp-cursors.toml` for restart-idempotent ingest.
+/// - `resource_revisions` maps stable resource URI to the last successfully
+///   persisted content digest. Every pass may re-read a URI because MCP does
+///   not guarantee revision metadata in `resources/list`; only a changed
+///   digest appends a new evidence event.
+/// - `unreadable_resource_uris` prevents duplicate catalog rows while still
+///   allowing a failed `resources/read` to be retried on the next pass.
 #[derive(Debug, Default)]
 struct ServerBookkeeping {
     tools: Vec<ToolDef>,
-    seen_resource_uris: HashSet<String>,
+    resource_revisions: HashMap<String, String>,
+    unreadable_resource_uris: HashSet<String>,
 }
 
 /// Internal state, behind the `Mutex` so a snapshot-for-tests cannot
@@ -387,26 +393,25 @@ impl McpAggregator {
             .collect()
     }
 
-    /// Pre-populate one server's seen-set so a resource already in the
-    /// brain is not read and written a second time.
+    /// Pre-populate one server's stable-resource revision map from events
+    /// already present in the brain.
     ///
-    /// The seen-set is in-memory and lives for one process lifetime,
-    /// which is the right cold-start posture for [`Self::run`]: the
-    /// long-running agent materializes a server's current resource list
-    /// once and then tracks it. It is the wrong posture for a command
-    /// that does one pass and exits, because every invocation would
-    /// start cold and duplicate every resource. `mci-agent mcp-sync`
-    /// seeds this from the store before calling
-    /// [`Self::reconcile_once`]; the loop does not call it, so its
-    /// documented behaviour is unchanged.
-    pub async fn seed_seen_resources(
+    /// Revision state is in-memory for the reconcile loop, so both
+    /// `mci-agent mcp-sync` and the app-owned background runner seed it from
+    /// persisted events before calling [`Self::reconcile_once`]. New resource
+    /// bodies are still read because MCP resource catalogs do not guarantee a
+    /// revision token; the digest prevents unchanged content from being
+    /// appended again.
+    pub async fn seed_resource_revisions(
         &self,
         server_name: &str,
-        uris: impl IntoIterator<Item = String>,
+        revisions: impl IntoIterator<Item = (String, String)>,
     ) {
         let mut state = self.state.lock().await;
         let bk = state.per_server.entry(server_name.to_owned()).or_default();
-        bk.seen_resource_uris.extend(uris);
+        for (uri, revision) in revisions {
+            bk.resource_revisions.entry(uri).or_insert(revision);
+        }
     }
 
     /// Run the reconcile loop until `shutdown` flips to `true`.
@@ -520,45 +525,47 @@ impl McpAggregator {
             .resources_discovered
             .fetch_add(resources.len() as u64, Ordering::Relaxed);
 
-        // Snapshot the prior seen-set (cheap clone — URIs are short)
+        // Snapshot prior revisions (cheap clone — URIs and digests are short)
         // so we don't hold the state lock across `resources/read`
         // network calls.
-        let prior_seen: HashSet<String> = {
+        let (prior_revisions, prior_unreadable) = {
             let state = self.state.lock().await;
             state
                 .per_server
                 .get(server_name)
-                .map(|bk| bk.seen_resource_uris.clone())
+                .map(|bk| {
+                    (
+                        bk.resource_revisions.clone(),
+                        bk.unreadable_resource_uris.clone(),
+                    )
+                })
                 .unwrap_or_default()
         };
 
-        let mut tick_materialized = 0usize;
-        let mut newly_seen: Vec<String> = Vec::new();
+        let mut new_revisions: Vec<(String, String)> = Vec::new();
+        let mut newly_unreadable: Vec<String> = Vec::new();
+        let mut newly_readable: Vec<String> = Vec::new();
 
-        for resource in &resources {
-            if tick_materialized >= self.max_resources_per_tick {
-                break;
-            }
-            if prior_seen.contains(&resource.uri) {
-                continue;
-            }
-            // Mark seen BEFORE we read so a transient read failure
-            // doesn't cause re-attempts on every tick — the v1 policy
-            // is "best-effort, one shot per agent lifetime per URI".
-            // Restart re-tries (no across-restart persistence in v1).
-            newly_seen.push(resource.uri.clone());
-
+        for resource in resources.iter().take(self.max_resources_per_tick) {
             let ts_us = now_us();
             let read_outcome = client.resources_read(&resource.uri).await;
             if let Ok(read_result) = read_outcome {
                 let body = concat_text(&read_result.contents);
+                let revision = resource_revision(&body);
+                if prior_revisions.get(&resource.uri) == Some(&revision) {
+                    newly_readable.push(resource.uri.clone());
+                    continue;
+                }
                 if body.len() <= self.materialize_max_bytes {
-                    let event = Self::materialize_event(server_name, resource, &body, ts_us);
+                    let event =
+                        Self::materialize_event(server_name, resource, &body, &revision, ts_us);
                     match self.store.put_event(&event) {
                         Ok(id) => {
                             self.stats
                                 .resources_materialized
                                 .fetch_add(1, Ordering::Relaxed);
+                            new_revisions.push((resource.uri.clone(), revision));
+                            newly_readable.push(resource.uri.clone());
                             // V2-P4 Tier 1 entity extraction —
                             // mirror the
                             // `BrainPump::ingest_ocr_event` Allow-
@@ -590,28 +597,41 @@ impl McpAggregator {
                         }
                     }
                 } else {
-                    let event =
-                        Self::catalog_only_event(server_name, resource, Some(body.len()), ts_us);
-                    self.persist_catalog_event(server_name, &event);
+                    let event = Self::catalog_only_event(
+                        server_name,
+                        resource,
+                        Some(body.len()),
+                        Some(&revision),
+                        ts_us,
+                    );
+                    if self.persist_catalog_event(server_name, &event) {
+                        new_revisions.push((resource.uri.clone(), revision));
+                        newly_readable.push(resource.uri.clone());
+                    }
                 }
-                tick_materialized += 1;
             } else {
-                // `resources/read` failed — persist a CATALOG_ONLY
-                // row anyway so V2-P12 can still surface the
-                // resource. No body; size unknown.
-                let event = Self::catalog_only_event(server_name, resource, None, ts_us);
-                self.persist_catalog_event(server_name, &event);
-                tick_materialized += 1;
+                // Keep read failures retryable, but persist at most one
+                // catalog row per URI while the resource remains unreadable.
+                if !prior_unreadable.contains(&resource.uri) {
+                    let event = Self::catalog_only_event(server_name, resource, None, None, ts_us);
+                    if self.persist_catalog_event(server_name, &event) {
+                        newly_unreadable.push(resource.uri.clone());
+                    }
+                }
             }
         }
 
-        // Commit: stash the updated tool catalog + seen-set under one
+        // Commit: stash the updated tool catalog + revision state under one
         // lock. Holding the lock here is fine — the per-server async
         // network calls already returned.
         let mut state = self.state.lock().await;
         let bk = state.per_server.entry(server_name.clone()).or_default();
         bk.tools = tools;
-        bk.seen_resource_uris.extend(newly_seen);
+        bk.resource_revisions.extend(new_revisions);
+        bk.unreadable_resource_uris.extend(newly_unreadable);
+        for uri in newly_readable {
+            bk.unreadable_resource_uris.remove(&uri);
+        }
 
         Ok(())
     }
@@ -645,12 +665,13 @@ impl McpAggregator {
     /// Persist a `[CATALOG_ONLY ...]` event + bump the right counter.
     /// Encapsulated so both the "body too large" and "read errored"
     /// branches share the same code path.
-    fn persist_catalog_event(&self, server_name: &str, event: &Event) {
+    fn persist_catalog_event(&self, server_name: &str, event: &Event) -> bool {
         match self.store.put_event(event) {
             Ok(_id) => {
                 self.stats
                     .resources_catalog_only
                     .fetch_add(1, Ordering::Relaxed);
+                true
             }
             Err(e) => {
                 self.stats.put_event_errors.fetch_add(1, Ordering::Relaxed);
@@ -659,6 +680,7 @@ impl McpAggregator {
                     server = %server_name,
                     "put_event failed for catalog: {e}",
                 );
+                false
             }
         }
     }
@@ -674,13 +696,17 @@ impl McpAggregator {
         server_name: &str,
         resource: &ResourceDef,
         body: &str,
+        revision: &str,
         ts_us: u64,
     ) -> Event {
         let app = source_tag(server_name);
         let title = resource_title(resource);
         let url = Some(resource.uri.clone());
         let header = compose_context_header(Some(&app), title.as_deref(), url.as_deref(), ts_us);
-        let mut text = String::with_capacity(header.len() + body.len());
+        let marker = revision_marker(revision);
+        let mut text = String::with_capacity(marker.len() + header.len() + body.len() + 2);
+        text.push_str(&marker);
+        text.push('\n');
         text.push_str(&header);
         text.push_str(body);
         Event {
@@ -708,13 +734,18 @@ impl McpAggregator {
         server_name: &str,
         resource: &ResourceDef,
         approx_size: Option<usize>,
+        revision: Option<&str>,
         ts_us: u64,
     ) -> Event {
         let app = source_tag(server_name);
         let title = resource_title(resource);
         let url = Some(resource.uri.clone());
         let header = compose_context_header(Some(&app), title.as_deref(), url.as_deref(), ts_us);
-        let mut text = String::with_capacity(header.len() + 128);
+        let mut text = String::with_capacity(header.len() + 224);
+        if let Some(revision) = revision {
+            text.push_str(&revision_marker(revision));
+            text.push('\n');
+        }
         text.push_str(&header);
         text.push_str(&catalog_text(resource, approx_size));
         Event {
@@ -733,6 +764,26 @@ impl McpAggregator {
             embedding: None,
         }
     }
+}
+
+fn resource_revision(body: &str) -> String {
+    let digest = Sha256::digest(body.as_bytes());
+    format!("{digest:x}")
+}
+
+fn revision_marker(revision: &str) -> String {
+    format!("{MCP_RESOURCE_REVISION_MARKER}{revision}]")
+}
+
+/// Read a stored MCP content revision from an event snippet.
+#[must_use]
+pub fn resource_revision_from_event_text(text: &str) -> Option<String> {
+    let revision = text
+        .strip_prefix(MCP_RESOURCE_REVISION_MARKER)?
+        .split_once(']')?
+        .0;
+    (revision.len() == 64 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| revision.to_ascii_lowercase())
 }
 
 /// `mcp:<server-name>` — the source tag. Pulled into a free function
@@ -891,12 +942,18 @@ mod tests {
             "slack",
             &resource,
             "hello world",
+            &"a".repeat(64),
             1_700_000_000_000_000,
         );
         assert_eq!(event.app_bundle_id.as_deref(), Some("mcp:slack"));
         assert_eq!(event.cascade_reason, 0);
         assert!(event.text.contains("hello world"));
-        assert!(event.text.starts_with("[app=mcp:slack"));
+        assert!(event.text.starts_with(MCP_RESOURCE_REVISION_MARKER));
+        assert_eq!(
+            resource_revision_from_event_text(&event.text),
+            Some("a".repeat(64))
+        );
+        assert!(event.text.contains("[app=mcp:slack"));
         assert_eq!(event.url.as_deref(), Some("slack://channels/C123"));
         assert_eq!(event.window_title.as_deref(), Some("design-review"));
         assert!(event.embedding.is_none(), "embedder is None in v1");
@@ -912,6 +969,7 @@ mod tests {
             "notion",
             &resource,
             Some(1_500_000),
+            Some(&"b".repeat(64)),
             1_700_000_000_000_000,
         );
         assert_eq!(event.app_bundle_id.as_deref(), Some("mcp:notion"));
@@ -921,14 +979,23 @@ mod tests {
         assert!(event.text.contains("bytes=1500000"));
         assert!(event.text.contains("name=Q4 Plan"));
         assert!(event.text.contains("mime=text/html"));
+        assert_eq!(
+            resource_revision_from_event_text(&event.text),
+            Some("b".repeat(64))
+        );
     }
 
     #[test]
     fn catalog_event_with_unknown_size() {
         let (_reg, _store, _agg) = aggregator_with_empty_registry();
         let resource = make_resource_minimal("linear://issue/MCI-1");
-        let event =
-            McpAggregator::catalog_only_event("linear", &resource, None, 1_700_000_000_000_000);
+        let event = McpAggregator::catalog_only_event(
+            "linear",
+            &resource,
+            None,
+            None,
+            1_700_000_000_000_000,
+        );
         assert_eq!(event.app_bundle_id.as_deref(), Some("mcp:linear"));
         assert!(event.text.contains("bytes=unknown"));
         // Defaults — both unset.

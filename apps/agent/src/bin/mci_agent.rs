@@ -951,7 +951,7 @@ async fn main() -> ExitCode {
                                 // against production input.
                                 spawn_mcp_aggregator(
                                     Arc::clone(&mcp_registry),
-                                    Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
+                                    Arc::clone(&store),
                                     None,
                                     shutdown_rx.clone(),
                                 );
@@ -2454,17 +2454,32 @@ fn spawn_pump_supervisor(
 /// [[project-v2p1-unit-tests-passed-but-never-wired]] discipline.
 fn spawn_mcp_aggregator(
     registry: Arc<mci_mcp_client::ServerRegistry>,
-    store: Arc<dyn mci_brain::BrainStore>,
+    store: Arc<mci_brain::SqlCipherBrainStore>,
     embedder: Option<Arc<dyn mci_brain::Embedder>>,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
-    let aggregator = mci_agent::mcp_aggregator::McpAggregator::new(registry, store, embedder);
+    let aggregator = mci_agent::mcp_aggregator::McpAggregator::new(
+        Arc::clone(&registry),
+        Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
+        embedder,
+    );
     eprintln!(
         "mci-agent: MCP aggregator started (reconcile every {}s; materialize cap {} bytes)",
         mci_agent::mcp_aggregator::DEFAULT_RECONCILE_INTERVAL.as_secs(),
         mci_agent::mcp_aggregator::DEFAULT_MATERIALIZE_MAX_BYTES,
     );
     tokio::spawn(async move {
+        let registrations = registry.list().await;
+        if let Err(error) = mci_agent::mcp_sync::seed_resource_revisions_from_store(
+            &registrations,
+            &store,
+            &aggregator,
+        )
+        .await
+        {
+            eprintln!("mci-agent: MCP aggregator revision seed failed: {error}");
+            return;
+        }
         aggregator.run(shutdown).await;
         eprintln!("mci-agent: MCP aggregator exited cleanly");
     });
