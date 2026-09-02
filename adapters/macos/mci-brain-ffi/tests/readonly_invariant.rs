@@ -35,6 +35,8 @@
 //! an `AGENT_PROTOCOL` §5 protected-set violation and the test fails.
 
 use std::ffi::{CStr, CString};
+use std::fs::OpenOptions;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::{fs, process};
 
@@ -50,7 +52,25 @@ use mci_brain_ffi::{
 use mci_core::crypto::DbKey;
 use mci_core::store::open_readonly as mci_core_open_readonly;
 use rusqlite::params;
+use rustix::fs::{flock, FlockOperation};
 use tempfile::TempDir;
+
+fn hold_writer_lease(brain_path: &std::path::Path) -> std::fs::File {
+    let lease_path = brain_path
+        .parent()
+        .expect("brain parent")
+        .join(".writer.lock");
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(lease_path)
+        .expect("open writer lease");
+    flock(&file, FlockOperation::NonBlockingLockExclusive).expect("hold writer lease");
+    file
+}
 
 /// Hex-encode raw 32-byte test key bytes for the FFI's `key_hex` arg.
 /// Tests construct the `DbKey` via [`DbKey::from_bytes`] from the same
@@ -782,7 +802,7 @@ fn ffi_delete_event_returns_committed_outcome_when_blob_cleanup_warns() {
 }
 
 #[test]
-fn ffi_delete_event_fails_closed_while_agent_run_sentinel_is_live() {
+fn ffi_delete_event_fails_closed_while_agent_writer_lease_is_live() {
     let (_dir, path, raw_key) = make_test_db();
     let id = {
         let key = DbKey::from_bytes(raw_key);
@@ -794,6 +814,7 @@ fn ffi_delete_event_fails_closed_while_agent_run_sentinel_is_live() {
         process::id().to_string(),
     )
     .expect("write live sentinel");
+    let _writer_lease = hold_writer_lease(&path);
 
     let path_c = CString::new(path.to_str().unwrap()).unwrap();
     let key_c = CString::new(key_hex_for(raw_key)).unwrap();
@@ -811,7 +832,7 @@ fn ffi_delete_event_fails_closed_while_agent_run_sentinel_is_live() {
 }
 
 #[test]
-fn ffi_delete_event_fails_closed_on_malformed_run_sentinel() {
+fn ffi_delete_event_allows_recovery_when_only_a_malformed_crash_marker_remains() {
     let (_dir, path, raw_key) = make_test_db();
     let id = {
         let key = DbKey::from_bytes(raw_key);
@@ -827,13 +848,17 @@ fn ffi_delete_event_fails_closed_on_malformed_run_sentinel() {
     assert!(!h.is_null());
     let query = CString::new(format!(r#"{{"event_id":{}}}"#, id.0)).unwrap();
     let raw = unsafe { mci_brain_ffi_delete_event(h, query.as_ptr()) };
-    assert!(raw.is_null(), "ambiguous writer state must fail closed");
-    assert!(last_error_string().contains("MCI_MUTATION_BLOCKED"));
+    assert!(
+        !raw.is_null(),
+        "a stale crash marker must not impersonate a live writer: {}",
+        last_error_string()
+    );
+    unsafe { mci_brain_ffi_string_free(raw) };
     unsafe { mci_brain_ffi_close(h) };
 
     let key = DbKey::from_bytes(raw_key);
     let reader = SqlCipherBrainStore::open_readonly(&path, &key).expect("reader open");
-    assert!(reader.get_event(id).expect("read event").is_some());
+    assert!(reader.get_event(id).expect("read event").is_none());
 }
 
 // ---------------------------------------------------------------------------

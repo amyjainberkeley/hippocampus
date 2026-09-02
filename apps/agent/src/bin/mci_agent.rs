@@ -39,9 +39,7 @@ use mci_agent::client_registry::{
     ClientRegistration, ClientRegistry, RegistrationChange, RegistrationStatus,
 };
 use mci_agent::consolidator_worker;
-use mci_agent::crash_recovery::{
-    acquire_lock, default_lock_path, release_lock, LockAcquireOutcome,
-};
+use mci_agent::crash_recovery::{acquire_lock, lock_path_for_brain, LockAcquireOutcome, LockError};
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::episode_worker;
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
@@ -495,7 +493,8 @@ fn print_usage() {
         \x20 MCI_DB_KEYCHAIN_SERVICE    content-free Keychain service reference; production\n\
         \x20 MCI_DB_KEYCHAIN_ACCOUNT    account reference. Defaults match Hippocampus.app.\n\
         \x20 MCI_DEVELOPMENT_FILE_KEY   set to 1 only for local development to allow dev.key\n\
-        \x20                            or MCI_DB_KEY_HEX. Production ignores raw/file keys.\n\
+        \x20                            MCI_DB_KEY_FILE, or MCI_DB_KEY_HEX. Production\n\
+        \x20                            ignores raw/file keys.\n\
         \x20 MCI_EMBEDDER_DISABLED      set to 1 to force lexical-only recall in mcp-serve\n\
         \x20                            (skips HybridRetriever even if an embedder is\n\
         \x20                            available). Default fusion weights per ADR-0010:\n\
@@ -610,6 +609,7 @@ async fn main() -> ExitCode {
             // ~220 MB bert-base-NER working set is resident once, not twice.
             // None when the model is absent (opt-in download) or non-macOS.
             let mut ner_sync_backend: Option<Arc<dyn mci_brain::NerBackend>> = None;
+            let mut writer_run_lock = None;
 
             let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> = match resolve_key_hex()
             {
@@ -634,27 +634,28 @@ async fn main() -> ExitCode {
                         // writers on the same SQLCipher DB corrupt the
                         // store). A stale lock (unclean prior shutdown)
                         // triggers an extra integrity check after open.
-                        let lock_path = default_lock_path();
+                        let lock_path = lock_path_for_brain(&db_path);
                         let unclean_prior_shutdown = match acquire_lock(&lock_path) {
-                            Ok(LockAcquireOutcome::CleanBoot) => false,
-                            Ok(LockAcquireOutcome::UncleanShutdown { stale_pid }) => {
+                            Ok((LockAcquireOutcome::CleanBoot, lock)) => {
+                                writer_run_lock = Some(lock);
+                                false
+                            }
+                            Ok((LockAcquireOutcome::UncleanShutdown { stale_pid }, lock)) => {
+                                writer_run_lock = Some(lock);
                                 eprintln!(
-                                    "mci-agent: unclean prior shutdown detected (stale pid {stale_pid}) — will run extra integrity_check",
+                                    "mci-agent: unclean prior shutdown detected (stale pid {stale_pid:?}) — will run extra integrity_check",
                                 );
                                 true
                             }
-                            Ok(LockAcquireOutcome::AnotherInstanceRunning { live_pid }) => {
+                            Err(LockError::WriterLeaseHeld { owner_pid }) => {
                                 eprintln!(
-                                    "mci-agent: another mci-agent instance is running (pid {live_pid}) — refusing to open store (ADR-0008 §1.4 one-writer invariant)",
+                                    "mci-agent: another writer owns the process-lifetime lease (pid {owner_pid:?}) — refusing to open store (ADR-0008 §1.4 one-writer invariant)",
                                 );
                                 return ExitCode::from(21);
                             }
                             Err(e) => {
                                 eprintln!("mci-agent: crash_recovery::acquire_lock: {e}");
-                                // Treat lock-file I/O failure as unclean
-                                // — safer to run the extra check than
-                                // to skip it.
-                                true
+                                return ExitCode::from(21);
                             }
                         };
                         match SqlCipherBrainStore::new(&db_path, &key) {
@@ -686,7 +687,9 @@ async fn main() -> ExitCode {
                                     // Release the lock so a follow-up
                                     // repair boot doesn't false-positive
                                     // as "another instance running".
-                                    let _ = release_lock(&lock_path);
+                                    if let Some(lock) = writer_run_lock.take() {
+                                        let _ = lock.release();
+                                    }
                                     return ExitCode::from(22);
                                 }
                                 // Post-crash-recovery re-check (wiring #3):
@@ -703,7 +706,9 @@ async fn main() -> ExitCode {
                                         eprintln!(
                                             "mci-agent: helper_health integrity_check_failed=true (post-crash)",
                                         );
-                                        let _ = release_lock(&lock_path);
+                                        if let Some(lock) = writer_run_lock.take() {
+                                            let _ = lock.release();
+                                        }
                                         return ExitCode::from(22);
                                     }
                                 }
@@ -980,6 +985,9 @@ async fn main() -> ExitCode {
                                 Some((pump, store))
                             }
                             Err(e) => {
+                                if let Some(lock) = writer_run_lock.take() {
+                                    let _ = lock.release();
+                                }
                                 eprintln!(
                                     "\n========================================================"
                                 );
@@ -1096,12 +1104,11 @@ async fn main() -> ExitCode {
             // Signal shutdown to idle-batch + episode workers.
             let _ = shutdown_tx.send(true);
 
-            // Cycle 8.44 audit — breakage risk #3 wiring #3: release
-            // the run-lock on clean shutdown. Absence of the file on
-            // next boot signals a clean prior exit; presence with a
-            // stale PID triggers the extra integrity check.
-            if brain_pump.is_some() {
-                if let Err(e) = release_lock(&default_lock_path()) {
+            // Mark the run clean, but retain the advisory descriptor until
+            // process teardown. Background Tokio/runtime cleanup therefore
+            // cannot outlive the one-writer lease.
+            if let Some(lock) = writer_run_lock.take() {
+                if let Err(e) = lock.release_at_process_exit() {
                     eprintln!("mci-agent: crash_recovery::release_lock: {e}");
                 }
             }
@@ -1310,9 +1317,11 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
 /// Read the development file key when the explicit development gate is set.
 fn read_dev_key_hex() -> Option<String> {
     let home = std::env::var("HOME").ok().map(PathBuf::from);
+    let explicit_key_file = std::env::var_os("MCI_DB_KEY_FILE").map(PathBuf::from);
     development_key_hex_from(
         std::env::var("MCI_DEVELOPMENT_FILE_KEY").ok().as_deref(),
         std::env::var("MCI_DB_KEY_HEX").ok().as_deref(),
+        explicit_key_file.as_deref(),
         home.as_deref(),
     )
 }
@@ -1320,18 +1329,29 @@ fn read_dev_key_hex() -> Option<String> {
 fn development_key_hex_from(
     marker: Option<&str>,
     raw_key: Option<&str>,
+    explicit_key_file: Option<&Path>,
     home: Option<&Path>,
 ) -> Option<String> {
     guard_development_marker(marker)?;
+    if let Some(path) = explicit_key_file {
+        return read_development_key_file(path);
+    }
     raw_key
         .filter(|key| key_resolver::is_valid_database_key(key))
         .map(str::to_owned)
         .or_else(|| {
             let path = home?.join("Library/Application Support/MCI/dev.key");
-            std::fs::read_to_string(path)
-                .ok()
-                .filter(|key| key_resolver::is_valid_database_key(key))
+            read_development_key_file(&path)
         })
+}
+
+fn read_development_key_file(path: &Path) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let key = contents
+        .strip_suffix("\r\n")
+        .or_else(|| contents.strip_suffix('\n'))
+        .unwrap_or(&contents);
+    key_resolver::is_valid_database_key(key).then(|| key.to_owned())
 }
 
 fn guard_development_marker(marker: Option<&str>) -> Option<()> {
@@ -2570,15 +2590,49 @@ mod capture_consent_tests {
         std::fs::write(&key_path, &key).expect("write dev key");
 
         assert_eq!(
-            development_key_hex_from(Some("1"), None, Some(root.path())),
+            development_key_hex_from(Some("1"), None, None, Some(root.path())),
             Some(key)
         );
         assert_eq!(
             development_key_hex_from(
                 None,
                 Some("cd".repeat(32).as_str()),
+                None,
                 Some(Path::new("/tmp"))
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn supervisor_explicit_key_file_is_honored_only_behind_exact_development_marker() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let key_path = root.path().join("supervisor-selected.key");
+        let key = "ef".repeat(32);
+        std::fs::write(&key_path, format!("{key}\n")).expect("write explicit dev key");
+
+        assert_eq!(
+            development_key_hex_from(Some("1"), None, Some(&key_path), None),
+            Some(key.clone())
+        );
+        assert_eq!(
+            development_key_hex_from(Some("true"), None, Some(&key_path), None),
+            None
+        );
+        assert_eq!(
+            development_key_hex_from(None, None, Some(&key_path), None),
+            None
+        );
+
+        std::fs::write(&key_path, format!("{key} ")).expect("write padded key");
+        assert_eq!(
+            development_key_hex_from(Some("1"), None, Some(&key_path), None),
+            None,
+            "non-newline whitespace must not be normalized into key material"
+        );
+        std::fs::write(&key_path, "g0".repeat(32)).expect("write non-hex key");
+        assert_eq!(
+            development_key_hex_from(Some("1"), None, Some(&key_path), None),
             None
         );
     }
