@@ -20,7 +20,7 @@ Primary Apple references:
 
 ## Current Machine Snapshot
 
-Measured on 2026-09-01:
+Measured again on 2026-09-02:
 
 ```text
 xcode-select -p
@@ -28,6 +28,9 @@ xcode-select -p
 
 xcodebuild -version
 error: active developer directory is a Command Line Tools instance
+
+find /Applications -maxdepth 2 -name 'Xcode*.app' -print
+(no result)
 
 security find-identity -v -p codesigning
 0 valid identities found
@@ -143,11 +146,13 @@ child processes.
 
 ## 6. Configure The Immutable Model Bundle
 
-The three release models are intentionally not checked into git. A clean tag
-runner therefore requires one HTTPS tar archive whose top-level `models/`
-directory contains complete compiled bundles for Arctic Embed S, BERT NER, and
-Qwen3. The immutable URL and digest live in the tagged
-`release-models.json`; mutable GitHub variables are not release authority.
+The sole required release model, Arctic Embed S, is intentionally not checked
+into git. BERT NER and Qwen3 remain optional experiments and are not release
+dependencies. A clean tag runner therefore requires one HTTPS tar archive
+whose top-level `models/` directory contains the complete
+`ArcticEmbedS_INT8.mlmodelc` bundle named by `release-models.json`. The
+immutable URL and digest live in that tagged manifest; mutable GitHub variables
+are not release authority.
 
 Create the archive without AppleDouble metadata where possible and calculate
 the digest from the final bytes:
