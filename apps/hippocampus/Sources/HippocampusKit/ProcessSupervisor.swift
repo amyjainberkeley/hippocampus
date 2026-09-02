@@ -23,6 +23,25 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         return environment
     }
 
+    package static func onboardingEnvironment(
+        baseEnvironment: [String: String],
+        dbPath: URL,
+        keyReference: KeychainKeyReference,
+        initialStep: String?
+    ) -> [String: String] {
+        var environment = sanitizedEnvironment(
+            baseEnvironment: baseEnvironment,
+            dbPath: dbPath,
+            keyReference: keyReference
+        )
+        if let initialStep, !initialStep.isEmpty {
+            environment["MCI_ONBOARDING_STEP"] = initialStep
+        } else {
+            environment.removeValue(forKey: "MCI_ONBOARDING_STEP")
+        }
+        return environment
+    }
+
     package static func make(
         helperURL: URL,
         agentURL: URL,
@@ -551,13 +570,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         try? task.run()
     }
 
-    public func openOnboarding() -> Bool {
+    public func openOnboarding(initialStep: String? = nil) -> Bool {
         guard let path = locator.onboardingPath() else { return false }
         let task = ChildProcessEnvironment.makeProcess(
-            baseEnvironment: ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+            baseEnvironment: ProcessSupervisorLaunchPlan.onboardingEnvironment(
                 baseEnvironment: ProcessInfo.processInfo.environment,
                 dbPath: dbPath,
-                keyReference: currentKeyReference
+                keyReference: currentKeyReference,
+                initialStep: initialStep
             )
         )
         task.executableURL = path

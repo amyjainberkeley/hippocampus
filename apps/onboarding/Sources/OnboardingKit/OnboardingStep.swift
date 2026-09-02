@@ -31,6 +31,25 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
     case mcpServers = 11
     case done = 12
 
+    public init?(launchRoute: String) {
+        switch launchRoute.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "welcome": self = .welcome
+        case "how-it-works": self = .howItWorks
+        case "trust", "denylist": self = .trust
+        case "permissions": self = .permissions
+        case "hotkey": self = .primaryHotkey
+        case "allowlist", "app-access": self = .allowlist
+        case "browser-extension": self = .browserExtension
+        case "live-preview": self = .livePreview
+        case "retention": self = .retention
+        case "prepare-brain": self = .prepareBrain
+        case "connect-ai": self = .connectClaudeCode
+        case "mcp-servers": self = .mcpServers
+        case "done": self = .done
+        default: return nil
+        }
+    }
+
     public var id: Int { rawValue }
 
     public var title: String {

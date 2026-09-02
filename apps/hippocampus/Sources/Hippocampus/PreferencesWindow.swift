@@ -178,19 +178,12 @@ struct PreferencesRootView: View {
 
             Divider()
 
-            Text("Deep-hook plugins")
-                .font(.system(size: 13, weight: .semibold))
-            ForEach(PreferencesStore.deepHookPluginOrder, id: \.self) { name in
-                Toggle(name, isOn: pluginBinding(name))
+            Button {
+                onOpenAllowlistEditor()
+            } label: {
+                Label("Manage app access", systemImage: "checklist.checked")
             }
         }
-    }
-
-    private func pluginBinding(_ name: String) -> Binding<Bool> {
-        Binding(
-            get: { store.deepHookPlugins[name] ?? false },
-            set: { store.deepHookPlugins[name] = $0 }
-        )
     }
 
     // MARK: Privacy

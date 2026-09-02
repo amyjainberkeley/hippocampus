@@ -11,6 +11,7 @@ INSTALLER="$REPO_ROOT/scripts/build-installer.sh"
 PREFERENCES_STORE="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift"
 PREFERENCES_WINDOW="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
 RUNTIME_CONFIG="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift"
+PROCESS_SUPERVISOR="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift"
 RETENTION_WORKER="$REPO_ROOT/apps/agent/src/retention_worker.rs"
 AGENT_MAIN="$REPO_ROOT/apps/agent/src/bin/mci_agent.rs"
 STATUS_MENU="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"
@@ -18,6 +19,8 @@ APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift"
 ONBOARDING_RETENTION_STORE="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift"
 ONBOARDING_RETENTION_MODEL="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift"
 ONBOARDING_FLOW="$REPO_ROOT/apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift"
+ONBOARDING_APP="$REPO_ROOT/apps/onboarding/Sources/Onboarding/OnboardingApp.swift"
+ONBOARDING_STEP="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift"
 
 python3 "$GENERATOR" --check
 
@@ -40,6 +43,14 @@ rg -Fq 'await retentionVM.saveThen { flowVM.advance() }' "$ONBOARDING_FLOW"
 rg -Fq 'parsed[key] = value' "$RUNTIME_CONFIG"
 rg -Fq 'parsed.convert(to: .toml)' "$RUNTIME_CONFIG"
 rg -Fq 'captureEnabled: supervisor.captureEnabled' "$STATUS_MENU" "$APP"
+rg -Fq 'environment["MCI_ONBOARDING_STEP"] = initialStep' "$PROCESS_SUPERVISOR"
+rg -Fq 'OnboardingStep.init(launchRoute:)' "$ONBOARDING_APP"
+rg -Fq 'case "allowlist", "app-access": self = .allowlist' "$ONBOARDING_STEP"
+if rg -q 'deepHookPlugins|defaultDeepHookPlugins|deepHookPluginOrder' \
+    "$PREFERENCES_STORE" "$PREFERENCES_WINDOW"; then
+    echo "FAIL: disconnected UserDefaults deep-hook control returned" >&2
+    exit 1
+fi
 rg -Fq 'RecordingControl.derive(' "$STATUS_MENU"
 rg -Fq 'Text(menuBarStatus.displayText)' "$STATUS_MENU"
 if rg -Fq 'defaults.set(retentionPolicy.rawValue' "$PREFERENCES_STORE"; then

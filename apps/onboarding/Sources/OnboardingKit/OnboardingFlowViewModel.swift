@@ -117,7 +117,8 @@ public final class OnboardingFlowViewModel: ObservableObject {
         automation: (any TCCPermission)? = nil,
         fullDiskAccess: (any FullDiskAccessPermission)? = nil,
         stateStore: any OnboardingStateStore = FileOnboardingStateStore(),
-        migrationSource: MigrationSource? = nil
+        migrationSource: MigrationSource? = nil,
+        initialStep: OnboardingStep? = nil
     ) {
         // Default the Automation permission to a stub so pre-audit
         // callers (unit tests + any downstream) keep compiling without
@@ -135,7 +136,9 @@ public final class OnboardingFlowViewModel: ObservableObject {
         // Falls back to `.welcome` on a fresh install or any
         // read/parse failure (CEO dogfood 2026-05-26 — quit + reopen
         // used to always restart at slide 0).
-        if let resumed = stateStore.load() {
+        if let initialStep {
+            self.currentStep = initialStep
+        } else if let resumed = stateStore.load() {
             self.currentStep = resumed
         }
 
