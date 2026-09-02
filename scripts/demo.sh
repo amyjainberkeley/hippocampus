@@ -233,7 +233,8 @@ do_seed() {
     "$REPO_ROOT/target/release/mci-seed-brief" \
         --date "$(date +%F)" \
         --title "Today in your work" \
-        --body "Hippocampus captured the launch-lifecycle fix, retrieval benchmark, agent context handoff, and local-memory architecture. The remaining release gates are calibrated abstention, a real capture soak, complete local models, and Developer ID notarization." \
+        --body "Hippocampus captured the launch-lifecycle fix, retrieval benchmark, agent context handoff, and local-memory architecture. The remaining release gates are a validation-qualified evidence verifier, a real capture soak, and Developer ID notarization." \
+        --model-id "hippocampus-extractive" \
         --source-events 20 \
         --db-path "$DB_PATH"
 

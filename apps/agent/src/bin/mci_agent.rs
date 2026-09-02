@@ -118,8 +118,8 @@ enum Mode {
         /// `YYYY-MM-DD` local day to summarize. `None` = the last 24 h,
         /// which is what the scheduled worker covers.
         date: Option<String>,
-        /// Directory holding the Qwen3 `.mlmodelc`. `None` = the default
-        /// install location.
+        /// Directory holding an optional Qwen3 `.mlmodelc`. `None` = the
+        /// default install location; a missing model uses the extractive author.
         model_dir: Option<PathBuf>,
     },
     /// Run every understanding stage over an existing brain.
@@ -456,9 +456,9 @@ fn print_usage() {
         \x20                            brain: extract entities, embed, segment episodes,\n\
         \x20                            resolve identities, link related episodes.\n\
         \x20 brief                      write the daily brief for an existing brain, now,\n\
-        \x20                            instead of waiting for the 06:00 worker (which only\n\
-        \x20                            runs inside live capture). Needs the Qwen3 model;\n\
-        \x20                            refuses, loudly, without it. The brief is a DRAFT:\n\
+        \x20                            instead of waiting for the 06:00 worker. The local,\n\
+        \x20                            evidence-cited extractive author needs no download;\n\
+        \x20                            Qwen is used only when installed. The brief is a DRAFT:\n\
         \x20                            approving one takes a human, per ADR-0018.\n\
         \x20                            Regenerating a date replaces that date's brief.\n\
         \x20 mcp-sync                   pull resources from every MCP server registered in\n\
@@ -484,7 +484,8 @@ fn print_usage() {
         \x20 --batch-size N             (with embed-backfill) events per batch. Default 32.\n\
         \x20 --date YYYY-MM-DD          (with brief) summarize that local day. Default is\n\
         \x20                            the last 24 hours, same window as the worker.\n\
-        \x20 --model-dir PATH           (with brief) where the Qwen3 .mlmodelc lives.\n\
+        \x20 --model-dir PATH           (with brief) where an optional Qwen3 .mlmodelc lives.\n\
+        \x20                            Without it, the extractive author runs.\n\
         \x20                            Default ~/Library/Application Support/MCI/Models\n\
         \x20 --strict                   (with --drain-stdin) exit non-zero if brain cannot\n\
         \x20                            be opened, instead of falling back to health-only.\n\
@@ -914,9 +915,8 @@ async fn main() -> ExitCode {
                                 });
 
                                 // ADR-0028 — daily brief worker. Fires at
-                                // 06:00 local. Disabled-idle if the Qwen3
-                                // model is not present OR
-                                // MCI_BRIEFS_DISABLED=1.
+                                // 06:00 local. Qwen is preferred when present;
+                                // the extractive author is always available.
                                 spawn_brief_worker(Arc::clone(&store), shutdown_rx.clone());
 
                                 // V2-P5 — Tier 2 Qwen NER idle-batch
@@ -2416,9 +2416,9 @@ fn qwen3_author_factory(model_dir: &std::path::Path) -> brief_worker::AuthorFact
     })
 }
 
-/// Non-macOS: there is no Core ML, so there is no author. The factory
-/// exists so the `brief` command compiles everywhere and fails with a
-/// reason rather than being absent.
+/// Non-macOS Qwen factory. The preferred-author selector never chooses it
+/// without the macOS-only model layout; the extractive author remains the
+/// portable default.
 #[cfg(not(target_os = "macos"))]
 fn qwen3_author_factory(_model_dir: &std::path::Path) -> brief_worker::AuthorFactory {
     Arc::new(|| {

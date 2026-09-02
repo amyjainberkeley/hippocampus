@@ -1,7 +1,7 @@
 //! `mci-seed-brief` — DEMO / SMOKE-TEST ONLY synthetic-brief inserter.
 //!
 //! Writes one row into the `briefs` table so the Recall UI's Brief tab
-//! has something to render before the Qwen3 brief-author pipeline lands.
+//! has something to render with truthful extractive-author provenance.
 //! ADR-0028 + `docs/design/brief-viewer-spec.md` §"manual smoke" — this
 //! binary is the test fixture the spec's smoke trace calls.
 //!
@@ -73,7 +73,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
     let mut date_local: Option<String> = None;
     let mut title: Option<String> = None;
     let mut body: Option<String> = None;
-    let mut model_id: String = "qwen3-1.7b-fp16".into();
+    let mut model_id: String = "hippocampus-extractive".into();
     let mut model_version: String = "demo".into();
     let mut source_event_count: u32 = 0;
     let mut force = false;
@@ -164,8 +164,8 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
         format!(
             "## Highlights\n\nSynthetic demo brief for {date_local}.\n\n\
              ## Deep work\n\nThis brief was inserted via `mci-seed-brief` \
-             so the Recall UI Brief tab has something to render before the \
-             Qwen3 author pipeline lands.\n"
+             so the Recall UI Brief tab can be verified without an optional \
+             model download.\n"
         )
     });
 
@@ -215,7 +215,7 @@ fn print_usage() {
         \x20 --date YYYY-MM-DD          REQUIRED. Local date the brief is for.\n\
         \x20 --title STRING             Header title (default: \"Demo brief for <date>\").\n\
         \x20 --body STRING              Markdown body (default: a synthetic stub).\n\
-        \x20 --model-id STRING          Model id for the header (default: qwen3-1.7b-fp16).\n\
+        \x20 --model-id STRING          Author id for the header (default: hippocampus-extractive).\n\
         \x20 --model-version STRING     Model version string (default: \"demo\").\n\
         \x20 --source-events N          Source-event count for the footer (default: 0).\n\
         \x20 --db-path PATH             default $MCI_DB_PATH or\n\
@@ -339,5 +339,25 @@ fn main() -> ExitCode {
             eprintln!("mci-seed-brief: put_brief failed: {e}");
             ExitCode::from(16)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_args, ParseOutcome};
+
+    #[test]
+    fn synthetic_brief_defaults_to_extractive_provenance() {
+        let argv = vec![
+            "mci-seed-brief".to_owned(),
+            "--date".to_owned(),
+            "2026-09-02".to_owned(),
+        ];
+        let ParseOutcome::Run(args) = parse_args(&argv) else {
+            panic!("minimal seed arguments should parse");
+        };
+
+        assert_eq!(args.model_id, "hippocampus-extractive");
+        assert!(!args.body.contains("before the Qwen3 author pipeline lands"));
     }
 }

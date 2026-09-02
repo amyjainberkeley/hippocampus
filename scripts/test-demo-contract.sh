@@ -23,6 +23,7 @@ grep -Fq 'agent context handoff' "$DEMO" || fail "MCP demo must exercise current
 grep -Fq '"name":"mci_context"' "$DEMO" || fail "MCP demo must request the bounded cited handoff"
 grep -Fq -- '--keyframe-digest' "$DEMO" || fail "demo seed must include authenticated visual evidence"
 grep -Fq 'mci-seed-brief' "$DEMO" || fail "demo seed must include a daily brief"
+grep -Fq -- '--model-id "hippocampus-extractive"' "$DEMO" || fail "demo brief must disclose extractive provenance"
 
 if grep -Fq 'MCI_DIR="$HOME/Library/Application Support/MCI"' "$DEMO"; then
     fail "demo must never point at the real memory database"
@@ -32,6 +33,9 @@ if grep -Eq 'pkill[[:space:]]+-f' "$DEMO"; then
 fi
 if grep -Eq 'snowflake|Cure53|zero-knowledge' "$DEMO"; then
     fail "stale queries must not make the current demo look empty"
+fi
+if grep -Fq 'complete local models' "$DEMO"; then
+    fail "demo must not claim optional local models are a release gate"
 fi
 
 printf 'PASS: demo stays disposable, bundled, and asset-verified\n'
