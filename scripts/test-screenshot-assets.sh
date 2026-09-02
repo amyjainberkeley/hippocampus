@@ -99,7 +99,8 @@ xcrun swift - \
     "$SCREENSHOTS/hero-onboarding-trust-panel.png" "Built for trust" \
     "$SCREENSHOTS/hero-recall-ui.png" "Latest memory" \
     "$SCREENSHOTS/hero-cli.png" "Launch qualified: false" \
-    "$SCREENSHOTS/hero-cli.png" "false positives" <<'SWIFT' \
+    "$SCREENSHOTS/hero-cli.png" "false positives" \
+    "$SCREENSHOTS/hero-cli.png" "local evidence verifier is not validation-qualified" <<'SWIFT' \
     || fail "exact product captures do not contain their current UI anchors"
 import AppKit
 import Foundation
@@ -133,8 +134,8 @@ SWIFT
 rg -Fq 'Launch qualified: {str(scorecard['"'"'launch_qualified'"'"']).lower()}' \
     "$REPO_ROOT/scripts/render-cli-screenshot.py" \
     || fail "CLI renderer must preserve the benchmark launch-qualified field"
-rg -Fq 'general evidence critic is not validation-qualified' \
+rg -Fq 'scorecard["quality_gate"]["failures"]' \
     "$REPO_ROOT/scripts/render-cli-screenshot.py" \
-    || fail "CLI renderer must preserve the remaining evidence-policy gap"
+    || fail "CLI renderer must derive its failure reason from the benchmark"
 
 printf 'PASS: screenshot assets are 1280x800 and light-surface dominated\n'
