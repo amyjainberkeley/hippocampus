@@ -89,6 +89,32 @@ on Hippocampus-owned answerability, contradiction, and insufficient-evidence
 triples, with FEVER, VitaminC, and ANLI used as public behavioral references.
 MiniLM and DeBERTa-v3-xsmall are benchmark candidates, not selected artifacts.
 
+### MobileBERT SQuAD2: native runtime proven, release qualification rejected
+
+`csarron/mobilebert-uncased-squad-v2` revision
+`6d49c30d06c6042041039f6fe076b011f0c2053c` was converted to a fixed-shape,
+384-token, FP32 Core ML program. The conversion is reproducible with
+`scripts/convert_evidence_verifier.py` and the exact operator-only dependency
+set in `scripts/requirements-evidence-verifier.txt`. The native Rust bridge
+accepts only the model's three named Int32 inputs, searches context tokens only,
+caps spans at 24 tokens, and returns a no-answer margin rather than claiming a
+verdict.
+
+Core ML and PyTorch logits matched to a maximum absolute delta of
+`0.00014687`. On the 54 candidate sets in the existing disjoint fixture, native
+Core ML inference measured 23.49 ms median and 25.17 ms p95 on the audit Mac.
+The minimum calibration threshold retaining at least 90% positive coverage was
+`8.024189`. That threshold retained 100% of validation positives but falsely
+accepted one of six validation negatives, for a 16.7% false-positive rate
+against the 5% target. Across all splits it extracted unsupported placeholders
+including `music`, `One`, `One room`, `a marked trail`, and `Fresh flowers`.
+
+The candidate therefore remains unqualified. The committed report is
+`docs/eval/mobilebert-qa-candidate.json`; its scorer intentionally exits
+nonzero. The result proves that a small native QA model fits the interactive
+latency budget. It also proves that span confidence from generic SQuAD2 training
+is not a sufficient authorization rule for durable personal memory.
+
 ## Evidence
 
 - SURE-RAG separates topical retrieval from support, contradiction, and
