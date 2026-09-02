@@ -11,9 +11,8 @@
 //!   exact function the `brief` CLI arm calls — with the `StubBriefAuthor`
 //!   and `StubLlamaBackend` from `mci_brief`, so the pipeline runs without
 //!   a model.
-//! - The refusal half spawns the real binary, because "what does the
-//!   command do on a machine with no model" is a question about argument
-//!   parsing and exit codes, not about generation.
+//! - The executable half spawns the real binary and proves that a machine
+//!   without Qwen still receives an evidence-cited extractive brief.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -491,6 +490,25 @@ fn agent_bin() -> PathBuf {
     }
     path.push("mci-agent");
     path
+}
+
+#[test]
+fn help_describes_the_zero_download_brief_path() {
+    let out = Command::new(agent_bin())
+        .arg("--help")
+        .output()
+        .expect("spawn mci-agent --help");
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("evidence-cited extractive"),
+        "help must name the always-available local author: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Needs the Qwen3 model"),
+        "help must not claim that an optional model is required: {stdout}"
+    );
 }
 
 #[test]
