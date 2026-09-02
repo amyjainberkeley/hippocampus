@@ -219,7 +219,9 @@ capture envelope
   -> episode/entity/claim projections
   -> lexical + semantic candidate generation
   -> temporal and provenance expansion
-  -> calibrated evidence sufficiency
+  -> explicit answer-shape relation guard
+  -> local support / refute / insufficient verifier
+  -> calibrated set-level evidence decision
   -> bounded cited context packet
   -> human or agent
 ```
@@ -412,8 +414,11 @@ Long-lived memory should be harder to write than an event.
 3. Add semantic candidates within a budget.
 4. Expand through typed episode/entity/claim edges.
 5. Prefer current supported state while retaining superseded evidence.
-6. Calibrate sufficiency using score, margin, agreement, recency, and source.
-7. Pack the smallest useful evidence set with deterministic tie breaks.
+6. Veto explicit person, count, duration, and date questions when no retrieved
+   sentence relates a correctly shaped value to the requested fact.
+7. Run a separately calibrated local verifier over the question and compact
+   evidence set. Retrieval similarity is an input, never proof of support.
+8. Pack the smallest useful evidence set with deterministic tie breaks.
 
 ### Make abstention a product surface
 
@@ -492,6 +497,29 @@ not used as fake precision for every button or implementation detail.
   even though its custody architecture differs: https://www.hiclicky.com/trust
 - Limitless officially sunset Rewind's screen/audio capture path, warning
   against treating recording itself as durable value: https://www.limitless.ai/
+
+### Decision F: verify answerability separately from retrieval
+
+- SURE-RAG treats topical retrieval and evidential support as different tasks,
+  then aggregates pair-level support, contradiction, disagreement, and
+  uncertainty into a three-way selective decision:
+  https://arxiv.org/abs/2605.03534
+- UAEval4RAG evaluates answerable accuracy and unanswerable rejection together
+  and finds that component and prompt choices materially change that balance:
+  https://aclanthology.org/2025.acl-long.415/
+- Ye et al. formulate grounded checking as constrained true/false reading
+  comprehension and show that small verifier models can replace expensive open
+  generation while retaining competitive factuality performance:
+  https://aclanthology.org/2026.acl-long.1468/
+
+Therefore Hippocampus does not treat Arctic Embed S similarity, rank margin, or
+fusion score as entailment. The qualified explicit relation guard handles four
+common high-risk answer shapes today. General `Matched` status remains blocked
+until a compact local question/evidence verifier passes disjoint answerability,
+counterfactual-swap, contradiction, and latency tests. A SQuAD2-style MiniLM
+reader is a candidate for that spike, not a selected dependency; model license,
+Core ML conversion, no-answer calibration, and out-of-domain work-memory
+behavior must all pass before it enters the release manifest.
 
 ## Immediate Definition Of Done
 
