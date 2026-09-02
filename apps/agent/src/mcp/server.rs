@@ -202,13 +202,13 @@ impl Server {
                     "name": "hippocampus",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
-                "instructions": "Hippocampus is your screen memory. It continuously captures \
-                    what you see on your Mac and stores it in a private, encrypted, local-only \
-                    brain. You can search it with mci_recall, browse recent activity with \
+                "instructions": "Hippocampus is your local work memory. It records permitted \
+                    context after you opt in and stores it in a private, encrypted brain on \
+                    this Mac. You can search it with mci_recall, browse recent activity with \
                     mci_events_since, check capture status with mci_stats, see work sessions \
                     with mci_episodes, filter by app with mci_events_by_app, or request a \
-                    bounded cited handoff with mci_context. All data stays \
-                    on this Mac — nothing is sent to any server.",
+                    bounded cited handoff with mci_context. Hippocampus keeps no cloud copy; \
+                    content returned through MCP is handled by the AI client you chose.",
             }),
         )
     }

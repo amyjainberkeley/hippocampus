@@ -358,13 +358,14 @@ fn initialize_returns_server_info_and_protocol_version() {
             .and_then(|n| n.as_str()),
         Some("hippocampus")
     );
-    assert!(
-        result
-            .get("instructions")
-            .and_then(|v| v.as_str())
-            .is_some(),
-        "initialize must include instructions for Claude Code"
-    );
+    let instructions = result
+        .get("instructions")
+        .and_then(|v| v.as_str())
+        .expect("initialize must include instructions for Claude Code");
+    assert!(instructions.contains("after you opt in"));
+    assert!(instructions.contains("AI client you chose"));
+    assert!(!instructions.contains("continuously captures"));
+    assert!(!instructions.contains("nothing is sent to any server"));
 }
 
 #[test]
