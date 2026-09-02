@@ -58,6 +58,8 @@ objc2-core-ml     = { version = "0.3", default-features = false, features = [
     "MLFeatureValue",
     "MLFeatureType",
     "MLMultiArrayConstraint",
+    "MLMultiArrayShapeConstraint",
+    "MLMultiArrayShapeConstraintType",
     "MLDictionaryFeatureProvider",
     "MLMultiArray",
     "MLModelConfiguration",

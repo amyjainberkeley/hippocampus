@@ -534,9 +534,10 @@ must select slots from that set; malformed output and runtime failure degrade
 instead of becoming hits. The host contract now enforces bounded canonical
 spans, exact scope, one brain, and revalidatable provenance. A native adapter
 for the selected task-trained MobileBERT three-way classifier and citation-slot
-head also exists. It requires a hash-bound qualification manifest, exact tensor
-schema, unique paired evidence markers, complete-slot retention after
-truncation, and explicit policy abstention. It still needs a trained
+head also exists. It requires a qualification manifest pinned into the signed
+binary, exact non-flexible tensor schema, unique paired evidence markers,
+complete-slot retention after truncation, explicit brain authorization, and
+explicit policy abstention. It still needs a trained
 redistributable artifact, a blind claim-level corpus, real Core ML parity
 results, signed-runtime execution, and minimum-Mac latency proof before it
 enters the release manifest or production.

@@ -178,11 +178,14 @@ The native runtime boundary is implemented in
 fixed MobileBERT claim-set tensor contract, proves all 16 paired slot markers
 encode as unique single tokens, makes only fully retained slots citable after
 the 384-token window, and distinguishes model-predicted insufficiency from a
-host-policy abstention. Startup requires a strict manifest that binds the model
-and tokenizer hashes, label order, tensor schema, calibrated thresholds,
-blind-dataset identity, and Core ML parity. Release signing must seal the
-manifest and both artifacts. There is still no task-trained artifact or
-qualified manifest, and production does not construct this verifier.
+host-policy abstention. Startup requires a strict manifest whose SHA-256 is
+compiled into the signed binary. The manifest binds the model and tokenizer
+hashes, label order, exact non-flexible tensor schema, calibrated thresholds,
+blind-dataset identity, and Core ML parity. The adapter validates the manifest
+and artifacts before load and revalidates them after Core ML and the tokenizer
+have opened them. Release signing must seal the binary, manifest, and both
+artifacts. There is still no task-trained artifact or qualified manifest, and
+production does not construct this verifier.
 
 This is an architecture selection, not a shipped-model claim. Release remains
 blocked until a blind corpus exercises the exact signed runtime, including
@@ -218,3 +221,12 @@ authority, OCR corruption, and candidate-order metamorphics.
   corpus, and minimum-Mac latency gate are still required.
 - The verifier can evolve independently of FTS/vector ranking and independently
   of the asynchronous brief author.
+- This is a source-breaking refinement of a `0.0.1` internal API with no
+  production caller: evidence-set construction now requires the caller's
+  expected brain identity, evidence requires a nonzero persisted event ID, and
+  policy abstention is explicit. That break is accepted before public release
+  instead of retaining constructors that cannot enforce the trust boundary.
+- The signed bundle and process integrity are the filesystem trust root. Hashes
+  catch artifact drift and ordinary substitution, but Hippocampus does not
+  claim protection from malicious code already executing as the same macOS
+  user; such code can tamper with the app process itself.

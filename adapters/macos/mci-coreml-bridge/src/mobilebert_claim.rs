@@ -132,13 +132,19 @@ struct ManifestQualification {
     validation_qualified: bool,
 }
 
-/// Validate a bundle-sealed manifest and both artifact identities without
-/// opening Core ML. Release signing must seal all three files in the app.
+/// Validate a manifest against a digest pinned by the signed caller, then
+/// validate both artifact identities without opening Core ML.
 pub fn validate_claim_verifier_manifest(
     manifest_path: &Path,
     model_path: &Path,
     tokenizer_path: &Path,
+    trusted_manifest_sha256: &str,
 ) -> Result<ClaimVerifierThresholds, MobileBertClaimError> {
+    if !is_sha256(trusted_manifest_sha256) {
+        return Err(MobileBertClaimError::Configuration(
+            "trusted manifest SHA-256 must be 64 lowercase hexadecimal characters".to_owned(),
+        ));
+    }
     let metadata = std::fs::symlink_metadata(manifest_path).map_err(|error| {
         MobileBertClaimError::Manifest(format!("{}: {error}", manifest_path.display()))
     })?;
@@ -153,6 +159,12 @@ pub fn validate_claim_verifier_manifest(
     let bytes = std::fs::read(manifest_path).map_err(|error| {
         MobileBertClaimError::Manifest(format!("{}: {error}", manifest_path.display()))
     })?;
+    let manifest_sha256 = hex_digest(Sha256::digest(&bytes));
+    if manifest_sha256 != trusted_manifest_sha256 {
+        return Err(MobileBertClaimError::Integrity(format!(
+            "manifest SHA-256 mismatch: expected {trusted_manifest_sha256}, got {manifest_sha256}"
+        )));
+    }
     let manifest: ClaimVerifierManifest = serde_json::from_slice(&bytes)
         .map_err(|error| MobileBertClaimError::Manifest(error.to_string()))?;
     validate_manifest_schema(&manifest)?;
@@ -443,11 +455,15 @@ impl SerializedClaimSet {
 ///
 /// Slot-marker lookalikes in source text are escaped only in this model view;
 /// canonical event bytes and the citations bound by `EvidenceSet` are unchanged.
-#[must_use]
 pub fn serialize_claim_set(
     claim: &ProposedClaim,
     evidence: &EvidenceSet<'_>,
-) -> SerializedClaimSet {
+) -> Result<SerializedClaimSet, MobileBertClaimError> {
+    if !evidence.validates_claim_scope(claim) {
+        return Err(MobileBertClaimError::Input(
+            "evidence set is not authorized for the proposed-claim scope".to_owned(),
+        ));
+    }
     let claim_text = format!(
         "subject: {}\npredicate: {}\nobject: {}\nscope: {}",
         normalize_model_text(claim.subject()),
@@ -469,10 +485,10 @@ pub fn serialize_claim_set(
         )
         .expect("writing to a String cannot fail");
     }
-    SerializedClaimSet {
+    Ok(SerializedClaimSet {
         claim_text,
         evidence_text,
-    }
+    })
 }
 
 fn normalize_model_text(value: &str) -> String {
@@ -639,19 +655,55 @@ pub struct MobileBertClaimVerifier {
     marker_ids: SlotMarkerIds,
 }
 
+fn validate_exact_feature_names(
+    kind: &str,
+    actual: &[String],
+    expected: &[&str],
+) -> Result<(), MobileBertClaimError> {
+    let mut actual = actual.to_vec();
+    actual.sort();
+    let mut expected = expected.iter().map(ToString::to_string).collect::<Vec<_>>();
+    expected.sort();
+    if actual != expected {
+        return Err(MobileBertClaimError::Schema(format!(
+            "{kind} features {actual:?} do not exactly match {expected:?}"
+        )));
+    }
+    Ok(())
+}
+
 impl MobileBertClaimVerifier {
-    /// Open a compiled model and its exact tokenizer with qualified thresholds.
+    /// Open a compiled model and exact tokenizer whose manifest digest was
+    /// pinned into this signed binary at build time.
     pub fn open(
         model_path: &Path,
         tokenizer_path: &Path,
         manifest_path: &Path,
     ) -> Result<Self, MobileBertClaimError> {
-        let thresholds =
-            validate_claim_verifier_manifest(manifest_path, model_path, tokenizer_path)?;
+        let trusted_manifest_sha256 = option_env!("MCI_CLAIM_VERIFIER_MANIFEST_SHA256")
+            .ok_or_else(|| {
+                MobileBertClaimError::Qualification(
+                    "this build has no pinned claim-verifier manifest digest".to_owned(),
+                )
+            })?;
+        let thresholds = validate_claim_verifier_manifest(
+            manifest_path,
+            model_path,
+            tokenizer_path,
+            trusted_manifest_sha256,
+        )?;
         let model = CoreMLModel::load_with_compute_units(model_path, ComputeUnits::CpuOnly)?;
         let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|error| {
             MobileBertClaimError::Tokenizer(format!("{}: {error}", tokenizer_path.display()))
         })?;
+        // Rehash after Core ML and the tokenizer have opened their artifacts.
+        // The signed app bundle remains the filesystem trust boundary.
+        validate_claim_verifier_manifest(
+            manifest_path,
+            model_path,
+            tokenizer_path,
+            trusted_manifest_sha256,
+        )?;
         let marker_ids = marker_ids(&tokenizer)?;
         let backend = Self {
             model,
@@ -664,10 +716,21 @@ impl MobileBertClaimVerifier {
     }
 
     fn verify_schema(&self) -> Result<(), MobileBertClaimError> {
+        validate_exact_feature_names(
+            "input",
+            &self.model.input_names(),
+            &["attention_mask", "input_ids", "token_type_ids"],
+        )?;
+        validate_exact_feature_names(
+            "output",
+            &self.model.output_names(),
+            &["citation_logits", "judgment_logits"],
+        )?;
         for name in ["input_ids", "attention_mask", "token_type_ids"] {
             let expected = MultiArraySchema {
                 shape: vec![1, CLAIM_VERIFIER_SEQUENCE_LENGTH],
                 element_type: MultiArrayElementType::Int32,
+                shape_is_flexible: false,
             };
             if self.model.input_multi_array_schema(name) != Some(expected) {
                 return Err(MobileBertClaimError::Schema(format!(
@@ -685,6 +748,7 @@ impl MobileBertClaimVerifier {
                 )));
             };
             if schema.shape != [1, width]
+                || schema.shape_is_flexible
                 || !matches!(
                     schema.element_type,
                     MultiArrayElementType::Float16 | MultiArrayElementType::Float32
@@ -708,7 +772,7 @@ impl MobileBertClaimVerifier {
                 "evidence set is not authorized for the proposed-claim scope".to_owned(),
             ));
         }
-        let serialized = serialize_claim_set(claim, evidence);
+        let serialized = serialize_claim_set(claim, evidence)?;
         let encoded = encode_claim_set(&self.tokenizer, &serialized, self.marker_ids)?;
         let input_ids =
             model::multi_array_i32(&[1, CLAIM_VERIFIER_SEQUENCE_LENGTH], &encoded.input_ids)?;
@@ -960,6 +1024,33 @@ mod tests {
             marker_ids(&tokenizer),
             Err(MobileBertClaimError::Schema(message))
                 if message.contains("does not encode as its single vocabulary token")
+        ));
+    }
+
+    #[test]
+    fn feature_set_validation_rejects_extra_required_inputs_or_outputs() {
+        assert!(validate_exact_feature_names(
+            "input",
+            &[
+                "token_type_ids".to_owned(),
+                "input_ids".to_owned(),
+                "attention_mask".to_owned(),
+            ],
+            &["attention_mask", "input_ids", "token_type_ids"],
+        )
+        .is_ok());
+        assert!(matches!(
+            validate_exact_feature_names(
+                "input",
+                &[
+                    "attention_mask".to_owned(),
+                    "input_ids".to_owned(),
+                    "position_ids".to_owned(),
+                    "token_type_ids".to_owned(),
+                ],
+                &["attention_mask", "input_ids", "token_type_ids"],
+            ),
+            Err(MobileBertClaimError::Schema(_))
         ));
     }
 }

@@ -33,6 +33,7 @@ use objc2::AllocAnyThread;
 use objc2_core_ml::{
     MLComputeUnits, MLDictionaryFeatureProvider, MLFeatureProvider, MLFeatureType, MLFeatureValue,
     MLModel, MLModelConfiguration, MLMultiArray, MLMultiArrayDataType,
+    MLMultiArrayShapeConstraintType,
 };
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL};
 
@@ -127,6 +128,8 @@ pub struct MultiArraySchema {
     pub shape: Vec<usize>,
     /// Declared scalar representation.
     pub element_type: MultiArrayElementType,
+    /// Whether Core ML declares enumerated or ranged shape flexibility.
+    pub shape_is_flexible: bool,
 }
 
 impl ComputeUnits {
@@ -205,6 +208,30 @@ impl CoreMLModel {
         let out = outputs.objectForKey(&NSString::from_str(name))?;
         let ty = unsafe { out.r#type() };
         Some(ty == MLFeatureType::MultiArray)
+    }
+
+    /// All declared input feature names.
+    #[must_use]
+    pub fn input_names(&self) -> Vec<String> {
+        let description = unsafe { self.model.modelDescription() };
+        let inputs = unsafe { description.inputDescriptionsByName() };
+        inputs
+            .allKeys()
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
+    }
+
+    /// All declared output feature names.
+    #[must_use]
+    pub fn output_names(&self) -> Vec<String> {
+        let description = unsafe { self.model.modelDescription() };
+        let outputs = unsafe { description.outputDescriptionsByName() };
+        outputs
+            .allKeys()
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
     }
 
     /// Read a named input's fixed `MLMultiArray` shape and element type.
@@ -291,6 +318,9 @@ fn multi_array_schema(feature: &objc2_core_ml::MLFeatureDescription) -> Option<M
         .map(|number| number.as_usize())
         .collect();
     let raw_type = unsafe { constraint.dataType() };
+    let shape_constraint = unsafe { constraint.shapeConstraint() };
+    let shape_is_flexible =
+        unsafe { shape_constraint.r#type() } != MLMultiArrayShapeConstraintType::Unspecified;
     let element_type = if raw_type == MLMultiArrayDataType::Float16 {
         MultiArrayElementType::Float16
     } else if raw_type == MLMultiArrayDataType::Float32 {
@@ -303,6 +333,7 @@ fn multi_array_schema(feature: &objc2_core_ml::MLFeatureDescription) -> Option<M
     Some(MultiArraySchema {
         shape,
         element_type,
+        shape_is_flexible,
     })
 }
 

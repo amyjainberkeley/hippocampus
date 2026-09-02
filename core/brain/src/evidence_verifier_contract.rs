@@ -185,6 +185,9 @@ impl<'a> EvidenceSpan<'a> {
         byte_end: usize,
         origin: &EvidenceOrigin,
     ) -> Result<Self, EvidenceContractError> {
+        if event_id.0 == 0 {
+            return Err(EvidenceContractError::UnpersistedEventId);
+        }
         if byte_start >= byte_end || byte_end > full_event_text.len() {
             return Err(EvidenceContractError::InvalidEvidenceRange);
         }
@@ -263,6 +266,7 @@ impl<'a> EvidenceSet<'a> {
     /// enforcing one brain and the proposed claim's exact authorization scope.
     pub fn new(
         claim: &ProposedClaim,
+        authorized_brain_id: &str,
         spans: Vec<EvidenceSpan<'a>>,
     ) -> Result<Self, EvidenceContractError> {
         if spans.is_empty() {
@@ -275,13 +279,20 @@ impl<'a> EvidenceSet<'a> {
             });
         }
         let mut identities = HashSet::with_capacity(spans.len());
-        let brain_id = spans[0].origin.brain_id.clone();
+        let brain_id = normalized_origin_field("authorized_brain_id", authorized_brain_id)?;
+        let observed_brains = spans
+            .iter()
+            .map(|span| span.origin.brain_id.as_str())
+            .collect::<HashSet<_>>();
+        if observed_brains.len() > 1 {
+            return Err(EvidenceContractError::MixedEvidenceBrains);
+        }
+        if spans[0].origin.brain_id != brain_id {
+            return Err(EvidenceContractError::EvidenceBrainMismatch);
+        }
         for span in &spans {
             if span.origin.scope != claim.scope {
                 return Err(EvidenceContractError::EvidenceScopeMismatch);
-            }
-            if span.origin.brain_id != brain_id {
-                return Err(EvidenceContractError::MixedEvidenceBrains);
             }
             let range = span.byte_range();
             if !identities.insert((span.event_id().0, range.start, range.end)) {
@@ -580,6 +591,9 @@ pub enum EvidenceContractError {
     /// The requested source range was empty, inverted, or out of bounds.
     #[error("invalid evidence byte range")]
     InvalidEvidenceRange,
+    /// The event has not received a stable persisted store identity.
+    #[error("evidence event ID must be nonzero")]
+    UnpersistedEventId,
     /// The requested range split a UTF-8 code point.
     #[error("evidence byte range is not on character boundaries")]
     NonCharacterBoundary,
@@ -614,6 +628,9 @@ pub enum EvidenceContractError {
     /// One verifier call mixed evidence from distinct local brains.
     #[error("evidence set mixes multiple brain identities")]
     MixedEvidenceBrains,
+    /// Evidence did not come from the brain identity authorized by the caller.
+    #[error("evidence brain does not match the caller-authorized brain")]
+    EvidenceBrainMismatch,
     /// Model confidence was NaN, infinite, or outside `[0, 1]`.
     #[error("invalid evidence confidence")]
     InvalidConfidence,

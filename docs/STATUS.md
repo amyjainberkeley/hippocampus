@@ -116,10 +116,12 @@ more than this page.
   Core ML runtime boundary. It requires exact Int32 `[1, 384]` inputs, fixed
   floating `[1, 3]` judgment and `[1, 8]` citation outputs, paired one-token
   evidence markers, and fully retained evidence slots. Startup requires a
-  bundle-sealed manifest binding model and tokenizer hashes, class order,
-  tensor schema, thresholds, blind-dataset identity, and Core ML parity. The
-  boundary fails closed on truncation, split markers, artifact drift, schema
-  drift, or an unqualified manifest. No task-trained artifact or qualified
+  manifest whose SHA-256 is compiled into the signed binary, binding model and
+  tokenizer hashes, class order, tensor schema, thresholds, blind-dataset
+  identity, and Core ML parity. Artifacts are checked before and after load.
+  The boundary fails closed on truncation, split markers, artifact drift,
+  extra or flexible tensors, schema drift, an unauthorized brain, event ID
+  zero, or an unqualified manifest. No task-trained artifact or qualified
   manifest exists yet, and this verifier is not installed in production.
 - The first compact native verifier candidate has a reproducible Core ML
   conversion and a memory-safe Rust inference adapter. MobileBERT SQuAD2 FP32
