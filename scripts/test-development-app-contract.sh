@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
+VERIFY_MODELS="$REPO_ROOT/scripts/verify-models.sh"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-app-contract.XXXXXX")"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
@@ -35,5 +36,17 @@ rg -q 'if \[\[ "\$DEVELOPMENT_LITE" -eq 1 \]\]' "$BUILD_APP" \
     || fail "build-app has no explicit development-lite branch"
 rg -q 'Release assembly requires a stable Developer ID Application identity' "$BUILD_APP" \
     || fail "release signing refusal was removed"
+rg -Fq '"$VERIFY_SCRIPT" --app "$APP" --allow-missing-bundled' "$BUILD_APP" \
+    || fail "development-lite does not explicitly authorize missing bundled models"
+rg -Fq '"$VERIFY_SCRIPT" --app "$APP"' "$BUILD_APP" \
+    || fail "release assembly does not run strict model verification"
+if rg -Fq '"$VERIFY_SCRIPT" --app "$APP" || true' "$BUILD_APP"; then
+    fail "model verification failures are still swallowed"
+fi
+rg -q -- '--allow-missing-bundled' "$VERIFY_MODELS" \
+    || fail "model verifier has no explicit development-only omission mode"
+if rg -Fq 'zero-vector stub fallback' "$VERIFY_MODELS"; then
+    fail "model verifier still promises the retired zero-vector fallback"
+fi
 
 printf 'PASS: development app mode is explicit and release-fail-closed\n'

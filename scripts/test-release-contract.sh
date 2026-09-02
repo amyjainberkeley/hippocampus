@@ -260,7 +260,8 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     third_party/licenses/TOMLKit-0.6.0-LICENSE.txt \
     third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt \
     third_party/licenses/toml-license-manifest.json \
-    scripts/verify-toml-license-contract.py scripts/test-toml-license-contract.sh \
+    scripts/verify-toml-license-contract.py scripts/verify-models.sh \
+    scripts/test-toml-license-contract.sh \
     scripts/test-retention-policy-contract.sh scripts/stage-recall-ffi.sh \
     scripts/e2e-clean-home.sh scripts/test-e2e-clean-home-contract.sh \
     scripts/test-development-file-key-contract.sh scripts/test-no-quarantine-bypass.sh \

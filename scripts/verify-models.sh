@@ -25,17 +25,20 @@ set -euo pipefail
 # Usage:
 #   scripts/verify-models.sh                              # auto-detect app
 #   scripts/verify-models.sh --app path/to/Hippocampus.app
+#   scripts/verify-models.sh --allow-missing-bundled --app path/to/Hippocampus.app
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 MODELS_JSON="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
 APP_PATH=""
+ALLOW_MISSING_BUNDLED=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --app) APP_PATH="$2"; shift 2 ;;
-        *) echo "Usage: verify-models.sh [--app path/to/Hippocampus.app]"; exit 1 ;;
+        --allow-missing-bundled) ALLOW_MISSING_BUNDLED=1; shift ;;
+        *) echo "Usage: verify-models.sh [--allow-missing-bundled] [--app path/to/Hippocampus.app]"; exit 1 ;;
     esac
 done
 
@@ -63,19 +66,33 @@ while IFS= read -r line; do
 
     if [[ "$kind" == "BUNDLED" ]]; then
         model_id="$rest"
-        # Map model IDs to expected .mlmodelc directory names
+        # Map model IDs to their exact runtime paths in the app bundle.
         case "$model_id" in
-            arctic-embed-s-int8) compiled_name="ArcticEmbedS_INT8.mlmodelc" ;;
-            *) compiled_name="${model_id}.mlmodelc" ;;
+            arctic-embed-s-int8)
+                compiled_name="ArcticEmbedS_INT8.mlmodelc"
+                unavailable_message="Semantic recall stays lexical-only."
+                ;;
+            qwen3-1.7b-fp16)
+                compiled_name="qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc"
+                unavailable_message="Generated daily briefs stay disabled."
+                ;;
+            *)
+                compiled_name="${model_id}.mlmodelc"
+                unavailable_message="The model-backed feature stays disabled."
+                ;;
         esac
 
         model_path="$APP_PATH/Contents/Resources/Models/$compiled_name"
         if [[ -d "$model_path" ]]; then
             echo "  OK: bundled model '$model_id' found at $model_path"
-        else
+        elif [[ "$ALLOW_MISSING_BUNDLED" -eq 1 ]]; then
             echo "  WARN: bundled model '$model_id' NOT found at $model_path"
-            echo "        Semantic search will use zero-vector stub fallback."
-            # Not a hard error — build works without bundled models
+            echo "        $unavailable_message"
+            echo "        Missing model explicitly allowed for this development-lite check."
+        else
+            echo "  ERROR: required bundled model '$model_id' NOT found at $model_path"
+            echo "         $unavailable_message"
+            ERRORS=$((ERRORS + 1))
         fi
     elif [[ "$kind" == "DOWNLOAD" ]]; then
         # Format: DOWNLOAD:<id>:<sha>:<url>
