@@ -862,9 +862,14 @@ async fn main() -> ExitCode {
                                     {
                                         Ok(stats) => {
                                             eprintln!(
-                                                "mci-agent: retention worker exited. cycles={} events_deleted={} vectors_deleted={} episodes_deleted={} errors={}",
+                                                "mci-agent: retention worker exited. cycles={} events_deleted={} vectors_deleted={} episodes_deleted={} referenced_blobs_deleted={} orphaned_blobs_deleted={} stale_temps_deleted={} referenced_blobs_missing_last={} blob_cleanup_errors={} errors={}",
                                                 stats.cycles_run, stats.total_events_deleted,
                                                 stats.total_vectors_deleted, stats.total_episodes_deleted,
+                                                stats.total_blobs_deleted,
+                                                stats.total_orphaned_blobs_deleted,
+                                                stats.total_stale_temporary_files_deleted,
+                                                stats.referenced_blobs_missing_last,
+                                                stats.total_blob_cleanup_errors,
                                                 stats.cycle_errors,
                                             );
                                         }

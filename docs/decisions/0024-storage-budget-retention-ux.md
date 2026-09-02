@@ -116,10 +116,12 @@ Workspace admins can set a fleet-wide default cap via workspace policy:
 
 When events are purged:
 
-1. The purger collects all `blob_path` values from the events being deleted.
-2. Blob files are `unlink`ed from the blob directory.
+1. The purger collects all canonical `events.keyframe_blob` SHA-256 digests from the events being deleted.
+2. After the database transaction commits, unreferenced `blobs/<digest>.bin` files are `unlink`ed from the managed blob directory.
 3. If a blob is referenced by multiple events (unlikely but possible with dedupe), it is only deleted when the last referencing event is purged.
 4. The blob directory is not `VACUUM`ed (it's a filesystem directory, not SQLite) — `unlink` reclaims space immediately.
+5. Every retention cycle also reconciles canonical orphan blobs and stale writer temp files older than one hour, including when retention is `forever`. The grace period avoids racing a durable blob publication that has not reached its event insert yet.
+6. Reconciliation never follows symlinks and never removes unknown filenames or non-regular entries. Missing referenced blobs and per-entry cleanup errors are surfaced only as content-free health counters.
 
 ## Consequences
 

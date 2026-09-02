@@ -33,10 +33,11 @@
 //! sign-off block on PR P3.2 asserts the ADR-0008 + ADR-0016 §4
 //! invariants in source (see the PR body).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use crate::alias_resolver::{ResolverEntity, RESOLVABLE_KINDS};
 use crate::episode_segmenter::EpisodeId;
@@ -53,8 +54,8 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension};
 
 use crate::{
-    BrainStats, ConsolidationWatermark, Event, EventId, EventRecord, ExpansionBudget,
-    IdentityMentionSite, MemoryClaim, MemoryClaimId, MemoryDelta, MemoryExpansion,
+    BlobReconciliationStats, BrainStats, ConsolidationWatermark, Event, EventId, EventRecord,
+    ExpansionBudget, IdentityMentionSite, MemoryClaim, MemoryClaimId, MemoryDelta, MemoryExpansion,
     MemoryRetraction, ResolutionWatermark, StoreError, TimeRange,
 };
 
@@ -73,9 +74,37 @@ use crate::{
 /// never reimplements `PRAGMA key` or the wrong-key probe; we inherit it.
 pub struct SqlCipherBrainStore {
     pub(crate) db: Mutex<Db>,
+    blob_dir: PathBuf,
 }
 
 impl SqlCipherBrainStore {
+    pub(crate) fn remove_unreferenced_keyframe_candidates(
+        &self,
+        candidates: &[String],
+    ) -> Result<u64, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, candidates)
+    }
+
+    /// Reconcile the managed encrypted keyframe directory against live event references.
+    ///
+    /// Canonical unreferenced blobs and writer temporary files are removed only after
+    /// `minimum_orphan_age`. Unknown names, symlinks, and non-regular entries are never
+    /// removed. A non-zero grace period prevents racing the capture helper between its
+    /// durable blob publication and the corresponding event insert.
+    pub fn reconcile_keyframe_blobs(
+        &self,
+        minimum_orphan_age: Duration,
+    ) -> Result<BlobReconciliationStats, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        reconcile_keyframe_blob_directory(
+            guard.conn(),
+            &self.blob_dir,
+            minimum_orphan_age,
+            SystemTime::now(),
+        )
+    }
+
     /// Apply one governed memory delta atomically.
     pub fn project_memory_delta(&self, delta: &MemoryDelta) -> Result<(), StoreError> {
         let mut guard = self.db.lock().expect("brain store mutex poisoned");
@@ -170,7 +199,10 @@ impl SqlCipherBrainStore {
     pub fn new(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
         let mut db = mci_core_open(path, key).map_err(|e| map_core_err(&e))?;
         run_brain_migration(&mut db)?;
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            blob_dir: blob_dir_for_brain(path),
+        })
     }
 
     /// Open the brain store at `path` with `key` in **READ-ONLY** mode for
@@ -195,7 +227,10 @@ impl SqlCipherBrainStore {
     ///   (the inner error is intentionally indistinguishable per ADR-0008).
     pub fn open_readonly(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
         let db = mci_core_open_readonly(path, key).map_err(|e| map_core_err(&e))?;
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            blob_dir: blob_dir_for_brain(path),
+        })
     }
 
     /// Read the N most-recent events ordered by `ts_us` DESC.
@@ -1248,14 +1283,20 @@ impl SqlCipherBrainStore {
             .transaction()
             .map_err(|e| StoreError::Backend(format!("begin delete_event tx: {e}")))?;
         let id_i = i64::try_from(id.0).unwrap_or(i64::MAX);
-        let event_ids = tx
+        let event = tx
             .query_row(
-                "SELECT id FROM events WHERE id = ?1",
+                "SELECT id, keyframe_blob FROM events WHERE id = ?1",
                 params![id_i],
-                |row| row.get::<_, i64>(0),
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
             )
             .optional()
-            .map_err(|e| StoreError::Backend(format!("select delete event: {e}")))?
+            .map_err(|e| StoreError::Backend(format!("select delete event: {e}")))?;
+        let event_ids = event
+            .as_ref()
+            .map(|(event_id, _)| vec![*event_id])
+            .unwrap_or_default();
+        let blob_digests = event
+            .and_then(|(_, digest)| digest)
             .into_iter()
             .collect::<Vec<_>>();
         delete_projected_memory_for_events(&tx, &event_ids)?;
@@ -1268,6 +1309,7 @@ impl SqlCipherBrainStore {
             .conn()
             .execute_batch("VACUUM")
             .map_err(|e| StoreError::Backend(format!("VACUUM after delete_event: {e}")))?;
+        remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, &blob_digests)?;
         Ok(n as u64)
     }
 
@@ -1298,6 +1340,14 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("begin delete_range tx: {e}")))?;
         let s_i = i64::try_from(start_ts_us).unwrap_or(i64::MAX);
         let e_i = i64::try_from(end_ts_us).unwrap_or(i64::MAX);
+        let blob_digests = keyframe_digests_matching(
+            &tx,
+            "SELECT keyframe_blob FROM events
+             WHERE ts_us >= ?1 AND ts_us <= ?2 AND keyframe_blob IS NOT NULL
+             ORDER BY keyframe_blob",
+            params![s_i, e_i],
+            "select delete range keyframe blobs",
+        )?;
         let event_ids = event_ids_matching(
             &tx,
             "SELECT id FROM events WHERE ts_us >= ?1 AND ts_us <= ?2 ORDER BY id",
@@ -1317,6 +1367,7 @@ impl SqlCipherBrainStore {
             .conn()
             .execute_batch("VACUUM")
             .map_err(|e| StoreError::Backend(format!("VACUUM after delete_range: {e}")))?;
+        remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, &blob_digests)?;
         Ok(n as u64)
     }
 
@@ -1353,6 +1404,13 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("DELETE entity_mentions: {e}")))?;
         tx.execute("DELETE FROM entities", [])
             .map_err(|e| StoreError::Backend(format!("DELETE entities: {e}")))?;
+        let blob_digests = keyframe_digests_matching(
+            &tx,
+            "SELECT keyframe_blob FROM events
+             WHERE keyframe_blob IS NOT NULL ORDER BY keyframe_blob",
+            [],
+            "select wipe keyframe blobs",
+        )?;
         let event_ids = event_ids_matching(
             &tx,
             "SELECT id FROM events ORDER BY id",
@@ -1371,6 +1429,7 @@ impl SqlCipherBrainStore {
             .conn()
             .execute_batch("VACUUM")
             .map_err(|e| StoreError::Backend(format!("VACUUM after wipe_all: {e}")))?;
+        remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, &blob_digests)?;
         Ok(n as u64)
     }
 }
@@ -1389,6 +1448,244 @@ fn event_ids_matching<P: rusqlite::Params>(
         .map_err(|error| StoreError::Backend(format!("query {operation}: {error}")))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| StoreError::Backend(format!("read {operation}: {error}")))
+}
+
+fn keyframe_digests_matching<P: rusqlite::Params>(
+    tx: &rusqlite::Transaction<'_>,
+    sql: &str,
+    params: P,
+    operation: &str,
+) -> Result<Vec<String>, StoreError> {
+    let mut statement = tx
+        .prepare(sql)
+        .map_err(|error| StoreError::Backend(format!("prepare {operation}: {error}")))?;
+    let rows = statement
+        .query_map(params, |row| row.get::<_, String>(0))
+        .map_err(|error| StoreError::Backend(format!("query {operation}: {error}")))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| StoreError::Backend(format!("read {operation}: {error}")))
+}
+
+fn blob_dir_for_brain(brain_path: &Path) -> PathBuf {
+    brain_path
+        .parent()
+        .map_or_else(|| PathBuf::from("blobs"), |parent| parent.join("blobs"))
+}
+
+fn is_keyframe_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn managed_blob_digest(file_name: &str) -> Option<&str> {
+    let digest = file_name.strip_suffix(".bin")?;
+    is_keyframe_digest(digest).then_some(digest)
+}
+
+fn is_managed_temporary_file(file_name: &str) -> bool {
+    let Some(body) = file_name.strip_prefix('.') else {
+        return false;
+    };
+    let Some(body) = body.strip_suffix(".tmp") else {
+        return false;
+    };
+    let Some((digest, nonce)) = body.split_once('.') else {
+        return false;
+    };
+    is_keyframe_digest(digest)
+        && nonce.len() == 36
+        && nonce.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn entry_is_old_enough(metadata: &std::fs::Metadata, grace: Duration, now: SystemTime) -> bool {
+    if grace.is_zero() {
+        return true;
+    }
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| now.duration_since(modified).ok())
+        .is_some_and(|age| age >= grace)
+}
+
+fn reconcile_keyframe_blob_directory(
+    connection: &rusqlite::Connection,
+    blob_dir: &Path,
+    minimum_orphan_age: Duration,
+    now: SystemTime,
+) -> Result<BlobReconciliationStats, StoreError> {
+    let mut referenced = {
+        let mut statement = connection
+            .prepare(
+                "SELECT DISTINCT keyframe_blob FROM events
+                 WHERE keyframe_blob IS NOT NULL ORDER BY keyframe_blob",
+            )
+            .map_err(|error| {
+                StoreError::Backend(format!("prepare keyframe blob references: {error}"))
+            })?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| {
+                StoreError::Backend(format!("query keyframe blob references: {error}"))
+            })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                StoreError::Backend(format!("read keyframe blob references: {error}"))
+            })?
+            .into_iter()
+            .filter(|digest| is_keyframe_digest(digest))
+            .collect::<BTreeSet<_>>()
+    };
+
+    let directory_metadata = match std::fs::symlink_metadata(blob_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(BlobReconciliationStats {
+                referenced_blobs_missing: u64::try_from(referenced.len()).unwrap_or(u64::MAX),
+                ..BlobReconciliationStats::default()
+            })
+        }
+        Err(error) => {
+            return Err(StoreError::Backend(format!(
+                "inspect keyframe blob directory: {error}"
+            )))
+        }
+    };
+    if directory_metadata.file_type().is_symlink() || !directory_metadata.is_dir() {
+        return Err(StoreError::Backend(
+            "keyframe blob directory is not a regular directory".into(),
+        ));
+    }
+
+    let mut stats = BlobReconciliationStats::default();
+    let entries = std::fs::read_dir(blob_dir)
+        .map_err(|error| StoreError::Backend(format!("read keyframe blob directory: {error}")))?;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            stats.cleanup_errors = stats.cleanup_errors.saturating_add(1);
+            continue;
+        };
+        let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
+            stats.unmanaged_entries_skipped = stats.unmanaged_entries_skipped.saturating_add(1);
+            continue;
+        };
+        let managed_digest = managed_blob_digest(&file_name);
+        let managed_temporary = is_managed_temporary_file(&file_name);
+        if managed_digest.is_none() && !managed_temporary {
+            stats.unmanaged_entries_skipped = stats.unmanaged_entries_skipped.saturating_add(1);
+            continue;
+        }
+
+        let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+            stats.cleanup_errors = stats.cleanup_errors.saturating_add(1);
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            stats.unmanaged_entries_skipped = stats.unmanaged_entries_skipped.saturating_add(1);
+            continue;
+        }
+
+        if let Some(digest) = managed_digest {
+            stats.managed_blobs_seen = stats.managed_blobs_seen.saturating_add(1);
+            if referenced.remove(digest) {
+                continue;
+            }
+        }
+        if !entry_is_old_enough(&metadata, minimum_orphan_age, now) {
+            stats.recent_orphans_retained = stats.recent_orphans_retained.saturating_add(1);
+            continue;
+        }
+
+        match std::fs::remove_file(entry.path()) {
+            Ok(()) if managed_temporary => {
+                stats.stale_temporary_files_deleted =
+                    stats.stale_temporary_files_deleted.saturating_add(1);
+            }
+            Ok(()) => {
+                stats.orphaned_blobs_deleted = stats.orphaned_blobs_deleted.saturating_add(1);
+            }
+            Err(_) => {
+                stats.cleanup_errors = stats.cleanup_errors.saturating_add(1);
+            }
+        }
+    }
+    stats.referenced_blobs_missing = u64::try_from(referenced.len()).unwrap_or(u64::MAX);
+    Ok(stats)
+}
+
+fn remove_unreferenced_keyframe_blobs(
+    connection: &rusqlite::Connection,
+    blob_dir: &Path,
+    candidates: &[String],
+) -> Result<u64, StoreError> {
+    let unique = candidates
+        .iter()
+        .map(String::as_str)
+        .filter(|digest| is_keyframe_digest(digest))
+        .collect::<BTreeSet<_>>();
+    if unique.is_empty() {
+        return Ok(0);
+    }
+
+    let directory_metadata = match std::fs::symlink_metadata(blob_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(StoreError::Backend(format!(
+                "inspect keyframe blob directory: {error}"
+            )))
+        }
+    };
+    if directory_metadata.file_type().is_symlink() || !directory_metadata.is_dir() {
+        return Err(StoreError::Backend(
+            "keyframe blob directory is not a regular directory".into(),
+        ));
+    }
+
+    let mut deleted = 0_u64;
+    for digest in unique {
+        let references: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE keyframe_blob = ?1",
+                params![digest],
+                |row| row.get(0),
+            )
+            .map_err(|error| {
+                StoreError::Backend(format!("count keyframe blob references: {error}"))
+            })?;
+        if references > 0 {
+            continue;
+        }
+
+        let path = blob_dir.join(format!("{digest}.bin"));
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(StoreError::Backend(format!(
+                    "inspect keyframe blob candidate: {error}"
+                )))
+            }
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(StoreError::Backend(
+                "keyframe blob candidate is not a regular file".into(),
+            ));
+        }
+        std::fs::remove_file(&path)
+            .map_err(|error| StoreError::Backend(format!("delete keyframe blob: {error}")))?;
+        deleted = deleted.saturating_add(1);
+    }
+
+    Ok(deleted)
 }
 
 pub(crate) fn delete_projected_memory_for_events(

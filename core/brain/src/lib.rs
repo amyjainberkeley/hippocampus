@@ -228,6 +228,25 @@ pub struct BrainStats {
     pub episode_edge_count: u64,
 }
 
+/// Content-free accounting from one encrypted keyframe blob reconciliation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BlobReconciliationStats {
+    /// Canonically named regular `.bin` files inspected.
+    pub managed_blobs_seen: u64,
+    /// Unreferenced canonical `.bin` files removed after the grace period.
+    pub orphaned_blobs_deleted: u64,
+    /// Canonically named temporary files removed after the grace period.
+    pub stale_temporary_files_deleted: u64,
+    /// Managed unreferenced files retained because they are inside the grace period.
+    pub recent_orphans_retained: u64,
+    /// Unknown filenames and non-regular entries left untouched.
+    pub unmanaged_entries_skipped: u64,
+    /// Database references whose canonical blob file is currently absent.
+    pub referenced_blobs_missing: u64,
+    /// Per-entry metadata or unlink failures encountered while continuing safely.
+    pub cleanup_errors: u64,
+}
+
 pub mod episode_segmenter;
 pub mod evidence_sufficiency;
 pub mod hybrid_retriever;
@@ -382,8 +401,9 @@ pub struct Event {
     /// bump; the invariant "no row with `cascade_reason != 0`" is asserted
     /// at insert time.
     pub cascade_reason: i64,
-    /// Content-addressed blob path for the keyframe (`None` for text-only
-    /// events). The blob is encrypted separately per ADR-0008 §1.5.
+    /// Lowercase SHA-256 digest of the content-addressed encrypted keyframe
+    /// blob (`None` for text-only events). The managed file lives at
+    /// `<brain_dir>/blobs/<digest>.bin` per ADR-0008 §1.5.
     pub keyframe_blob: Option<String>,
     /// Browser-assigned tab identifier the event came from. V2-P2 — fills
     /// the per-tab attribution gap the cycle 8.18 memo

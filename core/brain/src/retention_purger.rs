@@ -43,6 +43,8 @@ pub struct PurgeStats {
     /// the same retention cutoff as events per
     /// `docs/design/brief-viewer-spec.md` §"Storage + retention".
     pub briefs_deleted: u64,
+    /// Number of unreferenced encrypted keyframe files removed.
+    pub blobs_deleted: u64,
 }
 
 /// 1 hour in microseconds — events younger than this are never purged.
@@ -94,6 +96,21 @@ pub fn purge_once(
         )
         .map_err(|e| StoreError::Backend(format!("count event_vectors for purge: {e}")))?;
 
+    let blob_digests = {
+        let mut statement = tx
+            .prepare(
+                "SELECT keyframe_blob FROM events
+                 WHERE ts_us < ?1 AND keyframe_blob IS NOT NULL
+                 ORDER BY keyframe_blob",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare purge keyframe blobs: {e}")))?;
+        let rows = statement
+            .query_map(params![cutoff_i64], |row| row.get::<_, String>(0))
+            .map_err(|e| StoreError::Backend(format!("query purge keyframe blobs: {e}")))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| StoreError::Backend(format!("read purge keyframe blobs: {e}")))?
+    };
+
     let event_ids = {
         let mut statement = tx
             .prepare("SELECT id FROM events WHERE ts_us < ?1 ORDER BY id")
@@ -141,12 +158,15 @@ pub fn purge_once(
         .conn()
         .execute_batch("VACUUM")
         .map_err(|e| StoreError::Backend(format!("VACUUM after purge: {e}")))?;
+    drop(guard);
+    let blobs_deleted = store.remove_unreferenced_keyframe_candidates(&blob_digests)?;
 
     Ok(PurgeStats {
         events_deleted: events_deleted as u64,
         vectors_deleted: u64::try_from(vectors_count).unwrap_or(0),
         episodes_deleted: episodes_deleted as u64,
         briefs_deleted: briefs_deleted as u64,
+        blobs_deleted,
     })
 }
 
@@ -194,6 +214,7 @@ mod tests {
         assert_eq!(stats.vectors_deleted, 0);
         assert_eq!(stats.episodes_deleted, 0);
         assert_eq!(stats.briefs_deleted, 0);
+        assert_eq!(stats.blobs_deleted, 0);
     }
 
     #[test]
@@ -220,6 +241,36 @@ mod tests {
         // Events at ts >= (60-30)*day_us = 30*day_us should remain.
         // That's events with i >= 50 (ts = 50 * 60*day/100 = 30*day).
         assert_eq!(remaining, 50);
+    }
+
+    #[test]
+    fn purge_removes_expired_keyframe_blobs_and_keeps_live_blobs() {
+        let (store, dir) = temp_store();
+        let day_us = 86_400_000_000_u64;
+        let now = 100 * day_us;
+        let blob_dir = dir.path().join("blobs");
+        std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+        let expired_digest = "1".repeat(64);
+        let live_digest = "2".repeat(64);
+        let expired_path = blob_dir.join(format!("{expired_digest}.bin"));
+        let live_path = blob_dir.join(format!("{live_digest}.bin"));
+        std::fs::write(&expired_path, b"expired").expect("write expired blob");
+        std::fs::write(&live_path, b"live").expect("write live blob");
+
+        let mut expired = make_event(now - 40 * day_us, "expired");
+        expired.keyframe_blob = Some(expired_digest);
+        store.put_event(&expired).expect("put expired event");
+        let mut live = make_event(now - day_us, "live");
+        live.keyframe_blob = Some(live_digest);
+        store.put_event(&live).expect("put live event");
+
+        let stats = purge_once(&store, &RetentionConfig::Days(30), now).expect("purge");
+
+        assert_eq!(stats.events_deleted, 1);
+        assert_eq!(stats.blobs_deleted, 1);
+        assert!(!expired_path.exists(), "expired blob must be removed");
+        assert!(live_path.exists(), "retained blob must remain");
     }
 
     #[test]
