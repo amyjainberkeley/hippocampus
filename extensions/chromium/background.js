@@ -22,6 +22,10 @@ const NATIVE_HOST_NAME = "ai.hippocampus.native_messaging";
 
 let port = null;
 
+function isPersistableTab(tab) {
+  return Boolean(tab) && tab.incognito === false;
+}
+
 function connectNativeHost() {
   if (port) return port;
   try {
@@ -37,13 +41,10 @@ function connectNativeHost() {
 
 chrome.runtime.onMessage.addListener((message, sender, _sendResponse) => {
   if (message.type !== "page_content") return;
-  if (!sender.tab) return;
 
-  // CSO invariant: drop the message here, AND forward an `incognito`
-  // flag to the native host so a JS regression cannot silently leak
-  // content. Both layers are defense-in-depth; the early-return is the
-  // primary block, the flag is the belt-and-suspenders fallback.
-  if (sender.tab.incognito) return;
+  // Missing is not evidence of an ordinary tab. Require Chromium's
+  // explicit false classification before opening the native host.
+  if (!isPersistableTab(sender.tab)) return;
 
   const nativePort = connectNativeHost();
   if (!nativePort) return;
@@ -86,7 +87,7 @@ chrome.runtime.onMessage.addListener((message, sender, _sendResponse) => {
       ts_us: message.payload.ts_us,
       tab_id: sender.tab.id || 0,
       source_browser: detectBrowser(),
-      incognito: sender.tab.incognito === true,
+      incognito: false,
     });
   } catch (_e) {
     port = null;
@@ -100,4 +101,8 @@ function detectBrowser() {
   if (ua.includes("Arc")) return "arc";
   if (ua.includes("Chrome/")) return "chrome";
   return "chrome";
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { isPersistableTab };
 }
