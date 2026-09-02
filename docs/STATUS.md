@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `30c7580`
+Audited code baseline: `056b6e3`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -19,6 +19,11 @@ more than this page.
   source priority, and canonical event citations. Claude Code and Codex
   registration is structural, idempotent, ownership-safe, and records only a
   database path plus Keychain service/account references.
+- The supervisor preserves one database-key authority across capture, Recall,
+  onboarding, and AI-tool connection children. The packaged demo gives
+  Foundation an isolated `HOME` and `CFFIXED_USER_HOME`, and its seeder and
+  app share the exact fixed development-key path, so demo runs cannot touch
+  the user's real brain or silently exercise a different key.
 - Daily briefs work without a model download. The deterministic extractive
   author removes capture headers and duplicate OCR churn, prioritizes explicit
   changes and open loops, caps output at nine bullets, and cites the exact
