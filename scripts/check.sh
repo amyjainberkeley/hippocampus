@@ -37,6 +37,7 @@ LANES=(
     "child-process-environment|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior"
     "capture-source-policy-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior"
     "helper-readiness-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior"
+    "capture-overlap-corpus|swift|test|scripts/test-capture-overlap-corpus.sh"
     "onboarding-route-behavior|swift|test|scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior"
     "safari-private-context|bash|test|node --test extensions/safari/__tests__/content.test.cjs"
     "bash-syntax|bash|lint|__bash_syntax_lane"
@@ -96,6 +97,7 @@ LANES
     child-process-environment prepared file-key authority reaches supervised children
     capture-source-policy-behavior browser pixels stay outside ambient OCR
     helper-readiness-behavior readiness publication is private, atomic, and add-only
+    capture-overlap-corpus deterministic focused/background window fixture builds
     onboarding-route-behavior executable route to the durable app-access editor
     safari-private-context structured browser capture fails closed in private tabs
     bash-syntax           bash -n across repo *.sh files
