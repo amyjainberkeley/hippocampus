@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `3306385`
+Audited code baseline: `aca26e0`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -81,6 +81,12 @@ more than this page.
   outputs retain only the exact canonical events cited by the verifier. The
   retired score critic remains available to tests but is no longer installed
   by production construction.
+- The first compact native verifier candidate has a reproducible Core ML
+  conversion and a memory-safe Rust inference adapter. MobileBERT SQuAD2 FP32
+  matches its PyTorch logits within `0.00014687` and runs in 23.49 ms median,
+  but it is intentionally not installed in production: at a calibration
+  threshold preserving every validation positive, it falsely accepts 16.7%
+  of validation negatives against the 5% ceiling.
 - The menu app, onboarding, Recall workspace, icon, installer art, extensions,
   and documented product captures use one light native visual system. Native
   macOS material supplies the translucent top surfaces, dark system appearance
@@ -193,9 +199,13 @@ explicit relation guard is qualified on its narrow person/count/duration/date
 corpus, leaving the missing semantic verifier as the single quality failure.
 The prior score critic reached only 83.3% positive coverage with 33.3% false
 positives on its tiny held-out split; a fast MiniLM SQuAD2 spike produced the
-same held-out rates and was rejected. The benchmark exits nonzero even though
-ranking and typed abstention pass. Evidence calibration is a product gate, not
-benchmark fine print.
+same held-out rates and was rejected. A reproducible FP32 Core ML MobileBERT
+candidate improved validation positive coverage to 100% and measured 23.49 ms
+median / 25.17 ms p95, but still produced 16.7% validation false positives.
+Its committed evaluator exits nonzero and its artifact remains unbundled. The
+fixture has only six validation scenarios and lacks contradiction, temporal,
+synthesis, provenance, and order-metamorphic coverage. Evidence calibration is
+a product gate, not benchmark fine print.
 
 ## Release Gates
 
