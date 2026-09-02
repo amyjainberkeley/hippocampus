@@ -27,12 +27,12 @@
 //! call or new dependency is required.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
 #[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 #[cfg(unix)]
 use rustix::fs::{flock, FlockOperation, OFlags};
@@ -170,17 +170,55 @@ fn read_lock(path: &Path) -> Result<CrashMarker, LockError> {
     }
 }
 
+#[cfg(unix)]
 fn write_lock(path: &Path) -> Result<(), LockError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let mut file = OpenOptions::new()
+        .read(true)
         .write(true)
         .create(true)
-        .truncate(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(
+            i32::try_from((OFlags::NOFOLLOW | OFlags::CLOEXEC).bits())
+                .expect("open flags fit platform c_int"),
+        )
         .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file()
+        || metadata.uid() != rustix::process::getuid().as_raw()
+        || metadata.nlink() != 1
+    {
+        return Err(LockError::Io(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "crash marker must be a current-user regular file with one link",
+        )));
+    }
+    if metadata.mode() & 0o077 != 0 {
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    let secured = file.metadata()?;
+    if secured.mode() & 0o077 != 0 {
+        return Err(LockError::Io(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "crash marker permissions must be private",
+        )));
+    }
+    file.rewind()?;
+    file.set_len(0)?;
     write!(file, "{}", process::id())?;
     file.sync_all()?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_lock(path: &Path) -> Result<(), LockError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, process::id().to_string())?;
     Ok(())
 }
 
@@ -247,6 +285,8 @@ fn acquire_writer_lease(_run_lock_path: &Path) -> Result<File, LockError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -402,6 +442,41 @@ mod tests {
             error,
             LockError::Io(error) if error.kind() == io::ErrorKind::InvalidData
         ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn crash_marker_symlink_is_rejected_without_truncating_its_target() {
+        let (dir, path) = tmp_lock();
+        fs::create_dir_all(path.parent().expect("marker parent")).expect("create parent");
+        let target = dir.path().join("must-survive");
+        fs::write(&target, b"sensitive target contents").expect("write target");
+        std::os::unix::fs::symlink(&target, &path).expect("create marker symlink");
+
+        acquire_lock(&path).expect_err("marker symlink must fail closed");
+
+        assert_eq!(
+            fs::read(&target).expect("read untouched target"),
+            b"sensitive target contents"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn existing_crash_marker_is_made_private_before_publication() {
+        let (_dir, path) = tmp_lock();
+        fs::create_dir_all(path.parent().expect("marker parent")).expect("create parent");
+        fs::write(&path, "999999999").expect("seed legacy marker");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644))
+            .expect("set legacy marker mode");
+
+        let (_outcome, lock) = acquire_lock(&path).expect("secure legacy marker");
+
+        assert_eq!(
+            fs::metadata(&path).expect("marker metadata").mode() & 0o777,
+            0o600
+        );
+        lock.release().expect("clean release");
     }
 
     #[test]
