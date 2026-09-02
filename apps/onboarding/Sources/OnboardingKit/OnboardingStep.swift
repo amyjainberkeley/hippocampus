@@ -45,7 +45,7 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
         case .livePreview: "Live Preview"
         case .retention: "Retention & Privacy"
         case .prepareBrain: "Preparing Your Brain"
-        case .connectClaudeCode: "Connect Claude Code"
+        case .connectClaudeCode: "Connect AI Tools"
         case .mcpServers: "Connect MCP Servers (optional)"
         case .done: "You're All Set"
         }

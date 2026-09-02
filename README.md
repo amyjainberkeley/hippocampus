@@ -98,11 +98,13 @@ $ mci-brain export --format jsonl | head -1
 
 ## Use it as your agent's memory
 
-This is the part that makes it a memory layer rather than a search box. Hippocampus speaks MCP over stdio, so Claude Code (or anything else that speaks MCP) can query what you saw.
+This is the part that makes it a memory layer rather than a search box. Hippocampus speaks MCP over stdio, so Claude Code and Codex can query what you saw without copying the brain into a global prompt.
 
 ```bash
-mci-agent register-mcp     # writes the server into Claude Code's MCP settings
+mci-agent connect --all    # safely registers detected Claude Code and Codex clients
 ```
+
+`connect --all` is idempotent. It preserves unrelated client settings and writes only the database path plus a content-free Keychain reference, never the database key. `register-mcp` remains available as a Claude-only compatibility command.
 
 Or run it directly and talk JSON-RPC to it:
 
@@ -113,7 +115,7 @@ MCI_DB_PATH=$PWD/hippocampus-demo/demo.sqlite \
   mci-agent mcp-serve
 ```
 
-Five tools, described so a model knows when to reach for each:
+Six read-only tools, described so a model knows when to reach for each:
 
 | Tool | What an agent uses it for |
 |---|---|
@@ -122,6 +124,7 @@ Five tools, described so a model knows when to reach for each:
 | `mci_stats` | Counts and time range. Cheap way to check there is anything to search. |
 | `mci_episodes` | "What did I work on today," as stretches of focused activity. |
 | `mci_events_by_app` | "What sites did I visit," scoped to one app bundle id. |
+| `mci_context` | A bounded, cited handoff packet for the work at hand. Strong claims require governed evidence; weak memory is labeled as observation or abstains. |
 
 On startup it tells you which mode it is in, and this is the line to read:
 
@@ -336,7 +339,7 @@ Most projects bury this. It should be near the top, because it decides whether t
 | Piece | State |
 |---|---|
 | **Encrypted store + keyword search** | **Works, tested.** This is what `try-it.sh` exercises end to end. |
-| **MCP server** | **Works.** Five tools over stdio JSON-RPC, so an agent can query your memory. See below. |
+| **MCP server** | **Works.** Six read-only tools over stdio JSON-RPC, including bounded cited context handoff. See below. |
 | **Pulling from other MCP servers** | **Works against a local server.** `mci-agent mcp-sync` reads what your registered servers offer and files it in the brain, tagged so you can tell it apart. Tested end to end against a loopback MCP server; not tested against any third-party one. |
 | **Semantic search + fusion ranking** | **Works, and I have run the whole path.** Build the model, run `mci-agent embed-backfill`, restart. Verified end to end on a clean machine: a query sharing no words with the corpus goes from 0 hits to 3 correct ones. The model is ~66 MB so you build it yourself; until you do, everything degrades to keyword-only and says so on startup. |
 | **On-device embeddings** | **Works.** Runs through Core ML with the runtime pinned to CPU, with a regression test asserting the vectors still match a known-good reference. |
@@ -411,7 +414,8 @@ The agent-facing side lives on `mci-agent`:
 
 ```bash
 mci-agent mcp-serve                      # MCP server over stdio
-mci-agent register-mcp                   # add it to Claude Code
+mci-agent connect --all                  # add it to detected Claude Code and Codex clients
+mci-agent register-mcp                   # Claude-only compatibility command
 mci-agent mcp-sync                       # pull from your registered MCP servers
 mci-agent embed-backfill                 # fill in missing vectors
 mci-agent embed-backfill --batch-size 64

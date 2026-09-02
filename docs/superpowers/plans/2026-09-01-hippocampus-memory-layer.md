@@ -165,14 +165,14 @@
 - Produces: `compile_context_packet(project, budget)`, MCP tool `mci_context`, and idempotent client detection/registration.
 - Consumes: typed retrieval outcomes, episodes, claims, open loops, and evidence references.
 
-- [ ] **Step 1: Add failing tests** for deterministic token budgets, citation preservation, weak-evidence abstention, idempotent Claude/Codex registration, and no serialized secret.
-- [ ] **Step 2: Run focused tests** and confirm failures.
-- [ ] **Step 3: Implement context packets** ordered as current state, changes, decisions, open loops, people, and evidence.
-- [ ] **Step 4: Add the read-only `mci_context` MCP tool** with typed outcome metadata.
-- [ ] **Step 5: Implement local client discovery and atomic configuration updates** preserving unrelated user configuration.
-- [ ] **Step 6: Add `mci-agent connect --all` and make `init` call it after the key and brain are ready.**
-- [ ] **Step 7: Run focused tests and an isolated-HOME end-to-end registration smoke test.**
-- [ ] **Step 8: Commit** `feat: deliver evidence-backed agent context`.
+- [x] **Step 1: Add failing tests** for deterministic token budgets, citation preservation, weak-evidence abstention, idempotent Claude/Codex registration, and no serialized secret.
+- [x] **Step 2: Run focused tests** and confirm failures.
+- [x] **Step 3: Implement context packets** ordered as current state, changes, decisions, open loops, people, and evidence.
+- [x] **Step 4: Add the read-only `mci_context` MCP tool** with typed outcome metadata.
+- [x] **Step 5: Implement local client discovery and atomic configuration updates** preserving unrelated user configuration.
+- [x] **Step 6: Add `mci-agent connect --all` and make `init` call it after the key and brain are ready.**
+- [x] **Step 7: Run focused tests and an isolated-HOME end-to-end registration smoke test.**
+- [x] **Step 8: Commit** `feat: deliver evidence-backed agent context`.
 
 ### Task 7: Native Light Recall Experience And New Icon
 

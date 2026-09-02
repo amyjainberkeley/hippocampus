@@ -25,7 +25,11 @@ pub mod brain_ingest;
 pub mod brief_worker;
 /// Reusable environment scrubbing for agent-owned child processes.
 pub mod child_command_environment;
+/// Atomic, reference-only registration with supported local AI clients.
+pub mod client_registry;
 pub mod consolidator_worker;
+/// Deterministic, cited context packets for local agent handoff.
+pub mod context_packet;
 /// Cycle 8.44 audit — lock-file-based unclean-shutdown detection.
 /// On boot, [`crash_recovery::acquire_lock`] returns a
 /// [`crash_recovery::LockAcquireOutcome`] that tells the caller whether

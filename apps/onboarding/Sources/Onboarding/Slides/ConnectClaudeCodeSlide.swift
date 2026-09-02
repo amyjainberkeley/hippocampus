@@ -14,11 +14,11 @@ struct ConnectClaudeCodeSlide: View {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 VStack(spacing: OnboardingDesign.Space.md) {
                     SectionChip(text: "Connect")
-                    OnboardingDesign.TypeRamp.title("Connect Claude Code")
+                    OnboardingDesign.TypeRamp.title("Connect Your AI Tools")
                         .multilineTextAlignment(.center)
                 }
 
-                OnboardingDesign.TypeRamp.body("Hippocampus exposes 5 MCP tools to any AI agent on your Mac — Claude Code is what we use day-to-day. Ask it \"what was I doing at 2pm,\" \"find the doc I had open yesterday about embeddings,\" or \"what was that PR I reviewed Tuesday\" and it answers from your brain. Zero network — stays on this Mac.")
+                OnboardingDesign.TypeRamp.body("Hippocampus gives Claude Code and Codex six read-only memory tools. Agents can request a small, cited context packet for the work at hand instead of loading your whole history. Your brain stays on this Mac.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
@@ -27,7 +27,7 @@ struct ConnectClaudeCodeSlide: View {
 
                 stateView
 
-                OnboardingDesign.TypeRamp.footnote("Skip and connect later from the menu bar → Connect to Claude Code…")
+                OnboardingDesign.TypeRamp.footnote("Skip and connect later from the menu bar → Connect AI Tools…")
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
             }
@@ -41,6 +41,7 @@ struct ConnectClaudeCodeSlide: View {
             toolRow(name: "mci_episodes", note: "grouped work sessions")
             toolRow(name: "mci_events_by_app", note: "narrow to one app")
             toolRow(name: "mci_stats", note: "brain status + capture rate")
+            toolRow(name: "mci_context", note: "bounded, cited agent handoff")
         }
         .glassCard(padding: OnboardingDesign.Space.md)
         .frame(maxWidth: 440)
@@ -64,7 +65,7 @@ struct ConnectClaudeCodeSlide: View {
             Button {
                 Task.detached { await viewModel.runRegister() }
             } label: {
-                Label("Connect Claude Code", systemImage: "link")
+                Label("Connect AI Tools", systemImage: "link")
                     .frame(minWidth: 200)
             }
             .onboardingPrimary()

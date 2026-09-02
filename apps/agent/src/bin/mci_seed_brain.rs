@@ -282,7 +282,7 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
             "com.mci.demo.seed.notion",
             "Notion — MCI / Demo Script — Cycle 5",
             "https://www.notion.so/mci/demo-script-cycle-5",
-            "Demo script for the local memory flow: (1) Boot the bundled helper. (2) Use the Mac normally for 5 min. (3) Open Recall UI and inspect the timeline. (4) Search 'hybrid recall' and inspect ranked evidence. (5) Connect Claude Code through the local MCP server.",
+            "Demo script for the local memory flow: (1) Boot the bundled helper. (2) Use the Mac normally for 5 min. (3) Open Recall UI and inspect the timeline. (4) Search 'hybrid recall' and inspect ranked evidence. (5) Connect Claude Code or Codex through the local MCP server.",
         ),
         (
             "com.mci.demo.seed.github",

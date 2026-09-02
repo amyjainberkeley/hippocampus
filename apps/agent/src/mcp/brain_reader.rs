@@ -10,6 +10,8 @@ use mci_brain::{
 };
 use thiserror::Error;
 
+use crate::context_packet::{ContextBudget, ContextPacket};
+
 /// Compact recall hit shape the MCP server returns. Strictly a superset of
 /// `EventRecord` (the timeline-cursor row) + a relevance score from the
 /// underlying retriever. Distinct from `mci_brain::RetrievalHit` because
@@ -111,4 +113,11 @@ pub trait BrainReader: Send + Sync {
         app_bundle_id: &str,
         limit: usize,
     ) -> Result<Vec<EventRecord>, BrainReaderError>;
+
+    /// Compile a bounded, cited packet for one optional work focus.
+    fn context(
+        &self,
+        focus: Option<&str>,
+        budget: ContextBudget,
+    ) -> Result<ContextPacket, BrainReaderError>;
 }

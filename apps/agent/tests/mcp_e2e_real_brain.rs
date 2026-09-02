@@ -28,6 +28,7 @@ use mci_brain::extraction::tier2::KIND_PERSON_NAME;
 use mci_brain::graph::{Entity, EntityIdentity, EntityMention, EpisodeEdge};
 use mci_brain::stubs::FixedDimEmbedder;
 use mci_brain::{BrainStore, Embedder, Event, EventId, IdentityId, SqlCipherBrainStore};
+use mci_brain::{ClaimStatus, EvidenceRef, MemoryClaim, MemoryDelta};
 use mci_core::crypto::DbKey;
 
 // ---------------------------------------------------------------------------
@@ -146,11 +147,11 @@ fn degraded_context<'a>(
 }
 
 // ---------------------------------------------------------------------------
-// tools/list — exactly 5 tools
+// tools/list — exactly 6 read-only tools
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_exactly_five_tools_real_brain() {
+fn tools_list_returns_exactly_six_tools_real_brain() {
     let (_dir, store) = open_temp_store();
     let srv = server_fts_only(store);
 
@@ -159,7 +160,7 @@ fn tools_list_returns_exactly_five_tools_real_brain() {
         .get("tools")
         .and_then(|v| v.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 5, "MCP server must advertise exactly 5 tools");
+    assert_eq!(tools.len(), 6, "MCP server must advertise exactly 6 tools");
 
     let names: Vec<&str> = tools
         .iter()
@@ -170,6 +171,84 @@ fn tools_list_returns_exactly_five_tools_real_brain() {
     assert!(names.contains(&"mci_stats"));
     assert!(names.contains(&"mci_episodes"));
     assert!(names.contains(&"mci_events_by_app"));
+    assert!(names.contains(&"mci_context"));
+}
+
+#[test]
+fn context_over_recent_real_events_is_typed_and_cited() {
+    let (_dir, store) = open_temp_store();
+    let event_id = store
+        .put_event(&make_event(
+            "Implemented a bounded context packet",
+            1_000_000,
+        ))
+        .unwrap();
+    let server = server_fts_only(store);
+
+    let result = extract_result(server.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({
+            "name": "mci_context",
+            "arguments": {"max_tokens": 256, "max_evidence": 8}
+        })),
+    )));
+
+    assert_eq!(result["packet"]["outcome"], "observations_only");
+    assert_eq!(result["packet"]["citations"][0]["event_id"], event_id.0);
+    assert_eq!(result["packet"]["sections"][1]["kind"], "changes");
+    assert_eq!(result["packet"]["sections"][1]["status"], "observed");
+    assert_eq!(result["isError"], false);
+}
+
+#[test]
+fn context_promotes_only_a_governed_claim_from_the_real_projection() {
+    let (_dir, store) = open_temp_store();
+    let mut source = make_event("Decided to ship bounded context packets", 1_000_000);
+    source.id = store.put_event(&source).unwrap();
+    let evidence = EvidenceRef::from_event(source.id, &source, "screen_ocr");
+    let scope = evidence.source_scope.clone();
+    let claim = MemoryClaim::new(
+        source.id,
+        "Hippocampus",
+        "decision",
+        "ship bounded context packets",
+        &scope,
+        Some("Amy".into()),
+        0.99,
+        source.ts_us,
+        source.ts_us,
+        None,
+        "mcp-context-test-v1",
+        ClaimStatus::Active,
+        None,
+        vec![evidence],
+    );
+    store
+        .project_memory_delta(&MemoryDelta::new(
+            source.id,
+            source.ts_us,
+            "mcp-context-test-v1",
+            vec![claim],
+            Vec::new(),
+        ))
+        .unwrap();
+    let server = server_fts_only(store);
+
+    let result = extract_result(server.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({
+            "name": "mci_context",
+            "arguments": {"focus": "Hippocampus", "max_tokens": 256}
+        })),
+    )));
+
+    assert_eq!(result["packet"]["outcome"], "grounded");
+    assert_eq!(result["packet"]["sections"][2]["kind"], "decisions");
+    assert_eq!(result["packet"]["sections"][2]["status"], "grounded");
+    assert_eq!(
+        result["packet"]["sections"][2]["items"][0]["citation_event_ids"][0],
+        source.id.0
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -995,7 +1074,8 @@ fn counters_track_real_brain_dispatches() {
         })),
     ));
 
-    let (recall, events, stats, _episodes, _events_by_app, _parse, unknown) = counters.snapshot();
+    let (recall, events, stats, _episodes, _events_by_app, _context, _parse, unknown) =
+        counters.snapshot();
     assert_eq!(recall, 2, "recall_count");
     assert_eq!(events, 1, "events_since_count");
     assert_eq!(stats, 3, "stats_count");
