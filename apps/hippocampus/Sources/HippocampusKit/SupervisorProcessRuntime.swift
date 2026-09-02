@@ -136,16 +136,16 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         let helperStderr = try helperLog.fileHandle()
         let agentStderr = try agentLog.fileHandle()
 
-        let helper = ChildProcessEnvironment.makeProcess(
-            baseEnvironment: plan.helperEnvironment
+        let helper = try ChildProcessEnvironment.makeProcess(
+            preparedEnvironment: plan.helperEnvironment
         )
         helper.executableURL = plan.helperExecutableURL
         helper.arguments = plan.helperArguments
         helper.standardOutput = bridgePipe
         helper.standardError = helperStderr
 
-        let agent = ChildProcessEnvironment.makeProcess(
-            baseEnvironment: plan.agentEnvironment
+        let agent = try ChildProcessEnvironment.makeProcess(
+            preparedEnvironment: plan.agentEnvironment
         )
         agent.executableURL = plan.agentExecutableURL
         agent.arguments = plan.agentArguments

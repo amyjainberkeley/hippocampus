@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: TBD-private
 import Foundation
+import Darwin
 
 public enum HelperReadinessError: Error, Sendable, Equatable {
     case incompleteArguments
@@ -69,11 +70,29 @@ public struct HelperReadinessReceipt: Sendable, Equatable {
             generation: generation,
             captureEnabled: captureEnabled
         ))
-        try data.write(to: fileURL, options: [.atomic, .withoutOverwriting])
+        let temporaryURL = fileURL.deletingLastPathComponent().appendingPathComponent(
+            ".\(fileURL.lastPathComponent).\(UUID().uuidString).tmp"
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+
+        // Foundation traps when `.atomic` and `.withoutOverwriting` are
+        // combined. Prepare a complete, private inode off-path, then publish
+        // it with link(2), whose no-replacement behavior is atomic.
+        try data.write(to: temporaryURL, options: .atomic)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600],
-            ofItemAtPath: fileURL.path
+            ofItemAtPath: temporaryURL.path
         )
+        let result = temporaryURL.path.withCString { source in
+            fileURL.path.withCString { destination in
+                Darwin.link(source, destination)
+            }
+        }
+        guard result == 0 else {
+            let code = errno
+            if code == EEXIST { throw HelperReadinessError.existingReceipt }
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
     }
 
     public static func read(from fileURL: URL) throws -> HelperReadinessReceipt {

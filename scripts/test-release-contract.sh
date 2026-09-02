@@ -220,6 +220,10 @@ require_literal "$SWIFT_CI" 'swift test --package-path apps/onboarding' \
     'Swift CI runs the onboarding tests'
 require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior' \
     'release CI executes the capture-consent behavior fixture'
+require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior' \
+    'release CI proves prepared file-key authority reaches supervised children'
+require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior' \
+    'release CI proves readiness publication is private, atomic, and add-only'
 require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior' \
     'release CI executes the durable app-access route fixture'
 for script in test-release-contract.sh test-release-identity.sh \
@@ -236,6 +240,12 @@ require_literal "$RELEASE_CI" 'scripts/test-e2e-clean-home-contract.sh' \
     'release CI runs the clean-home source contract'
 require_literal "$RELEASE_CI" 'scripts/test-development-file-key-contract.sh' \
     'release CI proves development file-key authority cannot ship'
+require_literal "$RELEASE_CI" 'scripts/test-no-quarantine-bypass.sh' \
+    'release CI proves the app does not bypass Gatekeeper quarantine'
+require_literal "$RELEASE_CI" 'node --test extensions/safari/__tests__/content.test.cjs' \
+    'release CI proves Safari private-context capture fails closed'
+require_literal "$RELEASE_CI" 'CaptureSourcePolicyBehavior' \
+    'release CI executes the browser pixel exclusion fixture'
 require_literal "$RELEASE_CI" 'scripts/e2e-clean-home.sh' \
     'release CI executes the clean-home product path'
 require_literal "$RELEASE_CI" 'scripts/test-toml-license-contract.sh' \
@@ -249,7 +259,7 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     scripts/verify-toml-license-contract.py scripts/test-toml-license-contract.sh \
     scripts/test-retention-policy-contract.sh scripts/stage-recall-ffi.sh \
     scripts/e2e-clean-home.sh scripts/test-e2e-clean-home-contract.sh \
-    scripts/test-development-file-key-contract.sh \
+    scripts/test-development-file-key-contract.sh scripts/test-no-quarantine-bypass.sh \
     apps/onboarding/Package.swift \
     apps/onboarding/Sources/OnboardingKit/RetentionStore.swift \
     apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift \
@@ -265,6 +275,7 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift \
     apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift \
     apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift \
+    apps/hippocampus/Sources/HippocampusKit/KeyCustodyCommandRunner.swift \
     apps/hippocampus/Sources/HippocampusKit/DevelopmentFileKeyMode.swift \
     apps/hippocampus/Sources/HippocampusKit/KeyStore.swift \
     apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift \
@@ -279,6 +290,7 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift \
     apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift \
     apps/hippocampus/Tests/Fixtures/CaptureConsentBehavior.swift \
+    apps/hippocampus/Tests/Fixtures/ChildProcessEnvironmentBehavior.swift \
     apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift \
     apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift \
     apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift \
@@ -286,12 +298,20 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift \
     extensions/safari/appex/SafariWebExtensionHandler.swift \
+    extensions/safari/content.js extensions/safari/background.js \
+    extensions/safari/manifest.json extensions/safari/__tests__/content.test.cjs \
     apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift \
+    adapters/macos/MCICaptureHelper/Package.swift \
     adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift \
+    adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/HelperReadinessReceipt.swift \
+    adapters/macos/MCICaptureHelper/Tests/Fixtures/HelperReadinessBehavior/main.swift \
     adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Security/KeychainDatabaseKeyResolver.swift \
     adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/KeychainDatabaseKeyResolverTests.swift \
+    adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/BrowserPixelCapturePolicy.swift \
+    adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift \
+    adapters/macos/MCICaptureHelper/Tests/Fixtures/CaptureSourcePolicyBehavior/main.swift \
     apps/agent/Cargo.toml apps/agent/src/retention_worker.rs \
     apps/agent/src/bin/mci_agent.rs apps/agent/src/bin/mci_e2e_fixture.rs \
     apps/agent/tests/retention_preferences_contract.rs \

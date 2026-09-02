@@ -27,6 +27,40 @@ public enum ChildProcessEnvironment {
         process.environment = scrubbingReusableKeys(from: baseEnvironment)
         return process
     }
+
+    package enum PreparedEnvironmentError: Error, Equatable {
+        case rawKeyMaterial
+        case featureOverride
+        case invalidDevelopmentKeyAuthority
+    }
+
+    /// Construct a child from an environment already produced by the
+    /// launch-plan boundary. Ambient callers use `makeProcess(baseEnvironment:)`.
+    /// This path preserves only a coherent file-key authority and rejects
+    /// reusable raw keys or ambient feature overrides.
+    package static func makeProcess(
+        preparedEnvironment: [String: String]
+    ) throws -> Process {
+        guard preparedEnvironment["MCI_DB_KEY_HEX"] == nil else {
+            throw PreparedEnvironmentError.rawKeyMaterial
+        }
+        guard preparedEnvironment["HIPPOCAMPUS_ENABLE_V2P1"] == nil else {
+            throw PreparedEnvironmentError.featureOverride
+        }
+        let marker = preparedEnvironment["MCI_DEVELOPMENT_FILE_KEY"]
+        let keyFile = preparedEnvironment["MCI_DB_KEY_FILE"]
+        switch (marker, keyFile) {
+        case (nil, nil):
+            break
+        case ("1", .some(let path)) where !path.isEmpty:
+            break
+        default:
+            throw PreparedEnvironmentError.invalidDevelopmentKeyAuthority
+        }
+        let process = Process()
+        process.environment = preparedEnvironment
+        return process
+    }
 }
 
 struct KeyCustodyCommandResult: Sendable, Equatable {

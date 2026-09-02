@@ -27,6 +27,7 @@ on:
       - 'scripts/test-verify-app-launches.sh'
       - 'scripts/test-development-app-contract.sh'
       - 'scripts/test-development-file-key-contract.sh'
+      - 'scripts/test-no-quarantine-bypass.sh'
       - 'scripts/demo.sh'
       - 'scripts/test-demo-contract.sh'
       - 'scripts/test-keyframe-demo-fixture.sh'
@@ -54,6 +55,7 @@ on:
       - 'apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift'
       - 'apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/KeyCustodyCommandRunner.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/DevelopmentFileKeyMode.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/KeyStore.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift'
@@ -68,6 +70,7 @@ on:
       - 'apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift'
       - 'apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/CaptureConsentBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/ChildProcessEnvironmentBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift'
@@ -75,13 +78,23 @@ on:
       - 'apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift'
       - 'extensions/safari/appex/SafariWebExtensionHandler.swift'
+      - 'extensions/safari/content.js'
+      - 'extensions/safari/background.js'
+      - 'extensions/safari/manifest.json'
+      - 'extensions/safari/__tests__/content.test.cjs'
       - 'apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
       - 'apps/agent/src/retention_worker.rs'
       - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift'
+      - 'adapters/macos/MCICaptureHelper/Package.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/HelperReadinessReceipt.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/Fixtures/HelperReadinessBehavior/main.swift'
       - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Security/KeychainDatabaseKeyResolver.swift'
       - 'adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/KeychainDatabaseKeyResolverTests.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/BrowserPixelCapturePolicy.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/Fixtures/CaptureSourcePolicyBehavior/main.swift'
       - 'apps/agent/src/bin/mci_agent.rs'
       - 'apps/agent/src/bin/mci_e2e_fixture.rs'
       - 'apps/agent/Cargo.toml'
@@ -127,6 +140,7 @@ on:
       - 'scripts/test-verify-app-launches.sh'
       - 'scripts/test-development-app-contract.sh'
       - 'scripts/test-development-file-key-contract.sh'
+      - 'scripts/test-no-quarantine-bypass.sh'
       - 'scripts/demo.sh'
       - 'scripts/test-demo-contract.sh'
       - 'scripts/test-keyframe-demo-fixture.sh'
@@ -154,6 +168,7 @@ on:
       - 'apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift'
       - 'apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/KeyCustodyCommandRunner.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/DevelopmentFileKeyMode.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/KeyStore.swift'
       - 'apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift'
@@ -168,6 +183,7 @@ on:
       - 'apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift'
       - 'apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/CaptureConsentBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/ChildProcessEnvironmentBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift'
       - 'apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift'
@@ -175,13 +191,23 @@ on:
       - 'apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift'
       - 'extensions/safari/appex/SafariWebExtensionHandler.swift'
+      - 'extensions/safari/content.js'
+      - 'extensions/safari/background.js'
+      - 'extensions/safari/manifest.json'
+      - 'extensions/safari/__tests__/content.test.cjs'
       - 'apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift'
       - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
       - 'apps/agent/src/retention_worker.rs'
       - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift'
+      - 'adapters/macos/MCICaptureHelper/Package.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/HelperReadinessReceipt.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/Fixtures/HelperReadinessBehavior/main.swift'
       - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Security/KeychainDatabaseKeyResolver.swift'
       - 'adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/KeychainDatabaseKeyResolverTests.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/BrowserPixelCapturePolicy.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/Fixtures/CaptureSourcePolicyBehavior/main.swift'
       - 'apps/agent/src/bin/mci_agent.rs'
       - 'apps/agent/src/bin/mci_e2e_fixture.rs'
       - 'apps/agent/Cargo.toml'
@@ -221,12 +247,17 @@ jobs:
       - run: scripts/e2e-clean-home.sh
       - run: scripts/test-development-app-contract.sh
       - run: scripts/test-development-file-key-contract.sh
+      - run: scripts/test-no-quarantine-bypass.sh
       - run: scripts/test-verify-app-launches.sh
       - run: scripts/test-demo-contract.sh
       - run: scripts/test-keyframe-demo-fixture.sh
       - run: scripts/test-onboarding-product-truth.sh
       - run: scripts/test-screenshot-assets.sh
+      - run: node --test extensions/safari/__tests__/content.test.cjs
       - run: scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior
+      - run: scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior
+      - run: scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior
+      - run: scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior
       - run: scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior
       - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
       - run: scripts/test-release-identity.sh

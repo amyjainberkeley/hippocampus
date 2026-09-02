@@ -161,9 +161,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let sentinelLogger = Logger(
         subsystem: "ai.hippocampus", category: "sentinel-watch"
     )
-    private let quarantineLogger = Logger(
-        subsystem: "ai.hippocampus", category: "quarantine"
-    )
     private var sentinelWatcher: DispatchSourceFileSystemObject?
     private var sentinelWatcherFd: Int32 = -1
     private var sentinelPollTask: Task<Void, Never>?
@@ -227,8 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // FIRST thing on launch, before any pipe / socket / Process /
-        // xattr work: mask SIGPIPE.
+        // Mask SIGPIPE before any pipe, socket, or child-process work.
         //
         // CEO-reported (cycle 8.23, 2026-05-29): even after PR #254 shipped
         // the `applicationShouldTerminateAfterLastWindowClosed = false`
@@ -269,40 +265,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // hardening; it does NOT touch capture / OCR cascade /
         // redaction / sensitive-app denylist / wire framing / known-
         // safe-apps / entitlements / notarization / Gatekeeper /
-        // QuarantineUnlocker / mci.sqlite / blob store. Mirror of PR
+        // mci.sqlite / blob store. Mirror of PR
         // #252 + PR #254's no-CSO-sign-off-required pattern. Standard
         // library convention: Rust's `std` masks `SIGPIPE` by default
         // for the same reason.
         signal(SIGPIPE, SIG_IGN)
-
-        // FIRST thing on launch: strip `com.apple.quarantine` from the
-        // running .app bundle.
-        //
-        // CEO-reported (cycles 8.19 and 8.21): after granting a TCC
-        // permission during onboarding, the main GUI process vanishes
-        // (menu-bar icon disappears) while MCICaptureHelper + mci-agent
-        // stay alive (re-parented to launchd). Live triage confirmed
-        // `com.apple.quarantine` was still set on the .app, and the
-        // verified fix was:
-        //
-        //     xattr -dr com.apple.quarantine /Applications/Hippocampus.app
-        //
-        // Notarization + stapling do NOT clear the quarantine attr —
-        // it is attached by the downloading browser regardless of
-        // signing. While the attr is set, LaunchServices keeps a
-        // per-bundle decision record that a single Gatekeeper-adjacent
-        // Cancel or a TCC denial can flip to "reject", silently
-        // refusing subsequent launches. See QuarantineUnlocker for the
-        // full mechanism + §5 protected-set audit.
-        //
-        // We do this BEFORE `installBrowserHostManifests` and
-        // `startSupervisorOrDeferUntilOnboarded` so the strip is
-        // committed before any TCC-triggering call sites run.
-        let unlocker = QuarantineUnlocker()
-        let outcome = unlocker.runIfNeeded()
-        quarantineLogger.info(
-            "first-launch quarantine outcome: \(String(describing: outcome), privacy: .public)"
-        )
 
         Task { @MainActor in
             self.installBrowserHostManifests()
