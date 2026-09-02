@@ -1,6 +1,6 @@
 {
   "dataset_id": "hippocampus-explicit-evidence-veto-v1",
-  "description": "Disjoint synthetic regression fixture for conservative person, count, duration, and date evidence vetoes. It contains no work-memory acceptance questions, entities, sessions, or software-work facts.",
+  "description": "Disjoint synthetic regression and qualification fixture for conservative person, count, duration, and date evidence vetoes. It contains no work-memory acceptance questions, entities, sessions, or software-work facts. The held-out adversarial split tests unrelated values in otherwise relevant evidence and is not used for tuning.",
   "cases": [
     {
       "id": "calibration-pottery-signer",
@@ -99,6 +99,62 @@
       "query": "What date is the winter market opening?",
       "supporting_documents": ["The winter market opens on Tuesday."],
       "insufficient_documents": ["The winter market opening has been announced."]
+    },
+    {
+      "id": "adversarial-temporal-word-is-not-person",
+      "split": "adversarial",
+      "query": "Who authorized the archive transfer?",
+      "supporting_documents": ["Inez authorized the archive transfer."],
+      "insufficient_documents": ["Yesterday approval was recorded for the archive transfer, but the approver was omitted."]
+    },
+    {
+      "id": "adversarial-product-is-not-person",
+      "split": "adversarial",
+      "query": "Who countersigned the observatory receipt?",
+      "supporting_documents": ["Ravi countersigned the observatory receipt."],
+      "insufficient_documents": ["Notion stores the observatory receipt, but its countersigner field is empty."]
+    },
+    {
+      "id": "adversarial-version-is-not-count",
+      "split": "adversarial",
+      "query": "How many ceramic tiles passed sorting?",
+      "supporting_documents": ["Forty ceramic tiles passed sorting."],
+      "insufficient_documents": ["Version 3 of the sorting log discusses the ceramic tiles without recording a total."]
+    },
+    {
+      "id": "adversarial-clock-is-not-count",
+      "split": "adversarial",
+      "query": "How many parcels remained in the depot?",
+      "supporting_documents": ["Nine parcels remained in the depot."],
+      "insufficient_documents": ["At 14:30 the remaining parcels were reviewed, but their count was not entered."]
+    },
+    {
+      "id": "adversarial-prior-date-is-not-deadline",
+      "split": "adversarial",
+      "query": "What due date was set for the furnace repair?",
+      "supporting_documents": ["The furnace repair is due on November 6."],
+      "insufficient_documents": ["The 2026-10-01 inspection preceded the furnace repair, but the repair due date was omitted."]
+    },
+    {
+      "id": "adversarial-note-weekday-is-not-hearing-date",
+      "split": "adversarial",
+      "query": "What date is the shoreline permit hearing?",
+      "supporting_documents": ["The shoreline permit hearing is on Thursday."],
+      "insufficient_documents": ["Tuesday's planning note discusses the shoreline permit, but says the hearing date is pending."]
+    },
+    {
+      "id": "adversarial-other-event-is-not-duration",
+      "split": "adversarial",
+      "query": "How long did the tunnel inspection take?",
+      "supporting_documents": ["The tunnel inspection took four hours."],
+      "insufficient_documents": ["A two hour maintenance window ended before the tunnel inspection; the inspection duration was not recorded."]
+    },
+    {
+      "id": "adversarial-timer-is-not-duration",
+      "split": "adversarial",
+      "query": "How long was the dye bath active?",
+      "supporting_documents": ["The dye bath was active for 30 minutes."],
+      "insufficient_documents": ["The 30 minute timer was calibrated before the dye bath; the bath duration is absent."]
     }
   ]
 }

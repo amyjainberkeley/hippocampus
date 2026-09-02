@@ -1,6 +1,7 @@
 use mci_brain::{
-    evidence_features_for_candidates, explicit_evidence_support, EvidenceCandidate,
-    EvidenceFeatures, ExplicitEvidenceSupport, EVIDENCE_SUFFICIENCY_POLICY,
+    evidence_features_for_candidates, explicit_evidence_signal, EvidenceCandidate,
+    EvidenceFeatures, ExplicitEvidenceSignal, EVIDENCE_SUFFICIENCY_POLICY,
+    EXPLICIT_EVIDENCE_VETO_QUALIFICATION,
 };
 
 fn assert_close(actual: f32, expected: f32) {
@@ -260,13 +261,13 @@ fn explicit_answer_shapes_require_values_in_retrieved_evidence() {
             raw_semantic_cosine: 0.8,
         }];
         assert_eq!(
-            explicit_evidence_support(query, &supported_candidates),
-            ExplicitEvidenceSupport::Supported,
+            explicit_evidence_signal(query, &supported_candidates),
+            ExplicitEvidenceSignal::ValueTypeObserved,
             "supported query: {query}"
         );
         assert_eq!(
-            explicit_evidence_support(query, &unsupported_candidates),
-            ExplicitEvidenceSupport::Unsupported,
+            explicit_evidence_signal(query, &unsupported_candidates),
+            ExplicitEvidenceSignal::ValueTypeAbsent,
             "unsupported query: {query}"
         );
     }
@@ -281,8 +282,8 @@ fn capture_context_header_values_cannot_satisfy_an_explicit_date_question() {
     }];
 
     assert_eq!(
-        explicit_evidence_support("What due date did Priya set for HIPP 201?", &candidates),
-        ExplicitEvidenceSupport::Unsupported
+        explicit_evidence_signal("What due date did Priya set for HIPP 201?", &candidates),
+        ExplicitEvidenceSignal::ValueTypeAbsent
     );
 }
 
@@ -295,8 +296,8 @@ fn non_explicit_questions_are_left_to_the_calibrated_critic() {
     }];
 
     assert_eq!(
-        explicit_evidence_support("Why did partial benchmark runs change?", &candidates),
-        ExplicitEvidenceSupport::NotApplicable
+        explicit_evidence_signal("Why did partial benchmark runs change?", &candidates),
+        ExplicitEvidenceSignal::NotApplicable
     );
 }
 
@@ -351,17 +352,60 @@ fn explicit_evidence_veto_passes_disjoint_calibration_and_validation_splits() {
                 })
                 .collect::<Vec<_>>();
             assert_eq!(
-                explicit_evidence_support(&case.query, &supporting),
-                ExplicitEvidenceSupport::Supported,
+                explicit_evidence_signal(&case.query, &supporting),
+                ExplicitEvidenceSignal::ValueTypeObserved,
                 "{} positive",
                 case.id
             );
             assert_eq!(
-                explicit_evidence_support(&case.query, &insufficient),
-                ExplicitEvidenceSupport::Unsupported,
+                explicit_evidence_signal(&case.query, &insufficient),
+                ExplicitEvidenceSignal::ValueTypeAbsent,
                 "{} negative",
                 case.id
             );
         }
     }
+}
+
+#[test]
+fn explicit_evidence_veto_reports_held_out_unrelated_value_false_pass_throughs() {
+    let fixture: ExplicitEvidenceFixture = serde_json::from_str(include_str!(
+        "../../../eval/work-memory/explicit-evidence-veto-v1.json"
+    ))
+    .expect("explicit evidence fixture parses");
+    let cases = fixture
+        .cases
+        .iter()
+        .filter(|case| case.split == "adversarial")
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 8, "adversarial split size changed");
+
+    let false_pass_throughs = cases
+        .iter()
+        .filter_map(|case| {
+            let candidates = case
+                .insufficient_documents
+                .iter()
+                .enumerate()
+                .map(|(index, text)| EvidenceCandidate {
+                    stable_id: index as u64,
+                    text,
+                    raw_semantic_cosine: 0.8,
+                })
+                .collect::<Vec<_>>();
+            (explicit_evidence_signal(&case.query, &candidates)
+                != ExplicitEvidenceSignal::ValueTypeAbsent)
+                .then_some(case.id.as_str())
+        })
+        .collect::<Vec<_>>();
+
+    let qualification = EXPLICIT_EVIDENCE_VETO_QUALIFICATION;
+    assert_eq!(fixture.dataset_id, qualification.fixture_dataset_id);
+    assert_eq!(
+        false_pass_throughs.len(),
+        qualification.adversarial_false_pass_throughs,
+        "held-out false pass-through behavior changed: {false_pass_throughs:?}"
+    );
+    assert_eq!(cases.len(), qualification.adversarial_cases);
+    assert!(!qualification.relation_grounded);
 }

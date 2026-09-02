@@ -22,18 +22,55 @@ pub struct EvidenceCandidate<'a> {
 
 /// Conservative support check for questions with an explicit answer shape.
 ///
-/// This is a negative guard, not an entailment model: [`Supported`](Self::Supported)
-/// means only that retrieved evidence contains the requested value type. It
-/// never promotes a candidate to a match by itself.
+/// This is a negative guard, not an entailment model:
+/// [`ValueTypeObserved`](Self::ValueTypeObserved) means only that some retrieved
+/// evidence contains the requested value type. The value can be unrelated to
+/// the query's requested relation, so this signal never promotes a candidate
+/// to a match by itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExplicitEvidenceSupport {
+pub enum ExplicitEvidenceSignal {
     /// The query has no answer shape this guard can assess reliably.
     NotApplicable,
     /// At least one evidence candidate contains the requested value type.
-    Supported,
+    ValueTypeObserved,
     /// The query requests a known value type and no candidate contains it.
-    Unsupported,
+    ValueTypeAbsent,
 }
+
+/// Frozen qualification record for the deterministic explicit-value veto.
+///
+/// The calibration and validation slices cover simple type-presence cases.
+/// The adversarial slice adds unrelated values in otherwise relevant evidence
+/// and shows that type presence is not relation grounding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExplicitEvidenceVetoQualification {
+    /// Identifier of the committed synthetic fixture.
+    pub fixture_dataset_id: &'static str,
+    /// SHA-256 of the committed fixture bytes.
+    pub fixture_sha256: &'static str,
+    /// Number of simple calibration cases.
+    pub calibration_cases: usize,
+    /// Number of disjoint simple validation cases.
+    pub validation_cases: usize,
+    /// Number of held-out adversarial insufficient-evidence cases.
+    pub adversarial_cases: usize,
+    /// Adversarial cases where an unrelated value prevented the veto.
+    pub adversarial_false_pass_throughs: usize,
+    /// Whether held-out evidence establishes value-to-relation grounding.
+    pub relation_grounded: bool,
+}
+
+/// Current qualification of the explicit-value veto.
+pub const EXPLICIT_EVIDENCE_VETO_QUALIFICATION: ExplicitEvidenceVetoQualification =
+    ExplicitEvidenceVetoQualification {
+        fixture_dataset_id: "hippocampus-explicit-evidence-veto-v1",
+        fixture_sha256: "73d6ef3f3271945abbc5e7a5a6392073825299e1a3390c0ed0dc20d7801fd8a8",
+        calibration_cases: 6,
+        validation_cases: 8,
+        adversarial_cases: 8,
+        adversarial_false_pass_throughs: 8,
+        relation_grounded: false,
+    };
 
 /// Versioned, cross-query-comparable features consumed by the local critic.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -142,21 +179,21 @@ pub fn evidence_features_for_candidates(
 /// type. The check is deliberately conservative and recognizes only explicit
 /// person, count, duration, and date requests.
 #[must_use]
-pub fn explicit_evidence_support(
+pub fn explicit_evidence_signal(
     query: &str,
     candidates: &[EvidenceCandidate<'_>],
-) -> ExplicitEvidenceSupport {
+) -> ExplicitEvidenceSignal {
     let query_tokens = normalized_tokens(query);
     let Some(answer_type) = explicit_answer_type(&query_tokens) else {
-        return ExplicitEvidenceSupport::NotApplicable;
+        return ExplicitEvidenceSignal::NotApplicable;
     };
     let query_terms: HashSet<String> = query_tokens.into_iter().collect();
     if candidates.iter().any(|candidate| {
         contains_explicit_value(answer_type, evidence_body(candidate.text), &query_terms)
     }) {
-        ExplicitEvidenceSupport::Supported
+        ExplicitEvidenceSignal::ValueTypeObserved
     } else {
-        ExplicitEvidenceSupport::Unsupported
+        ExplicitEvidenceSignal::ValueTypeAbsent
     }
 }
 

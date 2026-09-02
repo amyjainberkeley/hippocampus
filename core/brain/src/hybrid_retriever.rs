@@ -85,8 +85,8 @@ use std::sync::Arc;
 use crate::extraction::tier1::{Tier1Extractor, KIND_REDACTED_TOKEN};
 use crate::extraction::tier2::{KIND_LOCATION, KIND_ORGANIZATION, KIND_PERSON_NAME};
 use crate::{
-    evidence_features_for_candidates, explicit_evidence_support, BrainStore, Embedder, EntityId,
-    EventId, EvidenceCandidate, EvidenceSufficiencyPolicy, ExplicitEvidenceSupport, RetrievalHit,
+    evidence_features_for_candidates, explicit_evidence_signal, BrainStore, Embedder, EntityId,
+    EventId, EvidenceCandidate, EvidenceSufficiencyPolicy, ExplicitEvidenceSignal, RetrievalHit,
     RetrievalQuery, RetrieveError, Retriever, TimeRange, EVIDENCE_SUFFICIENCY_POLICY,
 };
 
@@ -762,8 +762,8 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         let sufficient = evidence_features_for_candidates(&query.text, &candidates)
             .is_some_and(|features| self.evidence_policy.is_sufficient(features));
         let explicitly_unsupported = matches!(
-            explicit_evidence_support(&query.text, &candidates),
-            ExplicitEvidenceSupport::Unsupported
+            explicit_evidence_signal(&query.text, &candidates),
+            ExplicitEvidenceSignal::ValueTypeAbsent
         );
         matches.sort_by(|left, right| {
             right

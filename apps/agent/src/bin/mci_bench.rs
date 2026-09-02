@@ -18,7 +18,7 @@ use mci_agent::bench_longmemeval::{
     LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, ScratchRun, Summary,
 };
 use mci_agent::child_command_environment::sanitized_command;
-use mci_brain::EVIDENCE_SUFFICIENCY_POLICY;
+use mci_brain::{EVIDENCE_SUFFICIENCY_POLICY, EXPLICIT_EVIDENCE_VETO_QUALIFICATION};
 
 const CANONICAL_WORK_MEMORY_DATASET: &str = "eval/work-memory/synthetic-v1.json";
 const CANONICAL_WORK_MEMORY_DATASET_ID: &str = "synthetic-work-memory-v1";
@@ -920,6 +920,12 @@ fn main() -> ExitCode {
         EVIDENCE_SUFFICIENCY_POLICY.validation_qualified,
         &mut quality_gate,
     );
+    require_relation_grounded_explicit_evidence_veto(
+        EXPLICIT_EVIDENCE_VETO_QUALIFICATION.relation_grounded,
+        EXPLICIT_EVIDENCE_VETO_QUALIFICATION.adversarial_false_pass_throughs,
+        EXPLICIT_EVIDENCE_VETO_QUALIFICATION.adversarial_cases,
+        &mut quality_gate,
+    );
     let launch_qualified = publishable && quality_gate.passed;
 
     let report = Report {
@@ -986,6 +992,20 @@ fn require_qualified_evidence_policy(qualified: bool, quality_gate: &mut Regress
         quality_gate
             .failures
             .push("production evidence-sufficiency policy is not validation-qualified".into());
+    }
+}
+
+fn require_relation_grounded_explicit_evidence_veto(
+    relation_grounded: bool,
+    false_pass_throughs: usize,
+    adversarial_cases: usize,
+    quality_gate: &mut RegressionReport,
+) {
+    if !relation_grounded {
+        quality_gate.passed = false;
+        quality_gate.failures.push(format!(
+            "explicit-evidence veto is not relation-grounded ({false_pass_throughs}/{adversarial_cases} held-out unrelated-value false pass-throughs)"
+        ));
     }
 }
 
@@ -1103,6 +1123,22 @@ mod tests {
         assert_eq!(
             quality_gate.failures,
             ["production evidence-sufficiency policy is not validation-qualified"]
+        );
+    }
+
+    #[test]
+    fn ungrounded_explicit_evidence_veto_blocks_launch_quality() {
+        let mut quality_gate = RegressionReport {
+            passed: true,
+            failures: Vec::new(),
+        };
+
+        require_relation_grounded_explicit_evidence_veto(false, 8, 8, &mut quality_gate);
+
+        assert!(!quality_gate.passed);
+        assert_eq!(
+            quality_gate.failures,
+            ["explicit-evidence veto is not relation-grounded (8/8 held-out unrelated-value false pass-throughs)"]
         );
     }
 

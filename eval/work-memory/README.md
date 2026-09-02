@@ -48,10 +48,12 @@ not use nonsense-token negatives.
 Those three negatives are an acceptance slice, not enough data to fit or tune
 an abstention threshold. `explicit-evidence-veto-v1.json` is a disjoint
 synthetic fixture for the narrow deterministic guard used before the broader
-critic. Its six calibration and eight validation cases cover person, count,
-duration, and date requests without reusing work-memory questions, entities,
-sessions, or software facts. The fixture SHA-256 is
-`9d4ae81303209e3dcba6a167a87972c86e5eceb5edf90648cf2238df0d2770fd`.
+critic. Its six calibration and eight validation cases cover simple person,
+count, duration, and date type presence without reusing work-memory questions,
+entities, sessions, or software facts. A separate eight-case held-out
+adversarial split puts unrelated names, products, numbers, timestamps, dates,
+and durations into otherwise relevant evidence. The fixture SHA-256 is
+`73d6ef3f3271945abbc5e7a5a6392073825299e1a3390c0ed0dc20d7801fd8a8`.
 
 The guard is negative-only: when a query unambiguously requests one of those
 four value types and no retrieved evidence body contains it, production returns
@@ -61,8 +63,20 @@ critic remains authoritative and currently remains unqualified. Ingestion
 headers are removed before the check so app names, titles, URLs, and capture
 timestamps cannot satisfy a question. The committed regression fixture accepts
 all 6/6 calibration and 8/8 validation supporting sets while rejecting all 6/6
-and 8/8 corresponding insufficient sets. These small synthetic counts are a
-regression contract, not a population-level accuracy claim.
+and 8/8 corresponding simple insufficient sets.
+
+The held-out adversarial result is **8/8 false pass-throughs (100%)**: every
+unrelated value prevents this document-global veto, including capitalized
+temporal/product tokens for person questions and numbers or dates attached to
+the wrong event. Accordingly, the positive enum value is named
+`ValueTypeObserved`, not `Supported`; the guard is explicitly
+`relation_grounded: false`; and this qualification independently blocks
+`launch_qualified`. The three work-memory unanswerables remain a narrow
+acceptance improvement, not evidence that abstention is solved. Robust positive
+support requires value-to-relation grounding (for example, validated local NER
+plus relation extraction or entailment), which this deterministic guard does
+not implement. These small synthetic counts are regression and qualification
+evidence, not a population-level accuracy claim.
 
 Every per-case report includes `retrieval_disposition`, preserving whether the
 production path matched, abstained at a named reason, or returned ranked context
