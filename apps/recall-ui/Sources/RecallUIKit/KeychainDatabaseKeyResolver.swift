@@ -98,14 +98,21 @@ public enum KeychainDatabaseKeyError: Error, Sendable, Equatable {
     case readFailure(OSStatus)
 }
 
-/// Explicit escape hatch for deterministic local fixtures launched directly
-/// from a developer shell. Hippocampus.app strips both variables from every
-/// child process, so the shipped app path continues to resolve only Keychain
-/// references.
+/// Explicit escape hatch for deterministic local fixtures and ad-hoc
+/// development bundles. Production bundles do not carry the capability that
+/// lets the supervisor set this marker.
 public enum DevelopmentDatabaseKeyMaterial {
     public static func hex(from environment: [String: String]) throws -> String? {
         guard environment["MCI_DEVELOPMENT_FILE_KEY"] == "1" else { return nil }
-        guard let value = environment["MCI_DB_KEY_HEX"] else { return nil }
+        let value: String
+        if let raw = environment["MCI_DB_KEY_HEX"] {
+            value = raw
+        } else if let path = environment["MCI_DB_KEY_FILE"] {
+            value = try String(contentsOfFile: path, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            return nil
+        }
         guard value.utf8.count == 64,
               value.utf8.allSatisfy(\.isASCIIHexDigit)
         else {

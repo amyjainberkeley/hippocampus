@@ -24,6 +24,7 @@ private final class LockedCounter: @unchecked Sendable {
 struct ThumbnailProviderBehavior {
     static func main() async throws {
         try proveDevelopmentKeyRequiresExplicitGate()
+        try proveDevelopmentKeyCanUseSupervisorFileReference()
         proveAppDisplayNames()
         precondition(RecallTab.from(deepLinkValue: "now") == .now)
 
@@ -94,6 +95,21 @@ struct ThumbnailProviderBehavior {
         ])
         precondition(disabled == nil)
         precondition(enabled == raw.lowercased())
+    }
+
+    private static func proveDevelopmentKeyCanUseSupervisorFileReference() throws {
+        let keyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hippocampus-recall-key-\(UUID().uuidString)")
+        let raw = String(repeating: "cD", count: 32)
+        try Data(raw.utf8).write(to: keyURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: keyURL) }
+
+        let resolved = try DevelopmentDatabaseKeyMaterial.hex(from: [
+            "MCI_DEVELOPMENT_FILE_KEY": "1",
+            "MCI_DB_KEY_FILE": keyURL.path,
+        ])
+
+        precondition(resolved == raw.lowercased())
     }
 
     private static func proveAppDisplayNames() {
