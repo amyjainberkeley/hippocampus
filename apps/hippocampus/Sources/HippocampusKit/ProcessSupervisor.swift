@@ -64,6 +64,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
     ) -> ProcessSupervisorLaunchPlan {
         precondition(generation.captureEnabled == captureEnabled)
         var helperArguments = [
+            "--parent-lease-stdin",
             "--output", "/dev/stdout",
             "--readiness-file", generation.readinessURL.path,
             "--generation", generation.id,

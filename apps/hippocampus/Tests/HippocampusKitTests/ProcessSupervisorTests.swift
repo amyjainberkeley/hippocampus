@@ -230,6 +230,7 @@ final class ProcessSupervisorTests: XCTestCase {
         )
 
         XCTAssertFalse(plan.helperArguments.contains("--capture"))
+        XCTAssertTrue(plan.helperArguments.contains("--parent-lease-stdin"))
         XCTAssertTrue(plan.helperArguments.contains(generation.readinessURL.path))
         XCTAssertTrue(plan.helperArguments.contains(generation.id))
         for environment in [plan.helperEnvironment, plan.agentEnvironment] {

@@ -110,6 +110,7 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
     private var helper: Process?
     private var agent: Process?
     private var bridgePipe: Pipe?
+    private var parentLeaseWriteHandle: FileHandle?
     private var helperStderrHandle: FileHandle?
     private var agentStderrHandle: FileHandle?
     private var currentGeneration: SupervisorProcessGeneration?
@@ -129,6 +130,7 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         }
         try? FileManager.default.removeItem(at: generation.readinessURL)
         let bridgePipe = Pipe()
+        let parentLeasePipe = Pipe()
         let logDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MCI")
         let helperLog = LogRotator(path: logDirectory.appendingPathComponent("helper.stderr.log"))
@@ -141,6 +143,7 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         )
         helper.executableURL = plan.helperExecutableURL
         helper.arguments = plan.helperArguments
+        helper.standardInput = parentLeasePipe
         helper.standardOutput = bridgePipe
         helper.standardError = helperStderr
 
@@ -174,6 +177,7 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         }
 
         self.bridgePipe = bridgePipe
+        self.parentLeaseWriteHandle = parentLeasePipe.fileHandleForWriting
         self.helperStderrHandle = helperStderr
         self.agentStderrHandle = agentStderr
         do {
@@ -181,6 +185,9 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
             self.helper = helper
             try agent.run()
             self.agent = agent
+            try? parentLeasePipe.fileHandleForReading.close()
+            try? bridgePipe.fileHandleForReading.close()
+            try? bridgePipe.fileHandleForWriting.close()
         } catch let launchError {
             isStopping = true
             do {
@@ -230,11 +237,25 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
 
     func stop(timeout: TimeInterval) async throws {
         isStopping = true
+        try? parentLeaseWriteHandle?.close()
+        parentLeaseWriteHandle = nil
+        let gracefulTimeout = min(1, max(0.05, timeout / 2))
+        let gracefulDeadline = Date().addingTimeInterval(gracefulTimeout)
+        while Date() < gracefulDeadline,
+              helper?.isRunning == true || agent?.isRunning == true
+        {
+            try await Task.sleep(for: .milliseconds(25))
+        }
         do {
-            try await SupervisorProcessShutdown.stop(
-                processes: [helper, agent].compactMap { $0 },
-                termTimeout: timeout
-            )
+            let survivors = [helper, agent].compactMap { process in
+                process?.isRunning == true ? process : nil
+            }
+            if !survivors.isEmpty {
+                try await SupervisorProcessShutdown.stop(
+                    processes: survivors,
+                    termTimeout: max(0.05, timeout - gracefulTimeout)
+                )
+            }
         } catch {
             throw SupervisorProcessRuntimeError.partialStop
         }
@@ -257,6 +278,8 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         helper = nil
         agent = nil
         bridgePipe = nil
+        try? parentLeaseWriteHandle?.close()
+        parentLeaseWriteHandle = nil
         helperStderrHandle = nil
         agentStderrHandle = nil
         currentGeneration = nil

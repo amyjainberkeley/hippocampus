@@ -859,6 +859,17 @@ else
     echo "WARNING: scripts/verify-app-launches.sh not found — skipping launch gate."
 fi
 
+# Ad-hoc development bundles use isolated file-key custody, so they can also
+# prove the privacy-critical owner-death path without touching the real
+# Keychain. Developer ID builds exercise the same code in clean-Mac release
+# verification, where their Keychain ACL is available.
+PARENT_LIFETIME_VERIFY="$REPO_ROOT/scripts/verify-parent-lifetime.sh"
+if [[ "$SIGNING_MODE" == "ad-hoc" && -x "$PARENT_LIFETIME_VERIFY" ]]; then
+    echo ""
+    echo "=== Parent-lifetime gate ==="
+    "$PARENT_LIFETIME_VERIFY" "$APP"
+fi
+
 echo ""
 echo "=== Done ==="
 echo "  $APP"
