@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `740c7e3`
+Audited code baseline: `4d838d3`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -97,6 +97,9 @@ more than this page.
   failure, and an absent verifier all fail closed as the typed
   `EvidenceVerifierUnavailable` degradation. Supported and contradictory
   outputs retain only the exact canonical events cited by the verifier. The
+  verifier receives a bounded internal set of up to eight ranked events before
+  the caller's display limit is applied, so a one-result UI request cannot
+  discard supporting or contradictory evidence before verification. The
   retired score critic remains available to tests but is no longer installed
   by production construction.
 - The first compact native verifier candidate has a reproducible Core ML
@@ -242,6 +245,15 @@ fixture has only six validation scenarios and lacks contradiction, temporal,
 synthesis, provenance, and order-metamorphic coverage. Evidence calibration is
 a product gate, not benchmark fine print.
 
+A DeBERTa-v3-xsmall NLI spike correctly separated several hand-authored support
+and contradiction examples in PyTorch, but its relative-position attention
+graph did not convert through the repository's pinned Core ML toolchain. It is
+not a release dependency. The next production candidate reuses the already
+convertible fixed-shape MobileBERT encoder architecture with a task-trained
+three-way claim/evidence-set classifier and citation-slot head. That candidate
+does not exist in the app yet and cannot qualify without blind claim-level
+evaluation, Core ML parity, latency, and signed-runtime proof.
+
 The public v2 semantic-verifier fixture is
 `eval/evidence-verifier/v2-corpus.json` with SHA-256
 `d612bf537fbaa8453cd0a83075722f4e7fe8ff30afab86c5a2c33e4ea42041e4`.
@@ -264,6 +276,10 @@ immutable signed runtime is required before a production verifier can qualify.
   revocation behavior, then complete the 30-minute resource and privacy soak.
 - Provision and reconstruct the immutable Arctic retrieval archive named by
   `release-models.json`, then pass its integrity and completeness checks.
+- Train and qualify the claim/evidence-set verifier on a blind,
+  scenario-disjoint corpus; prove citation binding, Core ML parity, calibrated
+  abstention, and signed-runtime latency before adding it to the release
+  manifest.
 - Install full Xcode, a Developer ID Application identity with private key,
   and the `notarytool-profile`; verify the Sparkle private/public pair without
   recording secret values.

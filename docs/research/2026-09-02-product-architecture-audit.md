@@ -343,7 +343,7 @@ The order is based on dependency and falsifiability, not calendar estimates.
 | 3 | Capture privacy and terminal failure | Bad input poisons every later memory layer | Browser authorization, private-context exclusion, pause, lock, and TCC behavior are executable; live frames reached the helper, but exact overlap proof remains blocked by Accessibility and focus stability |
 | 4 | Retention, deletion, and writer quiescence | A user must be able to withdraw evidence safely | Complete, including process-held writer lease and orphan reconciliation |
 | 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | Deterministic overlap app built; current app reaches ScreenCaptureKit frames and encrypted ingestion, but focused-token/background-token proof and soak remain pending |
-| 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | Retrieval ranking and explicit relation veto pass; general semantic verifier remains unqualified |
+| 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | Retrieval ranking and explicit relation veto pass; verifier input is now independently bounded before display truncation, but the general semantic verifier remains unqualified |
 | 7 | Native product experience | A correct engine users cannot understand will not be trusted | Light native UI and release assets implemented; the disposable product capture visibly proves three authenticated keyframes, 20 events, and one brief |
 | 8 | Signed distribution and update proof | Public use requires identity, notarization, models, and continuity | Ad-hoc bundle passes launch/owner-death checks; Developer ID and notarization remain external |
 
@@ -420,7 +420,9 @@ Long-lived memory should be harder to write than an event.
 6. Veto explicit person, count, duration, and date questions when no retrieved
    sentence relates a correctly shaped value to the requested fact.
 7. Run a separately calibrated local verifier over the question and compact
-   evidence set. Retrieval similarity is an input, never proof of support.
+   evidence set. Its internal evidence budget is independent of the number of
+   results the caller wants displayed. Retrieval similarity is an input, never
+   proof of support.
 8. Pack the smallest useful evidence set with deterministic tie breaks.
 
 ### Make abstention a product surface
@@ -523,11 +525,16 @@ counterfactual-swap, contradiction, and latency tests. A SQuAD2-style MiniLM
 reader was tested as that spike and rejected: it was fast in PyTorch but reached
 only `0.833` held-out positive coverage with `0.333` negative false-positive
 rate, confidently extracting concrete-sounding placeholders from insufficient
-evidence. ADR-0038 now fixes the architecture: a verifier sees query, canonical
-event text, and stable event IDs but no retrieval scores; trusted support must
-cite IDs from the candidate set; malformed output and runtime failure degrade
-instead of becoming hits. A compact app-owned verifier still needs a locked
-qualification corpus, Core ML parity, redistribution clearance, and minimum-Mac
+evidence. A DeBERTa-v3-xsmall NLI spike was semantically promising on a few
+hand-authored cases but its relative-position attention graph failed conversion
+through the pinned Core ML toolchain, so it was rejected as the immediate Mac
+path. ADR-0038 now fixes the architecture: a verifier sees atomic claims,
+canonical event slots, and host-bound event identities but no retrieval scores;
+trusted support must select slots from that set; malformed output and runtime
+failure degrade instead of becoming hits. The next candidate is a task-trained
+three-way classifier and citation-slot head on the already convertible
+fixed-shape MobileBERT encoder. It still needs a blind claim-level corpus, Core
+ML parity, redistribution clearance, signed-runtime execution, and minimum-Mac
 latency proof before it enters the release manifest.
 
 ## Immediate Definition Of Done
