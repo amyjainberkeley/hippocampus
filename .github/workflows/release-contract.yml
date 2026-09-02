@@ -21,6 +21,8 @@ on:
       - 'scripts/verify-toml-license-contract.py'
       - 'scripts/test-task-2-product-truth.sh'
       - 'scripts/test-retention-policy-contract.sh'
+      - 'scripts/e2e-clean-home.sh'
+      - 'scripts/test-e2e-clean-home-contract.sh'
       - 'scripts/stage-recall-ffi.sh'
       - 'apps/onboarding/Package.swift'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionStore.swift'
@@ -47,6 +49,8 @@ on:
       - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
       - 'apps/agent/src/retention_worker.rs'
       - 'apps/agent/src/bin/mci_agent.rs'
+      - 'apps/agent/src/bin/mci_e2e_fixture.rs'
+      - 'apps/agent/Cargo.toml'
       - 'apps/agent/tests/retention_preferences_contract.rs'
       - 'assets/installer/EULA.rtf'
       - 'assets/installer/sla.r'
@@ -82,6 +86,8 @@ on:
       - 'scripts/verify-toml-license-contract.py'
       - 'scripts/test-task-2-product-truth.sh'
       - 'scripts/test-retention-policy-contract.sh'
+      - 'scripts/e2e-clean-home.sh'
+      - 'scripts/test-e2e-clean-home-contract.sh'
       - 'scripts/stage-recall-ffi.sh'
       - 'apps/onboarding/Package.swift'
       - 'apps/onboarding/Sources/OnboardingKit/RetentionStore.swift'
@@ -108,6 +114,8 @@ on:
       - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
       - 'apps/agent/src/retention_worker.rs'
       - 'apps/agent/src/bin/mci_agent.rs'
+      - 'apps/agent/src/bin/mci_e2e_fixture.rs'
+      - 'apps/agent/Cargo.toml'
       - 'apps/agent/tests/retention_preferences_contract.rs'
       - 'assets/installer/EULA.rtf'
       - 'assets/installer/sla.r'
@@ -139,6 +147,8 @@ jobs:
       - run: scripts/test-toml-license-contract.sh
       - run: scripts/test-task-2-product-truth.sh
       - run: scripts/test-retention-policy-contract.sh
+      - run: scripts/test-e2e-clean-home-contract.sh
+      - run: scripts/e2e-clean-home.sh
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh
       - run: scripts/test-release-model-manifest.sh

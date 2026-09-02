@@ -46,6 +46,8 @@ Run on a quiet host and retain command logs:
 ./scripts/test-release-model-manifest.sh
 ./scripts/test-sparkle-keygen.sh
 ./scripts/test-sparkle-keypair.sh
+./scripts/test-e2e-clean-home-contract.sh
+./scripts/e2e-clean-home.sh
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
