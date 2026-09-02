@@ -11,16 +11,10 @@
 //   - The recognized text is the worker's responsibility to feed
 //     through the cascade twice (P3.6) before it crosses the IPC seam.
 //
-// ┌──────────────────────────────────────────────────────────────────┐
-// │ THIS FILE IS A SCAFFOLD (P3.5).                                  │
-// │                                                                  │
-// │ It is reachable by the production helper binary ONLY through     │
-// │ `VisionOCRWorker`, and `VisionOCRWorker` is NOT YET WIRED INTO   │
-// │ `SCStreamCaptureSession.swift`. That wiring lands at P3.6 along  │
-// │ with the wire bump `0x03 → 0x04` + cascade-twice plumbing. CSO   │
-// │ veto-gate on the P3.6 PR. This PR exists in isolation so the     │
-// │ §4 invariants are vacuously held (worker not invoked).           │
-// └──────────────────────────────────────────────────────────────────┘
+// `VisionOCRWorker` is the only production caller. The runner puts the
+// synchronous, cancellation-insensitive Vision request on one serial lane;
+// a timeout publishes independently and quarantines that lane until the
+// underlying request really returns.
 //
 // Cites ADR-0016 §1.1 (Apple Vision + dirty-rect ROI scoping).
 
@@ -52,8 +46,30 @@ public struct VisionOCRRunner: OCREngine {
     /// concern, not Phase 3.
     public let recognitionLanguages: [String]
 
+    private let executionLane: VisionOCRExecutionLane
+
+    private static let sharedExecutionLane = VisionOCRExecutionLane(
+        label: "com.hippocampus.capture.vision-ocr"
+    ) { input, languages in
+        Self.runVisionPerform(input: input, languages: languages)
+    }
+
     public init(recognitionLanguages: [String] = ["en-US"]) {
         self.recognitionLanguages = recognitionLanguages
+        self.executionLane = Self.sharedExecutionLane
+    }
+
+    /// Package-only seam for the runnable cancellation fixture. The
+    /// production initializer always uses Apple Vision on the shared lane.
+    package init(
+        recognitionLanguages: [String] = ["en-US"],
+        synchronousPerform: @escaping @Sendable (OCREngineInput, [String]) -> OCRResult
+    ) {
+        self.recognitionLanguages = recognitionLanguages
+        self.executionLane = VisionOCRExecutionLane(
+            label: "com.hippocampus.capture.vision-ocr.fixture",
+            synchronousPerform: synchronousPerform
+        )
     }
 
     public func recognize(
@@ -61,64 +77,15 @@ public struct VisionOCRRunner: OCREngine {
         timeoutMs: Int
     ) async -> OCRResult {
         // UNVERIFIED — needs live macOS; do not claim working.
-        let started = DispatchTime.now()
-        let timeoutNanos = UInt64(max(1, timeoutMs)) * 1_000_000
-
-        // Race the OCR perform against a wall-clock timeout. We do
-        // NOT cancel the underlying VNRequest — Apple Vision does not
-        // expose a stable cancellation primitive in current SDKs; the
-        // observation result is simply discarded if it arrives after
-        // the deadline. The bounded MPSC channel in `VisionOCRWorker`
-        // caps the absolute number of in-flight Vision calls so a
-        // timed-out call cannot pile up indefinitely.
-        //
-        // `OCREngineInput` is `@unchecked Sendable` (see the type doc):
-        // CVPixelBuffer reference is single-owner here for the
-        // duration of the call, then released.
-        let languages = recognitionLanguages
-        let capturedInput = input
-
-        let resultFromVision: OCRResult? = await withTaskGroup(
-            of: OCRResult?.self,
-            returning: OCRResult?.self
-        ) { group in
-            group.addTask {
-                await Self.runVisionPerform(
-                    input: capturedInput,
-                    languages: languages
-                )
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: timeoutNanos)
-                return nil  // sentinel: timed out
-            }
-            // The first completed task wins; cancel the loser.
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
-
-        let elapsedNanos = DispatchTime.now().uptimeNanoseconds &- started.uptimeNanoseconds
-        let durationMs = UInt64(elapsedNanos / 1_000_000)
-
-        if let r = resultFromVision {
-            return OCRResult(
-                recognizedLines: r.recognizedLines,
-                durationMs: durationMs,
-                timedOut: false
-            )
-        } else {
-            return OCRResult(
-                recognizedLines: [],
-                durationMs: durationMs,
-                timedOut: true
-            )
-        }
+        return await executionLane.recognize(
+            input: input,
+            languages: recognitionLanguages,
+            timeoutMs: timeoutMs
+        )
     }
 
-    /// One synchronous Vision call wrapped in an async shell so the
-    /// task group can race it against the timeout. Returns `nil` on
-    /// any underlying error (mapped to the "engine error" arm of the
+    /// One synchronous Vision call executed by the serial lane. Any
+    /// underlying error is mapped to the "engine error" arm of the
     /// `OCREngine` contract: `recognizedLines == []`, `timedOut ==
     /// false`).
     ///
@@ -126,7 +93,7 @@ public struct VisionOCRRunner: OCREngine {
     private static func runVisionPerform(
         input: OCREngineInput,
         languages: [String]
-    ) async -> OCRResult? {
+    ) -> OCRResult {
         // UNVERIFIED — needs live macOS; do not claim working.
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
@@ -168,5 +135,133 @@ public struct VisionOCRRunner: OCREngine {
             durationMs: 0,  // overridden by caller using the outer wall-clock
             timedOut: false
         )
+    }
+}
+
+/// A single-operation boundary around cancellation-insensitive Vision work.
+///
+/// A timed-out operation remains the lane's sole occupant until it really
+/// returns. Later calls fail fast instead of enqueueing another pixel buffer
+/// or consuming another thread. The late result is discarded by
+/// `VisionOCRAttempt`, which resumes its continuation exactly once.
+private final class VisionOCRExecutionLane: @unchecked Sendable {
+    typealias SynchronousPerform = @Sendable (OCREngineInput, [String]) -> OCRResult
+
+    private let queue: DispatchQueue
+    private let deadlineQueue: DispatchQueue
+    private let stateLock = NSLock()
+    private let synchronousPerform: SynchronousPerform
+    private var occupied = false
+
+    init(label: String, synchronousPerform: @escaping SynchronousPerform) {
+        self.queue = DispatchQueue(label: label, qos: .utility)
+        self.deadlineQueue = DispatchQueue(label: "\(label).deadline", qos: .userInitiated)
+        self.synchronousPerform = synchronousPerform
+    }
+
+    func recognize(
+        input: OCREngineInput,
+        languages: [String],
+        timeoutMs: Int
+    ) async -> OCRResult {
+        let started = DispatchTime.now()
+        guard claim() else {
+            return Self.timeoutResult(started: started)
+        }
+
+        let boundedTimeoutMs = max(1, timeoutMs)
+        return await withCheckedContinuation { continuation in
+            let attempt = VisionOCRAttempt(continuation: continuation)
+
+            queue.async { [self, attempt, input, languages] in
+                guard attempt.beginSynchronousWork() else {
+                    releaseClaim()
+                    return
+                }
+
+                let rawResult = synchronousPerform(input, languages)
+                let result = Self.result(rawResult, started: started)
+                attempt.resolve(with: result)
+                releaseClaim()
+            }
+
+            deadlineQueue.asyncAfter(
+                deadline: .now() + .milliseconds(boundedTimeoutMs)
+            ) {
+                attempt.resolve(with: Self.timeoutResult(started: started))
+            }
+        }
+    }
+
+    private func claim() -> Bool {
+        stateLock.withLock {
+            guard !occupied else { return false }
+            occupied = true
+            return true
+        }
+    }
+
+    private func releaseClaim() {
+        stateLock.withLock {
+            precondition(occupied, "Vision OCR lane released without an active operation")
+            occupied = false
+        }
+    }
+
+    private static func result(_ rawResult: OCRResult, started: DispatchTime) -> OCRResult {
+        OCRResult(
+            recognizedLines: rawResult.recognizedLines,
+            durationMs: elapsedMilliseconds(since: started),
+            timedOut: rawResult.timedOut
+        )
+    }
+
+    private static func timeoutResult(started: DispatchTime) -> OCRResult {
+        OCRResult(
+            recognizedLines: [],
+            durationMs: elapsedMilliseconds(since: started),
+            timedOut: true
+        )
+    }
+
+    private static func elapsedMilliseconds(since started: DispatchTime) -> UInt64 {
+        let now = DispatchTime.now().uptimeNanoseconds
+        return (now &- started.uptimeNanoseconds) / 1_000_000
+    }
+}
+
+/// Races one serial operation against its deadline without structured
+/// concurrency waiting for the cancellation-insensitive loser.
+private final class VisionOCRAttempt: @unchecked Sendable {
+    private enum State {
+        case waiting
+        case running
+        case resolved
+    }
+
+    private let lock = NSLock()
+    private var state: State = .waiting
+    private var continuation: CheckedContinuation<OCRResult, Never>?
+
+    init(continuation: CheckedContinuation<OCRResult, Never>) {
+        self.continuation = continuation
+    }
+
+    func beginSynchronousWork() -> Bool {
+        lock.withLock {
+            guard state == .waiting else { return false }
+            state = .running
+            return true
+        }
+    }
+
+    func resolve(with result: OCRResult) {
+        let continuationToResume: CheckedContinuation<OCRResult, Never>? = lock.withLock {
+            guard state != .resolved else { return nil }
+            state = .resolved
+            defer { continuation = nil }
+            return continuation
+        }
+        continuationToResume?.resume(returning: result)
     }
 }

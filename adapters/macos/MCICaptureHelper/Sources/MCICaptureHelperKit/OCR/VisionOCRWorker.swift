@@ -9,20 +9,10 @@
 //
 // PROTECTED-SET per AGENT_PROTOCOL §5.
 //
-// ┌──────────────────────────────────────────────────────────────────┐
-// │ SCOPE OF P3.5 — NO CASCADE WIRING.                                │
-// │                                                                  │
-// │ This worker EXISTS but nothing in production invokes it yet.     │
-// │ `SCStreamCaptureSession.swift` is NOT modified by this PR; the   │
-// │ wire schema is NOT bumped; the IPC seam carries no OCR payload.  │
-// │ All of that lands in the CSO-gated P3.6 PR alongside the         │
-// │ cascade-twice plumbing (cascade §6 OCR-time secret/PII regex     │
-// │ re-runs over the OCR'd text before any IPC emission).            │
-// │                                                                  │
-// │ The §4 invariants in ADR-0016 are therefore VACUOUSLY HELD this  │
-// │ PR — the worker has no production caller, so it cannot leak.     │
-// │ The CSO sign-off block on the PR body asserts this explicitly.   │
-// └──────────────────────────────────────────────────────────────────┘
+// Production submits only pixel-time-cleared frames, then routes text
+// through `CascadeTwiceOCREmitter` before IPC publication. The runner's
+// serial execution lane ensures a timed-out Vision call cannot create an
+// unbounded set of blocked operations or retained pixel buffers.
 //
 // Cites ADR-0016 §1.1 (single worker actor, bounded MPSC channel,
 // dirty-rect ROI scoping, per-job wall-clock timeout, drop-oldest
@@ -109,8 +99,8 @@ public actor VisionOCRWorker {
     }
 
     /// Stop accepting OCR jobs and wait for the owned consumer to exit.
-    /// Cancellation-resistant engines are still drained before this returns,
-    /// so their completion cannot outlive the owning capture session.
+    /// A timed-out Vision call may still occupy the runner's quarantined serial
+    /// lane, but its late result cannot invoke this worker's completion again.
     public func stopAndDrain() async {
         stop()
         let task = consumer
