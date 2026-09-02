@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>IOConsoleLocked</key>
+    <false/>
+    <key>IOConsoleUsers</key>
+    <array>
+        <dict>
+            <key>CGSSessionScreenIsLocked</key>
+            <false/>
+            <key>kCGSessionLoginDoneKey</key>
+            <true/>
+            <key>kCGSSessionOnConsoleKey</key>
+            <true/>
+            <key>kCGSSessionUserIDKey</key>
+            <integer>501</integer>
+            <key>kCGSSessionUserNameKey</key>
+            <string>amy</string>
+        </dict>
+    </array>
+</dict>
+</plist>

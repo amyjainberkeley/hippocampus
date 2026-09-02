@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}
+{"jsonrpc":"2.0","id":2,"result":{"outcome":"degraded","degradation":"embeddings_unavailable","hits":[],"related_context":[{"app_bundle_id":"ai.hippocampus.CaptureOverlapCorpus","text_snippet":"FOCUSED_EVIDENCE_ZEPHYR_9241"}],"isError":false}}
+{"jsonrpc":"2.0","id":3,"result":{"outcome":"nothing_matched","reason":"no_candidates","hits":[],"related_context":[],"isError":false}}
+{"jsonrpc":"2.0","id":4,"result":{"events":[{"event_id":1,"ts_us":1000,"app_bundle_id":"ai.hippocampus.CaptureOverlapCorpus","window_title":"Focused Evidence","url":null,"text_snippet":"FOCUSED_EVIDENCE_ZEPHYR_9241"}],"isError":false}}
+{"jsonrpc":"2.0","id":5,"result":{"events":[{"event_id":1,"ts_us":1000,"app_bundle_id":"ai.hippocampus.CaptureOverlapCorpus","window_title":"Focused Evidence","url":null,"text_snippet":"FOCUSED_EVIDENCE_ZEPHYR_9241"}],"isError":false}}
