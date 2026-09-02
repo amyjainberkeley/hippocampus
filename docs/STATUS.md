@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `48f18fa`
+Audited code baseline: `0a8777f`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -105,12 +105,22 @@ more than this page.
   by production construction.
 - The claim-verifier boundary now has a host-owned v3 evidence contract. A
   proposed claim is a normalized subject/predicate/object tuple; at most eight
-  evidence spans are cut from canonical events with UTF-8-safe byte ranges,
-  exact text, and a SHA-256 digest of the complete event. The future model can
-  select only host-assigned slot indices. The host rejects non-finite
-  confidence, duplicate or unknown slots, and stale or modified citations, so
-  model output cannot invent provenance. This contract is implemented and
-  tested; the task-trained model and production Core ML adapter are not.
+  bounded evidence spans are cut from canonical events with UTF-8-safe byte
+  ranges, exact text, and digests binding event bytes to brain, scope, and
+  source identity. One call cannot mix brains or cross the claim's exact scope.
+  The model can select only host-assigned slot indices. The host rejects
+  non-finite confidence, duplicate or unknown slots, stale or modified
+  citations, and policy-threshold uncertainty, so model output cannot invent
+  provenance or disguise abstention as model-predicted insufficiency.
+- The selected task-trained MobileBERT claim-set architecture now has a native
+  Core ML runtime boundary. It requires exact Int32 `[1, 384]` inputs, fixed
+  floating `[1, 3]` judgment and `[1, 8]` citation outputs, paired one-token
+  evidence markers, and fully retained evidence slots. Startup requires a
+  bundle-sealed manifest binding model and tokenizer hashes, class order,
+  tensor schema, thresholds, blind-dataset identity, and Core ML parity. The
+  boundary fails closed on truncation, split markers, artifact drift, schema
+  drift, or an unqualified manifest. No task-trained artifact or qualified
+  manifest exists yet, and this verifier is not installed in production.
 - The first compact native verifier candidate has a reproducible Core ML
   conversion and a memory-safe Rust inference adapter. MobileBERT SQuAD2 FP32
   matches its PyTorch logits within `0.00014687` and runs in 23.49 ms median,
@@ -171,13 +181,13 @@ more than this page.
   requires Screen Recording and Accessibility for that helper, foregrounds a
   synthetic overlapping-window corpus, captures through the bundled helper and
   agent, and proves focused-window recall plus background-window abstention.
-  Its contract is tested and the unlocked-session preflight passes. Earlier
-  attempts reached the ScreenCaptureKit first-sample callback, focused-window
-  filter installation, encrypted brain open, and Arctic model load, and proved
-  fail-closed Accessibility revocation plus a healthy short page-content socket.
-  The latest attempt against the current app reached live frames and encrypted
-  ingestion, then aborted during capture when Chrome reclaimed focus from the
-  synthetic corpus while Accessibility was denied. No OCR was retained. The
+  Its contract is tested and the unlocked-session preflight passes. The latest
+  attempt reached a real ScreenCaptureKit sample, installed the focused-window
+  include set, opened the isolated encrypted brain, and loaded Arctic Embed S.
+  Accessibility was denied for the bundled helper, so the agent drained 11
+  frames but committed zero content events; no OCR was retained. The harness
+  now closes its FIFO guard descriptor in both child processes, so EOF reliably
+  stops the ingest agent, and its result check uses valid ripgrep flags. The
   harness uses a short `/tmp` root so its isolated Unix socket remains below
   Darwin's 104-byte path limit. A fresh run with Accessibility granted, an
   uninterrupted foreground corpus, and the required 30-minute soak remain open.

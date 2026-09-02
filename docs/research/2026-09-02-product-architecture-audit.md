@@ -340,10 +340,10 @@ The order is based on dependency and falsifiability, not calendar estimates.
 |---:|---|---|---|
 | 1 | Canonical repository and release truth | No benchmark or release matters if it targets the wrong product | Established |
 | 2 | Reliable supervised runtime and key custody | Capture, deletion, and agent handoff require one healthy local authority | Development path and owner-death shutdown verified; public signing remains external |
-| 3 | Capture privacy and terminal failure | Bad input poisons every later memory layer | Browser authorization, private-context exclusion, pause, lock, and TCC behavior are executable; live frames reached the helper, but exact overlap proof remains blocked by Accessibility and focus stability |
+| 3 | Capture privacy and terminal failure | Bad input poisons every later memory layer | Browser authorization, private-context exclusion, pause, lock, and TCC behavior are executable; a real ScreenCaptureKit sample reached the helper, but denied Accessibility kept OCR out of the brain and exact overlap proof remains open |
 | 4 | Retention, deletion, and writer quiescence | A user must be able to withdraw evidence safely | Complete, including process-held writer lease and orphan reconciliation |
-| 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | Deterministic overlap app built; current app reaches ScreenCaptureKit frames and encrypted ingestion, but focused-token/background-token proof and soak remain pending |
-| 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | Retrieval ranking and explicit relation veto pass; verifier input is now independently bounded before display truncation, but the general semantic verifier remains unqualified |
+| 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | Deterministic overlap app built; the helper receives live frames and the isolated encrypted brain opens, but denied Accessibility produced zero OCR events, so focused-token/background-token proof and soak remain pending |
+| 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | Retrieval ranking and explicit relation veto pass; the host provenance contract and fail-closed Core ML adapter exist, but no task-trained artifact or manifest has passed blind qualification |
 | 7 | Native product experience | A correct engine users cannot understand will not be trusted | Light native UI and release assets implemented; the disposable product capture visibly proves three authenticated keyframes, 20 events, and one brief |
 | 8 | Signed distribution and update proof | Public use requires identity, notarization, models, and continuity | Ad-hoc bundle passes launch/owner-death checks; Developer ID and notarization remain external |
 
@@ -528,17 +528,18 @@ rate, confidently extracting concrete-sounding placeholders from insufficient
 evidence. A DeBERTa-v3-xsmall NLI spike was semantically promising on a few
 hand-authored cases but its relative-position attention graph failed conversion
 through the pinned Core ML toolchain, so it was rejected as the immediate Mac
-path. ADR-0038 now fixes the architecture: a verifier sees atomic claims,
-canonical event slots, and host-bound event identities but no retrieval scores;
-trusted support must select slots from that set; malformed output and runtime
-failure degrade instead of becoming hits. The model-independent host contract
-is implemented: evidence slots carry exact canonical spans, full-event hashes,
-and host-assigned indices that are validated and can be revalidated before a
-verdict becomes trusted. The next candidate is a task-trained
-three-way classifier and citation-slot head on the already convertible
-fixed-shape MobileBERT encoder. It still needs a blind claim-level corpus, Core
-ML parity, redistribution clearance, signed-runtime execution, and minimum-Mac
-latency proof before it enters the release manifest.
+path. ADR-0038 fixes the architecture: a verifier sees atomic claims, canonical
+event slots, and host-bound provenance but no retrieval scores; trusted support
+must select slots from that set; malformed output and runtime failure degrade
+instead of becoming hits. The host contract now enforces bounded canonical
+spans, exact scope, one brain, and revalidatable provenance. A native adapter
+for the selected task-trained MobileBERT three-way classifier and citation-slot
+head also exists. It requires a hash-bound qualification manifest, exact tensor
+schema, unique paired evidence markers, complete-slot retention after
+truncation, and explicit policy abstention. It still needs a trained
+redistributable artifact, a blind claim-level corpus, real Core ML parity
+results, signed-runtime execution, and minimum-Mac latency proof before it
+enters the release manifest or production.
 
 ## Immediate Definition Of Done
 
