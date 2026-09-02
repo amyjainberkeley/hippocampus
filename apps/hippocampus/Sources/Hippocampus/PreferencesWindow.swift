@@ -109,6 +109,8 @@ struct PreferencesRootView: View {
             }
         }
         .frame(width: PreferencesStyle.panelWidth, height: PreferencesStyle.panelHeight)
+        .preferredColorScheme(.light)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder
@@ -434,6 +436,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
+        panel.appearance = NSAppearance(named: .aqua)
         panel.center()
 
         let toolbar = NSToolbar(identifier: "ai.hippocampus.preferences.toolbar")

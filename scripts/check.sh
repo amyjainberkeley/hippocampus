@@ -63,6 +63,7 @@ LANES=(
     "demo-contract|bash|lint|scripts/test-demo-contract.sh"
     "keyframe-demo-fixture|bash|test|scripts/test-keyframe-demo-fixture.sh"
     "onboarding-product-truth|bash|lint|scripts/test-onboarding-product-truth.sh"
+    "product-visual-assets|bash|test|scripts/test-product-visual-assets.sh"
     "screenshot-assets|bash|lint|scripts/test-screenshot-assets.sh"
     "changelog-sanity|bash|lint|__changelog_sanity_lane"
 )
@@ -125,6 +126,7 @@ LANES
     demo-contract           demo uses disposable state and bundled UI artifacts
     keyframe-demo-fixture   encrypted visual fixture uses the production codec
     onboarding-product-truth onboarding copy preserves local/provider boundaries
+    product-visual-assets   app, installer, browser, and screenshot assets share the light identity
     screenshot-assets       screenshots stay light, non-placeholder, and 1280x800
     changelog-sanity      gen-changelog.sh --dry-run smoke
 
