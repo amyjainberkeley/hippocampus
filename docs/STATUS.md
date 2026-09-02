@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `aca26e0`
+Audited code baseline: `53538df`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -19,6 +19,11 @@ more than this page.
   source priority, and canonical event citations. Claude Code and Codex
   registration is structural, idempotent, ownership-safe, and records only a
   database path plus Keychain service/account references.
+- Focused `mci_context` handoffs preserve the retrieval truth state all the
+  way to Claude and Codex. Packets now say whether focus retrieval matched,
+  contradicted, abstained, or returned degraded related context, including the
+  stable degradation reason; unqualified ranking is no longer silently
+  flattened into an ordinary observation-only packet.
 - The supervisor preserves one database-key authority across capture, Recall,
   onboarding, and AI-tool connection children. The packaged demo gives
   Foundation an isolated `HOME` and `CFFIXED_USER_HOME`, and its seeder and
@@ -206,6 +211,19 @@ Its committed evaluator exits nonzero and its artifact remains unbundled. The
 fixture has only six validation scenarios and lacks contradiction, temporal,
 synthesis, provenance, and order-metamorphic coverage. Evidence calibration is
 a product gate, not benchmark fine print.
+
+The locked v2 semantic-verifier corpus is
+`eval/evidence-verifier/v2-corpus.json` with SHA-256
+`d612bf537fbaa8453cd0a83075722f4e7fe8ff30afab86c5a2c33e4ea42041e4`.
+It has 48 cases across 24 split-exclusive scenarios, with 16 cases and
+eight scenarios in each of fit, calibration, and validation. Every split
+covers direct answers, paraphrase/coreference, temporal change,
+contradiction, cross-document synthesis, provenance enforcement, absent
+answers, concrete distractors, and both supporting and insufficient
+candidate-order metamorphics. The standard-library qualifier fails closed on
+malformed or invented provenance and passes its oracle/adversarial self-test.
+This qualifies the corpus harness, not a model; no production verifier has
+passed it yet.
 
 ## Release Gates
 
