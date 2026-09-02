@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `83d5b0f`
+Audited code baseline: `130e5f1`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -39,6 +39,10 @@ more than this page.
   requires an enabled App Group authority owned by the live container process,
   stamps each payload with the committed supervisor generation, and rejects
   stale or missing generations before socket delivery.
+- The production capture session now owns a live TCC monitor. A permission
+  denied before helper startup is applied as an immediate fail-closed pause and
+  emits the same content-free, actionable app status as a mid-run revoke;
+  restoration remains direction-asymmetric and requires two granted samples.
 - Semantic recall works when the Arctic Embed S Core ML artifact is present
   and backfill has run. The macOS runtime uses CPU Core ML for inference and a
   Rust cosine scan over vectors stored inside SQLCipher; there is no separate
@@ -65,11 +69,12 @@ more than this page.
 - The app, capture helper, Recall, and onboarding Swift packages compile on
   this host through the constrained SwiftPM wrapper. The complete Rust gate
   passes formatting, all-target workspace Clippy, every workspace test, and
-  dependency audit. All 24 shell and executable behavior lanes pass, including
+  dependency audit. The shell and executable behavior lanes pass, including
   capture/privacy, release identity, model integrity, product truth, clean-home,
-  app launch, and visual contracts. Full Hippocampus XCTest execution still
-  requires Xcode on this host; CI owns an explicit app-test job instead of only
-  compiling it.
+  app launch, and visual contracts. This host's current Command Line Tools
+  installation does not include XCTest, so full Swift package test execution
+  requires full Xcode or CI; production package builds and executable fixtures
+  remain locally runnable.
 - A throwaway-home E2E installs the engine, starts with capture disabled,
   imports 20 synthetic events, injects one shared-encoder `OCREvent` through
   production `--drain-stdin --strict`, derives episodes, persists and reads
@@ -84,18 +89,28 @@ more than this page.
   requires Screen Recording and Accessibility for that helper, foregrounds a
   synthetic overlapping-window corpus, captures through the bundled helper and
   agent, and proves focused-window recall plus background-window abstention.
-  Its contract is tested, but the live run is pending because this Mac session
-  is locked. The required 30-minute soak and release-machine permission
-  walkthrough also remain open.
+  Its contract is tested and the unlocked-session preflight passes. The first
+  two of three live attempts reached the ScreenCaptureKit first-sample callback,
+  focused-window filter installation, encrypted brain open, and Arctic model
+  load. The third, against `130e5f1`, proved the new startup
+  `tcc_revoked=accessibility` signal and a healthy short page-content socket.
+  All correctly retained no OCR because Accessibility was denied to the exact
+  ad-hoc helper; the privacy cascade paused or suppressed instead of guessing.
+  User Notification Center, WhatsApp, and Codex separately stole focus, so
+  focused-token recall and background-token absence are not yet proven. The
+  harness now uses a short `/tmp` root so its isolated Unix socket remains below
+  Darwin's 104-byte path limit. A fresh run with Accessibility granted, an
+  uninterrupted foreground corpus, and the required 30-minute soak remain open.
 - OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
   ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
   use separate structured capture paths that reject private contexts before
   reading page content, with executable release tests. Automatic OCR enablement
   remains blocked until the overlapping-window corpus and live soak pass.
-- The TCC and screen-sharing revocation monitors exist but are not yet proven
-  by a live permission-revocation run. Delete and wipe operations separate
-  committed SQL deletion from post-commit storage-cleanup warnings and now
-  quiesce against every other writer through the shared operating-system lease.
+- The now-production-wired TCC and screen-sharing revocation monitors are not
+  yet proven by a live grant/revoke/restore run. Delete and wipe operations
+  separate committed SQL deletion from post-commit storage-cleanup warnings and
+  now quiesce against every other writer through the shared operating-system
+  lease.
 - Production key custody targets the non-synchronizable macOS file-Keychain
   item `ai.hippocampus.brain` / `database-key-v1`. Migration is fail-closed and
   removes a legacy plaintext key only after Keychain reread plus read-only
@@ -108,12 +123,12 @@ more than this page.
 - This machine has Command Line Tools rather than full Xcode, zero valid code
   signing identities, and no `notarytool-profile`. It cannot produce or claim a
   Developer ID-signed, notarized public release.
-- The three release Core ML bundles are absent from this worktree. Release
-  assembly and strict model verification fail without the complete Arctic
-  Embed S, BERT NER, and Qwen3 plus tokenizer artifacts. Only a debug ad-hoc
-  lite bundle can explicitly authorize those omissions for local UI
-  verification; it is not distributable, semantic recall remains lexical-only,
-  and generated briefs remain unavailable in that artifact.
+- A verified local Arctic Embed S Core ML bundle is present in the gitignored
+  development model directory and is included by debug ad-hoc assembly, so that
+  artifact supports semantic recall. BERT NER and the release Qwen3 bundle plus
+  tokenizer remain absent from this worktree; generated briefs stay unavailable
+  in the assembled development app. The immutable release archive is still
+  incomplete, and the debug app is not distributable.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status
