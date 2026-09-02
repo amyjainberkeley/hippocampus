@@ -25,6 +25,8 @@ with open(BASELINE, encoding="utf-8") as baseline_file:
 
 hybrid = next(row for row in scorecard["overall"] if row["arm"] == "hybrid")
 outcomes = hybrid["outcomes"]
+quality_failures = scorecard["quality_gate"]["failures"]
+quality_reason = quality_failures[0] if quality_failures else "quality gate did not pass"
 
 WIDTH, HEIGHT = 1280, 800
 BG = (247, 248, 250)
@@ -132,7 +134,7 @@ text(
     SUCCESS if scorecard["quality_gate"]["passed"] else FAILURE,
 )
 text(f"Launch qualified: {str(scorecard['launch_qualified']).lower()}", FAILURE)
-wrapped("Reason: general evidence critic is not validation-qualified.")
+wrapped(f"Reason: {quality_reason.rstrip('.')}.")
 blank()
 
 prompt("jq '.quality_gate, .launch_qualified' docs/eval/work-memory-baseline.json")
