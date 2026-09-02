@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `0c8e157`
+Audited code baseline: `740c7e3`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -71,8 +71,12 @@ more than this page.
   binds that authority to the container's exact process-start identity, stamps
   each payload with the committed supervisor generation, and rejects stale or
   missing generations before socket delivery. Chromium performs a content-free
-  native authorization handshake before reading the page DOM. User pause stops
-  the helper and agent process tree; resume starts a fresh supervised generation.
+  native authorization handshake before reading the page DOM. A dead agent
+  socket terminates the native host so the browser cannot retain a stale port
+  across pause or restart. User pause stops the helper and agent process tree;
+  resume starts a fresh supervised generation. Consent revocation and topology
+  shutdown are independent attempts, so a failed authority-file removal cannot
+  skip helper and agent termination during quit, pause, or reconfiguration.
 - The production capture session now owns a live TCC monitor. A permission
   denied before helper startup is applied as an immediate fail-closed pause and
   emits the same content-free, actionable app status as a mid-run revoke;
@@ -119,11 +123,12 @@ more than this page.
   passes formatting, all-target workspace Clippy, every workspace test, and
   dependency audit. The shell and executable behavior lanes pass, including
   capture/privacy, release identity, model integrity, product truth, clean-home,
-  app launch, and visual contracts. This host's current Command Line Tools
-  installation does not include XCTest, so full Swift package test execution
-  requires full Xcode or CI; production package builds and executable fixtures
-  remain locally runnable.
-- The current `177 MB` debug ad-hoc app at
+  app launch, and visual contracts. The current full run reports 36 passing
+  lanes, four XCTest-only failures, and one unavailable SwiftFormat skip. This
+  host's current Command Line Tools installation does not include XCTest, so
+  full Swift package test execution requires full Xcode or CI; production
+  package builds and executable fixtures remain locally runnable.
+- The current `178 MB` debug ad-hoc app at
   `apps/hippocampus/dist/development-20260902-v3/Hippocampus.app` includes Arctic
   Embed S as its only bundled model, passes signed App Group and model
   validation, and survives the disposable-home first-launch and owner-death
@@ -163,8 +168,10 @@ more than this page.
 - OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
   ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
   use separate structured capture paths that reject private contexts before
-  reading page content, with executable release tests. Automatic OCR enablement
-  remains blocked until the overlapping-window corpus and live soak pass.
+  reading page content, with executable release tests. The narrow live OCR
+  qualification capability exists only in debug builds and is proven absent
+  from the release helper binary. Automatic OCR enablement remains blocked until
+  the overlapping-window corpus and live soak pass.
 - The production-wired TCC revocation monitor is not yet proven by a live
   grant/revoke/restore run. macOS exposes no qualified public signal that a
   different app has started sharing or recording the screen, so Hippocampus
