@@ -298,15 +298,7 @@ struct RootView: View {
         MemoryWorkspaceView(
             reader: reader,
             selection: $selection,
-            searchFocusTrigger: searchFocusTrigger,
-            onRequestModelDownload: {
-                // The recall-ui doesn't own the download UI (PR #134
-                // lives in Hippocampus.app). Surface a hippocampus://
-                // deep-link so the menu-bar app handles it.
-                if let url = URL(string: "hippocampus://recall?tab=brief&download=1") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
+            searchFocusTrigger: searchFocusTrigger
         )
         .background(Color.brandBgPrimary)
         .focusable(true, interactions: .automatic)
@@ -369,34 +361,5 @@ struct RootView: View {
             // version, so this is safe to call on every boot.
             whatsNewCoord.maybeShowOnBoot()
         }
-    }
-}
-
-/// Best-effort probe for whether the daily-brief author model has been
-/// downloaded. The recall-ui does NOT own model lifecycle (PR #134's
-/// ModelDownloadView in Hippocampus.app does); we just want to know
-/// whether the file exists on disk so the Brief tab can render the
-/// right empty state.
-///
-/// Mirrors `ModelDownloadManager.isModelAvailable(modelID:)` —
-/// checks `~/Library/Application Support/MCI/Models/<modelID>/` exists.
-/// Kept inside the recall-ui rather than via FFI/IPC because (a) it's
-/// a plain filesystem read, (b) the recall-ui already runs under the
-/// user's HOME, and (c) a missing-file false-negative just renders
-/// the "Enable on-device brief model" CTA which is benign.
-enum ModelPresenceProbe {
-    static let qwen3ModelID = "qwen3-1.7b-fp16"
-
-    static func isBriefModelInstalled(modelID: String = qwen3ModelID) -> Bool {
-        // Per `docs/decisions/0028-brief-author-model-qwen3-1.7b-coreml.md` §4,
-        // models live in ~/Library/Application Support/MCI/Models/<id>/.
-        let supportDir = NSSearchPathForDirectoriesInDomains(
-            .applicationSupportDirectory,
-            .userDomainMask,
-            true
-        ).first ?? NSTemporaryDirectory()
-        let path = (supportDir as NSString)
-            .appendingPathComponent("MCI/Models/\(modelID)")
-        return FileManager.default.fileExists(atPath: path)
     }
 }

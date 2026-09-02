@@ -76,18 +76,20 @@ final class BriefViewModelTests: XCTestCase {
     // 5-state machine — each spec state has a test pinning the transition.
     // -------------------------------------------------------------------
 
-    func testReloadWhenModelMissingShortCircuitsToModelMissingScene() async {
+    func testReloadRendersStoredBriefWithoutOptionalModel() async {
         let reader = InMemoryBriefReader(briefs: [sampleBrief(date: "2026-05-22")])
-        let vm = BriefViewModel(reader: reader, isModelPresent: false)
+        let vm = BriefViewModel(reader: reader)
         await vm.reload()
-        XCTAssertEqual(vm.scene, .modelMissing)
+        guard case .brief(let brief) = vm.scene else {
+            return XCTFail("expected stored brief, got \(vm.scene)")
+        }
+        XCTAssertEqual(brief.dateLocal, "2026-05-22")
     }
 
     func testReloadWhenBriefsEmptyAndNoFullDayLandsOnAwaitingFirstFullDay() async {
         let reader = InMemoryBriefReader(briefs: [])
         let vm = BriefViewModel(
             reader: reader,
-            isModelPresent: true,
             hasFullDayCapture: false,
             captureHoursSoFar: 4.5
         )
@@ -99,7 +101,6 @@ final class BriefViewModelTests: XCTestCase {
         let reader = InMemoryBriefReader(briefs: [])
         let vm = BriefViewModel(
             reader: reader,
-            isModelPresent: true,
             captureCoverage: .unknown
         )
 
@@ -126,7 +127,6 @@ final class BriefViewModelTests: XCTestCase {
         let reader = InMemoryBriefReader(briefs: [])
         let vm = BriefViewModel(
             reader: reader,
-            isModelPresent: true,
             hasFullDayCapture: true
         )
         await vm.reload()

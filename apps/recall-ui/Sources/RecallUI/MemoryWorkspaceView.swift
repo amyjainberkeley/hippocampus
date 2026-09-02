@@ -61,7 +61,6 @@ struct MemoryWorkspaceView: View {
     let reader: BrainReader
     @Binding var selection: MemoryWorkspaceSelection
     var searchFocusTrigger: Bool
-    var onRequestModelDownload: () -> Void
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
@@ -134,12 +133,8 @@ struct MemoryWorkspaceView: View {
                     BriefView(
                         viewModel: BriefViewModel(
                             reader: reader,
-                            isModelPresentProbe: {
-                                ModelPresenceProbe.isBriefModelInstalled()
-                            },
                             captureCoverage: .unknown
-                        ),
-                        onRequestModelDownload: onRequestModelDownload
+                        )
                     )
                 case .sources:
                     SourcesWorkspaceView(reader: reader)
