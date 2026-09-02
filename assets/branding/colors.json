@@ -1,73 +1,73 @@
 {
   "brand": {
     "approvedPalette": {
-      "snowCanvas": "#F6F8FB",
+      "snowCanvas": "#F7F8FA",
       "clearSurface": "#FFFFFF",
-      "ink": "#18212B",
-      "graphite": "#5F6975",
-      "cobaltAction": "#3568D4",
-      "coralChangeMarker": "#D96C5F"
+      "ink": "#1D1D1F",
+      "graphite": "#6E6E73",
+      "cobaltAction": "#0A66D8",
+      "coralChangeMarker": "#C7473A"
     },
     "semantic": {
       "accent": {
-        "light": "#3568D4",
-        "dark": "#8AADFF"
+        "light": "#0A66D8",
+        "dark": "#6EA8FF"
       },
       "accentSubtle": {
-        "light": "#EAF1FF",
-        "dark": "#182848"
+        "light": "#EAF2FC",
+        "dark": "#172A42"
       },
       "accentDim": {
-        "light": "#6F89C8",
-        "dark": "#AEC4FF"
+        "light": "#527EAE",
+        "dark": "#9DC2F5"
       },
       "background": {
-        "light": "#F6F8FB",
-        "dark": "#10151B"
+        "light": "#F7F8FA",
+        "dark": "#17191D"
       },
       "surface": {
         "light": "#FFFFFF",
-        "dark": "#171D24"
+        "dark": "#202226"
       },
       "surfaceElevated": {
         "light": "#FFFFFF",
-        "dark": "#202833"
+        "dark": "#292C31"
       },
       "foreground": {
-        "light": "#18212B",
-        "dark": "#F0F4F8"
+        "light": "#1D1D1F",
+        "dark": "#F5F5F7"
       },
       "foregroundSecondary": {
-        "light": "#5F6975",
-        "dark": "#ADB7C3"
+        "light": "#6E6E73",
+        "dark": "#B8B8BD"
       },
       "foregroundMuted": {
-        "light": "#8B96A3",
-        "dark": "#7B8794"
+        "light": "#8E8E93",
+        "dark": "#85858B"
       },
       "border": {
-        "light": "#DDE4EC",
-        "dark": "#323C48"
+        "light": "#E2E4E8",
+        "dark": "#383A3F"
       },
       "borderStrong": {
-        "light": "#C8D2DE",
-        "dark": "#465262"
+        "light": "#C9CCD2",
+        "dark": "#51545B"
       },
       "change": {
-        "light": "#D96C5F",
-        "dark": "#FF9A8F"
+        "light": "#C7473A",
+        "dark": "#FF8B7F"
       },
       "error": {
-        "light": "#D96C5F",
-        "dark": "#FF9A8F"
+        "light": "#C7473A",
+        "dark": "#FF8B7F"
       },
       "warning": {
-        "light": "#B9822E",
-        "dark": "#E7B767"
+        "light": "#9A6700",
+        "dark": "#E9B949"
       },
       "success": {
-        "light": "#3568D4",
-        "dark": "#AEC4FF"
+        "light": "#247A47",
+        "dark": "#67C58A"
       }
     }
   },

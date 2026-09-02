@@ -213,7 +213,7 @@ do_seed() {
             --package-path "$REPO_ROOT/adapters/macos/MCIKeyframeCodec" \
             KeyframeFixtureBuilder \
             --blob-root "$blob_dir" \
-            "$REPO_ROOT/assets/screenshots/hero-hippocampus-menu.png" \
+            "$REPO_ROOT/assets/screenshots/hero-onboarding-welcome.png" \
             "$REPO_ROOT/assets/screenshots/hero-onboarding-trust-panel.png" \
             "$REPO_ROOT/assets/screenshots/hero-cli.png"
     )
@@ -381,12 +381,12 @@ do_screenshot() {
     echo "Click on each window when prompted by the crosshair cursor."
     echo ""
 
-    bold "Screenshot 1/4: Hippocampus menu-bar (click the menu-bar icon area)"
-    SHOT1="$SHOT_DIR/hippocampus-menu-$TIMESTAMP.png"
+    bold "Screenshot 1/4: Onboarding welcome (click the onboarding window)"
+    SHOT1="$SHOT_DIR/onboarding-welcome-$TIMESTAMP.png"
     screencapture -w "$SHOT1"
     if [[ -f "$SHOT1" ]]; then
-        normalize_screenshot "$SHOT1" "$REPO_ROOT/assets/screenshots/hero-hippocampus-menu.png"
-        green "  Saved: assets/screenshots/hero-hippocampus-menu.png"
+        normalize_screenshot "$SHOT1" "$REPO_ROOT/assets/screenshots/hero-onboarding-welcome.png"
+        green "  Saved: assets/screenshots/hero-onboarding-welcome.png"
     else
         dim "  (cancelled)"
     fi
@@ -490,10 +490,8 @@ do_screenshot_auto() {
         rm -f "$PID_DIR/recall.pid"
     fi
 
-    bold "--- 3/4: hero-hippocampus-menu.png (requires interactive) ---"
-    dim "  Menu-bar dropdowns require interactive click."
-    dim "  Use: screencapture -w assets/screenshots/hero-hippocampus-menu.png"
-    dim "  Or run: demo.sh screenshot (interactive mode)"
+    bold "--- 3/4: hero-onboarding-welcome.png ---"
+    dim "  Preserving the reviewed Welcome capture. Navigation is intentionally interactive."
 
     bold "--- 4/4: hero-onboarding-trust-panel.png ---"
     dim "  Preserving the reviewed Trust-panel capture. Navigation is intentionally interactive."

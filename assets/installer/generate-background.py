@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate the light Hippocampus DMG background (1280x800 Retina-ready).
 
-Brand colors from assets/branding/colors.json. Renders a quiet snow-to-white
-surface, the layered-memory watermark, and a cobalt drag arrow.
+Brand colors from assets/branding/colors.json. Renders a quiet system-like
+surface, the memory-aperture mark, and a cobalt drag arrow.
 Pure Python stdlib (struct + zlib). No Pillow.
 
 Regenerate:
@@ -18,12 +18,12 @@ import zlib
 W, H = 1280, 800
 
 # Brand palette (assets/branding/colors.json)
-BG = (0xF6, 0xF8, 0xFB)
-BG2 = (0xFF, 0xFF, 0xFF)
-ACCENT_DIM = (0x6F, 0x89, 0xC8)
-BORDER = (0xC8, 0xD2, 0xDE)
-INK = (0x18, 0x21, 0x2B)
-GRAPHITE = (0x5F, 0x69, 0x75)
+BG = (0xF7, 0xF8, 0xFA)
+ACCENT_DIM = (0x52, 0x7E, 0xAE)
+BORDER = (0xE2, 0xE4, 0xE8)
+INK = (0x1D, 0x1D, 0x1F)
+GRAPHITE = (0x6E, 0x6E, 0x73)
+WHITE = (0xFF, 0xFF, 0xFF)
 
 # Layout (2x image coords; AppleScript window is 640x400 at 1x)
 APP_POS = (340, 460)
@@ -40,13 +40,9 @@ def blend(x, y, color, alpha):
         buf[i + 2] = min(255, int(buf[i + 2] * inv + color[2] * alpha))
 
 
-def draw_gradient():
+def fill_background():
     for y in range(H):
-        t = y / H
-        r = int(BG[0] + (BG2[0] - BG[0]) * t)
-        g = int(BG[1] + (BG2[1] - BG[1]) * t)
-        b = int(BG[2] + (BG2[2] - BG[2]) * t)
-        row = bytes([r, g, b]) * W
+        row = bytes(BG) * W
         buf[y * W * 3:(y + 1) * W * 3] = row
 
 
@@ -60,13 +56,12 @@ def draw_rounded_rect(x, y, width, height, radius, color, alpha):
 
 
 def draw_watermark():
-    # Three quiet evidence sheets mirror the app icon without turning the
-    # installer into a billboard.
-    draw_rounded_rect(485, 82, 250, 300, 48, BORDER, 0.22)
-    draw_rounded_rect(515, 66, 250, 300, 48, GRAPHITE, 0.13)
-    draw_rounded_rect(545, 86, 250, 300, 48, INK, 0.10)
-    for y, width, opacity in [(160, 138, 0.16), (216, 122, 0.13), (272, 96, 0.10)]:
-        draw_rounded_rect(600, y, width, 14, 7, INK, opacity)
+    # A quiet version of the product's memory-aperture mark.
+    draw_rounded_rect(515, 74, 250, 264, 44, WHITE, 0.78)
+    draw_rounded_rect(515, 74, 250, 264, 44, BORDER, 0.22)
+    draw_rounded_rect(564, 120, 40, 172, 12, INK, 0.16)
+    draw_rounded_rect(676, 120, 40, 172, 12, INK, 0.16)
+    draw_rounded_rect(592, 189, 96, 34, 10, ACCENT_DIM, 0.24)
 
 
 def draw_ring(cx, cy, r, color, alpha=0.2, thickness=2):
@@ -119,7 +114,7 @@ def make_png():
 
 def main():
     print("Generating DMG background (1280x800 Retina)...")
-    draw_gradient()
+    fill_background()
     draw_watermark()
     draw_ring(APP_POS[0], APP_POS[1], 58, BORDER, 0.55, 2)
     draw_ring(APPS_POS[0], APPS_POS[1], 58, BORDER, 0.55, 2)

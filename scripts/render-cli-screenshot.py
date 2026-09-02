@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Render hero-cli.png from real mci-brain output against the seed brain.
+"""Render the illustrative CLI asset from the committed benchmark scorecard.
 
-Requires: Pillow (`pip3 install Pillow`), seed brain populated
-(`scripts/demo.sh seed`), and mci-brain built (`cargo build --release
---bin mci-brain`).
-
-Outputs: assets/screenshots/hero-cli.png (1280x800, ~70KB, no metadata).
+The image is deliberately not presented as a live terminal capture. Its
+metrics come from docs/eval/work-memory-baseline.json, making the launch truth
+deterministic and keeping personal/local brain contents out of the asset.
 """
 
+import json
 import os
-import subprocess
 import sys
 
 try:
@@ -19,59 +17,27 @@ except ImportError:
     sys.exit(1)
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BRAIN = os.environ.get(
-    "MCI_BRAIN_BIN",
-    os.path.join(REPO, "target", "release", "mci-brain"),
-)
+BASELINE = os.path.join(REPO, "docs", "eval", "work-memory-baseline.json")
 OUT = os.path.join(REPO, "assets", "screenshots", "hero-cli.png")
 
-KEY_FILE = os.environ.get("MCI_DB_KEY_FILE", "/tmp/mci-demo-key.hex")
-DB_PATH = os.environ.get(
-    "MCI_DB_PATH",
-    os.path.expanduser("~/Library/Application Support/MCI/mci.sqlite"),
-)
+with open(BASELINE, encoding="utf-8") as baseline_file:
+    scorecard = json.load(baseline_file)
 
-if not os.path.exists(BRAIN):
-    print(f"ERROR: {BRAIN} not found. Run: cargo build --release --bin mci-brain", file=sys.stderr)
-    sys.exit(1)
-
-if "MCI_DB_KEY_HEX" not in os.environ and not os.path.exists(KEY_FILE):
-    print(f"ERROR: {KEY_FILE} not found. Run: scripts/demo.sh seed", file=sys.stderr)
-    sys.exit(1)
-
-env = os.environ.copy()
-env["MCI_DEVELOPMENT_FILE_KEY"] = "1"
-if "MCI_DB_KEY_HEX" not in env:
-    with open(KEY_FILE, encoding="ascii") as key_file:
-        env["MCI_DB_KEY_HEX"] = key_file.read().strip()
-env["MCI_DB_PATH"] = DB_PATH
-
-
-def run_brain(*args):
-    r = subprocess.run([BRAIN] + list(args), capture_output=True, text=True, env=env)
-    return r.stdout.strip()
-
-
-stats_out = run_brain("stats")
-search1_out = run_brain("search", "retrieval benchmark", "--limit", "3")
-search2_out = run_brain("search", "agent context handoff", "--limit", "3")
-
-if not stats_out:
-    print("ERROR: mci-brain stats returned empty. Check seed brain.", file=sys.stderr)
-    sys.exit(1)
-
-# --- Render ---
+hybrid = next(row for row in scorecard["overall"] if row["arm"] == "hybrid")
+outcomes = hybrid["outcomes"]
 
 WIDTH, HEIGHT = 1280, 800
-BG = (246, 248, 251)
-FG = (24, 33, 43)
-GREEN = (45, 139, 87)
-CYAN = (53, 104, 212)
-YELLOW = (196, 86, 73)
-DIM = (95, 105, 117)
+BG = (247, 248, 250)
+TITLE_BG = (238, 240, 243)
+FG = (29, 29, 31)
+SUCCESS = (36, 122, 71)
+BLUE = (10, 102, 216)
+FAILURE = (199, 71, 58)
+DIM = (110, 110, 115)
 
 FONT_SIZE = 14
-LINE_HEIGHT = 20
+LINE_HEIGHT = 21
+MAX_COL = 104
 
 FONT_PATH = "/System/Library/Fonts/Menlo.ttc"
 if not os.path.exists(FONT_PATH):
@@ -81,37 +47,37 @@ if not os.path.exists(FONT_PATH):
     FONT_PATH = None
 
 FONT = ImageFont.truetype(FONT_PATH, FONT_SIZE) if FONT_PATH else ImageFont.load_default()
+TITLE_FONT = ImageFont.truetype(FONT_PATH, 12) if FONT_PATH else ImageFont.load_default()
 
-img = Image.new("RGB", (WIDTH, HEIGHT), BG)
-draw = ImageDraw.Draw(img)
+image = Image.new("RGB", (WIDTH, HEIGHT), BG)
+draw = ImageDraw.Draw(image)
 
-TITLE_BAR_H = 28
-draw.rectangle([0, 0, WIDTH, TITLE_BAR_H], fill=(232, 236, 242))
-for i, color in enumerate([(255, 96, 92), (255, 189, 46), (39, 201, 63)]):
-    draw.ellipse([12 + i * 22, 8, 24 + i * 22, 20], fill=color)
-title_font = ImageFont.truetype(FONT_PATH, 12) if FONT_PATH else ImageFont.load_default()
+TITLE_BAR_HEIGHT = 28
+draw.rectangle([0, 0, WIDTH, TITLE_BAR_HEIGHT], fill=TITLE_BG)
+for index, color in enumerate([(255, 96, 92), (255, 189, 46), (39, 201, 63)]):
+    draw.ellipse([12 + index * 22, 8, 24 + index * 22, 20], fill=color)
 draw.text(
-    (WIDTH // 2 - 96, 8),
-    "hippocampus — local memory",
+    (WIDTH // 2 - 132, 8),
+    "hippocampus - benchmark snapshot",
     fill=DIM,
-    font=title_font,
+    font=TITLE_FONT,
 )
 
 x = 16
-y = TITLE_BAR_H + 16
+y = TITLE_BAR_HEIGHT + 16
 
 
-def text(txt, color=FG, indent=0):
+def text(value, color=FG, indent=0):
     global y
-    draw.text((x + indent, y), txt, fill=color, font=FONT)
+    draw.text((x + indent, y), value, fill=color, font=FONT)
     y += LINE_HEIGHT
 
 
-def prompt(cmd):
+def prompt(command):
     global y
-    p = "$ "
-    draw.text((x, y), p, fill=GREEN, font=FONT)
-    draw.text((x + FONT.getlength(p), y), cmd, fill=FG, font=FONT)
+    prefix = "$ "
+    draw.text((x, y), prefix, fill=SUCCESS, font=FONT)
+    draw.text((x + FONT.getlength(prefix), y), command, fill=FG, font=FONT)
     y += LINE_HEIGHT
 
 
@@ -120,73 +86,73 @@ def blank():
     y += LINE_HEIGHT
 
 
-MAX_COL = 82
-
-
-def wrap_text(s, col=MAX_COL):
-    lines = []
-    words = s.split()
-    cur = []
+def wrapped(value, color=DIM, indent=16):
+    words = value.split()
+    line = []
     length = 0
-    for w in words:
-        if length + len(w) + 1 > col and cur:
-            lines.append(" ".join(cur))
-            cur = [w]
-            length = len(w)
+    for word in words:
+        if line and length + len(word) + 1 > MAX_COL:
+            text(" ".join(line), color, indent)
+            line = [word]
+            length = len(word)
         else:
-            cur.append(w)
-            length += len(w) + 1
-    if cur:
-        lines.append(" ".join(cur))
-    return lines
+            line.append(word)
+            length += len(word) + 1
+    if line:
+        text(" ".join(line), color, indent)
 
 
-def render_output(raw):
-    for line in raw.split("\n"):
-        if line.startswith("event:"):
-            parts = line.split(" | ", 3)
-            header = " | ".join(parts[:3]) if len(parts) >= 3 else line
-            text(header, YELLOW)
-            if len(parts) >= 4:
-                title_url_body = parts[3]
-                sub = title_url_body.split(" | ")
-                for s in sub:
-                    s = s.strip()
-                    if s.startswith("http"):
-                        text("  " + s[:MAX_COL], CYAN, indent=8)
-                    elif len(s) > MAX_COL - 4:
-                        for wl in wrap_text(s, MAX_COL - 4):
-                            text("  " + wl, DIM, indent=8)
-                    else:
-                        text("  " + s, FG, indent=8)
-        elif line.startswith("Events:"):
-            text(line, CYAN)
-        elif line.startswith("Oldest:") or line.startswith("Newest:"):
-            text(line, DIM)
-        else:
-            text(line, FG)
-
-
-prompt("mci-brain stats")
+prompt("cargo run -q -p mci-agent --bin mci-bench -- --arm both")
 blank()
-render_output(stats_out)
+text("Committed synthetic technical-work benchmark", BLUE)
+text(
+    f"Dataset: {hybrid['instances']} cases "
+    f"({hybrid['answerable_instances']} answerable, "
+    f"{hybrid['unanswerable_instances']} unanswerable)",
+    DIM,
+)
+text(f"Hybrid recall @3: {hybrid['recall_at']['3']:.0%}")
+text(f"MRR: {hybrid['mrr']:.3f}")
+text(f"Provenance coverage @3: {hybrid['provenance_coverage_at']['3']:.0%}")
+text(
+    f"Unanswerable: abstained {outcomes['abstained']}/"
+    f"{hybrid['unanswerable_instances']}; false positives: {outcomes['false_positive']}",
+    SUCCESS,
+)
+text(f"Latency p95: {hybrid['latency_ms']['p95']:.1f} ms", DIM)
+text(f"Index size p95: {hybrid['index_size_bytes']['p95'] / 1024:.1f} KiB", DIM)
 blank()
 
-prompt('mci-brain search "retrieval benchmark" --limit 3')
-blank()
-render_output(search1_out)
+text(
+    f"Regression gate: {'PASS' if scorecard['regression']['passed'] else 'FAIL'}",
+    SUCCESS if scorecard["regression"]["passed"] else FAILURE,
+)
+text(
+    f"Quality gate: {'PASS' if scorecard['quality_gate']['passed'] else 'FAIL'}",
+    SUCCESS if scorecard["quality_gate"]["passed"] else FAILURE,
+)
+text(f"Launch qualified: {str(scorecard['launch_qualified']).lower()}", FAILURE)
+wrapped("Reason: production evidence critic is not validation-qualified.")
+wrapped("Reason: explicit-value veto is not relation-grounded.")
 blank()
 
-prompt('mci-brain search "agent context handoff" --limit 3')
+prompt("jq '.quality_gate, .launch_qualified' docs/eval/work-memory-baseline.json")
 blank()
-render_output(search2_out)
+text('{ "quality_gate": { "passed": false }, "launch_qualified": false }', FAILURE)
+blank()
+wrapped(
+    "Retrieval improved and abstention is now correct on this synthetic set. "
+    "The evidence policy still blocks launch; this does not claim memory is solved.",
+    FG,
+    0,
+)
 blank()
 
-pw = FONT.getlength("$ ")
-draw.rectangle([x, y + 2, x + pw, y + LINE_HEIGHT - 2], fill=GREEN)
+prefix_width = FONT.getlength("$ ")
+draw.rectangle([x, y + 2, x + prefix_width, y + LINE_HEIGHT - 2], fill=SUCCESS)
 draw.text((x, y), "$ ", fill=BG, font=FONT)
 
-img.save(OUT, "PNG", optimize=True)
+image.save(OUT, "PNG", optimize=True)
 size = os.path.getsize(OUT)
 print(f"Saved: {OUT}")
 print(f"Size: {size} bytes ({size / 1024:.0f} KB)")
