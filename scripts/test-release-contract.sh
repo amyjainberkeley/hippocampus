@@ -248,6 +248,8 @@ require_literal "$RELEASE_CI" 'CaptureSourcePolicyBehavior' \
     'release CI executes the browser pixel exclusion fixture'
 require_literal "$RELEASE_CI" 'scripts/test-capture-overlap-corpus.sh' \
     'release CI builds and verifies the focused-window overlap corpus'
+require_literal "$RELEASE_CI" 'scripts/test-live-capture-overlap-contract.sh' \
+    'release CI keeps the live focused-window verifier fail-closed'
 require_literal "$RELEASE_CI" 'scripts/e2e-clean-home.sh' \
     'release CI executes the clean-home product path'
 require_literal "$RELEASE_CI" 'scripts/test-toml-license-contract.sh' \
@@ -263,6 +265,8 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     scripts/e2e-clean-home.sh scripts/test-e2e-clean-home-contract.sh \
     scripts/test-development-file-key-contract.sh scripts/test-no-quarantine-bypass.sh \
     scripts/test-capture-overlap-corpus.sh 'tools/capture-overlap-corpus/**' \
+    scripts/run-live-capture-overlap.sh scripts/test-live-capture-overlap-contract.sh \
+    'scripts/live-capture/**' \
     apps/onboarding/Package.swift \
     apps/onboarding/Sources/OnboardingKit/RetentionStore.swift \
     apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift \
