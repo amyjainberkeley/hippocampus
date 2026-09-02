@@ -106,6 +106,14 @@ pub const DEFAULT_K_LEX: usize = 200;
 /// §1.5). Symmetric with [`DEFAULT_K_LEX`].
 pub const DEFAULT_K_SEM: usize = 200;
 
+/// Maximum number of ranked events presented to the semantic verifier.
+///
+/// This is intentionally independent of [`RetrievalQuery::limit`], which is
+/// a display/output preference. Verification may need a small evidence set to
+/// resolve multi-event support or contradiction even when a caller only wants
+/// one visible result.
+pub const DEFAULT_VERIFICATION_CANDIDATE_LIMIT: usize = 8;
+
 /// Anchor-then-window half-width, microseconds. ADR-0010 §6 specifies
 /// `±5 min` around the anchor's `ts_us`; this constant is that bound.
 pub const ANCHOR_WINDOW_US: u64 = 5 * 60 * 1_000_000;
@@ -448,6 +456,9 @@ pub struct HybridRetriever<S: BrainStore, E: Embedder> {
     k_lex: usize,
     /// Semantic candidate-pool size (`k_sem`).
     k_sem: usize,
+    /// Ranked evidence-set size presented to the semantic verifier before the
+    /// caller's display limit is applied.
+    verification_candidate_limit: usize,
     /// Legacy score critic retained only for test/stub ranking mechanics.
     /// Production construction leaves this absent.
     evidence_policy: Option<EvidenceSufficiencyPolicy>,
@@ -487,6 +498,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             now_us,
             k_lex: DEFAULT_K_LEX,
             k_sem: DEFAULT_K_SEM,
+            verification_candidate_limit: DEFAULT_VERIFICATION_CANDIDATE_LIMIT,
             evidence_policy: None,
             evidence_verifier: None,
         }
@@ -515,6 +527,15 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     pub fn with_pools(mut self, k_lex: usize, k_sem: usize) -> Self {
         self.k_lex = k_lex;
         self.k_sem = k_sem;
+        self
+    }
+
+    /// Override the bounded evidence-set size presented to the verifier.
+    /// A zero value is clamped to one so a configured verifier is never called
+    /// with an empty set after retrieval found candidates.
+    #[must_use]
+    pub fn with_verification_candidate_limit(mut self, limit: usize) -> Self {
+        self.verification_candidate_limit = limit.max(1);
         self
     }
 
@@ -758,6 +779,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             matches,
             evidence_assessment,
             lex_map.is_empty() && sem_map.is_empty(),
+            query.limit,
         ))
     }
 
@@ -783,7 +805,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     fn rank_and_assess(
         &self,
         query: &RetrievalQuery,
-        matches: &mut Vec<RetrievalMatch>,
+        matches: &mut [RetrievalMatch],
         critic_rows: &[(EventId, String, f32)],
         evidence_rows: &[(EventId, String)],
     ) -> EvidenceAssessment {
@@ -802,7 +824,6 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 .total_cmp(&left.hit.score_combined)
                 .then_with(|| left.hit.event_id.cmp(&right.hit.event_id))
         });
-        matches.truncate(query.limit);
 
         if matches!(
             explicit_evidence_signal(&query.text, &candidates),
@@ -818,6 +839,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 .collect::<HashMap<_, _>>();
             let excerpts = matches
                 .iter()
+                .take(self.verification_candidate_limit)
                 .filter_map(|value| {
                     evidence_by_id
                         .get(&value.hit.event_id)
@@ -851,7 +873,11 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             .is_some_and(|features| evidence_policy.is_sufficient(features))
         {
             EvidenceAssessment::Supported(
-                matches.iter().map(|value| value.hit.event_id.0).collect(),
+                matches
+                    .iter()
+                    .take(query.limit)
+                    .map(|value| value.hit.event_id.0)
+                    .collect(),
             )
         } else {
             EvidenceAssessment::Unsupported
@@ -920,6 +946,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         mut matches: Vec<RetrievalMatch>,
         assessment: EvidenceAssessment,
         candidate_arms_empty: bool,
+        display_limit: usize,
     ) -> RetrievalOutcome {
         if matches.is_empty() {
             return RetrievalOutcome::NothingMatched {
@@ -933,10 +960,12 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         match assessment {
             EvidenceAssessment::Supported(evidence_ids) => {
                 retain_cited_matches(&mut matches, &evidence_ids);
+                matches.truncate(display_limit);
                 RetrievalOutcome::Matched { matches }
             }
             EvidenceAssessment::Contradicted(evidence_ids) => {
                 retain_cited_matches(&mut matches, &evidence_ids);
+                matches.truncate(display_limit);
                 RetrievalOutcome::Contradicted { matches }
             }
             EvidenceAssessment::Unsupported => RetrievalOutcome::NothingMatched {
@@ -944,11 +973,17 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             },
             EvidenceAssessment::Unqualified => RetrievalOutcome::Degraded {
                 degradation: RetrievalDegradation::EvidenceSufficiencyUnqualified,
-                fallback_matches: matches,
+                fallback_matches: {
+                    matches.truncate(display_limit);
+                    matches
+                },
             },
             EvidenceAssessment::VerifierUnavailable => RetrievalOutcome::Degraded {
                 degradation: RetrievalDegradation::EvidenceVerifierUnavailable,
-                fallback_matches: matches,
+                fallback_matches: {
+                    matches.truncate(display_limit);
+                    matches
+                },
             },
         }
     }
