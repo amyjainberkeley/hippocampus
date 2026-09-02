@@ -5,9 +5,9 @@
 //!
 //! 1. Sleep until the next local-time fire (default 06:00).
 //! 2. Query the last 24 h of OCR events from the brain.
-//! 3. Pass them to a freshly-constructed [`BriefAuthor`] (loaded from
-//!    the model factory; lazily so the ~500 MB working set is only
-//!    resident during generation per ADR-0028 §6).
+//! 3. Pass them to a freshly-constructed [`BriefAuthor`]. The default
+//!    extractive author has no model dependency; an installed Qwen author
+//!    is loaded lazily so its working set is resident only during generation.
 //! 4. Insert the resulting brief into the `briefs` table.
 //!
 //! # First-launch path
@@ -19,10 +19,9 @@
 //!
 //! # Disable path
 //!
-//! When `MCI_BRIEFS_DISABLED=1` is set OR the Qwen3 `.mlmodelc` is not
-//! present in `~/Library/Application Support/MCI/Models/`, the worker
-//! logs a single line and idles on the shutdown channel — no busy-loop,
-//! no repeated failure logs.
+//! When `MCI_BRIEFS_DISABLED=1` is set, the worker logs a single line and
+//! idles on the shutdown channel — no busy-loop or repeated failure logs.
+//! A missing Qwen model selects the evidence-cited extractive author instead.
 //!
 //! # Privacy invariants
 //!
@@ -49,6 +48,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mci_brain::{BrainStore, BriefRow, SqlCipherBrainStore};
 use mci_brief::author::BriefAuthor;
+use mci_brief::extractive_author::ExtractiveBriefAuthor;
 use mci_brief::model::BriefState;
 use mci_brief::tripwire::validate_citations;
 use tokio::sync::watch;
@@ -165,8 +165,6 @@ pub enum BriefGate {
     Open,
     /// `MCI_BRIEFS_DISABLED=1` is set.
     DisabledByEnv,
-    /// The Qwen3 `.mlmodelc` is not on disk.
-    ModelMissing,
 }
 
 /// Read the gate. Callers pass [`briefs_disabled_via_env`] for
@@ -178,15 +176,11 @@ pub enum BriefGate {
 /// `MCI_BRIEFS_DISABLED=1` wants to hear about that variable, not be sent
 /// to build a 1.7 B model they may already have.
 #[must_use]
-pub fn brief_gate(model_dir: &Path, disabled_by_env: bool) -> BriefGate {
+pub fn brief_gate(_model_dir: &Path, disabled_by_env: bool) -> BriefGate {
     if disabled_by_env {
         return BriefGate::DisabledByEnv;
     }
-    if qwen3_model_present(model_dir) {
-        BriefGate::Open
-    } else {
-        BriefGate::ModelMissing
-    }
+    BriefGate::Open
 }
 
 /// What to print when the gate is shut. Names the thing that is missing,
@@ -195,39 +189,20 @@ pub fn brief_gate(model_dir: &Path, disabled_by_env: bool) -> BriefGate {
 /// Returns an empty string for [`BriefGate::Open`] — there is nothing to
 /// explain when nothing is blocked.
 #[must_use]
-pub fn gate_block_message(gate: BriefGate, model_dir: &Path) -> String {
+pub fn gate_block_message(gate: BriefGate, _model_dir: &Path) -> String {
     match gate {
         BriefGate::Open => String::new(),
         BriefGate::DisabledByEnv => "briefs are switched off: MCI_BRIEFS_DISABLED=1 is set in \
              this environment.\n\
              Unset it (`unset MCI_BRIEFS_DISABLED`) and run this again."
             .to_owned(),
-        BriefGate::ModelMissing => format!(
-            "no Qwen3 model, so there is nothing to write the brief with.\n\
-             \n\
-             Looked for:\n      \
-               {}\n\
-             \n\
-             That model is ~1.7 B parameters and is not checked into the\n\
-             repository. Convert and compile it yourself:\n\
-             \n      \
-               python3.11 -m venv .venv-ml && source .venv-ml/bin/activate\n      \
-               pip install -r scripts/requirements-ml.txt\n      \
-               python scripts/convert_brief_model.py --help\n\
-             \n\
-             The full recipe, including the `xcrun coremlcompiler compile` step\n\
-             that produces the .mlmodelc the loader needs, is in\n\
-             docs/coreml-conversion-howto.md. Put the compiled directory at the\n\
-             path above, or pass --model-dir to point somewhere else.\n\
-             \n\
-             Everything else keeps working — recall, enrich, doctor. There is\n\
-             just no author to run yet, so no brief was written.",
-            model_dir
-                .join(QWEN3_MODEL_ID)
-                .join(QWEN3_MODEL_BASENAME)
-                .display(),
-        ),
     }
+}
+
+/// Factory for the deterministic, evidence-cited author available on every host.
+#[must_use]
+pub fn extractive_author_factory() -> AuthorFactory {
+    Arc::new(|| Ok(Box::new(ExtractiveBriefAuthor) as Box<dyn BriefAuthor>))
 }
 
 /// Run the daily brief loop until the shutdown signal fires.
@@ -390,15 +365,6 @@ impl BriefWindow {
             date_local: date_local.to_owned(),
         })
     }
-
-    /// Lower bound in the form `events_since` wants it.
-    ///
-    /// That query is `ts_us > cursor`, strictly greater, so an event landing
-    /// exactly on local midnight would fall out of its own day. Step back one
-    /// microsecond to make the bound inclusive.
-    fn query_cursor_us(&self) -> u64 {
-        self.since_us.saturating_sub(1)
-    }
 }
 
 /// Outcome of one brief pass.
@@ -452,10 +418,9 @@ pub fn generate_brief_once(
     window: &BriefWindow,
     generated_ts_us: u64,
 ) -> Result<BriefOutcome, BriefWorkerError> {
-    let mut records = store
-        .events_since(window.query_cursor_us(), MAX_EVENTS_PER_BRIEF)
-        .map_err(|e| BriefWorkerError::Store(format!("events_since: {e}")))?;
-    records.retain(|r| r.ts_us < window.until_us);
+    let records = store
+        .sampled_events_between(window.since_us, window.until_us, MAX_EVENTS_PER_BRIEF)
+        .map_err(|e| BriefWorkerError::Store(format!("sampled_events_between: {e}")))?;
 
     if records.is_empty() {
         return Ok(BriefOutcome::SkippedEmpty);
@@ -466,6 +431,8 @@ pub fn generate_brief_once(
     // end of this function — the ~500 MB working set is resident only while
     // generating (ADR-0028 §6), and only when there was something to write.
     let author = (factory)()?;
+    let model_id = author.model_id().to_owned();
+    let model_version = author.model_version().to_owned();
     let brief = author
         .author(&records, topic)
         .map_err(|e| BriefWorkerError::Author(e.to_string()))?;
@@ -488,8 +455,8 @@ pub fn generate_brief_once(
         id: 0,
         date_local: window.date_local.clone(),
         generated_ts_us,
-        model_id: QWEN3_MODEL_ID.to_owned(),
-        model_version: "1.0".to_owned(),
+        model_id,
+        model_version,
         title: brief.title,
         body: brief.body,
         word_count,
@@ -940,14 +907,6 @@ mod tests {
     }
 
     #[test]
-    fn dated_window_query_cursor_includes_midnight_itself() {
-        // `events_since` is `ts_us > cursor`. An event landing exactly on
-        // local midnight has to stay inside its own day.
-        let w = BriefWindow::for_local_date("2026-05-19", 0).expect("valid date");
-        assert_eq!(w.query_cursor_us(), w.since_us - 1);
-    }
-
-    #[test]
     fn dated_window_rejects_a_date_that_does_not_exist() {
         assert_eq!(BriefWindow::for_local_date("2026-02-30", 0), None);
     }
@@ -955,9 +914,9 @@ mod tests {
     // ---------------- brief_gate ----------------
 
     #[test]
-    fn gate_is_open_only_with_a_model_and_no_disable_flag() {
+    fn gate_is_open_without_a_model_and_disable_flag_still_wins() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(brief_gate(dir.path(), false), BriefGate::ModelMissing);
+        assert_eq!(brief_gate(dir.path(), false), BriefGate::Open);
         assert_eq!(brief_gate(dir.path(), true), BriefGate::DisabledByEnv);
 
         std::fs::create_dir_all(dir.path().join(QWEN3_MODEL_ID).join(QWEN3_MODEL_BASENAME))
@@ -973,16 +932,6 @@ mod tests {
     #[test]
     fn every_shut_gate_says_what_to_do_about_it() {
         let dir = tempfile::tempdir().unwrap();
-
-        let missing = gate_block_message(BriefGate::ModelMissing, dir.path());
-        assert!(
-            missing.contains(QWEN3_MODEL_BASENAME),
-            "must name the file it looked for: {missing}"
-        );
-        assert!(
-            missing.contains("convert_brief_model.py"),
-            "must say how to get one: {missing}"
-        );
 
         let disabled = gate_block_message(BriefGate::DisabledByEnv, dir.path());
         assert!(

@@ -2118,15 +2118,16 @@ fn run_brief_cmd(
         Some(d) => format!("Daily brief for {d}"),
         None => "Daily brief".to_owned(),
     };
-    let factory = qwen3_author_factory(&model_dir);
+    let (factory, author_id) = preferred_brief_author_factory(&model_dir);
 
     eprintln!(
-        "mci-agent brief: summarizing {} into a draft for {}",
+        "mci-agent brief: summarizing {} into a draft for {} with {}",
         match date {
             Some(_) => "that local day",
             None => "the last 24 hours",
         },
         window.date_local,
+        author_id,
     );
 
     match brief_worker::generate_brief_once(&store, &factory, &topic, &window, now_us) {
@@ -2427,9 +2428,21 @@ fn qwen3_author_factory(_model_dir: &std::path::Path) -> brief_worker::AuthorFac
     })
 }
 
-/// Spawn the daily-brief worker (ADR-0028). Selects between the
-/// production Qwen3 Core ML backend and the disabled-idle path based on
-/// `MCI_BRIEFS_DISABLED`, the presence of the model, and the host OS.
+fn preferred_brief_author_factory(
+    model_dir: &std::path::Path,
+) -> (brief_worker::AuthorFactory, &'static str) {
+    if brief_worker::qwen3_model_present(model_dir) {
+        (qwen3_author_factory(model_dir), "qwen3-1.7b-fp16")
+    } else {
+        (
+            brief_worker::extractive_author_factory(),
+            "hippocampus-extractive",
+        )
+    }
+}
+
+/// Spawn the daily-brief worker. Qwen is preferred when installed; the
+/// evidence-cited extractive author keeps the feature available otherwise.
 #[cfg(target_os = "macos")]
 fn spawn_brief_worker(
     store: Arc<mci_brain::SqlCipherBrainStore>,
@@ -2447,19 +2460,10 @@ fn spawn_brief_worker(
     }
 
     let model_dir = brief_worker::default_model_dir();
-    if !brief_worker::qwen3_model_present(&model_dir) {
-        tokio::spawn(async move {
-            let stats =
-                brief_worker::run_disabled_idle("Qwen3 model not installed", shutdown).await;
-            eprintln!(
-                "mci-agent: brief worker exited (no model). generated={} skipped_empty={} errors={}",
-                stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
-            );
-        });
-        return;
+    let (factory, author_id) = preferred_brief_author_factory(&model_dir);
+    if author_id == "hippocampus-extractive" {
+        eprintln!("mci-agent: Qwen3 is not installed; daily briefs use hippocampus-extractive");
     }
-
-    let factory = qwen3_author_factory(&model_dir);
 
     let tz_resolver: Arc<dyn Fn() -> i32 + Send + Sync> =
         Arc::new(brief_worker::current_tz_offset_secs);
@@ -2490,19 +2494,31 @@ fn spawn_brief_worker(
     });
 }
 
-/// Non-macOS: there is no Core ML, no Qwen3 backend, so the brief
-/// worker stays in disabled-idle mode.
+/// Non-macOS uses the platform-independent extractive author.
 #[cfg(not(target_os = "macos"))]
 fn spawn_brief_worker(
-    _store: Arc<mci_brain::SqlCipherBrainStore>,
+    store: Arc<mci_brain::SqlCipherBrainStore>,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
+    let factory = brief_worker::extractive_author_factory();
+    let tz_resolver: Arc<dyn Fn() -> i32 + Send + Sync> =
+        Arc::new(brief_worker::current_tz_offset_secs);
     tokio::spawn(async move {
-        let stats = brief_worker::run_disabled_idle("non-macOS platform", shutdown).await;
-        eprintln!(
-            "mci-agent: brief worker exited (non-macOS). generated={} skipped_empty={} errors={}",
-            stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
-        );
+        match brief_worker::run_brief_worker(
+            store,
+            factory,
+            brief_worker::DEFAULT_BRIEF_HOUR,
+            tz_resolver,
+            shutdown,
+        )
+        .await
+        {
+            Ok(stats) => eprintln!(
+                "mci-agent: extractive brief worker exited. generated={} skipped_empty={} errors={}",
+                stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
+            ),
+            Err(e) => eprintln!("mci-agent: extractive brief worker error: {e}"),
+        }
     });
 }
 
