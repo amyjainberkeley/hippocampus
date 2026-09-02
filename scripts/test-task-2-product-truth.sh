@@ -10,10 +10,14 @@ SLA="$REPO_ROOT/assets/installer/sla.r"
 INSTALLER="$REPO_ROOT/scripts/build-installer.sh"
 PREFERENCES_STORE="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift"
 PREFERENCES_WINDOW="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
+RUNTIME_CONFIG="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift"
 RETENTION_WORKER="$REPO_ROOT/apps/agent/src/retention_worker.rs"
 AGENT_MAIN="$REPO_ROOT/apps/agent/src/bin/mci_agent.rs"
 STATUS_MENU="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"
 APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift"
+ONBOARDING_RETENTION_STORE="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift"
+ONBOARDING_RETENTION_MODEL="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift"
+ONBOARDING_FLOW="$REPO_ROOT/apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift"
 
 python3 "$GENERATOR" --check
 
@@ -28,11 +32,22 @@ rg -Fq 'home.join("Library/Application Support/MCI/retention.json")' "$AGENT_MAI
 rg -Fq 'setRetentionPolicy(' "$PREFERENCES_WINDOW"
 rg -Fq '"thirtyDays" => RetentionConfig::Days(30)' "$RETENTION_WORKER"
 rg -Fq '"sevenDays" => RetentionConfig::Days(7)' "$RETENTION_WORKER"
+rg -Fq 'Some(d) if (1..=365).contains(&d)' "$RETENTION_WORKER"
+rg -Fq 'try writer.write(data, to: fileURL)' "$ONBOARDING_RETENTION_STORE"
+rg -Fq 'cached = (policy, validatedDays)' "$ONBOARDING_RETENTION_STORE"
+rg -Fq 'public func saveThen(' "$ONBOARDING_RETENTION_MODEL"
+rg -Fq 'await retentionVM.saveThen { flowVM.advance() }' "$ONBOARDING_FLOW"
+rg -Fq 'parsed[key] = value' "$RUNTIME_CONFIG"
+rg -Fq 'parsed.convert(to: .toml)' "$RUNTIME_CONFIG"
 rg -Fq 'captureEnabled: supervisor.captureEnabled' "$STATUS_MENU" "$APP"
 rg -Fq 'RecordingControl.derive(' "$STATUS_MENU"
 rg -Fq 'Text(menuBarStatus.displayText)' "$STATUS_MENU"
 if rg -Fq 'defaults.set(retentionPolicy.rawValue' "$PREFERENCES_STORE"; then
     echo "FAIL: UserDefaults remains a competing retention authority" >&2
+    exit 1
+fi
+if rg -q 'assignmentKey\(|isTableHeader\(|equalsAfterKey\(' "$RUNTIME_CONFIG"; then
+    echo "FAIL: RuntimeConfig still mutates TOML through a physical-line scanner" >&2
     exit 1
 fi
 

@@ -80,29 +80,9 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
             throw RuntimeConfigError.invalidBooleanValue(key)
         }
 
-        var updated: [String] = []
-        var replaced = false
-        var inRootTable = true
-        for line in Self.lines(in: original) {
-            if inRootTable, Self.isTableHeader(line) {
-                if !replaced {
-                    updated.append("\(key) = \(value)")
-                    replaced = true
-                }
-                inRootTable = false
-            }
-            guard inRootTable, Self.assignmentKey(in: line) == key else {
-                updated.append(line)
-                continue
-            }
-            if !replaced {
-                updated.append(Self.replacingBool(in: line, key: key, value: value))
-                replaced = true
-            }
-        }
-        if !replaced { updated.append("\(key) = \(value)") }
-
-        let content = updated.joined(separator: "\n") + "\n"
+        parsed[key] = value
+        var content = parsed.convert(to: .toml)
+        if !content.hasSuffix("\n") { content.append("\n") }
         do {
             let reparsed = try TOMLTable(string: content)
             guard reparsed[key]?.bool == value else {
@@ -130,89 +110,8 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
         return text
     }
 
-    private static func lines(in text: String) -> [String] {
-        var lines = text.components(separatedBy: "\n")
-        if lines.last == "" { lines.removeLast() }
-        return lines
-    }
-
     package static func parseBool(key: String, in text: String) -> Bool {
         guard let table = try? TOMLTable(string: text) else { return false }
         return table[key]?.bool ?? false
-    }
-
-    /// This lexical helper runs only after TOMLKit validates the full document.
-    /// Parsing the key probe with the same conforming parser lets the editor
-    /// recognize quoted Unicode escapes without becoming a second authority.
-    private static func assignmentKey(in line: String) -> String? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
-        guard let equals = equalsAfterKey(in: line) else { return nil }
-        let rawKey = line[..<equals].trimmingCharacters(in: .whitespaces)
-        guard !rawKey.isEmpty,
-              let probe = try? TOMLTable(string: "\(rawKey) = true")
-        else { return nil }
-        return ["capture_enabled", "crash_report_opted_in"].first {
-            probe[$0]?.bool == true
-        }
-    }
-
-    private static func replacingBool(in line: String, key: String, value: Bool) -> String {
-        let leading = line.prefix { $0 == " " || $0 == "\t" }
-        let comment = commentStart(in: line).map { " " + line[$0...] } ?? ""
-        return "\(leading)\(key) = \(value)\(comment)"
-    }
-
-    private static func equalsAfterKey(in line: String) -> String.Index? {
-        var quote: Character?
-        var escaped = false
-        for index in line.indices {
-            let character = line[index]
-            if let activeQuote = quote {
-                if activeQuote == "\"" && character == "\\" && !escaped {
-                    escaped = true
-                    continue
-                }
-                if character == activeQuote && !escaped { quote = nil }
-                escaped = false
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-            } else if character == "=" {
-                return index
-            } else if character == "#" {
-                return nil
-            }
-        }
-        return nil
-    }
-
-    private static func commentStart(in line: String) -> String.Index? {
-        var quote: Character?
-        var escaped = false
-        for index in line.indices {
-            let character = line[index]
-            if let activeQuote = quote {
-                if activeQuote == "\"" && character == "\\" && !escaped {
-                    escaped = true
-                    continue
-                }
-                if character == activeQuote && !escaped { quote = nil }
-                escaped = false
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-            } else if character == "#" {
-                return index
-            }
-        }
-        return nil
-    }
-
-    private static func isTableHeader(_ line: String) -> Bool {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        return trimmed.hasPrefix("[")
     }
 }

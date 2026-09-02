@@ -79,6 +79,8 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
     var onReadinessWait: ((ProcessSupervisorLaunchPlan) -> Void)?
     var onStop: (() -> Void)?
     var stopDelay: Duration?
+    var stopSuspensionOnCall: Int?
+    var stopSuspension: TestSuspension?
     var readinessSuspension: TestSuspension?
     private(set) var launchPlans: [ProcessSupervisorLaunchPlan] = []
     private(set) var generations: [SupervisorProcessGeneration] = []
@@ -112,6 +114,9 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         _ = timeout
         stopCalls += 1
         onStop?()
+        if stopCalls == stopSuspensionOnCall, let stopSuspension {
+            await stopSuspension.suspend()
+        }
         if let stopDelay { try? await Task.sleep(for: stopDelay) }
         if !stopResults.isEmpty {
             try stopResults.removeFirst().get()
@@ -385,6 +390,30 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertFalse(supervisor.captureEnabled)
         XCTAssertEqual(config.captureWrites, [])
         XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertFalse(topology.isRunning)
+    }
+
+    func test_shutdown_wins_when_initial_reconfiguration_stop_resumes_late() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        let suspension = TestSuspension()
+        topology.stopSuspensionOnCall = 1
+        topology.stopSuspension = suspension
+
+        let reconfiguration = Task { @MainActor in
+            try await supervisor.applyCaptureEnabled(true)
+        }
+        await suspension.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        while topology.stopCalls < 2 { await Task.yield() }
+        try await shutdown.value
+        XCTAssertEqual(supervisor.state, .stopped)
+
+        suspension.resume()
+        await XCTAssertThrowsErrorAsync(try await reconfiguration.value)
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertEqual(config.captureWrites, [])
         XCTAssertFalse(topology.isRunning)
     }
 

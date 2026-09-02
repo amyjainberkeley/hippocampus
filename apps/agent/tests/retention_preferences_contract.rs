@@ -11,14 +11,25 @@ fn picker_outputs_are_worker_compatible() {
             .expect("MCI_RETENTION_PICKER_FIXTURE_DIR is required"),
     );
     let cases = [
-        ("forever", RetentionConfig::Forever),
-        ("thirty-days", RetentionConfig::Days(30)),
-        ("seven-days", RetentionConfig::Days(7)),
-        ("custom", RetentionConfig::Days(90)),
-        ("replacement", RetentionConfig::Days(90)),
+        ("forever/retention.json", RetentionConfig::Forever),
+        ("thirty-days/retention.json", RetentionConfig::Days(30)),
+        ("seven-days/retention.json", RetentionConfig::Days(7)),
+        ("custom-one/retention.json", RetentionConfig::Days(1)),
+        ("custom/retention.json", RetentionConfig::Days(90)),
+        ("custom-365/retention.json", RetentionConfig::Days(365)),
+        ("replacement/retention.json", RetentionConfig::Days(90)),
+        ("onboarding/retention.json", RetentionConfig::Days(7)),
+        ("custom-zero/retention.json", RetentionConfig::Forever),
+        ("custom-366/retention.json", RetentionConfig::Forever),
+        ("custom-missing/retention.json", RetentionConfig::Forever),
+        ("custom-overflow/retention.json", RetentionConfig::Forever),
     ];
-    for (name, expected) in cases {
-        let path = root.join(name).join("retention.json");
-        assert_eq!(load_retention_config(&path), expected, "case {name}");
+    for (relative_path, expected) in cases {
+        let path = root.join(relative_path);
+        assert_eq!(
+            load_retention_config(&path),
+            expected,
+            "case {relative_path}"
+        );
     }
 }

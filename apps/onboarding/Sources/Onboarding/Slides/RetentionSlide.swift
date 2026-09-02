@@ -21,6 +21,14 @@ struct RetentionSlide: View {
 
                 retentionPicker
 
+                if let saveError = retentionVM.saveError {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(OnboardingDesign.Palette.excluded)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: OnboardingDesign.Width.prose)
+                }
+
                 blockedAppsPreview
             }
         }

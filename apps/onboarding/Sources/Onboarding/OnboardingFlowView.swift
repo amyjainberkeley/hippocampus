@@ -124,15 +124,19 @@ struct OnboardingFlowView: View {
             Button(primaryLabel) { advance() }
                 .keyboardShortcut(.defaultAction)
                 .onboardingSecondary()
-                .disabled(!flowVM.canAdvance)
-                .opacity(flowVM.canAdvance ? 1 : 0.5)
+                .disabled(!canUsePrimaryAction)
+                .opacity(canUsePrimaryAction ? 1 : 0.5)
         } else {
             Button(primaryLabel) { advance() }
                 .keyboardShortcut(.defaultAction)
                 .onboardingPrimary()
-                .disabled(!flowVM.canAdvance)
-                .opacity(flowVM.canAdvance ? 1 : 0.5)
+                .disabled(!canUsePrimaryAction)
+                .opacity(canUsePrimaryAction ? 1 : 0.5)
         }
+    }
+
+    private var canUsePrimaryAction: Bool {
+        flowVM.canAdvance && !(flowVM.currentStep == .retention && retentionVM.isSaving)
     }
 
     /// Raycast labels its first step "Start Setup"; the rest are "Continue".
@@ -142,7 +146,10 @@ struct OnboardingFlowView: View {
 
     private func advance() {
         if flowVM.currentStep == .retention {
-            Task { await retentionVM.save() }
+            Task { @MainActor in
+                await retentionVM.saveThen { flowVM.advance() }
+            }
+            return
         }
         flowVM.advance()
     }
