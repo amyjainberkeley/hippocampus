@@ -59,7 +59,7 @@ use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
 use mci_brain::{IntegrityError, IntegrityScheduler, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 
-const VERSION: &str = "0.0.3-phase1-cycle2-iter12";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DEFAULT_HEALTH_SUMMARY_WINDOW_SECONDS: u64 = 3_600; // 1 hour
 const COMMAND_INTEGRITY_FAILURE_EXIT_CODE: u8 = 22;
