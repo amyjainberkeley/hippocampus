@@ -33,12 +33,14 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         baseEnvironment: [String: String],
         dbPath: URL,
         keyReference: KeychainKeyReference,
+        developmentKeyMode: DevelopmentFileKeyMode? = nil,
         initialStep: String?
     ) -> [String: String] {
         var environment = sanitizedEnvironment(
             baseEnvironment: baseEnvironment,
             dbPath: dbPath,
-            keyReference: keyReference
+            keyReference: keyReference,
+            developmentKeyMode: developmentKeyMode
         )
         if let initialStep, !initialStep.isEmpty {
             environment["MCI_ONBOARDING_STEP"] = initialStep
@@ -580,7 +582,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         var environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,
             dbPath: dbPath,
-            keyReference: currentKeyReference
+            keyReference: currentKeyReference,
+            developmentKeyMode: developmentKeyMode
         )
         if let initialTab, !initialTab.isEmpty { environment["MCI_INITIAL_TAB"] = initialTab }
         let task = ChildProcessEnvironment.makeProcess(baseEnvironment: environment)
@@ -595,6 +598,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 baseEnvironment: ProcessInfo.processInfo.environment,
                 dbPath: dbPath,
                 keyReference: currentKeyReference,
+                developmentKeyMode: developmentKeyMode,
                 initialStep: initialStep
             )
         )
@@ -609,7 +613,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         ProcessSupervisorLaunchPlan.sanitizedEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,
             dbPath: dbPath,
-            keyReference: currentKeyReference
+            keyReference: currentKeyReference,
+            developmentKeyMode: developmentKeyMode
         )
     }
     public var dbPath: URL {

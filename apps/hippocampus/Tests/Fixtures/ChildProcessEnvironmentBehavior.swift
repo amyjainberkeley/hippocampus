@@ -7,6 +7,7 @@ struct ChildProcessEnvironmentBehavior {
         try proveAmbientEnvironmentIsScrubbed()
         try provePreparedEnvironmentIsPreserved()
         proveMalformedPreparedEnvironmentsAreRejected()
+        proveOnboardingPreservesDevelopmentKeyAuthority()
     }
 
     private static func proveAmbientEnvironmentIsScrubbed() throws {
@@ -50,6 +51,22 @@ struct ChildProcessEnvironmentBehavior {
         expectPreparedEnvironmentError(.invalidDevelopmentKeyAuthority, environment: [
             "MCI_DB_KEY_FILE": "/tmp/orphaned.key",
         ])
+    }
+
+    private static func proveOnboardingPreservesDevelopmentKeyAuthority() {
+        let keyURL = URL(fileURLWithPath: "/tmp/fixed-user-owned/dev.key")
+        let environment = ProcessSupervisorLaunchPlan.onboardingEnvironment(
+            baseEnvironment: [:],
+            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey,
+            developmentKeyMode: DevelopmentFileKeyMode(keyURL: keyURL),
+            initialStep: "allowlist"
+        )
+
+        precondition(environment["MCI_DEVELOPMENT_FILE_KEY"] == "1")
+        precondition(environment["MCI_DB_KEY_FILE"] == keyURL.path)
+        precondition(environment["MCI_DB_KEYCHAIN_SERVICE"] == nil)
+        precondition(environment["MCI_DB_KEYCHAIN_ACCOUNT"] == nil)
     }
 
     private static func expectPreparedEnvironmentError(
