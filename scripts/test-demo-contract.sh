@@ -12,6 +12,7 @@ fail() {
 grep -Fq 'MCI_DEMO_ROOT' "$DEMO" || fail "demo root must be configurable"
 grep -Fq 'hippocampus-demo-${UID}' "$DEMO" || fail "default demo root must be disposable and per-user"
 grep -Fq 'CFFIXED_USER_HOME="$DEMO_HOME"' "$DEMO" || fail "Foundation apps must resolve user-domain paths inside the disposable home"
+grep -Fq 'KEY_FILE="$MCI_DIR/dev.key"' "$DEMO" || fail "seeders and packaged development app must share one fixed key path"
 grep -Fq 'Contents/MacOS/recall-ui' "$DEMO" || fail "visual demo must use the bundled Recall executable"
 grep -Fq 'MCI_INITIAL_TAB=now' "$DEMO" || fail "visual demo must open on the useful Now surface"
 grep -Fq 'MCI_DB_KEYCHAIN_SERVICE' "$DEMO" || fail "demo commands must avoid the production Keychain reference"
