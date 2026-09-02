@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `130e5f1`
+Audited code baseline: `b3120bb`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -19,6 +19,11 @@ more than this page.
   source priority, and canonical event citations. Claude Code and Codex
   registration is structural, idempotent, ownership-safe, and records only a
   database path plus Keychain service/account references.
+- Daily briefs work without a model download. The deterministic extractive
+  author removes capture headers and duplicate OCR churn, prioritizes explicit
+  changes and open loops, caps output at nine bullets, and cites the exact
+  canonical event behind every bullet. Stored author provenance distinguishes
+  this path from optional experimental model output.
 - Event, range, retention, and full-brain deletion remove last-reference
   encrypted keyframe blobs. Every retention cycle also reconciles canonical
   crash orphans and stale managed temporary files after a one-hour grace
@@ -75,6 +80,10 @@ more than this page.
   installation does not include XCTest, so full Swift package test execution
   requires full Xcode or CI; production package builds and executable fixtures
   remain locally runnable.
+- A `178 MB` debug ad-hoc app assembled from the audited code with Arctic Embed
+  S as its only bundled model, passed model validation, and survived the
+  disposable-home first-launch gate with onboarding attached. This proves a
+  runnable development bundle, not a distributable Apple release.
 - A throwaway-home E2E installs the engine, starts with capture disabled,
   imports 20 synthetic events, injects one shared-encoder `OCREvent` through
   production `--drain-stdin --strict`, derives episodes, persists and reads
@@ -125,10 +134,12 @@ more than this page.
   Developer ID-signed, notarized public release.
 - A verified local Arctic Embed S Core ML bundle is present in the gitignored
   development model directory and is included by debug ad-hoc assembly, so that
-  artifact supports semantic recall. BERT NER and the release Qwen3 bundle plus
-  tokenizer remain absent from this worktree; generated briefs stay unavailable
-  in the assembled development app. The immutable release archive is still
-  incomplete, and the debug app is not distributable.
+  artifact supports semantic recall. It is the sole required release model.
+  BERT NER is absent and Tier-1 entity extraction remains active. Qwen3 is
+  absent and evidence-cited extractive briefs remain active. Qwen is an
+  optional custom-build experiment, not a shipped download or release gate.
+  The immutable Arctic release archive is still unprovisioned, and the debug
+  app is not distributable.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status
@@ -165,8 +176,8 @@ benchmark fine print.
   CPU, memory, disk, pause, and protected-surface observations.
 - Run the focused-window overlap gate on an unlocked Mac, prove live TCC
   revocation behavior, then complete the 30-minute resource and privacy soak.
-- Reconstruct the immutable model archive named by `release-models.json` and
-  pass every model integrity/completeness check.
+- Provision and reconstruct the immutable Arctic retrieval archive named by
+  `release-models.json`, then pass its integrity and completeness checks.
 - Install full Xcode, a Developer ID Application identity with private key,
   and the `notarytool-profile`; verify the Sparkle private/public pair without
   recording secret values.
