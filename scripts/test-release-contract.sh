@@ -12,6 +12,7 @@ INFO_PLIST="$REPO_ROOT/apps/hippocampus/Resources/Info.plist"
 RELEASE_CI="$REPO_ROOT/.github/workflows/release-contract.yml"
 INSTALLER="$REPO_ROOT/scripts/build-installer.sh"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
+CAPTURE_HELPER_MAIN="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift"
 BRIEF_PRESENCE="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/BriefModelPresence.swift"
 CONVERT_EMBEDDER="$REPO_ROOT/scripts/convert_embedder.py"
 CONVERT_NER="$REPO_ROOT/scripts/convert_ner.py"
@@ -337,6 +338,10 @@ require_literal "$RELEASE_CI" "'release-models.json'" \
     'release CI watches the tag-owned model manifest'
 reject_pattern "$CARGO" 'continue-on-error:[[:space:]]*true' \
     'Clippy is a blocking CI gate'
+require_literal "$CAPTURE_HELPER_MAIN" 'let tccStatusMonitor = TCCStatusMonitor()' \
+    'capture helper constructs the live TCC monitor'
+require_literal "$CAPTURE_HELPER_MAIN" 'tccStatusMonitor: tccStatusMonitor' \
+    'capture helper passes the TCC monitor into the live session'
 
 if [[ -f "$TOML_LICENSE_TEST" && -f "$TOML_LICENSE_VERIFIER" ]]; then
     pass 'TOML dependency license gate and verifier are committed'

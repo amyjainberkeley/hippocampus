@@ -457,14 +457,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // first debounced verdict lands).
         screenShareDetector?.start()
 
-        // Cycle 8.45 audit risk #2 — seed the initial TCC snapshot
-        // (so the first tick does NOT fire spurious "revoked"
-        // transitions for surfaces already in their boot state) then
-        // start the poll. Any subsequent revoke fires
+        // Seed and apply the initial TCC snapshot before the helper can
+        // represent this session as healthy. A denied boot surface pauses
+        // the stream and emits the same actionable breadcrumb as a mid-run
+        // revoke. Any subsequent revoke fires
         // `tccStatusDidTransition` on this session (observer conformance
         // below), which drives pauseForTCC.
-        tccStatusMonitor?.seedInitialSnapshot()
-        tccStatusMonitor?.start()
+        await activateTCCMonitoring()
     }
 
     /// Stop the live capture stream (idempotent).
@@ -908,6 +907,19 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     }
 
     // MARK: - Cycle 8.45 — TCC pause/resume
+
+    /// Apply the boot-time permission snapshot, then begin transition
+    /// monitoring. The monitor itself intentionally does not emit callbacks
+    /// while seeding, so startup owns the initial fail-closed state explicitly.
+    internal func activateTCCMonitoring() async {
+        guard let tccStatusMonitor else { return }
+        tccStatusMonitor.seedInitialSnapshot()
+        let initialStatuses = tccStatusMonitor.currentStatuses()
+        for surface in TCCSurface.allCases where initialStatuses[surface] == .denied {
+            await pauseForTCC(surface: surface)
+        }
+        tccStatusMonitor.start()
+    }
 
     /// Pause the live SCStream because the TCC monitor observed a
     /// mid-run permission revoke. Idempotent per-surface. Emits a

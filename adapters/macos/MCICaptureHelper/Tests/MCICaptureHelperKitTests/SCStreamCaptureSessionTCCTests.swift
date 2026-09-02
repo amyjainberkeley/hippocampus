@@ -18,6 +18,18 @@ import XCTest
 @testable import MCICaptureHelperKit
 
 private enum TCCFixtures {
+    private final class FixedProbe: TCCProbe, @unchecked Sendable {
+        private let statuses: [TCCSurface: TCCStatus]
+
+        init(statuses: [TCCSurface: TCCStatus]) {
+            self.statuses = statuses
+        }
+
+        func status(for surface: TCCSurface) -> TCCStatus {
+            statuses[surface] ?? .unknown
+        }
+    }
+
     private struct NoSEI: SecureEventInputProbe {
         func isSecureEventInputEnabled() -> Bool { false }
     }
@@ -43,7 +55,9 @@ private enum TCCFixtures {
         func write(_: Data) async throws {}
     }
 
-    static func makeSession() -> SCStreamCaptureSession {
+    static func makeSession(
+        initialTCCStatuses: [TCCSurface: TCCStatus]? = nil
+    ) -> SCStreamCaptureSession {
         let cascade = SuppressionCascade(
             secureEventInput: NoSEI(),
             axSecureSubrole: AXNonSecure(),
@@ -56,14 +70,35 @@ private enum TCCFixtures {
             encoder: NoopEncoder(),
             sink: NoopSink()
         )
+        let monitor = initialTCCStatuses.map {
+            TCCStatusMonitor(
+                probe: FixedProbe(statuses: $0),
+                pollIntervalNs: UInt64.max,
+                surfaces: Array($0.keys)
+            )
+        }
         return SCStreamCaptureSession(
             pipeline: pipeline,
-            denylist: Denylist(entries: [])
+            denylist: Denylist(entries: []),
+            tccStatusMonitor: monitor
         )
     }
 }
 
 final class SCStreamCaptureSessionTCCTests: XCTestCase {
+    func testInitialDeniedSnapshotPausesBeforeHealthyRuntime() async {
+        let session = TCCFixtures.makeSession(initialTCCStatuses: [
+            .screenRecording: .granted,
+            .accessibility: .denied,
+        ])
+
+        await session.activateTCCMonitoring()
+
+        XCTAssertTrue(session.isPausedForTCCForTest())
+        XCTAssertEqual(session.revokedSurfacesForTest(), [.accessibility])
+        try? await session.stop()
+    }
+
     // 1
     func testPauseForTCCSetsFlagAndRecordsSurface() async {
         let session = TCCFixtures.makeSession()

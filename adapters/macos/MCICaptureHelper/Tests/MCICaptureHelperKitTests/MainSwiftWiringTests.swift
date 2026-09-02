@@ -203,6 +203,19 @@ final class MainSwiftWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("exit(79)"), "SCStream startup failure must exit nonzero")
     }
 
+    func test_main_swift_wires_tcc_monitor_into_capture_session() throws {
+        let src = try Self.readMainSwift()
+
+        XCTAssertTrue(
+            src.contains("let tccStatusMonitor = TCCStatusMonitor()"),
+            "main.swift MUST construct the live TCC monitor."
+        )
+        XCTAssertTrue(
+            src.contains("tccStatusMonitor: tccStatusMonitor"),
+            "main.swift MUST pass the TCC monitor into SCStreamCaptureSession."
+        )
+    }
+
     func test_main_uses_no_op_encoder_without_an_undrained_hevc_queue() throws {
         let src = try Self.readMainSwift()
 
