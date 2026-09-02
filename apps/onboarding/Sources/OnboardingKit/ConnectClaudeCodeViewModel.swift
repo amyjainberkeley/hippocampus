@@ -17,7 +17,7 @@ public final class ConnectClaudeCodeViewModel: ObservableObject {
         self.registrar = registrar
     }
 
-    /// Kick off `mci-agent register-mcp`. Re-entrant — if a previous
+    /// Kick off `mci-agent connect --all`. Re-entrant — if a previous
     /// attempt is already in flight (state == .running), this call is
     /// a no-op so the user double-clicking the Connect button doesn't
     /// spawn two helper processes.

@@ -1,14 +1,15 @@
 //! Tool definitions — names + MCP `tools/list` schemas.
 //!
-//! Five **read-only** tools (CSO veto-gate on any addition that mutates):
+//! Six **read-only** tools (CSO veto-gate on any addition that mutates):
 //!
 //! - [`ToolName::Recall`] — `mci_recall { query, limit }`.
 //! - [`ToolName::EventsSince`] — `mci_events_since { ts_us, limit }`.
 //! - [`ToolName::Stats`] — `mci_stats {}`.
 //! - [`ToolName::Episodes`] — `mci_episodes { limit }`.
 //! - [`ToolName::EventsByApp`] — `mci_events_by_app { app_bundle_id, limit }`.
+//! - [`ToolName::Context`] — `mci_context { focus, max_tokens, max_evidence }`.
 //!
-//! The dispatcher in `super::server` enumerates exactly these five by
+//! The dispatcher in `super::server` enumerates exactly these six by
 //! matching `ToolName::from_str`; an unknown name returns
 //! `METHOD_NOT_FOUND`, never falls through to a write surface.
 
@@ -32,6 +33,8 @@ pub enum ToolName {
     Episodes,
     /// `mci_events_by_app` — events filtered by exact app bundle id.
     EventsByApp,
+    /// `mci_context` — bounded, cited context for local agent handoff.
+    Context,
 }
 
 impl ToolName {
@@ -44,6 +47,7 @@ impl ToolName {
             Self::Stats => "mci_stats",
             Self::Episodes => "mci_episodes",
             Self::EventsByApp => "mci_events_by_app",
+            Self::Context => "mci_context",
         }
     }
 
@@ -57,6 +61,7 @@ impl ToolName {
             "mci_stats" => Some(Self::Stats),
             "mci_episodes" => Some(Self::Episodes),
             "mci_events_by_app" => Some(Self::EventsByApp),
+            "mci_context" => Some(Self::Context),
             _ => None,
         }
     }
@@ -177,6 +182,38 @@ pub fn tool_definitions() -> serde_json::Value {
                 },
                 "required": ["app_bundle_id"]
             }
+        },
+        {
+            "name": ToolName::Context.as_str(),
+            "description": "Compile a bounded, evidence-backed handoff for your current work. \
+                             Governed claims are kept separate from raw screen observations; \
+                             weak or missing sections abstain explicitly, and every rendered \
+                             item cites a canonical local event.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional project, task, or question used to focus candidate retrieval."
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Compatibility alias for focus when the caller has a project name."
+                    },
+                    "max_tokens": {
+                        "type": "integer",
+                        "description": "Maximum content-token estimate. Defaults to 1200.",
+                        "minimum": 128,
+                        "maximum": 4096
+                    },
+                    "max_evidence": {
+                        "type": "integer",
+                        "description": "Maximum distinct event citations. Defaults to 24.",
+                        "minimum": 1,
+                        "maximum": 64
+                    }
+                }
+            }
         }
     ])
 }
@@ -193,6 +230,7 @@ mod tests {
             ToolName::Stats,
             ToolName::Episodes,
             ToolName::EventsByApp,
+            ToolName::Context,
         ] {
             assert_eq!(ToolName::from_wire(t.as_str()), Some(t));
         }
@@ -206,10 +244,10 @@ mod tests {
     }
 
     #[test]
-    fn tool_definitions_has_five_entries() {
+    fn tool_definitions_has_six_entries() {
         let defs = tool_definitions();
         let arr = defs.as_array().expect("tools is an array");
-        assert_eq!(arr.len(), 5);
+        assert_eq!(arr.len(), 6);
         let names: Vec<&str> = arr
             .iter()
             .map(|t| t.get("name").and_then(|n| n.as_str()).unwrap_or(""))
@@ -219,6 +257,7 @@ mod tests {
         assert!(names.contains(&"mci_stats"));
         assert!(names.contains(&"mci_episodes"));
         assert!(names.contains(&"mci_events_by_app"));
+        assert!(names.contains(&"mci_context"));
     }
 
     #[test]

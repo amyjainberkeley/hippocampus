@@ -75,8 +75,8 @@ struct StatusMenuView: View {
 
             briefsMenuItem
 
-            Button("Connect to Claude Code…") {
-                connectToClaude()
+            Button("Connect AI Tools…") {
+                connectAITools()
             }
             .disabled(mcpRegistering)
 
@@ -380,15 +380,15 @@ struct StatusMenuView: View {
         onRequestRestart()
     }
 
-    private func connectToClaude() {
+    private func connectAITools() {
         guard let agentPath = supervisor.agentBinaryPath else {
             // Cycle 8.54 copy audit — plain-English replacement for the
             // engineer-only "mci-agent binary not found." Users have no
             // context for what "mci-agent" is.
             showAlert(
-                title: "Couldn\u{2019}t connect to Claude Code",
+                title: "Couldn\u{2019}t connect AI tools",
                 message:
-                    "Hippocampus can\u{2019}t find its Claude Code "
+                    "Hippocampus can\u{2019}t find its agent "
                     + "connector. Try reinstalling Hippocampus."
             )
             return
@@ -398,7 +398,7 @@ struct StatusMenuView: View {
         Task.detached {
             let proc = ChildProcessEnvironment.makeProcess(baseEnvironment: childEnvironment)
             proc.executableURL = agentPath
-            proc.arguments = ["register-mcp"]
+            proc.arguments = ["connect", "--all"]
             let outPipe = Pipe()
             let errPipe = Pipe()
             proc.standardOutput = outPipe
@@ -410,9 +410,9 @@ struct StatusMenuView: View {
                 await MainActor.run {
                     mcpRegistering = false
                     // Cycle 8.54 copy audit — user-facing title + no
-                    // "register-mcp" jargon leak.
+                    // Internal connector jargon should not leak here.
                     showAlert(
-                        title: "Couldn\u{2019}t connect to Claude Code",
+                        title: "Couldn\u{2019}t connect AI tools",
                         message:
                             "Try again in a moment — if it keeps "
                             + "happening, use \u{201C}Send Feedback\u{201D} "
@@ -427,7 +427,7 @@ struct StatusMenuView: View {
                 mcpRegistering = false
                 if proc.terminationStatus == 0 {
                     let msg = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-                    showAlert(title: "Connected", message: msg.isEmpty ? "Hippocampus registered with Claude Code. Restart Claude Code to connect." : msg)
+                    showAlert(title: "Connected", message: msg.isEmpty ? "Hippocampus connected the AI tools installed on this Mac." : msg)
                 } else {
                     // Cycle 8.54 copy audit — never surface raw
                     // "exited with code -N" to the user. Stderr detail
@@ -436,7 +436,7 @@ struct StatusMenuView: View {
                     // instead of the exit-code leak.
                     let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                     showAlert(
-                        title: "Couldn\u{2019}t connect to Claude Code",
+                        title: "Couldn\u{2019}t connect AI tools",
                         message: detail.isEmpty
                             ? "Try again in a moment — if it keeps happening, "
                               + "use \u{201C}Send Feedback\u{201D} from the menu bar."

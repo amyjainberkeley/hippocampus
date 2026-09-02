@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: TBD-private
 import Foundation
 
-/// Protocol for the `mci-agent register-mcp` invocation used by the
-/// Connect-to-Claude-Code onboarding slide. Behind a protocol so unit
+/// Protocol for the `mci-agent connect --all` invocation used by the
+/// AI-tools onboarding slide. Behind a protocol so unit
 /// tests can swap a stub instead of spawning a real process.
 ///
 /// Production impl: `DefaultClaudeCodeRegistrar` finds `mci-agent` at
 /// the sibling path next to the onboarding executable and runs
-/// `mci-agent register-mcp`, mirroring the wiring in
-/// `StatusMenuView.connectToClaude()` in HippocampusKit. We duplicate
+/// `mci-agent connect --all`, mirroring the wiring in
+/// `StatusMenuView.connectAITools()` in HippocampusKit. We duplicate
 /// (not import) that logic because OnboardingKit deliberately has no
 /// dependency on HippocampusKit (each package builds in isolation per
 /// Package.swift).
 public protocol ClaudeCodeRegistrar: Sendable {
     /// Run the registration. On success returns the stdout/result
-    /// message the user should see ("Hippocampus registered with Claude
-    /// Code. Restart Claude Code to connect."). On failure throws a
+    /// message the user should see. On failure throws a
     /// `ClaudeCodeRegistrarError` whose `message` is the user-facing
     /// diagnostic.
     func register() async throws -> String
@@ -38,18 +37,18 @@ public enum ClaudeCodeRegistrarError: Error, Equatable {
         // remain available via the associated values for logging.
         switch self {
         case .agentNotFound:
-            return "Hippocampus can\u{2019}t find its Claude Code connector. Try reinstalling Hippocampus."
+            return "Hippocampus can\u{2019}t find its agent connector. Try reinstalling Hippocampus."
         case .launchFailed:
-            return "Couldn\u{2019}t connect to Claude Code. Try again — if it keeps happening, use \u{201C}Send Feedback\u{201D} from the menu bar."
+            return "Couldn\u{2019}t connect AI tools. Try again — if it keeps happening, use \u{201C}Send Feedback\u{201D} from the menu bar."
         case .nonZeroExit(_, let stderr):
             return stderr.isEmpty
-                ? "Couldn\u{2019}t connect to Claude Code. Try again — if it keeps happening, use \u{201C}Send Feedback\u{201D} from the menu bar."
+                ? "Couldn\u{2019}t connect AI tools. Try again — if it keeps happening, use \u{201C}Send Feedback\u{201D} from the menu bar."
                 : stderr
         }
     }
 }
 
-/// Default registrar — spawns `mci-agent register-mcp` as a child
+/// Default registrar — spawns `mci-agent connect --all` as a child
 /// process and captures stdout / stderr. The agent binary is expected
 /// to sit alongside the onboarding executable inside
 /// `Hippocampus.app/Contents/MacOS/`.
@@ -74,9 +73,9 @@ public struct DefaultClaudeCodeRegistrar: ClaudeCodeRegistrar {
     public var manualCommand: String {
         // Quote-stable across shells. The path embeds the user's home,
         // so we don't dare interpolate it into a `pbcopy`-friendly
-        // string; users can always type `mci-agent register-mcp` once
+        // string; users can always type `mci-agent connect --all` once
         // it's on PATH.
-        "mci-agent register-mcp"
+        "mci-agent connect --all"
     }
 
     public func register() async throws -> String {
@@ -86,7 +85,7 @@ public struct DefaultClaudeCodeRegistrar: ClaudeCodeRegistrar {
 
         let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = agentURL
-        proc.arguments = ["register-mcp"]
+        proc.arguments = ["connect", "--all"]
         let stdout = Pipe()
         let stderr = Pipe()
         proc.standardOutput = stdout
@@ -113,7 +112,7 @@ public struct DefaultClaudeCodeRegistrar: ClaudeCodeRegistrar {
 
         if proc.terminationStatus == 0 {
             if !out.isEmpty { return out }
-            return "Hippocampus registered with Claude Code. Restart Claude Code to connect."
+            return "Hippocampus connected the AI tools installed on this Mac."
         } else {
             throw ClaudeCodeRegistrarError.nonZeroExit(
                 code: proc.terminationStatus,

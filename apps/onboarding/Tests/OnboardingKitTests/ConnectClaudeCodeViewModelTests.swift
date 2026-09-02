@@ -4,7 +4,7 @@ import XCTest
 private struct StubRegistrar: ClaudeCodeRegistrar {
     let result: Result<String, ClaudeCodeRegistrarError>
     let delay: UInt64
-    let manualCommand: String = "mci-agent register-mcp"
+    let manualCommand: String = "mci-agent connect --all"
 
     func register() async throws -> String {
         if delay > 0 {
@@ -108,7 +108,7 @@ final class ConnectClaudeCodeViewModelTests: XCTestCase {
         let vm = ConnectClaudeCodeViewModel(
             registrar: StubRegistrar(result: .success("ok"), delay: 0)
         )
-        XCTAssertEqual(vm.manualCommand, "mci-agent register-mcp")
+        XCTAssertEqual(vm.manualCommand, "mci-agent connect --all")
     }
 }
 

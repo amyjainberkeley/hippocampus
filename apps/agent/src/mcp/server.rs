@@ -7,9 +7,9 @@
 //!
 //! # Read-only invariant (structural)
 //!
-//! [`Server::dispatch`] reaches the `BrainReader` only via five named
+//! [`Server::dispatch`] reaches the `BrainReader` only via six named
 //! arms — `Recall` / `EventsSince` / `Stats` / `Episodes` /
-//! `EventsByApp`. There is **no fall-through** branch that touches the
+//! `EventsByApp` / `Context`. There is **no fall-through** branch that touches the
 //! brain; an unknown tool name returns `METHOD_NOT_FOUND` synchronously.
 //! The `BrainReader` trait itself has no mutating methods (per
 //! `brain_reader.rs`).
@@ -22,6 +22,7 @@ use std::sync::{
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
+use crate::context_packet::ContextBudget;
 use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 use crate::mcp::jsonrpc::{
     JsonRpcId, JsonRpcRequest, JsonRpcResponse, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
@@ -37,6 +38,14 @@ const MAX_EPISODES_LIMIT: usize = 100;
 const DEFAULT_EVENTS_BY_APP_LIMIT: usize = 50;
 /// Hard cap for `mci_events_by_app`'s `limit` parameter.
 const MAX_EVENTS_BY_APP_LIMIT: usize = 500;
+/// Default content-token budget for `mci_context`.
+const DEFAULT_CONTEXT_TOKENS: usize = 1200;
+/// Allowed content-token bounds for `mci_context`.
+const MIN_CONTEXT_TOKENS: usize = 128;
+const MAX_CONTEXT_TOKENS: usize = 4096;
+/// Default and maximum citation counts for `mci_context`.
+const DEFAULT_CONTEXT_EVIDENCE: usize = 24;
+const MAX_CONTEXT_EVIDENCE: usize = 64;
 
 /// MCP protocol version this server advertises in `initialize`.
 ///
@@ -75,6 +84,8 @@ pub struct ServerCounters {
     pub episodes_count: AtomicU64,
     /// `mci_events_by_app` invocations.
     pub events_by_app_count: AtomicU64,
+    /// `mci_context` invocations.
+    pub context_count: AtomicU64,
     /// Frames that did not parse as JSON-RPC 2.0.
     pub parse_error_count: AtomicU64,
     /// Frames that named an unknown method or unknown tool.
@@ -84,13 +95,14 @@ pub struct ServerCounters {
 impl ServerCounters {
     /// Snapshot the counters atomically-as-of-now.
     #[must_use]
-    pub fn snapshot(&self) -> (u64, u64, u64, u64, u64, u64, u64) {
+    pub fn snapshot(&self) -> (u64, u64, u64, u64, u64, u64, u64, u64) {
         (
             self.recall_count.load(Ordering::SeqCst),
             self.events_since_count.load(Ordering::SeqCst),
             self.stats_count.load(Ordering::SeqCst),
             self.episodes_count.load(Ordering::SeqCst),
             self.events_by_app_count.load(Ordering::SeqCst),
+            self.context_count.load(Ordering::SeqCst),
             self.parse_error_count.load(Ordering::SeqCst),
             self.unknown_method_count.load(Ordering::SeqCst),
         )
@@ -194,7 +206,8 @@ impl Server {
                     what you see on your Mac and stores it in a private, encrypted, local-only \
                     brain. You can search it with mci_recall, browse recent activity with \
                     mci_events_since, check capture status with mci_stats, see work sessions \
-                    with mci_episodes, or filter by app with mci_events_by_app. All data stays \
+                    with mci_episodes, filter by app with mci_events_by_app, or request a \
+                    bounded cited handoff with mci_context. All data stays \
                     on this Mac — nothing is sent to any server.",
             }),
         )
@@ -236,7 +249,7 @@ impl Server {
             return JsonRpcResponse::err(id, METHOD_NOT_FOUND, format!("unknown tool: {name}"));
         };
 
-        // STRUCTURAL READ-ONLY POINT — five named branches, no fall-through.
+        // STRUCTURAL READ-ONLY POINT — six named branches, no fall-through.
         match tool {
             ToolName::Recall => {
                 self.counters.recall_count.fetch_add(1, Ordering::SeqCst);
@@ -261,6 +274,10 @@ impl Server {
                     .events_by_app_count
                     .fetch_add(1, Ordering::SeqCst);
                 self.handle_events_by_app(id, args)
+            }
+            ToolName::Context => {
+                self.counters.context_count.fetch_add(1, Ordering::SeqCst);
+                self.handle_context(id, args)
             }
         }
     }
@@ -489,6 +506,62 @@ impl Server {
                 )
             }
             Err(e) => brain_err_to_response(id, &e),
+        }
+    }
+
+    fn handle_context(&self, id: JsonRpcId, args: serde_json::Value) -> JsonRpcResponse {
+        #[derive(Deserialize)]
+        struct ContextArgs {
+            #[serde(default)]
+            focus: Option<String>,
+            #[serde(default)]
+            project: Option<String>,
+            #[serde(default)]
+            max_tokens: Option<usize>,
+            #[serde(default)]
+            max_evidence: Option<usize>,
+        }
+        let parsed = match serde_json::from_value::<ContextArgs>(args) {
+            Ok(value) => value,
+            Err(error) => {
+                return JsonRpcResponse::err(
+                    id,
+                    INVALID_PARAMS,
+                    format!("mci_context args: {error}"),
+                )
+            }
+        };
+        let focus_value = parsed.focus.or(parsed.project);
+        let focus = focus_value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let budget = ContextBudget::new(
+            parsed
+                .max_tokens
+                .unwrap_or(DEFAULT_CONTEXT_TOKENS)
+                .clamp(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS),
+            parsed
+                .max_evidence
+                .unwrap_or(DEFAULT_CONTEXT_EVIDENCE)
+                .clamp(1, MAX_CONTEXT_EVIDENCE),
+        );
+
+        match self.reader.context(focus, budget) {
+            Ok(packet) => {
+                let text = serde_json::to_string(&packet).unwrap_or_else(|_| {
+                    "{\"outcome\":\"nothing_available\",\"serialization_error\":true}".to_owned()
+                });
+                JsonRpcResponse::ok(
+                    id,
+                    serde_json::json!({
+                        "content": [{"type": "text", "text": text}],
+                        "packet": packet,
+                        "isError": false,
+                    }),
+                )
+            }
+            Err(error) => brain_err_to_response(id, &error),
         }
     }
 }

@@ -35,6 +35,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mci_agent::alias_resolver_worker;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::brief_worker;
+use mci_agent::client_registry::{
+    ClientRegistration, ClientRegistry, RegistrationChange, RegistrationStatus,
+};
 use mci_agent::consolidator_worker;
 use mci_agent::crash_recovery::{
     acquire_lock, default_lock_path, release_lock, LockAcquireOutcome,
@@ -44,7 +47,7 @@ use mci_agent::episode_worker;
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
 use mci_agent::idle_batch;
-use mci_agent::key_resolver::{self, mcp_registration_env};
+use mci_agent::key_resolver;
 use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
 use mci_agent::page_content::PageContentListener;
 use mci_agent::panic_uploader::{self, PanicUploader};
@@ -158,6 +161,10 @@ enum Mode {
     RegisterMcp {
         db_path: PathBuf,
     },
+    /// Register the read-only memory server with every detected local client.
+    ConnectAll {
+        db_path: PathBuf,
+    },
     /// Cycle 8.29 P0 #3 — empirical "is content reaching the brain
     /// from `source`?" probe. Used by
     /// `OnboardingKit.RealBrowserDetector.checkExtensionInstalled` to
@@ -249,6 +256,7 @@ fn parse_args(argv: &[String]) -> Args {
             "--health-summary" => mode_kind = ModeKind::HealthSummary,
             "mcp-serve" => mode_kind = ModeKind::McpServe,
             "register-mcp" => mode_kind = ModeKind::RegisterMcp,
+            "connect" => mode_kind = ModeKind::ConnectAll,
             "stats" => mode_kind = ModeKind::Stats,
             "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
             "enrich" => mode_kind = ModeKind::Enrich,
@@ -347,6 +355,9 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::RegisterMcp => Mode::RegisterMcp {
             db_path: resolved_db_path,
         },
+        ModeKind::ConnectAll => Mode::ConnectAll {
+            db_path: resolved_db_path,
+        },
         ModeKind::Stats => Mode::Stats {
             source: stats_source,
             since_seconds: stats_since_seconds,
@@ -401,6 +412,7 @@ enum ModeKind {
     HealthSummary,
     McpServe,
     RegisterMcp,
+    ConnectAll,
     Stats,
     EmbedBackfill,
     Enrich,
@@ -424,9 +436,11 @@ fn print_usage() {
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 connect --all              register Hippocampus with detected Claude Code and\n\
+        \x20                            Codex clients without serializing a database key\n\
         \x20 init                       one-command setup: make a key, import your\n\
-        \x20                            Claude Code history, index it, and register\n\
-        \x20                            with Claude Code as an MCP server\n\
+        \x20                            Claude Code history, index it, and connect\n\
+        \x20                            detected Claude Code and Codex clients\n\
         \x20 ensure-key                 initialize or validate the bundled macOS\n\
         \x20                            Keychain item without importing data\n\
         \x20 import-sessions            import Claude Code transcripts from\n\
@@ -1091,6 +1105,10 @@ async fn main() -> ExitCode {
                 ExitCode::from(14)
             }
         },
+        Mode::ConnectAll { db_path } => match run_connect_all_cmd(&db_path) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::Init { db_path, root } => match run_init_cmd(&db_path, &root) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
@@ -1319,79 +1337,60 @@ fn resolve_key_for_command(command: &str) -> Result<String, u8> {
 /// so a user who imported into any other path would register a server that
 /// opens an empty (or absent) database and reports success while doing it.
 fn register_mcp(db_path: &Path) -> Result<(), String> {
-    use std::fs::Permissions;
-    use std::os::unix::fs::PermissionsExt;
-
-    let exe =
-        std::env::current_exe().map_err(|e| format!("cannot resolve own binary path: {e}"))?;
-    let exe_str = exe.to_str().ok_or("binary path is not valid UTF-8")?;
-    let db_str = db_path.to_str().ok_or("brain path is not valid UTF-8")?;
-
-    let home = std::env::var("HOME").map_err(|_| "HOME not set")?;
-    let settings_path = PathBuf::from(&home).join(".claude.json");
-
-    let mut root: serde_json::Map<String, serde_json::Value> = if settings_path.exists() {
-        let content = std::fs::read_to_string(&settings_path)
-            .map_err(|e| format!("read {}: {e}", settings_path.display()))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("parse {}: {e}", settings_path.display()))?
-    } else {
-        serde_json::Map::new()
-    };
-
-    let mut hippocampus_entry = serde_json::json!({
-        "type": "stdio",
-        "command": exe_str,
-        "args": ["mcp-serve"]
-    });
-    hippocampus_entry["env"] = serde_json::to_value(mcp_registration_env(db_str))
-        .map_err(|e| format!("serialize keychain reference: {e}"))?;
-
-    let servers = root
-        .entry("mcpServers")
-        .or_insert_with(|| serde_json::json!({}));
-    if let Some(obj) = servers.as_object_mut() {
-        if obj.contains_key("hippocampus") {
-            let existing = &obj["hippocampus"];
-            if existing.get("command").and_then(|v| v.as_str()) == Some(exe_str)
-                && existing.get("env") == hippocampus_entry.get("env")
-            {
-                println!(
-                    "Hippocampus already registered with Claude Code (path and Keychain reference unchanged)."
-                );
-                return Ok(());
-            }
+    let registry = ClientRegistry::discover()?;
+    match registry
+        .register_claude(db_path)
+        .map_err(|error| error.to_string())?
+    {
+        RegistrationChange::Updated => {
+            println!("Hippocampus registered with Claude Code. Restart Claude Code to connect.");
         }
-        obj.insert("hippocampus".to_owned(), hippocampus_entry);
+        RegistrationChange::AlreadyCurrent => {
+            println!("Hippocampus is already registered with Claude Code.");
+        }
     }
-
-    let output =
-        serde_json::to_string_pretty(&root).map_err(|e| format!("serialize settings: {e}"))?;
-    // Write through a sibling temp file and rename. `~/.claude.json` holds
-    // every MCP server and setting the user has; a truncated write from a
-    // full disk or a signal would take all of it, not just our entry.
-    // rename(2) within a directory is atomic, so the file is either the old
-    // one or the new one and never a prefix of the new one.
-    let tmp_path = settings_path.with_extension(format!("json.tmp-{}", std::process::id()));
-    std::fs::write(&tmp_path, output.as_bytes())
-        .map_err(|e| format!("write {}: {e}", tmp_path.display()))?;
-
-    // rename(2) replaces the destination's mode with the temp file's.
-    // Carry the old mode across; a file we are creating starts at 0600
-    // so future client metadata can stay private by default.
-    let mode = std::fs::metadata(&settings_path).map_or(0o600, |m| m.permissions().mode() & 0o777);
-    if let Err(e) = std::fs::set_permissions(&tmp_path, Permissions::from_mode(mode)) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(format!("set mode on {}: {e}", tmp_path.display()));
-    }
-
-    if let Err(e) = std::fs::rename(&tmp_path, &settings_path) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(format!("replace {}: {e}", settings_path.display()));
-    }
-
-    println!("Hippocampus registered with Claude Code. Restart Claude Code to connect.");
     Ok(())
+}
+
+fn run_connect_all_cmd(db_path: &Path) -> Result<(), u8> {
+    let registry = ClientRegistry::discover().map_err(|error| {
+        eprintln!("mci-agent connect --all: {error}");
+        14
+    })?;
+    let report = registry.connect_all(db_path);
+    let claude_failed = print_client_registration("Claude Code", &report.claude);
+    let codex_failed = print_client_registration("Codex", &report.codex);
+    if claude_failed || codex_failed {
+        Err(14)
+    } else {
+        Ok(())
+    }
+}
+
+fn print_client_registration(name: &str, registration: &ClientRegistration) -> bool {
+    match registration.status {
+        RegistrationStatus::Registered => {
+            println!("  {name:<11} connected");
+            false
+        }
+        RegistrationStatus::Unchanged => {
+            println!("  {name:<11} already connected");
+            false
+        }
+        RegistrationStatus::NotInstalled => {
+            println!("  {name:<11} not installed, skipped");
+            false
+        }
+        RegistrationStatus::BlockedMalformed
+        | RegistrationStatus::NameConflict
+        | RegistrationStatus::Failed => {
+            eprintln!(
+                "  {name:<11} failed: {}",
+                registration.detail.as_deref().unwrap_or("unknown error")
+            );
+            true
+        }
+    }
 }
 
 /// Resolve the `SQLCipher` key from the production Keychain reference, open the brain,
@@ -1692,15 +1691,12 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
     // 3. Index.
     run_enrich_cmd(db_path, DEFAULT_EMBED_BATCH_SIZE)?;
 
-    // 4. Register with Claude Code.
-    match register_mcp(db_path) {
-        Ok(()) => println!("  mcp      registered with Claude Code"),
-        Err(e) => println!("  mcp      not registered: {e}"),
-    }
+    // 4. Register every detected local client with reference-only custody.
+    run_connect_all_cmd(db_path)?;
 
     println!("\nDone. Try it:\n");
     println!("  mci-brain search \"some phrase you remember\"");
-    println!("\nOr restart Claude Code and ask it what you were working on.");
+    println!("\nOr restart Claude Code or Codex and ask what you were working on.");
     println!("Run `mci-agent doctor` if anything looks wrong.");
     Ok(())
 }

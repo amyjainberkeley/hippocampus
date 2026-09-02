@@ -40,6 +40,10 @@ use mci_brain::{
 };
 use mci_core::crypto::DbKey;
 
+use crate::context_packet::{
+    compile_context_packet, ContextBudget, ContextEvidence, ContextPacket, ContextSources,
+    EvidencePriority,
+};
 use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 
 // ---------------------------------------------------------------------------
@@ -430,6 +434,24 @@ impl LiveBrainReader {
         }
         Ok(out)
     }
+
+    fn context_evidence_from_hit(
+        &self,
+        hit: &McpHit,
+    ) -> Result<Option<ContextEvidence>, BrainReaderError> {
+        let Some(event) = self
+            .store
+            .get_event(hit.record.event_id)
+            .map_err(|error| BrainReaderError::Backend(format!("get context event: {error}")))?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ContextEvidence::from_event(
+            &event,
+            EvidencePriority::Focused,
+            Some(hit.score),
+        )))
+    }
 }
 
 impl BrainReader for LiveBrainReader {
@@ -473,6 +495,72 @@ impl BrainReader for LiveBrainReader {
         self.store
             .events_by_app_bundle_id(app_bundle_id, limit)
             .map_err(|e| BrainReaderError::Backend(format!("events_by_app: {e}")))
+    }
+
+    fn context(
+        &self,
+        focus: Option<&str>,
+        budget: ContextBudget,
+    ) -> Result<ContextPacket, BrainReaderError> {
+        let now_us = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros(),
+        )
+        .unwrap_or(u64::MAX);
+        let claim_limit = budget.max_evidence.saturating_mul(4).clamp(1, 128);
+        let claims = self
+            .store
+            .memory_claims_as_of(now_us, now_us, claim_limit)
+            .map_err(|error| BrainReaderError::Backend(format!("read current claims: {error}")))?;
+        let mut evidence = Vec::new();
+
+        for claim in &claims {
+            for reference in &claim.evidence {
+                if let Some(event) = self.store.get_event(reference.event_id).map_err(|error| {
+                    BrainReaderError::Backend(format!("get claim evidence: {error}"))
+                })? {
+                    let mut candidate =
+                        ContextEvidence::from_event(&event, EvidencePriority::Claim, None);
+                    candidate.source_kind.clone_from(&reference.source_kind);
+                    evidence.push(candidate);
+                }
+            }
+        }
+
+        let candidate_limit = budget.max_evidence.saturating_mul(2).clamp(1, 100);
+        if let Some(focus) = focus.map(str::trim).filter(|value| !value.is_empty()) {
+            let recall_candidates = match self.recall(focus, candidate_limit)? {
+                McpRecallOutcome::Matched { hits } => hits,
+                McpRecallOutcome::Degraded {
+                    related_context, ..
+                } => related_context,
+                McpRecallOutcome::NothingMatched { .. } => Vec::new(),
+            };
+            for hit in &recall_candidates {
+                if let Some(candidate) = self.context_evidence_from_hit(hit)? {
+                    evidence.push(candidate);
+                }
+            }
+        } else {
+            let recent_limit = candidate_limit.min(64);
+            let recent = self.store.recent_events(recent_limit).map_err(|error| {
+                BrainReaderError::Backend(format!("read recent events: {error}"))
+            })?;
+            evidence.extend(
+                recent.iter().map(|event| {
+                    ContextEvidence::from_event(event, EvidencePriority::Recent, None)
+                }),
+            );
+        }
+
+        Ok(compile_context_packet(
+            focus,
+            now_us,
+            budget,
+            ContextSources { claims, evidence },
+        ))
     }
 }
 
