@@ -254,9 +254,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                try self.captureConsentAuthority.disable()
-                try await self.topology.stop(timeout: timeout)
-                self.stopAncillaryServices()
+                try await self.revokeConsentAndStopTopology(timeout: timeout)
                 self.state = .stopped
             } catch {
                 self.state = .crashed(reason: error.localizedDescription)
@@ -316,13 +314,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             if state == .starting {
                 transitionGate.reset()
                 do {
-                    try captureConsentAuthority.disable()
-                    try await topology.stop(timeout: 5)
+                    try await revokeConsentAndStopTopology(timeout: 5)
                     try Task.checkCancellation()
                     guard !shutdownRequested, shutdownTask == nil else {
                         throw SupervisorError.transitionInProgress
                     }
-                    stopAncillaryServices()
                     state = .paused
                 } catch {
                     if !shutdownRequested {
@@ -336,10 +332,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 throw SupervisorError.transitionInProgress
             }
             do {
-                try captureConsentAuthority.disable()
-                try await topology.stop(timeout: 5)
+                try await revokeConsentAndStopTopology(timeout: 5)
                 try ensureTransitionIsActive(transitionID)
-                stopAncillaryServices()
                 guard transitionGate.commitStopped(transitionID: transitionID) else {
                     throw SupervisorError.transitionInProgress
                 }
@@ -401,10 +395,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let prior = captureEnabled
 
         do {
-            try captureConsentAuthority.disable()
-            try await topology.stop(timeout: 5)
+            try await revokeConsentAndStopTopology(timeout: 5)
             try ensureTransitionIsActive(transitionID)
-            stopAncillaryServices()
         } catch {
             if transitionGate.ownsTransition(transitionID) {
                 transitionGate.fail(transitionID: transitionID)
@@ -594,6 +586,32 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         stopAncillaryServices()
     }
 
+    /// Consent and child-process shutdown are independent safety boundaries.
+    /// Always attempt both, then surface the strongest failure after ancillary
+    /// readers and timers have been stopped.
+    private func revokeConsentAndStopTopology(timeout: TimeInterval) async throws {
+        var consentError: Error?
+        var topologyError: Error?
+
+        do {
+            try captureConsentAuthority.disable()
+        } catch {
+            consentError = error
+            logger.error("supervisor: capture consent revocation failed: \(error.localizedDescription)")
+        }
+
+        do {
+            try await topology.stop(timeout: timeout)
+        } catch {
+            topologyError = error
+        }
+
+        stopAncillaryServices(revokeCaptureConsent: false)
+
+        if let topologyError { throw topologyError }
+        if let consentError { throw consentError }
+    }
+
     private func failStart(_ error: Error) throws -> Never {
         state = .crashed(reason: error.localizedDescription)
         throw error
@@ -678,11 +696,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         health = HealthSnapshot.readFromLog()
     }
 
-    private func stopAncillaryServices() {
-        do {
-            try captureConsentAuthority.disable()
-        } catch {
-            logger.error("supervisor: capture consent revocation failed: \(error.localizedDescription)")
+    private func stopAncillaryServices(revokeCaptureConsent: Bool = true) {
+        if revokeCaptureConsent {
+            do {
+                try captureConsentAuthority.disable()
+            } catch {
+                logger.error("supervisor: capture consent revocation failed: \(error.localizedDescription)")
+            }
         }
         safariInboxReader?.stop()
         safariInboxReader = nil

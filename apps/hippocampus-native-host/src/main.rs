@@ -310,6 +310,7 @@ fn main() {
                 } else {
                     let ack = serde_json::json!({"status": "error", "reason": "socket_write"});
                     let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+                    return;
                 }
             }
         }

@@ -50,6 +50,7 @@ public struct CaptureLaunchOptions: Sendable, Equatable {
 /// production kill switch remains engaged. This is diagnostic authorization,
 /// not a persisted setting: every independent signal must be present on the
 /// helper process that owns the isolated test brain.
+#if DEBUG
 public enum LiveOCRQualification {
     public static let flag = "--live-overlap-qualification"
 
@@ -68,3 +69,4 @@ public enum LiveOCRQualification {
             && environment["MCI_OCR_TRACE"] == "1"
     }
 }
+#endif

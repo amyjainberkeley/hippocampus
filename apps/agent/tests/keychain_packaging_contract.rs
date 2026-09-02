@@ -41,14 +41,16 @@ fn packaging_places_and_signs_every_acl_consumer_before_sealing_the_app() {
     }
 
     let developer_start = script
-        .rfind("if [[ \"$SIGNING_MODE\" == \"developer-id\" ]]")
+        .find(
+            "if [[ \"$SIGNING_MODE\" == \"developer-id\" ]]; then\n    echo \"Codesigning with Developer ID",
+        )
         .expect("developer-id signing branch");
     let ad_hoc_start = script[developer_start..]
         .find("\nelse\n    echo \"Codesigning (development-only ad-hoc)...\"")
         .map(|offset| developer_start + offset)
         .expect("ad-hoc signing branch");
     let branch_end = script[ad_hoc_start..]
-        .find("\nfi\n\n# Verify rpath")
+        .find("\nfi\n\nEXPECTED_SIGNED_TEAM_ID=")
         .map(|offset| ad_hoc_start + offset)
         .expect("signing branch end");
     let developer_branch = &script[developer_start..ad_hoc_start];
