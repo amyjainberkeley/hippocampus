@@ -17,6 +17,9 @@ struct SupervisorLifecycleBehavior {
         try await proveShutdownCancelsReadiness()
         try await proveShutdownCancelsCaptureReconfiguration()
         try await proveShutdownWinsBlockedInitialReconfigurationStop()
+        try await proveConsentRevocationFailureStillStopsTopology()
+        try await proveConsentRevocationFailureStillStopsTopologyOnPause()
+        try await proveConsentRevocationFailureStillStopsTopologyOnCaptureChange()
     }
 
     @MainActor
@@ -270,9 +273,83 @@ struct SupervisorLifecycleBehavior {
     }
 
     @MainActor
+    private static func proveConsentRevocationFailureStillStopsTopology() async throws {
+        let topology = SuspendingLifecycleTopology()
+        let consent = FixtureCaptureConsentAuthority()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer(),
+            captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        consent.failDisable = true
+
+        do {
+            try await supervisor.shutdownAndWait()
+            preconditionFailure("consent revocation failure must remain visible")
+        } catch {}
+
+        precondition(topology.stopCount == 1)
+        precondition(!topology.isRunning)
+        guard case .crashed = supervisor.state else {
+            preconditionFailure("consent revocation failure must publish a crashed state")
+        }
+    }
+
+    @MainActor
+    private static func proveConsentRevocationFailureStillStopsTopologyOnPause() async throws {
+        let topology = SuspendingLifecycleTopology()
+        let consent = FixtureCaptureConsentAuthority()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer(),
+            captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        consent.failDisable = true
+
+        do {
+            try await supervisor.setPausedAndWait(true)
+            preconditionFailure("pause must surface consent revocation failure")
+        } catch {}
+
+        precondition(topology.stopCount == 1)
+        precondition(!topology.isRunning)
+        guard case .crashed = supervisor.state else {
+            preconditionFailure("pause revocation failure must publish a crashed state")
+        }
+    }
+
+    @MainActor
+    private static func proveConsentRevocationFailureStillStopsTopologyOnCaptureChange() async throws {
+        let topology = SuspendingLifecycleTopology()
+        let consent = FixtureCaptureConsentAuthority()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer(),
+            captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        consent.failDisable = true
+
+        do {
+            try await supervisor.applyCaptureEnabled(true)
+            preconditionFailure("capture change must surface consent revocation failure")
+        } catch {}
+
+        precondition(topology.stopCount == 1)
+        precondition(!topology.isRunning)
+        precondition(!supervisor.captureEnabled)
+        guard case .crashed = supervisor.state else {
+            preconditionFailure("capture-change revocation failure must publish a crashed state")
+        }
+    }
+
+    @MainActor
     private static func makeSupervisor(
         topology: any SupervisorTopologyControlling,
-        keyCustodyPreparer: any KeyCustodyPreparing
+        keyCustodyPreparer: any KeyCustodyPreparing,
+        captureConsentAuthority: any CaptureConsentControlling = FixtureCaptureConsentAuthority()
     ) -> ProcessSupervisor {
         ProcessSupervisor(
             locator: FixtureBinaryLocator(),
@@ -280,6 +357,7 @@ struct SupervisorLifecycleBehavior {
             runtimeConfig: FixtureRuntimeConfig(),
             topology: topology,
             keyCustodyPreparer: keyCustodyPreparer,
+            captureConsentAuthority: captureConsentAuthority,
             readinessTimeout: 1
         )
     }
@@ -304,6 +382,20 @@ private struct FixtureRuntimeConfig: RuntimeConfiguring {
     var captureEnabled: Bool { false }
     func setCrashReportOptedIn(_ value: Bool) throws { _ = value }
     func setCaptureEnabled(_ value: Bool) throws { _ = value }
+}
+
+private final class FixtureCaptureConsentAuthority: CaptureConsentControlling, @unchecked Sendable {
+    var failDisable = false
+
+    func enable(generationID: String) throws { _ = generationID }
+
+    func disable() throws {
+        if failDisable { throw FixtureConsentError.revocationFailed }
+    }
+}
+
+private enum FixtureConsentError: Error {
+    case revocationFailed
 }
 
 @MainActor

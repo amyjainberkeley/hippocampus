@@ -36,6 +36,7 @@ LANES=(
     "capture-consent-behavior|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior"
     "child-process-environment|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior"
     "capture-source-policy-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior"
+    "release-ocr-killswitch|swift|test|scripts/test-release-ocr-killswitch.sh"
     "helper-readiness-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior"
     "capture-overlap-corpus|swift|test|scripts/test-capture-overlap-corpus.sh"
     "live-capture-overlap-contract|bash|test|scripts/test-live-capture-overlap-contract.sh"
@@ -98,6 +99,7 @@ LANES
     capture-consent-behavior executable capture authority and generation fixture
     child-process-environment prepared file-key authority reaches supervised children
     capture-source-policy-behavior browser pixels stay outside ambient OCR
+    release-ocr-killswitch release helper excludes development OCR qualification
     helper-readiness-behavior readiness publication is private, atomic, and add-only
     capture-overlap-corpus deterministic focused/background window fixture builds
     live-capture-overlap-contract live verifier preflight and cleanup remain fail-closed

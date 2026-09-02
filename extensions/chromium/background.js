@@ -29,9 +29,10 @@ function isPersistableTab(tab) {
 function connectNativeHost() {
   if (port) return port;
   try {
-    port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-    port.onDisconnect.addListener(() => {
-      port = null;
+    const connectedPort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+    port = connectedPort;
+    connectedPort.onDisconnect.addListener(() => {
+      if (port === connectedPort) port = null;
     });
   } catch (_e) {
     port = null;
@@ -112,7 +113,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       incognito: false,
     });
   } catch (_e) {
-    port = null;
+    if (port === nativePort) port = null;
   }
 });
 

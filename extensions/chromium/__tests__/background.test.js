@@ -5,12 +5,13 @@ import { fileURLToPath } from "node:url";
 let messageListener;
 const postMessage = vi.fn();
 const sendNativeMessage = vi.fn();
+const disconnectListeners = [];
 
 globalThis.chrome = {
   runtime: {
     sendNativeMessage,
     connectNative: vi.fn(() => ({
-      onDisconnect: { addListener: vi.fn() },
+      onDisconnect: { addListener: (listener) => disconnectListeners.push(listener) },
       postMessage,
     })),
     onMessage: {
@@ -50,6 +51,7 @@ function sender(tab) {
 
 describe("Chromium private-context relay", () => {
   beforeEach(() => {
+    for (const disconnect of disconnectListeners.splice(0)) disconnect();
     postMessage.mockClear();
     sendNativeMessage.mockReset();
     globalThis.chrome.runtime.connectNative.mockClear();
@@ -109,6 +111,43 @@ describe("Chromium private-context relay", () => {
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ incognito: false, text: "ordinary work" }),
     );
+  });
+
+  it("connects a fresh native host after the prior host disconnects", () => {
+    messageListener(pageContentMessage(), sender({ incognito: false }), () => {});
+    expect(globalThis.chrome.runtime.connectNative).toHaveBeenCalledOnce();
+    expect(disconnectListeners).toHaveLength(1);
+
+    disconnectListeners[0]();
+    messageListener(pageContentMessage(), sender({ incognito: false }), () => {});
+
+    expect(globalThis.chrome.runtime.connectNative).toHaveBeenCalledTimes(2);
+    expect(postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let an old disconnect clear the replacement host", () => {
+    messageListener(pageContentMessage(), sender({ incognito: false }), () => {});
+    const oldDisconnect = disconnectListeners[0];
+    oldDisconnect();
+    messageListener(pageContentMessage(), sender({ incognito: false }), () => {});
+
+    oldDisconnect();
+    messageListener(pageContentMessage(), sender({ incognito: false }), () => {});
+
+    expect(globalThis.chrome.runtime.connectNative).toHaveBeenCalledTimes(2);
+    expect(postMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries after native host connection construction throws", () => {
+    globalThis.chrome.runtime.connectNative.mockImplementationOnce(() => {
+      throw new Error("native host unavailable");
+    });
+
+    messageListener(pageContentMessage(), sender({ incognito: false }), () => {});
+    messageListener(pageContentMessage(), sender({ incognito: false }), () => {});
+
+    expect(globalThis.chrome.runtime.connectNative).toHaveBeenCalledTimes(2);
+    expect(postMessage).toHaveBeenCalledOnce();
   });
 
   it("declares the extension unavailable in incognito windows", () => {

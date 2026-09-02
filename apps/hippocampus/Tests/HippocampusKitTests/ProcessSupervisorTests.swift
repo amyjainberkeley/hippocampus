@@ -164,6 +164,16 @@ final class FakeApplicationRestartLauncher: ApplicationRestartLaunching {
     }
 }
 
+final class FakeCaptureConsentAuthority: CaptureConsentControlling, @unchecked Sendable {
+    var disableError: Error?
+
+    func enable(generationID: String) throws { _ = generationID }
+
+    func disable() throws {
+        if let disableError { throw disableError }
+    }
+}
+
 @MainActor
 final class ProcessSupervisorTests: XCTestCase {
     private enum TestError: LocalizedError {
@@ -176,7 +186,10 @@ final class ProcessSupervisorTests: XCTestCase {
         var errorDescription: String? { String(describing: self) }
     }
 
-    private func makeSupervisor(captureEnabled: Bool = false) -> (
+    private func makeSupervisor(
+        captureEnabled: Bool = false,
+        captureConsentAuthority: any CaptureConsentControlling = NoopCaptureConsentAuthority()
+    ) -> (
         ProcessSupervisor,
         FakeBinaryLocator,
         FakeKeyStore,
@@ -198,6 +211,7 @@ final class ProcessSupervisorTests: XCTestCase {
             runtimeConfig: config,
             topology: topology,
             keyCustodyPreparer: custody,
+            captureConsentAuthority: captureConsentAuthority,
             readinessTimeout: 0.1
         )
         return (supervisor, locator, keyStore, config, topology, custody)
@@ -603,6 +617,62 @@ final class ProcessSupervisorTests: XCTestCase {
 
         guard case .crashed = supervisor.state else {
             return XCTFail("failed shutdown must stay visible, got \(supervisor.state)")
+        }
+    }
+
+    func test_shutdown_attempts_topology_stop_when_consent_revocation_fails() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(
+            captureConsentAuthority: consent
+        )
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        consent.disableError = TestError.writeFailed
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.shutdownAndWait())
+
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertFalse(topology.isRunning)
+        guard case .crashed = supervisor.state else {
+            return XCTFail("revocation failure must be visible after shutdown")
+        }
+    }
+
+    func test_pause_attempts_topology_stop_when_consent_revocation_fails() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(
+            captureEnabled: true,
+            captureConsentAuthority: consent
+        )
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        consent.disableError = TestError.writeFailed
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.setPausedAndWait(true))
+
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertFalse(topology.isRunning)
+        guard case .crashed = supervisor.state else {
+            return XCTFail("revocation failure must be visible after pause")
+        }
+    }
+
+    func test_capture_change_attempts_topology_stop_when_consent_revocation_fails() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureConsentAuthority: consent
+        )
+        topology.readinessResults = [.success(())]
+        try await supervisor.startAndWaitForReadiness()
+        consent.disableError = TestError.writeFailed
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertEqual(config.captureWrites, [])
+        guard case .crashed = supervisor.state else {
+            return XCTFail("revocation failure must be visible after capture change")
         }
     }
 
