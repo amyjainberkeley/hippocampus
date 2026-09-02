@@ -54,13 +54,17 @@ fn stage_runner_fixture(
 
     let dataset = root.join("eval/work-memory/synthetic-v1.json");
     fs::create_dir_all(dataset.parent().expect("dataset parent")).expect("dataset directory");
-    fs::write(&dataset, "{}").expect("canonical dataset placeholder");
-    fs::create_dir_all(root.join("docs/eval")).expect("baseline directory");
-    fs::write(
-        root.join("docs/eval/work-memory-baseline.json"),
-        serde_json::to_vec_pretty(&eligible_fake_baseline()).expect("serialize accepted baseline"),
+    fs::copy(
+        repo_root.join("eval/work-memory/synthetic-v1.json"),
+        &dataset,
     )
-    .expect("write accepted baseline");
+    .expect("copy canonical dataset");
+    fs::create_dir_all(root.join("docs/eval")).expect("baseline directory");
+    fs::copy(
+        repo_root.join("docs/eval/work-memory-baseline.json"),
+        root.join("docs/eval/work-memory-baseline.json"),
+    )
+    .expect("copy accepted baseline");
 
     let fake_report_path = root.join("fake-report.json");
     fs::write(
@@ -104,15 +108,27 @@ fn eligible_fake_baseline() -> Value {
     serde_json::json!({
         "complete": true,
         "publishable": true,
+        "launch_qualified": true,
         "dataset": "eval/work-memory/synthetic-v1.json",
         "dataset_id": "synthetic-work-memory-v1",
+        "dataset_checksum_sha256": "96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f",
+        "failures": [],
+        "regression": {"passed": true, "failures": []},
+        "quality_gate": {"passed": true, "failures": []},
         "run": {
             "git_dirty_at_start": false,
             "limit": null,
             "requested_arms": ["lexical", "hybrid"],
             "ks": [1, 3, 5, 10],
             "original_instances": 24,
-            "evaluated_instances": 24
+            "evaluated_instances": 24,
+            "model_checksum_sha256": "f782f7f4a13c69a4399345f1d6a4b8de8f4327c131e537a1ea6bf9fdeaeaeef8",
+            "arguments": [
+                "--dataset", "eval/work-memory/synthetic-v1.json",
+                "--arm", "both",
+                "--out", "external-report://fake-report.json",
+                "--baseline", "docs/eval/work-memory-baseline.json"
+            ]
         }
     })
 }
@@ -809,6 +825,90 @@ fn work_memory_runner_always_forwards_the_accepted_baseline() {
         arguments.get(baseline_index + 1).copied(),
         Some("docs/eval/work-memory-baseline.json")
     );
+}
+
+#[test]
+fn work_memory_runner_rejects_a_successful_override_that_produces_no_report() {
+    let dir = tempdir().expect("tempdir");
+    let report = eligible_fake_baseline();
+    let (script, _) = stage_runner_fixture(dir.path(), &report);
+    let output_path = dir.path().join("report.json");
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", "/usr/bin/true")
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .arg("--out")
+        .arg(&output_path)
+        .output()
+        .expect("run canonical runner with a no-op benchmark override");
+
+    assert!(
+        !output.status.success(),
+        "a zero exit without a canonical report must never pass"
+    );
+    assert!(
+        !output_path.exists(),
+        "the runner must not leave an absent or unvalidated report"
+    );
+}
+
+#[test]
+fn work_memory_runner_rejects_semantically_forged_override_reports() {
+    let cases = [
+        (
+            "dataset digest",
+            "/dataset_checksum_sha256",
+            Value::String("00".repeat(32)),
+        ),
+        (
+            "baseline provenance",
+            "/run/arguments",
+            serde_json::json!([
+                "--dataset",
+                "eval/work-memory/synthetic-v1.json",
+                "--arm",
+                "both",
+                "--out",
+                "external-report://fake-report.json"
+            ]),
+        ),
+        (
+            "completion truthfulness",
+            "/regression/passed",
+            Value::Bool(false),
+        ),
+        (
+            "qualification truthfulness",
+            "/quality_gate/passed",
+            Value::Bool(false),
+        ),
+    ];
+
+    for (label, pointer, replacement) in cases {
+        let dir = tempdir().expect("tempdir");
+        let mut report = eligible_fake_baseline();
+        *report.pointer_mut(pointer).expect("fixture field") = replacement;
+        let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+        let output_path = dir.path().join("report.json");
+
+        let output = Command::new(&script)
+            .current_dir(dir.path())
+            .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+            .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+            .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+            .env("MCI_FAKE_ARGS", &fake_args_path)
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("run canonical runner with forged report");
+
+        assert!(!output.status.success(), "forged {label} must be rejected");
+        assert!(
+            !output_path.exists(),
+            "forged {label} must not be installed as the canonical report"
+        );
+    }
 }
 
 #[test]

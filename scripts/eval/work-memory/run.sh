@@ -6,6 +6,8 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd -P)
 DATASET="eval/work-memory/synthetic-v1.json"
 BASELINE="docs/eval/work-memory-baseline.json"
 BASELINE_NEXT="docs/eval/work-memory-baseline.next.json"
+DATASET_SHA256="96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f"
+BASELINE_SHA256="35fbebff470f957caf7ea17b456ba0708d48521858061470a2c51dfccc7691c9"
 DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
 
 UPDATE_BASELINE=0
@@ -71,6 +73,72 @@ if [[ ! -f "$BASELINE" ]]; then
     exit 3
 fi
 
+if [[ "$(shasum -a 256 "$DATASET" | awk '{print $1}')" != "$DATASET_SHA256" ]]; then
+    echo "work-memory runner: canonical dataset digest does not match the accepted artifact" >&2
+    exit 3
+fi
+
+if [[ "$(shasum -a 256 "$BASELINE" | awk '{print $1}')" != "$BASELINE_SHA256" ]]; then
+    echo "work-memory runner: canonical baseline digest does not match the accepted artifact" >&2
+    exit 3
+fi
+
+validate_canonical_report() {
+    local report=$1
+    local benchmark_status=$2
+
+    [[ -s "$report" ]] || return 1
+    jq -e \
+        --arg dataset "$DATASET" \
+        --arg dataset_sha "$DATASET_SHA256" \
+        --arg baseline "$BASELINE" \
+        --argjson benchmark_status "$benchmark_status" '
+        def argument_values($flag):
+            [.run.arguments as $arguments
+             | range(0; ($arguments | length) - 1) as $index
+             | select($arguments[$index] == $flag)
+             | $arguments[$index + 1]];
+        def canonical_scope:
+            .dataset == $dataset and
+            .dataset_id == "synthetic-work-memory-v1" and
+            .dataset_checksum_sha256 == $dataset_sha and
+            .run.limit == null and
+            .run.requested_arms == ["lexical", "hybrid"] and
+            .run.ks == [1, 3, 5, 10] and
+            .run.original_instances == 24 and
+            .run.evaluated_instances == 24;
+        (.complete | type) == "boolean" and
+        (.publishable | type) == "boolean" and
+        (.launch_qualified | type) == "boolean" and
+        (.failures | type) == "array" and
+        (.regression | type) == "object" and
+        (.regression.passed | type) == "boolean" and
+        (.quality_gate | type) == "object" and
+        (.quality_gate.passed | type) == "boolean" and
+        (.run | type) == "object" and
+        (.run.arguments | type) == "array" and
+        all(.run.arguments[]; type == "string") and
+        .dataset == $dataset and
+        .dataset_id == "synthetic-work-memory-v1" and
+        .dataset_checksum_sha256 == $dataset_sha and
+        argument_values("--dataset") == [$dataset] and
+        argument_values("--baseline") == [$baseline] and
+        .complete == (((.failures | length) == 0) and
+                      (.run.limit == null) and
+                      .regression.passed) and
+        .publishable == (.complete and canonical_scope and
+                         (.run.git_dirty_at_start == false) and
+                         ((.run.model_checksum_sha256 | type) == "string") and
+                         ((.run.model_checksum_sha256 | length) > 0)) and
+        .launch_qualified == (.publishable and .quality_gate.passed) and
+        (($benchmark_status == 0 and canonical_scope and .complete and
+          .quality_gate.passed) or
+         ($benchmark_status == 5 and (.complete | not)) or
+         ($benchmark_status == 7 and canonical_scope and .complete and
+          (.quality_gate.passed | not)))
+    ' "$report" >/dev/null
+}
+
 if [[ -n "${MCI_BENCH_BIN:-}" ]]; then
     BENCH_CMD=("$MCI_BENCH_BIN")
     export MCI_BENCH_COMMAND="mci-bench"
@@ -123,7 +191,8 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
     BENCH_STATUS=$?
     set -e
 
-    if [[ ! -f "$BASELINE_NEXT" || ( $BENCH_STATUS -ne 0 && $BENCH_STATUS -ne 7 ) ]] ||
+    if ! validate_canonical_report "$BASELINE_NEXT" "$BENCH_STATUS" ||
+        [[ $BENCH_STATUS -ne 0 && $BENCH_STATUS -ne 7 ]] ||
         ! jq -e --arg dataset "$DATASET" '
         .complete == true and
         .publishable == true and
@@ -146,12 +215,29 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
     exit "$BENCH_STATUS"
 fi
 
-OUT="${OUT:-$(mktemp "${TMPDIR:-/tmp}/work-memory-report.XXXXXX")}"
+REMOVE_DEFAULT_OUT=0
+if [[ -z "$OUT" ]]; then
+    OUT=$(mktemp "${TMPDIR:-/tmp}/work-memory-report.XXXXXX")
+    REMOVE_DEFAULT_OUT=1
+fi
+OUT_DIR=$(dirname "$OUT")
+if [[ ! -d "$OUT_DIR" ]]; then
+    echo "work-memory runner: report directory does not exist: $OUT_DIR" >&2
+    exit 3
+fi
+REPORT_CANDIDATE=$(mktemp "$OUT_DIR/.work-memory-report.next.XXXXXX")
+cleanup_report_candidate() {
+    rm -f "$REPORT_CANDIDATE"
+    if [[ $REMOVE_DEFAULT_OUT -eq 1 ]]; then
+        rm -f "$OUT"
+    fi
+}
+trap cleanup_report_candidate EXIT
 CMD=(
     "${BENCH_CMD[@]}"
     --dataset "$DATASET"
     --arm both
-    --out "$OUT"
+    --out "$REPORT_CANDIDATE"
 )
 
 CMD+=(--baseline "$BASELINE")
@@ -161,4 +247,17 @@ if [[ ${#PASS_ARGS[@]} -gt 0 ]]; then
 fi
 
 echo "work-memory runner: report -> $OUT" >&2
-exec "${CMD[@]}"
+set +e
+"${CMD[@]}"
+BENCH_STATUS=$?
+set -e
+
+if ! validate_canonical_report "$REPORT_CANDIDATE" "$BENCH_STATUS"; then
+    echo "work-memory runner: benchmark did not produce a valid canonical report" >&2
+    exit 5
+fi
+
+mv "$REPORT_CANDIDATE" "$OUT"
+REMOVE_DEFAULT_OUT=0
+trap - EXIT
+exit "$BENCH_STATUS"
