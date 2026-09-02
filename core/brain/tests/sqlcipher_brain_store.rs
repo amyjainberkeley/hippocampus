@@ -903,6 +903,55 @@ fn events_since_truncates_long_text_to_snippet_cap() {
     assert!(out[0].text_snippet.len() <= EventRecord::SNIPPET_MAX_CHARS);
 }
 
+#[test]
+fn sampled_events_between_spans_the_whole_window_and_keeps_boundaries() {
+    let (_dir, path) = tmp("sampled_events_between.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in [10_u64, 20, 30, 40, 50, 60, 70] {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+
+    let out = store
+        .sampled_events_between(20, 70, 3)
+        .expect("sampled_events_between");
+    let ts_seq: Vec<u64> = out.iter().map(|record| record.ts_us).collect();
+
+    assert_eq!(ts_seq, vec![20, 40, 60]);
+}
+
+#[test]
+fn sampled_events_between_with_one_slot_keeps_the_newest_event() {
+    let (_dir, path) = tmp("sampled_events_between_one.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in [10_u64, 20, 30] {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+
+    let out = store
+        .sampled_events_between(0, 40, 1)
+        .expect("sampled_events_between");
+
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].ts_us, 30);
+}
+
+#[test]
+fn sampled_events_between_zero_limit_returns_empty() {
+    let (_dir, path) = tmp("sampled_events_between_zero.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    store.put_event(&blank_event(10, "anything")).expect("put");
+
+    let out = store
+        .sampled_events_between(0, 20, 0)
+        .expect("sampled_events_between");
+
+    assert!(out.is_empty());
+}
+
 // ---------------------------------------------------------------------------
 // distinct_urls_for_app — the durable already-ingested set `mci-agent
 // mcp-sync` rebuilds its dedupe from across process boundaries.

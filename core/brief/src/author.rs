@@ -31,6 +31,16 @@ pub trait BriefAuthor: Send + Sync {
     /// The returned brief MUST be in [`BriefState::Draft`] with citations
     /// drawn from the input `EventRecord::event_id` values.
     fn author(&self, retrieval: &[EventRecord], topic: &str) -> Result<Brief, AuthorError>;
+
+    /// Stable identifier persisted with briefs produced by this author.
+    fn model_id(&self) -> &'static str {
+        "brief-author"
+    }
+
+    /// Version of the author behavior persisted with generated briefs.
+    fn model_version(&self) -> &'static str {
+        "1"
+    }
 }
 
 /// Stub brief author for tests + dev. Produces a trivial brief:

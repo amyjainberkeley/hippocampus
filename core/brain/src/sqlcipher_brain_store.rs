@@ -407,6 +407,82 @@ impl SqlCipherBrainStore {
         Ok(out)
     }
 
+    /// Read a bounded, evenly distributed sample from a half-open time window.
+    ///
+    /// Unlike [`Self::events_since`], this does not bias a capped result toward
+    /// the beginning of the window. When the window contains more than `limit`
+    /// rows, the first and newest rows are retained and the remainder are spread
+    /// across the interval in timestamp order. This is the daily-brief read path:
+    /// a busy morning must not make the afternoon disappear from the summary.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn sampled_events_between(
+        &self,
+        since_ts_us: u64,
+        until_ts_us: u64,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, StoreError> {
+        if limit == 0 || since_ts_us >= until_ts_us {
+            return Ok(Vec::new());
+        }
+        let since = i64::try_from(since_ts_us).unwrap_or(i64::MAX);
+        let until = i64::try_from(until_ts_us).unwrap_or(i64::MAX);
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "WITH ranked AS (
+                    SELECT id, ts_us, app_bundle_id, window_title, url, text,
+                           ROW_NUMBER() OVER (ORDER BY ts_us ASC, id ASC) AS rn,
+                           COUNT(*) OVER () AS total
+                    FROM events
+                    WHERE ts_us >= ?1 AND ts_us < ?2
+                 )
+                 SELECT id, ts_us, app_bundle_id, window_title, url, text
+                 FROM ranked
+                 WHERE total <= ?3
+                    OR (?3 = 1 AND rn = total)
+                    OR (
+                        ?3 > 1 AND (
+                            rn = 1 OR
+                            ((rn - 1) * (?3 - 1)) / NULLIF(total - 1, 0) >
+                            ((rn - 2) * (?3 - 1)) / NULLIF(total - 1, 0)
+                        )
+                    )
+                 ORDER BY ts_us ASC, id ASC",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare sampled_events_between: {e}")))?;
+        let rows = stmt
+            .query_map(params![since, until, lim], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| StoreError::Backend(format!("query sampled_events_between: {e}")))?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, ts_us, app, title, url, text) =
+                row.map_err(|e| StoreError::Backend(format!("row sampled_events_between: {e}")))?;
+            out.push(EventRecord {
+                event_id: EventId(u64::try_from(id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text_snippet: EventRecord::truncate_snippet(&text),
+            });
+        }
+        Ok(out)
+    }
+
     /// Content-free aggregate counts. SELECT-only — no write side.
     ///
     /// Surface for the agent-API loopback (`mci_stats` MCP tool, P3.10b)
