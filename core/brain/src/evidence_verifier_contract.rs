@@ -15,6 +15,11 @@ use crate::{EventId, EvidenceVerifierError};
 
 /// Maximum number of canonical evidence spans available to one verifier call.
 pub const MAX_VERIFIER_EVIDENCE_SLOTS: usize = 8;
+/// Maximum UTF-8 byte length of one structured claim field.
+pub const MAX_CLAIM_FIELD_BYTES: usize = 1_024;
+/// Maximum UTF-8 byte length of one model-visible evidence span.
+pub const MAX_EVIDENCE_SPAN_BYTES: usize = 4_096;
+const MAX_ORIGIN_FIELD_BYTES: usize = 256;
 
 /// One proposed subject-predicate-object relation in a local scope.
 ///
@@ -78,6 +83,13 @@ fn normalized_claim_field(
     if value.is_empty() {
         return Err(EvidenceContractError::EmptyClaimField(field));
     }
+    if value.len() > MAX_CLAIM_FIELD_BYTES {
+        return Err(EvidenceContractError::ClaimFieldTooLarge {
+            field,
+            actual: value.len(),
+            maximum: MAX_CLAIM_FIELD_BYTES,
+        });
+    }
     if value
         .chars()
         .any(|character| matches!(character, '\0' | '\n' | '\r'))
@@ -87,11 +99,79 @@ fn normalized_claim_field(
     Ok(value.to_owned())
 }
 
+/// Host-owned identity and authorization scope for canonical evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceOrigin {
+    brain_id: String,
+    scope: String,
+    source_kind: String,
+}
+
+impl EvidenceOrigin {
+    /// Construct bounded provenance metadata. These values come from the host,
+    /// never from model output.
+    pub fn new(
+        brain_id: &str,
+        scope: &str,
+        source_kind: &str,
+    ) -> Result<Self, EvidenceContractError> {
+        Ok(Self {
+            brain_id: normalized_origin_field("brain_id", brain_id)?,
+            scope: normalized_origin_field("scope", scope)?,
+            source_kind: normalized_origin_field("source_kind", source_kind)?,
+        })
+    }
+
+    /// Stable local brain or device identity that owns the event.
+    #[must_use]
+    pub fn brain_id(&self) -> &str {
+        &self.brain_id
+    }
+
+    /// Privacy or project scope authorized for the event.
+    #[must_use]
+    pub fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    /// Capture or connector source kind.
+    #[must_use]
+    pub fn source_kind(&self) -> &str {
+        &self.source_kind
+    }
+}
+
+fn normalized_origin_field(
+    field: &'static str,
+    value: &str,
+) -> Result<String, EvidenceContractError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(EvidenceContractError::EmptyOriginField(field));
+    }
+    if value.len() > MAX_ORIGIN_FIELD_BYTES {
+        return Err(EvidenceContractError::OriginFieldTooLarge {
+            field,
+            actual: value.len(),
+            maximum: MAX_ORIGIN_FIELD_BYTES,
+        });
+    }
+    if value
+        .chars()
+        .any(|character| matches!(character, '\0' | '\n' | '\r'))
+    {
+        return Err(EvidenceContractError::InvalidOriginField(field));
+    }
+    Ok(value.to_owned())
+}
+
 /// One UTF-8-safe excerpt derived by the host from a canonical event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceSpan<'a> {
     event_id: EventId,
+    origin: EvidenceOrigin,
     event_content_sha256: String,
+    provenance_sha256: String,
     byte_range: Range<usize>,
     exact_text: &'a str,
 }
@@ -103,6 +183,7 @@ impl<'a> EvidenceSpan<'a> {
         full_event_text: &'a str,
         byte_start: usize,
         byte_end: usize,
+        origin: &EvidenceOrigin,
     ) -> Result<Self, EvidenceContractError> {
         if byte_start >= byte_end || byte_end > full_event_text.len() {
             return Err(EvidenceContractError::InvalidEvidenceRange);
@@ -116,9 +197,17 @@ impl<'a> EvidenceSpan<'a> {
         if exact_text.trim().is_empty() {
             return Err(EvidenceContractError::EmptyEvidenceSpan);
         }
+        if exact_text.len() > MAX_EVIDENCE_SPAN_BYTES {
+            return Err(EvidenceContractError::EvidenceSpanTooLarge {
+                actual: exact_text.len(),
+                maximum: MAX_EVIDENCE_SPAN_BYTES,
+            });
+        }
         Ok(Self {
             event_id,
+            origin: origin.clone(),
             event_content_sha256: sha256_hex(full_event_text.as_bytes()),
+            provenance_sha256: provenance_sha256(event_id, origin, full_event_text),
             byte_range: byte_start..byte_end,
             exact_text,
         })
@@ -130,10 +219,22 @@ impl<'a> EvidenceSpan<'a> {
         self.event_id
     }
 
+    /// Host-owned brain, scope, and source identity.
+    #[must_use]
+    pub const fn origin(&self) -> &EvidenceOrigin {
+        &self.origin
+    }
+
     /// SHA-256 of the complete canonical event text, not only the excerpt.
     #[must_use]
     pub fn event_content_sha256(&self) -> &str {
         &self.event_content_sha256
+    }
+
+    /// Digest binding event identity, origin metadata, and canonical bytes.
+    #[must_use]
+    pub fn provenance_sha256(&self) -> &str {
+        &self.provenance_sha256
     }
 
     /// UTF-8-safe byte range inside the canonical event text.
@@ -153,11 +254,17 @@ impl<'a> EvidenceSpan<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceSet<'a> {
     spans: Vec<EvidenceSpan<'a>>,
+    brain_id: String,
+    claim_scope: String,
 }
 
 impl<'a> EvidenceSet<'a> {
-    /// Preserve host ranking order and assign implicit slots `0..len`.
-    pub fn new(spans: Vec<EvidenceSpan<'a>>) -> Result<Self, EvidenceContractError> {
+    /// Preserve host ranking order and assign implicit slots `0..len` while
+    /// enforcing one brain and the proposed claim's exact authorization scope.
+    pub fn new(
+        claim: &ProposedClaim,
+        spans: Vec<EvidenceSpan<'a>>,
+    ) -> Result<Self, EvidenceContractError> {
         if spans.is_empty() {
             return Err(EvidenceContractError::EmptyEvidenceSet);
         }
@@ -168,13 +275,24 @@ impl<'a> EvidenceSet<'a> {
             });
         }
         let mut identities = HashSet::with_capacity(spans.len());
+        let brain_id = spans[0].origin.brain_id.clone();
         for span in &spans {
+            if span.origin.scope != claim.scope {
+                return Err(EvidenceContractError::EvidenceScopeMismatch);
+            }
+            if span.origin.brain_id != brain_id {
+                return Err(EvidenceContractError::MixedEvidenceBrains);
+            }
             let range = span.byte_range();
             if !identities.insert((span.event_id().0, range.start, range.end)) {
                 return Err(EvidenceContractError::DuplicateEvidenceSpan);
             }
         }
-        Ok(Self { spans })
+        Ok(Self {
+            spans,
+            brain_id,
+            claim_scope: claim.scope.clone(),
+        })
     }
 
     /// Number of model-visible evidence slots.
@@ -188,6 +306,22 @@ impl<'a> EvidenceSet<'a> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.spans.is_empty()
+    }
+
+    /// Iterate over host-ranked evidence slots without exposing mutation.
+    #[must_use]
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &EvidenceSpan<'a>> {
+        self.spans.iter()
+    }
+
+    /// Confirm this evidence set is still being used for the authorized claim
+    /// scope it was constructed against.
+    #[must_use]
+    pub fn validates_claim_scope(&self, claim: &ProposedClaim) -> bool {
+        self.claim_scope == claim.scope
+            && self.spans.iter().all(|span| {
+                span.origin.scope == claim.scope && span.origin.brain_id == self.brain_id
+            })
     }
 
     /// Bind a model judgment to host-owned immutable provenance.
@@ -215,6 +349,11 @@ impl<'a> EvidenceSet<'a> {
             EvidenceSlotVerdict::Insufficient { .. } => {
                 Ok(BoundEvidenceVerdict::Insufficient { confidence })
             }
+            EvidenceSlotVerdict::Abstained {
+                strongest_class_confidence,
+            } => Ok(BoundEvidenceVerdict::Abstained {
+                strongest_class_confidence,
+            }),
         }
     }
 
@@ -266,6 +405,12 @@ pub enum EvidenceSlotVerdict {
         /// Calibrated confidence in `[0, 1]`.
         confidence: f32,
     },
+    /// The model preferred support or contradiction, but host qualification
+    /// thresholds did not authorize that judgment.
+    Abstained {
+        /// Probability of the strongest non-authorized model class.
+        strongest_class_confidence: f32,
+    },
 }
 
 impl EvidenceSlotVerdict {
@@ -274,6 +419,9 @@ impl EvidenceSlotVerdict {
             Self::Supported { confidence, .. }
             | Self::Contradicted { confidence, .. }
             | Self::Insufficient { confidence } => *confidence,
+            Self::Abstained {
+                strongest_class_confidence,
+            } => *strongest_class_confidence,
         }
     }
 }
@@ -300,13 +448,20 @@ pub enum BoundEvidenceVerdict {
         /// Calibrated confidence in `[0, 1]`.
         confidence: f32,
     },
+    /// Host policy refused to authorize the model's strongest class.
+    Abstained {
+        /// Probability of the strongest non-authorized model class.
+        strongest_class_confidence: f32,
+    },
 }
 
 /// Immutable source citation created only from a host-owned evidence span.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedCitation {
     event_id: EventId,
+    origin: EvidenceOrigin,
     event_content_sha256: String,
+    provenance_sha256: String,
     byte_range: Range<usize>,
     exact_text: String,
 }
@@ -318,10 +473,22 @@ impl VerifiedCitation {
         self.event_id
     }
 
+    /// Host-owned brain, scope, and source identity.
+    #[must_use]
+    pub const fn origin(&self) -> &EvidenceOrigin {
+        &self.origin
+    }
+
     /// SHA-256 of the complete canonical event text.
     #[must_use]
     pub fn event_content_sha256(&self) -> &str {
         &self.event_content_sha256
+    }
+
+    /// Digest binding event identity, origin metadata, and canonical bytes.
+    #[must_use]
+    pub fn provenance_sha256(&self) -> &str {
+        &self.provenance_sha256
     }
 
     /// Exact UTF-8 byte range in the canonical event text.
@@ -338,9 +505,16 @@ impl VerifiedCitation {
 
     /// Revalidate identity, full-event digest, range, and exact text.
     #[must_use]
-    pub fn validate_against_event(&self, event_id: EventId, full_event_text: &str) -> bool {
+    pub fn validate_against_event(
+        &self,
+        event_id: EventId,
+        origin: &EvidenceOrigin,
+        full_event_text: &str,
+    ) -> bool {
         self.event_id == event_id
+            && self.origin == *origin
             && self.event_content_sha256 == sha256_hex(full_event_text.as_bytes())
+            && self.provenance_sha256 == provenance_sha256(event_id, origin, full_event_text)
             && full_event_text.get(self.byte_range.clone()) == Some(self.exact_text.as_str())
     }
 }
@@ -349,7 +523,9 @@ impl From<&EvidenceSpan<'_>> for VerifiedCitation {
     fn from(span: &EvidenceSpan<'_>) -> Self {
         Self {
             event_id: span.event_id,
+            origin: span.origin.clone(),
             event_content_sha256: span.event_content_sha256.clone(),
+            provenance_sha256: span.provenance_sha256.clone(),
             byte_range: span.byte_range.clone(),
             exact_text: span.exact_text.to_owned(),
         }
@@ -375,6 +551,32 @@ pub enum EvidenceContractError {
     /// A structured claim field contained a line break or NUL.
     #[error("invalid proposed-claim field: {0}")]
     InvalidClaimField(&'static str),
+    /// A structured claim field exceeded its pre-tokenization byte cap.
+    #[error("proposed-claim field {field} is too large: {actual}; maximum is {maximum}")]
+    ClaimFieldTooLarge {
+        /// Field name.
+        field: &'static str,
+        /// Supplied UTF-8 byte length.
+        actual: usize,
+        /// Maximum UTF-8 byte length.
+        maximum: usize,
+    },
+    /// Required host-owned origin metadata was empty.
+    #[error("empty evidence-origin field: {0}")]
+    EmptyOriginField(&'static str),
+    /// Host-owned origin metadata contained a line break or NUL.
+    #[error("invalid evidence-origin field: {0}")]
+    InvalidOriginField(&'static str),
+    /// Host-owned origin metadata exceeded its byte cap.
+    #[error("evidence-origin field {field} is too large: {actual}; maximum is {maximum}")]
+    OriginFieldTooLarge {
+        /// Field name.
+        field: &'static str,
+        /// Supplied UTF-8 byte length.
+        actual: usize,
+        /// Maximum UTF-8 byte length.
+        maximum: usize,
+    },
     /// The requested source range was empty, inverted, or out of bounds.
     #[error("invalid evidence byte range")]
     InvalidEvidenceRange,
@@ -384,6 +586,14 @@ pub enum EvidenceContractError {
     /// The requested source range contained only whitespace.
     #[error("evidence span is empty after trimming")]
     EmptyEvidenceSpan,
+    /// A model-visible evidence span exceeded its pre-tokenization byte cap.
+    #[error("evidence span is too large: {actual}; maximum is {maximum}")]
+    EvidenceSpanTooLarge {
+        /// Supplied UTF-8 byte length.
+        actual: usize,
+        /// Maximum UTF-8 byte length.
+        maximum: usize,
+    },
     /// A verifier call requires at least one evidence span.
     #[error("evidence set is empty")]
     EmptyEvidenceSet,
@@ -398,6 +608,12 @@ pub enum EvidenceContractError {
     /// The same canonical event range appeared more than once.
     #[error("duplicate evidence span")]
     DuplicateEvidenceSpan,
+    /// Evidence came from a scope not authorized for the claim.
+    #[error("evidence scope does not match proposed-claim scope")]
+    EvidenceScopeMismatch,
+    /// One verifier call mixed evidence from distinct local brains.
+    #[error("evidence set mixes multiple brain identities")]
+    MixedEvidenceBrains,
     /// Model confidence was NaN, infinite, or outside `[0, 1]`.
     #[error("invalid evidence confidence")]
     InvalidConfidence,
@@ -416,6 +632,26 @@ fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut output = String::with_capacity(digest.len() * 2);
     for byte in digest {
+        write!(&mut output, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    output
+}
+
+fn provenance_sha256(event_id: EventId, origin: &EvidenceOrigin, full_event_text: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"hippocampus:evidence:v1\0");
+    digest.update(event_id.0.to_be_bytes());
+    digest.update([0]);
+    digest.update(origin.brain_id.as_bytes());
+    digest.update([0]);
+    digest.update(origin.scope.as_bytes());
+    digest.update([0]);
+    digest.update(origin.source_kind.as_bytes());
+    digest.update([0]);
+    digest.update(full_event_text.as_bytes());
+    let bytes = digest.finalize();
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
         write!(&mut output, "{byte:02x}").expect("writing to a String cannot fail");
     }
     output

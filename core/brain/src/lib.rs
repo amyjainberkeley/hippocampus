@@ -264,9 +264,9 @@ pub use evidence_sufficiency::{
     EVIDENCE_VERIFIER_QUALIFICATION, EXPLICIT_EVIDENCE_VETO_QUALIFICATION,
 };
 pub use evidence_verifier_contract::{
-    BoundEvidenceVerdict, ClaimEvidenceVerifier, EvidenceContractError, EvidenceSet,
-    EvidenceSlotVerdict, EvidenceSpan, ProposedClaim, VerifiedCitation,
-    MAX_VERIFIER_EVIDENCE_SLOTS,
+    BoundEvidenceVerdict, ClaimEvidenceVerifier, EvidenceContractError, EvidenceOrigin,
+    EvidenceSet, EvidenceSlotVerdict, EvidenceSpan, ProposedClaim, VerifiedCitation,
+    MAX_CLAIM_FIELD_BYTES, MAX_EVIDENCE_SPAN_BYTES, MAX_VERIFIER_EVIDENCE_SLOTS,
 };
 pub use hybrid_retriever::{
     lexical_retrieval_outcome, FusionWeights, HybridRetriever, NothingMatchedReason,
