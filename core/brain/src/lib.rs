@@ -252,6 +252,7 @@ pub struct BlobReconciliationStats {
 
 pub mod episode_segmenter;
 pub mod evidence_sufficiency;
+pub mod evidence_verifier_contract;
 pub mod hybrid_retriever;
 
 pub use episode_segmenter::EpisodeId;
@@ -261,6 +262,11 @@ pub use evidence_sufficiency::{
     EvidenceVerifierError, EvidenceVerifierQualification, ExplicitEvidenceSignal,
     ExplicitEvidenceVetoQualification, EVIDENCE_SUFFICIENCY_POLICY,
     EVIDENCE_VERIFIER_QUALIFICATION, EXPLICIT_EVIDENCE_VETO_QUALIFICATION,
+};
+pub use evidence_verifier_contract::{
+    BoundEvidenceVerdict, ClaimEvidenceVerifier, EvidenceContractError, EvidenceSet,
+    EvidenceSlotVerdict, EvidenceSpan, ProposedClaim, VerifiedCitation,
+    MAX_VERIFIER_EVIDENCE_SLOTS,
 };
 pub use hybrid_retriever::{
     lexical_retrieval_outcome, FusionWeights, HybridRetriever, NothingMatchedReason,
