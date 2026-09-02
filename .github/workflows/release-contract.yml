@@ -26,6 +26,8 @@ on:
       - 'scripts/verify-app-launches.sh'
       - 'scripts/test-verify-app-launches.sh'
       - 'scripts/test-development-app-contract.sh'
+      - 'scripts/demo.sh'
+      - 'scripts/test-demo-contract.sh'
       - 'scripts/test-keyframe-demo-fixture.sh'
       - 'scripts/test-onboarding-product-truth.sh'
       - 'scripts/test-screenshot-assets.sh'
@@ -105,6 +107,8 @@ on:
       - 'scripts/verify-app-launches.sh'
       - 'scripts/test-verify-app-launches.sh'
       - 'scripts/test-development-app-contract.sh'
+      - 'scripts/demo.sh'
+      - 'scripts/test-demo-contract.sh'
       - 'scripts/test-keyframe-demo-fixture.sh'
       - 'scripts/test-onboarding-product-truth.sh'
       - 'scripts/test-screenshot-assets.sh'
@@ -179,6 +183,7 @@ jobs:
       - run: scripts/e2e-clean-home.sh
       - run: scripts/test-development-app-contract.sh
       - run: scripts/test-verify-app-launches.sh
+      - run: scripts/test-demo-contract.sh
       - run: scripts/test-keyframe-demo-fixture.sh
       - run: scripts/test-onboarding-product-truth.sh
       - run: scripts/test-screenshot-assets.sh
