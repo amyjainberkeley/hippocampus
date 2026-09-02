@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `1a85e70`
+Audited code baseline: `83d5b0f`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -49,6 +49,14 @@ more than this page.
   boundaries, passes all 14 disjoint calibration/validation cases, and rejects
   all eight adversarial cases containing an unrelated name, number, date, or
   duration. This guard can veto evidence but cannot promote it by itself.
+- Hybrid recall now separates ranking from semantic evidence verification.
+  The verifier contract returns source-attributed `Supported`, `Contradicted`,
+  or `Insufficient` judgments; malformed confidence, invented event IDs, model
+  failure, and an absent verifier all fail closed as the typed
+  `EvidenceVerifierUnavailable` degradation. Supported and contradictory
+  outputs retain only the exact canonical events cited by the verifier. The
+  retired score critic remains available to tests but is no longer installed
+  by production construction.
 - The menu app, onboarding, Recall workspace, icon, installer art, extensions,
   and documented product captures use one light native visual system. Native
   macOS material supplies the translucent top surfaces, dark system appearance
@@ -118,17 +126,20 @@ and is not comparable to LoCoMo or LongMemEval.
 
 | Arm | Answerable outcome | Hit rate @1 | Recall @1 / @3 | MRR | Unanswerable outcome | p95 latency |
 |---|---:|---:|---:|---:|---:|---:|
-| Lexical | 7/21 matched; 14 missed | 33.3% | 33.3% / 33.3% | 0.333 | 3/3 abstained; 0 false positives | 15.80 ms |
-| Hybrid | 21/21 matched; 0 missed | 95.2% | 88.1% / 100% | 0.976 | 3/3 abstained; 0 false positives | 94.74 ms |
+| Lexical | 7/21 ranked; 14 missed | 33.3% | 33.3% / 33.3% | 0.333 | 3/3 abstained; 0 false positives | 10.00 ms |
+| Hybrid | 21/21 ranked; 0 missed | 95.2% | 88.1% / 100% | 0.976 | 3/3 abstained; 0 false positives | 62.32 ms |
 
 The artifact is complete and publishable but explicitly
-`"launch_qualified": false`. Retrieval abstention now passes the three
-unanswerable cases, but the production evidence-sufficiency policy is not yet
-validation-qualified. The explicit relation guard is qualified on its narrow
-person/count/duration/date corpus, leaving the generic verifier as the single
-quality failure. The benchmark exits nonzero even though ranking and typed
-abstention pass. Evidence calibration is a product gate, not benchmark fine
-print.
+`"launch_qualified": false`. Retrieval abstention passes the three
+unanswerable cases, but all 21 answerable hybrid rankings are deliberately
+recorded as `degradedEvidenceVerifierUnavailable`, not trusted matches. The
+explicit relation guard is qualified on its narrow person/count/duration/date
+corpus, leaving the missing semantic verifier as the single quality failure.
+The prior score critic reached only 83.3% positive coverage with 33.3% false
+positives on its tiny held-out split; a fast MiniLM SQuAD2 spike produced the
+same held-out rates and was rejected. The benchmark exits nonzero even though
+ranking and typed abstention pass. Evidence calibration is a product gate, not
+benchmark fine print.
 
 ## Release Gates
 
