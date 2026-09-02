@@ -95,7 +95,7 @@ public enum BriefModelPresence {
     /// Outcome of `seedBundledQwen3IfNeeded()`. Reported for observability;
     /// call sites treat all cases as non-fatal (a missing bundle model is
     /// gated at build time, not runtime).
-    public enum SeedOutcome: Equatable {
+    public enum SeedOutcome: Equatable, Sendable {
         /// The Application Support copy was already present; no work done.
         case alreadyPresent
         /// The bundled model was hardlinked/copied into Application Support.

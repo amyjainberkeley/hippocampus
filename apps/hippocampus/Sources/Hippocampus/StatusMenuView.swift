@@ -4,6 +4,7 @@ import HippocampusKit
 
 struct StatusMenuView: View {
     @ObservedObject var supervisor: ProcessSupervisor
+    @ObservedObject var modelProvisioner: BriefModelProvisioner
     @ObservedObject var loginItemVM: LoginItemViewModel
     let updater: SparkleUpdaterService
     @ObservedObject var preferencesStore: PreferencesStore
@@ -156,6 +157,7 @@ struct StatusMenuView: View {
         }
         .task {
             crashReportOptedIn = supervisor.isCrashReportOptedIn
+            modelProvisioner.refreshIfMissing()
             if loginItemVM.shouldPrompt {
                 loginItemVM.markPrompted()
             }
@@ -170,43 +172,38 @@ struct StatusMenuView: View {
 
     @ViewBuilder
     private var briefsMenuItem: some View {
-        // Filesystem is ground truth (CEO dogfood 2026-05-26).
-        // Previously this read `UserDefaults.standard.bool(forKey:
-        // "MCIBriefModelDownloaded")`, but that flag survives across
-        // installs / `cfprefsd` caches even after the model dir is
-        // wiped — so the menu showed "Daily Briefs" toggle while the
-        // model wasn't on disk. `BriefModelPresence.isQwen3Installed()`
-        // checks `~/Library/Application Support/MCI/Models/
-        // qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc/` directly. The
-        // SwiftUI menu re-renders this body on every open, so the
-        // toggle/button state stays in sync with the filesystem.
-        let modelDownloaded = BriefModelPresence.isQwen3Installed()
-        if modelDownloaded {
+        switch modelProvisioner.state {
+        case .ready where modelProvisioner.isReadyOnDisk:
             Toggle("Daily Briefs", isOn: $briefsEnabled)
                 .onChange(of: briefsEnabled) { _, newValue in
                     UserDefaults.standard.set(newValue, forKey: "MCIBriefsEnabled")
                 }
-        } else {
-            // Qwen3-1.7B FP16 Core ML model now live (PR #192). Clicking
-            // surfaces the download sheet → ModelDownloadView pulls the
-            // tarball from HF, SHA-verifies against
-            // `HippocampusKit/Resources/models.json`, unpacks under
-            // `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/`
-            // where brief_worker (apps/agent) picks it up on its next
-            // 06:00 cycle or first-launch fast path.
+        case .ready:
+            Button("Daily Briefs: Restore bundled model") {
+                modelProvisioner.refreshIfMissing()
+            }
+            .help("The local Daily Briefs model is missing. Restore it from this app bundle.")
+        case .provisioning:
+            Text("Daily Briefs: Preparing bundled model…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .failed:
+            Button("Daily Briefs: Retry bundled model setup") {
+                modelProvisioner.startIfNeeded()
+            }
+            .help("The bundled model was not prepared. Retry local setup; no data leaves this Mac.")
+        case .unavailable:
             Button("Daily Briefs: Off — Download Model…") {
-                // Open the dedicated `Window` scene (id: "model-download")
-                // declared in HippocampusApp.body — NOT a SwiftUI `.sheet`,
-                // which SwiftUI dismissed along with the MenuBarExtra
-                // menu before the sheet could present (CEO dogfood
-                // 2026-05-26 "nothing happens when I click Download
-                // Model").
                 openWindow(id: "model-download")
                 #if canImport(AppKit)
                 NSApp.activate(ignoringOtherApps: true)
                 #endif
             }
             .help("Daily briefs summarize your day with Qwen3-1.7B (~2.5 GB download, runs entirely on your Mac).")
+        case .notStarted:
+            Text("Daily Briefs: Checking local model…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
