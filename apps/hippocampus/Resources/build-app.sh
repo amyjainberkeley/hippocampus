@@ -15,7 +15,8 @@ set -euo pipefail
 #   4. cargo build --workspace --release
 #
 # Usage:
-#   ./build-app.sh [--help] [--debug] [--dist DIR]
+#   ./build-app.sh [--help] [--debug] [--development-ad-hoc]
+#                  [--development-lite] [--dist DIR]
 #
 # Dev iteration loop:
 #   1. Make changes to Sources/
@@ -30,6 +31,7 @@ REPO_ROOT="$(cd "$PKG_DIR/../.." && pwd)"
 
 PROFILE="release"
 DEVELOPMENT_ADHOC=0
+DEVELOPMENT_LITE=0
 DIST_DIR="$PKG_DIR/dist"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
 NOTICE_SRC="$REPO_ROOT/NOTICE"
@@ -141,6 +143,7 @@ usage() {
     echo "Options:"
     echo "  --debug     Use debug builds instead of release"
     echo "  --development-ad-hoc  Allow unstable ad-hoc signing with --debug only"
+    echo "  --development-lite  Omit unavailable Core ML models for local UI verification"
     echo "  --dist DIR  Output directory (default: apps/hippocampus/dist/)"
     echo "  --help      Show this help"
     echo ""
@@ -155,11 +158,23 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --debug) PROFILE="debug"; shift ;;
         --development-ad-hoc) DEVELOPMENT_ADHOC=1; shift ;;
+        --development-lite) DEVELOPMENT_LITE=1; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
         --help|-h) usage; exit 0 ;;
         *) echo "Unknown option: $1"; usage; exit 1 ;;
     esac
 done
+
+if [[ "$DEVELOPMENT_LITE" -eq 1 && "$PROFILE" != "debug" ]]; then
+    fatal \
+        "development-lite requires --debug" \
+        "Release assembly keeps every model-completeness gate enabled."
+fi
+if [[ "$DEVELOPMENT_LITE" -eq 1 && "$DEVELOPMENT_ADHOC" -ne 1 ]]; then
+    fatal \
+        "development-lite requires --development-ad-hoc" \
+        "A model-incomplete bundle must remain an explicitly disposable local artifact."
+fi
 
 APP="$DIST_DIR/Hippocampus.app"
 CONTENTS="$APP/Contents"
@@ -257,6 +272,9 @@ fi
 echo "=== Hippocampus.app assembly ==="
 echo "Profile:   $PROFILE"
 echo "Signing:   $SIGNING_MODE"
+if [[ "$DEVELOPMENT_LITE" -eq 1 ]]; then
+    echo "Models:    development-lite (missing models stay visibly unavailable)"
+fi
 if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     echo "Identity:  $DEVELOPER_ID"
 fi
@@ -425,6 +443,8 @@ elif [[ -d "$EMBEDDER_PACKAGE" ]]; then
     mkdir -p "$EMBEDDER_DEST_DIR"
     rm -rf "$EMBEDDER_DEST"
     xcrun coremlcompiler compile "$EMBEDDER_PACKAGE" "$EMBEDDER_DEST_DIR"
+elif [[ "$DEVELOPMENT_LITE" -eq 1 ]]; then
+    echo "DEVELOPMENT LITE: ArcticEmbedS is unavailable; recall stays lexical-only."
 else
     fatal \
         "ArcticEmbedS_INT8.{mlpackage,mlmodelc} missing under $REPO_ROOT/models" \
@@ -478,6 +498,8 @@ elif [[ -d "$NER_PACKAGE" ]]; then
     mkdir -p "$NER_DEST_DIR"
     rm -rf "$NER_DEST"
     xcrun coremlcompiler compile "$NER_PACKAGE" "$NER_DEST_DIR"
+elif [[ "$DEVELOPMENT_LITE" -eq 1 ]]; then
+    echo "DEVELOPMENT LITE: BERT NER is unavailable; sync entity extraction stays disabled."
 else
     fatal \
         "bert_base_NER_INT8.{mlpackage,mlmodelc} missing under $REPO_ROOT/models" \
@@ -575,7 +597,7 @@ PY
 )"
 QWEN3_DOWNLOAD_CMD="mkdir -p models && curl -L \"$QWEN3_DOWNLOAD_URL\" -o /tmp/Qwen3-1.7B-FP16.mlmodelc.tar.gz && tar -xzf /tmp/Qwen3-1.7B-FP16.mlmodelc.tar.gz -C models"
 
-if [[ ! -f "$QWEN3_TOKENIZER" ]]; then
+if [[ ! -f "$QWEN3_TOKENIZER" && "$DEVELOPMENT_LITE" -ne 1 ]]; then
     fatal \
         "Qwen tokenizer.json missing at $QWEN3_TOKENIZER" \
         "Run: python scripts/convert_brief_model.py --output models/Qwen3-1.7B-FP16.mlpackage --verify" \
@@ -594,6 +616,8 @@ elif [[ -d "$QWEN3_PACKAGE" ]]; then
     mkdir -p "$QWEN3_DEST_DIR"
     rm -rf "$QWEN3_DEST"
     xcrun coremlcompiler compile "$QWEN3_PACKAGE" "$QWEN3_DEST_DIR"
+elif [[ "$DEVELOPMENT_LITE" -eq 1 ]]; then
+    echo "DEVELOPMENT LITE: Qwen3 is unavailable; generated briefs stay disabled."
 else
     fatal \
         "$QWEN3_BASENAME missing under $REPO_ROOT/models" \
@@ -879,7 +903,8 @@ LAUNCH_VERIFY="$REPO_ROOT/scripts/verify-app-launches.sh"
 if [[ -x "$LAUNCH_VERIFY" ]]; then
     echo ""
     echo "=== Launch-verify gate ==="
-    "$LAUNCH_VERIFY" "$APP"
+    VERIFY_CLEAN_HOME=1 VERIFY_EXPECT_ONBOARDING=1 \
+        "$LAUNCH_VERIFY" "$APP"
 else
     echo "WARNING: scripts/verify-app-launches.sh not found — skipping launch gate."
 fi

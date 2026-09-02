@@ -6,6 +6,25 @@ package enum ApplicationTerminationIntent: Equatable {
     case restart
 }
 
+/// Distinguishes a deliberate product quit/restart from AppKit lifecycle
+/// noise. In particular, SwiftUI's menu-bar visibility action can ask the
+/// application to terminate even though the user never chose Quit.
+@MainActor
+package final class ApplicationTerminationRequestGate {
+    private var requestedIntent: ApplicationTerminationIntent?
+
+    package init() {}
+
+    package func request(_ intent: ApplicationTerminationIntent) {
+        requestedIntent = intent
+    }
+
+    package func takeRequestedIntent() -> ApplicationTerminationIntent? {
+        defer { requestedIntent = nil }
+        return requestedIntent
+    }
+}
+
 @MainActor
 package protocol ApplicationRestartLaunching: AnyObject {
     func scheduleRestart() throws
