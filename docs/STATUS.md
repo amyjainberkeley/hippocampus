@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `53538df`
+Audited code baseline: `2b62ae4`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -19,6 +19,9 @@ more than this page.
   source priority, and canonical event citations. Claude Code and Codex
   registration is structural, idempotent, ownership-safe, and records only a
   database path plus Keychain service/account references.
+- The app and packaged `mci-agent` now share the `0.1.0` release identity.
+  The agent derives its displayed version from Cargo package metadata, and a
+  regression test compares it with the shipping app's Info.plist.
 - Focused `mci_context` handoffs preserve the retrieval truth state all the
   way to Claude and Codex. Packets now say whether focus retrieval matched,
   contradicted, abstained, or returned degraded related context, including the
@@ -97,6 +100,12 @@ more than this page.
   macOS material supplies the translucent top surfaces, dark system appearance
   does not turn the product black, and the retired turquoise identity is not
   present in the release asset set.
+- Runlog remains an audited research input rather than a runtime dependency.
+  It does use 768-dimensional Gemini vectors and Firestore cosine search; its
+  useful hypothesis is hybrid candidate generation plus source-region
+  provenance. Hippocampus will evaluate those ideas locally without adopting
+  Runlog's cloud store, uncited agent-written claims, query-time general
+  knowledge injection, or eventual-deletion semantics.
 - The app, capture helper, Recall, and onboarding Swift packages compile on
   this host through the constrained SwiftPM wrapper. The complete Rust gate
   passes formatting, all-target workspace Clippy, every workspace test, and
