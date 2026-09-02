@@ -234,6 +234,8 @@ require_literal "$RELEASE_CI" 'scripts/test-retention-policy-contract.sh' \
     'release CI runs the picker-to-worker retention contract'
 require_literal "$RELEASE_CI" 'scripts/test-e2e-clean-home-contract.sh' \
     'release CI runs the clean-home source contract'
+require_literal "$RELEASE_CI" 'scripts/test-development-file-key-contract.sh' \
+    'release CI proves development file-key authority cannot ship'
 require_literal "$RELEASE_CI" 'scripts/e2e-clean-home.sh' \
     'release CI executes the clean-home product path'
 require_literal "$RELEASE_CI" 'scripts/test-toml-license-contract.sh' \
@@ -247,6 +249,7 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     scripts/verify-toml-license-contract.py scripts/test-toml-license-contract.sh \
     scripts/test-retention-policy-contract.sh scripts/stage-recall-ffi.sh \
     scripts/e2e-clean-home.sh scripts/test-e2e-clean-home-contract.sh \
+    scripts/test-development-file-key-contract.sh \
     apps/onboarding/Package.swift \
     apps/onboarding/Sources/OnboardingKit/RetentionStore.swift \
     apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift \
@@ -262,6 +265,8 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift \
     apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift \
     apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift \
+    apps/hippocampus/Sources/HippocampusKit/DevelopmentFileKeyMode.swift \
+    apps/hippocampus/Sources/HippocampusKit/KeyStore.swift \
     apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift \
     apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift \
     apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift \
@@ -277,12 +282,16 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift \
     apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift \
     apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift \
+    apps/hippocampus/Tests/HippocampusKitTests/KeyStoreTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift \
     extensions/safari/appex/SafariWebExtensionHandler.swift \
     apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift \
     apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift \
+    adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift \
+    adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Security/KeychainDatabaseKeyResolver.swift \
+    adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/KeychainDatabaseKeyResolverTests.swift \
     apps/agent/Cargo.toml apps/agent/src/retention_worker.rs \
     apps/agent/src/bin/mci_agent.rs apps/agent/src/bin/mci_e2e_fixture.rs \
     apps/agent/tests/retention_preferences_contract.rs \

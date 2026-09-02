@@ -96,6 +96,11 @@ public enum KeychainDatabaseKeyError: Error, Sendable, Equatable {
     case domainMismatch
     case malformed
     case readFailure(OSStatus)
+    case developmentKeyPathMissing
+    case invalidDevelopmentKeyPath
+    case developmentKeyMissing
+    case developmentKeyUnreadable
+    case malformedDevelopmentKey
 }
 
 extension KeychainDatabaseKeyError: LocalizedError {
@@ -107,6 +112,11 @@ extension KeychainDatabaseKeyError: LocalizedError {
         case .domainMismatch: "The capture helper received an unsupported Keychain domain."
         case .malformed: "The Keychain database key is malformed."
         case .readFailure(let status): "Keychain read failed with status \(status)."
+        case .developmentKeyPathMissing: "Development file-key mode did not include a key path."
+        case .invalidDevelopmentKeyPath: "Development file-key mode rejected a nonstandard key path."
+        case .developmentKeyMissing: "The development database key is missing."
+        case .developmentKeyUnreadable: "The development database key could not be read."
+        case .malformedDevelopmentKey: "The development database key is malformed."
         }
     }
 }
@@ -142,6 +152,45 @@ public struct KeychainDatabaseKeyResolver: Sendable {
               hex.utf8.allSatisfy({ $0.isASCIIHexDigit })
         else {
             throw KeychainDatabaseKeyError.malformed
+        }
+        return stride(from: 0, to: 64, by: 2).compactMap { offset in
+            let start = hex.index(hex.startIndex, offsetBy: offset)
+            let end = hex.index(start, offsetBy: 2)
+            return UInt8(hex[start..<end], radix: 16)
+        }
+    }
+
+    /// Resolve a development file only when the parent explicitly marks the
+    /// child as development-only and names the fixed, user-owned key path.
+    /// Every other launch remains Keychain-only, regardless of ambient env.
+    public func resolveBytes(
+        environment: [String: String],
+        developmentKeyPath: URL
+    ) throws -> [UInt8] {
+        guard environment["MCI_DEVELOPMENT_FILE_KEY"] == "1" else {
+            return try resolveBytes(reference: .from(environment: environment))
+        }
+        guard let rawPath = environment["MCI_DB_KEY_FILE"] else {
+            throw KeychainDatabaseKeyError.developmentKeyPathMissing
+        }
+        let suppliedPath = URL(fileURLWithPath: rawPath).standardizedFileURL
+        guard suppliedPath == developmentKeyPath.standardizedFileURL else {
+            throw KeychainDatabaseKeyError.invalidDevelopmentKeyPath
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: suppliedPath)
+        } catch CocoaError.fileNoSuchFile {
+            throw KeychainDatabaseKeyError.developmentKeyMissing
+        } catch {
+            throw KeychainDatabaseKeyError.developmentKeyUnreadable
+        }
+        guard let hex = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              hex.count == 64,
+              hex.utf8.allSatisfy({ $0.isASCIIHexDigit })
+        else {
+            throw KeychainDatabaseKeyError.malformedDevelopmentKey
         }
         return stride(from: 0, to: 64, by: 2).compactMap { offset in
             let start = hex.index(hex.startIndex, offsetBy: offset)

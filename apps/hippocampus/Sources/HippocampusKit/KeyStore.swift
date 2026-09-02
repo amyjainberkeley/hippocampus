@@ -380,6 +380,17 @@ public struct FileKeyStore: KeyStore, Sendable {
         )
     }
 
+    /// Create a local development key on first run. This method is only
+    /// reached after `DevelopmentFileKeyMode` validates a signed ad-hoc bundle.
+    public func ensureDevelopmentKey() throws {
+        guard case .developmentFile = backing else { return }
+        do {
+            _ = try readKey()
+        } catch KeyStoreError.noKeyFound {
+            try writeKey(Self.generateHexKey())
+        }
+    }
+
     public static func generateHexKey() throws -> String {
         try generateHexKey { count, buffer in
             SecRandomCopyBytes(kSecRandomDefault, count, buffer)

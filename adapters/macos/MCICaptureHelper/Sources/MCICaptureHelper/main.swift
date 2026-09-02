@@ -438,13 +438,15 @@ if captureOptions.captureEnabled {
     // encryption, and durable publication behind one serialized coordinator.
     let keyframeRetainer: KeyframeRetentionCoordinator
     do {
-        let reference = KeychainDatabaseKeyReference.from(
-            environment: ProcessInfo.processInfo.environment
-        )
-        let keyBytes = try KeychainDatabaseKeyResolver().resolveBytes(reference: reference)
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
+        let keyBytes = try KeychainDatabaseKeyResolver().resolveBytes(
+            environment: ProcessInfo.processInfo.environment,
+            developmentKeyPath: appSupport
+                .appendingPathComponent("MCI")
+                .appendingPathComponent("dev.key")
+        )
         let blobDir = appSupport
             .appendingPathComponent("MCI")
             .appendingPathComponent("blobs")
@@ -461,7 +463,7 @@ if captureOptions.captureEnabled {
         )
     } catch {
         FileHandle.standardError.write(
-            ("mci-capture-helper: database key unavailable from Keychain; "
+            ("mci-capture-helper: database key unavailable; "
              + "capture is disabled: \(error.localizedDescription)\n")
                 .data(using: .utf8) ?? Data()
         )

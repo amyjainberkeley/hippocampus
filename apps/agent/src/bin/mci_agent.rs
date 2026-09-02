@@ -1309,36 +1309,44 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
 
 /// Read the development file key when the explicit development gate is set.
 fn read_dev_key_hex() -> Option<String> {
-    if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
-        return None;
-    }
-    let home = std::env::var("HOME").ok()?;
-    let path = PathBuf::from(home).join("Library/Application Support/MCI/dev.key");
-    std::fs::read_to_string(&path)
-        .ok()
-        .filter(|s| key_resolver::is_valid_database_key(s))
+    let home = std::env::var("HOME").ok().map(PathBuf::from);
+    development_key_hex_from(
+        std::env::var("MCI_DEVELOPMENT_FILE_KEY").ok().as_deref(),
+        std::env::var("MCI_DB_KEY_HEX").ok().as_deref(),
+        home.as_deref(),
+    )
 }
 
-fn development_key_fallback_enabled() -> bool {
-    std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() == Ok("1")
+fn development_key_hex_from(
+    marker: Option<&str>,
+    raw_key: Option<&str>,
+    home: Option<&Path>,
+) -> Option<String> {
+    guard_development_marker(marker)?;
+    raw_key
+        .filter(|key| key_resolver::is_valid_database_key(key))
+        .map(str::to_owned)
+        .or_else(|| {
+            let path = home?.join("Library/Application Support/MCI/dev.key");
+            std::fs::read_to_string(path)
+                .ok()
+                .filter(|key| key_resolver::is_valid_database_key(key))
+        })
+}
+
+fn guard_development_marker(marker: Option<&str>) -> Option<()> {
+    (marker == Some("1")).then_some(())
 }
 
 /// Resolve the brain key from Keychain. Raw/file keys are development-only
-/// and are considered only after a proven item-not-found result.
+/// and, when explicitly enabled, take precedence over Keychain. This lets an
+/// ad-hoc child avoid an ACL-denied production item without weakening release
+/// custody: the marker is never emitted by a Developer ID bundle.
 fn resolve_key_hex() -> Result<String, key_resolver::KeyResolutionError> {
-    match key_resolver::resolve_database_key() {
-        Ok(key) => Ok(key),
-        Err(missing @ key_resolver::KeyResolutionError::MissingKey { .. })
-            if development_key_fallback_enabled() =>
-        {
-            std::env::var("MCI_DB_KEY_HEX")
-                .ok()
-                .filter(|key| key_resolver::is_valid_database_key(key))
-                .or_else(read_dev_key_hex)
-                .ok_or(missing)
-        }
-        Err(error) => Err(error),
+    if let Some(key) = read_dev_key_hex() {
+        return Ok(key);
     }
+    key_resolver::resolve_database_key()
 }
 
 fn report_key_resolution_error(command: &str, error: &key_resolver::KeyResolutionError) {
@@ -2536,7 +2544,8 @@ fn hex_nibble(b: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod capture_consent_tests {
-    use super::capture_ingestion_enabled;
+    use super::{capture_ingestion_enabled, development_key_hex_from};
+    use std::path::Path;
 
     #[test]
     fn packaged_app_can_disable_all_observation_ingestion() {
@@ -2550,5 +2559,27 @@ mod capture_consent_tests {
         assert!(capture_ingestion_enabled(Some("1")));
         assert!(capture_ingestion_enabled(Some("true")));
         assert!(capture_ingestion_enabled(None));
+    }
+
+    #[test]
+    fn explicit_development_marker_prefers_the_fixed_local_key() {
+        let key = "ab".repeat(32);
+        let root = tempfile::tempdir().expect("temporary home");
+        let key_path = root.path().join("Library/Application Support/MCI/dev.key");
+        std::fs::create_dir_all(key_path.parent().expect("key parent")).expect("key parent");
+        std::fs::write(&key_path, &key).expect("write dev key");
+
+        assert_eq!(
+            development_key_hex_from(Some("1"), None, Some(root.path())),
+            Some(key)
+        );
+        assert_eq!(
+            development_key_hex_from(
+                None,
+                Some("cd".repeat(32).as_str()),
+                Some(Path::new("/tmp"))
+            ),
+            None
+        );
     }
 }
