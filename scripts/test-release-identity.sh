@@ -60,9 +60,7 @@ CHANGELOG
   "archiveURL": "https://github.com/amyjainberkeley/hippocampus-models/releases/download/v1.2.3/release-models-1.2.3.tar.gz",
   "archiveSHA256": "abababababababababababababababababababababababababababababababab",
   "models": [
-    {"id": "arctic-embed-s-int8", "bundle": "ArcticEmbedS_INT8.mlmodelc"},
-    {"id": "bert-base-ner-int8", "bundle": "bert_base_NER_INT8.mlmodelc"},
-    {"id": "qwen3-1.7b-fp16", "bundle": "Qwen3-1.7B-FP16.mlmodelc"}
+    {"id": "arctic-embed-s-int8", "bundle": "ArcticEmbedS_INT8.mlmodelc"}
   ]
 }
 MODELS
