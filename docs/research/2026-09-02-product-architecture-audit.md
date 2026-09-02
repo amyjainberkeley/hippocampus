@@ -517,9 +517,15 @@ fusion score as entailment. The qualified explicit relation guard handles four
 common high-risk answer shapes today. General `Matched` status remains blocked
 until a compact local question/evidence verifier passes disjoint answerability,
 counterfactual-swap, contradiction, and latency tests. A SQuAD2-style MiniLM
-reader is a candidate for that spike, not a selected dependency; model license,
-Core ML conversion, no-answer calibration, and out-of-domain work-memory
-behavior must all pass before it enters the release manifest.
+reader was tested as that spike and rejected: it was fast in PyTorch but reached
+only `0.833` held-out positive coverage with `0.333` negative false-positive
+rate, confidently extracting concrete-sounding placeholders from insufficient
+evidence. ADR-0038 now fixes the architecture: a verifier sees query, canonical
+event text, and stable event IDs but no retrieval scores; trusted support must
+cite IDs from the candidate set; malformed output and runtime failure degrade
+instead of becoming hits. A compact app-owned verifier still needs a locked
+qualification corpus, Core ML parity, redistribution clearance, and minimum-Mac
+latency proof before it enters the release manifest.
 
 ## Immediate Definition Of Done
 

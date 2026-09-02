@@ -390,6 +390,9 @@ impl LiveBrainReader {
             RetrievalOutcome::Matched { matches } => Ok(McpRecallOutcome::Matched {
                 hits: self.materialize_matches(matches)?,
             }),
+            RetrievalOutcome::Contradicted { matches } => Ok(McpRecallOutcome::Contradicted {
+                evidence: self.materialize_matches(matches)?,
+            }),
             RetrievalOutcome::NothingMatched { reason } => {
                 Ok(McpRecallOutcome::NothingMatched { reason })
             }
@@ -533,6 +536,7 @@ impl BrainReader for LiveBrainReader {
         if let Some(focus) = focus.map(str::trim).filter(|value| !value.is_empty()) {
             let recall_candidates = match self.recall(focus, candidate_limit)? {
                 McpRecallOutcome::Matched { hits } => hits,
+                McpRecallOutcome::Contradicted { evidence } => evidence,
                 McpRecallOutcome::Degraded {
                     related_context, ..
                 } => related_context,

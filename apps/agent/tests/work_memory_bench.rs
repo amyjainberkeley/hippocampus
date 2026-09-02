@@ -65,6 +65,11 @@ fn stage_runner_fixture(
         root.join("docs/eval/work-memory-baseline.json"),
     )
     .expect("copy accepted baseline");
+    fs::copy(
+        repo_root.join("docs/eval/work-memory-baseline.sha256"),
+        root.join("docs/eval/work-memory-baseline.sha256"),
+    )
+    .expect("copy accepted baseline digest");
 
     let fake_report_path = root.join("fake-report.json");
     fs::write(
@@ -1001,6 +1006,48 @@ fn baseline_update_never_installs_an_invalid_corpus_report() {
             .join("docs/eval/work-memory-baseline.next.json")
             .exists(),
         "invalid candidate artifacts must be cleaned up"
+    );
+}
+
+#[test]
+fn baseline_update_refreshes_the_single_pinned_digest() {
+    let dir = tempdir().expect("tempdir");
+    let report = eligible_fake_baseline();
+    let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+    let baseline = dir.path().join("docs/eval/work-memory-baseline.json");
+    let digest = dir.path().join("docs/eval/work-memory-baseline.sha256");
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+        .env("MCI_FAKE_ARGS", &fake_args_path)
+        .arg("--update-baseline")
+        .output()
+        .expect("update canonical baseline");
+
+    assert!(
+        output.status.success(),
+        "eligible update must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected = Command::new("shasum")
+        .args(["-a", "256"])
+        .arg(&baseline)
+        .output()
+        .expect("hash installed baseline");
+    assert!(expected.status.success());
+    let expected = String::from_utf8(expected.stdout)
+        .expect("utf-8 shasum")
+        .split_whitespace()
+        .next()
+        .expect("digest")
+        .to_owned();
+    assert_eq!(
+        fs::read_to_string(digest).expect("updated digest").trim(),
+        expected,
+        "baseline bytes and their single pinned authority must move together"
     );
 }
 

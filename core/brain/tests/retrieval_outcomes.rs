@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use mci_brain::stubs::InMemoryBrainStore;
 use mci_brain::{
-    lexical_retrieval_outcome, BrainStore, EmbedError, Embedder, Event, EventId,
-    EvidenceSufficiencyPolicy, HybridRetriever, RetrievalDegradation, RetrievalOutcome,
-    RetrievalQuery, Retriever, SourceQuality, EVIDENCE_SUFFICIENCY_POLICY,
+    lexical_retrieval_outcome, BrainStore, EmbedError, Embedder, Event, EventId, EvidenceExcerpt,
+    EvidenceSufficiencyPolicy, EvidenceVerdict, EvidenceVerifier, EvidenceVerifierError,
+    HybridRetriever, RetrievalDegradation, RetrievalOutcome, RetrievalQuery, Retriever,
+    SourceQuality, EVIDENCE_SUFFICIENCY_POLICY,
 };
 
 struct CapabilityStore {
@@ -83,6 +84,21 @@ impl Embedder for FailingEmbedder {
     }
 }
 
+#[derive(Debug)]
+struct FixedEvidenceVerifier {
+    result: Result<EvidenceVerdict, EvidenceVerifierError>,
+}
+
+impl EvidenceVerifier for FixedEvidenceVerifier {
+    fn verify(
+        &self,
+        _query: &str,
+        _candidates: &[EvidenceExcerpt<'_>],
+    ) -> Result<EvidenceVerdict, EvidenceVerifierError> {
+        self.result.clone()
+    }
+}
+
 fn event(text: &str, url: Option<&str>) -> Event {
     let mut embedding = vec![0.0; 384];
     embedding[0] = 1.0;
@@ -152,7 +168,7 @@ fn matched_outcome_carries_extant_event_evidence_and_source_quality() {
 }
 
 #[test]
-fn unqualified_production_critic_returns_named_degradation_with_ranked_fallback() {
+fn missing_production_verifier_returns_named_degradation_with_ranked_fallback() {
     let store = Arc::new(InMemoryBrainStore::new());
     let event_id = store
         .put_event(&event(
@@ -170,11 +186,194 @@ fn unqualified_production_critic_returns_named_degradation_with_ranked_fallback(
         fallback_matches,
     } = outcome
     else {
-        panic!("expected unqualified evidence-sufficiency degradation");
+        panic!("expected unavailable evidence-verifier degradation");
     };
     assert_eq!(
         degradation,
-        RetrievalDegradation::EvidenceSufficiencyUnqualified
+        RetrievalDegradation::EvidenceVerifierUnavailable
+    );
+    assert_eq!(fallback_matches[0].hit.event_id, event_id);
+}
+
+#[test]
+fn qualified_verifier_support_promotes_source_attributed_evidence() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    let event_id = store
+        .put_event(&event(
+            "The cedar chest is beside the window.",
+            Some("file:///notes/room.txt"),
+        ))
+        .unwrap();
+    let verifier = FixedEvidenceVerifier {
+        result: Ok(EvidenceVerdict::Supported {
+            confidence: 0.97,
+            evidence_ids: vec![event_id.0],
+        }),
+    };
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20)
+        .with_evidence_verifier(Arc::new(verifier));
+
+    let outcome = retriever
+        .retrieve_outcome(&query("Where is the cedar chest?"))
+        .unwrap();
+
+    let RetrievalOutcome::Matched { matches } = outcome else {
+        panic!("verified support should be a trusted match");
+    };
+    assert_eq!(matches[0].evidence.event_id, event_id);
+}
+
+#[test]
+fn qualified_verifier_returns_only_the_events_it_cites_as_support() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    let distractor_id = store
+        .put_event(&event(
+            "The cedar chest was discussed during the move.",
+            Some("file:///notes/move.txt"),
+        ))
+        .unwrap();
+    let support_id = store
+        .put_event(&event(
+            "The cedar chest is beside the window.",
+            Some("file:///notes/room.txt"),
+        ))
+        .unwrap();
+    let verifier = FixedEvidenceVerifier {
+        result: Ok(EvidenceVerdict::Supported {
+            confidence: 0.97,
+            evidence_ids: vec![support_id.0],
+        }),
+    };
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20)
+        .with_evidence_verifier(Arc::new(verifier));
+
+    let RetrievalOutcome::Matched { matches } = retriever
+        .retrieve_outcome(&query("Where is the cedar chest?"))
+        .unwrap()
+    else {
+        panic!("verified support should be a trusted match");
+    };
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].evidence.event_id, support_id);
+    assert_ne!(matches[0].evidence.event_id, distractor_id);
+}
+
+#[test]
+fn verifier_insufficient_abstains_even_when_retrieval_rank_is_high() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    store
+        .put_event(&event(
+            "The cedar chest was discussed during the move.",
+            Some("file:///notes/room.txt"),
+        ))
+        .unwrap();
+    let verifier = FixedEvidenceVerifier {
+        result: Ok(EvidenceVerdict::Insufficient { confidence: 0.96 }),
+    };
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20)
+        .with_evidence_verifier(Arc::new(verifier));
+
+    assert!(matches!(
+        retriever
+            .retrieve_outcome(&query("Where is the cedar chest?"))
+            .unwrap(),
+        RetrievalOutcome::NothingMatched {
+            reason: mci_brain::NothingMatchedReason::EvidenceFloor
+        }
+    ));
+}
+
+#[test]
+fn verifier_contradiction_preserves_its_source_without_returning_supported_hits() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    let event_id = store
+        .put_event(&event(
+            "The cedar chest is not beside the window.",
+            Some("file:///notes/room.txt"),
+        ))
+        .unwrap();
+    let verifier = FixedEvidenceVerifier {
+        result: Ok(EvidenceVerdict::Contradicted {
+            confidence: 0.94,
+            evidence_ids: vec![event_id.0],
+        }),
+    };
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20)
+        .with_evidence_verifier(Arc::new(verifier));
+
+    let RetrievalOutcome::Contradicted { matches } = retriever
+        .retrieve_outcome(&query("Is the cedar chest beside the window?"))
+        .unwrap()
+    else {
+        panic!("contradiction should remain source-attributed");
+    };
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].evidence.event_id, event_id);
+}
+
+#[test]
+fn verifier_failure_is_named_and_keeps_ranked_context_untrusted() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    let event_id = store
+        .put_event(&event(
+            "The cedar chest is beside the window.",
+            Some("file:///notes/room.txt"),
+        ))
+        .unwrap();
+    let verifier = FixedEvidenceVerifier {
+        result: Err(EvidenceVerifierError::Unavailable(
+            "model is not loaded".into(),
+        )),
+    };
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20)
+        .with_evidence_verifier(Arc::new(verifier));
+
+    let RetrievalOutcome::Degraded {
+        degradation,
+        fallback_matches,
+    } = retriever
+        .retrieve_outcome(&query("Where is the cedar chest?"))
+        .unwrap()
+    else {
+        panic!("verifier failure must be a typed degradation");
+    };
+    assert_eq!(
+        degradation,
+        RetrievalDegradation::EvidenceVerifierUnavailable
+    );
+    assert_eq!(fallback_matches[0].hit.event_id, event_id);
+}
+
+#[test]
+fn malformed_verifier_provenance_fails_closed() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    let event_id = store
+        .put_event(&event(
+            "The cedar chest is beside the window.",
+            Some("file:///notes/room.txt"),
+        ))
+        .unwrap();
+    let verifier = FixedEvidenceVerifier {
+        result: Ok(EvidenceVerdict::Supported {
+            confidence: 0.99,
+            evidence_ids: vec![event_id.0 + 10_000],
+        }),
+    };
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20)
+        .with_evidence_verifier(Arc::new(verifier));
+
+    let RetrievalOutcome::Degraded {
+        degradation,
+        fallback_matches,
+    } = retriever
+        .retrieve_outcome(&query("Where is the cedar chest?"))
+        .unwrap()
+    else {
+        panic!("invented provenance must fail closed");
+    };
+    assert_eq!(
+        degradation,
+        RetrievalDegradation::EvidenceVerifierUnavailable
     );
     assert_eq!(fallback_matches[0].hit.event_id, event_id);
 }
@@ -223,7 +422,7 @@ fn legacy_retrieve_rejects_unqualified_ranked_context() {
         .retrieve(&query("Where is the cedar chest?"))
         .expect_err("legacy API must not erase typed degradation");
 
-    assert!(error.to_string().contains("EvidenceSufficiencyUnqualified"));
+    assert!(error.to_string().contains("EvidenceVerifierUnavailable"));
 }
 
 #[test]

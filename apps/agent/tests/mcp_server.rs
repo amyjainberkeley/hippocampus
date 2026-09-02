@@ -428,6 +428,32 @@ fn tools_call_mci_recall_serializes_nothing_matched_without_hits() {
 }
 
 #[test]
+fn tools_call_mci_recall_serializes_source_attributed_contradiction() {
+    let (server, stub) = server();
+    stub.set_recall_outcome(McpRecallOutcome::Contradicted {
+        evidence: vec![sample_hit(101, 1_000_000, "the assertion is false", None)],
+    });
+    let response = server
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_recall",
+                "arguments": {"query": "asserted fact"}
+            })),
+        ))
+        .expect("response");
+    let result = response.result.expect("result");
+    assert_eq!(result["outcome"], "contradicted");
+    assert_eq!(result["hits"], serde_json::json!([]));
+    assert_eq!(result["related_context"], serde_json::json!([]));
+    assert_eq!(result["contradicting_context"].as_array().unwrap().len(), 1);
+    let text: serde_json::Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text["outcome"], "contradicted");
+    assert_eq!(text["contradicting_context"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn tools_call_mci_recall_serializes_every_degradation_as_related_context_never_hits() {
     for (degradation, expected) in [
         (
@@ -445,6 +471,10 @@ fn tools_call_mci_recall_serializes_every_degradation_as_related_context_never_h
         (
             RetrievalDegradation::EvidenceSufficiencyUnqualified,
             "evidence_sufficiency_unqualified",
+        ),
+        (
+            RetrievalDegradation::EvidenceVerifierUnavailable,
+            "evidence_verifier_unavailable",
         ),
     ] {
         let (server, stub) = server();
@@ -1012,7 +1042,7 @@ fn mci_recall_with_embedder_calls_hybrid_retriever() {
 
     let result = resp.result.expect("result — hybrid recall must succeed");
     assert_eq!(result["outcome"], "degraded");
-    assert_eq!(result["degradation"], "evidence_sufficiency_unqualified");
+    assert_eq!(result["degradation"], "evidence_verifier_unavailable");
     assert_eq!(result["hits"], serde_json::json!([]));
     let hits = result
         .get("related_context")

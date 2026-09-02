@@ -548,7 +548,7 @@ fn recall_hybrid_returns_hits_with_positive_scores() {
             "arguments": {"query": "database optimization", "limit": 10}
         })),
     )));
-    let hits = degraded_context(&result, "evidence_sufficiency_unqualified");
+    let hits = degraded_context(&result, "evidence_verifier_unavailable");
     assert!(
         !hits.is_empty(),
         "hybrid retriever should return related context"
@@ -1525,7 +1525,7 @@ fn w_entity_arm_fires_through_fts_sanitizing_store_in_production_recall() {
         })),
     )));
 
-    let hits = degraded_context(&result, "evidence_sufficiency_unqualified");
+    let hits = degraded_context(&result, "evidence_verifier_unavailable");
     let pos = |id: u64| {
         hits.iter()
             .position(|h| h.get("event_id").and_then(serde_json::Value::as_u64) == Some(id))

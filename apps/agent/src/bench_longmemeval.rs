@@ -310,10 +310,12 @@ pub enum Outcome {
 #[serde(rename_all = "camelCase")]
 pub enum RetrievalDisposition {
     Matched,
+    Contradicted,
     NothingMatchedNoCandidates,
     NothingMatchedEvidenceFloor,
     NothingMatchedZeroLimit,
     DegradedEvidenceSufficiencyUnqualified,
+    DegradedEvidenceVerifierUnavailable,
 }
 
 #[allow(missing_docs)]
@@ -1099,6 +1101,13 @@ fn typed_outcome_hits(
                 .collect(),
             disposition: RetrievalDisposition::Matched,
         }),
+        RetrievalOutcome::Contradicted { matches } => Ok(RetrievalMeasurement {
+            hits: matches
+                .into_iter()
+                .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
+                .collect(),
+            disposition: RetrievalDisposition::Contradicted,
+        }),
         RetrievalOutcome::NothingMatched { reason } => Ok(RetrievalMeasurement {
             hits: Vec::new(),
             disposition: match reason {
@@ -1120,6 +1129,16 @@ fn typed_outcome_hits(
                 .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
                 .collect(),
             disposition: RetrievalDisposition::DegradedEvidenceSufficiencyUnqualified,
+        }),
+        RetrievalOutcome::Degraded {
+            degradation: RetrievalDegradation::EvidenceVerifierUnavailable,
+            fallback_matches,
+        } => Ok(RetrievalMeasurement {
+            hits: fallback_matches
+                .into_iter()
+                .map(|value| (value.hit.event_id.0, f64::from(value.hit.score_combined)))
+                .collect(),
+            disposition: RetrievalDisposition::DegradedEvidenceVerifierUnavailable,
         }),
         RetrievalOutcome::Degraded { degradation, .. } => Err(format!(
             "{question_id}: production retrieval degraded: {degradation:?}"
@@ -1979,20 +1998,20 @@ mod tests {
     }
 
     #[test]
-    fn benchmark_scores_unqualified_evidence_fallback_without_certifying_it() {
+    fn benchmark_scores_unavailable_verifier_fallback_without_certifying_it() {
         let result = typed_outcome_hits(
             RetrievalOutcome::Degraded {
-                degradation: mci_brain::RetrievalDegradation::EvidenceSufficiencyUnqualified,
+                degradation: mci_brain::RetrievalDegradation::EvidenceVerifierUnavailable,
                 fallback_matches: Vec::new(),
             },
-            "unqualified-evidence",
+            "unavailable-verifier",
         )
         .expect("ranking remains measurable");
 
         assert_eq!(result.hits, Vec::new());
         assert_eq!(
             result.disposition,
-            RetrievalDisposition::DegradedEvidenceSufficiencyUnqualified
+            RetrievalDisposition::DegradedEvidenceVerifierUnavailable
         );
     }
 

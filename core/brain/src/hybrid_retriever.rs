@@ -86,8 +86,9 @@ use crate::extraction::tier1::{Tier1Extractor, KIND_REDACTED_TOKEN};
 use crate::extraction::tier2::{KIND_LOCATION, KIND_ORGANIZATION, KIND_PERSON_NAME};
 use crate::{
     evidence_features_for_candidates, explicit_evidence_signal, BrainStore, Embedder, EntityId,
-    EventId, EvidenceCandidate, EvidenceSufficiencyPolicy, ExplicitEvidenceSignal, RetrievalHit,
-    RetrievalQuery, RetrieveError, Retriever, TimeRange, EVIDENCE_SUFFICIENCY_POLICY,
+    EventId, EvidenceCandidate, EvidenceExcerpt, EvidenceSufficiencyPolicy, EvidenceVerdict,
+    EvidenceVerifier, ExplicitEvidenceSignal, RetrievalHit, RetrievalQuery, RetrieveError,
+    Retriever, TimeRange,
 };
 
 // ---------------------------------------------------------------------------
@@ -211,6 +212,9 @@ pub enum RetrievalDegradation {
     /// The independently calibrated evidence-sufficiency critic did not
     /// qualify, so ranking is available but answerability is not.
     EvidenceSufficiencyUnqualified,
+    /// A configured semantic verifier failed or returned malformed source
+    /// attribution, so ranked context remains explicitly untrusted.
+    EvidenceVerifierUnavailable,
 }
 
 /// Typed production retrieval result.
@@ -219,6 +223,11 @@ pub enum RetrievalOutcome {
     /// Evidence passed the explicit relevance floor.
     Matched {
         /// Ranked, evidence-backed matches.
+        matches: Vec<RetrievalMatch>,
+    },
+    /// Retrieved evidence directly contradicts an asserted query.
+    Contradicted {
+        /// Ranked events cited by the verifier as contradictory evidence.
         matches: Vec<RetrievalMatch>,
     },
     /// Retrieval completed normally and found no support.
@@ -439,9 +448,12 @@ pub struct HybridRetriever<S: BrainStore, E: Embedder> {
     k_lex: usize,
     /// Semantic candidate-pool size (`k_sem`).
     k_sem: usize,
-    /// Separately calibrated evidence-sufficiency critic. Ranking alone cannot
-    /// promote a candidate to `Matched`.
-    evidence_policy: EvidenceSufficiencyPolicy,
+    /// Legacy score critic retained only for test/stub ranking mechanics.
+    /// Production construction leaves this absent.
+    evidence_policy: Option<EvidenceSufficiencyPolicy>,
+    /// Optional local semantic verifier. When present, this source-attributed
+    /// judgment replaces the legacy score-only critic.
+    evidence_verifier: Option<Arc<dyn EvidenceVerifier>>,
 }
 
 enum CandidateArms {
@@ -450,6 +462,15 @@ enum CandidateArms {
         semantic: HashMap<EventId, (f32, usize)>,
     },
     Degraded(RetrievalOutcome),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EvidenceAssessment {
+    Supported(Vec<u64>),
+    Contradicted(Vec<u64>),
+    Unsupported,
+    Unqualified,
+    VerifierUnavailable,
 }
 
 impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
@@ -466,7 +487,8 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             now_us,
             k_lex: DEFAULT_K_LEX,
             k_sem: DEFAULT_K_SEM,
-            evidence_policy: EVIDENCE_SUFFICIENCY_POLICY,
+            evidence_policy: None,
+            evidence_verifier: None,
         }
     }
 
@@ -501,7 +523,17 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     #[cfg(any(test, feature = "stubs"))]
     #[must_use]
     pub fn with_evidence_policy(mut self, policy: EvidenceSufficiencyPolicy) -> Self {
-        self.evidence_policy = policy;
+        self.evidence_policy = Some(policy);
+        self
+    }
+
+    /// Attach a local semantic evidence verifier.
+    ///
+    /// Verifier output is checked for confidence bounds and source provenance
+    /// before it can promote retrieval output to [`RetrievalOutcome::Matched`].
+    #[must_use]
+    pub fn with_evidence_verifier(mut self, verifier: Arc<dyn EvidenceVerifier>) -> Self {
+        self.evidence_verifier = Some(verifier);
         self
     }
 
@@ -567,7 +599,9 @@ impl<S: BrainStore, E: Embedder> Retriever for HybridRetriever<S, E> {
             RetrievalOutcome::Matched { matches } => {
                 Ok(matches.into_iter().map(|value| value.hit).collect())
             }
-            RetrievalOutcome::NothingMatched { .. } => Ok(Vec::new()),
+            RetrievalOutcome::Contradicted { .. } | RetrievalOutcome::NothingMatched { .. } => {
+                Ok(Vec::new())
+            }
             RetrievalOutcome::Degraded { degradation, .. } => Err(RetrieveError::Backend(format!(
                 "retrieval degraded: {degradation:?}"
             ))),
@@ -634,6 +668,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             .zip(semantic_scores.get(1))
             .map_or(0.0, |(top, second)| (top - second).max(0.0));
         let mut critic_rows: Vec<(EventId, String, f32)> = Vec::new();
+        let mut evidence_rows: Vec<(EventId, String)> = Vec::new();
         let mut matches: Vec<RetrievalMatch> = Vec::with_capacity(candidate_ids.len());
         for id in candidate_ids {
             let event_opt = self
@@ -699,6 +734,7 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             if let Some(raw_semantic_cosine) = sem_raw {
                 critic_rows.push((id, event.text.clone(), raw_semantic_cosine));
             }
+            evidence_rows.push((id, event.text.clone()));
             matches.push(RetrievalMatch {
                 hit: RetrievalHit {
                     event_id: id,
@@ -716,12 +752,11 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 signals,
             });
         }
-        let (evidence_is_sufficient, evidence_is_explicitly_unsupported) =
-            self.rank_and_assess(query, &mut matches, &critic_rows);
-        Ok(self.finalize_retrieval_outcome(
+        let evidence_assessment =
+            self.rank_and_assess(query, &mut matches, &critic_rows, &evidence_rows);
+        Ok(Self::finalize_retrieval_outcome(
             matches,
-            evidence_is_sufficient,
-            evidence_is_explicitly_unsupported,
+            evidence_assessment,
             lex_map.is_empty() && sem_map.is_empty(),
         ))
     }
@@ -750,7 +785,8 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         query: &RetrievalQuery,
         matches: &mut Vec<RetrievalMatch>,
         critic_rows: &[(EventId, String, f32)],
-    ) -> (bool, bool) {
+        evidence_rows: &[(EventId, String)],
+    ) -> EvidenceAssessment {
         let candidates = critic_rows
             .iter()
             .map(|(event_id, text, raw_semantic_cosine)| EvidenceCandidate {
@@ -759,12 +795,6 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 raw_semantic_cosine: *raw_semantic_cosine,
             })
             .collect::<Vec<_>>();
-        let sufficient = evidence_features_for_candidates(&query.text, &candidates)
-            .is_some_and(|features| self.evidence_policy.is_sufficient(features));
-        let explicitly_unsupported = matches!(
-            explicit_evidence_signal(&query.text, &candidates),
-            ExplicitEvidenceSignal::RelationUnsupported
-        );
         matches.sort_by(|left, right| {
             right
                 .hit
@@ -773,7 +803,59 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 .then_with(|| left.hit.event_id.cmp(&right.hit.event_id))
         });
         matches.truncate(query.limit);
-        (sufficient, explicitly_unsupported)
+
+        if matches!(
+            explicit_evidence_signal(&query.text, &candidates),
+            ExplicitEvidenceSignal::RelationUnsupported
+        ) {
+            return EvidenceAssessment::Unsupported;
+        }
+
+        if let Some(verifier) = &self.evidence_verifier {
+            let evidence_by_id = evidence_rows
+                .iter()
+                .map(|(event_id, text)| (*event_id, text.as_str()))
+                .collect::<HashMap<_, _>>();
+            let excerpts = matches
+                .iter()
+                .filter_map(|value| {
+                    evidence_by_id
+                        .get(&value.hit.event_id)
+                        .map(|text| EvidenceExcerpt {
+                            stable_id: value.hit.event_id.0,
+                            text,
+                        })
+                })
+                .collect::<Vec<_>>();
+            return match verifier.verify(&query.text, &excerpts) {
+                Ok(verdict) if verdict.is_well_formed(&excerpts) => match verdict {
+                    EvidenceVerdict::Supported { evidence_ids, .. } => {
+                        EvidenceAssessment::Supported(evidence_ids)
+                    }
+                    EvidenceVerdict::Contradicted { evidence_ids, .. } => {
+                        EvidenceAssessment::Contradicted(evidence_ids)
+                    }
+                    EvidenceVerdict::Insufficient { .. } => EvidenceAssessment::Unsupported,
+                },
+                Ok(_) | Err(_) => EvidenceAssessment::VerifierUnavailable,
+            };
+        }
+
+        let Some(evidence_policy) = self.evidence_policy else {
+            return EvidenceAssessment::VerifierUnavailable;
+        };
+        if !evidence_policy.validation_qualified {
+            return EvidenceAssessment::Unqualified;
+        }
+        if evidence_features_for_candidates(&query.text, &candidates)
+            .is_some_and(|features| evidence_policy.is_sufficient(features))
+        {
+            EvidenceAssessment::Supported(
+                matches.iter().map(|value| value.hit.event_id.0).collect(),
+            )
+        } else {
+            EvidenceAssessment::Unsupported
+        }
     }
 
     fn candidate_arms(
@@ -835,10 +917,8 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     }
 
     fn finalize_retrieval_outcome(
-        &self,
-        matches: Vec<RetrievalMatch>,
-        evidence_is_sufficient: bool,
-        evidence_is_explicitly_unsupported: bool,
+        mut matches: Vec<RetrievalMatch>,
+        assessment: EvidenceAssessment,
         candidate_arms_empty: bool,
     ) -> RetrievalOutcome {
         if matches.is_empty() {
@@ -850,23 +930,26 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 },
             };
         }
-        if evidence_is_explicitly_unsupported {
-            return RetrievalOutcome::NothingMatched {
+        match assessment {
+            EvidenceAssessment::Supported(evidence_ids) => {
+                retain_cited_matches(&mut matches, &evidence_ids);
+                RetrievalOutcome::Matched { matches }
+            }
+            EvidenceAssessment::Contradicted(evidence_ids) => {
+                retain_cited_matches(&mut matches, &evidence_ids);
+                RetrievalOutcome::Contradicted { matches }
+            }
+            EvidenceAssessment::Unsupported => RetrievalOutcome::NothingMatched {
                 reason: NothingMatchedReason::EvidenceFloor,
-            };
-        }
-        if !self.evidence_policy.validation_qualified {
-            return RetrievalOutcome::Degraded {
+            },
+            EvidenceAssessment::Unqualified => RetrievalOutcome::Degraded {
                 degradation: RetrievalDegradation::EvidenceSufficiencyUnqualified,
                 fallback_matches: matches,
-            };
-        }
-        if evidence_is_sufficient {
-            RetrievalOutcome::Matched { matches }
-        } else {
-            RetrievalOutcome::NothingMatched {
-                reason: NothingMatchedReason::EvidenceFloor,
-            }
+            },
+            EvidenceAssessment::VerifierUnavailable => RetrievalOutcome::Degraded {
+                degradation: RetrievalDegradation::EvidenceVerifierUnavailable,
+                fallback_matches: matches,
+            },
         }
     }
 
@@ -1055,6 +1138,11 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         let effective = intersect_ranges(query.time_filter, Some(window));
         self.plain_retrieve_outcome(query, effective)
     }
+}
+
+fn retain_cited_matches(matches: &mut Vec<RetrievalMatch>, evidence_ids: &[u64]) {
+    let cited = evidence_ids.iter().copied().collect::<HashSet<_>>();
+    matches.retain(|value| cited.contains(&value.hit.event_id.0));
 }
 
 // ---------------------------------------------------------------------------

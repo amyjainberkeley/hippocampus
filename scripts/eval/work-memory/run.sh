@@ -6,8 +6,9 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd -P)
 DATASET="eval/work-memory/synthetic-v1.json"
 BASELINE="docs/eval/work-memory-baseline.json"
 BASELINE_NEXT="docs/eval/work-memory-baseline.next.json"
+BASELINE_SHA256_FILE="docs/eval/work-memory-baseline.sha256"
+BASELINE_SHA256_NEXT="docs/eval/work-memory-baseline.sha256.next"
 DATASET_SHA256="96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f"
-BASELINE_SHA256="e9c1239ba0cbe1c5ab16ec80aa591fee121890fb2654f2fe8c138eaa6db06bc2"
 DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
 
 UPDATE_BASELINE=0
@@ -70,6 +71,17 @@ fi
 
 if [[ ! -f "$BASELINE" ]]; then
     echo "work-memory runner: accepted baseline not found at $REPO_ROOT/$BASELINE" >&2
+    exit 3
+fi
+
+if [[ ! -f "$BASELINE_SHA256_FILE" ]]; then
+    echo "work-memory runner: accepted baseline digest not found at $REPO_ROOT/$BASELINE_SHA256_FILE" >&2
+    exit 3
+fi
+
+BASELINE_SHA256=$(tr -d '[:space:]' < "$BASELINE_SHA256_FILE")
+if [[ ! "$BASELINE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "work-memory runner: accepted baseline digest is malformed" >&2
     exit 3
 fi
 
@@ -168,11 +180,14 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
                 ;;
         esac
     done
-    if [[ -e "$BASELINE_NEXT" ]]; then
-        echo "work-memory runner: refusing to overwrite stale $REPO_ROOT/$BASELINE_NEXT" >&2
+    if [[ -e "$BASELINE_NEXT" || -e "$BASELINE_SHA256_NEXT" ]]; then
+        echo "work-memory runner: refusing to overwrite stale baseline candidate artifacts" >&2
         exit 3
     fi
-    trap 'rm -f "$BASELINE_NEXT"' EXIT
+    cleanup_baseline_candidates() {
+        rm -f "$BASELINE_NEXT" "$BASELINE_SHA256_NEXT"
+    }
+    trap cleanup_baseline_candidates EXIT
 
     OUT="${OUT:-$BASELINE}"
     echo "work-memory runner: generating publishable baseline for $OUT" >&2
@@ -209,7 +224,13 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
         exit 5
     fi
 
+    if [[ "$OUT" == "$BASELINE" ]]; then
+        shasum -a 256 "$BASELINE_NEXT" | awk '{print $1}' > "$BASELINE_SHA256_NEXT"
+    fi
     mv "$BASELINE_NEXT" "$OUT"
+    if [[ "$OUT" == "$BASELINE" ]]; then
+        mv "$BASELINE_SHA256_NEXT" "$BASELINE_SHA256_FILE"
+    fi
     trap - EXIT
     echo "work-memory runner: baseline written to $OUT" >&2
     exit "$BENCH_STATUS"
