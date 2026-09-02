@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and score evidence-verifier v2 verdicts without loading a model."""
+"""Validate and score the public evidence-verifier v2 regression fixture."""
 
 from __future__ import annotations
 
@@ -417,7 +417,14 @@ def score_verdicts(corpus: dict[str, Any], verdicts: dict[str, dict[str, Any]]) 
     deduplicated_failures = list(dict.fromkeys(failures))
     return {
         "dataset_id": corpus["dataset_id"],
-        "qualified": not deduplicated_failures,
+        "evaluation_scope": "public_regression_smoke",
+        "fixture_passed": not deduplicated_failures,
+        "release_qualified": False,
+        "release_qualification_failures": [
+            "public fixture includes its answer key",
+            "fixture does not evaluate a proposed answer or atomic claims",
+            "blind signed-runtime evaluation is required",
+        ],
         "thresholds": thresholds,
         "splits": splits,
         "validation": validation,
@@ -440,7 +447,7 @@ def oracle_verdicts(corpus: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def run_self_test(corpus: dict[str, Any]) -> dict[str, Any]:
     oracle = oracle_verdicts(corpus)
     oracle_report = score_verdicts(corpus, oracle)
-    require(oracle_report["qualified"], "internal oracle did not qualify")
+    require(oracle_report["fixture_passed"], "internal oracle did not pass the fixture")
 
     adversarial = copy.deepcopy(oracle)
     target_id = next(
@@ -450,7 +457,7 @@ def run_self_test(corpus: dict[str, Any]) -> dict[str, Any]:
     )
     adversarial[target_id]["citations"] = ["ev-invented-self-test"]
     adversarial_report = score_verdicts(corpus, adversarial)
-    require(not adversarial_report["qualified"], "invented citation did not fail closed")
+    require(not adversarial_report["fixture_passed"], "invented citation did not fail closed")
     require(
         any("invented citation" in failure for failure in adversarial_report["failures"]),
         "invented citation failure was not reported",
@@ -470,7 +477,7 @@ def run_self_test(corpus: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "checks": [
-            "oracle verdicts qualify",
+            "oracle verdicts pass the public fixture",
             "invented citations fail closed",
             "candidate-order inconsistency fails closed",
         ],
@@ -531,7 +538,7 @@ def main() -> int:
         report["corpus_sha256"] = digest
         report["system"] = verdict_data["system"]
         write_report(report, args.output)
-        return 0 if report["qualified"] else 1
+        return 0 if report["fixture_passed"] else 1
     except ContractError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

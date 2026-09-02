@@ -1,9 +1,15 @@
 # Evidence verifier evaluation
 
-This directory owns candidate semantic-verifier evaluation. A retrieval rank
-is never counted as evidence support. Candidate models must be scored on the
-disjoint corpus and must preserve source attribution through the
-`EvidenceVerifier` contract in `core/brain`.
+This directory owns public semantic-verifier regression fixtures. A retrieval
+rank is never counted as evidence support. Candidate models can be scored here
+to test the `EvidenceVerifier` verdict and citation contract, but passing these
+public fixtures cannot qualify a release model.
+
+The v2 answer key is checked into the repository and its split families share
+templates. It also scores only a query plus candidates, not a proposed answer.
+Release qualification therefore requires a separate blind corpus, atomic
+proposed claims, opaque evidence IDs, and execution through the immutable
+signed runtime described by ADR-0038.
 
 The initial MobileBERT QA candidate intentionally reuses
 `eval/relevance-calibration/v1.json` so its result can be compared with the

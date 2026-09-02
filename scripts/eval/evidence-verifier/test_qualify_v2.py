@@ -213,7 +213,7 @@ class QualifierContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("supported and insufficient", result.stderr)
 
-    def test_score_perfect_verdicts_qualifies(self) -> None:
+    def test_score_perfect_verdicts_passes_only_the_public_fixture(self) -> None:
         data = complete_corpus()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -224,7 +224,10 @@ class QualifierContractTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertTrue(report["qualified"])
+        self.assertTrue(report["fixture_passed"])
+        self.assertFalse(report["release_qualified"])
+        self.assertNotIn("qualified", report)
+        self.assertEqual(report["evaluation_scope"], "public_regression_smoke")
         self.assertEqual(report["validation"]["positive_support_coverage"], 1.0)
         self.assertEqual(report["validation"]["contradiction_coverage"], 1.0)
         self.assertEqual(report["validation"]["insufficient_false_positive_rate"], 0.0)
@@ -244,7 +247,8 @@ class QualifierContractTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 1)
         report = json.loads(result.stdout)
-        self.assertFalse(report["qualified"])
+        self.assertFalse(report["fixture_passed"])
+        self.assertFalse(report["release_qualified"])
         self.assertIn("invented citation", " ".join(report["failures"]))
 
     def test_malformed_citations_are_rejected(self) -> None:
