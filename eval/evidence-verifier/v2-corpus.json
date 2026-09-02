@@ -1,0 +1,928 @@
+{
+  "schema_version": 2,
+  "dataset_id": "hippocampus-evidence-verifier-v2",
+  "description": "Synthetic, scenario-disjoint evidence-verifier qualification corpus. Evidence text is canonical and must not be rewritten by evaluators.",
+  "qualification_thresholds": {
+    "minimum_validation_support_coverage": 0.9,
+    "minimum_validation_contradiction_coverage": 0.9,
+    "maximum_validation_insufficient_false_positive_rate": 0.05,
+    "minimum_validation_provenance_validity": 1.0,
+    "minimum_validation_metamorphic_consistency": 1.0
+  },
+  "required_categories": [
+    "direct_answer",
+    "paraphrase_coreference",
+    "temporal_update",
+    "contradiction",
+    "cross_document_synthesis",
+    "provenance_enforcement",
+    "absent_answer",
+    "concrete_distractor"
+  ],
+  "evidence": [
+    {
+      "id": "ev-fit-cedar-001",
+      "scenario_id": "fit-cedar-release",
+      "source_id": "src-fit-cedar-release-note",
+      "text": "The Cedar desktop beta is scheduled for April 18 at 10:00 a.m. Pacific time."
+    },
+    {
+      "id": "ev-fit-cedar-002",
+      "scenario_id": "fit-cedar-release",
+      "source_id": "src-fit-cedar-design-note",
+      "text": "Cedar uses a white toolbar with graphite icons and a compact timeline."
+    },
+    {
+      "id": "ev-fit-cedar-003",
+      "scenario_id": "fit-cedar-release",
+      "source_id": "src-fit-cedar-qa-note",
+      "text": "The Cedar smoke test contains twelve capture fixtures."
+    },
+    {
+      "id": "ev-fit-orchid-001",
+      "scenario_id": "fit-orchid-owner",
+      "source_id": "src-fit-orchid-project-brief",
+      "text": "Mina Rao leads Project Orchid. She owns the customer rollout checklist and the final go-live decision."
+    },
+    {
+      "id": "ev-fit-orchid-002",
+      "scenario_id": "fit-orchid-owner",
+      "source_id": "src-fit-orchid-engineering-note",
+      "text": "Owen Park maintains Orchid's import worker and retry dashboard."
+    },
+    {
+      "id": "ev-fit-orchid-003",
+      "scenario_id": "fit-orchid-owner",
+      "source_id": "src-fit-orchid-support-note",
+      "text": "The Orchid pilot includes Northwind and Blue Yonder."
+    },
+    {
+      "id": "ev-fit-lantern-001",
+      "scenario_id": "fit-lantern-status",
+      "source_id": "src-fit-lantern-april-plan",
+      "text": "On April 2, the Lantern migration plan listed May 4 as the target date."
+    },
+    {
+      "id": "ev-fit-lantern-002",
+      "scenario_id": "fit-lantern-status",
+      "source_id": "src-fit-lantern-april-update",
+      "text": "The April 11 update supersedes the earlier Lantern plan: migration is now scheduled for May 18."
+    },
+    {
+      "id": "ev-fit-lantern-003",
+      "scenario_id": "fit-lantern-status",
+      "source_id": "src-fit-lantern-runbook",
+      "text": "Lantern's rollback window lasts forty-five minutes."
+    },
+    {
+      "id": "ev-fit-harbor-001",
+      "scenario_id": "fit-harbor-platform",
+      "source_id": "src-fit-harbor-platform-matrix",
+      "text": "Harbor 1.0 is a macOS-only application. Windows and Linux builds are not supported."
+    },
+    {
+      "id": "ev-fit-harbor-002",
+      "scenario_id": "fit-harbor-platform",
+      "source_id": "src-fit-harbor-chip-note",
+      "text": "Harbor's local classifier is optimized for Apple silicon."
+    },
+    {
+      "id": "ev-fit-harbor-003",
+      "scenario_id": "fit-harbor-platform",
+      "source_id": "src-fit-harbor-export-note",
+      "text": "Harbor exports memories as newline-delimited JSON."
+    },
+    {
+      "id": "ev-fit-kestrel-001",
+      "scenario_id": "fit-kestrel-dependency",
+      "source_id": "src-fit-kestrel-release-policy",
+      "text": "Kestrel cannot ship until the authentication review is approved."
+    },
+    {
+      "id": "ev-fit-kestrel-002",
+      "scenario_id": "fit-kestrel-dependency",
+      "source_id": "src-fit-kestrel-owner-directory",
+      "text": "Priya Shah is the approval owner for authentication reviews."
+    },
+    {
+      "id": "ev-fit-kestrel-003",
+      "scenario_id": "fit-kestrel-dependency",
+      "source_id": "src-fit-kestrel-release-note",
+      "text": "Kestrel's release candidate is build 184."
+    },
+    {
+      "id": "ev-fit-maple-001",
+      "scenario_id": "fit-maple-provenance",
+      "source_id": "src-fit-maple-visual-spec",
+      "text": "Maple's selected accent color is coral."
+    },
+    {
+      "id": "ev-fit-maple-002",
+      "scenario_id": "fit-maple-provenance",
+      "source_id": "src-fit-maple-runtime-spec",
+      "text": "Maple's local inspector listens on port 4317."
+    },
+    {
+      "id": "ev-fit-maple-003",
+      "scenario_id": "fit-maple-provenance",
+      "source_id": "src-fit-maple-storage-spec",
+      "text": "Maple rotates diagnostic logs after seven days."
+    },
+    {
+      "id": "ev-fit-quartz-001",
+      "scenario_id": "fit-quartz-absence",
+      "source_id": "src-fit-quartz-team-note",
+      "text": "The Quartz working group has five members and meets on Thursdays."
+    },
+    {
+      "id": "ev-fit-quartz-002",
+      "scenario_id": "fit-quartz-absence",
+      "source_id": "src-fit-quartz-milestone-note",
+      "text": "Quartz completed its accessibility review on March 9."
+    },
+    {
+      "id": "ev-fit-quartz-003",
+      "scenario_id": "fit-quartz-absence",
+      "source_id": "src-fit-quartz-format-note",
+      "text": "Quartz reports are distributed as PDF files."
+    },
+    {
+      "id": "ev-fit-river-001",
+      "scenario_id": "fit-river-distractor",
+      "source_id": "src-fit-river-office-note",
+      "text": "River's design review is in room 4B, and the mobile review is in room 4D."
+    },
+    {
+      "id": "ev-fit-river-002",
+      "scenario_id": "fit-river-distractor",
+      "source_id": "src-fit-river-retry-note",
+      "text": "The Delta API retries four times, while the Brook API retries six times."
+    },
+    {
+      "id": "ev-fit-river-003",
+      "scenario_id": "fit-river-distractor",
+      "source_id": "src-fit-river-owner-note",
+      "text": "Rina owns the River dashboard, and Rio owns the River alert rules."
+    },
+    {
+      "id": "ev-cal-atlas-001",
+      "scenario_id": "cal-atlas-release",
+      "source_id": "src-cal-atlas-launch-note",
+      "text": "The Atlas command-line preview opens on June 7 at 2:30 p.m. Eastern time."
+    },
+    {
+      "id": "ev-cal-atlas-002",
+      "scenario_id": "cal-atlas-release",
+      "source_id": "src-cal-atlas-doc-note",
+      "text": "Atlas documentation uses runnable shell examples."
+    },
+    {
+      "id": "ev-cal-atlas-003",
+      "scenario_id": "cal-atlas-release",
+      "source_id": "src-cal-atlas-test-note",
+      "text": "Atlas has nineteen parser fixtures."
+    },
+    {
+      "id": "ev-cal-birch-001",
+      "scenario_id": "cal-birch-owner",
+      "source_id": "src-cal-birch-program-note",
+      "text": "Theo Grant coordinates the Birch program. He is accountable for partner onboarding and launch approval."
+    },
+    {
+      "id": "ev-cal-birch-002",
+      "scenario_id": "cal-birch-owner",
+      "source_id": "src-cal-birch-data-note",
+      "text": "Nadia Kim maintains Birch's analytics schema."
+    },
+    {
+      "id": "ev-cal-birch-003",
+      "scenario_id": "cal-birch-owner",
+      "source_id": "src-cal-birch-pilot-note",
+      "text": "The Birch pilot covers three regional offices."
+    },
+    {
+      "id": "ev-cal-comet-001",
+      "scenario_id": "cal-comet-status",
+      "source_id": "src-cal-comet-june-plan",
+      "text": "The June 1 Comet plan proposed July 12 for the data cutover."
+    },
+    {
+      "id": "ev-cal-comet-002",
+      "scenario_id": "cal-comet-status",
+      "source_id": "src-cal-comet-june-update",
+      "text": "A June 16 decision replaced Comet's prior target; the data cutover is scheduled for July 26."
+    },
+    {
+      "id": "ev-cal-comet-003",
+      "scenario_id": "cal-comet-status",
+      "source_id": "src-cal-comet-volume-note",
+      "text": "Comet will transfer approximately eighty gigabytes during cutover."
+    },
+    {
+      "id": "ev-cal-delta-001",
+      "scenario_id": "cal-delta-platform",
+      "source_id": "src-cal-delta-network-policy",
+      "text": "Delta runs entirely offline after installation and does not require a cloud account."
+    },
+    {
+      "id": "ev-cal-delta-002",
+      "scenario_id": "cal-delta-platform",
+      "source_id": "src-cal-delta-package-note",
+      "text": "Delta's installer is distributed as a signed disk image."
+    },
+    {
+      "id": "ev-cal-delta-003",
+      "scenario_id": "cal-delta-platform",
+      "source_id": "src-cal-delta-index-note",
+      "text": "Delta rebuilds its local index every night."
+    },
+    {
+      "id": "ev-cal-ember-001",
+      "scenario_id": "cal-ember-dependency",
+      "source_id": "src-cal-ember-release-policy",
+      "text": "Ember's production rollout requires a completed privacy review."
+    },
+    {
+      "id": "ev-cal-ember-002",
+      "scenario_id": "cal-ember-dependency",
+      "source_id": "src-cal-ember-owner-directory",
+      "text": "Luis Moreno is the designated reviewer for privacy approvals."
+    },
+    {
+      "id": "ev-cal-ember-003",
+      "scenario_id": "cal-ember-dependency",
+      "source_id": "src-cal-ember-build-note",
+      "text": "Ember's current candidate is version 3.4.1."
+    },
+    {
+      "id": "ev-cal-forest-001",
+      "scenario_id": "cal-forest-provenance",
+      "source_id": "src-cal-forest-visual-spec",
+      "text": "Forest's approved typeface is Inter."
+    },
+    {
+      "id": "ev-cal-forest-002",
+      "scenario_id": "cal-forest-provenance",
+      "source_id": "src-cal-forest-runtime-spec",
+      "text": "Forest's preview server uses port 6182."
+    },
+    {
+      "id": "ev-cal-forest-003",
+      "scenario_id": "cal-forest-provenance",
+      "source_id": "src-cal-forest-retention-spec",
+      "text": "Forest retains local crash reports for fourteen days."
+    },
+    {
+      "id": "ev-cal-garnet-001",
+      "scenario_id": "cal-garnet-absence",
+      "source_id": "src-cal-garnet-team-note",
+      "text": "Garnet's research group includes seven people across two time zones."
+    },
+    {
+      "id": "ev-cal-garnet-002",
+      "scenario_id": "cal-garnet-absence",
+      "source_id": "src-cal-garnet-review-note",
+      "text": "Garnet passed its keyboard navigation review on August 3."
+    },
+    {
+      "id": "ev-cal-garnet-003",
+      "scenario_id": "cal-garnet-absence",
+      "source_id": "src-cal-garnet-export-note",
+      "text": "Garnet exports audit summaries in Markdown."
+    },
+    {
+      "id": "ev-cal-hemlock-001",
+      "scenario_id": "cal-hemlock-distractor",
+      "source_id": "src-cal-hemlock-room-note",
+      "text": "Hemlock's planning session is in room 8A, and the finance session is in room 8C."
+    },
+    {
+      "id": "ev-cal-hemlock-002",
+      "scenario_id": "cal-hemlock-distractor",
+      "source_id": "src-cal-hemlock-timeout-note",
+      "text": "The Ash service times out after twenty seconds, while the Pine service times out after thirty seconds."
+    },
+    {
+      "id": "ev-cal-hemlock-003",
+      "scenario_id": "cal-hemlock-distractor",
+      "source_id": "src-cal-hemlock-owner-note",
+      "text": "Helena owns Hemlock search, and Hector owns Hemlock exports."
+    },
+    {
+      "id": "ev-val-iris-001",
+      "scenario_id": "val-iris-release",
+      "source_id": "src-val-iris-release-note",
+      "text": "The Iris desktop release is scheduled for September 22 at 9:15 a.m. Central time."
+    },
+    {
+      "id": "ev-val-iris-002",
+      "scenario_id": "val-iris-release",
+      "source_id": "src-val-iris-design-note",
+      "text": "Iris uses a translucent sidebar and a neutral gray canvas."
+    },
+    {
+      "id": "ev-val-iris-003",
+      "scenario_id": "val-iris-release",
+      "source_id": "src-val-iris-test-note",
+      "text": "Iris has twenty-three end-to-end fixtures."
+    },
+    {
+      "id": "ev-val-juniper-001",
+      "scenario_id": "val-juniper-owner",
+      "source_id": "src-val-juniper-project-note",
+      "text": "Avery Chen directs the Juniper initiative. They own enterprise onboarding and make the final release call."
+    },
+    {
+      "id": "ev-val-juniper-002",
+      "scenario_id": "val-juniper-owner",
+      "source_id": "src-val-juniper-sync-note",
+      "text": "Sofia Bell maintains Juniper's synchronization engine."
+    },
+    {
+      "id": "ev-val-juniper-003",
+      "scenario_id": "val-juniper-owner",
+      "source_id": "src-val-juniper-pilot-note",
+      "text": "Juniper's pilot contains four design teams."
+    },
+    {
+      "id": "ev-val-kepler-001",
+      "scenario_id": "val-kepler-status",
+      "source_id": "src-val-kepler-august-plan",
+      "text": "The August 5 Kepler plan named October 1 as the indexing switchover date."
+    },
+    {
+      "id": "ev-val-kepler-002",
+      "scenario_id": "val-kepler-status",
+      "source_id": "src-val-kepler-august-update",
+      "text": "The August 19 Kepler update supersedes the old schedule: indexing will switch over on October 15."
+    },
+    {
+      "id": "ev-val-kepler-003",
+      "scenario_id": "val-kepler-status",
+      "source_id": "src-val-kepler-capacity-note",
+      "text": "Kepler's new index reserves twelve gigabytes of local storage."
+    },
+    {
+      "id": "ev-val-lotus-001",
+      "scenario_id": "val-lotus-platform",
+      "source_id": "src-val-lotus-account-policy",
+      "text": "Lotus never uploads screen captures and has no account sign-in flow."
+    },
+    {
+      "id": "ev-val-lotus-002",
+      "scenario_id": "val-lotus-platform",
+      "source_id": "src-val-lotus-encryption-note",
+      "text": "Lotus encrypts its local database with a key stored in Keychain."
+    },
+    {
+      "id": "ev-val-lotus-003",
+      "scenario_id": "val-lotus-platform",
+      "source_id": "src-val-lotus-import-note",
+      "text": "Lotus can import plain-text notes from a selected folder."
+    },
+    {
+      "id": "ev-val-mosaic-001",
+      "scenario_id": "val-mosaic-dependency",
+      "source_id": "src-val-mosaic-release-policy",
+      "text": "Mosaic's public beta is blocked until the accessibility audit is approved."
+    },
+    {
+      "id": "ev-val-mosaic-002",
+      "scenario_id": "val-mosaic-dependency",
+      "source_id": "src-val-mosaic-owner-directory",
+      "text": "Grace Lin is the approval owner for accessibility audits."
+    },
+    {
+      "id": "ev-val-mosaic-003",
+      "scenario_id": "val-mosaic-dependency",
+      "source_id": "src-val-mosaic-build-note",
+      "text": "Mosaic's beta candidate is build 912."
+    },
+    {
+      "id": "ev-val-nova-001",
+      "scenario_id": "val-nova-provenance",
+      "source_id": "src-val-nova-visual-spec",
+      "text": "Nova's approved highlight color is saffron."
+    },
+    {
+      "id": "ev-val-nova-002",
+      "scenario_id": "val-nova-provenance",
+      "source_id": "src-val-nova-runtime-spec",
+      "text": "Nova's diagnostics endpoint listens on port 7443."
+    },
+    {
+      "id": "ev-val-nova-003",
+      "scenario_id": "val-nova-provenance",
+      "source_id": "src-val-nova-retention-spec",
+      "text": "Nova removes temporary thumbnails after forty-eight hours."
+    },
+    {
+      "id": "ev-val-onyx-001",
+      "scenario_id": "val-onyx-absence",
+      "source_id": "src-val-onyx-team-note",
+      "text": "Onyx has six contributors and holds a review every second Tuesday."
+    },
+    {
+      "id": "ev-val-onyx-002",
+      "scenario_id": "val-onyx-absence",
+      "source_id": "src-val-onyx-audit-note",
+      "text": "Onyx completed its contrast audit on November 6."
+    },
+    {
+      "id": "ev-val-onyx-003",
+      "scenario_id": "val-onyx-absence",
+      "source_id": "src-val-onyx-format-note",
+      "text": "Onyx stores exported summaries as HTML files."
+    },
+    {
+      "id": "ev-val-pulse-001",
+      "scenario_id": "val-pulse-distractor",
+      "source_id": "src-val-pulse-room-note",
+      "text": "Pulse's product review is in room 12E, and the security review is in room 12G."
+    },
+    {
+      "id": "ev-val-pulse-002",
+      "scenario_id": "val-pulse-distractor",
+      "source_id": "src-val-pulse-cache-note",
+      "text": "The Echo cache holds 256 entries, while the Wave cache holds 512 entries."
+    },
+    {
+      "id": "ev-val-pulse-003",
+      "scenario_id": "val-pulse-distractor",
+      "source_id": "src-val-pulse-owner-note",
+      "text": "Paula owns Pulse capture, and Pavel owns Pulse search."
+    }
+  ],
+  "cases": [
+    {
+      "id": "case-fit-cedar-release-time",
+      "scenario_id": "fit-cedar-release",
+      "split": "fit",
+      "category": "direct_answer",
+      "query": "When is the Cedar desktop beta scheduled?",
+      "candidate_ids": ["ev-fit-cedar-001", "ev-fit-cedar-002", "ev-fit-cedar-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-cedar-001"]]}
+    },
+    {
+      "id": "case-fit-cedar-release-time-order",
+      "scenario_id": "fit-cedar-release",
+      "split": "fit",
+      "category": "direct_answer",
+      "query": "When is the Cedar desktop beta scheduled?",
+      "candidate_ids": ["ev-fit-cedar-003", "ev-fit-cedar-001", "ev-fit-cedar-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-cedar-001"]]}
+    },
+    {
+      "id": "case-fit-orchid-rollout-owner",
+      "scenario_id": "fit-orchid-owner",
+      "split": "fit",
+      "category": "paraphrase_coreference",
+      "query": "Who is responsible for Orchid customer onboarding?",
+      "candidate_ids": ["ev-fit-orchid-002", "ev-fit-orchid-001", "ev-fit-orchid-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-orchid-001"]]}
+    },
+    {
+      "id": "case-fit-orchid-she-reference",
+      "scenario_id": "fit-orchid-owner",
+      "split": "fit",
+      "category": "paraphrase_coreference",
+      "query": "In the project brief, who does 'She' refer to?",
+      "candidate_ids": ["ev-fit-orchid-001", "ev-fit-orchid-003", "ev-fit-orchid-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-orchid-001"]]}
+    },
+    {
+      "id": "case-fit-lantern-current-date",
+      "scenario_id": "fit-lantern-status",
+      "split": "fit",
+      "category": "temporal_update",
+      "query": "What is Lantern's current migration date?",
+      "candidate_ids": ["ev-fit-lantern-001", "ev-fit-lantern-003", "ev-fit-lantern-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-lantern-002"]]}
+    },
+    {
+      "id": "case-fit-lantern-old-date-current",
+      "scenario_id": "fit-lantern-status",
+      "split": "fit",
+      "category": "temporal_update",
+      "query": "Is May 4 still Lantern's current migration date?",
+      "candidate_ids": ["ev-fit-lantern-003", "ev-fit-lantern-002", "ev-fit-lantern-001"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-fit-lantern-002"]]}
+    },
+    {
+      "id": "case-fit-harbor-windows",
+      "scenario_id": "fit-harbor-platform",
+      "split": "fit",
+      "category": "contradiction",
+      "query": "Does Harbor 1.0 support Windows?",
+      "candidate_ids": ["ev-fit-harbor-003", "ev-fit-harbor-001", "ev-fit-harbor-002"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-fit-harbor-001"]]}
+    },
+    {
+      "id": "case-fit-harbor-linux",
+      "scenario_id": "fit-harbor-platform",
+      "split": "fit",
+      "category": "contradiction",
+      "query": "Is a Linux build included in Harbor 1.0?",
+      "candidate_ids": ["ev-fit-harbor-002", "ev-fit-harbor-003", "ev-fit-harbor-001"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-fit-harbor-001"]]}
+    },
+    {
+      "id": "case-fit-kestrel-approval-owner",
+      "scenario_id": "fit-kestrel-dependency",
+      "split": "fit",
+      "category": "cross_document_synthesis",
+      "query": "Who must approve the review that blocks Kestrel from shipping?",
+      "candidate_ids": ["ev-fit-kestrel-003", "ev-fit-kestrel-001", "ev-fit-kestrel-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-kestrel-001", "ev-fit-kestrel-002"]]}
+    },
+    {
+      "id": "case-fit-kestrel-blocking-review",
+      "scenario_id": "fit-kestrel-dependency",
+      "split": "fit",
+      "category": "cross_document_synthesis",
+      "query": "Which Priya-owned approval is required before Kestrel ships?",
+      "candidate_ids": ["ev-fit-kestrel-002", "ev-fit-kestrel-003", "ev-fit-kestrel-001"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-kestrel-001", "ev-fit-kestrel-002"]]}
+    },
+    {
+      "id": "case-fit-maple-accent",
+      "scenario_id": "fit-maple-provenance",
+      "split": "fit",
+      "category": "provenance_enforcement",
+      "query": "What accent color was selected for Maple?",
+      "candidate_ids": ["ev-fit-maple-002", "ev-fit-maple-001", "ev-fit-maple-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-maple-001"]]}
+    },
+    {
+      "id": "case-fit-maple-port",
+      "scenario_id": "fit-maple-provenance",
+      "split": "fit",
+      "category": "provenance_enforcement",
+      "query": "Which port does Maple's local inspector use?",
+      "candidate_ids": ["ev-fit-maple-003", "ev-fit-maple-001", "ev-fit-maple-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-fit-maple-002"]]}
+    },
+    {
+      "id": "case-fit-quartz-budget",
+      "scenario_id": "fit-quartz-absence",
+      "split": "fit",
+      "category": "absent_answer",
+      "query": "What is Quartz's annual budget?",
+      "candidate_ids": ["ev-fit-quartz-001", "ev-fit-quartz-003", "ev-fit-quartz-002"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-fit-quartz-database",
+      "scenario_id": "fit-quartz-absence",
+      "split": "fit",
+      "category": "absent_answer",
+      "query": "Which database engine does Quartz use?",
+      "candidate_ids": ["ev-fit-quartz-002", "ev-fit-quartz-001", "ev-fit-quartz-003"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-fit-river-api-retries",
+      "scenario_id": "fit-river-distractor",
+      "split": "fit",
+      "category": "concrete_distractor",
+      "query": "How many times does the River API retry?",
+      "candidate_ids": ["ev-fit-river-002", "ev-fit-river-003", "ev-fit-river-001"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-fit-river-api-retries-order",
+      "scenario_id": "fit-river-distractor",
+      "split": "fit",
+      "category": "concrete_distractor",
+      "query": "How many times does the River API retry?",
+      "candidate_ids": ["ev-fit-river-001", "ev-fit-river-002", "ev-fit-river-003"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-cal-atlas-preview-time",
+      "scenario_id": "cal-atlas-release",
+      "split": "calibration",
+      "category": "direct_answer",
+      "query": "When does the Atlas command-line preview open?",
+      "candidate_ids": ["ev-cal-atlas-002", "ev-cal-atlas-001", "ev-cal-atlas-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-atlas-001"]]}
+    },
+    {
+      "id": "case-cal-atlas-preview-time-order",
+      "scenario_id": "cal-atlas-release",
+      "split": "calibration",
+      "category": "direct_answer",
+      "query": "When does the Atlas command-line preview open?",
+      "candidate_ids": ["ev-cal-atlas-003", "ev-cal-atlas-002", "ev-cal-atlas-001"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-atlas-001"]]}
+    },
+    {
+      "id": "case-cal-birch-onboarding-owner",
+      "scenario_id": "cal-birch-owner",
+      "split": "calibration",
+      "category": "paraphrase_coreference",
+      "query": "Who is accountable for bringing Birch partners aboard?",
+      "candidate_ids": ["ev-cal-birch-003", "ev-cal-birch-002", "ev-cal-birch-001"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-birch-001"]]}
+    },
+    {
+      "id": "case-cal-birch-he-reference",
+      "scenario_id": "cal-birch-owner",
+      "split": "calibration",
+      "category": "paraphrase_coreference",
+      "query": "Who does 'He' identify in the Birch program note?",
+      "candidate_ids": ["ev-cal-birch-001", "ev-cal-birch-002", "ev-cal-birch-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-birch-001"]]}
+    },
+    {
+      "id": "case-cal-comet-current-date",
+      "scenario_id": "cal-comet-status",
+      "split": "calibration",
+      "category": "temporal_update",
+      "query": "What is Comet's current data cutover date?",
+      "candidate_ids": ["ev-cal-comet-003", "ev-cal-comet-001", "ev-cal-comet-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-comet-002"]]}
+    },
+    {
+      "id": "case-cal-comet-old-date-current",
+      "scenario_id": "cal-comet-status",
+      "split": "calibration",
+      "category": "temporal_update",
+      "query": "Is July 12 still Comet's current cutover date?",
+      "candidate_ids": ["ev-cal-comet-002", "ev-cal-comet-001", "ev-cal-comet-003"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-cal-comet-002"]]}
+    },
+    {
+      "id": "case-cal-delta-cloud-required",
+      "scenario_id": "cal-delta-platform",
+      "split": "calibration",
+      "category": "contradiction",
+      "query": "Does Delta require a cloud account after installation?",
+      "candidate_ids": ["ev-cal-delta-002", "ev-cal-delta-003", "ev-cal-delta-001"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-cal-delta-001"]]}
+    },
+    {
+      "id": "case-cal-delta-uploads-required",
+      "scenario_id": "cal-delta-platform",
+      "split": "calibration",
+      "category": "contradiction",
+      "query": "Must Delta upload data to run normally?",
+      "candidate_ids": ["ev-cal-delta-003", "ev-cal-delta-001", "ev-cal-delta-002"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-cal-delta-001"]]}
+    },
+    {
+      "id": "case-cal-ember-approval-owner",
+      "scenario_id": "cal-ember-dependency",
+      "split": "calibration",
+      "category": "cross_document_synthesis",
+      "query": "Who must approve the review required for Ember's production rollout?",
+      "candidate_ids": ["ev-cal-ember-001", "ev-cal-ember-003", "ev-cal-ember-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-ember-001", "ev-cal-ember-002"]]}
+    },
+    {
+      "id": "case-cal-ember-required-review",
+      "scenario_id": "cal-ember-dependency",
+      "split": "calibration",
+      "category": "cross_document_synthesis",
+      "query": "Which Luis-owned approval is needed before Ember reaches production?",
+      "candidate_ids": ["ev-cal-ember-002", "ev-cal-ember-001", "ev-cal-ember-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-ember-001", "ev-cal-ember-002"]]}
+    },
+    {
+      "id": "case-cal-forest-typeface",
+      "scenario_id": "cal-forest-provenance",
+      "split": "calibration",
+      "category": "provenance_enforcement",
+      "query": "Which typeface is approved for Forest?",
+      "candidate_ids": ["ev-cal-forest-003", "ev-cal-forest-001", "ev-cal-forest-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-forest-001"]]}
+    },
+    {
+      "id": "case-cal-forest-port",
+      "scenario_id": "cal-forest-provenance",
+      "split": "calibration",
+      "category": "provenance_enforcement",
+      "query": "What port does Forest's preview server use?",
+      "candidate_ids": ["ev-cal-forest-001", "ev-cal-forest-002", "ev-cal-forest-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-cal-forest-002"]]}
+    },
+    {
+      "id": "case-cal-garnet-budget",
+      "scenario_id": "cal-garnet-absence",
+      "split": "calibration",
+      "category": "absent_answer",
+      "query": "What is Garnet's monthly infrastructure cost?",
+      "candidate_ids": ["ev-cal-garnet-002", "ev-cal-garnet-001", "ev-cal-garnet-003"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-cal-garnet-database",
+      "scenario_id": "cal-garnet-absence",
+      "split": "calibration",
+      "category": "absent_answer",
+      "query": "Which database stores Garnet's records?",
+      "candidate_ids": ["ev-cal-garnet-003", "ev-cal-garnet-002", "ev-cal-garnet-001"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-cal-hemlock-timeout",
+      "scenario_id": "cal-hemlock-distractor",
+      "split": "calibration",
+      "category": "concrete_distractor",
+      "query": "What is the Hemlock service timeout?",
+      "candidate_ids": ["ev-cal-hemlock-003", "ev-cal-hemlock-002", "ev-cal-hemlock-001"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-cal-hemlock-timeout-order",
+      "scenario_id": "cal-hemlock-distractor",
+      "split": "calibration",
+      "category": "concrete_distractor",
+      "query": "What is the Hemlock service timeout?",
+      "candidate_ids": ["ev-cal-hemlock-001", "ev-cal-hemlock-003", "ev-cal-hemlock-002"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-val-iris-release-time",
+      "scenario_id": "val-iris-release",
+      "split": "validation",
+      "category": "direct_answer",
+      "query": "When is the Iris desktop release scheduled?",
+      "candidate_ids": ["ev-val-iris-003", "ev-val-iris-001", "ev-val-iris-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-iris-001"]]}
+    },
+    {
+      "id": "case-val-iris-release-time-order",
+      "scenario_id": "val-iris-release",
+      "split": "validation",
+      "category": "direct_answer",
+      "query": "When is the Iris desktop release scheduled?",
+      "candidate_ids": ["ev-val-iris-002", "ev-val-iris-003", "ev-val-iris-001"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-iris-001"]]}
+    },
+    {
+      "id": "case-val-juniper-onboarding-owner",
+      "scenario_id": "val-juniper-owner",
+      "split": "validation",
+      "category": "paraphrase_coreference",
+      "query": "Who is responsible for onboarding Juniper's enterprise users?",
+      "candidate_ids": ["ev-val-juniper-001", "ev-val-juniper-003", "ev-val-juniper-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-juniper-001"]]}
+    },
+    {
+      "id": "case-val-juniper-they-reference",
+      "scenario_id": "val-juniper-owner",
+      "split": "validation",
+      "category": "paraphrase_coreference",
+      "query": "Who does 'They' refer to in the Juniper initiative note?",
+      "candidate_ids": ["ev-val-juniper-002", "ev-val-juniper-001", "ev-val-juniper-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-juniper-001"]]}
+    },
+    {
+      "id": "case-val-kepler-current-date",
+      "scenario_id": "val-kepler-status",
+      "split": "validation",
+      "category": "temporal_update",
+      "query": "What is Kepler's current indexing switchover date?",
+      "candidate_ids": ["ev-val-kepler-001", "ev-val-kepler-002", "ev-val-kepler-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-kepler-002"]]}
+    },
+    {
+      "id": "case-val-kepler-old-date-current",
+      "scenario_id": "val-kepler-status",
+      "split": "validation",
+      "category": "temporal_update",
+      "query": "Is October 1 still Kepler's current switchover date?",
+      "candidate_ids": ["ev-val-kepler-003", "ev-val-kepler-002", "ev-val-kepler-001"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-val-kepler-002"]]}
+    },
+    {
+      "id": "case-val-lotus-cloud-upload",
+      "scenario_id": "val-lotus-platform",
+      "split": "validation",
+      "category": "contradiction",
+      "query": "Does Lotus upload screen captures to the cloud?",
+      "candidate_ids": ["ev-val-lotus-003", "ev-val-lotus-001", "ev-val-lotus-002"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-val-lotus-001"]]}
+    },
+    {
+      "id": "case-val-lotus-sign-in",
+      "scenario_id": "val-lotus-platform",
+      "split": "validation",
+      "category": "contradiction",
+      "query": "Must a user sign in before using Lotus?",
+      "candidate_ids": ["ev-val-lotus-002", "ev-val-lotus-003", "ev-val-lotus-001"],
+      "expected": {"verdict": "contradicted", "required_citation_sets": [["ev-val-lotus-001"]]}
+    },
+    {
+      "id": "case-val-mosaic-approval-owner",
+      "scenario_id": "val-mosaic-dependency",
+      "split": "validation",
+      "category": "cross_document_synthesis",
+      "query": "Who must approve the audit that blocks Mosaic's public beta?",
+      "candidate_ids": ["ev-val-mosaic-002", "ev-val-mosaic-003", "ev-val-mosaic-001"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-mosaic-001", "ev-val-mosaic-002"]]}
+    },
+    {
+      "id": "case-val-mosaic-blocking-audit",
+      "scenario_id": "val-mosaic-dependency",
+      "split": "validation",
+      "category": "cross_document_synthesis",
+      "query": "Which Grace-owned approval must finish before Mosaic's beta?",
+      "candidate_ids": ["ev-val-mosaic-001", "ev-val-mosaic-002", "ev-val-mosaic-003"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-mosaic-001", "ev-val-mosaic-002"]]}
+    },
+    {
+      "id": "case-val-nova-highlight",
+      "scenario_id": "val-nova-provenance",
+      "split": "validation",
+      "category": "provenance_enforcement",
+      "query": "What highlight color is approved for Nova?",
+      "candidate_ids": ["ev-val-nova-003", "ev-val-nova-002", "ev-val-nova-001"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-nova-001"]]}
+    },
+    {
+      "id": "case-val-nova-port",
+      "scenario_id": "val-nova-provenance",
+      "split": "validation",
+      "category": "provenance_enforcement",
+      "query": "Which port serves Nova diagnostics?",
+      "candidate_ids": ["ev-val-nova-001", "ev-val-nova-003", "ev-val-nova-002"],
+      "expected": {"verdict": "supported", "required_citation_sets": [["ev-val-nova-002"]]}
+    },
+    {
+      "id": "case-val-onyx-budget",
+      "scenario_id": "val-onyx-absence",
+      "split": "validation",
+      "category": "absent_answer",
+      "query": "How much did Onyx spend on contractors?",
+      "candidate_ids": ["ev-val-onyx-001", "ev-val-onyx-002", "ev-val-onyx-003"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-val-onyx-database",
+      "scenario_id": "val-onyx-absence",
+      "split": "validation",
+      "category": "absent_answer",
+      "query": "What database engine powers Onyx?",
+      "candidate_ids": ["ev-val-onyx-003", "ev-val-onyx-001", "ev-val-onyx-002"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-val-pulse-cache-size",
+      "scenario_id": "val-pulse-distractor",
+      "split": "validation",
+      "category": "concrete_distractor",
+      "query": "How many entries does the Pulse cache hold?",
+      "candidate_ids": ["ev-val-pulse-002", "ev-val-pulse-001", "ev-val-pulse-003"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    },
+    {
+      "id": "case-val-pulse-cache-size-order",
+      "scenario_id": "val-pulse-distractor",
+      "split": "validation",
+      "category": "concrete_distractor",
+      "query": "How many entries does the Pulse cache hold?",
+      "candidate_ids": ["ev-val-pulse-003", "ev-val-pulse-002", "ev-val-pulse-001"],
+      "expected": {"verdict": "insufficient", "required_citation_sets": []}
+    }
+  ],
+  "metamorphic_pairs": [
+    {
+      "id": "meta-fit-cedar-order",
+      "base_case_id": "case-fit-cedar-release-time",
+      "variant_case_id": "case-fit-cedar-release-time-order",
+      "relation": "candidate_order_invariant"
+    },
+    {
+      "id": "meta-fit-river-order",
+      "base_case_id": "case-fit-river-api-retries",
+      "variant_case_id": "case-fit-river-api-retries-order",
+      "relation": "candidate_order_invariant"
+    },
+    {
+      "id": "meta-cal-atlas-order",
+      "base_case_id": "case-cal-atlas-preview-time",
+      "variant_case_id": "case-cal-atlas-preview-time-order",
+      "relation": "candidate_order_invariant"
+    },
+    {
+      "id": "meta-cal-hemlock-order",
+      "base_case_id": "case-cal-hemlock-timeout",
+      "variant_case_id": "case-cal-hemlock-timeout-order",
+      "relation": "candidate_order_invariant"
+    },
+    {
+      "id": "meta-val-iris-order",
+      "base_case_id": "case-val-iris-release-time",
+      "variant_case_id": "case-val-iris-release-time-order",
+      "relation": "candidate_order_invariant"
+    },
+    {
+      "id": "meta-val-pulse-order",
+      "base_case_id": "case-val-pulse-cache-size",
+      "variant_case_id": "case-val-pulse-cache-size-order",
+      "relation": "candidate_order_invariant"
+    }
+  ]
+}
