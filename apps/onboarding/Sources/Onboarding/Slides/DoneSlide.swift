@@ -52,15 +52,15 @@ struct DoneSlide: View {
     @ViewBuilder
     private var modelCheckRow: some View {
         if prepareBrainVM.modelDownloaded {
-            checkRow(granted: true, label: "On-device LLM")
+            checkRow(granted: true, label: "Richer brief wording ready")
         } else {
             HStack(spacing: OnboardingDesign.Space.md) {
-                Image(systemName: "circle")
-                    .foregroundStyle(.secondary)
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(OnboardingDesign.Palette.success)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("On-device LLM")
+                    Text("Evidence-cited briefs ready")
                         .font(.system(size: 14))
-                    Text("Daily briefs disabled — enable in Settings")
+                    Text("Optional richer wording can be added later")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                 }

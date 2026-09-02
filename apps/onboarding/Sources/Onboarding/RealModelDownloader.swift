@@ -127,7 +127,6 @@ actor RealModelDownloader: ModelDownloader {
             throw ModelDownloadError.extractionFailed
         }
 
-        UserDefaults.standard.set(true, forKey: "MCIBriefModelDownloaded")
         logger.info("model '\(self.modelID, privacy: .public)' ready at \(self.artifactPath.path, privacy: .public)")
     }
 

@@ -13,8 +13,6 @@ from urllib.parse import urlparse
 
 EXPECTED_MODELS = {
     "arctic-embed-s-int8": "ArcticEmbedS_INT8.mlmodelc",
-    "bert-base-ner-int8": "bert_base_NER_INT8.mlmodelc",
-    "qwen3-1.7b-fp16": "Qwen3-1.7B-FP16.mlmodelc",
 }
 VERSION_RE = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 
@@ -74,7 +72,7 @@ def load_and_validate(path: Path, release_version: str) -> dict[str, object]:
         require(isinstance(model_id, str) and isinstance(bundle, str), "model id and bundle must be strings")
         require(model_id not in observed, f"duplicate release model id: {model_id}")
         observed[model_id] = bundle
-    require(observed == EXPECTED_MODELS, "release model manifest must name exactly the three required bundles")
+    require(observed == EXPECTED_MODELS, "release model manifest must name exactly the required retrieval bundle")
     return manifest
 
 

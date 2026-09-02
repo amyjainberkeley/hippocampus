@@ -30,7 +30,7 @@ struct HowItWorksSlide: View {
                     IconTextRow(icon: "cpu", title: OnboardingCopy.howItWorksFootprint)
                     IconTextRow(
                         icon: "sparkles",
-                        title: "Daily briefs run locally when the optional model is installed."
+                        title: "Daily briefs are local and source-cited. An optional model can add richer wording."
                     )
                 }
                 .frame(maxWidth: 460)

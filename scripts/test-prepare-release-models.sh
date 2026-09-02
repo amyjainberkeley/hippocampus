@@ -30,7 +30,7 @@ expect_fail() {
 }
 
 SOURCE="$TMP_ROOT/source/models"
-for model in ArcticEmbedS_INT8.mlmodelc bert_base_NER_INT8.mlmodelc Qwen3-1.7B-FP16.mlmodelc; do
+for model in ArcticEmbedS_INT8.mlmodelc; do
     mkdir -p "$SOURCE/$model/weights"
     printf 'mil' >"$SOURCE/$model/model.mil"
     printf 'metadata' >"$SOURCE/$model/coremldata.bin"
@@ -45,19 +45,11 @@ expect_fail 'model preparation rejects the wrong archive hash' \
     "$PREPARE" --archive "$ARCHIVE" --sha256 "$(printf '%064d' 0)" \
     --output "$TMP_ROOT/wrong-hash"
 
-expect_fail 'model preparation rejects Qwen without its tokenizer' \
-    "$PREPARE" --archive "$ARCHIVE" --sha256 "$SHA" \
-    --output "$TMP_ROOT/missing-tokenizer"
-
-printf '{"version":"fixture"}' >"$SOURCE/tokenizer.json"
-tar -C "$TMP_ROOT/source" -czf "$ARCHIVE" models
-SHA="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
-
-expect_pass 'model preparation validates and atomically installs all models' \
+expect_pass 'model preparation validates and atomically installs required models' \
     "$PREPARE" --archive "$ARCHIVE" --sha256 "$SHA" \
     --output "$TMP_ROOT/output"
 
-for model in ArcticEmbedS_INT8.mlmodelc bert_base_NER_INT8.mlmodelc Qwen3-1.7B-FP16.mlmodelc; do
+for model in ArcticEmbedS_INT8.mlmodelc; do
     if [[ -f "$TMP_ROOT/output/$model/model.mil" && \
           -f "$TMP_ROOT/output/$model/coremldata.bin" && \
           -f "$TMP_ROOT/output/$model/weights/weight.bin" ]]; then
@@ -66,12 +58,6 @@ for model in ArcticEmbedS_INT8.mlmodelc bert_base_NER_INT8.mlmodelc Qwen3-1.7B-F
         fail "$model is complete"
     fi
 done
-
-if [[ -f "$TMP_ROOT/output/tokenizer.json" ]]; then
-    pass 'Qwen tokenizer is installed beside its model directory'
-else
-    fail 'Qwen tokenizer is installed beside its model directory'
-fi
 
 expect_fail 'model preparation refuses to overwrite an existing model directory' \
     "$PREPARE" --archive "$ARCHIVE" --sha256 "$SHA" \

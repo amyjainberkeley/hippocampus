@@ -12,14 +12,9 @@ struct StatusMenuView: View {
     let onRequestRestart: () -> Void
 
     @State private var crashReportOptedIn: Bool = false
-    @State private var briefsEnabled: Bool = UserDefaults.standard.bool(forKey: "MCIBriefsEnabled")
     @State private var mcpRegistering = false
     @State private var showTCCResetConfirm = false
     @State private var showKeyWrapAudit = false
-    // `Window` scene (HippocampusApp.body) hosts the model-download UI;
-    // `openWindow(id:)` survives the MenuBarExtra menu close that
-    // dismisses any `.sheet`-attached SwiftUI presentation.
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -103,36 +98,12 @@ struct StatusMenuView: View {
 
     @ViewBuilder
     private var briefsMenuItem: some View {
-        switch modelProvisioner.state {
-        case .ready where modelProvisioner.isReadyOnDisk:
-            Toggle("Daily Briefs", isOn: $briefsEnabled)
-                .onChange(of: briefsEnabled) { _, newValue in
-                    UserDefaults.standard.set(newValue, forKey: "MCIBriefsEnabled")
-                }
-        case .ready:
-            Button("Daily Briefs: Restore bundled model") {
-                modelProvisioner.refreshIfMissing()
-            }
-            .help("The local Daily Briefs model is missing. Restore it from this app bundle.")
-        case .provisioning:
-            Text("Daily Briefs: Preparing bundled model…")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .failed:
-            Button("Daily Briefs: Retry bundled model setup") {
-                modelProvisioner.startIfNeeded()
-            }
-            .help("The bundled model was not prepared. Retry local setup; no data leaves this Mac.")
-        case .unavailable:
-            Button("Daily Briefs: Off — Download Model…") {
-                openWindow(id: "model-download")
-                #if canImport(AppKit)
-                NSApp.activate(ignoringOtherApps: true)
-                #endif
-            }
-            .help("Daily briefs summarize your day with Qwen3-1.7B (~2.5 GB download, runs entirely on your Mac).")
-        case .notStarted:
-            Text("Daily Briefs: Checking local model…")
+        Button("Open Daily Brief") {
+            supervisor.openRecallUI(initialTab: "brief")
+        }
+
+        if modelProvisioner.state == .ready && modelProvisioner.isReadyOnDisk {
+            Text("Brief quality: Rich local model")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

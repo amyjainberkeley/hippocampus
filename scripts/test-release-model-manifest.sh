@@ -35,9 +35,7 @@ write_manifest() {
   "archiveURL": "$url",
   "archiveSHA256": "$sha",
   "models": [
-    {"id": "arctic-embed-s-int8", "bundle": "ArcticEmbedS_INT8.mlmodelc"},
-    {"id": "bert-base-ner-int8", "bundle": "bert_base_NER_INT8.mlmodelc"},
-    {"id": "qwen3-1.7b-fp16", "bundle": "Qwen3-1.7B-FP16.mlmodelc"}
+    {"id": "arctic-embed-s-int8", "bundle": "ArcticEmbedS_INT8.mlmodelc"}
   ]
 }
 JSON
@@ -64,6 +62,23 @@ expect_fail 'unprovisioned model digest is rejected' \
 
 write_manifest "$URL" "$SHA" 9.9.9
 expect_fail 'model manifest version must match the release' \
+    "$VERIFY" --manifest "$TEST_ROOT/manifest.json" --release-version 1.2.3
+
+write_manifest "$URL" "$SHA"
+python3 - "$TEST_ROOT/manifest.json" <<'PY'
+import json
+import sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    payload = json.load(handle)
+payload["models"].append({
+    "id": "qwen3-1.7b-fp16",
+    "bundle": "Qwen3-1.7B-FP16.mlmodelc",
+})
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle)
+PY
+expect_fail 'optional generative models cannot become silent release prerequisites' \
     "$VERIFY" --manifest "$TEST_ROOT/manifest.json" --release-version 1.2.3
 
 printf '%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"

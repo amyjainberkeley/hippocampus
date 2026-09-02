@@ -7,7 +7,6 @@ BRAND="$REPO_ROOT/assets/branding"
 ONBOARDING="$REPO_ROOT/apps/onboarding/Sources/Onboarding"
 RECALL_APP="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/MCIRecallApp.swift"
 ONBOARDING_APP="$ONBOARDING/OnboardingApp.swift"
-MODEL_DOWNLOAD="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/ModelDownloadView.swift"
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -29,7 +28,7 @@ if rg -q 'RadialGradient|LinearGradient' "$ONBOARDING"; then
     fail "onboarding must not restore a decorative gradient backdrop"
 fi
 
-for root in "$RECALL_APP" "$ONBOARDING_APP" "$MODEL_DOWNLOAD"; do
+for root in "$RECALL_APP" "$ONBOARDING_APP"; do
     rg -q '\.preferredColorScheme\(\.light\)' "$root" \
         || fail "$(basename "$root") does not pin the V1 window to light appearance"
 done

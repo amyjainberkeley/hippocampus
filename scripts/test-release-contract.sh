@@ -14,6 +14,12 @@ INSTALLER="$REPO_ROOT/scripts/build-installer.sh"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
 CAPTURE_HELPER_MAIN="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift"
 BRIEF_PRESENCE="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/BriefModelPresence.swift"
+STATUS_MENU="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"
+HIPPOCAMPUS_APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift"
+APP_MODELS="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
+PREPARE_BRAIN="$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/PrepareBrainSlide.swift"
+DONE_SLIDE="$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/DoneSlide.swift"
+HOW_IT_WORKS="$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/HowItWorksSlide.swift"
 CONVERT_EMBEDDER="$REPO_ROOT/scripts/convert_embedder.py"
 CONVERT_NER="$REPO_ROOT/scripts/convert_ner.py"
 CONVERT_BRIEF="$REPO_ROOT/scripts/convert_brief_model.py"
@@ -174,13 +180,39 @@ require_pattern "$INSTALLER" 'notary-\$\{label\}-submission\.json' \
 reject_pattern "$INSTALLER" 'NOTARYTOOL_PASSWORD|NOTARY_ARGS\[\*\]|APP_NOTARY_ARGS\[\*\]' \
     'installer never accepts or renders raw notarization passwords'
 require_literal "$BUILD_APP" 'QWEN3_TOKENIZER="$REPO_ROOT/models/tokenizer.json"' \
-    'app assembly requires the Qwen tokenizer produced by conversion'
+    'app assembly validates an optional Qwen tokenizer produced by conversion'
 require_literal "$BUILD_APP" 'QWEN3_TOKENIZER_DEST="$QWEN3_DEST_DIR/tokenizer.json"' \
-    'app assembly places the tokenizer beside the Qwen model'
-require_literal "$INSTALLER" 'QWEN3_TOKENIZER_PATH="$APP_PATH/Contents/Resources/Models/qwen3-1.7b-fp16/tokenizer.json"' \
-    'installer verifies the tokenizer at the runtime path'
+    'app assembly places an optional tokenizer beside the Qwen model'
+reject_pattern "$INSTALLER" 'QWEN3_MODEL_PATH=|NER_MODEL_PATH=' \
+    'optional enrichment models are not installer ship blockers'
+require_literal "$BUILD_APP" 'evidence-cited extractive briefs remain active' \
+    'app assembly names the no-Qwen production fallback'
+require_literal "$BUILD_APP" 'Tier 1 entity extraction remains active' \
+    'app assembly names the no-BERT production fallback'
 require_literal "$BRIEF_PRESENCE" '.appendingPathComponent("tokenizer.json")' \
     'runtime readiness and first-launch seed include the Qwen tokenizer'
+reject_pattern "$STATUS_MENU" '@State private var briefsEnabled|MCIBriefsEnabled' \
+    'menu does not expose an unwired Daily Briefs toggle'
+require_literal "$STATUS_MENU" 'Button("Open Daily Brief")' \
+    'daily brief is directly reachable without a model'
+require_literal "$STATUS_MENU" 'supervisor.openRecallUI(initialTab: "brief")' \
+    'daily brief menu action opens the real persisted brief surface'
+reject_pattern "$STATUS_MENU" 'Add Richer Brief Model|model-download' \
+    'menu does not expose the unavailable Qwen download'
+reject_pattern "$HIPPOCAMPUS_APP" 'Download AI Model|model-download|ModelDownloadView' \
+    'app has no dead model-download window'
+reject_pattern "$APP_MODELS" 'qwen3-1\.7b|huggingface\.co' \
+    'shipped model manifest advertises only reachable model assets'
+require_literal "$PREPARE_BRAIN" 'Evidence-cited briefs are ready. No model download or account is required.' \
+    'onboarding confirms the zero-download brief path'
+reject_pattern "$PREPARE_BRAIN" 'Daily briefs disabled|enable Daily Briefs|startDownload\(\)|Download \(' \
+    'onboarding has no unavailable model-download action'
+require_literal "$DONE_SLIDE" 'Evidence-cited briefs ready' \
+    'onboarding completion confirms the zero-download brief path'
+require_literal "$HOW_IT_WORKS" 'Daily briefs are local and source-cited.' \
+    'onboarding explains the default brief path truthfully'
+reject_pattern "$PREFERENCES" 'Ollama endpoint \(optional\)|ollamaEndpoint' \
+    'preferences do not expose the unwired Ollama endpoint'
 require_literal "$CONVERT_EMBEDDER" 'MODEL_REVISION = "e596f507467533e48a2e17c007f0e1dacc837b33"' \
     'embedder conversion pins the reviewed upstream revision'
 require_literal "$CONVERT_NER" 'DEFAULT_MODEL = "dslim/bert-base-NER"' \

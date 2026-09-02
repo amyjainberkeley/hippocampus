@@ -259,15 +259,6 @@ struct PreferencesRootView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: PreferencesStyle.controlSpacing) {
-                Text("Ollama endpoint (optional)")
-                TextField("http://localhost:11434", text: $store.ollamaEndpoint)
-                    .textFieldStyle(.roundedBorder)
-                Text("BYOK local-LLM endpoint for brief authoring. Empty = use bundled Qwen3.")
-                    .font(PreferencesStyle.captionFont)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: PreferencesStyle.controlSpacing) {
                 Text("Custom database path (optional)")
                 TextField(dbPath, text: $store.customDatabasePath)
                     .textFieldStyle(.roundedBorder)

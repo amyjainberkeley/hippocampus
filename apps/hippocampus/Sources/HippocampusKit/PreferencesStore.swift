@@ -125,13 +125,6 @@ public final class PreferencesStore: ObservableObject {
 
     // MARK: Advanced
 
-    /// Optional Ollama endpoint for BYOK local-LLM users who want to
-    /// route brief-authoring through their own local model instead of
-    /// bundled Qwen3. Empty string = disabled (default).
-    @Published public var ollamaEndpoint: String {
-        didSet { defaults.set(ollamaEndpoint, forKey: Keys.ollamaEndpoint) }
-    }
-
     /// Custom SQLCipher database path. Empty string = default
     /// (`~/Library/Application Support/Hippocampus/mci.sqlite`).
     /// Changing this requires a restart — the supervisor caches its
@@ -192,7 +185,6 @@ public final class PreferencesStore: ObservableObject {
         self.retentionCustomDays = nil
         self.retentionWriteError = nil
 
-        self.ollamaEndpoint = defaults.string(forKey: Keys.ollamaEndpoint) ?? ""
         self.customDatabasePath = defaults.string(forKey: Keys.customDatabasePath) ?? ""
 
         if FileManager.default.fileExists(atPath: retentionURL.path) {
@@ -331,7 +323,6 @@ public final class PreferencesStore: ObservableObject {
         static let showMenuBarIcon = "ai.hippocampus.prefs.showMenuBarIcon"
         static let defaultRecallTab = "ai.hippocampus.prefs.defaultRecallTab"
         static let retentionPolicy = "ai.hippocampus.prefs.retentionPolicy"
-        static let ollamaEndpoint = "ai.hippocampus.prefs.ollamaEndpoint"
         static let customDatabasePath = "ai.hippocampus.prefs.customDatabasePath"
     }
 }
