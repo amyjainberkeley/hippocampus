@@ -92,6 +92,7 @@ EOF
 
 xcrun swiftc \
     -parse-as-library \
+    -package-name Hippocampus \
     -strict-concurrency=complete \
     -warnings-as-errors \
     "$RUNNER_SOURCE" \
