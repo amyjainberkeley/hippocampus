@@ -27,6 +27,7 @@
 //! per call site in [`model`]; crates above the seam (`mci-brief`,
 //! `mci-brain`, `mci-agent`) stay `#![forbid(unsafe_code)]`.
 
+pub mod mobilebert_qa;
 pub mod model;
 pub mod qwen3;
 pub mod tokenizer;
