@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$SCRIPT_DIR/run-live-capture-overlap.sh"
 SESSION_CHECK="$SCRIPT_DIR/live-capture/check_session.py"
 MEMORY_CHECK="$SCRIPT_DIR/live-capture/verify_memory.py"
+SOAK_REPORT="$SCRIPT_DIR/live-capture/summarize_soak.py"
 FIXTURE_DIR="$SCRIPT_DIR/live-capture/fixtures"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-live-contract.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -23,10 +24,146 @@ require_literal() {
 [[ -x "$RUNNER" ]] || fail "live overlap runner is missing or not executable"
 [[ -x "$SESSION_CHECK" ]] || fail "session preflight checker is missing or not executable"
 [[ -x "$MEMORY_CHECK" ]] || fail "memory response checker is missing or not executable"
+[[ -x "$SOAK_REPORT" ]] || fail "capture soak reporter is missing or not executable"
 
 bash -n "$RUNNER"
 PYTHONPYCACHEPREFIX="$TMP_ROOT/pycache" python3 -m py_compile "$SESSION_CHECK"
 PYTHONPYCACHEPREFIX="$TMP_ROOT/pycache" python3 -m py_compile "$MEMORY_CHECK"
+PYTHONPYCACHEPREFIX="$TMP_ROOT/pycache" python3 -m py_compile "$SOAK_REPORT"
+
+cat > "$TMP_ROOT/health.jsonl" <<'EOF'
+{"wall_ts":"2026-09-03T00:00:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":0,"frames_delivered":1,"frames_suppressed":0,"frames_redacted_by_failsafe":0,"cascade_forced_count":0,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0,"frames_encode_failed":0,"frames_focus_race_dropped":0,"failsafe_by_app":{},"cpu_pct_micro":10000,"rss_bytes":104857600,"tracker_alive_at_us":0}
+{"wall_ts":"2026-09-03T00:30:00Z","device_id":"0123456789abcdef0123456789abcdef","uptime_ms":1800000,"frames_delivered":900,"frames_suppressed":600,"frames_redacted_by_failsafe":0,"cascade_forced_count":1,"frames_dropped_backpressure":0,"frames_dropped_late_ack":0,"frames_encode_failed":0,"frames_focus_race_dropped":1,"failsafe_by_app":{},"cpu_pct_micro":120000,"rss_bytes":314572800,"tracker_alive_at_us":0}
+EOF
+
+cat > "$TMP_ROOT/footprint.csv" <<'EOF'
+ts_unix,helper_pid,rss_kb,cpu_pct
+1,42,102400,1.0
+2,42,204800,4.0
+3,42,307200,12.0
+EOF
+
+cat > "$TMP_ROOT/memory.json" <<'EOF'
+{"background_token_present":false,"corpus_event_count":600,"focused_recall_outcome":"degraded","focused_token_present":true,"timeline_event_count":600}
+EOF
+
+mkdir -p "$TMP_ROOT/brain/blobs"
+truncate -s 4096 "$TMP_ROOT/brain/mci.sqlite"
+truncate -s 1024 "$TMP_ROOT/brain/blobs/a.bin"
+
+python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/soak-report.json"
+
+python3 - "$TMP_ROOT/soak-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+assert report["qualified"] is True, report
+assert report["capture"]["frames_delivered"] == 900, report
+assert report["capture"]["ocr_events"] == 600, report
+assert report["capture"]["keyframes_retained"] == 1, report
+assert report["resources"]["helper_cpu_pct_p95"] == 12.0, report
+assert report["resources"]["helper_rss_bytes_p95"] == 314572800, report
+assert report["storage"]["total_bytes"] == 5120, report
+PY
+
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1799 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/short-report.json"; then
+    fail "a sub-30-minute run must not qualify as the release soak"
+fi
+python3 - "$TMP_ROOT/short-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+assert report["qualified"] is False, report
+assert "capture_duration_below_1800_seconds" in report["failures"], report
+PY
+
+cat > "$TMP_ROOT/high-cpu.csv" <<'EOF'
+ts_unix,helper_pid,rss_kb,cpu_pct
+1,42,102400,1.0
+2,42,204800,16.0
+EOF
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/health.jsonl" \
+    --footprint-csv "$TMP_ROOT/high-cpu.csv" \
+    --memory-json "$TMP_ROOT/memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 2 \
+    --output "$TMP_ROOT/high-cpu-report.json" > /dev/null; then
+    fail "a helper over the documented CPU envelope must not qualify"
+fi
+python3 - "$TMP_ROOT/high-cpu-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+assert "helper_cpu_p95_above_15_percent" in report["failures"], report
+PY
+
+cat > "$TMP_ROOT/leaked-memory.json" <<'EOF'
+{"background_token_present":true,"corpus_event_count":600,"focused_recall_outcome":"degraded","focused_token_present":true,"timeline_event_count":600}
+EOF
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/leaked-memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/leaked-report.json" > /dev/null; then
+    fail "a background-token leak must not qualify"
+fi
+python3 - "$TMP_ROOT/leaked-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+assert "background_token_present" in report["failures"], report
+PY
+
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 3 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/sparse-report.json" > /dev/null; then
+    fail "a soak with missing health coverage must not qualify"
+fi
+python3 - "$TMP_ROOT/sparse-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+assert "insufficient_health_samples" in report["failures"], report
+PY
 
 if "$RUNNER" --not-a-real-option >"$TMP_ROOT/bad-arg.out" 2>&1; then
     fail "unknown runner arguments must fail"
@@ -55,6 +192,16 @@ rg -q 'assembled app does not exist' "$TMP_ROOT/missing-app.out" \
     || fail "missing-app preflight is not actionable"
 if rg -q 'PASS: live' "$TMP_ROOT/missing-app.out"; then
     fail "preflight failure must never claim live capture passed"
+fi
+
+if "$RUNNER" --preflight-only --soak --capture-seconds 0 \
+    --app "$TMP_ROOT/Missing.app" >"$TMP_ROOT/soak-config.out" 2>&1; then
+    fail "soak preflight must still reject a missing assembled app"
+fi
+rg -q 'assembled app does not exist' "$TMP_ROOT/soak-config.out" \
+    || fail "--soak must select its fixed duration before app preflight"
+if rg -q 'unknown option\|integer from 1 through' "$TMP_ROOT/soak-config.out"; then
+    fail "--soak must be recognized and override the short-run duration"
 fi
 
 cat "$FIXTURE_DIR/session-unlocked.plist" \

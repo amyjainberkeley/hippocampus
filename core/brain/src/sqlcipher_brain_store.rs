@@ -555,6 +555,7 @@ impl SqlCipherBrainStore {
                  FROM events e
                  LEFT JOIN event_vectors ev ON ev.event_id = e.id
                  WHERE ev.event_id IS NULL
+                   AND length(trim(e.text, ' ' || char(9) || char(10) || char(11) || char(12) || char(13))) > 0
                  ORDER BY e.ts_us ASC
                  LIMIT ?1",
             )
