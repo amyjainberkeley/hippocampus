@@ -53,6 +53,11 @@ final class MemoryWorkspaceTests: XCTestCase {
         XCTAssertEqual(MCI.Workspace.keyframeCountLabel(12), "12 keyframes")
     }
 
+    func testEvidenceFilmstripCompactsToPreservePrimaryContentInShortWindows() {
+        XCTAssertEqual(MCI.Workspace.evidenceFilmstripHeight(availableHeight: 599), 136)
+        XCTAssertEqual(MCI.Workspace.evidenceFilmstripHeight(availableHeight: 600), 200)
+    }
+
     func testEvidenceSummaryStripsCaptureHeaderAndNormalizesWhitespace() {
         let hit = Hit(
             eventId: 9,

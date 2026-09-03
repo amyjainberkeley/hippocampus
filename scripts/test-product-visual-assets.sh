@@ -42,12 +42,16 @@ rg -q 'panel\.appearance = NSAppearance\(named: \.aqua\)' "$PREFERENCES_APP" \
 if rg -q '\.blur\(' "$EVIDENCE_THUMBNAIL"; then
     fail "evidence pixels must remain inspectable; blur belongs on the surrounding material"
 fi
-rg -q 'size: CGSize\(width: 152, height: 86\)' "$MEMORY_WORKSPACE" \
+rg -q 'CGSize\(width: 152, height: 86\)' "$MEMORY_WORKSPACE" \
     || fail "recent-evidence previews do not use the inspectable 16:9 card size"
 rg -q 'Text\(Formatters\.evidenceSummary\(hit\)\)' "$MEMORY_WORKSPACE" \
     || fail "recent-evidence cards do not render a cleaned evidence summary"
 rg -q '\.popover\(item: \$selectedHit' "$MEMORY_WORKSPACE" \
     || fail "recent-evidence cards are not inspectable"
+rg -q 'evidenceFilmstripHeight\(' "$MEMORY_WORKSPACE" \
+    || fail "memory workspace does not compact the filmstrip in short windows"
+rg -q '\.defaultSize\(width: 1024, height: 700\)' "$RECALL_APP" \
+    || fail "Recall default window is too small for the evidence workspace"
 
 if rg -q 'Use System Appearance|follows the current macOS light or dark appearance' "$RECALL_APP"; then
     fail "Recall still advertises the retired adaptive appearance control"

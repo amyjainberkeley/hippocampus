@@ -259,6 +259,7 @@ do_boot() {
     echo "Launching the packaged app with a disposable home..."
     HOME="$DEMO_HOME" \
         CFFIXED_USER_HOME="$DEMO_HOME" \
+        MCI_EPHEMERAL_UI_STATE=1 \
         "$APP_PATH/Contents/MacOS/Hippocampus" \
         >"$LOG_DIR/hippocampus.stdout.log" \
         2>"$LOG_DIR/hippocampus.stderr.log" &
@@ -473,6 +474,7 @@ do_screenshot_auto() {
             MCI_DEVELOPMENT_FILE_KEY=1 \
             MCI_DB_KEY_HEX="$MCI_DB_KEY_HEX" \
             MCI_DB_PATH="$DB_PATH" \
+            MCI_EPHEMERAL_UI_STATE=1 \
             MCI_INITIAL_TAB=now \
             "$RECALL_UI" \
             >"$LOG_DIR/recall.stdout.log" \
@@ -482,18 +484,19 @@ do_screenshot_auto() {
 
         WID=""
         for _ in 1 2 3 4 5 6 7 8 9 10; do
-            WID=$(window_id_for_pid "$RECALL_PID")
+            WID=$(window_id_for_pid "$RECALL_PID" || true)
             [[ -n "$WID" ]] && break
             sleep 0.5
         done
         if [[ -n "$WID" ]]; then
-            screencapture -l "$WID" -o /tmp/recall-ui-auto.png 2>/dev/null
-            if [[ -f /tmp/recall-ui-auto.png ]]; then
-                normalize_screenshot /tmp/recall-ui-auto.png "$SCREENSHOTS/hero-recall-ui.png"
+            RAW_RECALL_SHOT=$(mktemp "${TMPDIR:-/tmp}/recall-ui-auto.XXXXXX.png")
+            if screencapture -l "$WID" -o "$RAW_RECALL_SHOT" 2>/dev/null && [[ -s "$RAW_RECALL_SHOT" ]]; then
+                normalize_screenshot "$RAW_RECALL_SHOT" "$SCREENSHOTS/hero-recall-ui.png"
                 green "  hero-recall-ui.png captured"
             else
                 dim "  screencapture failed (TCC Screen Recording permission needed)"
             fi
+            rm -f "$RAW_RECALL_SHOT"
         else
             dim "  Could not find the Recall window for process $RECALL_PID"
         fi

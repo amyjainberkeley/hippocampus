@@ -116,13 +116,18 @@ let package = Package(
                 .product(name: "MCIKeyframeCodec", package: "MCIKeyframeCodec"),
             ],
             path: "Tests/Fixtures",
-            exclude: ["DeletionTruthBehavior"],
+            exclude: ["DeletionTruthBehavior", "RecallStateBehavior"],
             sources: ["ThumbnailProviderBehavior.swift"]
         ),
         .executableTarget(
             name: "DeletionTruthBehavior",
             dependencies: ["RecallUIKit"],
             path: "Tests/Fixtures/DeletionTruthBehavior"
+        ),
+        .executableTarget(
+            name: "RecallStateBehavior",
+            dependencies: ["RecallUIKit"],
+            path: "Tests/Fixtures/RecallStateBehavior"
         ),
     ]
 )

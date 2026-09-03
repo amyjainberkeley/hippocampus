@@ -438,5 +438,13 @@ public extension MCI {
         public static func keyframeCountLabel(_ count: Int) -> String {
             "\(count) \(count == 1 ? "keyframe" : "keyframes")"
         }
+
+        /// The full keyframe strip needs enough vertical room to coexist with
+        /// Search's controls and empty states. Short windows retain a compact
+        /// screenshot-and-summary strip instead of clipping navigation behind
+        /// the title bar or hiding visual memory altogether.
+        public static func evidenceFilmstripHeight(availableHeight: CGFloat) -> CGFloat {
+            availableHeight >= 600 ? 200 : 136
+        }
     }
 }
