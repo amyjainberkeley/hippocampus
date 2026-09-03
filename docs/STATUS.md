@@ -1,8 +1,8 @@
 # Hippocampus Status
 
-_Audited on 2026-09-02._
+_Audited on 2026-09-03._
 
-Audited code baseline: `900fa68`
+Audited code baseline: `4daf91f`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -57,6 +57,12 @@ truthfully scoped evidence product.
   wedged child after a bounded grace period instead of leaving the interface
   spinning forever. Exported Markdown labels observations as unverified
   reference data and retains exact canonical event citations.
+- Both AI-tool connection surfaces now impose a hard 15-second deadline,
+  concurrently drain child output while retaining at most 8 KiB, request
+  graceful termination, and force-kill a child that ignores the grace period.
+  User-visible failures are sanitized instead of exposing raw stderr or local
+  filesystem details. Executable fixtures prove timeout cleanup, output
+  bounding, and diagnostic redaction without XCTest.
 - Temporal handoff no longer treats recency as truth. A current-state query can
   remove an older raw observation only when a newer source explicitly declares
   that it supersedes or replaces a source labeled as previous or old. Competing
@@ -93,7 +99,9 @@ truthfully scoped evidence product.
   `SIGKILL`, the helper observes EOF, drains capture, exits, and closes the
   existing helper-to-agent pipe so the agent releases its clean-run marker and
   exits too. Ad-hoc app assembly runs this owner-death proof against the real
-  packaged process tree in a disposable home.
+  packaged process tree in a disposable home. The launch verifier allows a
+  20-second cold-start window before judging onboarding missing, covering clean
+  Swift package and Rust cache starts without weakening the liveness checks.
 - The read-only `mci-brain` development fallback now normalizes a
   newline-terminated `dev.key` before validating it, matching the file emitted
   by the canonical demo while leaving production Keychain resolution
@@ -222,7 +230,7 @@ truthfully scoped evidence product.
   passes formatting, all-target workspace Clippy, every workspace test, and
   dependency audit. The shell and executable behavior lanes pass, including
   capture/privacy, release identity, model integrity, product truth, clean-home,
-  app launch, and visual contracts. The current verified matrix reports 41
+  app launch, and visual contracts. The current verified matrix reports 43
   passing lanes, four XCTest-only failures, and one unavailable SwiftFormat
   skip. The local gate now routes package tests through the repository's
   manifest-compatibility wrapper instead of failing before test compilation.
@@ -264,7 +272,7 @@ truthfully scoped evidence product.
   retains evidence, and emits a machine-readable qualification report covering
   frame, OCR, keyframe, memory, storage, privacy, and resource-SLO evidence.
   The required uninterrupted 30-minute run has not completed because subsequent
-  attempts correctly stopped when Chrome became frontmost.
+  attempts correctly stopped when Chrome, Codex, or WhatsApp became frontmost.
 - OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
   ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
   use separate structured capture paths that reject private contexts before
