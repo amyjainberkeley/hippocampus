@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-03._
 
-Audited code baseline: `4daf91f`
+Audited code baseline: `d6da607`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -144,9 +144,14 @@ truthfully scoped evidence product.
   restoration remains direction-asymmetric and requires two granted samples.
 - Semantic recall works when the Arctic Embed S Core ML artifact is present
   and backfill has run. The macOS runtime explicitly permits CPU plus Neural
-  Engine for inference and uses a
-  Rust cosine scan over vectors stored inside SQLCipher; there is no separate
-  vector service or shipped sqlite-vec retrieval path.
+  Engine for inference and uses a Rust cosine scan over vectors stored inside
+  SQLCipher; there is no separate vector service or shipped sqlite-vec
+  retrieval path. The shipping FP16 graph has app-owned provenance and a
+  compiled-MIL contract that traces its finite `-10000` mask into every
+  softmax. All 50 pinned reference sentences produce finite, normalized
+  embeddings with cosine similarity at least `0.999` under both CPU-only and
+  CPU-plus-Neural-Engine policies. The measured averages on this Mac were
+  26.00 ms and 10.35 ms per embedding, respectively.
 - Empty or whitespace-only observations no longer enter the embedding queue.
   One-shot backfill now stops when the current batch makes no progress, and the
   long-running worker waits on its normal idle interval before retrying a
@@ -238,6 +243,11 @@ truthfully scoped evidence product.
   This host's current Command Line Tools installation does not include XCTest,
   so full Swift package test execution requires full Xcode or CI; production
   package builds and executable fixtures remain locally runnable.
+- Installer subprocesses run in isolated POSIX process groups with bounded
+  TERM/KILL escalation. Executable fixtures prove ordinary descendants and
+  descendants created by TERM handlers are gone before timeout returns. Failed
+  builds remove incomplete canonical DMGs and sidecars; successful cleanup
+  preserves completed artifacts.
 - The most recently verified `181 MB` debug ad-hoc app at
   `apps/hippocampus/dist/Hippocampus.app` includes Arctic
   Embed S as its only bundled model, passes signed App Group and model
@@ -319,15 +329,16 @@ truthfully scoped evidence product.
 The accepted `agent-handoff-v1` evaluation runs 36 tasks through both the
 production hybrid and lexical-only `LiveBrainReader::recall` plus
 `LiveBrainReader::context` paths, for 72 arm-task combinations over disposable
-SQLCipher brains. Both fixed quality gates pass. Hybrid scores 100% Hit@1/3/5,
-MRR, semantic relevance, temporal currency, superseded exclusion,
+SQLCipher brains. Both fixed quality gates pass. Hybrid scores 96.8% Hit@1,
+100% Hit@3/5, 98.4% MRR, semantic relevance, temporal currency, superseded exclusion,
 contradiction visibility, duplicate suppression, exact provenance,
 abstention, handoff utility, fact coverage, bounded packets, and capability
-pass rate; its recall is 72.6% at rank one and 100% at ranks three and five.
+pass rate; its recall is 69.4% at rank one and 100% at ranks three and five.
 Lexical-only scores 100% Hit@3/5, temporal currency, superseded
 exclusion, contradiction visibility, duplicate suppression, exact provenance,
-abstention, and bounded packets; its capability pass rate is 35/36 and fact
-coverage is 43/44. This qualifies retrieval and bounded handoff only.
+abstention, and bounded packets; its capability pass rate is 35/36, handoff
+task success is 75%, and fact coverage is 43/44. This qualifies retrieval and
+bounded handoff only.
 `trusted_answer_qualified` remains structurally false until a source-attributed
 answer verifier passes its separate held-out gate. The checksummed report is
 `docs/eval/agent-handoff-v1-result.json`.
@@ -348,8 +359,8 @@ and is not comparable to LoCoMo or LongMemEval.
 
 | Arm | Answerable outcome | Hit rate @1 | Recall @1 / @3 | MRR | Unanswerable outcome | p95 latency |
 |---|---:|---:|---:|---:|---:|---:|
-| Lexical | 7/21 ranked; 14 missed | 33.3% | 33.3% / 33.3% | 0.333 | 3/3 abstained; 0 false positives | 10.00 ms |
-| Hybrid | 21/21 ranked; 0 missed | 95.2% | 88.1% / 100% | 0.976 | 3/3 abstained; 0 false positives | 62.32 ms |
+| Lexical | 7/21 ranked; 14 missed | 33.3% | 33.3% / 33.3% | 0.333 | 3/3 abstained; 0 false positives | 22.15 ms |
+| Hybrid | 21/21 ranked; 0 missed | 95.2% | 88.1% / 100% | 0.976 | 3/3 abstained; 0 false positives | 72.06 ms |
 
 The artifact is complete and publishable but explicitly
 `"launch_qualified": false`. Retrieval abstention passes the three
