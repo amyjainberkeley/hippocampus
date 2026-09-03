@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `24c5ace`
+Audited code baseline: `900fa68`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -201,7 +201,10 @@ truthfully scoped evidence product.
   previews, cleaned two-line evidence summaries, source/time context, and an
   inspectable detail popover instead of blurred passive thumbnails. It compacts
   to screenshot plus summary cards in short windows instead of expanding the
-  root view behind the title bar; fresh windows default to `1024x700`. The demo
+  root view behind the title bar; fresh windows default to `1024x700`. The Now
+  screen exposes the bounded, citation-preserving agent handoff as its stable
+  primary action, and the repository thumbnail is regenerated from that exact
+  packaged surface. The demo
   opts out of saved query/filter state and its automated screenshot path treats
   denied Screen Recording as an explicit nonfatal result rather than aborting
   or accepting a stale temporary image. Demo boot now hands the packaged app to
@@ -219,7 +222,7 @@ truthfully scoped evidence product.
   passes formatting, all-target workspace Clippy, every workspace test, and
   dependency audit. The shell and executable behavior lanes pass, including
   capture/privacy, release identity, model integrity, product truth, clean-home,
-  app launch, and visual contracts. The current verified matrix reports 39
+  app launch, and visual contracts. The current verified matrix reports 41
   passing lanes, four XCTest-only failures, and one unavailable SwiftFormat
   skip. The local gate now routes package tests through the repository's
   manifest-compatibility wrapper instead of failing before test compilation.
