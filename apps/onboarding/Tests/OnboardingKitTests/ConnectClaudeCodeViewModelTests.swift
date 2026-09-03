@@ -41,7 +41,7 @@ final class ConnectClaudeCodeViewModelTests: XCTestCase {
         }
     }
 
-    func testFailureTransitionSurfacesUserFacingMessage() async {
+    func testFailureTransitionDoesNotSurfaceRawDiagnostics() async {
         let vm = ConnectClaudeCodeViewModel(
             registrar: StubRegistrar(
                 result: .failure(
@@ -52,10 +52,8 @@ final class ConnectClaudeCodeViewModelTests: XCTestCase {
         )
         await vm.runRegister()
         if case .failure(let msg) = vm.state {
-            XCTAssertTrue(
-                msg.contains("permission denied"),
-                "view model should surface the stderr to the user; got '\(msg)'"
-            )
+            XCTAssertFalse(msg.contains("permission denied"))
+            XCTAssertTrue(msg.contains("Couldn\u{2019}t connect AI tools"))
         } else {
             XCTFail("expected .failure, got \(vm.state)")
         }

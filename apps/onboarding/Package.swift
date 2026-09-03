@@ -63,5 +63,10 @@ let package = Package(
             dependencies: ["OnboardingKit"],
             path: "Tests/Fixtures/AppAccessBehavior"
         ),
+        .executableTarget(
+            name: "AIToolConnectorBehavior",
+            dependencies: ["OnboardingKit"],
+            path: "Tests/Fixtures/AIToolConnectorBehavior"
+        ),
     ]
 )
