@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `0a8777f`
+Audited code baseline: `75870a8`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -30,6 +30,26 @@ more than this page.
   contradicted, abstained, or returned degraded related context, including the
   stable degradation reason; unqualified ranking is no longer silently
   flattened into an ordinary observation-only packet.
+- The same canonical context compiler is now directly usable outside MCP.
+  `mci-agent context` opens the encrypted brain read-only, uses the production
+  hybrid-or-lexical retrieval path, enforces the shared token and citation
+  limits, and prints prompt-ready Markdown or typed JSON. Recall exposes this
+  as an explicit clipboard action beside search. Production resolves only the
+  app-bundled sibling agent; an external agent path is accepted only in the
+  build-gated development key mode. Exported Markdown labels observations as
+  unverified reference data and retains exact canonical event citations.
+- Temporal handoff no longer treats recency as truth. A current-state query can
+  remove an older raw observation only when a newer source explicitly declares
+  that it supersedes or replaces a source labeled as previous or old. Competing
+  observations without that marker remain visible. Exact repeated screen OCR
+  consumes one packet citation, keeping the newest canonical observation while
+  leaving the lossless event ledger unchanged.
+- First-run onboarding now treats Screen Recording and Accessibility as required
+  capture permissions, starts the supervised capture generation after the user
+  finishes onboarding, and keeps one commandable Recall process available from
+  the menu app. The global Recall shortcut opens that process, and search can
+  deep-link to one exact canonical event instead of silently reusing stale
+  popup results.
 - The supervisor preserves one database-key authority across capture, Recall,
   onboarding, and AI-tool connection children. The packaged demo gives
   Foundation an isolated `HOME` and `CFFIXED_USER_HOME`, and its seeder and
@@ -156,7 +176,7 @@ more than this page.
   host's current Command Line Tools installation does not include XCTest, so
   full Swift package test execution requires full Xcode or CI; production
   package builds and executable fixtures remain locally runnable.
-- The current `178 MB` debug ad-hoc app at
+- The most recently verified `178 MB` debug ad-hoc app at
   `apps/hippocampus/dist/development-20260902-v4/Hippocampus.app` includes Arctic
   Embed S as its only bundled model, passes signed App Group and model
   validation, and survives the disposable-home first-launch and owner-death
@@ -234,6 +254,22 @@ more than this page.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status
+
+The accepted `agent-handoff-v1` evaluation runs 36 tasks through both the
+production hybrid and lexical-only `LiveBrainReader::recall` plus
+`LiveBrainReader::context` paths, for 72 arm-task combinations over disposable
+SQLCipher brains. Both fixed quality gates pass. Hybrid scores 100% Hit@1/3/5,
+MRR, semantic relevance, temporal currency, superseded exclusion,
+contradiction visibility, duplicate suppression, exact provenance,
+abstention, handoff utility, fact coverage, bounded packets, and capability
+pass rate; its recall is 72.6% at rank one and 100% at ranks three and five.
+Lexical-only scores 100% Hit@3/5, temporal currency, superseded
+exclusion, contradiction visibility, duplicate suppression, exact provenance,
+abstention, and bounded packets; its capability pass rate is 35/36 and fact
+coverage is 43/44. This qualifies retrieval and bounded handoff only.
+`trusted_answer_qualified` remains structurally false until a source-attributed
+answer verifier passes its separate held-out gate. The checksummed report is
+`docs/eval/agent-handoff-v1-result.json`.
 
 The shipping extractive brief author passes all eight committed synthetic
 workdays: 37/37 required facts, 69/69 valid citations, zero unresolved
