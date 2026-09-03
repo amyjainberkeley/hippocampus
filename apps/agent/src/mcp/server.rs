@@ -22,7 +22,10 @@ use std::sync::{
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
-use crate::context_packet::ContextBudget;
+use crate::context_packet::{
+    ContextBudget, DEFAULT_CONTEXT_EVIDENCE, DEFAULT_CONTEXT_TOKENS, MAX_CONTEXT_EVIDENCE,
+    MAX_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS,
+};
 use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 use crate::mcp::jsonrpc::{
     JsonRpcId, JsonRpcRequest, JsonRpcResponse, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
@@ -38,15 +41,6 @@ const MAX_EPISODES_LIMIT: usize = 100;
 const DEFAULT_EVENTS_BY_APP_LIMIT: usize = 50;
 /// Hard cap for `mci_events_by_app`'s `limit` parameter.
 const MAX_EVENTS_BY_APP_LIMIT: usize = 500;
-/// Default content-token budget for `mci_context`.
-const DEFAULT_CONTEXT_TOKENS: usize = 1200;
-/// Allowed content-token bounds for `mci_context`.
-const MIN_CONTEXT_TOKENS: usize = 128;
-const MAX_CONTEXT_TOKENS: usize = 4096;
-/// Default and maximum citation counts for `mci_context`.
-const DEFAULT_CONTEXT_EVIDENCE: usize = 24;
-const MAX_CONTEXT_EVIDENCE: usize = 64;
-
 /// MCP protocol version this server advertises in `initialize`.
 ///
 /// The MCP spec uses calendar-versioned protocol revisions; Claude Code

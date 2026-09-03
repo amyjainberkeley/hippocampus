@@ -1,6 +1,7 @@
 use mci_agent::context_packet::{
-    compile_context_packet, ContextBudget, ContextEvidence, ContextPacketOutcome,
-    ContextSectionKind, ContextSectionStatus, ContextSources, EvidencePriority,
+    compile_context_packet, render_context_packet_markdown, ContextBudget, ContextEvidence,
+    ContextPacketOutcome, ContextSectionKind, ContextSectionStatus, ContextSources,
+    EvidencePriority,
 };
 use mci_brain::{ClaimStatus, Event, EventId, EvidenceRef, MemoryClaim, MemoryClaimId};
 
@@ -447,6 +448,41 @@ fn current_focus_preserves_competing_observations_without_supersession_marker() 
     );
 
     assert_eq!(packet.citations.len(), 2);
+}
+
+#[test]
+fn markdown_handoff_preserves_truth_status_and_exact_event_citations() {
+    let source = event(
+        92,
+        1_900_000,
+        "Current decision: ship the bounded context command.",
+    );
+    let mut packet = compile_context_packet(
+        Some("What should the coding agent know?"),
+        NOW_US,
+        ContextBudget::new(200, 6),
+        ContextSources {
+            claims: Vec::new(),
+            evidence: vec![ContextEvidence::from_event(
+                &source,
+                EvidencePriority::Focused,
+                Some(0.8),
+            )],
+        },
+    );
+    packet.focus_retrieval = Some(mci_agent::context_packet::ContextFocusRetrieval::degraded(
+        mci_brain::RetrievalDegradation::EvidenceVerifierUnavailable,
+    ));
+
+    let markdown = render_context_packet_markdown(&packet);
+
+    assert!(markdown.contains("# Hippocampus context"));
+    assert!(markdown.contains("Truth status: observations only"));
+    assert!(markdown.contains("Retrieval: degraded (evidence verifier unavailable)"));
+    assert!(markdown.contains("[event 92]"));
+    assert!(markdown.contains("com.apple.dt.Xcode"));
+    assert!(markdown.contains("https://github.com/example/hippocampus"));
+    assert!(markdown.contains("Observations are not verified facts."));
 }
 
 #[test]

@@ -39,6 +39,10 @@ use mci_agent::client_registry::{
     ClientRegistration, ClientRegistry, RegistrationChange, RegistrationRepair, RegistrationStatus,
 };
 use mci_agent::consolidator_worker;
+use mci_agent::context_packet::{
+    render_context_packet_markdown, ContextBudget, DEFAULT_CONTEXT_EVIDENCE,
+    DEFAULT_CONTEXT_TOKENS, MAX_CONTEXT_EVIDENCE, MAX_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS,
+};
 use mci_agent::crash_recovery::{acquire_lock, lock_path_for_brain, LockAcquireOutcome, LockError};
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::episode_worker;
@@ -46,7 +50,7 @@ use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
 use mci_agent::idle_batch;
 use mci_agent::key_resolver;
-use mci_agent::mcp::{serve_stdio, LiveBrainReader, Server};
+use mci_agent::mcp::{serve_stdio, BrainReader, LiveBrainReader, Server};
 use mci_agent::page_content::PageContentListener;
 use mci_agent::panic_uploader::{self, PanicUploader};
 #[cfg(target_os = "macos")]
@@ -89,6 +93,14 @@ enum Mode {
     /// Resolves `db_path` and the DB key from env at start-up.
     McpServe {
         db_path: PathBuf,
+    },
+    /// Print one bounded, cited context packet for a human or local agent.
+    Context {
+        db_path: PathBuf,
+        focus: Option<String>,
+        max_tokens: usize,
+        max_evidence: usize,
+        format: ContextOutputFormat,
     },
     /// One-command setup: key, import, enrich, register.
     Init {
@@ -156,6 +168,10 @@ enum Mode {
     UnknownCommand {
         name: String,
     },
+    /// A recognized command received an invalid option value.
+    InvalidArguments {
+        message: String,
+    },
     /// Register Hippocampus as an MCP server in Claude Code's settings.
     RegisterMcp {
         db_path: PathBuf,
@@ -181,6 +197,22 @@ enum Mode {
         since_seconds: u64,
         db_path: PathBuf,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContextOutputFormat {
+    Markdown,
+    Json,
+}
+
+impl ContextOutputFormat {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "markdown" => Some(Self::Markdown),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
 }
 
 fn default_device_id_path() -> PathBuf {
@@ -241,6 +273,11 @@ fn parse_args(argv: &[String]) -> Args {
     let mut model_dir: Option<PathBuf> = None;
     let mut transcript_root: Option<PathBuf> = None;
     let mut unknown_command: Option<String> = None;
+    let mut context_focus: Option<String> = None;
+    let mut context_max_tokens = DEFAULT_CONTEXT_TOKENS;
+    let mut context_max_evidence = DEFAULT_CONTEXT_EVIDENCE;
+    let mut context_format = ContextOutputFormat::Markdown;
+    let mut invalid_arguments: Option<String> = None;
 
     let mut i = 1;
     while i < argv.len() {
@@ -261,6 +298,7 @@ fn parse_args(argv: &[String]) -> Args {
             "--strict" => strict = true,
             "--health-summary" => mode_kind = ModeKind::HealthSummary,
             "mcp-serve" => mode_kind = ModeKind::McpServe,
+            "context" => mode_kind = ModeKind::Context,
             "register-mcp" => mode_kind = ModeKind::RegisterMcp,
             "connect" => mode_kind = ModeKind::ConnectAll,
             "stats" => mode_kind = ModeKind::Stats,
@@ -276,6 +314,38 @@ fn parse_args(argv: &[String]) -> Args {
             "--model-dir" if i + 1 < argv.len() => {
                 model_dir = Some(PathBuf::from(&argv[i + 1]));
                 i += 1;
+            }
+            "--focus" if i + 1 < argv.len() => {
+                context_focus = Some(argv[i + 1].clone());
+                i += 1;
+            }
+            "--max-tokens" if i + 1 < argv.len() => {
+                match argv[i + 1].parse::<usize>() {
+                    Ok(value) => {
+                        context_max_tokens = value.clamp(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS);
+                    }
+                    Err(_) => invalid_arguments = Some("--max-tokens must be an integer".into()),
+                }
+                i += 1;
+            }
+            "--max-evidence" if i + 1 < argv.len() => {
+                match argv[i + 1].parse::<usize>() {
+                    Ok(value) => context_max_evidence = value.clamp(1, MAX_CONTEXT_EVIDENCE),
+                    Err(_) => invalid_arguments = Some("--max-evidence must be an integer".into()),
+                }
+                i += 1;
+            }
+            "--format" if i + 1 < argv.len() => {
+                match ContextOutputFormat::parse(&argv[i + 1]) {
+                    Some(value) => context_format = value,
+                    None => {
+                        invalid_arguments = Some("--format must be either markdown or json".into());
+                    }
+                }
+                i += 1;
+            }
+            "--focus" | "--max-tokens" | "--max-evidence" | "--format" => {
+                invalid_arguments = Some(format!("{} requires a value", argv[i]));
             }
             "import-sessions" => mode_kind = ModeKind::ImportSessions,
             "init" => mode_kind = ModeKind::Init,
@@ -344,7 +414,7 @@ fn parse_args(argv: &[String]) -> Args {
         mode_kind = ModeKind::UnknownCommand;
     }
 
-    let mode = match mode_kind {
+    let requested_mode = match mode_kind {
         ModeKind::Help => Mode::Help,
         ModeKind::Version => Mode::Version,
         ModeKind::DrainStdin => Mode::DrainStdin {
@@ -354,6 +424,13 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::HealthSummary => Mode::HealthSummary { window_seconds },
         ModeKind::McpServe => Mode::McpServe {
             db_path: resolved_db_path.clone(),
+        },
+        ModeKind::Context => Mode::Context {
+            db_path: resolved_db_path.clone(),
+            focus: context_focus,
+            max_tokens: context_max_tokens,
+            max_evidence: context_max_evidence,
+            format: context_format,
         },
         ModeKind::UnknownCommand => Mode::UnknownCommand {
             name: unknown_command.unwrap_or_default(),
@@ -403,6 +480,8 @@ fn parse_args(argv: &[String]) -> Args {
                 .unwrap_or_else(mci_agent::import_sessions::default_transcript_root),
         },
     };
+    let mode =
+        invalid_arguments.map_or(requested_mode, |message| Mode::InvalidArguments { message });
     Args {
         device_id_path,
         log_path,
@@ -417,6 +496,7 @@ enum ModeKind {
     DrainStdin,
     HealthSummary,
     McpServe,
+    Context,
     RegisterMcp,
     ConnectAll,
     Stats,
@@ -441,6 +521,8 @@ fn print_usage() {
         \x20 --drain-stdin              read wire frames from stdin and write JSONL\n\
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
+        \x20 context                    print a bounded, cited memory packet for the current\n\
+        \x20                            task. Markdown by default; JSON for automation.\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
         \x20 connect --all              register Hippocampus with detected Claude Code and\n\
         \x20                            Codex clients without serializing a database key\n\
@@ -487,6 +569,10 @@ fn print_usage() {
         \x20 --model-dir PATH           (with brief) where an optional Qwen3 .mlmodelc lives.\n\
         \x20                            Without it, the extractive author runs.\n\
         \x20                            Default ~/Library/Application Support/MCI/Models\n\
+        \x20 --focus TEXT               (with context) retrieve memory related to this task.\n\
+        \x20 --max-tokens N             (with context) content budget, clamped to 128...4096.\n\
+        \x20 --max-evidence N           (with context) citation budget, clamped to 1...64.\n\
+        \x20 --format markdown|json     (with context) output shape. Default markdown.\n\
         \x20 --strict                   (with --drain-stdin) exit non-zero if brain cannot\n\
         \x20                            be opened, instead of falling back to health-only.\n\
         \n\
@@ -1148,6 +1234,10 @@ async fn main() -> ExitCode {
             print_usage();
             ExitCode::from(2)
         }
+        Mode::InvalidArguments { message } => {
+            eprintln!("mci-agent: {message}");
+            ExitCode::from(2)
+        }
         Mode::RegisterMcp { db_path } => match register_mcp(&db_path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -1202,6 +1292,21 @@ async fn main() -> ExitCode {
             Err(code) => ExitCode::from(code),
         },
         Mode::McpServe { db_path } => match run_mcp_serve(db_path).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::Context {
+            db_path,
+            focus,
+            max_tokens,
+            max_evidence,
+            format,
+        } => match run_context_cmd(
+            &db_path,
+            focus.as_deref(),
+            ContextBudget::new(max_tokens, max_evidence),
+            format,
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
@@ -1660,6 +1765,72 @@ fn print_client_registration(name: &str, registration: &ClientRegistration) -> b
     }
 }
 
+fn load_read_query_embedder(command: &str) -> Option<Arc<dyn mci_brain::Embedder>> {
+    if std::env::var("MCI_EMBEDDER_DISABLED").as_deref() == Ok("1") {
+        eprintln!(
+            "mci-agent {command}: embedder disabled (MCI_EMBEDDER_DISABLED=1). Lexical-only recall."
+        );
+        return None;
+    }
+
+    let (embedder, is_real) = load_query_embedder_backend();
+    if is_real {
+        Some(embedder)
+    } else {
+        eprintln!(
+            "mci-agent {command}: query embedder unavailable (no ArcticEmbedS model bundled or non-macOS). Lexical-only recall."
+        );
+        None
+    }
+}
+
+/// Print a bounded context packet through the same production reader used by
+/// the read-only `mci_context` MCP tool.
+fn run_context_cmd(
+    db_path: &Path,
+    focus: Option<&str>,
+    budget: ContextBudget,
+    format: ContextOutputFormat,
+) -> Result<(), u8> {
+    let key_hex = resolve_key_for_command("context")?;
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!(
+            "mci-agent context: resolved database key is malformed; refusing to open the brain."
+        );
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+    let embedder = load_read_query_embedder("context");
+    let reader = LiveBrainReader::open_with_embedder(db_path, &key, embedder).map_err(|error| {
+        eprintln!(
+            "mci-agent context: open brain at {}: {error}",
+            db_path.display()
+        );
+        12
+    })?;
+    let packet = reader
+        .context(
+            focus.map(str::trim).filter(|value| !value.is_empty()),
+            budget,
+        )
+        .map_err(|error| {
+            eprintln!("mci-agent context: compile packet: {error}");
+            13
+        })?;
+
+    match format {
+        ContextOutputFormat::Markdown => print!("{}", render_context_packet_markdown(&packet)),
+        ContextOutputFormat::Json => {
+            let output = serde_json::to_string_pretty(&packet).map_err(|error| {
+                eprintln!("mci-agent context: serialize packet: {error}");
+                13
+            })?;
+            println!("{output}");
+        }
+    }
+    Ok(())
+}
+
 /// Resolve the `SQLCipher` key from the production Keychain reference, open the brain,
 /// optionally construct the embedder for hybrid recall, build the
 /// [`Server`], and run [`serve_stdio`].
@@ -1695,30 +1866,7 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     // Core ML compute units stay pinned to `cpu_only` inside
     // `load_backend_or_fallback` — the "all" tier is the latency trap
     // ([[reference-coreml-computeunits-all-trap]]).
-    let embedder: Option<Arc<dyn mci_brain::Embedder>> =
-        if std::env::var("MCI_EMBEDDER_DISABLED").as_deref() == Ok("1") {
-            eprintln!(
-                "mci-agent mcp-serve: embedder disabled (MCI_EMBEDDER_DISABLED=1). \
-                 Lexical-only recall."
-            );
-            None
-        } else {
-            let (emb, is_real) = load_query_embedder_backend();
-            if is_real {
-                Some(emb)
-            } else {
-                // Zero-vector / non-macOS fallback: hybrid retriever would
-                // just add noise (every doc "matches" the zero query with
-                // cosine 0), so stay on FTS5-only until a real backend is
-                // bundled.
-                eprintln!(
-                    "mci-agent mcp-serve: query embedder unavailable \
-                     (no ArcticEmbedS model bundled or non-macOS). \
-                     Lexical-only recall."
-                );
-                None
-            }
-        };
+    let embedder = load_read_query_embedder("mcp-serve");
 
     let recall_mode = if embedder.is_some() {
         "hybrid (FTS5 + semantic, ADR-0010 min-max CC)"
@@ -2775,6 +2923,78 @@ fn hex_nibble(b: u8) -> Option<u8> {
         b'a'..=b'f' => Some(b - b'a' + 10),
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod context_command_tests {
+    use super::{parse_args, ContextOutputFormat, Mode};
+
+    fn argv(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn context_command_defaults_to_a_prompt_ready_bounded_packet() {
+        let args = parse_args(&argv(&["mci-agent", "context"]));
+
+        let Mode::Context {
+            focus,
+            max_tokens,
+            max_evidence,
+            format,
+            ..
+        } = args.mode
+        else {
+            panic!("context subcommand must select context mode");
+        };
+        assert_eq!(focus, None);
+        assert_eq!(max_tokens, 1_200);
+        assert_eq!(max_evidence, 24);
+        assert_eq!(format, ContextOutputFormat::Markdown);
+    }
+
+    #[test]
+    fn context_command_clamps_limits_and_accepts_json_for_automation() {
+        let args = parse_args(&argv(&[
+            "mci-agent",
+            "context",
+            "--focus",
+            "HIP-204 launch owner",
+            "--max-tokens",
+            "99999",
+            "--max-evidence",
+            "0",
+            "--format",
+            "json",
+        ]));
+
+        let Mode::Context {
+            focus,
+            max_tokens,
+            max_evidence,
+            format,
+            ..
+        } = args.mode
+        else {
+            panic!("context subcommand must select context mode");
+        };
+        assert_eq!(focus.as_deref(), Some("HIP-204 launch owner"));
+        assert_eq!(max_tokens, 4_096);
+        assert_eq!(max_evidence, 1);
+        assert_eq!(format, ContextOutputFormat::Json);
+    }
+
+    #[test]
+    fn context_command_rejects_an_unknown_output_format() {
+        let args = parse_args(&argv(&["mci-agent", "context", "--format", "html"]));
+
+        let Mode::InvalidArguments { message } = args.mode else {
+            panic!("unknown context format must be an argument error");
+        };
+        assert!(message.contains("--format"));
+        assert!(message.contains("json"));
+        assert!(message.contains("markdown"));
     }
 }
 
