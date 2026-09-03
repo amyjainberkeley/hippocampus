@@ -111,7 +111,7 @@ struct MCIRecallApp: App {
             }
         }
         .defaultPosition(.center)
-        .defaultSize(width: 900, height: 600)
+        .defaultSize(width: 1024, height: 700)
     }
 
     @MainActor

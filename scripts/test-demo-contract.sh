@@ -15,6 +15,8 @@ grep -Fq 'CFFIXED_USER_HOME="$DEMO_HOME"' "$DEMO" || fail "Foundation apps must 
 grep -Fq 'KEY_FILE="$MCI_DIR/dev.key"' "$DEMO" || fail "seeders and packaged development app must share one fixed key path"
 grep -Fq 'Contents/MacOS/recall-ui' "$DEMO" || fail "visual demo must use the bundled Recall executable"
 grep -Fq 'MCI_INITIAL_TAB=now' "$DEMO" || fail "visual demo must open on the useful Now surface"
+grep -Fq 'MCI_EPHEMERAL_UI_STATE=1' "$DEMO" || fail "demo UI state must not inherit the host saved query"
+grep -Fq 'if screencapture -l "$WID" -o "$RAW_RECALL_SHOT"' "$DEMO" || fail "automatic screenshots must tolerate missing Screen Recording permission"
 grep -Fq 'MCI_DB_KEYCHAIN_SERVICE' "$DEMO" || fail "demo commands must avoid the production Keychain reference"
 grep -Fq 'ps -p "$pid" -o command=' "$DEMO" || fail "stale PID files must be identity-checked"
 grep -Fq 'scripts/test-screenshot-assets.sh' "$DEMO" || fail "captured assets must pass the quality contract"

@@ -111,42 +111,51 @@ struct MemoryWorkspaceView: View {
 
     @ViewBuilder
     private var workspaceDetail: some View {
-        VStack(spacing: 0) {
-            WorkspaceFilmstrip(reader: reader)
-                .frame(minHeight: 168, idealHeight: 184, maxHeight: 200)
-            Divider().overlay(Color.brandCardBorder)
+        GeometryReader { geometry in
+            let filmstripHeight = MCI.Workspace.evidenceFilmstripHeight(
+                availableHeight: geometry.size.height
+            )
+            VStack(spacing: 0) {
+                WorkspaceFilmstrip(
+                    reader: reader,
+                    isCompact: filmstripHeight < 200
+                )
+                .frame(height: filmstripHeight)
+                Divider().overlay(Color.brandCardBorder)
 
-            Group {
-                switch selection {
-                case .now:
-                    NowWorkspaceView(reader: reader)
-                case .search:
-                    SearchView(
-                        viewModel: SearchViewModel(reader: reader),
-                        focusTrigger: searchFocusTrigger,
-                        focusRequest: focusRequest,
-                        reader: reader
-                    )
-                case .timeline:
-                    TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
-                case .episodes:
-                    EpisodesView(viewModel: EpisodesViewModel(reader: reader))
-                case .briefs:
-                    BriefView(
-                        viewModel: BriefViewModel(
-                            reader: reader,
-                            captureCoverage: .unknown
+                Group {
+                    switch selection {
+                    case .now:
+                        NowWorkspaceView(reader: reader)
+                    case .search:
+                        SearchView(
+                            viewModel: SearchViewModel(reader: reader),
+                            focusTrigger: searchFocusTrigger,
+                            focusRequest: focusRequest,
+                            reader: reader
                         )
-                    )
-                case .sources:
-                    SourcesWorkspaceView(reader: reader)
-                case .privacy:
-                    PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
-                case .settings:
-                    UserDictionaryEditor()
+                    case .timeline:
+                        TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
+                    case .episodes:
+                        EpisodesView(viewModel: EpisodesViewModel(reader: reader))
+                    case .briefs:
+                        BriefView(
+                            viewModel: BriefViewModel(
+                                reader: reader,
+                                captureCoverage: .unknown
+                            )
+                        )
+                    case .sources:
+                        SourcesWorkspaceView(reader: reader)
+                    case .privacy:
+                        PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
+                    case .settings:
+                        UserDictionaryEditor()
+                    }
                 }
+                .frame(minHeight: 0, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .background(Color.brandBgPrimary)
         .navigationTitle(selection.descriptor.title)
@@ -202,6 +211,7 @@ private struct MemorySidebarRow: View {
 
 private struct WorkspaceFilmstrip: View {
     let reader: BrainReader
+    let isCompact: Bool
     @State private var hits: [Hit] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -219,7 +229,7 @@ private struct WorkspaceFilmstrip: View {
                     .mciFont(.caption)
                     .foregroundStyle(Color.brandFgMuted)
             }
-            .frame(width: 148, alignment: .leading)
+            .frame(width: isCompact ? 128 : 148, alignment: .leading)
 
             if isLoading {
                 ProgressView()
@@ -242,7 +252,7 @@ private struct WorkspaceFilmstrip: View {
                             Button {
                                 selectedHit = hit
                             } label: {
-                                FilmstripCard(hit: hit)
+                                FilmstripCard(hit: hit, isCompact: isCompact)
                             }
                             .buttonStyle(.plain)
                             .help("Inspect source evidence")
@@ -290,16 +300,17 @@ private struct WorkspaceFilmstrip: View {
 
 private struct FilmstripCard: View {
     let hit: Hit
+    let isCompact: Bool
     @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
             EvidenceThumbnail(
                 url: hit.thumbnailURL,
-                size: CGSize(width: 152, height: 86),
-                maxPixelSize: 384
+                size: thumbnailSize,
+                maxPixelSize: isCompact ? 300 : 384
             )
-            HStack(spacing: MCI.Spacing.s) {
+            HStack(spacing: MCI.Spacing.xs) {
                 Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
                     .font(MCI.Font.mono)
                     .foregroundStyle(Color.brandMint)
@@ -308,17 +319,23 @@ private struct FilmstripCard: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Color.brandFgMuted)
             }
-            Text(Formatters.contextLine(hit))
-                .font(MCI.Font.footnote)
-                .foregroundStyle(Color.brandFgPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            if !isCompact {
+                Text(Formatters.contextLine(hit))
+                    .font(MCI.Font.footnote)
+                    .foregroundStyle(Color.brandFgPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
             Text(Formatters.evidenceSummary(hit))
                 .mciFont(.caption)
                 .foregroundStyle(Color.brandFgSecondary)
-                .lineLimit(2)
+                .lineLimit(isCompact ? 1 : 2)
         }
-        .frame(width: 152, height: 154, alignment: .topLeading)
+        .frame(
+            width: isCompact ? 120 : 152,
+            height: isCompact ? 104 : 154,
+            alignment: .topLeading
+        )
         .padding(MCI.Spacing.s)
         .background(
             isHovered
@@ -340,6 +357,13 @@ private struct FilmstripCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Formatters.contextLine(hit))
         .accessibilityHint("Opens the source evidence")
+    }
+
+    private var thumbnailSize: CGSize {
+        if isCompact {
+            return CGSize(width: 120, height: 68)
+        }
+        return CGSize(width: 152, height: 86)
     }
 }
 

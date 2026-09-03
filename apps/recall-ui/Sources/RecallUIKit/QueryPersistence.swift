@@ -96,18 +96,22 @@ public struct QueryPersistence: Sendable {
 
     private let store: KeyValueStore
     private let key: String
+    private let isEnabled: Bool
 
     public init(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         store: KeyValueStore = UserDefaults.standard,
         key: String = QueryPersistence.defaultKey
     ) {
         self.store = store
         self.key = key
+        self.isEnabled = environment["MCI_EPHEMERAL_UI_STATE"] != "1"
     }
 
     /// Save the state. Empty state (empty query + default filters)
     /// clears the key so the next `load` returns nil.
     public func save(_ state: PersistedQueryState) {
+        guard isEnabled else { return }
         guard !state.isEmpty else {
             store.removeObject(forKey: key)
             return
@@ -123,6 +127,7 @@ public struct QueryPersistence: Sendable {
     /// Load the state. Returns `nil` when nothing is stored OR the
     /// stored blob is corrupted / from an unknown schema version.
     public func load() -> PersistedQueryState? {
+        guard isEnabled else { return nil }
         guard let data = store.data(forKey: key) else { return nil }
         do {
             let decoded = try JSONDecoder().decode(PersistedQueryState.self, from: data)
