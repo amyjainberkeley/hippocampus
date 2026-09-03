@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `75870a8`
+Audited code baseline: `a46b602`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -54,7 +54,11 @@ more than this page.
   onboarding, and AI-tool connection children. The packaged demo gives
   Foundation an isolated `HOME` and `CFFIXED_USER_HOME`, and its seeder and
   app share the exact fixed development-key path, so demo runs cannot touch
-  the user's real brain or silently exercise a different key.
+  the user's real brain or silently exercise a different key. Recall launch
+  now uses the prepared-environment validator: source and demo builds retain
+  only the fixed file-key marker/path while production remains Keychain-only;
+  the ambient scrubber can no longer remove the authority immediately before
+  the child starts.
 - The supervised capture topology now has a kernel-enforced parent-lifetime
   lease. If the visible app quits, crashes, is force-quit, or receives
   `SIGKILL`, the helper observes EOF, drains capture, exits, and closes the
@@ -159,7 +163,12 @@ more than this page.
   three authenticated encrypted keyframes, 20 synthetic events, and one current
   synthetic brief. Recall's recent-evidence strip now shows sharp 16:9 source
   previews, cleaned two-line evidence summaries, source/time context, and an
-  inspectable detail popover instead of blurred passive thumbnails.
+  inspectable detail popover instead of blurred passive thumbnails. It compacts
+  to screenshot plus summary cards in short windows instead of expanding the
+  root view behind the title bar; fresh windows default to `1024x700`. The demo
+  opts out of saved query/filter state and its automated screenshot path treats
+  denied Screen Recording as an explicit nonfatal result rather than aborting
+  or accepting a stale temporary image.
 - Runlog remains an audited research input rather than a runtime dependency.
   It does use 768-dimensional Gemini vectors and Firestore cosine search; its
   useful hypothesis is hybrid candidate generation plus source-region
@@ -171,13 +180,15 @@ more than this page.
   passes formatting, all-target workspace Clippy, every workspace test, and
   dependency audit. The shell and executable behavior lanes pass, including
   capture/privacy, release identity, model integrity, product truth, clean-home,
-  app launch, and visual contracts. The current full run reports 36 passing
-  lanes, four XCTest-only failures, and one unavailable SwiftFormat skip. This
-  host's current Command Line Tools installation does not include XCTest, so
-  full Swift package test execution requires full Xcode or CI; production
+  app launch, and visual contracts. The current verified matrix reports 39
+  passing lanes, four XCTest-only failures, and one unavailable SwiftFormat
+  skip. The local gate now routes package tests through the repository's
+  manifest-compatibility wrapper instead of failing before test compilation.
+  This host's current Command Line Tools installation does not include XCTest,
+  so full Swift package test execution requires full Xcode or CI; production
   package builds and executable fixtures remain locally runnable.
-- The most recently verified `178 MB` debug ad-hoc app at
-  `apps/hippocampus/dist/development-20260902-v4/Hippocampus.app` includes Arctic
+- The most recently verified `181 MB` debug ad-hoc app at
+  `apps/hippocampus/dist/Hippocampus.app` includes Arctic
   Embed S as its only bundled model, passes signed App Group and model
   validation, and survives the disposable-home first-launch and owner-death
   gates. This proves a runnable development bundle, not a distributable Apple
