@@ -6,6 +6,7 @@ RUNNER="$SCRIPT_DIR/run-live-capture-overlap.sh"
 SESSION_CHECK="$SCRIPT_DIR/live-capture/check_session.py"
 MEMORY_CHECK="$SCRIPT_DIR/live-capture/verify_memory.py"
 SOAK_REPORT="$SCRIPT_DIR/live-capture/summarize_soak.py"
+STREAM_POLICY="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/StreamConfig.swift"
 FIXTURE_DIR="$SCRIPT_DIR/live-capture/fixtures"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-live-contract.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -25,6 +26,8 @@ require_literal() {
 [[ -x "$SESSION_CHECK" ]] || fail "session preflight checker is missing or not executable"
 [[ -x "$MEMORY_CHECK" ]] || fail "memory response checker is missing or not executable"
 [[ -x "$SOAK_REPORT" ]] || fail "capture soak reporter is missing or not executable"
+rg -Fq 'minimumFrameIntervalMs: 500,' "$STREAM_POLICY" \
+    || fail "active capture default must honor the documented 2 fps energy ceiling"
 
 bash -n "$RUNNER"
 PYTHONPYCACHEPREFIX="$TMP_ROOT/pycache" python3 -m py_compile "$SESSION_CHECK"
