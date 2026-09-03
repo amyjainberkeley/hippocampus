@@ -142,9 +142,9 @@ fn check_embedder() -> Check {
     let candidates = [
         std::env::var_os("MCI_ARCTIC_MODEL_PATH").map(PathBuf::from),
         Some(PathBuf::from(
-            "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc",
+            "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc",
         )),
-        Some(home.join("Library/Application Support/MCI/Models/ArcticEmbedS_INT8.mlmodelc")),
+        Some(home.join("Library/Application Support/MCI/Models/ArcticEmbedS_FP16.mlmodelc")),
     ];
     for c in candidates.into_iter().flatten() {
         if c.exists() {

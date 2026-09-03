@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 
 EXPECTED_MODELS = {
-    "arctic-embed-s-int8": "ArcticEmbedS_INT8.mlmodelc",
+    "arctic-embed-s-fp16": "ArcticEmbedS_FP16.mlmodelc",
 }
 VERSION_RE = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 

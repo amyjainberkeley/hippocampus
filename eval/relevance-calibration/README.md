@@ -31,7 +31,7 @@ sessions, source text, or labeled answers. Task 3 remains an acceptance set.
 Run the deterministic maintainer tool from the repository root:
 
 ```sh
-MCI_ARCTIC_MODEL_PATH=/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc \
+MCI_ARCTIC_MODEL_PATH=/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc \
 cargo run -q -p mci-agent --bin mci_calibrate_evidence -- \
   eval/relevance-calibration/v1.json \
   eval/relevance-calibration/v1-policy.json

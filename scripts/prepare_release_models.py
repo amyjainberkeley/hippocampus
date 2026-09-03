@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path, PurePosixPath
 import shutil
@@ -16,8 +17,20 @@ import tempfile
 MAX_UNPACKED_BYTES = 8 * 1024 * 1024 * 1024
 MAX_MEMBERS = 100_000
 REQUIRED_MODELS = (
-    "ArcticEmbedS_INT8.mlmodelc",
+    "ArcticEmbedS_FP16.mlmodelc",
 )
+ARCTIC_CONTRACT = {
+    "attentionImplementation": "eager",
+    "embeddingDimension": 384,
+    "maxSequenceLength": 128,
+    "minimumSystemVersion": "14.0",
+    "modelID": "arctic-embed-s-fp16",
+    "precision": "float16",
+    "schemaVersion": 1,
+    "sourceRepo": "Snowflake/snowflake-arctic-embed-s",
+    "sourceRevision": "e596f507467533e48a2e17c007f0e1dacc837b33",
+    "specificationVersion": 8,
+}
 
 
 class ModelArchiveError(RuntimeError):
@@ -58,6 +71,18 @@ def validate_model(root: Path, model: str) -> None:
     weights = model_path / "weights"
     require(weights.is_dir(), f"{model} has no weights directory")
     require(any(path.is_file() for path in weights.rglob("*")), f"{model} has no weight files")
+    contract_path = model_path / "hippocampus-model.json"
+    require(contract_path.is_file(), f"{model} has no compatibility metadata")
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as error:
+        raise ModelArchiveError(
+            f"{model} compatibility metadata is invalid JSON: {error}"
+        ) from error
+    require(
+        contract == ARCTIC_CONTRACT,
+        f"{model} compatibility metadata does not match the shipping contract",
+    )
 
 
 def install(archive: Path, expected_sha: str, output: Path) -> None:

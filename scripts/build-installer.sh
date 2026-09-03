@@ -18,6 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
 APP_GROUP_CONTRACT="$REPO_ROOT/scripts/lib/app-group-contract.sh"
+INSTALLER_RUNTIME="$REPO_ROOT/scripts/lib/installer-runtime.sh"
 INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
 CANONICAL_APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
@@ -27,8 +28,31 @@ if [[ ! -f "$APP_GROUP_CONTRACT" ]]; then
     echo "FATAL: App Group contract helper missing at $APP_GROUP_CONTRACT" >&2
     exit 1
 fi
+if [[ ! -f "$INSTALLER_RUNTIME" ]]; then
+    echo "FATAL: Installer runtime helper missing at $INSTALLER_RUNTIME" >&2
+    exit 1
+fi
 # shellcheck source=/dev/null
 source "$APP_GROUP_CONTRACT"
+# shellcheck source=/dev/null
+source "$INSTALLER_RUNTIME"
+
+MOUNT_DIR=""
+SIGNING_SCRATCH=""
+DMG_STAGING=""
+TEMP_DMG=""
+APP_ZIP=""
+
+installer_on_exit() {
+    local status=$?
+    trap - EXIT
+    hippocampus_installer_cleanup "$status"
+    exit "$status"
+}
+
+trap installer_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 SKIP_BUILD=0
 BUILD_PROFILE="release"
@@ -261,7 +285,7 @@ fi
 # before running this script. build-app.sh logged
 # `WARNING: ArcticEmbedS .mlpackage not found at $REPO_ROOT/models/...` and
 # continued anyway, producing a .app with no embedder under
-# Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc. The DMG built + signed
+# Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc. The DMG built + signed
 # + notarized + stapled cleanly because nothing in the signing or notary path
 # inspects resource completeness — but first-launch semantic search silently
 # falls back to a zero-vector stub. By the time CEO mounted the DMG, the bug
@@ -269,16 +293,16 @@ fi
 #
 # This gate trips BEFORE codesign / launch-verify / notarize so the operator
 # fixes the worktree and re-runs from scratch instead of shipping broken.
-EMBEDDER_PATH="$APP_PATH/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
+EMBEDDER_PATH="$APP_PATH/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc"
 if [[ ! -d "$EMBEDDER_PATH" ]]; then
-    echo "FATAL: ArcticEmbedS_INT8.mlmodelc missing at:"
+    echo "FATAL: ArcticEmbedS_FP16.mlmodelc missing at:"
     echo "         $EMBEDDER_PATH"
     echo ""
     echo "Refusing to ship a DMG with broken semantic search."
     echo ""
     echo "Root cause is almost always: the build worktree does not have the"
     echo "models/ directory. The embedder lives at"
-    echo "  <repo>/models/ArcticEmbedS_INT8.{mlpackage,mlmodelc}"
+    echo "  <repo>/models/ArcticEmbedS_FP16.{mlpackage,mlmodelc}"
     echo "and is .gitignored (~64 MB). For worktree builds, copy it in from"
     echo "the primary checkout before re-running:"
     echo ""
@@ -333,7 +357,6 @@ if [[ -d "$APPEX_PATH" ]]; then
 fi
 
 SIGNING_SCRATCH=$(mktemp -d -t hippocampus-installer-signing)
-trap 'rm -rf "$SIGNING_SCRATCH"' EXIT
 ENTITLEMENTS="$SIGNING_SCRATCH/Hippocampus.entitlements"
 APPEX_ENTITLEMENTS="$SIGNING_SCRATCH/HippocampusSafariExtension.entitlements"
 hippocampus_render_app_group_entitlements \
@@ -469,7 +492,7 @@ if [[ -d "$APPEX_PATH" ]] && ! hippocampus_verify_signed_app_group \
     exit 1
 fi
 rm -rf "$SIGNING_SCRATCH"
-trap - EXIT
+SIGNING_SCRATCH=""
 
 # --- Step 2.5: Notarize + staple the .app ITSELF (not just the DMG) ---
 #
@@ -529,13 +552,13 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
     fi
 
     rm -f "$APP_ZIP"
+    APP_ZIP=""
 fi
 
 # --- Step 3: Prepare DMG staging directory ---
 
 DMG_NAME="Hippocampus-${VERSION}"
 DMG_STAGING=$(mktemp -d -t hippocampus-dmg)
-trap 'rm -rf "$DMG_STAGING"' EXIT
 
 echo "--- Staging DMG contents ---"
 
@@ -646,8 +669,19 @@ if [[ -f "$APPLESCRIPT" ]] && [[ -f "$BACKGROUND_PNG" ]]; then
         # Give Finder a moment to notice the new volume before scripting it.
         sleep 2
 
-        if ! osascript "$APPLESCRIPT" "$MOUNT_DIR"; then
-            echo "WARNING: AppleScript layout failed (non-fatal — Finder layout is cosmetic)"
+        DMG_LAYOUT_TIMEOUT_SECONDS="${DMG_LAYOUT_TIMEOUT_SECONDS:-20}"
+        DMG_LAYOUT_KILL_GRACE_SECONDS="${DMG_LAYOUT_KILL_GRACE_SECONDS:-2}"
+        layout_status=0
+        hippocampus_run_with_deadline \
+            "$DMG_LAYOUT_TIMEOUT_SECONDS" \
+            "$DMG_LAYOUT_KILL_GRACE_SECONDS" \
+            osascript "$APPLESCRIPT" "$MOUNT_DIR" || layout_status=$?
+        if [[ "$layout_status" -eq 124 ]]; then
+            echo "WARNING: AppleScript layout exceeded ${DMG_LAYOUT_TIMEOUT_SECONDS}s and was terminated"
+            echo "         Finder layout is cosmetic; continuing with a default-layout DMG."
+        elif [[ "$layout_status" -ne 0 ]]; then
+            echo "WARNING: AppleScript layout failed with status $layout_status"
+            echo "         Finder layout is cosmetic; continuing with a default-layout DMG."
         fi
 
         # Set volume icon flag
@@ -669,6 +703,7 @@ if [[ -f "$APPLESCRIPT" ]] && [[ -f "$BACKGROUND_PNG" ]]; then
 
         # -force so a lingering Finder reference can't keep the volume busy.
         hdiutil detach "$MOUNT_DIR" -force -quiet || hdiutil detach "$MOUNT_DIR" -quiet
+        MOUNT_DIR=""
     else
         echo "WARNING: Could not mount temp DMG for layout (non-fatal)"
     fi
@@ -688,6 +723,7 @@ hdiutil convert \
     -o "$FINAL_DMG"
 
 rm -f "$TEMP_DMG"
+TEMP_DMG=""
 
 # --- Step 6.5: Attach Software License Agreement ---
 

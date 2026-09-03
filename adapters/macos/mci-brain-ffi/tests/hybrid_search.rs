@@ -21,7 +21,7 @@ fn model_path() -> Option<PathBuf> {
         .filter(|path| path.exists())
         .or_else(|| {
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../models/ArcticEmbedS_INT8.mlmodelc");
+                .join("../../../models/ArcticEmbedS_FP16.mlmodelc");
             path.exists().then_some(path)
         })
 }

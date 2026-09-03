@@ -60,9 +60,9 @@ Snowflake Arctic Embed S
     Apache-2.0
     https://huggingface.co/Snowflake/snowflake-arctic-embed-s
 
-    Redistributed here as a Core ML derivative. The current FP16 artifact
-    retains the legacy filename `ArcticEmbedS_INT8.mlmodelc` for runtime
-    compatibility. Used for the semantic half of hybrid recall.
+    Redistributed here as the FP16 Core ML derivative
+    `ArcticEmbedS_FP16.mlmodelc`. Used for the semantic half of hybrid
+    recall.
 
 dslim/bert-base-NER
     Copyright (c) David S. Lim

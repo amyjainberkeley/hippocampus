@@ -1,20 +1,19 @@
 //! Quality regression for the `snowflake-arctic-embed-s` Core ML
 //! pipeline.
 //!
-//! Wave-17 gate: the converted INT8 `.mlmodelc` must produce embeddings
+//! Shipping gate: the converted FP16 `.mlmodelc` must produce embeddings
 //! that match the Python FP32 reference (sentence-transformers
 //! `Snowflake/snowflake-arctic-embed-s`, `normalize_embeddings=True`)
 //! to within cosine similarity `>= 0.999` on the 50-sentence fixture
 //! at `tests/fixtures/arctic_embed_sentences.txt` /
 //! `arctic_embed_reference.npy`.
 //!
-//! A failure on any row flips the INT8-vs-FP16 decision per the
-//! ADR-0011 erratum (2026-05-22): rerun the conversion without
-//! `linear_quantize_weights` to ship FP16 instead.
+//! INT8 already failed this gate on 43/50 rows. A failure on the FP16
+//! artifact is a conversion regression and blocks packaging.
 //!
 //! # Skipping when fixtures are not present
 //!
-//! The `.mlmodelc` (~30 MB, gitignored) and the `.npy` reference
+//! The `.mlmodelc` (~66 MB, gitignored) and the `.npy` reference
 //! (~75 KB) are produced by `scripts/convert_embedder.py --verify
 //! --fixtures` and live under the repo's `models/` and
 //! `tests/fixtures/` directories respectively. CI / headless dev
@@ -42,8 +41,8 @@ fn model_path() -> Option<PathBuf> {
     let repo_root = manifest_dir.join("../../..").canonicalize().ok()?;
 
     let candidates = [
-        repo_root.join("models/ArcticEmbedS_INT8.mlmodelc"),
-        repo_root.join("models/ArcticEmbedS_INT8.mlpackage"),
+        repo_root.join("models/ArcticEmbedS_FP16.mlmodelc"),
+        repo_root.join("models/ArcticEmbedS_FP16.mlpackage"),
     ];
     candidates.into_iter().find(|candidate| candidate.exists())
 }
@@ -75,9 +74,9 @@ fn sentences_path() -> Option<PathBuf> {
 fn model_and_reference_or_skip() -> Option<(CoreMLBackend, Vec<String>, Vec<Vec<f32>>)> {
     let Some(model) = model_path() else {
         println!(
-            "quality.rs: skipping — no ArcticEmbedS_INT8.mlmodelc or .mlpackage \
+            "quality.rs: skipping — no ArcticEmbedS_FP16.mlmodelc or .mlpackage \
              found under <repo>/models/. Run scripts/convert_embedder.py \
-             --output models/ArcticEmbedS_INT8.mlpackage --verify --fixtures \
+             --output models/ArcticEmbedS_FP16.mlpackage --verify --fixtures \
              to produce it."
         );
         return None;
@@ -172,9 +171,8 @@ fn cosine_similarity_matches_python_reference() {
 
     assert!(
         failures.is_empty(),
-        "INT8 quantization drift > 1e-3 vs Python FP32 reference on {} / {} rows: {:?}. \
-         Per ADR-0011 erratum (2026-05-22), flip the build to FP16 by removing \
-         the linear_quantize_weights step in scripts/convert_embedder.py.",
+        "FP16 conversion drift > 1e-3 vs Python FP32 reference on {} / {} rows: {:?}. \
+         The shipping model no longer matches its pinned source checkpoint.",
         failures.len(),
         sentences.len(),
         failures

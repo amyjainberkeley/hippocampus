@@ -178,7 +178,7 @@ def semantic_tasks() -> list[dict[str, Any]]:
 def temporal_tasks() -> list[dict[str, Any]]:
     specs = [
         ("temporal-owner", "Who owns HIP-204 now?", "Martin", "Priya", "linear://HIP-204/old", "linear://HIP-204/current"),
-        ("temporal-model-path", "What is the current installed embedding model path?", "~/Models/ArcticEmbedS_INT8.mlmodelc", "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc", "file:///old-model-path", "file:///current-model-path"),
+        ("temporal-model-path", "What is the current installed embedding model path?", "~/Models/ArcticEmbedS_INT8.mlmodelc", "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc", "file:///old-model-path", "file:///current-model-path"),
         ("temporal-launch-date", "What is the current launch date for Atlas?", "September 8", "September 15", "slack://atlas/launch-old", "linear://ATLAS-90/current"),
         ("temporal-benchmark-count", "How many tasks are in agent-handoff-v1 now?", "24 tasks", "36 tasks", "file:///benchmark-count-old", "file:///benchmark-count-current"),
         ("temporal-signing-team", "Which Apple team identifier should the release use now?", "OLDTEAM42", "NEWTEAM73", "file:///signing-team-old", "file:///signing-team-current"),

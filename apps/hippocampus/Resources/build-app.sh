@@ -450,20 +450,20 @@ fi
 # Embed ArcticEmbedS Core ML model (per ADR-0011 + ADR-0028 §4).
 # The .mlpackage is produced offline by scripts/convert_embedder.py
 # and committed locally (gitignored — too big to checkin).
-EMBEDDER_PACKAGE="$REPO_ROOT/models/ArcticEmbedS_INT8.mlpackage"
-EMBEDDER_COMPILED="$REPO_ROOT/models/ArcticEmbedS_INT8.mlmodelc"
+EMBEDDER_PACKAGE="$REPO_ROOT/models/ArcticEmbedS_FP16.mlpackage"
+EMBEDDER_COMPILED="$REPO_ROOT/models/ArcticEmbedS_FP16.mlmodelc"
 EMBEDDER_DEST_DIR="$RESOURCES/Models"
-EMBEDDER_DEST="$EMBEDDER_DEST_DIR/ArcticEmbedS_INT8.mlmodelc"
+EMBEDDER_DEST="$EMBEDDER_DEST_DIR/ArcticEmbedS_FP16.mlmodelc"
 EMBEDDER_SOURCE_PRESENT=0
 
 if [[ -d "$EMBEDDER_COMPILED" ]]; then
-    echo "Bundling pre-compiled ArcticEmbedS_INT8.mlmodelc"
+    echo "Bundling pre-compiled ArcticEmbedS_FP16.mlmodelc"
     EMBEDDER_SOURCE_PRESENT=1
     mkdir -p "$EMBEDDER_DEST_DIR"
     rm -rf "$EMBEDDER_DEST"
     cp -R "$EMBEDDER_COMPILED" "$EMBEDDER_DEST_DIR/"
 elif [[ -d "$EMBEDDER_PACKAGE" ]]; then
-    echo "Compiling ArcticEmbedS_INT8.mlpackage → .mlmodelc"
+    echo "Compiling ArcticEmbedS_FP16.mlpackage → .mlmodelc"
     EMBEDDER_SOURCE_PRESENT=1
     mkdir -p "$EMBEDDER_DEST_DIR"
     rm -rf "$EMBEDDER_DEST"
@@ -472,24 +472,24 @@ elif [[ "$DEVELOPMENT_LITE" -eq 1 ]]; then
     echo "DEVELOPMENT LITE: ArcticEmbedS is unavailable; recall stays lexical-only."
 else
     fatal \
-        "ArcticEmbedS_INT8.{mlpackage,mlmodelc} missing under $REPO_ROOT/models" \
+        "ArcticEmbedS_FP16.{mlpackage,mlmodelc} missing under $REPO_ROOT/models" \
         "Run: pip install -r scripts/requirements-ml.txt" \
-        "Then: python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage --verify" \
+        "Then: python scripts/convert_embedder.py --output models/ArcticEmbedS_FP16.mlpackage --verify" \
         "Refusing to ship a bundle whose semantic recall silently degrades to lexical-only."
 fi
 
 if [[ "$EMBEDDER_SOURCE_PRESENT" -eq 1 ]]; then
     if [[ ! -d "$EMBEDDER_DEST" ]]; then
         fatal \
-            "ArcticEmbedS_INT8.mlmodelc missing at $EMBEDDER_DEST after bundling" \
-            "Run: python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage --verify" \
+            "ArcticEmbedS_FP16.mlmodelc missing at $EMBEDDER_DEST after bundling" \
+            "Run: python scripts/convert_embedder.py --output models/ArcticEmbedS_FP16.mlpackage --verify" \
             "Then re-run: ./apps/hippocampus/Resources/build-app.sh"
     fi
     if [[ ! -f "$EMBEDDER_DEST/model.mil" || ! -d "$EMBEDDER_DEST/weights" || ! -f "$EMBEDDER_DEST/coremldata.bin" ]]; then
         fatal \
             "bundled $EMBEDDER_DEST is structurally incomplete" \
             "(missing model.mil, weights/, or coremldata.bin)." \
-            "Rebuild with: python scripts/convert_embedder.py --output models/ArcticEmbedS_INT8.mlpackage --verify"
+            "Rebuild with: python scripts/convert_embedder.py --output models/ArcticEmbedS_FP16.mlpackage --verify"
     fi
 fi
 

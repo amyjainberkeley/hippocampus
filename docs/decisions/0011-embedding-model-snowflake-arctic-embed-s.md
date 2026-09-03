@@ -25,11 +25,11 @@ CEO ratified 2026-05-18.
 
 ## Decision
 
-1. **The embedding model is `snowflake-arctic-embed-s` (33M params, 384-d, Apache-2.0, int8-quantized for runtime).** It replaces `all-MiniLM-L6-v2` end-to-end.
+1. **The embedding model is `snowflake-arctic-embed-s` (33M params, 384-d, Apache-2.0) with FP16 shipping weights.** It replaces `all-MiniLM-L6-v2` end-to-end. INT8 remains a non-shipping experiment because it failed the pinned quality gate.
 2. **The schema is unchanged.** ADR-0009 pins `event_vectors.embedding` to 384; arctic-embed-s is also 384-d. No migration of the column shape; full re-embed only.
 3. **Query/document prefixes per the model card.** The embedder wrapper prepends `Represent this sentence for searching relevant passages: ` to queries and the document-side prefix to events. Without the prefixes, retrieval quality degrades — this is binding on the wrapper implementation.
 4. **Runtime:**
-   - **macOS:** Core ML on the Apple Neural Engine (ANE), exported via `coremltools` from the int8 `.onnx` or HuggingFace original.
+   - **macOS:** Core ML from the pinned HuggingFace original. The shipping graph uses eager attention, FP16 weights, Core ML specification version 8, and a macOS 14 deployment target.
    - **Windows:** ONNX Runtime, DirectML execution provider (later phase per DESIGN.md §15 Phase 8).
    - **MLX is rejected** because it does not target the ANE (engineering fact; do **not** cite arXiv:2510.18921 for this — it's not what that paper claims). For an energy-bound always-on daemon, an ANE-targeting runtime is the only acceptable choice on Apple Silicon.
    - **`NLEmbedding` (Apple's built-in) and potion-retrieval-32M-class static embedders are kept as a no-dependency floor** for environments where the Core ML / ONNX path is unavailable; never primary.
@@ -41,7 +41,7 @@ CEO ratified 2026-05-18.
 - Positive: +23.9% relative MTEB-R lift on MCI's exact noisy-corpus profile, with **zero schema cost** (ADR-0009).
 - Positive: Apache-2.0 license is permissive enough to ship inside a notarized macOS app without separate licensing concerns. CSO confirms (protected-set adjacent).
 - Positive: ANE on macOS keeps the footprint SLO (AGENT_PROTOCOL §4) reachable on long batches.
-- Negative / tradeoffs: arctic-embed-s is ~50% larger in params (33M vs 22.7M). The int8 deployment artifact is still ≪100 MB; resident-memory delta is minor, not a §4 risk. Verified.
+- Negative / tradeoffs: arctic-embed-s is ~50% larger in params (33M vs 22.7M). The verified FP16 deployment artifact is ~66 MB; resident-memory impact remains within the app's measured release envelope.
 - Negative / tradeoffs: query/document prefixes must be **always-on** in the embedder wrapper. A future contributor who forgets the prefix silently degrades retrieval; a test asserts the prefix is present at insert and query time.
 - Forces: the ADR-0010 eval gate (LongMemEval/ScreenshotVQA-style) is the source of truth that the +23.9% lift actually materializes on MCI's corpus. If the eval shows a regression vs MiniLM on the actual MCI workload, this ADR is re-opened.
 
@@ -52,7 +52,7 @@ CEO ratified 2026-05-18.
 
 ## DESIGN.md edits required by this ADR
 
-- **§8 (Brain) — embedding-model line.** Replace `"quantized all-MiniLM-L6-v2 (384-d)"` with `"quantized snowflake-arctic-embed-s (33M, 384-d, Apache-2.0, int8)"`. Same rationale, plus a one-line note that query/document prefixes are required by the model card.
+- **§8 (Brain) — embedding-model line.** Replace `"quantized all-MiniLM-L6-v2 (384-d)"` with `"FP16 snowflake-arctic-embed-s (33M, 384-d, Apache-2.0)"`. Same rationale, plus a one-line note that query/document prefixes are required by the model card.
 - **§13 (Tech Stack Summary) — Embeddings row.** Same one-line swap.
 - **§12 (Data Model)** — unchanged (dimension pinned to 384 by ADR-0009).
 
@@ -94,15 +94,15 @@ exporters, all of which use **external tokenization + token-IDs input**.
    converted to MIL slice + l2_norm). The Rust runtime reads a finished
    unit vector at the output — no Rust-side post-processing on the
    primary backend.
-3. **INT8 quantization retained.** Pipeline tradeoff: keep the size
-   win, gate the quality with a regression test. The Rust
+3. **FP16 is the shipping precision.** INT8 was evaluated for the size
+   win and gated with a regression test. The Rust
    `tests/quality.rs` cosine-similarity test against a 50-sentence
-   Python FP32 reference fixture is the gate: per-row cosine
-   `>= 0.999` keeps INT8; a failure flips the build to FP16 (no
-   `linear_quantize_weights` step) as the documented fallback.
+   Python FP32 reference fixture is the gate. INT8 failed on 43/50 rows;
+   the default conversion therefore stays FP16 and `--int8` exists only
+   to reproduce the rejected experiment.
 4. **No HuggingFace publish until post-v2.0.** The converted
    `.mlpackage` ships only inside the notarized signed app bundle;
-   publishing the int8-quantized artifact to a third-party hub before
+   publishing the converted artifact to a third-party hub before
    product/legal review is out of scope for v1.
 5. **The `mci-brain::arctic_embed_s::ArcticEmbedSEmbedder` wrapper
    keeps its L2-normalize step** as defense-in-depth for alternate
@@ -124,13 +124,26 @@ exporters, all of which use **external tokenization + token-IDs input**.
 - `adapters/macos/mci-embed-coreml/src/tokenizer.rs` (new) — bundled
   `WordPieceTokenizer` over `include_bytes!` resource.
 - `adapters/macos/mci-embed-coreml/tests/quality.rs` (new) —
-  cosine-similarity regression vs the Python reference; gates the
-  INT8 vs FP16 decision.
+  cosine-similarity regression vs the Python reference; protects the
+  shipping FP16 conversion.
 
 **Not changed.** ADR-0011's core decision (model = `snowflake-arctic-embed-s`,
 dim = 384, prefix discipline on the wrapper, ANE compute units, the
 scaling ladder) is unchanged. This erratum only corrects the *runtime
 plumbing* between Rust and the Core ML graph.
+
+## 2026-09-03 release-truth amendment
+
+The prior compiled artifact had two release-blocking identity defects: its
+filename claimed INT8 while Core ML reported FP16 storage, and its fused
+scaled-dot-product-attention operations required macOS 15 while the app
+advertised macOS 14. The canonical artifact is now
+`ArcticEmbedS_FP16.mlmodelc`. Conversion forces eager attention and targets
+macOS 14, producing Core ML specification version 8. Every compiled bundle
+also carries `hippocampus-model.json` with the source revision, precision,
+minimum OS, dimensions, and attention implementation. App assembly rejects
+newer-than-app models, false precision labels, and missing compatibility
+metadata.
 
 ## §5.1 — Candidate-pool pre-filter (implemented cycle 8.56)
 

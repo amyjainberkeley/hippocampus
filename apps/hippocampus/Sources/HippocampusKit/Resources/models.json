@@ -2,7 +2,7 @@
   "version": 1,
   "models": [
     {
-      "modelID": "arctic-embed-s-int8",
+      "modelID": "arctic-embed-s-fp16",
       "displayName": "Arctic Embed S (Search)",
       "bundled": true,
       "note": "Bundled in app. No download needed."

@@ -47,44 +47,47 @@ fn load_empty_path_is_invalid_input() {
 /// `apps/agent` candidate-paths chain. `None` (skip) when no artifact is
 /// present (headless CI), `Some(path)` on a live Mac with the model built.
 fn embedder_model_path() -> Option<PathBuf> {
+    if let Some(configured) = std::env::var_os("MCI_ARCTIC_MODEL_PATH").map(PathBuf::from) {
+        return configured.exists().then_some(configured);
+    }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir.join("../../..").canonicalize().ok()?;
     [
-        repo_root.join("models/ArcticEmbedS_INT8.mlmodelc"),
-        repo_root.join("models/ArcticEmbedS_INT8.mlpackage"),
+        repo_root.join("models/ArcticEmbedS_FP16.mlmodelc"),
+        repo_root.join("models/ArcticEmbedS_FP16.mlpackage"),
     ]
     .into_iter()
     .find(|candidate| candidate.exists())
 }
 
 /// PRODUCTION-PATH smoke: the exact loader the live agent uses
-/// ([`CoreMLBackend::open`], which pins [`ComputeUnits::CpuOnly`]) must
+/// ([`CoreMLBackend::open`], which pins [`ComputeUnits::CpuAndNeuralEngine`]) must
 /// produce a finite, L2-normalized, 384-d vector for a probe string —
 /// proving the embedder genuinely predicts, not just loads. This is the
 /// regression guard for the E5RT "Invalid blob shape" class of bug: a
-/// model whose predict path throws (or whose CPU pin regresses) fails
+/// model whose predict path throws (or whose compute-unit pin regresses) fails
 /// here, not silently at runtime via a nonzero `embed_errors` aggregate.
 ///
 /// Skips (passes) when no model artifact is present (headless CI). On a
-/// live Mac with `models/ArcticEmbedS_INT8.{mlmodelc,mlpackage}` built, it
+/// live Mac with `models/ArcticEmbedS_FP16.{mlmodelc,mlpackage}` built, it
 /// runs the real Core ML inference.
 #[test]
 fn production_path_smoke_embed_is_finite_unit_vector() {
     let Some(model) = embedder_model_path() else {
         println!(
             "load.rs: skipping production-path smoke — no \
-             ArcticEmbedS_INT8.{{mlmodelc,mlpackage}} under <repo>/models/. \
+             ArcticEmbedS_FP16.{{mlmodelc,mlpackage}} under <repo>/models/. \
              Run scripts/convert_embedder.py --output \
-             models/ArcticEmbedS_INT8.mlpackage --verify to produce it."
+             models/ArcticEmbedS_FP16.mlpackage --verify to produce it."
         );
         return;
     };
 
     // Production loader: CoreMLBackend::open pins DEFAULT_COMPUTE_UNITS
-    // (CpuOnly). Wrap in the document-side embedder exactly as
+    // (CpuAndNeuralEngine). Wrap in the document-side embedder exactly as
     // load_embedder_backend does on the ingest path.
     let backend = CoreMLBackend::open(&model)
-        .unwrap_or_else(|e| panic!("CoreMLBackend::open (cpu_only pin) failed: {e:?}"));
+        .unwrap_or_else(|e| panic!("CoreMLBackend::open (cpu_and_ne pin) failed: {e:?}"));
     let embedder = ArcticEmbedSEmbedder::new_document(Arc::new(backend));
 
     let v = embedder

@@ -26,12 +26,12 @@ The script monkey-patches `torch.Tensor.new_ones` for coremltools 9.0
 compatibility (retained from PR #143). Do not remove the patch until
 coremltools upstream lands the `new_ones` converter.
 
-## Step 1: Embedder (~33 MB)
+## Step 1: Embedder (~66 MB)
 
 ```bash
 mkdir -p models
 python scripts/convert_embedder.py \
-  --output models/ArcticEmbedS_INT8.mlpackage \
+  --output models/ArcticEmbedS_FP16.mlpackage \
   --verify --fixtures
 ```
 
@@ -50,8 +50,9 @@ erratum.
 sentences) and `tests/fixtures/arctic_embed_reference.npy` (50 × 384
 Float32 unit vectors from sentence-transformers FP32). These power the
 `cargo test -p mci-embed-coreml --test quality` cosine-similarity
-regression that gates the INT8 vs FP16 decision (target: cosine sim
->= 0.999 per row).
+regression that protects the shipping FP16 conversion (target: cosine
+sim >= 0.999 per row). INT8 is an explicit experiment only; it failed
+this gate on 43/50 fixture rows and is not the release artifact.
 
 Semantic search now works end-to-end (no zero-vector stub fallback).
 

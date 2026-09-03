@@ -309,7 +309,7 @@
           {"role": "assistant", "content": "Older note says use models ArcticEmbedS INT8 mlmodelc from the repo root."}
         ],
         [
-          {"role": "assistant", "content": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc."}
+          {"role": "assistant", "content": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc."}
         ]
       ],
       "tags": ["browser", "files", "changed_fact", "provenance"]
