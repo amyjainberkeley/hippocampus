@@ -37,8 +37,8 @@ struct Args {
 
     /// `--probe-debug` — dev-only. STEP-2-FINDING-001 instrumentation.
     /// When set, every call to `AXSubroleProbe.focusedHasSecureSubrole()`
-    /// writes ONE stderr line: focused element's role + subrole +
-    /// identifier + title + the `Bool?` returned. Default OFF; the
+    /// writes ONE content-free stderr line containing attribute-presence bits,
+    /// backstop outcomes, and the `Bool?` returned. Default OFF; the
     /// steady-state (no-flag) cost of the flag is zero — the probe
     /// only reads role / identifier / title when a sink is wired.
     /// No wire-schema change. Pairs with `--capture` (which is what
@@ -132,7 +132,8 @@ func printUsage() {
       --generation <token>      Expected supervisor process generation.
       --once                    Emit one frame and exit (CI smoke).
       --probe-debug             DEV-ONLY. Log every AXSubroleProbe call to
-                                stderr (role/subrole/identifier/title/Bool?).
+                                stderr (presence/outcome/Bool? only; never raw
+                                AX values).
                                 For STEP-2-FINDING-001 diagnosis only. No
                                 wire-schema change. Steady-state cost when
                                 OFF is zero. Pair with --capture.
@@ -281,9 +282,9 @@ let blackedRegionProbe = PixelGridBlackedRegionProbe()
 // STEP-2-FINDING-001 diagnostic — `--probe-debug` only.
 // `axProbeDebugSink == nil` is the steady-state production path: the
 // probe makes the same two AX calls the prior implementation made; no
-// extra work. When the sink is wired (dev-only), each probe call also
-// reads role / identifier / title and emits ONE stderr line. Never
-// writes to the wire / disk / encoded frame path.
+// extra work. When the sink is wired (dev-only), each probe call emits
+// presence and classification signals only. Raw AX values never reach stderr,
+// the wire, disk, or the encoded-frame path.
 let axProbeDebugSink: AXSubroleProbe.DebugSink?
 if args.probeDebug {
     if !captureOptions.captureEnabled {
@@ -295,40 +296,9 @@ if args.probeDebug {
                 .data(using: .utf8) ?? Data())
     }
     axProbeDebugSink = { observation in
-        let role = observation.role ?? "nil"
-        let subrole = observation.subrole ?? "nil"
-        let identifier = observation.identifier ?? "nil"
-        let title = observation.title ?? "nil"
-        let result: String = {
-            switch observation.classification {
-            case .some(true): return "true"
-            case .some(false): return "false"
-            case .none: return "nil"
-            }
-        }()
-        // STEP-2-FINDING-001 §4 backstop signals — render one short
-        // token per signal so the next Step-2 re-run can attribute
-        // `reason=4` (or its absence) at signal granularity.
-        //   descendant=pos|neg|err
-        //   value-hidden=pos|neg|err
-        //   id-regex=pos|neg|err
-        func renderOutcome(_ o: AXBackstopOutcome) -> String {
-            switch o {
-            case .positive: return "pos"
-            case .negative: return "neg"
-            case .errored: return "err"
-            }
-        }
-        let line =
-            "mci-capture-helper: probe(ax-subrole) "
-            + "focus=\(observation.focusResult) "
-            + "role=\(role) subrole=\(subrole) "
-            + "id=\(identifier) title=\(title) "
-            + "descendant=\(renderOutcome(observation.descendantSecure)) "
-            + "value-hidden=\(renderOutcome(observation.valueAttributeHidden)) "
-            + "id-regex=\(renderOutcome(observation.identifierRegexMatch)) "
-            + "result=\(result)\n"
-        FileHandle.standardError.write(line.data(using: .utf8) ?? Data())
+        FileHandle.standardError.write(
+            AXProbeDiagnostic.render(observation).data(using: .utf8) ?? Data()
+        )
     }
 } else {
     axProbeDebugSink = nil
@@ -584,6 +554,7 @@ if captureOptions.captureEnabled {
     captureRuntime = nil
 }
 
+var captureDrainFailed = false
 if let captureRuntime {
     let captureSession = captureRuntime.session
     FileHandle.standardError.write(
@@ -654,12 +625,16 @@ if let captureRuntime {
     do {
         try await captureRuntime.session.stop()
     } catch {
+        captureDrainFailed = true
         FileHandle.standardError.write(
             "mci-capture-helper: capture drain failed during shutdown\n"
                 .data(using: .utf8)!
         )
     }
     captureRuntime.contextProvider.stop()
+}
+if captureDrainFailed {
+    exit(82)
 }
 
 // Defensive: ensure the optimizer cannot lift `captureSession` out

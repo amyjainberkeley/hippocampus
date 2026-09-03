@@ -9,10 +9,14 @@ commits are intentionally omitted from release notes.
 
 - Bind captured frames to the focused-window stream generation so focus changes
   cannot attribute stale pixels to a newly focused app.
+- Resolve public AX focus to one unique WindowServer surface twice, failing
+  closed on ambiguous geometry or a same-application window switch.
 - Retry static-window OCR after an empty, timed-out, or dropped recognition job
   without weakening focused-window or protected-surface privacy checks.
 - Treat unexpected stream loss and failed teardown as terminal capture failures
   instead of leaving a healthy-looking helper with no live capture source.
+- Keep qualification diagnostics content-free and fail the live gate when the
+  capture helper cannot shut down cleanly.
 
 ## [0.1.0] - 2026-09-01
 

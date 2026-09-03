@@ -13,7 +13,7 @@
 //   (b) frontmost present + AX rect  → snapshot.focused = (bundleId, wid, rect), gen=1
 //   (c) consecutive identical reads  → generation does NOT bump on no-op ticks
 //   (d) focus change                 → generation bumps exactly once per change
-//   (e) AX rect timeout              → snapshot.focused with axRect = nil
+//   (e) AX rect timeout              → snapshot.focused = nil
 //   (f) windowId resolver fails      → snapshot.focused = nil
 //   (g) empty bundleId               → snapshot.focused = nil
 
@@ -103,9 +103,9 @@ final class FocusTrackerTests: XCTestCase {
         XCTAssertEqual(store.currentSync().focused, term)
     }
 
-    // MARK: - Test (e): AX rect timeout → snapshot has nil rect but still populated
+    // MARK: - Test (e): AX rect timeout → identity fails closed
 
-    func test_ax_rect_timeout_yields_focused_with_nil_rect() {
+    func test_ax_rect_timeout_yields_nil_focused() {
         struct TimingOutAX: AXFocusedWindowRectReader {
             func readRect(pid _: pid_t, timeoutMs _: Int) -> CGRect? { nil }
         }
@@ -115,17 +115,16 @@ final class FocusTrackerTests: XCTestCase {
             }
         }
         struct StubWid: FocusedWindowIDSource {
-            func focusedWindowID(pid _: pid_t) -> CGWindowID? { CGWindowID(9) }
+            func focusedWindowID(pid _: pid_t, axFocusedRect _: CGRect) -> CGWindowID? {
+                CGWindowID(9)
+            }
         }
         let reader = AXFocusedWindowReader(
             pidSource: StubPid(),
             axRectReader: TimingOutAX(),
             windowIdSource: StubWid()
         )
-        let result = reader.readFocusedWindow()
-        XCTAssertEqual(result?.bundleId, "com.apple.Safari")
-        XCTAssertEqual(result?.windowId, CGWindowID(9))
-        XCTAssertNil(result?.axRect)
+        XCTAssertNil(reader.readFocusedWindow())
     }
 
     // MARK: - Test (f): windowId resolver fails → reader returns nil
@@ -137,7 +136,7 @@ final class FocusTrackerTests: XCTestCase {
             }
         }
         struct NoWid: FocusedWindowIDSource {
-            func focusedWindowID(pid _: pid_t) -> CGWindowID? { nil }
+            func focusedWindowID(pid _: pid_t, axFocusedRect _: CGRect) -> CGWindowID? { nil }
         }
         struct AnyRect: AXFocusedWindowRectReader {
             func readRect(pid _: pid_t, timeoutMs _: Int) -> CGRect? { .zero }
@@ -159,7 +158,9 @@ final class FocusTrackerTests: XCTestCase {
             }
         }
         struct AnyWid: FocusedWindowIDSource {
-            func focusedWindowID(pid _: pid_t) -> CGWindowID? { CGWindowID(1) }
+            func focusedWindowID(pid _: pid_t, axFocusedRect _: CGRect) -> CGWindowID? {
+                CGWindowID(1)
+            }
         }
         struct AnyRect: AXFocusedWindowRectReader {
             func readRect(pid _: pid_t, timeoutMs _: Int) -> CGRect? { .zero }

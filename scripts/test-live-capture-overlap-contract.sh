@@ -9,6 +9,9 @@ SOAK_REPORT="$SCRIPT_DIR/live-capture/summarize_soak.py"
 STREAM_POLICY="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/StreamConfig.swift"
 CAPTURE_SESSION="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SCStreamCaptureSession.swift"
 FOCUS_TRACKER="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Context/FocusTracker.swift"
+HELPER_MAIN="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift"
+OCR_EMITTER="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/OCRPostAllowEmitter.swift"
+SUPPRESSION_CASCADE="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift"
 FIXTURE_DIR="$SCRIPT_DIR/live-capture/fixtures"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-live-contract.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -330,6 +333,35 @@ require_literal 'check_session.py' \
     "runner must fail closed when the GUI session is unavailable or locked"
 require_literal 'Evidence retained at:' \
     "runner must disclose retained failure evidence"
+
+if rg -n '\$HELPER.*--probe-debug' "$RUNNER"; then
+    fail "live qualification must not enable AX value logging"
+fi
+if rg -Fq 'frontmost: ${front_bundle' "$RUNNER"; then
+    fail "live qualification diagnostics must not expose the frontmost bundle identifier"
+fi
+if rg -Fq 'wait "$HELPER_PID" 2>/dev/null || true' "$RUNNER"; then
+    fail "live qualification must not discard the capture helper exit status"
+fi
+require_literal 'helper_exit=$?' \
+    "runner must retain the capture helper exit status"
+require_literal '(( helper_exit == 0 )) || runtime_fail' \
+    "runner must fail qualification when the capture helper exits nonzero"
+rg -Fq 'exit(82)' "$HELPER_MAIN" \
+    || fail "capture helper must exit nonzero when shutdown cannot stop capture"
+python3 - "$HELPER_MAIN" <<'PY'
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+stop_call = source.index("try await captureRuntime.session.stop()")
+context_stop = source.index("captureRuntime.contextProvider.stop()", stop_call)
+shutdown_block = source[stop_call:context_stop]
+if "captureDrainFailed = true" not in shutdown_block:
+    raise SystemExit("capture shutdown failure must arm the nonzero exit path")
+PY
+if rg -Fq 'bundle=\(' "$OCR_EMITTER" "$SUPPRESSION_CASCADE"; then
+    fail "capture diagnostics must not log application bundle identifiers"
+fi
 
 if rg -n 'tccutil[[:space:]]+(reset|insert)|xattr[[:space:]].*(-d|-c)|spctl[[:space:]]+--add|pkill' \
     "$RUNNER" "$SESSION_CHECK" "$MEMORY_CHECK"; then

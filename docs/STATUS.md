@@ -145,8 +145,12 @@ truthfully scoped evidence product.
   resets its grant evidence after a failed reconstruction attempt.
 - Focused-window capture now binds every callback to the immutable generation
   of the `SCStream` that produced it. Focus changes build a replacement stream;
-  stale generations fail closed before pixel admission, and terminal stream
-  loss stops the helper instead of leaving a falsely healthy process. OCR queue
+  public AX geometry must resolve twice to one unique WindowServer identity, so
+  ambiguous same-bounds surfaces and same-application focus races fail closed.
+  Stale generations fail closed before pixel admission, and terminal stream
+  loss or failed teardown stops the helper instead of leaving a falsely healthy
+  process. The live verifier preserves that nonzero status and its diagnostics
+  expose only fixed outcomes, presence bits, booleans, and counts. OCR queue
   eviction, timeout, and empty recognition explicitly reopen only that exact
   frame's visual baseline. A complete later static frame can then receive one
   full-frame retry without disabling the normal no-dirty-rectangle energy gate

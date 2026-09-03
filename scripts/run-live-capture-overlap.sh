@@ -426,7 +426,7 @@ done
 kill -0 "$CORPUS_PID" 2>/dev/null || fail "overlap corpus exited during startup"
 front_bundle="$(frontmost_bundle_id || true)"
 [[ "$front_bundle" == "$CORPUS_BUNDLE_ID" ]] \
-    || fail "overlap corpus did not become frontmost within ${STARTUP_TIMEOUT}s (frontmost: ${front_bundle:-unknown}); unlock the Mac and dismiss any system dialog"
+    || fail "overlap corpus did not become frontmost within ${STARTUP_TIMEOUT}s; unlock the Mac and dismiss any system dialog"
 rg -q '^capture-overlap-corpus ready$' "$CORPUS_STDOUT" 2>/dev/null \
     || fail "overlap corpus became frontmost but did not publish its readiness line"
 
@@ -442,7 +442,7 @@ FIFO_GUARD_OPEN=1
 AGENT_PID=$!
 
 generation="live-overlap-$(date +%s)-$$"
-"$HELPER" --capture --probe-debug --live-overlap-qualification \
+"$HELPER" --capture --live-overlap-qualification \
     --output "$CAPTURE_FIFO" \
     --heartbeat-seconds 2 --readiness-file "$READINESS_FILE" \
     --generation "$generation" 9>&- >"$HELPER_STDOUT" 2>"$HELPER_STDERR" &
@@ -484,7 +484,7 @@ while [[ ! -f "$READINESS_FILE" ]] && (( SECONDS < deadline )); do
     kill -0 "$AGENT_PID" 2>/dev/null || runtime_fail "ingest agent exited before helper readiness"
     front_bundle="$(frontmost_bundle_id || true)"
     [[ "$front_bundle" == "$CORPUS_BUNDLE_ID" ]] \
-        || runtime_fail "overlap corpus lost frontmost status during helper startup (frontmost: ${front_bundle:-unknown})"
+        || runtime_fail "overlap corpus lost frontmost status during helper startup"
     sleep 0.25
 done
 [[ -f "$READINESS_FILE" ]] \
@@ -523,14 +523,18 @@ while (( SECONDS < deadline )); do
     kill -0 "$FOOTPRINT_PID" 2>/dev/null || runtime_fail "footprint sampler exited during capture"
     front_bundle="$(frontmost_bundle_id || true)"
     [[ "$front_bundle" == "$CORPUS_BUNDLE_ID" ]] \
-        || runtime_fail "overlap corpus lost frontmost status during capture (frontmost: ${front_bundle:-unknown})"
+        || runtime_fail "overlap corpus lost frontmost status during capture"
     sleep 0.5
 done
 
 printf '\n==> Closing capture and waiting for the writer lease to release\n'
 stop_owned_process "$HELPER_PID" "capture helper" "$HELPER"
-wait "$HELPER_PID" 2>/dev/null || true
+set +e
+wait "$HELPER_PID" 2>/dev/null
+helper_exit=$?
+set -e
 HELPER_PID=""
+(( helper_exit == 0 )) || runtime_fail "capture helper exited with status $helper_exit"
 wait "$FOOTPRINT_PID" 2>/dev/null || true
 FOOTPRINT_PID=""
 exec 9>&-

@@ -157,14 +157,13 @@ public struct SuppressionCascade: Sendable {
             axSecureSubrole: axResult
         )
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 env-gated trace.
-        // Content-free: bundle id (already cascade-attributed) +
-        // decision enum + AX outcome enum. No window title / URL / OCR
-        // text. Zero steady-state cost when off (single static-let
+        // Content-free: decision enum only. No bundle ID, window title, URL,
+        // or OCR text. Zero steady-state cost when off (single static-let
         // load via `OCRTrace.isEnabled`; the autoclosure prevents
         // line-construction overhead).
         OCRTrace.emit(
             "cascade-decide",
-            "bundle=\(context.appBundleId ?? "nil") decision=\(decision.traceLabel)"
+            "decision=\(decision.traceLabel)"
         )
         return PixelPrivacySnapshot(
             hasBlackedRegion: blacked,

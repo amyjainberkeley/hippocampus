@@ -340,13 +340,11 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
     ) async {
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 env-gated trace at the
-        // post-allow entry. Logs bundle id + kill-switch state so the
-        // operator can attribute the M4 short-circuit fork live.
-        // Content-free: bundle id + boolean. NO OCR text — there is
-        // no OCR text at this entry point anyway (OCR has not run).
+        // post-allow entry. Only the kill-switch state is emitted; bundle ID,
+        // title, URL, and OCR text stay out of diagnostics.
         OCRTrace.emit(
             "ocr-post-allow-entry",
-            "bundle=\(context.appBundleId ?? "nil") kill_ocr_emit=\(Self.killOcrEmit)"
+            "kill_ocr_emit=\(Self.killOcrEmit)"
         )
         // CSO escalation 2026-05-29 — capture-scope cross-window leak
         // (see `Self.killOcrEmit` + `docs/research/capture-scope-
@@ -383,38 +381,182 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         // buffer stays alive until the job completes (held by the
         // worker's Job struct + this captured reference).
         let inputSnapshot = input
+        await Self.submitOCRAttempt(
+            worker: worker,
+            completionCoordinator: completionCoordinator,
+            attemptsRemaining: 1,
+            captureOrdinal: captureOrdinal,
+            tsUs: tsUs,
+            context: context,
+            input: inputSnapshot,
+            evidenceCandidate: evidenceCandidate,
+            cascade: cascadeSnapshot,
+            sink: sinkSnapshot,
+            sequence: sequenceSnapshot,
+            counters: countersSnapshot,
+            keyframeRetainer: keyframeRetainerSnapshot,
+            disposition: disposition
+        )
+    }
+
+    /// Retry one OCR job against the same retained pixels. ScreenCaptureKit's
+    /// `.idle` status explicitly means no new frame was generated, so waiting
+    /// for a later callback cannot recover a static window. Keeping the retry
+    /// inside the owned worker/coordinator pair bounds work and preserves the
+    /// original privacy snapshot, context, evidence identity, and ROI.
+    private static func submitOCRAttempt(
+        worker: VisionOCRWorker,
+        completionCoordinator: OrderedCaptureDispatcher,
+        attemptsRemaining: Int,
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        cascade: SuppressionCascade,
+        sink: any FrameSink,
+        sequence: FrameSequence,
+        counters: HelperHealthCounters,
+        keyframeRetainer: (any KeyframeRetaining)?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) async {
         await worker.submit(
             input: input,
             onDrop: {
-                disposition(.retryableNoContent)
+                Self.scheduleRetryOrFinish(
+                    worker: worker,
+                    completionCoordinator: completionCoordinator,
+                    attemptsRemaining: attemptsRemaining,
+                    captureOrdinal: captureOrdinal,
+                    tsUs: tsUs,
+                    context: context,
+                    input: input,
+                    evidenceCandidate: evidenceCandidate,
+                    cascade: cascade,
+                    sink: sink,
+                    sequence: sequence,
+                    counters: counters,
+                    keyframeRetainer: keyframeRetainer,
+                    disposition: disposition
+                )
             }
         ) { result in
             let resultDisposition = Self.disposition(for: result)
             // VisionOCRWorker invokes completions serially in submission
             // order. The owned coordinator preserves that order while
-            // bounding post-OCR persistence/publication work.
+            // bounding retry and post-OCR persistence/publication work.
             completionCoordinator.submit(
                 captureOrdinal: captureOrdinal,
                 operation: {
-                    await CascadeTwiceOCREmitter.handleOCRResult(
+                    if resultDisposition == .retryableNoContent,
+                       attemptsRemaining > 0
+                    {
+                        OCRTrace.emit(
+                            "ocr-post-allow-retry",
+                            "reason=no_content attempts_remaining=\(attemptsRemaining - 1)"
+                        )
+                        await Self.submitOCRAttempt(
+                            worker: worker,
+                            completionCoordinator: completionCoordinator,
+                            attemptsRemaining: attemptsRemaining - 1,
+                            captureOrdinal: captureOrdinal,
+                            tsUs: tsUs,
+                            context: context,
+                            input: input,
+                            evidenceCandidate: evidenceCandidate,
+                            cascade: cascade,
+                            sink: sink,
+                            sequence: sequence,
+                            counters: counters,
+                            keyframeRetainer: keyframeRetainer,
+                            disposition: disposition
+                        )
+                        return
+                    }
+                    await Self.handleOCRResult(
                         tsUs: tsUs,
                         context: context,
                         result: result,
-                        cascade: cascadeSnapshot,
-                        sink: sinkSnapshot,
-                        sequence: sequenceSnapshot,
-                        counters: countersSnapshot,
-                        pixelBuffer: inputSnapshot.pixelBuffer,
-                        keyframeRetainer: keyframeRetainerSnapshot,
+                        cascade: cascade,
+                        sink: sink,
+                        sequence: sequence,
+                        counters: counters,
+                        pixelBuffer: input.pixelBuffer,
+                        keyframeRetainer: keyframeRetainer,
                         evidenceCandidate: evidenceCandidate
                     )
                     disposition(resultDisposition)
                 },
                 onDrop: {
-                    disposition(.retryableNoContent)
+                    Self.scheduleRetryOrFinish(
+                        worker: worker,
+                        completionCoordinator: completionCoordinator,
+                        attemptsRemaining: attemptsRemaining,
+                        captureOrdinal: captureOrdinal,
+                        tsUs: tsUs,
+                        context: context,
+                        input: input,
+                        evidenceCandidate: evidenceCandidate,
+                        cascade: cascade,
+                        sink: sink,
+                        sequence: sequence,
+                        counters: counters,
+                        keyframeRetainer: keyframeRetainer,
+                        disposition: disposition
+                    )
                 }
             )
         }
+    }
+
+    private static func scheduleRetryOrFinish(
+        worker: VisionOCRWorker,
+        completionCoordinator: OrderedCaptureDispatcher,
+        attemptsRemaining: Int,
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        cascade: SuppressionCascade,
+        sink: any FrameSink,
+        sequence: FrameSequence,
+        counters: HelperHealthCounters,
+        keyframeRetainer: (any KeyframeRetaining)?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) {
+        guard attemptsRemaining > 0 else {
+            disposition(.retryableNoContent)
+            return
+        }
+        completionCoordinator.submit(
+            captureOrdinal: captureOrdinal,
+            operation: {
+                OCRTrace.emit(
+                    "ocr-post-allow-retry",
+                    "reason=queue_drop attempts_remaining=\(attemptsRemaining - 1)"
+                )
+                await Self.submitOCRAttempt(
+                    worker: worker,
+                    completionCoordinator: completionCoordinator,
+                    attemptsRemaining: attemptsRemaining - 1,
+                    captureOrdinal: captureOrdinal,
+                    tsUs: tsUs,
+                    context: context,
+                    input: input,
+                    evidenceCandidate: evidenceCandidate,
+                    cascade: cascade,
+                    sink: sink,
+                    sequence: sequence,
+                    counters: counters,
+                    keyframeRetainer: keyframeRetainer,
+                    disposition: disposition
+                )
+            },
+            onDrop: {
+                disposition(.retryableNoContent)
+            }
+        )
     }
 
     private static func disposition(for result: OCRResult) -> OCRPostAllowDisposition {
@@ -466,8 +608,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         else {
             OCRTrace.emit(
                 "ocr-post-allow-result",
-                "bundle=\(context.appBundleId ?? "nil") "
-                    + "decision=no_content "
+                "decision=no_content "
                     + "ocr_len=\(text.utf8.count) "
                     + "ocr_lines=\(result.recognizedLines.count)"
             )
@@ -475,16 +616,15 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         }
         let decision = cascade.decideOcr(text: text, context: context)
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 trace at the post-allow
-        // OCR completion. Logs bundle id + cascade-twice §6 decision
-        // + OCR text LENGTH (the spec explicitly permits the length
+        // OCR completion. Logs cascade-twice §6 decision + OCR text LENGTH
+        // (the spec explicitly permits the length
         // count as a non-content signal; recognized lines counted as
         // a coarse signal of how much text the OCR produced — useful
         // for diagnosing "OCR ran but produced nothing" silences
         // without leaking the actual content). NEVER the text itself.
         OCRTrace.emit(
             "ocr-post-allow-result",
-            "bundle=\(context.appBundleId ?? "nil") "
-                + "decision=\(decision.traceLabel) "
+            "decision=\(decision.traceLabel) "
                 + "ocr_len=\(text.utf8.count) "
                 + "ocr_lines=\(result.recognizedLines.count)"
         )

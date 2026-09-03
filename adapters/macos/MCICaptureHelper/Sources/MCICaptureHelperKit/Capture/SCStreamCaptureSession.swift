@@ -236,9 +236,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private var runtimeFailure: CaptureRuntimeFailure?
 
     /// Streams this session deliberately stopped for shutdown or a privacy
-    /// pause. Keep a strong list until each delegate callback arrives so an
-    /// expected stop cannot be mistaken for a runtime failure; strong
-    /// retention also prevents `ObjectIdentifier` reuse.
+    /// pause. Keep a strong list until stop completion or a racing delegate
+    /// callback consumes the identity, so an expected stop cannot be mistaken
+    /// for a runtime failure and `ObjectIdentifier` cannot be reused early.
     private var expectedTerminatedStreams: [SCStream] = []
 
     /// ADR-0031 §5.3 — the focus generation the currently-installed
@@ -485,6 +485,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         for stream in streams {
             do {
                 try await stream.stopCapture()
+                forgetExpectedTermination(stream)
             } catch {
                 if firstStopError == nil { firstStopError = error }
             }
@@ -655,10 +656,18 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private func stopExpectedStream(_ stream: SCStream) async -> Bool {
         do {
             try await stream.stopCapture()
+            forgetExpectedTermination(stream)
             return true
         } catch {
             reportTerminalCaptureFailure()
             return false
+        }
+    }
+
+    private func forgetExpectedTermination(_ stream: SCStream) {
+        lock.lock(); defer { lock.unlock() }
+        if let index = expectedTerminatedStreams.firstIndex(where: { $0 === stream }) {
+            expectedTerminatedStreams.remove(at: index)
         }
     }
 
