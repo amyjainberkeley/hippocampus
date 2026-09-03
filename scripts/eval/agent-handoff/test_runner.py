@@ -3,6 +3,7 @@
 import json
 import importlib.util
 import datetime
+import hashlib
 import pathlib
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from types import ModuleType
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 CORPUS_PATH = REPO_ROOT / "eval/agent-handoff/agent-handoff-v1.json"
 RUNNER_PATH = REPO_ROOT / "scripts/eval/agent-handoff/runner.py"
+RESULT_PATH = REPO_ROOT / "docs/eval/agent-handoff-v1-result.json"
+RESULT_SHA_PATH = REPO_ROOT / "docs/eval/agent-handoff-v1-result.sha256"
 
 
 def load_runner() -> ModuleType:
@@ -180,6 +183,23 @@ class CorpusContractTests(unittest.TestCase):
             self.assertEqual(case["answer_session_ids"], [])
             self.assertEqual(case["handoff_expectation"]["required_facts"], [])
             self.assertTrue(case["handoff_expectation"]["expect_abstention"])
+
+    def test_accepted_result_is_complete_pinned_and_never_answer_qualified(self) -> None:
+        self.assertTrue(RESULT_PATH.is_file())
+        self.assertTrue(RESULT_SHA_PATH.is_file())
+        expected_digest = RESULT_SHA_PATH.read_text(encoding="utf-8").strip()
+        actual_digest = hashlib.sha256(RESULT_PATH.read_bytes()).hexdigest()
+        self.assertEqual(actual_digest, expected_digest)
+
+        result = json.loads(RESULT_PATH.read_text(encoding="utf-8"))
+        self.assertTrue(result["complete"])
+        self.assertTrue(result["publishable"])
+        self.assertFalse(result["trusted_answer_qualified"])
+        self.assertFalse(result["retrieval_and_handoff_qualified"])
+        self.assertEqual(result["task_count"], 36)
+        self.assertEqual(len(result["results"]), 72)
+        self.assertEqual([arm["arm"] for arm in result["arms"]], ["hybrid", "lexical"])
+        self.assertFalse(result["run"]["benchmark_scope_dirty_at_start"])
 
 
 class ScoringContractTests(unittest.TestCase):

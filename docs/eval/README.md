@@ -21,6 +21,8 @@ the eval story. Paired with `../../scripts/eval/` (the runners) and
   semantic relevance, temporal updates, contradictions, duplicate OCR,
   provenance, abstention, and bounded agent handoff without claiming answer
   generation.
+- `agent-handoff-v1-result.json` — the accepted 72-row lexical/hybrid result,
+  with exact per-case evidence and a pinned SHA-256 sidecar.
 
 ## Related
 

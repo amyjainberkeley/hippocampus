@@ -1,0 +1,4015 @@
+{
+  "schema_version": 1,
+  "dataset": "eval/agent-handoff/agent-handoff-v1.json",
+  "dataset_id": "synthetic-agent-handoff-v1",
+  "task_count": 36,
+  "surface": "LiveBrainReader::recall + LiveBrainReader::context (mci_context backend)",
+  "measurement_boundary": "retrieval_and_context_handoff_not_answer_generation",
+  "trusted_answer_qualified": false,
+  "retrieval_and_handoff_qualified": false,
+  "complete": true,
+  "publishable": true,
+  "run": {
+    "captured_at_utc": "2026-09-03T00:52:24Z",
+    "git_commit": "9b8300f2e511ee7adf4e17a80eec1850a56e22a3",
+    "branch": "codex/hippocampus-v1",
+    "repository_dirty_at_start": true,
+    "benchmark_scope_dirty_at_start": false,
+    "command": "scripts/eval/agent-handoff/run.sh --arm both",
+    "dataset": "eval/agent-handoff/agent-handoff-v1.json",
+    "dataset_checksum_sha256": "78b2d44c80653c98ef01f00f82748d1e6f9b0715daaaae9589ec3899b29c9ea2",
+    "python_version": "3.14.2",
+    "os": "macOS-26.5-arm64-arm-64bit-Mach-O",
+    "architecture": "arm64",
+    "model_path": "installed-model://ArcticEmbedS_INT8.mlmodelc",
+    "model_checksum_sha256": "f782f7f4a13c69a4399345f1d6a4b8de8f4327c131e537a1ea6bf9fdeaeaeef8"
+  },
+  "quality_targets": {
+    "semantic_relevance_at_3_min": 0.9,
+    "temporal_current_accuracy_min": 0.9,
+    "superseded_exclusion_rate_min": 0.9,
+    "contradiction_visibility_min": 0.8,
+    "duplicate_ocr_suppression_min": 0.8,
+    "exact_provenance_validity_min": 1.0,
+    "abstention_accuracy_min": 0.8,
+    "handoff_task_success_min": 0.75,
+    "bounded_packet_rate_min": 1.0
+  },
+  "arms": [
+    {
+      "arm": "hybrid",
+      "tasks": 36,
+      "answerable_tasks": 31,
+      "unanswerable_tasks": 5,
+      "metrics": {
+        "hit_rate_at": {
+          "1": 0.9354838709677419,
+          "3": 0.9354838709677419,
+          "5": 0.9354838709677419
+        },
+        "recall_at": {
+          "1": 0.6612903225806451,
+          "3": 0.9354838709677419,
+          "5": 0.9354838709677419
+        },
+        "mrr": 0.9354838709677419,
+        "semantic_relevance_at_3": 1.0,
+        "temporal_current_accuracy": 0.6666666666666666,
+        "superseded_exclusion_rate": 0.0,
+        "contradiction_visibility": 1.0,
+        "duplicate_ocr_suppression": 0.0,
+        "exact_provenance_validity": 1.0,
+        "abstention_accuracy": 1.0,
+        "handoff_task_success": 1.0,
+        "handoff_fact_coverage": 0.9545454545454546,
+        "bounded_packet_rate": 1.0,
+        "capability_pass_rate": 0.6944444444444444
+      },
+      "quality_gate": {
+        "passed": false,
+        "failures": [
+          "temporal_current_accuracy 0.6667 is below 0.9000",
+          "superseded_exclusion_rate 0.0000 is below 0.9000",
+          "duplicate_ocr_suppression 0.0000 is below 0.8000"
+        ]
+      }
+    },
+    {
+      "arm": "lexical",
+      "tasks": 36,
+      "answerable_tasks": 31,
+      "unanswerable_tasks": 5,
+      "metrics": {
+        "hit_rate_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0
+        },
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0
+        },
+        "mrr": 0.0,
+        "semantic_relevance_at_3": 0.0,
+        "temporal_current_accuracy": 0.0,
+        "superseded_exclusion_rate": 0.0,
+        "contradiction_visibility": 0.0,
+        "duplicate_ocr_suppression": 0.0,
+        "exact_provenance_validity": 0.0,
+        "abstention_accuracy": 0.0,
+        "handoff_task_success": 0.0,
+        "handoff_fact_coverage": 0.0,
+        "bounded_packet_rate": 1.0,
+        "capability_pass_rate": 0.0
+      },
+      "quality_gate": {
+        "passed": false,
+        "failures": [
+          "semantic_relevance_at_3 0.0000 is below 0.9000",
+          "temporal_current_accuracy 0.0000 is below 0.9000",
+          "superseded_exclusion_rate 0.0000 is below 0.9000",
+          "contradiction_visibility 0.0000 is below 0.8000",
+          "duplicate_ocr_suppression 0.0000 is below 0.8000",
+          "exact_provenance_validity 0.0000 is below 1.0000",
+          "abstention_accuracy 0.0000 is below 0.8000",
+          "handoff_task_success 0.0000 is below 0.7500"
+        ]
+      }
+    }
+  ],
+  "failures": [],
+  "results": [
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "semantic-embeddings-advisory",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "browser://adr/0010"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "semantic-release-upload-blocker",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://HIP-311"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "semantic-global-recall-hotkey",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "github://hippocampus/pull/517"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "semantic-bounded-agent-context",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///docs/agent-context.md"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "semantic-missing-embedder",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "terminal://zsh/embedder-health"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "semantic-pre-pixel-privacy",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///docs/privacy/focus-gate.md"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "temporal-owner",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://HIP-204/current"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "temporal-model-path",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///current-model-path"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "temporal-launch-date",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://ATLAS-90/current"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "temporal-benchmark-count",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///benchmark-count-current"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "temporal-signing-team",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///signing-team-current"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "temporal-capture-state",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "github://capture/current"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "contradiction-retention",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/0/left",
+        "github://conflict/0/right"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": false,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 2,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "contradiction-cloud",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/1/left",
+        "github://conflict/1/right"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": false,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 2,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "contradiction-pr-state",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/2/left",
+        "github://conflict/2/right"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": false,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 2,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "contradiction-customer-date",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/3/left",
+        "github://conflict/3/right"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": false,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 2,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "contradiction-password-manager",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/4/left",
+        "github://conflict/4/right"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": false,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 2,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "duplicate-build-status",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/0/1",
+        "screen://duplicate/0/2",
+        "screen://duplicate/0/3"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "duplicate-test-status",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/1/1",
+        "screen://duplicate/1/2",
+        "screen://duplicate/1/3"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "duplicate-owner-status",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/2/1",
+        "screen://duplicate/2/2",
+        "screen://duplicate/2/3"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "duplicate-deploy-status",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/3/1",
+        "screen://duplicate/3/2",
+        "screen://duplicate/3/3"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "duplicate-sync-status",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/4/1",
+        "screen://duplicate/4/2",
+        "screen://duplicate/4/3"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "provenance-pr",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "github://hippocampus/pull/531"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "provenance-linear",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://HIP-311/comment-7"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "provenance-browser",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "https://hippocampus.local/privacy"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "provenance-terminal",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "terminal://zsh/agent-handoff-run"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "provenance-file",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///docs/eval/agent-handoff-v1.md"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-approver",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-due-date",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-duration",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-count",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-owner",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "handoff-release-brief",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "handoff_utility",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://release/blocker",
+        "github://release/hotkey",
+        "file:///release/checklist"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 3,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "handoff-memory-quality",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "handoff_utility",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///memory/retrieval",
+        "linear://memory/verifier",
+        "github://memory/provenance"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 3,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "handoff-privacy-review",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "handoff_utility",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///privacy/cascade",
+        "github://privacy/generation",
+        "linear://privacy/permission"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 3,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "lexical",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "embeddings_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "handoff-agent-integration",
+      "ranked_session_ids": [],
+      "recall_disposition": "degraded",
+      "recall_reason": "embeddings_unavailable",
+      "capability": "handoff_utility",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///agents/key-boundary",
+        "github://agents/mcp",
+        "terminal://agents/status"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 3,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 778,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://distractor/semantic-0",
+            "ts_us": 1788253200000000,
+            "url": "slack://distractor/semantic-0",
+            "window_title": "Unrelated planning thread 1"
+          },
+          {
+            "app_bundle_id": "com.apple.Safari",
+            "event_id": 2,
+            "session_id": "browser://adr/0010",
+            "ts_us": 1788346800000000,
+            "url": "browser://adr/0010",
+            "window_title": "Agent memory decision 1"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 3,
+            "session_id": "linear://distractor/semantic-0",
+            "ts_us": 1788354000000000,
+            "url": "linear://distractor/semantic-0",
+            "window_title": "UI polish issue 1"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.linear: UI polish issue 1\nObserved com.apple.Safari: Agent memory decision 1\nObserved com.tinyspeck.slackmacgap: Unrelated planning thread 1\nEvent 3: [app=com.linear | title=UI polish issue 1 | url=linear://distractor/semantic-0 | ts=2026-09-02T13:00:00.000Z]\nThe settings sidebar needs an alignment pass before screenshots are refreshed.\nEvent 2: [app=com.apple.Safari | title=Agent memory decision 1 | url=browser://adr/0010 | ts=2026-09-02T11:00:00.000Z]\nEmbedding scores are retrieval hints only; a source-backed verifier must establish support.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Unrelated planning thread 1 | url=slack://distractor/semantic-0 | ts=2026-09-01T09:00:00.000Z]\nThe design review moved to Friday and the notes need a final formatting pass.",
+        "token_estimate": 91,
+        "truncated": false
+      },
+      "question_id": "semantic-embeddings-advisory",
+      "ranked_session_ids": [
+        "browser://adr/0010",
+        "slack://distractor/semantic-0",
+        "linear://distractor/semantic-0"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "browser://adr/0010"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 789,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://distractor/semantic-1",
+            "ts_us": 1788253200000000,
+            "url": "slack://distractor/semantic-1",
+            "window_title": "Unrelated planning thread 2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "linear://HIP-311",
+            "ts_us": 1788346800000000,
+            "url": "linear://HIP-311",
+            "window_title": "Agent memory decision 2"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 3,
+            "session_id": "linear://distractor/semantic-1",
+            "ts_us": 1788354000000000,
+            "url": "linear://distractor/semantic-1",
+            "window_title": "UI polish issue 2"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.linear: UI polish issue 2\nObserved com.microsoft.VSCode: Agent memory decision 2\nObserved com.tinyspeck.slackmacgap: Unrelated planning thread 2\nEvent 3: [app=com.linear | title=UI polish issue 2 | url=linear://distractor/semantic-1 | ts=2026-09-02T13:00:00.000Z]\nThe settings sidebar needs an alignment pass before screenshots are refreshed.\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 2 | url=linear://HIP-311 | ts=2026-09-02T11:00:00.000Z]\nHIP-311 is blocked because the release machine has no Developer ID Application signing identity.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Unrelated planning thread 2 | url=slack://distractor/semantic-1 | ts=2026-09-01T09:00:00.000Z]\nThe design review moved to Friday and the notes need a final formatting pass.",
+        "token_estimate": 93,
+        "truncated": false
+      },
+      "question_id": "semantic-release-upload-blocker",
+      "ranked_session_ids": [
+        "linear://HIP-311",
+        "linear://distractor/semantic-1",
+        "slack://distractor/semantic-1"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://HIP-311"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 796,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://distractor/semantic-2",
+            "ts_us": 1788253200000000,
+            "url": "slack://distractor/semantic-2",
+            "window_title": "Unrelated planning thread 3"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "github://hippocampus/pull/517",
+            "ts_us": 1788346800000000,
+            "url": "github://hippocampus/pull/517",
+            "window_title": "Agent memory decision 3"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 3,
+            "session_id": "linear://distractor/semantic-2",
+            "ts_us": 1788354000000000,
+            "url": "linear://distractor/semantic-2",
+            "window_title": "UI polish issue 3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.linear: UI polish issue 3\nObserved com.microsoft.VSCode: Agent memory decision 3\nObserved com.tinyspeck.slackmacgap: Unrelated planning thread 3\nEvent 3: [app=com.linear | title=UI polish issue 3 | url=linear://distractor/semantic-2 | ts=2026-09-02T13:00:00.000Z]\nThe settings sidebar needs an alignment pass before screenshots are refreshed.\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 3 | url=github://hippocampus/pull/517 | ts=2026-09-02T11:00:00.000Z]\nPR 517 moved the global Shift Command Space hotkey into the always-running menu-bar shell.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Unrelated planning thread 3 | url=slack://distractor/semantic-2 | ts=2026-09-01T09:00:00.000Z]\nThe design review moved to Friday and the notes need a final formatting pass.",
+        "token_estimate": 93,
+        "truncated": false
+      },
+      "question_id": "semantic-global-recall-hotkey",
+      "ranked_session_ids": [
+        "github://hippocampus/pull/517",
+        "slack://distractor/semantic-2",
+        "linear://distractor/semantic-2"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "github://hippocampus/pull/517"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 811,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://distractor/semantic-3",
+            "ts_us": 1788253200000000,
+            "url": "slack://distractor/semantic-3",
+            "window_title": "Unrelated planning thread 4"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "file:///docs/agent-context.md",
+            "ts_us": 1788346800000000,
+            "url": "file:///docs/agent-context.md",
+            "window_title": "Agent memory decision 4"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 3,
+            "session_id": "linear://distractor/semantic-3",
+            "ts_us": 1788354000000000,
+            "url": "linear://distractor/semantic-3",
+            "window_title": "UI polish issue 4"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.linear: UI polish issue 4\nObserved com.microsoft.VSCode: Agent memory decision 4\nObserved com.tinyspeck.slackmacgap: Unrelated planning thread 4\nEvent 3: [app=com.linear | title=UI polish issue 4 | url=linear://distractor/semantic-3 | ts=2026-09-02T13:00:00.000Z]\nThe settings sidebar needs an alignment pass before screenshots are refreshed.\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 4 | url=file:///docs/agent-context.md | ts=2026-09-02T11:00:00.000Z]\nThe mci_context handoff compiles a bounded cited packet for the current focus instead of dumping history.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Unrelated planning thread 4 | url=slack://distractor/semantic-3 | ts=2026-09-01T09:00:00.000Z]\nThe design review moved to Friday and the notes need a final formatting pass.",
+        "token_estimate": 95,
+        "truncated": false
+      },
+      "question_id": "semantic-bounded-agent-context",
+      "ranked_session_ids": [
+        "file:///docs/agent-context.md",
+        "slack://distractor/semantic-3",
+        "linear://distractor/semantic-3"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///docs/agent-context.md"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 829,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://distractor/semantic-4",
+            "ts_us": 1788253200000000,
+            "url": "slack://distractor/semantic-4",
+            "window_title": "Unrelated planning thread 5"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "terminal://zsh/embedder-health",
+            "ts_us": 1788346800000000,
+            "url": "terminal://zsh/embedder-health",
+            "window_title": "Agent memory decision 5"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 3,
+            "session_id": "linear://distractor/semantic-4",
+            "ts_us": 1788354000000000,
+            "url": "linear://distractor/semantic-4",
+            "window_title": "UI polish issue 5"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.linear: UI polish issue 5\nObserved com.microsoft.VSCode: Agent memory decision 5\nObserved com.tinyspeck.slackmacgap: Unrelated planning thread 5\nEvent 3: [app=com.linear | title=UI polish issue 5 | url=linear://distractor/semantic-4 | ts=2026-09-02T13:00:00.000Z]\nThe settings sidebar needs an alignment pass before screenshots are refreshed.\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 5 | url=terminal://zsh/embedder-health | ts=2026-09-02T11:00:00.000Z]\nWhen Arctic Embed S is unavailable, recall reports embeddings_unavailable and exposes lexical related context as degraded.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Unrelated planning thread 5 | url=slack://distractor/semantic-4 | ts=2026-09-01T09:00:00.000Z]\nThe design review moved to Friday and the notes need a final formatting pass.",
+        "token_estimate": 95,
+        "truncated": false
+      },
+      "question_id": "semantic-missing-embedder",
+      "ranked_session_ids": [
+        "terminal://zsh/embedder-health",
+        "linear://distractor/semantic-4",
+        "slack://distractor/semantic-4"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "terminal://zsh/embedder-health"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 822,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://distractor/semantic-5",
+            "ts_us": 1788253200000000,
+            "url": "slack://distractor/semantic-5",
+            "window_title": "Unrelated planning thread 6"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "file:///docs/privacy/focus-gate.md",
+            "ts_us": 1788346800000000,
+            "url": "file:///docs/privacy/focus-gate.md",
+            "window_title": "Agent memory decision 6"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 3,
+            "session_id": "linear://distractor/semantic-5",
+            "ts_us": 1788354000000000,
+            "url": "linear://distractor/semantic-5",
+            "window_title": "UI polish issue 6"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.linear: UI polish issue 6\nObserved com.microsoft.VSCode: Agent memory decision 6\nObserved com.tinyspeck.slackmacgap: Unrelated planning thread 6\nEvent 3: [app=com.linear | title=UI polish issue 6 | url=linear://distractor/semantic-5 | ts=2026-09-02T13:00:00.000Z]\nThe settings sidebar needs an alignment pass before screenshots are refreshed.\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 6 | url=file:///docs/privacy/focus-gate.md | ts=2026-09-02T11:00:00.000Z]\nThe focus-generation gate binds each frame to the current Accessibility window snapshot before pixel admission.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Unrelated planning thread 6 | url=slack://distractor/semantic-5 | ts=2026-09-01T09:00:00.000Z]\nThe design review moved to Friday and the notes need a final formatting pass.",
+        "token_estimate": 94,
+        "truncated": false
+      },
+      "question_id": "semantic-pre-pixel-privacy",
+      "ranked_session_ids": [
+        "file:///docs/privacy/focus-gate.md",
+        "linear://distractor/semantic-5",
+        "slack://distractor/semantic-5"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "semantic_relevance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///docs/privacy/focus-gate.md"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "temporal-owner",
+      "ranked_session_ids": [],
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://HIP-204/current"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": true,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 718,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///old-model-path",
+            "ts_us": 1788253200000000,
+            "url": "file:///old-model-path",
+            "window_title": "Previous state 2"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "file:///current-model-path",
+            "ts_us": 1788357600000000,
+            "url": "file:///current-model-path",
+            "window_title": "Current state 2"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "terminal://distractor/temporal-1",
+            "ts_us": 1788361200000000,
+            "url": "",
+            "window_title": "Unrelated test run 2"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Unrelated test run 2\nObserved com.linear: Current state 2\nObserved com.microsoft.VSCode: Previous state 2\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 2 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 2 | url=file:///current-model-path | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc. This supersedes the previous plan.\nEvent 1: [app=com.microsoft.VSCode | title=Previous state 2 | url=file:///old-model-path | ts=2026-09-01T09:00:00.000Z]\nPrevious plan: ~/Models/ArcticEmbedS_INT8.mlmodelc.",
+        "token_estimate": 70,
+        "truncated": false
+      },
+      "question_id": "temporal-model-path",
+      "ranked_session_ids": [
+        "file:///current-model-path",
+        "file:///old-model-path",
+        "terminal://distractor/temporal-1"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///current-model-path"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "temporal-launch-date",
+      "ranked_session_ids": [],
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://ATLAS-90/current"
+      ],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "required_sources_present": false,
+      "current_source_present": false,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 1,
+      "facts_complete": false,
+      "provenance_exact": false,
+      "abstained": true,
+      "packet_bounded": true,
+      "handoff_complete": false,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 627,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///benchmark-count-old",
+            "ts_us": 1788253200000000,
+            "url": "file:///benchmark-count-old",
+            "window_title": "Previous state 4"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "file:///benchmark-count-current",
+            "ts_us": 1788357600000000,
+            "url": "file:///benchmark-count-current",
+            "window_title": "Current state 4"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "terminal://distractor/temporal-3",
+            "ts_us": 1788361200000000,
+            "url": "",
+            "window_title": "Unrelated test run 4"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Unrelated test run 4\nObserved com.linear: Current state 4\nObserved com.microsoft.VSCode: Previous state 4\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 4 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 4 | url=file:///benchmark-count-current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: 36 tasks. This supersedes the previous plan.\nEvent 1: [app=com.microsoft.VSCode | title=Previous state 4 | url=file:///benchmark-count-old | ts=2026-09-01T09:00:00.000Z]\nPrevious plan: 24 tasks.",
+        "token_estimate": 72,
+        "truncated": false
+      },
+      "question_id": "temporal-benchmark-count",
+      "ranked_session_ids": [
+        "file:///benchmark-count-current",
+        "file:///benchmark-count-old",
+        "terminal://distractor/temporal-3"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///benchmark-count-current"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 623,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///signing-team-old",
+            "ts_us": 1788253200000000,
+            "url": "file:///signing-team-old",
+            "window_title": "Previous state 5"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "file:///signing-team-current",
+            "ts_us": 1788357600000000,
+            "url": "file:///signing-team-current",
+            "window_title": "Current state 5"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "terminal://distractor/temporal-4",
+            "ts_us": 1788361200000000,
+            "url": "",
+            "window_title": "Unrelated test run 5"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Unrelated test run 5\nObserved com.linear: Current state 5\nObserved com.microsoft.VSCode: Previous state 5\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 5 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 5 | url=file:///signing-team-current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: NEWTEAM73. This supersedes the previous plan.\nEvent 1: [app=com.microsoft.VSCode | title=Previous state 5 | url=file:///signing-team-old | ts=2026-09-01T09:00:00.000Z]\nPrevious plan: OLDTEAM42.",
+        "token_estimate": 70,
+        "truncated": false
+      },
+      "question_id": "temporal-signing-team",
+      "ranked_session_ids": [
+        "file:///signing-team-current",
+        "file:///signing-team-old",
+        "terminal://distractor/temporal-4"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///signing-team-current"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 679,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "github://capture/old",
+            "ts_us": 1788253200000000,
+            "url": "github://capture/old",
+            "window_title": "Previous state 6"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "github://capture/current",
+            "ts_us": 1788357600000000,
+            "url": "github://capture/current",
+            "window_title": "Current state 6"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "terminal://distractor/temporal-5",
+            "ts_us": 1788361200000000,
+            "url": "",
+            "window_title": "Unrelated test run 6"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Unrelated test run 6\nObserved com.linear: Current state 6\nObserved com.microsoft.VSCode: Previous state 6\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 6 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 6 | url=github://capture/current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: capture is enabled and the verified helper topology starts. This supersedes the previous plan.\nEvent 1: [app=com.microsoft.VSCode | title=Previous state 6 | url=github://capture/old | ts=2026-09-01T09:00:00.000Z]\nPrevious plan: capture remains disabled.",
+        "token_estimate": 80,
+        "truncated": false
+      },
+      "question_id": "temporal-capture-state",
+      "ranked_session_ids": [
+        "github://capture/current",
+        "github://capture/old",
+        "terminal://distractor/temporal-5"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "temporal_supersession",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "github://capture/current"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": false,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 639,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/0/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/0/left",
+            "window_title": "Conflict note 1 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/0/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/0/right",
+            "window_title": "Conflict note 1 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/0/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 1"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 1 B\nObserved com.tinyspeck.slackmacgap: Conflict note 1 A\nObserved com.apple.TextEdit: Background 1\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 1 B | url=github://conflict/0/right | ts=2026-09-02T10:05:00.000Z]\nscreenshots are retained for 90 days.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 1 A | url=slack://conflict/0/left | ts=2026-09-02T10:00:00.000Z]\nscreenshots are retained for 30 days.\nEvent 3: [app=com.apple.TextEdit | title=Background 1 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 72,
+        "truncated": false
+      },
+      "question_id": "contradiction-retention",
+      "ranked_session_ids": [
+        "slack://conflict/0/left",
+        "github://conflict/0/right",
+        "file:///conflict/0/background"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/0/left",
+        "github://conflict/0/right"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 2,
+      "facts_required": 2,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 644,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/1/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/1/left",
+            "window_title": "Conflict note 2 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/1/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/1/right",
+            "window_title": "Conflict note 2 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/1/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 2"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 2 B\nObserved com.tinyspeck.slackmacgap: Conflict note 2 A\nObserved com.apple.TextEdit: Background 2\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 2 B | url=github://conflict/1/right | ts=2026-09-02T10:05:00.000Z]\nraw captures are uploaded for remote indexing.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 2 A | url=slack://conflict/1/left | ts=2026-09-02T10:00:00.000Z]\nraw captures never leave the Mac.\nEvent 3: [app=com.apple.TextEdit | title=Background 2 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 73,
+        "truncated": false
+      },
+      "question_id": "contradiction-cloud",
+      "ranked_session_ids": [
+        "github://conflict/1/right",
+        "file:///conflict/1/background",
+        "slack://conflict/1/left"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/1/left",
+        "github://conflict/1/right"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 2,
+      "facts_required": 2,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 610,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/2/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/2/left",
+            "window_title": "Conflict note 3 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/2/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/2/right",
+            "window_title": "Conflict note 3 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/2/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 3 B\nObserved com.tinyspeck.slackmacgap: Conflict note 3 A\nObserved com.apple.TextEdit: Background 3\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 3 B | url=github://conflict/2/right | ts=2026-09-02T10:05:00.000Z]\nPR 522 is blocked on review.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 3 A | url=slack://conflict/2/left | ts=2026-09-02T10:00:00.000Z]\nPR 522 is merged.\nEvent 3: [app=com.apple.TextEdit | title=Background 3 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 70,
+        "truncated": false
+      },
+      "question_id": "contradiction-pr-state",
+      "ranked_session_ids": [
+        "github://conflict/2/right",
+        "slack://conflict/2/left",
+        "file:///conflict/2/background"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/2/left",
+        "github://conflict/2/right"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 2,
+      "facts_required": 2,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 608,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/3/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/3/left",
+            "window_title": "Conflict note 4 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/3/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/3/right",
+            "window_title": "Conflict note 4 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/3/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 4"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 4 B\nObserved com.tinyspeck.slackmacgap: Conflict note 4 A\nObserved com.apple.TextEdit: Background 4\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 4 B | url=github://conflict/3/right | ts=2026-09-02T10:05:00.000Z]\nSSO ships in Q4.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 4 A | url=slack://conflict/3/left | ts=2026-09-02T10:00:00.000Z]\nSSO ships by the end of Q3.\nEvent 3: [app=com.apple.TextEdit | title=Background 4 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 71,
+        "truncated": false
+      },
+      "question_id": "contradiction-customer-date",
+      "ranked_session_ids": [
+        "slack://conflict/3/left",
+        "github://conflict/3/right",
+        "file:///conflict/3/background"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/3/left",
+        "github://conflict/3/right"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 2,
+      "facts_required": 2,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 663,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/4/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/4/left",
+            "window_title": "Conflict note 5 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/4/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/4/right",
+            "window_title": "Conflict note 5 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/4/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 5"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 5 B\nObserved com.tinyspeck.slackmacgap: Conflict note 5 A\nObserved com.apple.TextEdit: Background 5\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 5 B | url=github://conflict/4/right | ts=2026-09-02T10:05:00.000Z]\npassword-manager windows may be captured when focused.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 5 A | url=slack://conflict/4/left | ts=2026-09-02T10:00:00.000Z]\npassword-manager windows are always blocked.\nEvent 3: [app=com.apple.TextEdit | title=Background 5 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 72,
+        "truncated": false
+      },
+      "question_id": "contradiction-password-manager",
+      "ranked_session_ids": [
+        "github://conflict/4/right",
+        "slack://conflict/4/left",
+        "file:///conflict/4/background"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "contradiction",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "slack://conflict/4/left",
+        "github://conflict/4/right"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 2,
+      "facts_required": 2,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 769,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 1,
+            "session_id": "screen://duplicate/0/1",
+            "ts_us": 1788350460000000,
+            "url": "screen://duplicate/0",
+            "window_title": "Repeated status 1"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 2,
+            "session_id": "screen://duplicate/0/2",
+            "ts_us": 1788350520000000,
+            "url": "screen://duplicate/0",
+            "window_title": "Repeated status 1"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/0/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/0",
+            "window_title": "Repeated status 1"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 4,
+            "session_id": "slack://duplicate/0/distractor",
+            "ts_us": 1788346800000000,
+            "url": "",
+            "window_title": "Unrelated status 1"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 1\nObserved com.tinyspeck.slackmacgap: Unrelated status 1\nEvent 3: [app=com.apple.Terminal | title=Repeated status 1 | url=screen://duplicate/0 | ts=2026-09-02T12:03:00.000Z]\nThe notarized release build completed successfully.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 1 | url=screen://duplicate/0 | ts=2026-09-02T12:02:00.000Z]\nThe notarized release build completed successfully.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 1 | url=screen://duplicate/0 | ts=2026-09-02T12:01:00.000Z]\nThe notarized release build completed successfully.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 1 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 81,
+        "truncated": false
+      },
+      "question_id": "duplicate-build-status",
+      "ranked_session_ids": [
+        "screen://duplicate/0/2",
+        "screen://duplicate/0/1",
+        "screen://duplicate/0/3",
+        "slack://duplicate/0/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/0/1",
+        "screen://duplicate/0/2",
+        "screen://duplicate/0/3"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 3,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 775,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 1,
+            "session_id": "screen://duplicate/1/1",
+            "ts_us": 1788350460000000,
+            "url": "screen://duplicate/1",
+            "window_title": "Repeated status 2"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 2,
+            "session_id": "screen://duplicate/1/2",
+            "ts_us": 1788350520000000,
+            "url": "screen://duplicate/1",
+            "window_title": "Repeated status 2"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/1/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/1",
+            "window_title": "Repeated status 2"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 4,
+            "session_id": "slack://duplicate/1/distractor",
+            "ts_us": 1788346800000000,
+            "url": "",
+            "window_title": "Unrelated status 2"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 2\nObserved com.tinyspeck.slackmacgap: Unrelated status 2\nEvent 3: [app=com.apple.Terminal | title=Repeated status 2 | url=screen://duplicate/1 | ts=2026-09-02T12:03:00.000Z]\nThe capture privacy test blocked the password window.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 2 | url=screen://duplicate/1 | ts=2026-09-02T12:02:00.000Z]\nThe capture privacy test blocked the password window.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 2 | url=screen://duplicate/1 | ts=2026-09-02T12:01:00.000Z]\nThe capture privacy test blocked the password window.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 2 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 87,
+        "truncated": false
+      },
+      "question_id": "duplicate-test-status",
+      "ranked_session_ids": [
+        "screen://duplicate/1/3",
+        "screen://duplicate/1/2",
+        "screen://duplicate/1/1",
+        "slack://duplicate/1/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/1/1",
+        "screen://duplicate/1/2",
+        "screen://duplicate/1/3"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 3,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 754,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 1,
+            "session_id": "screen://duplicate/2/1",
+            "ts_us": 1788350460000000,
+            "url": "screen://duplicate/2",
+            "window_title": "Repeated status 3"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 2,
+            "session_id": "screen://duplicate/2/2",
+            "ts_us": 1788350520000000,
+            "url": "screen://duplicate/2",
+            "window_title": "Repeated status 3"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/2/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/2",
+            "window_title": "Repeated status 3"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 4,
+            "session_id": "slack://duplicate/2/distractor",
+            "ts_us": 1788346800000000,
+            "url": "",
+            "window_title": "Unrelated status 3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 3\nObserved com.tinyspeck.slackmacgap: Unrelated status 3\nEvent 3: [app=com.apple.Terminal | title=Repeated status 3 | url=screen://duplicate/2 | ts=2026-09-02T12:03:00.000Z]\nPriya accepted the memory benchmark follow-up.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 3 | url=screen://duplicate/2 | ts=2026-09-02T12:02:00.000Z]\nPriya accepted the memory benchmark follow-up.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 3 | url=screen://duplicate/2 | ts=2026-09-02T12:01:00.000Z]\nPriya accepted the memory benchmark follow-up.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 3 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 81,
+        "truncated": false
+      },
+      "question_id": "duplicate-owner-status",
+      "ranked_session_ids": [
+        "screen://duplicate/2/2",
+        "screen://duplicate/2/3",
+        "screen://duplicate/2/1",
+        "slack://duplicate/2/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/2/1",
+        "screen://duplicate/2/2",
+        "screen://duplicate/2/3"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 3,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 748,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 1,
+            "session_id": "screen://duplicate/3/1",
+            "ts_us": 1788350460000000,
+            "url": "screen://duplicate/3",
+            "window_title": "Repeated status 4"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 2,
+            "session_id": "screen://duplicate/3/2",
+            "ts_us": 1788350520000000,
+            "url": "screen://duplicate/3",
+            "window_title": "Repeated status 4"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/3/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/3",
+            "window_title": "Repeated status 4"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 4,
+            "session_id": "slack://duplicate/3/distractor",
+            "ts_us": 1788346800000000,
+            "url": "",
+            "window_title": "Unrelated status 4"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 4\nObserved com.tinyspeck.slackmacgap: Unrelated status 4\nEvent 3: [app=com.apple.Terminal | title=Repeated status 4 | url=screen://duplicate/3 | ts=2026-09-02T12:03:00.000Z]\nThe documentation deploy reached production.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 4 | url=screen://duplicate/3 | ts=2026-09-02T12:02:00.000Z]\nThe documentation deploy reached production.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 4 | url=screen://duplicate/3 | ts=2026-09-02T12:01:00.000Z]\nThe documentation deploy reached production.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 4 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 78,
+        "truncated": false
+      },
+      "question_id": "duplicate-deploy-status",
+      "ranked_session_ids": [
+        "screen://duplicate/3/3",
+        "screen://duplicate/3/2",
+        "screen://duplicate/3/1",
+        "slack://duplicate/3/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/3/1",
+        "screen://duplicate/3/2",
+        "screen://duplicate/3/3"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 3,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 793,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 1,
+            "session_id": "screen://duplicate/4/1",
+            "ts_us": 1788350460000000,
+            "url": "screen://duplicate/4",
+            "window_title": "Repeated status 5"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 2,
+            "session_id": "screen://duplicate/4/2",
+            "ts_us": 1788350520000000,
+            "url": "screen://duplicate/4",
+            "window_title": "Repeated status 5"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/4/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/4",
+            "window_title": "Repeated status 5"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 4,
+            "session_id": "slack://duplicate/4/distractor",
+            "ts_us": 1788346800000000,
+            "url": "",
+            "window_title": "Unrelated status 5"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 5\nObserved com.tinyspeck.slackmacgap: Unrelated status 5\nEvent 3: [app=com.apple.Terminal | title=Repeated status 5 | url=screen://duplicate/4 | ts=2026-09-02T12:03:00.000Z]\nThe MCP synchronization imported twelve approved resources.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 5 | url=screen://duplicate/4 | ts=2026-09-02T12:02:00.000Z]\nThe MCP synchronization imported twelve approved resources.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 5 | url=screen://duplicate/4 | ts=2026-09-02T12:01:00.000Z]\nThe MCP synchronization imported twelve approved resources.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 5 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 84,
+        "truncated": false
+      },
+      "question_id": "duplicate-sync-status",
+      "ranked_session_ids": [
+        "screen://duplicate/4/1",
+        "screen://duplicate/4/2",
+        "screen://duplicate/4/3",
+        "slack://duplicate/4/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "duplicate_ocr",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "screen://duplicate/4/1",
+        "screen://duplicate/4/2",
+        "screen://duplicate/4/3"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 3,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": false
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 513,
+        "citations": [
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 1,
+            "session_id": "github://hippocampus/pull/531",
+            "ts_us": 1788341400000000,
+            "url": "github://hippocampus/pull/531",
+            "window_title": "PR 531 bounded agent handoff"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 2,
+            "session_id": "slack://provenance/0/distractor",
+            "ts_us": 1788341700000000,
+            "url": "",
+            "window_title": "Nearby source 1"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.tinyspeck.slackmacgap: Nearby source 1\nObserved com.github.GitHubClient: PR 531 bounded agent handoff\nEvent 2: [app=com.tinyspeck.slackmacgap | title=Nearby source 1 | url= | ts=2026-09-02T09:35:00.000Z]\nA nearby thread mentions the same project but does not contain the requested record.\nEvent 1: [app=com.github.GitHubClient | title=PR 531 bounded agent handoff | url=github://hippocampus/pull/531 | ts=2026-09-02T09:30:00.000Z]\nPR 531 says mci_context emits a bounded packet with canonical citations.",
+        "token_estimate": 61,
+        "truncated": false
+      },
+      "question_id": "provenance-pr",
+      "ranked_session_ids": [
+        "github://hippocampus/pull/531",
+        "slack://provenance/0/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "github://hippocampus/pull/531"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 469,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 1,
+            "session_id": "linear://HIP-311/comment-7",
+            "ts_us": 1788341400000000,
+            "url": "linear://HIP-311/comment-7",
+            "window_title": "HIP-311 signing blocker"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 2,
+            "session_id": "slack://provenance/1/distractor",
+            "ts_us": 1788341700000000,
+            "url": "",
+            "window_title": "Nearby source 2"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.tinyspeck.slackmacgap: Nearby source 2\nObserved com.linear: HIP-311 signing blocker\nEvent 2: [app=com.tinyspeck.slackmacgap | title=Nearby source 2 | url= | ts=2026-09-02T09:35:00.000Z]\nA nearby thread mentions the same project but does not contain the requested record.\nEvent 1: [app=com.linear | title=HIP-311 signing blocker | url=linear://HIP-311/comment-7 | ts=2026-09-02T09:30:00.000Z]\nHIP-311 comment 7 assigns the signing blocker to the release owner.",
+        "token_estimate": 57,
+        "truncated": false
+      },
+      "question_id": "provenance-linear",
+      "ranked_session_ids": [
+        "linear://HIP-311/comment-7",
+        "slack://provenance/1/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://HIP-311/comment-7"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 517,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Safari",
+            "event_id": 1,
+            "session_id": "https://hippocampus.local/privacy",
+            "ts_us": 1788341400000000,
+            "url": "https://hippocampus.local/privacy",
+            "window_title": "Hippocampus privacy architecture"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 2,
+            "session_id": "slack://provenance/2/distractor",
+            "ts_us": 1788341700000000,
+            "url": "",
+            "window_title": "Nearby source 3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.tinyspeck.slackmacgap: Nearby source 3\nObserved com.apple.Safari: Hippocampus privacy architecture\nEvent 2: [app=com.tinyspeck.slackmacgap | title=Nearby source 3 | url= | ts=2026-09-02T09:35:00.000Z]\nA nearby thread mentions the same project but does not contain the requested record.\nEvent 1: [app=com.apple.Safari | title=Hippocampus privacy architecture | url=https://hippocampus.local/privacy | ts=2026-09-02T09:30:00.000Z]\nThe privacy architecture says raw memory remains in the local encrypted brain.",
+        "token_estimate": 58,
+        "truncated": false
+      },
+      "question_id": "provenance-browser",
+      "ranked_session_ids": [
+        "https://hippocampus.local/privacy",
+        "slack://provenance/2/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "https://hippocampus.local/privacy"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 502,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 1,
+            "session_id": "terminal://zsh/agent-handoff-run",
+            "ts_us": 1788341400000000,
+            "url": "terminal://zsh/agent-handoff-run",
+            "window_title": "Terminal agent handoff benchmark"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 2,
+            "session_id": "slack://provenance/3/distractor",
+            "ts_us": 1788341700000000,
+            "url": "",
+            "window_title": "Nearby source 4"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.tinyspeck.slackmacgap: Nearby source 4\nObserved com.apple.Terminal: Terminal agent handoff benchmark\nEvent 2: [app=com.tinyspeck.slackmacgap | title=Nearby source 4 | url= | ts=2026-09-02T09:35:00.000Z]\nA nearby thread mentions the same project but does not contain the requested record.\nEvent 1: [app=com.apple.Terminal | title=Terminal agent handoff benchmark | url=terminal://zsh/agent-handoff-run | ts=2026-09-02T09:30:00.000Z]\nCommand: scripts/eval/agent-handoff/run.sh --out result.json",
+        "token_estimate": 52,
+        "truncated": false
+      },
+      "question_id": "provenance-terminal",
+      "ranked_session_ids": [
+        "terminal://zsh/agent-handoff-run",
+        "slack://provenance/3/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "terminal://zsh/agent-handoff-run"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 528,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///docs/eval/agent-handoff-v1.md",
+            "ts_us": 1788341400000000,
+            "url": "file:///docs/eval/agent-handoff-v1.md",
+            "window_title": "agent-handoff-v1.md"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 2,
+            "session_id": "slack://provenance/4/distractor",
+            "ts_us": 1788341700000000,
+            "url": "",
+            "window_title": "Nearby source 5"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.tinyspeck.slackmacgap: Nearby source 5\nObserved com.microsoft.VSCode: agent-handoff-v1.md\nEvent 2: [app=com.tinyspeck.slackmacgap | title=Nearby source 5 | url= | ts=2026-09-02T09:35:00.000Z]\nA nearby thread mentions the same project but does not contain the requested record.\nEvent 1: [app=com.microsoft.VSCode | title=agent-handoff-v1.md | url=file:///docs/eval/agent-handoff-v1.md | ts=2026-09-02T09:30:00.000Z]\nThe benchmark document states trusted_answer_qualified remains false until a qualified verifier exists.",
+        "token_estimate": 54,
+        "truncated": false
+      },
+      "question_id": "provenance-file",
+      "ranked_session_ids": [
+        "file:///docs/eval/agent-handoff-v1.md",
+        "slack://provenance/4/distractor"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "exact_provenance",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///docs/eval/agent-handoff-v1.md"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 1,
+      "facts_required": 1,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-approver",
+      "ranked_session_ids": [],
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": true,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-due-date",
+      "ranked_session_ids": [],
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": true,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-duration",
+      "ranked_session_ids": [],
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": true,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-count",
+      "ranked_session_ids": [],
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": true,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 0,
+        "citations": [],
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
+        "outcome": "nothing_available",
+        "text": "",
+        "token_estimate": 0,
+        "truncated": false
+      },
+      "question_id": "abstain-owner",
+      "ranked_session_ids": [],
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
+      "capability": "abstention",
+      "unanswerable": true,
+      "answer_session_ids": [],
+      "first_hit_rank": null,
+      "recall_at": {
+        "1": null,
+        "3": null,
+        "5": null
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 0,
+      "facts_required": 0,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": true,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 718,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "linear://release/blocker",
+            "ts_us": 1788354060000000,
+            "url": "linear://release/blocker",
+            "window_title": "Handoff source 1.1"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "github://release/hotkey",
+            "ts_us": 1788354120000000,
+            "url": "github://release/hotkey",
+            "window_title": "Handoff source 1.2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 3,
+            "session_id": "file:///release/checklist",
+            "ts_us": 1788354180000000,
+            "url": "file:///release/checklist",
+            "window_title": "Handoff source 1.3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Handoff source 1.3\nObserved com.microsoft.VSCode: Handoff source 1.2\nObserved com.microsoft.VSCode: Handoff source 1.1\nEvent 3: [app=com.microsoft.VSCode | title=Handoff source 1.3 | url=file:///release/checklist | ts=2026-09-02T13:03:00.000Z]\nThe release checklist still requires notarization and a real capture soak.\nEvent 2: [app=com.microsoft.VSCode | title=Handoff source 1.2 | url=github://release/hotkey | ts=2026-09-02T13:02:00.000Z]\nThe menu-bar shell now owns the global recall hotkey.\nEvent 1: [app=com.microsoft.VSCode | title=Handoff source 1.1 | url=linear://release/blocker | ts=2026-09-02T13:01:00.000Z]\nThe release is blocked by the missing Developer ID Application identity.",
+        "token_estimate": 79,
+        "truncated": false
+      },
+      "question_id": "handoff-release-brief",
+      "ranked_session_ids": [
+        "file:///release/checklist",
+        "linear://release/blocker",
+        "github://release/hotkey"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "handoff_utility",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "linear://release/blocker",
+        "github://release/hotkey",
+        "file:///release/checklist"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 3,
+      "facts_required": 3,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 765,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///memory/retrieval",
+            "ts_us": 1788354060000000,
+            "url": "file:///memory/retrieval",
+            "window_title": "Handoff source 2.1"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "linear://memory/verifier",
+            "ts_us": 1788354120000000,
+            "url": "linear://memory/verifier",
+            "window_title": "Handoff source 2.2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 3,
+            "session_id": "github://memory/provenance",
+            "ts_us": 1788354180000000,
+            "url": "github://memory/provenance",
+            "window_title": "Handoff source 2.3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Handoff source 2.3\nObserved com.microsoft.VSCode: Handoff source 2.2\nObserved com.microsoft.VSCode: Handoff source 2.1\nEvent 3: [app=com.microsoft.VSCode | title=Handoff source 2.3 | url=github://memory/provenance | ts=2026-09-02T13:03:00.000Z]\nEvery context item must retain its canonical event citation.\nEvent 2: [app=com.microsoft.VSCode | title=Handoff source 2.2 | url=linear://memory/verifier | ts=2026-09-02T13:02:00.000Z]\nTrusted semantic support remains blocked because no verifier model is validation-qualified.\nEvent 1: [app=com.microsoft.VSCode | title=Handoff source 2.1 | url=file:///memory/retrieval | ts=2026-09-02T13:01:00.000Z]\nHybrid retrieval reaches all expected sources at rank three in the small work-memory fixture.",
+        "token_estimate": 82,
+        "truncated": false
+      },
+      "question_id": "handoff-memory-quality",
+      "ranked_session_ids": [
+        "github://memory/provenance",
+        "linear://memory/verifier",
+        "file:///memory/retrieval"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "handoff_utility",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///memory/retrieval",
+        "linear://memory/verifier",
+        "github://memory/provenance"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 3,
+      "facts_required": 3,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 764,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///privacy/cascade",
+            "ts_us": 1788354060000000,
+            "url": "file:///privacy/cascade",
+            "window_title": "Handoff source 3.1"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "github://privacy/generation",
+            "ts_us": 1788354120000000,
+            "url": "github://privacy/generation",
+            "window_title": "Handoff source 3.2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 3,
+            "session_id": "linear://privacy/permission",
+            "ts_us": 1788354180000000,
+            "url": "linear://privacy/permission",
+            "window_title": "Handoff source 3.3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Handoff source 3.3\nObserved com.microsoft.VSCode: Handoff source 3.2\nObserved com.microsoft.VSCode: Handoff source 3.1\nEvent 3: [app=com.microsoft.VSCode | title=Handoff source 3.3 | url=linear://privacy/permission | ts=2026-09-02T13:03:00.000Z]\nAccessibility and Screen Recording are required onboarding permissions.\nEvent 2: [app=com.microsoft.VSCode | title=Handoff source 3.2 | url=github://privacy/generation | ts=2026-09-02T13:02:00.000Z]\nThe focus generation race gate rejects frames captured against stale window state.\nEvent 1: [app=com.microsoft.VSCode | title=Handoff source 3.1 | url=file:///privacy/cascade | ts=2026-09-02T13:01:00.000Z]\nThe suppression cascade fails closed when Accessibility window identity is unavailable.",
+        "token_estimate": 79,
+        "truncated": false
+      },
+      "question_id": "handoff-privacy-review",
+      "ranked_session_ids": [
+        "linear://privacy/permission",
+        "file:///privacy/cascade",
+        "github://privacy/generation"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "handoff_utility",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///privacy/cascade",
+        "github://privacy/generation",
+        "linear://privacy/permission"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 3,
+      "facts_required": 3,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    },
+    {
+      "arm": "hybrid",
+      "packet": {
+        "byte_estimate": 743,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///agents/key-boundary",
+            "ts_us": 1788354060000000,
+            "url": "file:///agents/key-boundary",
+            "window_title": "Handoff source 4.1"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "github://agents/mcp",
+            "ts_us": 1788354120000000,
+            "url": "github://agents/mcp",
+            "window_title": "Handoff source 4.2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 3,
+            "session_id": "terminal://agents/status",
+            "ts_us": 1788354180000000,
+            "url": "terminal://agents/status",
+            "window_title": "Handoff source 4.3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Handoff source 4.3\nObserved com.microsoft.VSCode: Handoff source 4.2\nObserved com.microsoft.VSCode: Handoff source 4.1\nEvent 3: [app=com.microsoft.VSCode | title=Handoff source 4.3 | url=terminal://agents/status | ts=2026-09-02T13:03:00.000Z]\nConnection status must distinguish installed clients from skipped clients.\nEvent 2: [app=com.microsoft.VSCode | title=Handoff source 4.2 | url=github://agents/mcp | ts=2026-09-02T13:02:00.000Z]\nThe local MCP server exposes read-only recall and mci_context tools.\nEvent 1: [app=com.microsoft.VSCode | title=Handoff source 4.1 | url=file:///agents/key-boundary | ts=2026-09-02T13:01:00.000Z]\nClient registration stores a Keychain reference and never writes database key bytes.",
+        "token_estimate": 79,
+        "truncated": false
+      },
+      "question_id": "handoff-agent-integration",
+      "ranked_session_ids": [
+        "file:///agents/key-boundary",
+        "github://agents/mcp",
+        "terminal://agents/status"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
+      "capability": "handoff_utility",
+      "unanswerable": false,
+      "answer_session_ids": [
+        "file:///agents/key-boundary",
+        "github://agents/mcp",
+        "terminal://agents/status"
+      ],
+      "first_hit_rank": 1,
+      "recall_at": {
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
+      "duplicate_citations": 0,
+      "duplicate_ocr_suppressed": false,
+      "facts_present": 3,
+      "facts_required": 3,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
+      "packet_bounded": true,
+      "handoff_complete": true,
+      "capability_passed": true
+    }
+  ]
+}
