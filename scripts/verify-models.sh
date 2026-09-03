@@ -25,6 +25,7 @@ set -euo pipefail
 # Usage:
 #   scripts/verify-models.sh                              # auto-detect app
 #   scripts/verify-models.sh --app path/to/Hippocampus.app
+#   scripts/verify-models.sh --manifest path/to/models.json --app path/to/Hippocampus.app
 #   scripts/verify-models.sh --allow-missing-bundled --app path/to/Hippocampus.app
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,8 +38,9 @@ ALLOW_MISSING_BUNDLED=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --app) APP_PATH="$2"; shift 2 ;;
+        --manifest) MODELS_JSON="$2"; shift 2 ;;
         --allow-missing-bundled) ALLOW_MISSING_BUNDLED=1; shift ;;
-        *) echo "Usage: verify-models.sh [--allow-missing-bundled] [--app path/to/Hippocampus.app]"; exit 1 ;;
+        *) echo "Usage: verify-models.sh [--allow-missing-bundled] [--manifest path/to/models.json] [--app path/to/Hippocampus.app]"; exit 1 ;;
     esac
 done
 
@@ -52,6 +54,19 @@ if [[ ! -f "$MODELS_JSON" ]]; then
 fi
 
 ERRORS=0
+
+APP_MINIMUM_SYSTEM_VERSION=""
+if [[ -f "$APP_PATH/Contents/Info.plist" ]]; then
+    APP_MINIMUM_SYSTEM_VERSION=$(python3 - "$APP_PATH/Contents/Info.plist" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as handle:
+    value = plistlib.load(handle).get("LSMinimumSystemVersion", "")
+print(value)
+PY
+)
+fi
 
 echo "Checking models.json: $MODELS_JSON"
 echo "App bundle: $APP_PATH"
@@ -68,6 +83,10 @@ while IFS= read -r line; do
         model_id="$rest"
         # Map model IDs to their exact runtime paths in the app bundle.
         case "$model_id" in
+            arctic-embed-s-fp16)
+                compiled_name="ArcticEmbedS_FP16.mlmodelc"
+                unavailable_message="Semantic recall stays lexical-only."
+                ;;
             arctic-embed-s-int8)
                 compiled_name="ArcticEmbedS_INT8.mlmodelc"
                 unavailable_message="Semantic recall stays lexical-only."
@@ -85,6 +104,107 @@ while IFS= read -r line; do
         model_path="$APP_PATH/Contents/Resources/Models/$compiled_name"
         if [[ -d "$model_path" ]]; then
             echo "  OK: bundled model '$model_id' found at $model_path"
+            metadata_path="$model_path/metadata.json"
+            compatibility_path="$model_path/hippocampus-model.json"
+            model_minimum_system_version=""
+            storage_precision=""
+            compatibility_model_id=""
+            if [[ -f "$compatibility_path" ]]; then
+                model_minimum_system_version=$(python3 - "$compatibility_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+print(metadata.get("minimumSystemVersion", ""))
+PY
+)
+                storage_precision=$(python3 - "$compatibility_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+print(metadata.get("precision", ""))
+PY
+)
+                compatibility_model_id=$(python3 - "$compatibility_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+print(metadata.get("modelID", ""))
+PY
+)
+            elif [[ -f "$metadata_path" ]]; then
+                model_minimum_system_version=$(python3 - "$metadata_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+record = metadata[0] if isinstance(metadata, list) and metadata else metadata
+print(record.get("availability", {}).get("macOS", ""))
+PY
+)
+                storage_precision=$(python3 - "$metadata_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+record = metadata[0] if isinstance(metadata, list) and metadata else metadata
+print(record.get("storagePrecision", ""))
+PY
+)
+            else
+                echo "  ERROR: bundled model '$model_id' has no compatibility metadata"
+                echo "         Expected $compatibility_path or $metadata_path"
+                ERRORS=$((ERRORS + 1))
+            fi
+            if [[ -n "$compatibility_model_id" && "$compatibility_model_id" != "$model_id" ]]; then
+                echo "  ERROR: bundled model '$model_id' compatibility metadata identifies '$compatibility_model_id'"
+                ERRORS=$((ERRORS + 1))
+            fi
+            if [[ -n "$APP_MINIMUM_SYSTEM_VERSION" && -n "$model_minimum_system_version" ]] && ! python3 - "$APP_MINIMUM_SYSTEM_VERSION" "$model_minimum_system_version" <<'PY'
+import sys
+
+def version(value):
+    return tuple(int(part) for part in value.split("."))
+
+app = version(sys.argv[1])
+model = version(sys.argv[2])
+width = max(len(app), len(model))
+raise SystemExit(0 if app + (0,) * (width - len(app)) >= model + (0,) * (width - len(model)) else 1)
+PY
+            then
+                echo "  ERROR: bundled model '$model_id' requires macOS $model_minimum_system_version but the app supports macOS $APP_MINIMUM_SYSTEM_VERSION"
+                ERRORS=$((ERRORS + 1))
+            fi
+            if [[ -n "$storage_precision" ]]; then
+                model_identity="$model_id/$compiled_name"
+                case "$model_identity" in
+                    *fp16*|*FP16*)
+                        case "$storage_precision" in
+                            *float16*|*Float16*|*FP16*) ;;
+                            *)
+                                echo "  ERROR: bundled model '$model_id' claims FP16 but compatibility metadata says $storage_precision"
+                                ERRORS=$((ERRORS + 1))
+                                ;;
+                        esac
+                        ;;
+                    *int8*|*INT8*)
+                        case "$storage_precision" in
+                            *Int8*|*INT8*) ;;
+                            *)
+                                echo "  ERROR: bundled model '$model_id' claims INT8 but compiled storage precision is $storage_precision"
+                                ERRORS=$((ERRORS + 1))
+                                ;;
+                        esac
+                        ;;
+                esac
+            fi
         elif [[ "$ALLOW_MISSING_BUNDLED" -eq 1 ]]; then
             echo "  WARN: bundled model '$model_id' NOT found at $model_path"
             echo "        $unavailable_message"

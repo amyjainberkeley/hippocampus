@@ -181,7 +181,7 @@ final class ModelDownloadManagerTests: XCTestCase {
             ModelDownloadManager.ModelManifest.self, from: data
         )
 
-        XCTAssertEqual(manifest.models.map(\.modelID), ["arctic-embed-s-int8"])
+        XCTAssertEqual(manifest.models.map(\.modelID), ["arctic-embed-s-fp16"])
         XCTAssertTrue(manifest.models.allSatisfy(\.bundled))
         XCTAssertTrue(manifest.models.allSatisfy { $0.downloadURL == nil })
     }

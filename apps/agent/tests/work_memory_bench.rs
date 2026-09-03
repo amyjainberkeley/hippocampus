@@ -116,7 +116,7 @@ fn eligible_fake_baseline() -> Value {
         "launch_qualified": true,
         "dataset": "eval/work-memory/synthetic-v1.json",
         "dataset_id": "synthetic-work-memory-v1",
-        "dataset_checksum_sha256": "96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f",
+        "dataset_checksum_sha256": "f56ec3a13733343b6819edd86782d28c4ec9f6c5ee9fbb3a2d0b19c03282ae4d",
         "failures": [],
         "regression": {"passed": true, "failures": []},
         "quality_gate": {"passed": true, "failures": []},

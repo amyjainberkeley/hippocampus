@@ -1,7 +1,7 @@
 {
   "dataset_id": "hippocampus-evidence-sufficiency-calibration-v1",
   "fixture_sha256": "e18aba01ab344da3a1ee4ab58003e28bb86c041e99107b223073bfa7830ead5d",
-  "model_path": "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc",
+  "model_path": "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc",
   "feature_schema_version": 2,
   "feature_names": [
     "raw_semantic_cosine",

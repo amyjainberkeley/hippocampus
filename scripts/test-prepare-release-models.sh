@@ -30,7 +30,7 @@ expect_fail() {
 }
 
 SOURCE="$TMP_ROOT/source/models"
-for model in ArcticEmbedS_INT8.mlmodelc; do
+for model in ArcticEmbedS_FP16.mlmodelc; do
     mkdir -p "$SOURCE/$model/weights"
     printf 'mil' >"$SOURCE/$model/model.mil"
     printf 'metadata' >"$SOURCE/$model/coremldata.bin"
@@ -38,6 +38,27 @@ for model in ArcticEmbedS_INT8.mlmodelc; do
 done
 
 ARCHIVE="$TMP_ROOT/release-models.tar.gz"
+tar -C "$TMP_ROOT/source" -czf "$ARCHIVE" models
+SHA="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+
+expect_fail 'model preparation rejects missing compatibility metadata' \
+    "$PREPARE" --archive "$ARCHIVE" --sha256 "$SHA" \
+    --output "$TMP_ROOT/missing-contract"
+
+cat > "$SOURCE/ArcticEmbedS_FP16.mlmodelc/hippocampus-model.json" <<'JSON'
+{
+  "attentionImplementation": "eager",
+  "embeddingDimension": 384,
+  "maxSequenceLength": 128,
+  "minimumSystemVersion": "14.0",
+  "modelID": "arctic-embed-s-fp16",
+  "precision": "float16",
+  "schemaVersion": 1,
+  "sourceRepo": "Snowflake/snowflake-arctic-embed-s",
+  "sourceRevision": "e596f507467533e48a2e17c007f0e1dacc837b33",
+  "specificationVersion": 8
+}
+JSON
 tar -C "$TMP_ROOT/source" -czf "$ARCHIVE" models
 SHA="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
 
@@ -49,7 +70,7 @@ expect_pass 'model preparation validates and atomically installs required models
     "$PREPARE" --archive "$ARCHIVE" --sha256 "$SHA" \
     --output "$TMP_ROOT/output"
 
-for model in ArcticEmbedS_INT8.mlmodelc; do
+for model in ArcticEmbedS_FP16.mlmodelc; do
     if [[ -f "$TMP_ROOT/output/$model/model.mil" && \
           -f "$TMP_ROOT/output/$model/coremldata.bin" && \
           -f "$TMP_ROOT/output/$model/weights/weight.bin" ]]; then

@@ -163,7 +163,7 @@ final class BuildAppScriptTests: XCTestCase {
 
         if includeEmbedder {
             try makeModelDirectory(
-                at: repoRoot.appendingPathComponent("models/ArcticEmbedS_INT8.mlmodelc"),
+                at: repoRoot.appendingPathComponent("models/ArcticEmbedS_FP16.mlmodelc"),
                 requireStructure: true
             )
         }
@@ -526,7 +526,7 @@ final class BuildAppScriptTests: XCTestCase {
             "missing embedder must fail the build, got: \(result.output)"
         )
         XCTAssertTrue(
-            result.output.contains("FATAL: ArcticEmbedS_INT8"),
+            result.output.contains("FATAL: ArcticEmbedS_FP16"),
             "expected embedder failure, got: \(result.output)"
         )
         XCTAssertTrue(

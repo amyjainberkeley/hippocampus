@@ -150,7 +150,7 @@ The sole required release model, Arctic Embed S, is intentionally not checked
 into git. BERT NER and Qwen3 remain optional experiments and are not release
 dependencies. A clean tag runner therefore requires one HTTPS tar archive
 whose top-level `models/` directory contains the complete
-`ArcticEmbedS_INT8.mlmodelc` bundle named by `release-models.json`. The
+`ArcticEmbedS_FP16.mlmodelc` bundle named by `release-models.json`. The
 immutable URL and digest live in that tagged manifest; mutable GitHub variables
 are not release authority.
 

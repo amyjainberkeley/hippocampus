@@ -19,7 +19,7 @@ Rust BIO decoder (P2') consumes.
 
 The per-token logits head does NOT ANE-compile on this stack (the §7.1
 spike: ANECCompile fails in FP16 AND INT8, while the production pooled
-ArcticEmbedS_INT8 compiles clean on the same Mac — so it's the per-token
+ArcticEmbedS_FP16 compiles clean on the same Mac — so it's the per-token
 head, not the environment). Ratification #4 was relaxed accordingly:
 **GPU/CPU residency, footprint-gated in Phase 5.** So the default
 `--compute-units cpu_and_gpu` avoids the ANE gamble; the runtime app sets

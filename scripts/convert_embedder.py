@@ -34,29 +34,30 @@ compatibility (retained from PR #143). Do not remove until coremltools
 upstream lands the new_ones converter.
 
 Usage:
-    # 1. Convert + INT8 quantize + verify (no fixtures)
+    # 1. Convert the shipping FP16 model + verify (no fixtures)
     python scripts/convert_embedder.py \\
-        --output models/ArcticEmbedS_INT8.mlpackage \\
+        --output models/ArcticEmbedS_FP16.mlpackage \\
         --verify
 
     # 2. Convert + write the Python reference fixture for the Rust
     #    quality regression test (50 sentences × 384-d Float32, saved
     #    next to the Rust crate as a .npy file)
     python scripts/convert_embedder.py \\
-        --output models/ArcticEmbedS_INT8.mlpackage \\
+        --output models/ArcticEmbedS_FP16.mlpackage \\
         --verify --fixtures
 
     # 3. --tokenizer is a no-op when resources/tokenizer.json already
     #    exists (Wave 17 commits it). Pass the flag for explicit
     #    documentation that the conversion expects the bundled file.
     python scripts/convert_embedder.py \\
-        --output models/ArcticEmbedS_INT8.mlpackage \\
+        --output models/ArcticEmbedS_FP16.mlpackage \\
         --tokenizer
 
 Per BUNDLING.md §2 (Wave-17 corrected) and ADR-0011 erratum (2026-05-22).
 """
 
 import argparse
+import json
 import logging
 import shutil
 import sys
@@ -64,6 +65,8 @@ from pathlib import Path
 
 MODEL_REPO = "Snowflake/snowflake-arctic-embed-s"
 MODEL_REVISION = "e596f507467533e48a2e17c007f0e1dacc837b33"
+MODEL_ID = "arctic-embed-s-fp16"
+MINIMUM_SYSTEM_VERSION = "14.0"
 OUTPUT_DIM = 384
 MAX_SEQ_LEN = 128
 
@@ -79,9 +82,35 @@ FIXTURES_REFERENCE = FIXTURES_DIR / "arctic_embed_reference.npy"
 log = logging.getLogger("convert_embedder")
 
 
+def write_model_contract(
+    compiled_path: Path,
+    *,
+    precision: str,
+    minimum_system_version: str,
+    specification_version: int,
+) -> None:
+    """Write the app-owned compatibility and provenance record."""
+    contract = {
+        "attentionImplementation": "eager",
+        "embeddingDimension": OUTPUT_DIM,
+        "maxSequenceLength": MAX_SEQ_LEN,
+        "minimumSystemVersion": minimum_system_version,
+        "modelID": MODEL_ID,
+        "precision": precision,
+        "schemaVersion": 1,
+        "sourceRepo": MODEL_REPO,
+        "sourceRevision": MODEL_REVISION,
+        "specificationVersion": specification_version,
+    }
+    (compiled_path / "hippocampus-model.json").write_text(
+        json.dumps(contract, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 # 50 diverse English sentences for the Rust quality-regression fixture.
 # Covers short / long / code-ish / Unicode-edge / empty-ish corners so a
-# numeric drift between Python FP32 reference and Core ML INT8 output
+# numeric drift between Python FP32 reference and the shipping Core ML output
 # shows up as cosine-sim < 0.999 on at least one row.
 FIXTURE_SENTENCES = [
     "Hello, world.",
@@ -263,7 +292,14 @@ def convert(
 
     log.info("Loading %s...", MODEL_REPO)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO, revision=MODEL_REVISION)
-    model = AutoModel.from_pretrained(MODEL_REPO, revision=MODEL_REVISION)
+    # Force unfused eager attention. The default PyTorch SDPA trace lowers to
+    # the iOS 18 / macOS 15 MIL dialect even though this BERT graph can run on
+    # macOS 14 when attention is expanded into primitive operations.
+    model = AutoModel.from_pretrained(
+        MODEL_REPO,
+        revision=MODEL_REVISION,
+        attn_implementation="eager",
+    )
     model.eval()
 
     sample_text = "Represent this sentence for searching relevant passages: hello world"
@@ -339,7 +375,7 @@ def convert(
         ],
         outputs=[ct.TensorType(name="embedding", dtype=np.float32)],
         compute_units=ct.ComputeUnit.CPU_AND_NE,
-        minimum_deployment_target=ct.target.macOS15,
+        minimum_deployment_target=ct.target.macOS14,
     )
 
     # Quantization gating per ADR-0011 §1 + 2026-05-22 erratum:
@@ -402,6 +438,12 @@ def convert(
         if compiled_path.exists():
             shutil.rmtree(compiled_path)
         shutil.copytree(compiled_src, compiled_path)
+        write_model_contract(
+            compiled_path,
+            precision="int8" if quantize_int8 else "float16",
+            minimum_system_version=MINIMUM_SYSTEM_VERSION,
+            specification_version=mlmodel.get_spec().specificationVersion,
+        )
         del loaded_for_compile
         compiled_size = sum(
             f.stat().st_size for f in compiled_path.rglob("*") if f.is_file()
@@ -467,7 +509,7 @@ def convert(
         assert emb.shape[-1] == OUTPUT_DIM, f"Expected {OUTPUT_DIM}-d, got {emb.shape}"
         mag = float(np.linalg.norm(emb))
         log.info("  Embedding magnitude: %.6f (expected ~1.0 from in-graph L2-norm)", mag)
-        # In-graph L2-normalize: |v| must be 1.0 to within INT8 quant noise.
+        # In-graph L2-normalize: |v| must be 1.0 within conversion noise.
         assert abs(mag - 1.0) < 1e-3, (
             f"L2-norm in graph appears broken: |emb| = {mag} (expected 1.0). "
             "If you see this, the Python -> MIL conversion of F.normalize "
@@ -487,7 +529,7 @@ def main():
     parser.add_argument(
         "--output",
         required=True,
-        help="Output .mlpackage path (e.g. models/ArcticEmbedS_INT8.mlpackage)",
+        help="Output .mlpackage path (e.g. models/ArcticEmbedS_FP16.mlpackage)",
     )
     parser.add_argument(
         "--verify",

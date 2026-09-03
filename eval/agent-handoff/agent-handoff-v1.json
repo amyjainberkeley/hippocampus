@@ -598,7 +598,7 @@
         [
           {
             "role": "assistant",
-            "content": "Current decision: /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc. This supersedes the previous plan."
+            "content": "Current decision: /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc. This supersedes the previous plan."
           }
         ],
         [
@@ -617,7 +617,7 @@
       ],
       "handoff_expectation": {
         "required_facts": [
-          "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
+          "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc"
         ],
         "required_session_ids": [
           "file:///current-model-path"

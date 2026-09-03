@@ -8,7 +8,7 @@ DATASET_SHA_FILE="eval/agent-handoff/agent-handoff-v1.sha256"
 RESULT="docs/eval/agent-handoff-v1-result.json"
 RESULT_SHA_FILE="docs/eval/agent-handoff-v1-result.sha256"
 HARNESS_MANIFEST="scripts/eval/agent-handoff/harness/Cargo.toml"
-DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
+DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc"
 
 ARM="both"
 OUT=""

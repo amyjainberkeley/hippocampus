@@ -1863,7 +1863,7 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     // Mirrors the ingest-side `load_embedder_backend()` pattern (see
     // `run` path around line 391) but constructs `new_query` (adds the
     // model-card query prefix per ADR-0011 §3) instead of `new_document`.
-    // Core ML compute units stay pinned to `cpu_only` inside
+    // Core ML compute units stay pinned to `cpu_and_ne` inside
     // `load_backend_or_fallback` — the "all" tier is the latency trap
     // ([[reference-coreml-computeunits-all-trap]]).
     let embedder = load_read_query_embedder("mcp-serve");
@@ -2457,13 +2457,13 @@ fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<()
                python3.11 -m venv .venv-ml && source .venv-ml/bin/activate\n\
                pip install -r scripts/requirements-ml.txt\n\
                python scripts/convert_embedder.py \\\n\
-                 --output models/ArcticEmbedS_INT8.mlpackage --verify\n\
+                 --output models/ArcticEmbedS_FP16.mlpackage --verify\n\
              \n\
              That writes both a .mlpackage and a .mlmodelc. The loader needs\n\
              the .mlmodelc; a raw .mlpackage cannot be opened at runtime.\n\
              Point at it explicitly if it lives elsewhere:\n\
              \n\
-               export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_INT8.mlmodelc\n\
+               export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_FP16.mlmodelc\n\
              \n\
              Until then recall works, but keyword-only. Nothing is broken;\n\
              there is just no semantic half to fill in yet."

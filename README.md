@@ -150,7 +150,7 @@ Two commands. This whole path has been run end to end on a clean machine.
 python3.11 -m venv .venv-ml && source .venv-ml/bin/activate
 pip install -r scripts/requirements-ml.txt
 python scripts/convert_embedder.py \
-  --output models/ArcticEmbedS_INT8.mlpackage --verify
+  --output models/ArcticEmbedS_FP16.mlpackage --verify
 ```
 
 That writes two things: a `.mlpackage` and a compiled `.mlmodelc` beside it. **The `.mlmodelc` is the one that matters.** A raw `.mlpackage` cannot be opened at runtime; Core ML rejects it with "Compile the model with Xcode." The script now compiles it for you, which it did not always do, and that gap was invisible because the loader treats a failed load and a missing file identically.
@@ -173,7 +173,7 @@ recall=hybrid (FTS5 + semantic, ADR-0010 min-max CC)
 If the model lives somewhere else, point at it:
 
 ```bash
-export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_INT8.mlmodelc
+export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_FP16.mlmodelc
 ```
 
 ### Does it actually help?
@@ -221,7 +221,7 @@ Loading is not the same as working. `adapters/macos/mci-embed-coreml/tests/quali
 
 ```bash
 python scripts/convert_embedder.py \
-  --output models/ArcticEmbedS_INT8.mlpackage --verify --fixtures
+  --output models/ArcticEmbedS_FP16.mlpackage --verify --fixtures
 cargo test -p mci-embed-coreml --test quality
 ```
 

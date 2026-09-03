@@ -186,7 +186,7 @@ state-transition event
                   extraction for "last Tuesday"; plain hybrid otherwise.
 ```
 
-- **Embedding model:** quantized **`snowflake-arctic-embed-s`** (33M params, **384-d**, Apache-2.0, int8) via **Core ML** on macOS and **ONNX Runtime + DirectML** on Windows. The current macOS runtime pins compute units to CPU; ANE residency is not part of the shipped path. **Query and document prefixes are required by the model card** and applied in the embedder wrapper. `NLEmbedding` / a potion-retrieval-32M-class static embedder is kept only as a no-dependency floor. (ADR-0011.)
+- **Embedding model:** **`snowflake-arctic-embed-s` FP16** (33M params, **384-d**, Apache-2.0, ~66 MB) via **Core ML** on macOS and **ONNX Runtime + DirectML** on Windows. The macOS graph uses eager attention and Core ML specification version 8 so the model honors the app's macOS 14 deployment target. The runtime pins Core ML to CPU plus Neural Engine; CPU-only execution is rejected because this graph produces non-finite output in that mode. **Query and document prefixes are required by the model card** and applied in the embedder wrapper. INT8 is not a shipping claim: it failed the 50-sentence quality gate. `NLEmbedding` / a potion-retrieval-32M-class static embedder is kept only as a no-dependency floor. (ADR-0011.)
 - **Vector retrieval path:** the target vector-store design is **sqlite-vec**, but the current shipped implementation does a Rust-side brute-force cosine scan over vectors stored in SQLCipher. That keeps semantic recall local without claiming the sqlite-vec runtime path has landed yet.
 - **Hybrid retrieval:** FTS5 (lexical) + vector KNN (semantic) fused by **min-max Convex Combination** (Bruch et al., ACM TOIS 2023 — outperforms Reciprocal Rank Fusion in- and out-of-domain). Recall (not precision) is the dominant success metric on lifelog corpora.
 - **Recall interface:**
@@ -282,7 +282,7 @@ Retention/compaction policy (open, §15): age-out raw keyframes while keeping te
 | Windows context | UI Automation |
 | Page content | Optional per-browser extension (native messaging); OCR fallback |
 | Dedupe | dHash (64-bit), SSIM for borderline |
-| Embeddings | quantized `snowflake-arctic-embed-s` (33M, 384-d, Apache-2.0) — Core ML/ANE (mac) / ONNX Runtime+DirectML (win); query+doc prefixes required (ADR-0011) |
+| Embeddings | FP16 `snowflake-arctic-embed-s` (33M, 384-d, Apache-2.0) — Core ML (macOS 14+) / ONNX Runtime+DirectML (win); query+doc prefixes required (ADR-0011) |
 | Store / index | one SQLite file: FTS5 + sqlite-vec, SQLCipher-encrypted |
 | Crypto | OS keystore-backed device key; client-side E2E for cloud |
 | Sync | zero-knowledge encrypted delta log to object storage |

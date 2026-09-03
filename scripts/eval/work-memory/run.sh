@@ -8,8 +8,8 @@ BASELINE="docs/eval/work-memory-baseline.json"
 BASELINE_NEXT="docs/eval/work-memory-baseline.next.json"
 BASELINE_SHA256_FILE="docs/eval/work-memory-baseline.sha256"
 BASELINE_SHA256_NEXT="docs/eval/work-memory-baseline.sha256.next"
-DATASET_SHA256="96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f"
-DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
+DATASET_SHA256="f56ec3a13733343b6819edd86782d28c4ec9f6c5ee9fbb3a2d0b19c03282ae4d"
+DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc"
 
 UPDATE_BASELINE=0
 OUT=""

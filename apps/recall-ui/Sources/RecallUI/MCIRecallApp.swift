@@ -162,7 +162,7 @@ struct MCIRecallApp: App {
         guard let resources = Bundle.main.resourceURL else { return nil }
         let bundled = resources
             .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent("ArcticEmbedS_INT8.mlmodelc", isDirectory: true)
+            .appendingPathComponent("ArcticEmbedS_FP16.mlmodelc", isDirectory: true)
         return FileManager.default.fileExists(atPath: bundled.path) ? bundled.path : nil
     }
 }

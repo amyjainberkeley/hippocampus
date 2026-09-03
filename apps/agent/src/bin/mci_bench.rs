@@ -345,11 +345,11 @@ fn run_metadata(
         hardware_chip: sysctl_value("machdep.cpu.brand_string"),
         ram_bytes: sysctl_value("hw.memsize").and_then(|value| value.parse().ok()),
         compute_mode: if uses_hybrid {
-            "coreml_cpu_only".into()
+            "coreml_cpu_and_ne".into()
         } else {
             "not_used".into()
         },
-        model_family: uses_hybrid.then(|| "snowflake-arctic-embed-s-int8".into()),
+        model_family: uses_hybrid.then(|| "snowflake-arctic-embed-s-fp16".into()),
         model_path: None,
         model_checksum_sha256: None,
         requested_arms: arms.iter().map(|arm| arm.label().to_string()).collect(),
@@ -1193,21 +1193,21 @@ mod tests {
         let root = Path::new("/checkout/hippocampus");
         assert_eq!(
             logical_path(
-                Path::new("/Users/alice/Models/ArcticEmbedS_INT8.mlmodelc"),
+                Path::new("/Users/alice/Models/ArcticEmbedS_FP16.mlmodelc"),
                 root,
                 "model"
             ),
-            "external-model://ArcticEmbedS_INT8.mlmodelc"
+            "external-model://ArcticEmbedS_FP16.mlmodelc"
         );
         assert_eq!(
             logical_path(
                 Path::new(
-                    "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
+                    "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc"
                 ),
                 root,
                 "model"
             ),
-            "installed-model://ArcticEmbedS_INT8.mlmodelc"
+            "installed-model://ArcticEmbedS_FP16.mlmodelc"
         );
         assert_eq!(
             logical_path(Path::new("/Users/alice/tmp/report.json"), root, "report"),

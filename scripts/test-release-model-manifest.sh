@@ -35,7 +35,7 @@ write_manifest() {
   "archiveURL": "$url",
   "archiveSHA256": "$sha",
   "models": [
-    {"id": "arctic-embed-s-int8", "bundle": "ArcticEmbedS_INT8.mlmodelc"}
+    {"id": "arctic-embed-s-fp16", "bundle": "ArcticEmbedS_FP16.mlmodelc"}
   ]
 }
 JSON
