@@ -16,6 +16,11 @@ the eval story. Paired with `../../scripts/eval/` (the runners) and
   baseline report for the synthetic work-memory corpus, including reproducible
   code/model/dataset identity, regression thresholds, fixed launch-quality
   targets, misses, and explicit answerable/unanswerable denominators.
+- `agent-handoff-v1.md` — methodology for the 36-task production-path
+  retrieval and `mci_context` sidecar. The adjacent result artifact measures
+  semantic relevance, temporal updates, contradictions, duplicate OCR,
+  provenance, abstention, and bounded agent handoff without claiming answer
+  generation.
 
 ## Related
 
@@ -24,6 +29,7 @@ the eval story. Paired with `../../scripts/eval/` (the runners) and
 - `../../eval/ner-corpus/` — the NER corpus used by ADR-0029.
 - `../../eval/work-memory/` — the synthetic work-memory corpus and
   README for the benchmark runner.
+- `../../eval/agent-handoff/` — the deterministic agent-handoff-v1 corpus.
 - `../decisions/0018-brief-authoring-approval-pipeline.md`,
   `0029-step2-7-corpus-gate.md`.
 
