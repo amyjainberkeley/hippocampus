@@ -392,12 +392,12 @@ Hippocampus's intended input is permitted screen context, which reaches the deta
 
 **On benchmarks, plainly:** the accepted 36-task agent-handoff benchmark runs
 both production hybrid and lexical paths over disposable encrypted brains.
-Hybrid reaches 100% Hit@1/3/5, 100% Recall@3/5, and 100% on temporal currency,
+Hybrid reaches 96.8% Hit@1, 100% Hit@3/5, 100% Recall@3/5, and 100% on temporal currency,
 superseded exclusion, contradiction visibility, duplicate suppression,
 provenance, abstention, handoff utility, fact coverage, bounded packets, and
-capability checks. Lexical reaches 100% Hit@3/5 and misses one of 36 capability
-checks. These results qualify retrieval and bounded cited handoff, not answer
-generation. Semantic neighbors remain explicitly degraded related context
+capability checks. Lexical reaches 100% Hit@3/5, misses one of 36 capability
+checks, and succeeds on 75% of handoff tasks. These results qualify retrieval
+and bounded cited handoff, not answer generation. Semantic neighbors remain explicitly degraded related context
 until a separately trained claim/evidence verifier passes its blind gate. The
 checksummed artifact is
 [docs/eval/agent-handoff-v1-result.json](docs/eval/agent-handoff-v1-result.json);
