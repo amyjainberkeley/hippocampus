@@ -61,6 +61,7 @@ struct MemoryWorkspaceView: View {
     let reader: BrainReader
     @Binding var selection: MemoryWorkspaceSelection
     var searchFocusTrigger: Bool
+    var focusRequest: RecallFocusRequest? = nil
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
@@ -123,6 +124,7 @@ struct MemoryWorkspaceView: View {
                     SearchView(
                         viewModel: SearchViewModel(reader: reader),
                         focusTrigger: searchFocusTrigger,
+                        focusRequest: focusRequest,
                         reader: reader
                     )
                 case .timeline:

@@ -5,6 +5,7 @@ import SwiftUI
 struct SearchView: View {
     @StateObject var viewModel: SearchViewModel
     var focusTrigger: Bool = false
+    var focusRequest: RecallFocusRequest? = nil
     /// Injected so `DetailPaneView`'s related-hits flyout (cycle 8.37
     /// PR-3) can resolve linked event ids. Optional so previews / tests
     /// that stub the VM can omit it — the flyout button hides in that
@@ -36,6 +37,11 @@ struct SearchView: View {
         .background(Color.brandBgPrimary)
         .task {
             await viewModel.reloadObservedApps()
+        }
+        .task(id: focusRequest) {
+            if let focusRequest {
+                await viewModel.focusEvent(id: focusRequest.eventId)
+            }
         }
         .onChange(of: focusTrigger) { _, _ in
             isSearchFieldFocused = true
@@ -115,7 +121,9 @@ struct SearchView: View {
                 .buttonStyle(.bordered)
                 .tint(Color.brandMint)
             }
-        } else if viewModel.query.isEmpty && !viewModel.filters.anyActive {
+        } else if viewModel.hits.isEmpty
+            && viewModel.query.isEmpty
+            && !viewModel.filters.anyActive {
             ContentUnavailableView(
                 "Type to search your memory",
                 systemImage: "magnifyingglass",

@@ -35,6 +35,35 @@ private struct ScriptedReader: BrainReader {
     }
 }
 
+/// Simulates a backend that notices cancellation but still completes its
+/// current read. The popup must reject that stale completion rather than let
+/// an older query overwrite the latest one.
+private struct RacingReader: BrainReader {
+    func search(_ opts: SearchOptions) async throws -> [Hit] {
+        if opts.text == "slow" {
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+            } catch {
+                // Database and FFI calls are not guaranteed to stop merely
+                // because their surrounding Task was cancelled.
+            }
+            return [makeHit(id: 1)]
+        }
+        return [makeHit(id: 2)]
+    }
+    func recentEvents(limit: Int) async throws -> [Hit] { [] }
+    func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
+    func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { [] }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
+    func summaryStats() async throws -> SummaryStats {
+        SummaryStats(totalEvents: 0, oldestTsUs: nil, newestTsUs: nil, diskBytes: 0)
+    }
+}
+
 private func makeHit(id: UInt64, url: String? = nil) -> Hit {
     Hit(
         eventId: id,
@@ -109,6 +138,30 @@ final class GlobalRecallPopupViewModelTests: XCTestCase {
         // the in-recall route — Spotlight semantics.
         let action = vm.invokeAction(preferExternal: true)
         XCTAssertEqual(action, .openInRecallUI(eventId: 7))
+    }
+
+    func testInvokeActionAtUsesTappedRowInsteadOfKeyboardSelection() async {
+        let hits = [makeHit(id: 7), makeHit(id: 8)]
+        let vm = GlobalRecallPopupViewModel(reader: ScriptedReader(scripted: hits))
+        await vm.perform(query: "x")
+
+        XCTAssertEqual(
+            vm.invokeAction(at: 1, preferExternal: false),
+            .openInRecallUI(eventId: 8)
+        )
+        XCTAssertEqual(vm.selectedIndex, 1)
+    }
+
+    func testOlderSearchCannotOverwriteNewerResults() async throws {
+        let vm = GlobalRecallPopupViewModel(reader: RacingReader())
+        let slow = Task { await vm.perform(query: "slow") }
+        try await Task.sleep(for: .milliseconds(20))
+
+        await vm.perform(query: "fast")
+        await slow.value
+
+        XCTAssertEqual(vm.results.map(\.eventId), [2])
+        XCTAssertFalse(vm.isSearching)
     }
 
     func testInvokeActionReturnsNilWhenNoResults() async {

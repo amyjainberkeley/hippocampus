@@ -20,12 +20,12 @@ struct LivePreviewSlide: View {
         SlideContainer {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 VStack(spacing: OnboardingDesign.Space.md) {
-                    SectionChip(text: "Live Preview")
-                    OnboardingDesign.TypeRamp.title("What Hippocampus captures")
+                    SectionChip(text: "Example Preview")
+                    OnboardingDesign.TypeRamp.title("What Hippocampus can capture")
                         .multilineTextAlignment(.center)
 
                     OnboardingDesign.TypeRamp.body(
-                        "A live preview of the capture pipeline. Sensitive apps are blocked automatically."
+                        "These sample rows show the capture policy. Your own activity starts only after setup is complete."
                     )
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -92,9 +92,9 @@ struct LivePreviewSlide: View {
 
     private var counterBar: some View {
         HStack(spacing: OnboardingDesign.Space.lg) {
-            Label("\(capturedCount) captured", systemImage: "checkmark.circle.fill")
+            Label("\(capturedCount) would be captured", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(OnboardingDesign.Palette.success)
-            Label("\(blockedCount) blocked", systemImage: "xmark.circle.fill")
+            Label("\(blockedCount) would be blocked", systemImage: "xmark.circle.fill")
                 .foregroundStyle(OnboardingDesign.Palette.excluded)
         }
         .font(.system(size: 13, weight: .medium))

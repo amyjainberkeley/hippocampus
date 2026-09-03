@@ -25,26 +25,48 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
             ]
         )
 
-        // Wire the CEO-directed Spotlight-like recall popup: ⇧⌘Space
-        // toggles a floating panel that types-through to the same
-        // FFI search path as the main recall UI. Registration is
-        // best-effort — if Carbon returns an error (e.g. another app
-        // has claimed the same combo), we surface a menu-bar hint
-        // and continue booting so the recall UI proper still works.
+        // The always-running Hippocampus shell owns the system-wide hotkey.
+        // This child process owns only the popup and handles the initial
+        // command passed by the shell.
         MainActor.assumeIsolated {
             GlobalRecallPopupController.shared.configure(reader: MCIRecallApp.reader)
-            let result = GlobalHotkeyManager.shared.registerDefault {
-                GlobalRecallPopupController.shared.toggle()
+            DistributedNotificationCenter.default().addObserver(
+                self,
+                selector: #selector(receiveRecallCommand(_:)),
+                name: RecallLaunchRequest.distributedCommandName,
+                object: nil
+            )
+            let launchRequest = RecallLaunchRequest(
+                environment: ProcessInfo.processInfo.environment
+            )
+            if launchRequest.openPopup {
+                DispatchQueue.main.async {
+                    GlobalRecallPopupController.shared.show()
+                }
             }
-            if case .osError = result {
-                // Not fatal; the popup can still be invoked via the
-                // hippocampus://recall?popup=1 URL or the ⌘K Action
-                // Panel command. Log so support has a trail.
-                NSLog(
-                    "MCI: global hotkey registration failed (%@); " +
-                    "popup remains accessible via ⌘K command / URL scheme.",
-                    String(describing: result)
-                )
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    @objc
+    private func receiveRecallCommand(_ notification: Notification) {
+        guard let request = RecallLaunchRequest(userInfo: notification.userInfo) else { return }
+        Task { @MainActor in
+            NSApp.activate(ignoringOtherApps: true)
+            let navigationRequest = RecallLaunchRequest(
+                tab: request.tab,
+                focusEventId: request.focusEventId,
+                openPopup: false
+            )
+            NotificationCenter.default.post(
+                name: RecallLaunchRequest.localCommandName,
+                object: navigationRequest
+            )
+            if request.openPopup {
+                GlobalRecallPopupController.shared.show()
             }
         }
     }
@@ -61,24 +83,17 @@ struct MCIRecallApp: App {
 
     var body: some Scene {
         WindowGroup("Hippocampus") {
+            let launchRequest = RecallLaunchRequest(
+                environment: ProcessInfo.processInfo.environment
+            )
             RootView(
                 reader: MCIRecallApp.reader,
-                initialTab: MCIRecallApp.initialTabFromEnv()
+                initialTab: launchRequest.tab ?? .search,
+                initialFocusEventId: launchRequest.focusEventId
             )
             .preferredColorScheme(.light)
             .frame(minWidth: 720, minHeight: 480)
             .background(Color.brandBgPrimary)
-            .onOpenURL { url in
-                // `hippocampus://recall?popup=1` — invoked by the
-                // ⌘K Action Panel from other Hippocampus apps or a
-                // command-palette shortcut. Presents the global
-                // popup without touching the current tab state.
-                let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-                let items = comps?.queryItems ?? []
-                if items.contains(where: { $0.name == "popup" && $0.value == "1" }) {
-                    GlobalRecallPopupController.shared.show()
-                }
-            }
             .task {
                 // Per `docs/design/brief-viewer-spec.md` §"When the user
                 // discovers their first brief": on Recall app launch, ask
@@ -97,18 +112,6 @@ struct MCIRecallApp: App {
         }
         .defaultPosition(.center)
         .defaultSize(width: 900, height: 600)
-    }
-
-    /// Read `MCI_INITIAL_TAB` set by Hippocampus.app when handling a
-    /// `hippocampus://recall?tab=…` deep-link. Defaults to `.search`.
-    @MainActor
-    private static func initialTabFromEnv() -> RecallTab {
-        guard let raw = ProcessInfo.processInfo.environment[RecallTab.initialTabEnvVar],
-              let tab = RecallTab.from(deepLinkValue: raw)
-        else {
-            return .search
-        }
-        return tab
     }
 
     @MainActor
@@ -143,15 +146,27 @@ struct RootView: View {
     let reader: BrainReader
     @State private var selection: MemoryWorkspaceSelection
     @State private var searchFocusTrigger = false
+    @State private var focusRequest: RecallFocusRequest?
+    @State private var nextFocusSequence: UInt64
     @ObservedObject private var actionPanelRegistry = ActionPanelRegistry.shared
     // Cycle 8.54 — "What's new" release-notes modal. Coordinator owns
     // the last-shown-version bookkeeping (UserDefaults) + the parsed
     // release loaded from Contents/Resources/CHANGELOG.md.
     @StateObject private var whatsNewCoord = WhatsNewCoordinator()
 
-    init(reader: BrainReader, initialTab: RecallTab = .search) {
+    init(
+        reader: BrainReader,
+        initialTab: RecallTab = .search,
+        initialFocusEventId: UInt64? = nil
+    ) {
         self.reader = reader
         self._selection = State(initialValue: MemoryWorkspaceSelection(initialTab: initialTab))
+        self._focusRequest = State(
+            initialValue: initialFocusEventId.map {
+                RecallFocusRequest(eventId: $0, sequence: 1)
+            }
+        )
+        self._nextFocusSequence = State(initialValue: initialFocusEventId == nil ? 1 : 2)
     }
 
     /// Global (non-contextual) commands. Registered once for the
@@ -298,9 +313,20 @@ struct RootView: View {
         MemoryWorkspaceView(
             reader: reader,
             selection: $selection,
-            searchFocusTrigger: searchFocusTrigger
+            searchFocusTrigger: searchFocusTrigger,
+            focusRequest: focusRequest
         )
         .background(Color.brandBgPrimary)
+        .onOpenURL { url in
+            guard let request = RecallLaunchRequest(url: url) else { return }
+            apply(request)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: RecallLaunchRequest.localCommandName)
+        ) { notification in
+            guard let request = notification.object as? RecallLaunchRequest else { return }
+            apply(request)
+        }
         .focusable(true, interactions: .automatic)
         .onKeyPress(
             keys: Set(
@@ -360,6 +386,23 @@ struct RootView: View {
             // coordinator no-ops on repeat launches at the same
             // version, so this is safe to call on every boot.
             whatsNewCoord.maybeShowOnBoot()
+        }
+    }
+
+    private func apply(_ request: RecallLaunchRequest) {
+        if request.openPopup {
+            GlobalRecallPopupController.shared.show()
+        }
+        if let tab = request.tab {
+            selection = MemoryWorkspaceSelection(initialTab: tab)
+        }
+        if let eventId = request.focusEventId {
+            selection = .search
+            focusRequest = RecallFocusRequest(
+                eventId: eventId,
+                sequence: nextFocusSequence
+            )
+            nextFocusSequence &+= 1
         }
     }
 }

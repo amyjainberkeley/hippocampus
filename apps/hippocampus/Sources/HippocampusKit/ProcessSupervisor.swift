@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: TBD-private
 import Foundation
+import AppKit
 import os
 
 public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
@@ -126,6 +127,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var shutdownRequested = false
     private var requestedPauseState = false
     private var pauseTask: Task<Void, Never>?
+    /// The Recall executable is a single commanded child. Keeping the process
+    /// handle prevents every menu action or hotkey press from launching a
+    /// competing window and duplicate database reader.
+    private var recallProcess: Process?
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -710,7 +715,29 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         healthTimer = nil
     }
 
-    public func openRecallUI(initialTab: String? = nil) {
+    public func openRecallUI(
+        initialTab: String? = nil,
+        focusEventId: UInt64? = nil,
+        openPopup: Bool = false
+    ) {
+        var command: [String: Any] = ["open_popup": openPopup]
+        if let initialTab, !initialTab.isEmpty { command["tab"] = initialTab }
+        if let focusEventId, focusEventId > 0 {
+            command["focus_event_id"] = NSNumber(value: focusEventId)
+        }
+
+        if let recallProcess, recallProcess.isRunning {
+            DistributedNotificationCenter.default().post(
+                name: Notification.Name("ai.hippocampus.recall.command.v1"),
+                object: nil,
+                userInfo: command
+            )
+            NSRunningApplication(processIdentifier: recallProcess.processIdentifier)?
+                .activate(options: [.activateAllWindows])
+            return
+        }
+        recallProcess = nil
+
         guard let recallPath = locator.recallUIPath() else { return }
         var environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,
@@ -719,9 +746,36 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             developmentKeyMode: developmentKeyMode
         )
         if let initialTab, !initialTab.isEmpty { environment["MCI_INITIAL_TAB"] = initialTab }
+        if let focusEventId, focusEventId > 0 {
+            environment["MCI_INITIAL_FOCUS_EVENT_ID"] = String(focusEventId)
+        }
+        if openPopup {
+            environment["MCI_OPEN_GLOBAL_POPUP"] = "1"
+        }
         let task = ChildProcessEnvironment.makeProcess(baseEnvironment: environment)
         task.executableURL = recallPath
-        try? task.run()
+        do {
+            try task.run()
+            recallProcess = task
+        } catch {
+            logger.error("supervisor: Recall launch failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Retire the commanded Recall child when the owning menu-bar process exits.
+    /// Capture restarts intentionally do not call this; Recall remains useful
+    /// while capture is paused or a helper generation is being replaced.
+    public func closeRecallUI() {
+        guard let recallProcess else { return }
+        if recallProcess.isRunning {
+            let runningApplication = NSRunningApplication(
+                processIdentifier: recallProcess.processIdentifier
+            )
+            if runningApplication?.terminate() != true {
+                recallProcess.terminate()
+            }
+        }
+        self.recallProcess = nil
     }
 
     public func openOnboarding(initialStep: String? = nil) -> Bool {

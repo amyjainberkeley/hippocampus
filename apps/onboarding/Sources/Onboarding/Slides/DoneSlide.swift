@@ -10,7 +10,7 @@ struct DoneSlide: View {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 HeroHeader(
                     title: "You're all set",
-                    subtitle: "Hippocampus is now watching for activity. Look for the menu-bar icon.",
+                    subtitle: "Capture begins when you click Get Started. You can pause it any time from the menu bar.",
                     titleStyle: .display
                 ) {
                     Image(systemName: "checkmark.circle.fill")
@@ -30,6 +30,10 @@ struct DoneSlide: View {
             checkRow(
                 granted: flowVM.screenRecordingPermission.status == .granted,
                 label: "Screen Recording"
+            )
+            checkRow(
+                granted: flowVM.accessibilityPermission.status == .granted,
+                label: "Accessibility privacy checks"
             )
             checkRow(granted: true, label: "Encrypted")
             checkRow(granted: true, label: "Retention policy set")

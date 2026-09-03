@@ -15,20 +15,47 @@ final class HippocampusURLRouteTests: XCTestCase {
 
     func testRecallWithoutTabQuery() {
         let url = URL(string: "hippocampus://recall")!
-        XCTAssertEqual(HippocampusURLRoute.parse(url), .openRecall(tab: nil))
+        XCTAssertEqual(
+            HippocampusURLRoute.parse(url),
+            .openRecall(tab: nil, focusEventId: nil, openPopup: false)
+        )
     }
 
     func testRecallWithTabQuery() {
         let url = URL(string: "hippocampus://recall?tab=brief")!
-        XCTAssertEqual(HippocampusURLRoute.parse(url), .openRecall(tab: "brief"))
+        XCTAssertEqual(
+            HippocampusURLRoute.parse(url),
+            .openRecall(tab: "brief", focusEventId: nil, openPopup: false)
+        )
     }
 
     func testRecallWithPopupQuery() {
-        // `popup=1` is consumed by the recall-ui process itself, not
-        // the top-level shell — from HippocampusApp's perspective we
-        // still just spawn the recall UI (tab: nil).
         let url = URL(string: "hippocampus://recall?popup=1")!
-        XCTAssertEqual(HippocampusURLRoute.parse(url), .openRecall(tab: nil))
+        XCTAssertEqual(
+            HippocampusURLRoute.parse(url),
+            .openRecall(tab: nil, focusEventId: nil, openPopup: true)
+        )
+    }
+
+    func testRecallCarriesFocusedEvent() {
+        let url = URL(string: "hippocampus://recall?tab=search&focus=42")!
+        XCTAssertEqual(
+            HippocampusURLRoute.parse(url),
+            .openRecall(tab: "search", focusEventId: 42, openPopup: false)
+        )
+    }
+
+    func testRecallRejectsZeroAndMalformedFocusValues() {
+        let zero = URL(string: "hippocampus://recall?focus=0")!
+        let malformed = URL(string: "hippocampus://recall?focus=not-a-number")!
+        XCTAssertEqual(
+            HippocampusURLRoute.parse(zero),
+            .openRecall(tab: nil, focusEventId: nil, openPopup: false)
+        )
+        XCTAssertEqual(
+            HippocampusURLRoute.parse(malformed),
+            .openRecall(tab: nil, focusEventId: nil, openPopup: false)
+        )
     }
 
     // MARK: - Onboarding route (cycle 8.48 — new)

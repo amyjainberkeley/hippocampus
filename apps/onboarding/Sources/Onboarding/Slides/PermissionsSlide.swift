@@ -136,10 +136,9 @@ struct PermissionsSlide: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // Grant / skip row. Both buttons are always present — the
-            // Skip affordance is an accessibility requirement (SetApp /
-            // Alfred conflicts, corporate-managed Macs where TCC is
-            // MDM-locked, etc. must never dead-end the user).
+            // Screen Recording and Accessibility jointly enforce the screen
+            // privacy boundary, so neither can be skipped. Automation and
+            // Full Disk Access remain optional and may be deferred.
             if currentStatus != .granted && outcome != .denied {
                 HStack(spacing: 12) {
                     Button {
@@ -149,10 +148,12 @@ struct PermissionsSlide: View {
                     }
                     .onboardingPrimary()
 
-                    Button("Skip for now") {
-                        flowVM.recordPermissionOutcome(surface, .skipped)
+                    if surface == .automation || surface == .fullDiskAccess {
+                        Button("Skip for now") {
+                            flowVM.recordPermissionOutcome(surface, .skipped)
+                        }
+                        .onboardingSecondary()
                     }
-                    .onboardingSecondary()
                 }
             }
 
@@ -203,11 +204,10 @@ struct PermissionsSlide: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 10) {
-                if surface == .screenRecording {
-                    // Screen Recording is hard-required. Offer the
-                    // Reset & Retry affordance (PR #44) rather than
-                    // "Continue" — a "Continue" past denied SR would
-                    // drop the user into a non-functional app.
+                if surface == .screenRecording || surface == .accessibility {
+                    // Both screen permissions are hard-required. A Continue
+                    // path would complete onboarding into a capture pipeline
+                    // that correctly refuses to retain anything.
                     Button {
                         Task { await performResetAndRetry(surface: surface) }
                     } label: {
@@ -223,9 +223,8 @@ struct PermissionsSlide: View {
                     .onboardingPrimary()
                     .disabled(isResetting)
                 } else {
-                    // AX / Automation / FDA are soft-fail — inline
-                    // "Continue" advances the sequence, matching the
-                    // Cotypist pattern.
+                    // Automation / FDA are soft-fail and can be revisited in
+                    // context when the corresponding integration is enabled.
                     Button("Continue") {
                         flowVM.recordPermissionOutcome(surface, .denied)
                     }
@@ -238,7 +237,8 @@ struct PermissionsSlide: View {
                 .onboardingSecondary()
             }
 
-            if showResetFailedFallback && surface == .screenRecording {
+            if showResetFailedFallback
+                && (surface == .screenRecording || surface == .accessibility) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Still denied after reset.")
                         .font(.system(size: 12, weight: .medium))

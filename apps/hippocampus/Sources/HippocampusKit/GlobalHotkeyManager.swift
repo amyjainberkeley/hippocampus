@@ -1,5 +1,5 @@
-// GlobalHotkeyManager.swift — system-wide hotkey binding for the
-// Spotlight-like recall popup (CEO-directed flagship feature).
+// GlobalHotkeyManager.swift — system-wide hotkey binding owned by the
+// always-running Hippocampus menu-bar process.
 //
 // # Why Carbon `RegisterEventHotKey` instead of NSEvent/CGEventTap
 //
@@ -219,7 +219,7 @@ final class CarbonHotkeyRegistrar: GlobalHotkeyRegistrar, @unchecked Sendable {
             return .osError(installStatus)
         }
 
-        var hkID = EventHotKeyID(signature: signature, id: hotkeyID)
+        let hkID = EventHotKeyID(signature: signature, id: hotkeyID)
         let regStatus = RegisterEventHotKey(
             spec.keyCode,
             spec.modifiers.rawValue,

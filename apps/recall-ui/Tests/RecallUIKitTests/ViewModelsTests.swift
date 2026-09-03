@@ -83,6 +83,29 @@ final class SearchViewModelTests: XCTestCase {
         XCTAssertFalse(vm.isSearching)
     }
 
+    func testFocusEventLoadsExactHitAndOpensDetail() async {
+        let vm = SearchViewModel(reader: StubBrainReader())
+
+        await vm.focusEvent(id: 102)
+
+        XCTAssertEqual(vm.hits.map(\.eventId), [102])
+        XCTAssertEqual(vm.selectedHitId, 102)
+        XCTAssertTrue(vm.isDetailFocused)
+        XCTAssertNil(vm.errorMessage)
+    }
+
+    func testFocusMissingEventLeavesNoStaleSelection() async {
+        let vm = SearchViewModel(reader: StubBrainReader())
+        await vm.focusEvent(id: 102)
+
+        await vm.focusEvent(id: 999_999)
+
+        XCTAssertTrue(vm.hits.isEmpty)
+        XCTAssertNil(vm.selectedHitId)
+        XCTAssertFalse(vm.isDetailFocused)
+        XCTAssertNil(vm.errorMessage)
+    }
+
     func testClearResetsState() async {
         let vm = SearchViewModel(reader: StubBrainReader())
         vm.query = "privacy"
