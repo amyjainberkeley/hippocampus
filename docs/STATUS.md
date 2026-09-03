@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-03._
 
-Audited code baseline: `d6da607`
+Audited code baseline: `15570c1`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -247,7 +247,14 @@ truthfully scoped evidence product.
   TERM/KILL escalation. Executable fixtures prove ordinary descendants and
   descendants created by TERM handlers are gone before timeout returns. Failed
   builds remove incomplete canonical DMGs and sidecars; successful cleanup
-  preserves completed artifacts.
+  preserves completed artifacts. The DMG stages the generated canonical terms
+  as a visible `License.rtf`; the removed macOS unflatten/Rez/flatten flow is no
+  longer treated as an optional success path.
+- The capture stream's active-work ceiling is now 2 fps, matching the product
+  footprint design instead of the prior 5 fps default. The 1 Hz privacy
+  cascade floor remains independent, so lower frame delivery cannot suppress
+  periodic protected-surface checks. The source contract and capture helper
+  build pass; a rebuilt-app live resource soak remains required.
 - The most recently verified `181 MB` debug ad-hoc app at
   `apps/hippocampus/dist/Hippocampus.app` includes Arctic
   Embed S as its only bundled model, passes signed App Group and model
