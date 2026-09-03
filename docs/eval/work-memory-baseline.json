@@ -4,7 +4,7 @@
   "launch_qualified": false,
   "dataset": "eval/work-memory/synthetic-v1.json",
   "dataset_id": "synthetic-work-memory-v1",
-  "dataset_checksum_sha256": "96d43502f52d186cafc905dca81737ae2c07c00264d0faf2468c29b912fa131f",
+  "dataset_checksum_sha256": "f56ec3a13733343b6819edd86782d28c4ec9f6c5ee9fbb3a2d0b19c03282ae4d",
   "dataset_description": "Synthetic technical-work benchmark for Hippocampus v1. Covers exact recall, paraphrase, temporal questions, cross-session synthesis, changed facts, contradiction, source attribution, and unanswerable queries across GitHub, terminal, browser, Slack, Linear, and files.",
   "overall": [
     {
@@ -51,11 +51,11 @@
       "answerable_instances": 21,
       "unanswerable_instances": 3,
       "latency_ms": {
-        "min": 8.781625,
-        "p50": 9.474125,
-        "p95": 10.010708,
-        "max": 15.801499999999999,
-        "mean": 9.635387208333333
+        "min": 14.297875,
+        "p50": 15.094167,
+        "p95": 22.149584,
+        "max": 41.321166,
+        "mean": 16.410385416666667
       },
       "index_size_bytes": {
         "min": 45056.0,
@@ -109,11 +109,11 @@
       "answerable_instances": 21,
       "unanswerable_instances": 3,
       "latency_ms": {
-        "min": 39.665958,
-        "p50": 41.436375,
-        "p95": 62.324458,
-        "max": 62.724917000000005,
-        "mean": 45.389321208333335
+        "min": 47.33729099999999,
+        "p50": 50.115417,
+        "p95": 72.06170900000001,
+        "max": 75.893417,
+        "mean": 53.89057825
       },
       "index_size_bytes": {
         "min": 45056.0,
@@ -170,11 +170,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 8.904917,
-          "p50": 9.323625,
-          "p95": 9.591375,
-          "max": 9.591375,
-          "mean": 9.273305666666666
+          "min": 14.761542,
+          "p50": 15.090083,
+          "p95": 15.936083,
+          "max": 15.936083,
+          "mean": 15.262569333333332
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -228,11 +228,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 40.410792,
-          "p50": 41.0875,
-          "p95": 53.147875,
-          "max": 53.147875,
-          "mean": 44.882055666666666
+          "min": 47.865916,
+          "p50": 49.136625,
+          "p95": 66.4125,
+          "max": 66.4125,
+          "mean": 54.47168033333333
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -288,11 +288,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 9.025167,
-          "p50": 9.210875,
-          "p95": 9.682917,
-          "max": 9.682917,
-          "mean": 9.306319666666665
+          "min": 14.528292,
+          "p50": 14.56175,
+          "p95": 14.776958,
+          "max": 14.776958,
+          "mean": 14.622333333333335
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -346,11 +346,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 39.665958,
-          "p50": 41.079042,
-          "p95": 41.334500000000006,
-          "max": 41.334500000000006,
-          "mean": 40.69316666666667
+          "min": 47.783166,
+          "p50": 47.955208999999996,
+          "p95": 48.190084,
+          "max": 48.190084,
+          "mean": 47.97615299999999
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -406,11 +406,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 9.488916,
-          "p50": 9.554458,
-          "p95": 10.010708,
-          "max": 10.010708,
-          "mean": 9.684694
+          "min": 14.797457999999999,
+          "p50": 14.825041,
+          "p95": 15.118875000000001,
+          "max": 15.118875000000001,
+          "mean": 14.913791333333334
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -464,11 +464,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 51.459166,
-          "p50": 51.4955,
-          "p95": 51.670459,
-          "max": 51.670459,
-          "mean": 51.54170833333333
+          "min": 58.750208,
+          "p50": 59.696292,
+          "p95": 60.397667000000006,
+          "max": 60.397667000000006,
+          "mean": 59.61472233333333
         },
         "index_size_bytes": {
           "min": 53248.0,
@@ -524,11 +524,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 9.470792000000001,
-          "p50": 9.502583,
-          "p95": 15.801499999999999,
-          "max": 15.801499999999999,
-          "mean": 11.591625
+          "min": 15.094167,
+          "p50": 15.191833,
+          "p95": 41.321166,
+          "max": 41.321166,
+          "mean": 23.869055333333336
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -582,11 +582,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 42.719125,
-          "p50": 44.334542,
-          "p95": 62.324458,
-          "max": 62.324458,
-          "mean": 49.79270833333333
+          "min": 50.115417,
+          "p50": 50.151832999999996,
+          "p95": 75.893417,
+          "max": 75.893417,
+          "mean": 58.72022233333333
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -642,11 +642,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 8.781625,
-          "p50": 9.474125,
-          "p95": 9.671249999999999,
-          "max": 9.671249999999999,
-          "mean": 9.309
+          "min": 15.201417,
+          "p50": 15.373,
+          "p95": 15.878,
+          "max": 15.878,
+          "mean": 15.484138999999999
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -700,11 +700,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 41.384125,
-          "p50": 42.846333,
-          "p95": 43.161667,
-          "max": 43.161667,
-          "mean": 42.46404166666667
+          "min": 48.901042,
+          "p50": 51.808166,
+          "p95": 52.756334,
+          "max": 52.756334,
+          "mean": 51.155180666666666
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -760,11 +760,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 8.835709000000001,
-          "p50": 9.538375,
-          "p95": 9.567375,
-          "max": 9.567375,
-          "mean": 9.313819666666667
+          "min": 14.549292,
+          "p50": 15.094417,
+          "p95": 15.4175,
+          "max": 15.4175,
+          "mean": 15.020403000000002
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -818,11 +818,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 39.704708,
-          "p50": 39.883584,
-          "p95": 40.504583,
-          "max": 40.504583,
-          "mean": 40.03095833333333
+          "min": 47.33729099999999,
+          "p50": 47.410292,
+          "p95": 56.491709,
+          "max": 56.491709,
+          "mean": 50.413097333333326
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -878,11 +878,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 9.118417,
-          "p50": 9.377084,
-          "p95": 9.855125,
-          "max": 9.855125,
-          "mean": 9.450208666666667
+          "min": 15.02225,
+          "p50": 15.674292,
+          "p95": 22.149584,
+          "max": 22.149584,
+          "mean": 17.615375333333333
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -936,11 +936,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 41.271,
-          "p50": 54.043959,
-          "p95": 62.724917000000005,
-          "max": 62.724917000000005,
-          "mean": 52.679958666666664
+          "min": 49.619875,
+          "p50": 60.957083000000004,
+          "p95": 72.06170900000001,
+          "max": 72.06170900000001,
+          "mean": 60.87955566666667
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -996,11 +996,11 @@
         "answerable_instances": 0,
         "unanswerable_instances": 3,
         "latency_ms": {
-          "min": 8.93125,
-          "p50": 9.087958,
-          "p95": 9.443167,
-          "max": 9.443167,
-          "mean": 9.154125
+          "min": 14.297875,
+          "p50": 14.500375,
+          "p95": 14.687999999999999,
+          "max": 14.687999999999999,
+          "mean": 14.495416666666666
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1054,11 +1054,11 @@
         "answerable_instances": 0,
         "unanswerable_instances": 3,
         "latency_ms": {
-          "min": 40.787458,
-          "p50": 40.866082999999996,
-          "p95": 41.436375,
-          "max": 41.436375,
-          "mean": 41.029971999999994
+          "min": 47.402542,
+          "p50": 47.692917,
+          "p95": 48.586584,
+          "max": 48.586584,
+          "mean": 47.89401433333334
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1116,11 +1116,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 8.904917,
-          "p50": 9.474125,
-          "p95": 9.488916,
-          "max": 9.488916,
-          "mean": 9.289319333333333
+          "min": 15.118875000000001,
+          "p50": 15.878,
+          "p95": 15.936083,
+          "max": 15.936083,
+          "mean": 15.644319333333334
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1174,11 +1174,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 40.410792,
-          "p50": 41.384125,
-          "p95": 51.670459,
-          "max": 51.670459,
-          "mean": 44.488458666666666
+          "min": 48.901042,
+          "p50": 49.136625,
+          "p95": 58.750208,
+          "max": 58.750208,
+          "mean": 52.26262499999999
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1234,11 +1234,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 8.904917,
-          "p50": 9.323625,
-          "p95": 9.591375,
-          "max": 9.591375,
-          "mean": 9.273305666666666
+          "min": 14.761542,
+          "p50": 15.090083,
+          "p95": 15.936083,
+          "max": 15.936083,
+          "mean": 15.262569333333332
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1292,11 +1292,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 40.410792,
-          "p50": 41.0875,
-          "p95": 53.147875,
-          "max": 53.147875,
-          "mean": 44.882055666666666
+          "min": 47.865916,
+          "p50": 49.136625,
+          "p95": 66.4125,
+          "max": 66.4125,
+          "mean": 54.47168033333333
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1352,11 +1352,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 9.025167,
-          "p50": 9.210875,
-          "p95": 9.682917,
-          "max": 9.682917,
-          "mean": 9.306319666666665
+          "min": 14.528292,
+          "p50": 14.56175,
+          "p95": 14.776958,
+          "max": 14.776958,
+          "mean": 14.622333333333335
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1410,11 +1410,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 39.665958,
-          "p50": 41.079042,
-          "p95": 41.334500000000006,
-          "max": 41.334500000000006,
-          "mean": 40.69316666666667
+          "min": 47.783166,
+          "p50": 47.955208999999996,
+          "p95": 48.190084,
+          "max": 48.190084,
+          "mean": 47.97615299999999
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1470,11 +1470,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 9.488916,
-          "p50": 9.554458,
-          "p95": 10.010708,
-          "max": 10.010708,
-          "mean": 9.684694
+          "min": 14.797457999999999,
+          "p50": 14.825041,
+          "p95": 15.118875000000001,
+          "max": 15.118875000000001,
+          "mean": 14.913791333333334
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1528,11 +1528,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 51.459166,
-          "p50": 51.4955,
-          "p95": 51.670459,
-          "max": 51.670459,
-          "mean": 51.54170833333333
+          "min": 58.750208,
+          "p50": 59.696292,
+          "p95": 60.397667000000006,
+          "max": 60.397667000000006,
+          "mean": 59.61472233333333
         },
         "index_size_bytes": {
           "min": 53248.0,
@@ -1588,11 +1588,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 9.470792000000001,
-          "p50": 9.502583,
-          "p95": 15.801499999999999,
-          "max": 15.801499999999999,
-          "mean": 11.591625
+          "min": 15.094167,
+          "p50": 15.191833,
+          "p95": 41.321166,
+          "max": 41.321166,
+          "mean": 23.869055333333336
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1646,11 +1646,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 42.719125,
-          "p50": 44.334542,
-          "p95": 62.324458,
-          "max": 62.324458,
-          "mean": 49.79270833333333
+          "min": 50.115417,
+          "p50": 50.151832999999996,
+          "p95": 75.893417,
+          "max": 75.893417,
+          "mean": 58.72022233333333
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1706,11 +1706,11 @@
         "answerable_instances": 7,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 8.904917,
-          "p50": 9.323625,
-          "p95": 9.567375,
-          "max": 9.567375,
-          "mean": 9.240974
+          "min": 14.297875,
+          "p50": 15.02225,
+          "p95": 15.936083,
+          "max": 15.936083,
+          "mean": 14.989526
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1764,11 +1764,11 @@
         "answerable_instances": 7,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 40.410792,
-          "p50": 41.334500000000006,
-          "p95": 51.4955,
-          "max": 51.4955,
-          "mean": 42.734348999999995
+          "min": 47.410292,
+          "p50": 49.136625,
+          "p95": 59.696292,
+          "max": 59.696292,
+          "mean": 50.026770875
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1824,11 +1824,11 @@
         "answerable_instances": 6,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 8.781625,
-          "p50": 9.210875,
-          "p95": 15.801499999999999,
-          "max": 15.801499999999999,
-          "mean": 10.201613142857143
+          "min": 14.528292,
+          "p50": 14.776958,
+          "p95": 41.321166,
+          "max": 41.321166,
+          "mean": 18.576309428571427
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1882,11 +1882,11 @@
         "answerable_instances": 6,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 39.665958,
-          "p50": 41.079042,
-          "p95": 62.324458,
-          "max": 62.324458,
-          "mean": 45.45463671428571
+          "min": 47.402542,
+          "p50": 52.756334,
+          "p95": 75.893417,
+          "max": 75.893417,
+          "mean": 55.58385171428572
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -1942,11 +1942,11 @@
         "answerable_instances": 4,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 9.443167,
-          "p50": 9.591375,
-          "p95": 9.855125,
-          "max": 9.855125,
-          "mean": 9.6123
+          "min": 14.500375,
+          "p50": 15.090083,
+          "p95": 15.674292,
+          "max": 15.674292,
+          "mean": 14.9823834
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2000,11 +2000,11 @@
         "answerable_instances": 4,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 39.665958,
-          "p50": 51.670459,
-          "p95": 54.043959,
-          "max": 54.043959,
-          "mean": 47.8788668
+          "min": 47.692917,
+          "p50": 58.750208,
+          "p95": 66.4125,
+          "max": 66.4125,
+          "mean": 56.4005584
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2060,11 +2060,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 8.781625,
-          "p50": 9.474125,
-          "p95": 9.671249999999999,
-          "max": 9.671249999999999,
-          "mean": 9.309
+          "min": 15.201417,
+          "p50": 15.373,
+          "p95": 15.878,
+          "max": 15.878,
+          "mean": 15.484138999999999
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2118,11 +2118,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 41.384125,
-          "p50": 42.846333,
-          "p95": 43.161667,
-          "max": 43.161667,
-          "mean": 42.46404166666667
+          "min": 48.901042,
+          "p50": 51.808166,
+          "p95": 52.756334,
+          "max": 52.756334,
+          "mean": 51.155180666666666
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2178,11 +2178,11 @@
         "answerable_instances": 13,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 8.835709000000001,
-          "p50": 9.554458,
-          "p95": 10.010708,
-          "max": 15.801499999999999,
-          "mean": 9.935458384615384
+          "min": 14.528292,
+          "p50": 15.094167,
+          "p95": 15.936083,
+          "max": 41.321166,
+          "mean": 17.05983330769231
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2236,11 +2236,11 @@
         "answerable_instances": 13,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 39.665958,
-          "p50": 41.334500000000006,
-          "p95": 54.043959,
-          "max": 62.324458,
-          "mean": 45.31439423076923
+          "min": 47.33729099999999,
+          "p50": 50.115417,
+          "p95": 60.957083000000004,
+          "max": 75.893417,
+          "mean": 54.09018599999999
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2296,11 +2296,11 @@
         "answerable_instances": 5,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 9.025167,
-          "p50": 9.538375,
-          "p95": 10.010708,
-          "max": 10.010708,
-          "mean": 9.4240555
+          "min": 14.56175,
+          "p50": 14.797457999999999,
+          "p95": 15.201417,
+          "max": 15.201417,
+          "mean": 14.853333333333333
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2354,11 +2354,11 @@
         "answerable_instances": 5,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 39.883584,
-          "p50": 41.334500000000006,
-          "p95": 51.459166,
-          "max": 51.459166,
-          "mean": 42.89834716666667
+          "min": 47.33729099999999,
+          "p50": 47.955208999999996,
+          "p95": 60.397667000000006,
+          "max": 60.397667000000006,
+          "mean": 50.44734016666666
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2414,11 +2414,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 8.835709000000001,
-          "p50": 9.538375,
-          "p95": 9.567375,
-          "max": 9.567375,
-          "mean": 9.313819666666667
+          "min": 14.549292,
+          "p50": 15.094417,
+          "p95": 15.4175,
+          "max": 15.4175,
+          "mean": 15.020403000000002
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2472,11 +2472,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 39.704708,
-          "p50": 39.883584,
-          "p95": 40.504583,
-          "max": 40.504583,
-          "mean": 40.03095833333333
+          "min": 47.33729099999999,
+          "p50": 47.410292,
+          "p95": 56.491709,
+          "max": 56.491709,
+          "mean": 50.413097333333326
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2532,11 +2532,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 9.118417,
-          "p50": 9.377084,
-          "p95": 9.855125,
-          "max": 9.855125,
-          "mean": 9.450208666666667
+          "min": 15.02225,
+          "p50": 15.674292,
+          "p95": 22.149584,
+          "max": 22.149584,
+          "mean": 17.615375333333333
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2590,11 +2590,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 0,
         "latency_ms": {
-          "min": 41.271,
-          "p50": 54.043959,
-          "p95": 62.724917000000005,
-          "max": 62.724917000000005,
-          "mean": 52.679958666666664
+          "min": 49.619875,
+          "p50": 60.957083000000004,
+          "p95": 72.06170900000001,
+          "max": 72.06170900000001,
+          "mean": 60.87955566666667
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2650,11 +2650,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 8.93125,
-          "p50": 9.470792000000001,
-          "p95": 9.554458,
-          "max": 9.554458,
-          "mean": 9.333396
+          "min": 14.297875,
+          "p50": 15.191833,
+          "p95": 22.149584,
+          "max": 22.149584,
+          "mean": 16.61608325
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2708,11 +2708,11 @@
         "answerable_instances": 3,
         "unanswerable_instances": 1,
         "latency_ms": {
-          "min": 41.436375,
-          "p50": 51.4955,
-          "p95": 62.724917000000005,
-          "max": 62.724917000000005,
-          "mean": 49.59397925
+          "min": 48.586584,
+          "p50": 59.696292,
+          "p95": 72.06170900000001,
+          "max": 72.06170900000001,
+          "mean": 57.6241045
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2768,11 +2768,11 @@
         "answerable_instances": 0,
         "unanswerable_instances": 3,
         "latency_ms": {
-          "min": 8.93125,
-          "p50": 9.087958,
-          "p95": 9.443167,
-          "max": 9.443167,
-          "mean": 9.154125
+          "min": 14.297875,
+          "p50": 14.500375,
+          "p95": 14.687999999999999,
+          "max": 14.687999999999999,
+          "mean": 14.495416666666666
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2826,11 +2826,11 @@
         "answerable_instances": 0,
         "unanswerable_instances": 3,
         "latency_ms": {
-          "min": 40.787458,
-          "p50": 40.866082999999996,
-          "p95": 41.436375,
-          "max": 41.436375,
-          "mean": 41.029971999999994
+          "min": 47.402542,
+          "p50": 47.692917,
+          "p95": 48.586584,
+          "max": 48.586584,
+          "mean": 47.89401433333334
         },
         "index_size_bytes": {
           "min": 45056.0,
@@ -2884,7 +2884,7 @@
           "excerpt": "PR 431 sets complete false on partial runs and exits nonzero when any requested arm fails."
         }
       ],
-      "latency_ms": 15.801499999999999,
+      "latency_ms": 41.321166,
       "index_size_bytes": 45056
     },
     {
@@ -2927,7 +2927,7 @@
           "excerpt": "Run cargo test -p mci-agent --test work_memory_bench to check the new parser and scoring metrics."
         }
       ],
-      "latency_ms": 9.470792000000001,
+      "latency_ms": 15.191833,
       "index_size_bytes": 45056
     },
     {
@@ -2971,7 +2971,7 @@
           "excerpt": "The baseline report records that a missing model or partial run is a failure and never a silently downgraded result."
         }
       ],
-      "latency_ms": 9.502583,
+      "latency_ms": 15.094167,
       "index_size_bytes": 45056
     },
     {
@@ -3002,7 +3002,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 8.781625,
+      "latency_ms": 15.373,
       "index_size_bytes": 45056
     },
     {
@@ -3033,7 +3033,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.474125,
+      "latency_ms": 15.878,
       "index_size_bytes": 45056
     },
     {
@@ -3065,7 +3065,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.671249999999999,
+      "latency_ms": 15.201417,
       "index_size_bytes": 45056
     },
     {
@@ -3108,7 +3108,7 @@
           "excerpt": "Right before the rollback we disabled hybrid on empty reports to stop fake green output."
         }
       ],
-      "latency_ms": 9.377084,
+      "latency_ms": 22.149584,
       "index_size_bytes": 45056
     },
     {
@@ -3152,7 +3152,7 @@
           "excerpt": "After opening HIPP 219 we added provenance coverage and typed abstention to the scorecard."
         }
       ],
-      "latency_ms": 9.855125,
+      "latency_ms": 15.674292,
       "index_size_bytes": 45056
     },
     {
@@ -3195,7 +3195,7 @@
           "excerpt": "Before we switched to the app bundle path the model lived at models ArcticEmbedS INT8 mlmodelc in the repo root."
         }
       ],
-      "latency_ms": 9.118417,
+      "latency_ms": 15.02225,
       "index_size_bytes": 45056
     },
     {
@@ -3228,7 +3228,7 @@
       "sessions_in_haystack": 3,
       "events_indexed": 3,
       "top_hits": [],
-      "latency_ms": 10.010708,
+      "latency_ms": 14.797457999999999,
       "index_size_bytes": 45056
     },
     {
@@ -3261,7 +3261,7 @@
       "sessions_in_haystack": 3,
       "events_indexed": 3,
       "top_hits": [],
-      "latency_ms": 9.554458,
+      "latency_ms": 14.825041,
       "index_size_bytes": 45056
     },
     {
@@ -3293,7 +3293,7 @@
       "sessions_in_haystack": 3,
       "events_indexed": 3,
       "top_hits": [],
-      "latency_ms": 9.488916,
+      "latency_ms": 15.118875000000001,
       "index_size_bytes": 45056
     },
     {
@@ -3324,7 +3324,7 @@
       "sessions_in_haystack": 3,
       "events_indexed": 3,
       "top_hits": [],
-      "latency_ms": 9.591375,
+      "latency_ms": 15.090083,
       "index_size_bytes": 45056
     },
     {
@@ -3366,10 +3366,10 @@
           "url": "browser://notes/model-history",
           "relevant": true,
           "score": 1.0,
-          "excerpt": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc."
+          "excerpt": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc."
         }
       ],
-      "latency_ms": 8.904917,
+      "latency_ms": 15.936083,
       "index_size_bytes": 45056
     },
     {
@@ -3400,7 +3400,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.323625,
+      "latency_ms": 14.761542,
       "index_size_bytes": 45056
     },
     {
@@ -3433,7 +3433,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.210875,
+      "latency_ms": 14.776958,
       "index_size_bytes": 45056
     },
     {
@@ -3466,7 +3466,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.682917,
+      "latency_ms": 14.528292,
       "index_size_bytes": 45056
     },
     {
@@ -3499,7 +3499,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.025167,
+      "latency_ms": 14.56175,
       "index_size_bytes": 45056
     },
     {
@@ -3531,7 +3531,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.538375,
+      "latency_ms": 15.094417,
       "index_size_bytes": 45056
     },
     {
@@ -3563,7 +3563,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.567375,
+      "latency_ms": 15.4175,
       "index_size_bytes": 45056
     },
     {
@@ -3595,7 +3595,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 8.835709000000001,
+      "latency_ms": 14.549292,
       "index_size_bytes": 45056
     },
     {
@@ -3627,7 +3627,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.087958,
+      "latency_ms": 14.687999999999999,
       "index_size_bytes": 45056
     },
     {
@@ -3659,7 +3659,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 8.93125,
+      "latency_ms": 14.297875,
       "index_size_bytes": 45056
     },
     {
@@ -3690,7 +3690,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 9.443167,
+      "latency_ms": 14.500375,
       "index_size_bytes": 45056
     },
     {
@@ -3745,7 +3745,7 @@
           "excerpt": "cargo test -p mci-agent --test work_memory_bench finished green after the partial-run guard landed."
         }
       ],
-      "latency_ms": 62.324458,
+      "latency_ms": 75.893417,
       "index_size_bytes": 45056
     },
     {
@@ -3799,7 +3799,7 @@
           "excerpt": "PR 430 adds the dataset envelope parser and the complete field in the JSON report."
         }
       ],
-      "latency_ms": 42.719125,
+      "latency_ms": 50.151832999999996,
       "index_size_bytes": 45056
     },
     {
@@ -3854,7 +3854,7 @@
           "excerpt": "ADR 0010 keeps vector similarity as a recall signal, not truth."
         }
       ],
-      "latency_ms": 44.334542,
+      "latency_ms": 50.115417,
       "index_size_bytes": 45056
     },
     {
@@ -3908,7 +3908,7 @@
           "excerpt": "PR 421 drafted an earlier synthetic dataset but did not use the production retriever."
         }
       ],
-      "latency_ms": 43.161667,
+      "latency_ms": 52.756334,
       "index_size_bytes": 45056
     },
     {
@@ -3962,7 +3962,7 @@
           "excerpt": "docs/eval/README.md lists the measurement surfaces but not the fusion caveat."
         }
       ],
-      "latency_ms": 41.384125,
+      "latency_ms": 48.901042,
       "index_size_bytes": 45056
     },
     {
@@ -4017,7 +4017,7 @@
           "excerpt": "The model check command verified the app bundle path exists on disk."
         }
       ],
-      "latency_ms": 42.846333,
+      "latency_ms": 51.808166,
       "index_size_bytes": 45056
     },
     {
@@ -4060,7 +4060,7 @@
           "excerpt": "Right before the rollback we disabled hybrid on empty reports to stop fake green output."
         }
       ],
-      "latency_ms": 62.724917000000005,
+      "latency_ms": 72.06170900000001,
       "index_size_bytes": 53248
     },
     {
@@ -4126,7 +4126,7 @@
           "excerpt": "PR 418 still reported only hit rate recall and MRR."
         }
       ],
-      "latency_ms": 54.043959,
+      "latency_ms": 60.957083000000004,
       "index_size_bytes": 53248
     },
     {
@@ -4180,7 +4180,7 @@
           "excerpt": "The model history note says the runner now prefers the installed app bundle model."
         }
       ],
-      "latency_ms": 41.271,
+      "latency_ms": 49.619875,
       "index_size_bytes": 45056
     },
     {
@@ -4247,7 +4247,7 @@
           "excerpt": "Local notes mention follow-up thresholds work but not the honesty rule."
         }
       ],
-      "latency_ms": 51.459166,
+      "latency_ms": 60.397667000000006,
       "index_size_bytes": 53248
     },
     {
@@ -4314,7 +4314,7 @@
           "excerpt": "Slack misc thread contains a screenshot but no rerun steps."
         }
       ],
-      "latency_ms": 51.4955,
+      "latency_ms": 59.696292,
       "index_size_bytes": 53248
     },
     {
@@ -4380,7 +4380,7 @@
           "excerpt": "PR 426 drafted baseline output without the final nonzero guard."
         }
       ],
-      "latency_ms": 51.670459,
+      "latency_ms": 58.750208,
       "index_size_bytes": 53248
     },
     {
@@ -4445,7 +4445,7 @@
           "excerpt": "Slack thread confirms the owner switch but not the issue number."
         }
       ],
-      "latency_ms": 53.147875,
+      "latency_ms": 66.4125,
       "index_size_bytes": 53248
     },
     {
@@ -4487,7 +4487,7 @@
           "url": "browser://notes/model-history",
           "relevant": true,
           "score": 0.8253127336502075,
-          "excerpt": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc."
+          "excerpt": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc."
         },
         {
           "rank": 2,
@@ -4501,7 +4501,7 @@
           "excerpt": "Older note says use models ArcticEmbedS INT8 mlmodelc from the repo root."
         }
       ],
-      "latency_ms": 40.410792,
+      "latency_ms": 49.136625,
       "index_size_bytes": 45056
     },
     {
@@ -4555,7 +4555,7 @@
           "excerpt": "Draft dataset note says the synthetic work-memory corpus has 18 cases."
         }
       ],
-      "latency_ms": 41.0875,
+      "latency_ms": 47.865916,
       "index_size_bytes": 45056
     },
     {
@@ -4611,7 +4611,7 @@
           "excerpt": "Old thread says a partial benchmark run can warn and still count as green."
         }
       ],
-      "latency_ms": 41.079042,
+      "latency_ms": 47.955208999999996,
       "index_size_bytes": 45056
     },
     {
@@ -4667,7 +4667,7 @@
           "excerpt": "Older PR note says provenance coverage is optional and can wait for later."
         }
       ],
-      "latency_ms": 39.665958,
+      "latency_ms": 48.190084,
       "index_size_bytes": 45056
     },
     {
@@ -4723,7 +4723,7 @@
           "excerpt": "Draft threshold thread says only hit at five matters."
         }
       ],
-      "latency_ms": 41.334500000000006,
+      "latency_ms": 47.783166,
       "index_size_bytes": 45056
     },
     {
@@ -4778,7 +4778,7 @@
           "excerpt": "The model path thread is about MCI_ARCTIC_MODEL_PATH and not the rollback."
         }
       ],
-      "latency_ms": 39.883584,
+      "latency_ms": 47.33729099999999,
       "index_size_bytes": 45056
     },
     {
@@ -4833,7 +4833,7 @@
           "excerpt": "docs/eval README lists the methodology docs but not the runner details."
         }
       ],
-      "latency_ms": 40.504583,
+      "latency_ms": 47.410292,
       "index_size_bytes": 45056
     },
     {
@@ -4888,7 +4888,7 @@
           "excerpt": "PR 440 moved the benchmark onto the production retriever path."
         }
       ],
-      "latency_ms": 39.704708,
+      "latency_ms": 56.491709,
       "index_size_bytes": 45056
     },
     {
@@ -4920,7 +4920,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 40.787458,
+      "latency_ms": 47.402542,
       "index_size_bytes": 45056
     },
     {
@@ -4952,7 +4952,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 41.436375,
+      "latency_ms": 48.586584,
       "index_size_bytes": 45056
     },
     {
@@ -4983,7 +4983,7 @@
       "sessions_in_haystack": 2,
       "events_indexed": 2,
       "top_hits": [],
-      "latency_ms": 40.866082999999996,
+      "latency_ms": 47.692917,
       "index_size_bytes": 45056
     }
   ],
@@ -5011,7 +5011,7 @@
       "abstention_separation_at_5_min": 0.9,
       "abstention_separation_at_10_min": 0.9,
       "mrr_min": 0.8785714285714286,
-      "latency_p95_ms_max": 124.648916,
+      "latency_p95_ms_max": 144.12341800000002,
       "index_size_p95_bytes_max": 75980.8
     },
     "lexical": {
@@ -5036,7 +5036,7 @@
       "abstention_separation_at_5_min": 0.2833333333333333,
       "abstention_separation_at_10_min": 0.2833333333333333,
       "mrr_min": 0.2833333333333333,
-      "latency_p95_ms_max": 35.010708,
+      "latency_p95_ms_max": 47.149584000000004,
       "index_size_p95_bytes_max": 64921.600000000006
     }
   },
@@ -5061,11 +5061,11 @@
     "failures": []
   },
   "run": {
-    "captured_at_utc": "2026-09-02T15:08:45Z",
-    "git_commit": "83d5b0fd6e3537c7f656fd6b20c145323ab67a46",
+    "captured_at_utc": "2026-09-03T19:57:29Z",
+    "git_commit": "5e3af5ffbfcff32e78ba188ca77b8262ba29acda",
     "git_dirty_at_start": false,
     "branch": "",
-    "command": "cargo run -q -p mci-agent --bin mci-bench --",
+    "command": "mci-bench",
     "arguments": [
       "--dataset",
       "eval/work-memory/synthetic-v1.json",
@@ -5074,7 +5074,8 @@
       "--out",
       "docs/eval/work-memory-baseline.next.json",
       "--baseline",
-      "docs/eval/work-memory-baseline.json"
+      "docs/eval/work-memory-baseline.json",
+      "--allow-baseline-identity-migration"
     ],
     "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)",
     "cargo_version": "cargo 1.96.0 (30a34c682 2026-05-25)",
@@ -5085,10 +5086,10 @@
     "hardware_model": "Mac15,13",
     "hardware_chip": "Apple M3",
     "ram_bytes": 17179869184,
-    "compute_mode": "coreml_cpu_only",
-    "model_family": "snowflake-arctic-embed-s-int8",
-    "model_path": "installed-model://ArcticEmbedS_INT8.mlmodelc",
-    "model_checksum_sha256": "f782f7f4a13c69a4399345f1d6a4b8de8f4327c131e537a1ea6bf9fdeaeaeef8",
+    "compute_mode": "coreml_cpu_and_ne",
+    "model_family": "snowflake-arctic-embed-s-fp16",
+    "model_path": "external-model://ArcticEmbedS_FP16.mlmodelc",
+    "model_checksum_sha256": "9e751567814ced3575afaec9fa2379b47ef6a28a40f3df21e5831136da5b30a0",
     "requested_arms": [
       "lexical",
       "hybrid"
