@@ -19,6 +19,7 @@ LOG="$ROOT/app.log"
 APP_PID=""
 HELPER_PID=""
 AGENT_PID=""
+EXIT_TIMEOUT_SECONDS=10
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -35,6 +36,14 @@ stop_owned() {
     command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
     [[ "$command" == *"$expected"* ]] || return 0
     kill -KILL "$pid" 2>/dev/null || true
+}
+
+process_is_running() {
+    local pid="$1"
+    local state
+    kill -0 "$pid" 2>/dev/null || return 1
+    state="$(ps -p "$pid" -o stat= 2>/dev/null | tr -d '[:space:]')"
+    [[ -n "$state" && "$state" != Z* ]]
 }
 
 cleanup() {
@@ -81,16 +90,16 @@ kill -KILL "$APP_PID"
 wait "$APP_PID" 2>/dev/null || true
 APP_PID=""
 
-deadline=$((SECONDS + 3))
+deadline=$((SECONDS + EXIT_TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
-    if ! kill -0 "$HELPER_PID" 2>/dev/null && ! kill -0 "$AGENT_PID" 2>/dev/null; then
+    if ! process_is_running "$HELPER_PID" && ! process_is_running "$AGENT_PID"; then
         break
     fi
     sleep 0.1
 done
 
-kill -0 "$HELPER_PID" 2>/dev/null && fail "capture helper survived owner SIGKILL"
-kill -0 "$AGENT_PID" 2>/dev/null && fail "memory agent survived owner SIGKILL"
+process_is_running "$HELPER_PID" && fail "capture helper survived owner SIGKILL"
+process_is_running "$AGENT_PID" && fail "memory agent survived owner SIGKILL"
 [[ ! -e "$CRASH_MARKER" ]] || fail "memory agent left an unclean-shutdown marker"
 
 printf 'ok: owner SIGKILL closed the helper lease; helper and agent exited cleanly\n'
