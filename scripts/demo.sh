@@ -253,17 +253,30 @@ do_seed() {
 do_boot() {
     bold "=== demo boot ==="
     ensure_demo_dirs
+    stop_demo_processes
     echo "Assembling the development app through the canonical build graph..."
     "$BUILD_APP" --debug --development-ad-hoc --development-lite
 
-    echo "Launching the packaged app with a disposable home..."
-    HOME="$DEMO_HOME" \
-        CFFIXED_USER_HOME="$DEMO_HOME" \
-        MCI_EPHEMERAL_UI_STATE=1 \
-        "$APP_PATH/Contents/MacOS/Hippocampus" \
-        >"$LOG_DIR/hippocampus.stdout.log" \
-        2>"$LOG_DIR/hippocampus.stderr.log" &
-    echo "$!" > "$PID_DIR/hippocampus.pid"
+    echo "Launching the packaged app with a disposable home through LaunchServices..."
+    open -n -g \
+        --stdout "$LOG_DIR/hippocampus.stdout.log" \
+        --stderr "$LOG_DIR/hippocampus.stderr.log" \
+        --env "HOME=$DEMO_HOME" \
+        --env "CFFIXED_USER_HOME=$DEMO_HOME" \
+        --env "MCI_EPHEMERAL_UI_STATE=1" \
+        "$APP_PATH"
+
+    local app_pid=""
+    for _ in {1..50}; do
+        app_pid="$(pgrep -f "^$APP_PATH/Contents/MacOS/Hippocampus$" | tail -n 1 || true)"
+        [[ -n "$app_pid" ]] && break
+        sleep 0.1
+    done
+    if [[ -z "$app_pid" ]] || ! kill -0 "$app_pid" 2>/dev/null; then
+        red "ERROR: packaged Hippocampus.app did not remain alive after launch"
+        return 1
+    fi
+    echo "$app_pid" > "$PID_DIR/hippocampus.pid"
 
     green "boot done. Packaged Hippocampus.app is running against $DEMO_HOME."
 }
