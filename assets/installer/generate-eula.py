@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Generate or verify EULA.rtf and sla.r from the canonical license terms.
+"""Generate or verify EULA.rtf from the canonical license terms.
 
 Single source of truth: the markdown file. This script produces:
   - EULA.rtf   — Rich Text for distribution / reference
-  - sla.r      — Rez resource source for DMG SLA popup attachment
 
 Regenerate:
     python3 assets/installer/generate-eula.py
@@ -23,7 +22,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 TOS_PATH = os.path.join(REPO_ROOT, "docs", "legal", "terms-of-service.md")
 EULA_PATH = os.path.join(SCRIPT_DIR, "EULA.rtf")
-SLA_PATH = os.path.join(SCRIPT_DIR, "sla.r")
 
 PROHIBITED_GUARANTEES = (
     (r"crypto[\s-]*shred", "unimplemented range-key deletion"),
@@ -137,86 +135,6 @@ def md_to_rtf(md_text):
     )
 
 
-def md_to_plain(md_text):
-    text = strip_comments(md_text)
-    lines = []
-    for line in text.split('\n'):
-        line = re.sub(r'^#{1,6}\s+', '', line)
-        line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
-        line = re.sub(r'\*(.+?)\*', r'\1', line)
-        line = re.sub(r'\[(.+?)\]\((.+?)\)', r'\1 (\2)', line)
-        line = re.sub(r'`(.+?)`', r'\1', line)
-        if re.match(r'^---+$', line.strip()):
-            line = ''
-        lines.append(line)
-    result = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines))
-    return result.strip()
-
-
-def rez_string_escape(text):
-    return text.replace('\\', '\\\\').replace('"', '\\"')
-
-
-def generate_sla_r(md_text):
-    plain = md_to_plain(md_text)
-    text_lines = []
-    for line in plain.split('\n'):
-        escaped = rez_string_escape(line)
-        text_lines.append(f'    "{escaped}\\n"')
-    text_data = '\n'.join(text_lines)
-
-    return f'''/* DMG Software License Agreement resources.
- * Auto-generated from docs/legal/terms-of-service.md.
- * Regenerate: python3 assets/installer/generate-eula.py
- *
- * Attach to DMG:
- *   hdiutil unflatten Hippocampus.dmg
- *   Rez -append assets/installer/sla.r -o Hippocampus.dmg
- *   hdiutil flatten Hippocampus.dmg
- */
-
-data 'LPic' (5000) {{
-    $"0000"  /* default language */
-    $"0001"  /* count */
-    $"0000"  /* English */
-    $"0000"  /* resource ID offset */
-    $"0000"  /* reserved */
-}};
-
-resource 'STR#' (5000, "English buttons") {{
-    {{
-        "English",
-        "Agree",
-        "Disagree",
-        "Print",
-        "Save\\311",
-        "If you agree with the terms of this license, click "
-        "\\"Agree\\" to install the software. "
-        "If you do not agree, click \\"Disagree\\"."
-    }}
-}};
-
-data 'TEXT' (5000, "English") {{
-{text_data}
-}};
-
-data 'styl' (5000, "English") {{
-    $"0001"           /* 1 style run */
-    $"00000000"       /* start offset */
-    $"000C"           /* height */
-    $"000A"           /* ascent */
-    $"0000"           /* font ID (system) */
-    $"0000"           /* face (plain) */
-    $"000A"           /* size 10 */
-    $"0000 0000 0000" /* color (black) */
-}};
-'''
-
-
-def rendered_artifacts(md_text):
-    return md_to_rtf(md_text), generate_sla_r(md_text)
-
-
 def check_artifact(path, expected):
     if not os.path.isfile(path):
         print(f"ERROR: generated legal artifact is missing: {path}", file=sys.stderr)
@@ -256,22 +174,17 @@ def main():
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
 
-    rtf, sla = rendered_artifacts(md_text)
+    rtf = md_to_rtf(md_text)
 
     if args.check:
-        valid = check_artifact(EULA_PATH, rtf) & check_artifact(SLA_PATH, sla)
-        if not valid:
+        if not check_artifact(EULA_PATH, rtf):
             sys.exit(1)
-        print("Legal artifacts match the canonical source and product-truth policy.")
+        print("Legal artifact matches the canonical source and product-truth policy.")
         return
 
     with open(EULA_PATH, "w", encoding="utf-8", newline="") as f:
         f.write(rtf)
     print(f"  EULA.rtf  ({len(rtf):,} bytes)")
-
-    with open(SLA_PATH, "w", encoding="utf-8", newline="") as f:
-        f.write(sla)
-    print(f"  sla.r     ({len(sla):,} bytes)")
 
 
 if __name__ == "__main__":
