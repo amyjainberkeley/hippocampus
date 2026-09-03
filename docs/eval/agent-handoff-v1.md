@@ -66,26 +66,30 @@ The accepted machine-readable result is
 The September 2, 2026 run completed all 72 arm-task combinations against the
 installed, checksummed Core ML model. The repository contained unrelated
 workspace changes, which the report records, while every benchmark and
-production dependency path used by this sidecar was clean at start.
+production dependency path used by this sidecar was clean at start. Both arms
+passed their fixed retrieval and handoff quality gates.
 
 Hybrid results:
 
-- 29/31 answerable tasks hit at ranks 1, 3, and 5; MRR was 0.9355.
-- Session recall was 0.6613 at rank 1 and 0.9355 at ranks 3 and 5.
-- Semantic relevance was 6/6, contradiction visibility 5/5, exact provenance
-  5/5, abstention 5/5, and multi-source handoff utility 4/4.
+- All 31 answerable tasks hit at ranks 1, 3, and 5; MRR was 1.0.
+- Session recall was 0.7258 at rank 1 and 1.0 at ranks 3 and 5.
+- Semantic relevance was 6/6, temporal currency 6/6, superseded exclusion 6/6,
+  contradiction visibility 5/5, exact provenance 5/5, abstention 5/5, and
+  multi-source handoff utility 4/4.
 - Repeated screen OCR was collapsed to one canonical citation in all 5/5
   duplicate cases; the lossless event store remains unchanged.
-- Exact fact coverage was 42/44 and every packet remained within budget.
-- Current evidence was present for 4/6 temporal tasks, but superseded evidence
-  was excluded in 0/6.
+- Exact fact coverage was 44/44, every packet remained within budget, and all
+  36 capability tasks passed.
 
-The lexical-only arm returned no ranked source for any of the 31 natural
-language answerable tasks. All 36 lexical calls remained typed as degraded,
-not trusted matches, and all packets stayed within budget. This is a useful
-fallback failure signal: strict FTS candidate generation cannot carry the
-agent-handoff product by itself.
+Lexical-only results:
 
-The fixed hybrid quality gate therefore fails only on temporal currency and
-supersession; the lexical arm still fails every utility axis. Both
-`retrieval_and_handoff_qualified` and `trusted_answer_qualified` remain false.
+- Hit@1 was 0.8710, Hit@3 and Hit@5 were 1.0, and MRR was 0.9247.
+- Session recall was 0.5968 at rank 1 and 0.9892 at ranks 3 and 5.
+- Temporal currency, superseded exclusion, contradiction visibility, duplicate
+  suppression, exact provenance, and abstention all scored 1.0.
+- Multi-source handoff utility was 3/4, exact fact coverage was 43/44, every
+  packet remained within budget, and 35/36 capability tasks passed.
+
+The accepted result sets `retrieval_and_handoff_qualified` to `true`.
+`trusted_answer_qualified` remains `false`: these scores qualify evidence
+retrieval and bounded context transfer, not generated factual answers.
