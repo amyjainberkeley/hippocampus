@@ -5,6 +5,15 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### Capture reliability
+
+- Bind captured frames to the focused-window stream generation so focus changes
+  cannot attribute stale pixels to a newly focused app.
+- Retry static-window OCR after an empty, timed-out, or dropped recognition job
+  without weakening focused-window or protected-surface privacy checks.
+- Treat unexpected stream loss and failed teardown as terminal capture failures
+  instead of leaving a healthy-looking helper with no live capture source.
+
 ## [0.1.0] - 2026-09-01
 
 ### Memory and recall
