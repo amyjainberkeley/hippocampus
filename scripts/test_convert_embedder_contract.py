@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import importlib.util
+import inspect
 import json
+import math
 import tempfile
 from pathlib import Path
 
@@ -15,6 +17,12 @@ spec.loader.exec_module(converter)
 
 assert hasattr(converter, "write_model_contract"), (
     "converter must write signed model compatibility metadata"
+)
+assert "quantize_int8" not in inspect.signature(converter.convert).parameters, (
+    "shipping converter must not expose the rejected INT8 experiment"
+)
+assert '"--int8"' not in CONVERTER_PATH.read_text(encoding="utf-8"), (
+    "shipping CLI must not advertise an option that cannot pass its release contract"
 )
 
 with tempfile.TemporaryDirectory(prefix="hippocampus-model-contract.") as temp:
@@ -32,6 +40,7 @@ with tempfile.TemporaryDirectory(prefix="hippocampus-model-contract.") as temp:
     )
     assert contract == {
         "attentionImplementation": "eager",
+        "attentionMaskFloor": -10000.0,
         "embeddingDimension": 384,
         "maxSequenceLength": 128,
         "minimumSystemVersion": "14.0",
@@ -42,5 +51,6 @@ with tempfile.TemporaryDirectory(prefix="hippocampus-model-contract.") as temp:
         "sourceRevision": "e596f507467533e48a2e17c007f0e1dacc837b33",
         "specificationVersion": 8,
     }
+    assert math.isfinite(contract["attentionMaskFloor"])
 
 print("PASS: converter writes the canonical Core ML compatibility contract")

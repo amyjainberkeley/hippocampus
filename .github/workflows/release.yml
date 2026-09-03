@@ -86,6 +86,11 @@ jobs:
             --sha256 "$RELEASE_MODELS_SHA256" \
             --output models
 
+      - name: Verify Arctic Core ML runtime quality
+        env:
+          MCI_REQUIRE_COREML_QUALITY: "1"
+        run: cargo test --locked -p mci-embed-coreml --test quality -- --nocapture
+
       - name: Build all binaries
         env:
           MACOSX_DEPLOYMENT_TARGET: "14.0"

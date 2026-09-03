@@ -104,6 +104,14 @@ while IFS= read -r line; do
         model_path="$APP_PATH/Contents/Resources/Models/$compiled_name"
         if [[ -d "$model_path" ]]; then
             echo "  OK: bundled model '$model_id' found at $model_path"
+            if [[ "$model_id" == "arctic-embed-s-fp16" ]]; then
+                if ! python3 "$SCRIPT_DIR/coreml_model_contract.py" \
+                    --model "$model_path" \
+                    --app-minimum-system-version "$APP_MINIMUM_SYSTEM_VERSION"; then
+                    ERRORS=$((ERRORS + 1))
+                fi
+                continue
+            fi
             metadata_path="$model_path/metadata.json"
             compatibility_path="$model_path/hippocampus-model.json"
             model_minimum_system_version=""

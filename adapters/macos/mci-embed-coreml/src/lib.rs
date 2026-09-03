@@ -141,26 +141,26 @@ pub const MAX_SEQ_LEN: usize = 128;
 /// to stderr and **falls back to CPU** — predictions still succeed (the
 /// live store's vectors are genuine unit vectors), but the failover wastes
 /// an ANE/GPU compile attempt and spews an alarming-but-benign error.
-/// Pinning the old graph to [`ComputeUnits::CpuOnly`] avoided that failure,
-/// but the macOS 14 eager-attention graph produces non-finite output under
-/// CPU-only execution. The same fixed-shape graph produces finite unit vectors
-/// under [`ComputeUnits::CpuAndNeuralEngine`], so that measured mode is the
-/// production policy. The companion conversion fix pins the graph to static
-/// `[1, 384]`, removing the original data-dependent-shape failure.
+/// Pinning the old graph to [`ComputeUnits::CpuOnly`] avoided that failure. The
+/// current macOS 14 eager-attention graph also replaces the FP16 `-inf`
+/// attention sentinel with finite `-10000`, so both CPU-only and
+/// [`ComputeUnits::CpuAndNeuralEngine`] produce finite vectors that pass the
+/// 50-sentence reference gate. CPU+Neural Engine is the production policy
+/// because it was faster in the same dual-mode development measurement. This
+/// policy permits those units; it does not prove physical ANE residency.
 ///
 /// [Core ML compute-units `.all` is a latency trap]: allowing every compute
 /// unit added a costly failed scheduling path on the previous graph. Keep the
 /// shipping policy explicit and remeasure it whenever the graph changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComputeUnits {
-    /// CPU only (`MLComputeUnitsCPUOnly`). Retained for diagnostics.
+    /// CPU only (`MLComputeUnitsCPUOnly`). Covered by the release quality gate.
     CpuOnly,
-    /// CPU + GPU, no ANE (`MLComputeUnitsCPUAndGPU`). Fastest measured
-    /// clean unit on the fixed-shape graph (~1.9 ms); available for future
-    /// tuning if the embedder ever moves to a hot path.
+    /// CPU + GPU, no ANE (`MLComputeUnitsCPUAndGPU`). Available for explicit
+    /// diagnostics; not part of the shipping quality gate.
     CpuAndGpu,
     /// CPU + ANE, no GPU (`MLComputeUnitsCPUAndNeuralEngine`). Production
-    /// mode for the fixed-shape macOS 14 eager-attention graph.
+    /// policy for the fixed-shape macOS 14 eager-attention graph.
     CpuAndNeuralEngine,
     /// Core ML schedules across ANE/GPU/CPU (`MLComputeUnitsAll`). The
     /// pre-fix default that produced the data-dependent-shape failover.

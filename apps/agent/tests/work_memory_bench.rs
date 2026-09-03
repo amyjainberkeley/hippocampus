@@ -265,7 +265,7 @@ fn direct_binary_never_publishes_an_unrelated_empty_corpus() {
       "instances": []
     }"#;
 
-    let (_output, report) = run_bench_for_arm(dataset, "both", &[]);
+    let (_output, report) = run_bench_for_arm(dataset, "lexical", &[]);
 
     assert_eq!(
         report["complete"],
@@ -286,7 +286,7 @@ fn direct_binary_never_publishes_an_unrelated_empty_corpus() {
     assert_eq!(report["run"]["evaluated_instances"], Value::from(0));
     assert_eq!(
         report["run"]["requested_arms"],
-        serde_json::json!(["lexical", "hybrid"])
+        serde_json::json!(["lexical"])
     );
 }
 
@@ -1049,6 +1049,64 @@ fn baseline_update_refreshes_the_single_pinned_digest() {
         expected,
         "baseline bytes and their single pinned authority must move together"
     );
+}
+
+#[test]
+fn identity_change_is_allowed_only_during_explicit_baseline_update() {
+    let dir = tempdir().expect("tempdir");
+    let report = eligible_fake_baseline();
+    let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+        .env("MCI_FAKE_ARGS", &fake_args_path)
+        .arg("--accept-identity-change")
+        .arg("--out")
+        .arg(dir.path().join("report.json"))
+        .output()
+        .expect("run identity change outside update mode");
+
+    assert!(!output.status.success());
+    assert!(
+        !fake_args_path.exists(),
+        "identity migration must be rejected before benchmark execution"
+    );
+}
+
+#[test]
+fn explicit_baseline_identity_change_forwards_the_narrow_binary_policy() {
+    let dir = tempdir().expect("tempdir");
+    let report = eligible_fake_baseline();
+    let (script, fake_args_path) = stage_runner_fixture(dir.path(), &report);
+
+    let output = Command::new(&script)
+        .current_dir(dir.path())
+        .env("MCI_BENCH_BIN", dir.path().join("fake-mci-bench"))
+        .env("MCI_ARCTIC_MODEL_PATH", dir.path())
+        .env("MCI_FAKE_REPORT", dir.path().join("fake-report.json"))
+        .env("MCI_FAKE_ARGS", &fake_args_path)
+        .arg("--update-baseline")
+        .arg("--accept-identity-change")
+        .output()
+        .expect("run explicit identity-changing baseline update");
+
+    assert!(
+        output.status.success(),
+        "explicit identity update must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let args = fs::read_to_string(fake_args_path).expect("captured benchmark arguments");
+    assert!(
+        args.lines()
+            .any(|argument| argument == "--allow-baseline-identity-migration"),
+        "runner must forward only the binary's narrow migration policy"
+    );
+    assert!(!args
+        .lines()
+        .any(|argument| argument == "--accept-identity-change"));
 }
 
 #[test]

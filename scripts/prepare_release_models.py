@@ -13,24 +13,19 @@ import sys
 import tarfile
 import tempfile
 
+from coreml_model_contract import (
+    ContractError,
+    EXPECTED_ARCTIC_CONTRACT,
+    validate_arctic_model,
+)
+
 
 MAX_UNPACKED_BYTES = 8 * 1024 * 1024 * 1024
 MAX_MEMBERS = 100_000
 REQUIRED_MODELS = (
     "ArcticEmbedS_FP16.mlmodelc",
 )
-ARCTIC_CONTRACT = {
-    "attentionImplementation": "eager",
-    "embeddingDimension": 384,
-    "maxSequenceLength": 128,
-    "minimumSystemVersion": "14.0",
-    "modelID": "arctic-embed-s-fp16",
-    "precision": "float16",
-    "schemaVersion": 1,
-    "sourceRepo": "Snowflake/snowflake-arctic-embed-s",
-    "sourceRevision": "e596f507467533e48a2e17c007f0e1dacc837b33",
-    "specificationVersion": 8,
-}
+ARCTIC_CONTRACT = EXPECTED_ARCTIC_CONTRACT
 
 
 class ModelArchiveError(RuntimeError):
@@ -83,6 +78,10 @@ def validate_model(root: Path, model: str) -> None:
         contract == ARCTIC_CONTRACT,
         f"{model} compatibility metadata does not match the shipping contract",
     )
+    try:
+        validate_arctic_model(model_path, app_minimum_system_version="14.0")
+    except ContractError as error:
+        raise ModelArchiveError(f"{model}: {error}") from error
 
 
 def install(archive: Path, expected_sha: str, output: Path) -> None:

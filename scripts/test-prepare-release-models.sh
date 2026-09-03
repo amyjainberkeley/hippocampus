@@ -32,7 +32,21 @@ expect_fail() {
 SOURCE="$TMP_ROOT/source/models"
 for model in ArcticEmbedS_FP16.mlmodelc; do
     mkdir -p "$SOURCE/$model/weights"
-    printf 'mil' >"$SOURCE/$model/model.mil"
+    cat >"$SOURCE/$model/model.mil" <<'MIL'
+program(1.0)
+{
+    func main<ios17>(tensor<int32, [1, 128]> attention_mask, tensor<int32, [1, 128]> input_ids) {
+        tensor<fp16, [384, 384]> encoder_weight_to_fp16 = const();
+        tensor<fp16, [1, 1, 1, 128]> mask_cast_fp16 = cast(x = attention_mask);
+        tensor<fp16, [1, 1, 1, 128]> inverted_mask = sub(x = one, y = mask_cast_fp16);
+        tensor<fp16, []> finite_attention_floor = const()[val = tensor<fp16, []>(-0x1.388p+13)];
+        tensor<fp16, [1, 1, 1, 128]> attention_mask_cast_fp16 = mul(x = inverted_mask, y = finite_attention_floor);
+        tensor<fp16, [1, 12, 128, 128]> masked_scores = add(x = attention_scores, y = attention_mask_cast_fp16);
+        tensor<fp16, [1, 12, 128, 128]> probabilities = softmax(x = masked_scores);
+        tensor<fp32, [1, 384]> embedding = cast();
+    } -> (embedding);
+}
+MIL
     printf 'metadata' >"$SOURCE/$model/coremldata.bin"
     printf 'weights' >"$SOURCE/$model/weights/weight.bin"
 done
@@ -48,6 +62,7 @@ expect_fail 'model preparation rejects missing compatibility metadata' \
 cat > "$SOURCE/ArcticEmbedS_FP16.mlmodelc/hippocampus-model.json" <<'JSON'
 {
   "attentionImplementation": "eager",
+  "attentionMaskFloor": -10000.0,
   "embeddingDimension": 384,
   "maxSequenceLength": 128,
   "minimumSystemVersion": "14.0",
@@ -69,6 +84,13 @@ expect_fail 'model preparation rejects the wrong archive hash' \
 expect_pass 'model preparation validates and atomically installs required models' \
     "$PREPARE" --archive "$ARCHIVE" --sha256 "$SHA" \
     --output "$TMP_ROOT/output"
+
+perl -0pi -e 's/-0x1\.388p\+13/-inf/' "$SOURCE/ArcticEmbedS_FP16.mlmodelc/model.mil"
+tar -C "$TMP_ROOT/source" -czf "$ARCHIVE" models
+SHA="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+expect_fail 'model preparation rejects a non-finite compiled attention graph' \
+    "$PREPARE" --archive "$ARCHIVE" --sha256 "$SHA" \
+    --output "$TMP_ROOT/non-finite-graph"
 
 for model in ArcticEmbedS_FP16.mlmodelc; do
     if [[ -f "$TMP_ROOT/output/$model/model.mil" && \

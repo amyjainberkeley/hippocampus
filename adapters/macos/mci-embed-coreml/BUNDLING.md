@@ -1,136 +1,111 @@
-# `arctic-embed-s.mlpackage` — Model Bundling
+# Arctic Embed S Release Artifact
 
-This document describes how the `snowflake-arctic-embed-s` Core ML model
-is produced and bundled into the signed macOS app for production
-deployment.
+Hippocampus ships one semantic-search model:
+`ArcticEmbedS_FP16.mlmodelc`, converted from
+`Snowflake/snowflake-arctic-embed-s`. The compiled bundle is about 66 MB and
+is intentionally gitignored. The immutable release archive and the signed,
+notarized app are its distribution trust boundaries.
 
-**The `.mlpackage` is NOT checked into this repository.** Reasons:
+The obsolete adapter-local `download_model.sh` skeleton was removed. It never
+performed a conversion and described an ONNX/INT8 pipeline that does not match
+the product. `scripts/convert_embedder.py` is the sole conversion entry point.
 
-- Size (~30–50 MB) makes the repo painful to clone.
-- Provenance: the trust boundary is the signed `.app` bundle
-  (notarized in Phase 5). The model is downloaded + converted + signed
-  at release time from a pinned upstream source, never committed in
-  binary form.
+## Pinned Identity
 
-The signed-app build pipeline (Phase 5) runs `scripts/download_model.sh`
-at release time to produce `arctic-embed-s.mlpackage` and copies it into
-the app bundle's `Resources/` directory.
+- Upstream repository: `Snowflake/snowflake-arctic-embed-s`
+- Upstream revision: `e596f507467533e48a2e17c007f0e1dacc837b33`
+- Precision: FP16; the rejected INT8 experiment is not a shipping option
+- Attention: eager primitives with a finite `-10000` mask floor
+- Deployment target: macOS 14 / Core ML specification version 8
+- Runtime compute policy: CPU and Neural Engine
+- Tokenizer: committed in `resources/tokenizer.json` and compiled into Rust
 
-## 1. Upstream source
+The compiled bundle contains `hippocampus-model.json`, an app-owned contract
+covering this identity. Generic Core ML metadata is not accepted in its place.
 
-- **Model:** `Snowflake/snowflake-arctic-embed-s`
-- **License:** Apache-2.0
-- **Source:** <https://huggingface.co/Snowflake/snowflake-arctic-embed-s>
-- **ADR:** [`docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md`](../../../docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md)
+## Runtime Schema
 
-## 2. Expected `.mlpackage` schema (Wave-17, corrected)
+| Direction | Feature | Type | Shape |
+| --- | --- | --- | --- |
+| Input | `input_ids` | Int32 multi-array | `[1, 128]` |
+| Input | `attention_mask` | Int32 multi-array | `[1, 128]` |
+| Output | `embedding` | Float32 multi-array | `[1, 384]` |
 
-The runtime (`CoreMLBackend` in `src/lib.rs`) expects the model to expose
-two Int32 input features (`input_ids` + `attention_mask`) and one
-Float32 output feature (`embedding`):
+Tokenization runs in Rust because MIL has no tokenizer/string operator for
+this graph. CLS pooling and L2 normalization run inside Core ML, so the output
+is already a unit vector.
 
-| Direction | Feature name      | `MLFeatureType` | dtype     | Shape          |
-|-----------|-------------------|-----------------|-----------|----------------|
-| Input     | `input_ids`       | `MultiArray`    | `Int32`   | `[1, 128]`     |
-| Input     | `attention_mask`  | `MultiArray`    | `Int32`   | `[1, 128]`     |
-| Output    | `embedding`       | `MultiArray`    | `Float32` | `[384]` (L2-normalized in graph) |
+## Convert Locally
 
-The CLS-pool and L2-normalize ops are inside the Core ML graph — the
-Rust side reads the output directly as a unit vector with no
-post-processing.
-
-**Wave-17 architectural pivot.** The original "tokenizer baked into
-the Core ML graph; the runtime hands raw UTF-8 strings to the model"
-plan was architecturally impossible — the Core ML MIL (Model
-Intermediate Language) spec has no string ops, so `coremltools` will
-not convert a graph whose input is a `String` and whose first hidden
-layer is a tokenizer. CRS Arxiv/OSS scout verified this on 2026-05-22,
-and the CEO ratified the pivot the same day. Industry-standard pattern
-(Apple `ml-stable-diffusion`, WhisperKit, HuggingFace's own Core ML
-exporters): tokenize on the host, pass token-IDs into the graph.
-
-Tokenization now happens in Rust via the HuggingFace `tokenizers` crate
-against the `Snowflake/snowflake-arctic-embed-s` `tokenizer.json`,
-which is bundled in this crate at `resources/tokenizer.json` and
-embedded into `mci-agent` / `Hippocampus.app` at compile time via
-`include_bytes!`. Zero runtime filesystem dependency.
-
-See the ADR-0011 erratum (2026-05-22) for the full architectural
-rationale.
-
-## 3. Conversion recipe
-
-`scripts/download_model.sh` runs the following steps:
-
-1. Pull the HuggingFace `Snowflake/snowflake-arctic-embed-s` weights
-   (PyTorch `.bin` + `tokenizer.json` + `config.json`) at the version
-   pinned in the script's `MODEL_REVISION` constant.
-2. Convert to ONNX with optimum-cli for an intermediate representation
-   that preserves the tokenizer as a preprocessing layer.
-3. Convert ONNX → Core ML `.mlpackage` via `coremltools.converters.mil`,
-   targeting the input/output schema in §2.
-4. Quantize to int8 via `coremltools.optimize.coreml.palettize_weights`
-   (per ADR-0011 §1: "int8-quantized for runtime").
-5. Set the `computeUnits` hint to `.cpuAndNeuralEngine` so Core ML
-   prefers ANE eligibility when the device supports it.
-6. Verify the resulting `.mlpackage` round-trips a known fixture text
-   to a 384-d float32 vector with magnitude ≈ 1.0 (post the wrapper's
-   L2 step in `mci-brain::arctic_embed_s`).
-
-## 4. Reproducibility
-
-`scripts/download_model.sh` pins:
-
-- the HuggingFace model revision (commit SHA, not branch),
-- the `coremltools` version,
-- the `optimum` version,
-- the `transformers` version,
-- the `tokenizers` version,
-- the `onnx` runtime version.
-
-A failed conversion (e.g. upstream weights changed under the same
-revision SHA) aborts the release build — never silently produces a
-different model.
-
-## 5. Signed-app integration
-
-Phase 5 packaging copies the `.mlpackage` into the app bundle:
-
-```
-MCI.app/Contents/Resources/arctic-embed-s.mlpackage/
-```
-
-The `mci-agent` daemon opens it via:
-
-```rust
-let bundle = std::env::current_exe()?
-    .parent().unwrap()
-    .parent().unwrap()
-    .join("Resources/arctic-embed-s.mlpackage");
-let backend = std::sync::Arc::new(mci_embed_coreml::CoreMLBackend::open(&bundle)?);
-let query_emb = mci_brain::arctic_embed_s::ArcticEmbedSEmbedder::new_query(backend.clone());
-let doc_emb   = mci_brain::arctic_embed_s::ArcticEmbedSEmbedder::new_document(backend);
-```
-
-Notarization signs the model along with the rest of the bundle —
-tampering with the model breaks the notarization signature, which the
-OS refuses to launch. Same trust boundary as the rest of the app.
-
-## 6. Dev / CI / headless tests
-
-The `mci-embed-coreml` crate **does not require** the `.mlpackage` to
-build or to run its unit tests. The tests cover the load-path error
-surface and the trait-shape contract; full end-to-end inference
-against the real model is exercised at **P3.11 live-Mac audit** per
-ADR-0016 §7. CI never downloads the model.
-
-A developer who wants to exercise end-to-end inference locally runs:
+Use the dependencies pinned in `scripts/requirements-ml.txt`, then run:
 
 ```sh
-adapters/macos/mci-embed-coreml/scripts/download_model.sh \
-    --output ~/Library/Application\ Support/MCI/arctic-embed-s.mlpackage
+python3 scripts/convert_embedder.py \
+  --output models/ArcticEmbedS_FP16.mlpackage \
+  --verify
 ```
 
-and points the dev `mci-agent` build at that path via the
-`MCI_EMBED_MODEL_PATH` environment variable (wired in P3.7 when the
-agent gets the real embedder runtime).
+The converter:
+
+1. Loads the exact Hugging Face revision with eager attention.
+2. Replaces the dtype-minimum sentinel with finite `-10000` before tracing.
+3. Exports static `[1, 128]` inputs and a static `[1, 384]` output for macOS 14.
+4. Compiles the package to `models/ArcticEmbedS_FP16.mlmodelc`.
+5. Writes the app-owned compatibility and provenance contract.
+6. Invokes `scripts/coreml_model_contract.py` against the compiled MIL.
+
+Use `--fixtures` only when deliberately regenerating the pinned 50-sentence
+FP32 reference. A fixture change is a benchmark input change and belongs in a
+reviewed commit.
+
+## Verify Quality
+
+Static verification rejects identity, precision, shape, deployment, weight,
+non-finite constant, and attention-mask dataflow drift:
+
+```sh
+python3 scripts/coreml_model_contract.py \
+  --model models/ArcticEmbedS_FP16.mlmodelc \
+  --app-minimum-system-version 14.0
+```
+
+Runtime verification evaluates exactly 50 sentences on both CPU-only and
+CPU-and-Neural-Engine policies. Every output must be finite, 384-dimensional,
+L2 normalized, and at least `0.999` cosine-similar to the FP32 reference:
+
+```sh
+MCI_REQUIRE_COREML_QUALITY=1 \
+  cargo test --locked -p mci-embed-coreml --test quality -- --nocapture
+```
+
+CPU-and-Neural-Engine allows Core ML to choose those units. It does not prove
+that every operation physically resides on the Neural Engine.
+
+## Release Assembly
+
+Release CI does not download mutable model files from Hugging Face. An owner
+first creates an archive containing the compiled bundle. The tag-owned
+`release-models.json` records the immutable HTTPS URL and SHA-256. It must be
+provisioned before a release; `UNPROVISIONED` is a deliberate hard stop.
+
+CI reconstructs the archive with:
+
+```sh
+scripts/prepare-release-models.sh \
+  --archive /path/to/release-models.tar.gz \
+  --sha256 EXPECTED_SHA256 \
+  --output models
+```
+
+That command validates archive safety and the compiled model contract. Release
+CI then runs the runtime quality gate before building the signed app.
+
+`apps/hippocampus/Resources/build-app.sh` installs the verified bundle at:
+
+```text
+Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc
+```
+
+The agent discovers that bundled path automatically. Local tools and clean
+benchmark worktrees can point to the same compiled bundle with
+`MCI_ARCTIC_MODEL_PATH=/absolute/path/ArcticEmbedS_FP16.mlmodelc`.

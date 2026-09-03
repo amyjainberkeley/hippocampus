@@ -58,6 +58,7 @@ LANES=(
     "release-model-fixtures|bash|test|scripts/test-prepare-release-models.sh"
     "release-model-manifest|bash|test|scripts/test-release-model-manifest.sh"
     "coreml-compatibility|bash|test|scripts/test-coreml-compatibility.sh"
+    "coreml-compiled-contract|bash|test|python3 scripts/test_coreml_model_contract.py"
     "coreml-converter-contract|bash|test|python3 scripts/test_convert_embedder_contract.py"
     "installer-runtime|bash|test|scripts/test-installer-runtime.sh"
     "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
@@ -130,6 +131,7 @@ LANES
     release-model-fixtures immutable model archive integrity fixtures
     release-model-manifest tag-owned model identity fixtures
     coreml-compatibility    packaged model precision and minimum-OS fixtures
+    coreml-compiled-contract independently inspect compiled model shape and constants
     coreml-converter-contract canonical converted-model provenance fixture
     installer-runtime       bounded layout process and centralized cleanup fixture
     sparkle-keygen-fixtures bundled Sparkle CLI contract fixture

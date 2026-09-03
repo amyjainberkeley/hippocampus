@@ -24,7 +24,7 @@ under that provider's terms; Hippocampus does not upload or mirror your brain.
 
 - Canonical shipped status lives in [docs/STATUS.md](docs/STATUS.md).
 - **Local by construction, not by policy.** Screen text is parsed on-device,
-  embedded through Core ML with the current runtime pinned to CPU, and kept on
+  embedded through Core ML with an explicit CPU+Neural Engine policy, and kept on
   your Mac. The local memory engine needs no API key.
 - **One local store, plus local blobs.** Rows, FTS, and stored vectors live in SQLCipher; keyframes stay as local blobs referenced from the database. Production database-key custody uses the non-synchronizable macOS file-Keychain item `ai.hippocampus.brain` / `database-key-v1` with a `SecAccess` ACL for the four stable Developer-ID-signed consumers. Legacy `dev.key` is migration input only and is removed after the Keychain value is re-read and proven against the existing database.
 - **Search the way you remember.** Keyword search for exact things like an error code, Rust-side cosine search for vague things like "that pricing discussion," fused into one ranked list when the embedder and backfill are present. (The CLI below exposes the keyword half. See [what works](#what-works-and-what-doesnt).)
@@ -195,25 +195,28 @@ $ mci_recall "finding things by meaning rather than exact wording"
 
 Keyword search cannot answer that question, because you did not use any of the words. That difference is the entire reason this project exists.
 
-### On the Neural Engine message
+### Core ML compute policy
 
-You will see this during conversion, and it is not a problem:
+The shipping graph uses fixed input/output shapes and a finite attention-mask
+floor. The release gate runs all 50 reference sentences under both CPU-only and
+CPU+Neural Engine and rejects non-finite output or cosine similarity below
+`0.999` in either mode.
 
-```
-MILCompilerForANE error: failed to compile ANE model using ANEF.
-Error=_ANECompiler : ANECCompile() FAILED.
-```
+The Rust loader explicitly selects CPU+Neural Engine. That setting permits Core
+ML to schedule across those units; it is not a claim that every operation is
+physically resident on the Neural Engine. It also avoids the extra GPU path in
+Core ML's `.all` default.
 
-There is no Neural Engine residency for this BERT graph. It cannot run on the ANE, so Core ML tries, fails, and moves on. The Rust loader never goes down that path anyway: it pins compute units to CPU on purpose, which is a measured decision rather than a default. The rationale is written up in `adapters/macos/mci-embed-coreml/src/lib.rs` under the E5RT story, and it is worth reading if you are tempted to change it.
-
-Measured here, Apple Silicon, CPU-only pin:
+One local Apple Silicon development run of the dual-compute quality gate:
 
 | | |
 |---|---|
-| Model load | ~340 ms, once at startup |
-| Per embed | ~18 ms |
+| CPU-only | 14.54 ms / embedding |
+| CPU+Neural Engine | 10.25 ms / embedding |
 
-Embedding happens on an idle loop, not in front of your query, so 18 ms is not a number anyone will feel. CPU+GPU benchmarks faster (~1.9 ms in the notes in that file) and would be the thing to reach for if the embedder ever moved onto a hot path. It has not, so it stays on CPU.
+These are development measurements, not cross-device performance promises.
+Embedding backfill runs on the idle loop; query embeddings use the same loaded
+model on demand.
 
 ### How I know the vectors are right
 
@@ -309,7 +312,7 @@ This step is most of the engineering. A day of screen recording is millions of f
 
 **2. Read.** Surviving frames go through on-device OCR and get joined to what you were doing: which app, which window, which URL.
 
-**3. Understand.** Moments get grouped into episodes and turned into vectors by a small embedding model through Core ML, currently pinned to CPU. This happens when your machine is idle, never while you are using it.
+**3. Understand.** Moments get grouped into episodes and turned into vectors by a small embedding model through Core ML, with compute explicitly limited to CPU plus Neural Engine. Backfill happens when your machine is idle; a search embeds its query on demand.
 
 **4. Store.** Everything goes into one SQLCipher-encrypted SQLite file. Its database key is stored as a non-synchronizable item in the macOS file Keychain. New item creation uses the bundled trusted-app contract, while access-object inspection and signed cross-version continuity remain release gates; the key is not represented as Secure-Enclave-wrapped or non-exportable.
 
@@ -348,7 +351,7 @@ Most projects bury this. It should be near the top, because it decides whether t
 | **MCP server** | **Works.** Six read-only tools over stdio JSON-RPC, including bounded cited context handoff. See below. |
 | **Pulling from other MCP servers** | **Works against a local server.** `mci-agent mcp-sync` reads what your registered servers offer and files it in the brain, tagged so you can tell it apart. Tested end to end against a loopback MCP server; not tested against any third-party one. |
 | **Semantic search + fusion ranking** | **Works, and I have run the whole path.** Build the model, run `mci-agent embed-backfill`, restart. Verified end to end on a clean machine: a query sharing no words with the corpus goes from 0 hits to 3 correct ones. The model is ~66 MB so you build it yourself; until you do, everything degrades to keyword-only and says so on startup. |
-| **On-device embeddings** | **Works.** Runs through Core ML with the runtime pinned to CPU, with a regression test asserting the vectors still match a known-good reference. |
+| **On-device embeddings** | **Works.** Runs through Core ML with an explicit CPU+Neural Engine policy. The release gate also runs CPU-only and asserts both modes stay finite and match a known-good reference. |
 | **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
 | **Reading Mail and Messages** | **Partly wired.** The agent-side deep-hook pumps can persist allowed Mail and Messages content into the brain after their cascade checks, but they are not part of the default demo flow and still depend on explicit allowlists / FDA. |
 | **Live screen capture** | **Built, live-overlap verified, defaults OFF.** The persisted Preferences toggle is the only capture authority; enable commits only after a generation-bound helper readiness receipt. A real 20-second focused-window run recalled the foreground token, excluded the overlapping background token, and wrote 18 OCR events to an isolated encrypted brain. The 30-minute resource soak and public signed-release verification are still owed. |

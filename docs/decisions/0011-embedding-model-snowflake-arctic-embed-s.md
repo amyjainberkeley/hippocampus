@@ -98,8 +98,8 @@ exporters, all of which use **external tokenization + token-IDs input**.
    win and gated with a regression test. The Rust
    `tests/quality.rs` cosine-similarity test against a 50-sentence
    Python FP32 reference fixture is the gate. INT8 failed on 43/50 rows;
-   the default conversion therefore stays FP16 and `--int8` exists only
-   to reproduce the rejected experiment.
+   the shipping converter therefore emits FP16 only. The measured failure
+   remains in the decision history instead of an unusable release CLI flag.
 4. **No HuggingFace publish until post-v2.0.** The converted
    `.mlpackage` ships only inside the notarized signed app bundle;
    publishing the converted artifact to a third-party hub before

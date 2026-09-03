@@ -98,6 +98,10 @@ for package in apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui a
 done
 require_pattern "$RELEASE" 'scripts/prepare-release-models\.sh' \
     'release workflow reconstructs and validates model inputs'
+require_literal "$RELEASE" 'MCI_REQUIRE_COREML_QUALITY: "1"' \
+    'release workflow makes the Core ML runtime quality gate fail closed'
+require_literal "$RELEASE" 'cargo test --locked -p mci-embed-coreml --test quality -- --nocapture' \
+    'release workflow runs the 50-sentence Core ML runtime quality gate'
 require_pattern "$RELEASE" 'scripts/release_models_manifest\.py' \
     'release workflow reads the tag-owned model manifest'
 require_literal "$RELEASE" '--manifest release-models.json' \

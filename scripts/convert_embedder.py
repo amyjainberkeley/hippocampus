@@ -61,12 +61,16 @@ import json
 import logging
 import shutil
 import sys
+import types
 from pathlib import Path
+
+from coreml_model_contract import validate_arctic_model
 
 MODEL_REPO = "Snowflake/snowflake-arctic-embed-s"
 MODEL_REVISION = "e596f507467533e48a2e17c007f0e1dacc837b33"
 MODEL_ID = "arctic-embed-s-fp16"
 MINIMUM_SYSTEM_VERSION = "14.0"
+ATTENTION_MASK_FLOOR = -10000.0
 OUTPUT_DIM = 384
 MAX_SEQ_LEN = 128
 
@@ -92,6 +96,7 @@ def write_model_contract(
     """Write the app-owned compatibility and provenance record."""
     contract = {
         "attentionImplementation": "eager",
+        "attentionMaskFloor": ATTENTION_MASK_FLOOR,
         "embeddingDimension": OUTPUT_DIM,
         "maxSequenceLength": MAX_SEQ_LEN,
         "minimumSystemVersion": minimum_system_version,
@@ -246,7 +251,6 @@ def convert(
     quiet: bool = False,
     fixtures: bool = False,
     write_tokenizer: bool = False,
-    quantize_int8: bool = False,
 ) -> None:
     if quiet:
         logging.basicConfig(level=logging.WARNING)
@@ -301,6 +305,28 @@ def convert(
         attn_implementation="eager",
     )
     model.eval()
+
+    def _finite_extended_attention_mask(
+        self, attention_mask, input_shape, device=None, dtype=None
+    ):
+        # Hugging Face normally multiplies the inverted mask by the dtype's
+        # minimum value. Core ML narrows that value to FP16 -inf, making valid
+        # tokens evaluate as 0 * -inf = NaN on its CPU path. A finite floor is
+        # numerically equivalent for softmax and remains valid on every unit.
+        del input_shape, device
+        if attention_mask.dim() == 3:
+            extended = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            extended = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(f"unsupported attention mask rank: {attention_mask.dim()}")
+        target_dtype = dtype if dtype is not None else self.dtype
+        extended = extended.to(dtype=target_dtype)
+        return (1.0 - extended) * ATTENTION_MASK_FLOOR
+
+    model.get_extended_attention_mask = types.MethodType(
+        _finite_extended_attention_mask, model
+    )
 
     sample_text = "Represent this sentence for searching relevant passages: hello world"
     inputs = tokenizer(
@@ -378,7 +404,7 @@ def convert(
         minimum_deployment_target=ct.target.macOS14,
     )
 
-    # Quantization gating per ADR-0011 §1 + 2026-05-22 erratum:
+    # Precision decision per ADR-0011 §1 + 2026-05-22 erratum:
     # - INT8: original plan, smallest size (~33 MB), but quality
     #   regression test (tests/quality.rs) showed 43/50 sentences
     #   drift > 1e-3 vs Python FP32 reference (range 0.99-0.9989
@@ -388,17 +414,9 @@ def convert(
     # - FP32: would be ~133 MB, partial ANE fallback to GPU.
     #   Not shipped.
     #
-    # Default: FP16 (Wave 17 ratified path after INT8 quality test
-    # failed). Override with --int8 only to re-run the regression.
-    if quantize_int8:
-        log.info("Applying INT8 quantization (--int8 flag)...")
-        op_config = ct.optimize.coreml.OpLinearQuantizerConfig(
-            mode="linear_symmetric", dtype="int8"
-        )
-        config = ct.optimize.coreml.OptimizationConfig(global_config=op_config)
-        mlmodel = ct.optimize.coreml.linear_quantize_weights(mlmodel, config=config)
-    else:
-        log.info("Keeping FP16 weights (default per ADR-0011 erratum 2026-05-22).")
+    # The rejected INT8 experiment is intentionally absent from this shipping
+    # converter: every artifact it emits must satisfy the FP16 release identity.
+    log.info("Keeping FP16 weights (required by the shipping model contract).")
 
     log.info("Saving to %s...", output_path)
     mlmodel.save(output_path)
@@ -440,9 +458,13 @@ def convert(
         shutil.copytree(compiled_src, compiled_path)
         write_model_contract(
             compiled_path,
-            precision="int8" if quantize_int8 else "float16",
+            precision="float16",
             minimum_system_version=MINIMUM_SYSTEM_VERSION,
             specification_version=mlmodel.get_spec().specificationVersion,
+        )
+        validate_arctic_model(
+            compiled_path,
+            app_minimum_system_version=MINIMUM_SYSTEM_VERSION,
         )
         del loaded_for_compile
         compiled_size = sum(
@@ -561,15 +583,6 @@ def main():
             "Errors out with a curl command if missing."
         ),
     )
-    parser.add_argument(
-        "--int8",
-        action="store_true",
-        help=(
-            "Apply INT8 weight quantization. Default is FP16 per ADR-0011 "
-            "erratum 2026-05-22 (INT8 cosine-sim regression test failed "
-            "43/50 sentences). Pass --int8 only to re-run the regression."
-        ),
-    )
     args = parser.parse_args()
     convert(
         args.output,
@@ -577,7 +590,6 @@ def main():
         quiet=args.quiet,
         fixtures=args.fixtures,
         write_tokenizer=args.tokenizer,
-        quantize_int8=args.int8,
     )
 
 
