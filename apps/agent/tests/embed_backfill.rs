@@ -12,9 +12,13 @@
 //! keeps the test honest about the plumbing without needing the 33 MB
 //! `.mlpackage`, which is not in the repository.
 
-use mci_agent::idle_batch::backfill_until_drained;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use mci_agent::idle_batch::{backfill_until_drained, run_idle_batch_worker};
 use mci_brain::stubs::FixedDimEmbedder;
-use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
+use mci_brain::{BrainStore, EmbedError, Embedder, Event, EventId, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 use tempfile::TempDir;
 
@@ -48,6 +52,42 @@ fn store_with(events: &[(u64, &str)]) -> (TempDir, SqlCipherBrainStore) {
         store.put_event(&event(*ts, text)).expect("put_event");
     }
     (dir, store)
+}
+
+struct RejectingEmbedder {
+    calls: AtomicUsize,
+    panic_after: Option<usize>,
+}
+
+impl RejectingEmbedder {
+    fn new(panic_after: Option<usize>) -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            panic_after,
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl Embedder for RejectingEmbedder {
+    fn dimension(&self) -> usize {
+        384
+    }
+
+    fn embed_one(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(
+            self.panic_after.is_none_or(|limit| call <= limit),
+            "embedder was retried without batch progress"
+        );
+        if text == "good" {
+            return Ok(vec![1.0 / 384_f32.sqrt(); 384]);
+        }
+        Err(EmbedError::InvalidInput("fixture rejection".into()))
+    }
 }
 
 #[test]
@@ -138,4 +178,48 @@ fn embedded_events_become_findable_by_vector_search() {
         EventId(1),
         "the event whose text matches the probe should rank first"
     );
+}
+
+#[test]
+fn backfill_stops_after_the_current_batch_makes_no_progress() {
+    let (_dir, store) = store_with(&[(1_000, "good"), (2_000, "reject")]);
+    let embedder = RejectingEmbedder::new(Some(2));
+
+    let stats = backfill_until_drained(&store, &embedder, 1, |_| {}).expect("backfill");
+
+    assert_eq!(stats.events_embedded, 1);
+    assert_eq!(stats.embed_errors, 1);
+    assert_eq!(embedder.calls(), 2);
+}
+
+#[tokio::test]
+async fn live_worker_backs_off_after_a_rejected_batch() {
+    let (_dir, store) = store_with(&[(1_000, "reject")]);
+    let store = Arc::new(store);
+    let embedder = Arc::new(RejectingEmbedder::new(None));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let worker_store = Arc::clone(&store);
+    let worker_embedder: Arc<dyn Embedder> = embedder.clone();
+    let worker = tokio::spawn(async move {
+        run_idle_batch_worker(
+            worker_store,
+            worker_embedder,
+            8,
+            Duration::from_secs(1),
+            shutdown_rx,
+        )
+        .await
+    });
+
+    for _ in 0..100 {
+        if embedder.calls() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    shutdown_tx.send(true).expect("signal shutdown");
+    let stats = worker.await.expect("join worker").expect("worker result");
+
+    assert_eq!(stats.embed_errors, 1);
+    assert_eq!(embedder.calls(), 1);
 }

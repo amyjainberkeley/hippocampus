@@ -88,6 +88,8 @@ pub fn backfill_until_drained(
             break;
         }
         stats.batches_run += 1;
+        let embedded_before_batch = stats.events_embedded;
+        let failures_before_batch = stats.embed_errors + stats.store_errors;
 
         for event in &batch {
             // Embed the same text the FTS5 index sees, so a hit on one
@@ -105,7 +107,9 @@ pub fn backfill_until_drained(
         // A batch where every event failed would otherwise spin forever:
         // the rows stay un-embedded, so the next read returns the same
         // ones. Stop and let the caller report it.
-        if stats.events_embedded == 0 && (stats.embed_errors + stats.store_errors) > 0 {
+        if stats.events_embedded == embedded_before_batch
+            && (stats.embed_errors + stats.store_errors) > failures_before_batch
+        {
             break;
         }
     }
@@ -159,6 +163,8 @@ pub async fn run_idle_batch_worker(
             }
         }
 
+        let embedded_before_batch = stats.events_embedded;
+        let failures_before_batch = stats.embed_errors + stats.store_errors;
         for event in &batch {
             if *shutdown.borrow() {
                 return Ok(stats);
@@ -201,6 +207,14 @@ pub async fn run_idle_batch_worker(
         }
 
         stats.batches_run += 1;
+        if stats.events_embedded == embedded_before_batch
+            && (stats.embed_errors + stats.store_errors) > failures_before_batch
+        {
+            tokio::select! {
+                () = tokio::time::sleep(idle_interval) => {}
+                _ = shutdown.changed() => break,
+            }
+        }
     }
 
     Ok(stats)

@@ -9,6 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SESSION_CHECK="$SCRIPT_DIR/live-capture/check_session.py"
 MEMORY_CHECK="$SCRIPT_DIR/live-capture/verify_memory.py"
+SOAK_REPORTER="$SCRIPT_DIR/live-capture/summarize_soak.py"
+FOOTPRINT_TOOL="$REPO_ROOT/tools/footprint_measure.sh"
 CORPUS_BUILD="$REPO_ROOT/tools/capture-overlap-corpus/build-app.sh"
 CORPUS_BUNDLE_ID="ai.hippocampus.CaptureOverlapCorpus"
 FOCUSED_TOKEN="FOCUSED_EVIDENCE_ZEPHYR_9241"
@@ -21,6 +23,7 @@ QUERY_TIMEOUT=20
 PREFLIGHT_ONLY=0
 KEEP_ARTIFACTS=0
 DISCARD_FAILURE_ARTIFACTS=0
+SOAK_MODE=0
 
 RUN_ROOT=""
 EVIDENCE_CREATED=0
@@ -31,6 +34,7 @@ CORPUS_PID=""
 HELPER_PID=""
 AGENT_PID=""
 QUERY_PID=""
+FOOTPRINT_PID=""
 HELPER=""
 AGENT=""
 CLEANUP_EXIT_CODE=0
@@ -45,6 +49,8 @@ Required:
 
 Options:
   --capture-seconds N     Keep the corpus focused for 1-30 seconds (default 20).
+  --soak                  Run the release soak for exactly 30 minutes, retain
+                          evidence, and enforce the documented resource SLO.
   --startup-timeout N     Bound app/helper startup in seconds (default 20).
   --query-timeout N       Bound MCP readback in seconds (default 20).
   --preflight-only        Validate the host and app; never launch capture.
@@ -132,6 +138,7 @@ cleanup() {
         FIFO_GUARD_OPEN=0
     fi
     stop_owned_process "$QUERY_PID" "MCP query" "$AGENT"
+    stop_owned_process "$FOOTPRINT_PID" "footprint sampler" "$FOOTPRINT_TOOL"
     stop_owned_process "$HELPER_PID" "capture helper" "$HELPER"
     stop_owned_process "$AGENT_PID" "ingest agent" "$AGENT"
     stop_owned_process "$CORPUS_PID" "overlap corpus" "capture-overlap-corpus"
@@ -192,6 +199,10 @@ while [[ $# -gt 0 ]]; do
             KEEP_ARTIFACTS=1
             shift
             ;;
+        --soak)
+            SOAK_MODE=1
+            shift
+            ;;
         --discard-on-failure)
             DISCARD_FAILURE_ARTIFACTS=1
             shift
@@ -208,7 +219,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$APP_PATH" ]] || fail "--app is required; pass an assembled Hippocampus.app"
-require_bounded_integer "--capture-seconds" "$CAPTURE_SECONDS" 30
+if (( SOAK_MODE == 1 )); then
+    CAPTURE_SECONDS=1800
+    KEEP_ARTIFACTS=1
+    require_bounded_integer "--capture-seconds" "$CAPTURE_SECONDS" 1800
+else
+    require_bounded_integer "--capture-seconds" "$CAPTURE_SECONDS" 30
+fi
 require_bounded_integer "--startup-timeout" "$STARTUP_TIMEOUT" 300
 require_bounded_integer "--query-timeout" "$QUERY_TIMEOUT" 300
 
@@ -224,6 +241,8 @@ for executable in /usr/bin/open /usr/bin/lsappinfo /usr/sbin/ioreg /usr/libexec/
 done
 [[ -x "$SESSION_CHECK" ]] || fail "session checker is missing: $SESSION_CHECK"
 [[ -x "$MEMORY_CHECK" ]] || fail "memory checker is missing: $MEMORY_CHECK"
+[[ -x "$SOAK_REPORTER" ]] || fail "soak reporter is missing: $SOAK_REPORTER"
+[[ -x "$FOOTPRINT_TOOL" ]] || fail "footprint sampler is missing: $FOOTPRINT_TOOL"
 [[ -x "$CORPUS_BUILD" ]] || fail "overlap corpus builder is missing: $CORPUS_BUILD"
 
 INFO_PLIST="$APP_PATH/Contents/Info.plist"
@@ -257,7 +276,8 @@ existing_corpus_asn="$(/usr/bin/lsappinfo find bundleid="$CORPUS_BUNDLE_ID" 2>/d
     || fail "the overlap corpus is already running; quit that instance so PID ownership is unambiguous"
 
 if (( PREFLIGHT_ONLY == 1 )); then
-    printf 'PREFLIGHT ONLY: app and unlocked-session gates passed; live capture was not run.\n'
+    printf 'PREFLIGHT ONLY: app and unlocked-session gates passed; configured capture_seconds=%s soak=%s; live capture was not run.\n' \
+        "$CAPTURE_SECONDS" "$SOAK_MODE"
     RUN_SUCCEEDED=1
     exit 0
 fi
@@ -291,6 +311,8 @@ MCP_RESPONSES="$LOG_DIR/mcp.responses.jsonl"
 MCP_STDERR="$LOG_DIR/mcp.stderr"
 VERIFY_STDOUT="$LOG_DIR/verify.stdout"
 VERIFY_STDERR="$LOG_DIR/verify.stderr"
+FOOTPRINT_CSV="$LOG_DIR/helper-footprint.csv"
+SOAK_REPORT="$RUN_ROOT/capture-soak-report.json"
 
 mkdir -p "$LOG_DIR" "$SUPPORT_DIR" "$(dirname "$DEVICE_ID")"
 chmod 700 "$ISOLATED_HOME" "$SUPPORT_DIR" "$(dirname "$DEVICE_ID")"
@@ -445,7 +467,11 @@ runtime_diagnostic() {
 
 runtime_fail() {
     printf 'FAIL: %s\n' "$1" >&2
-    runtime_diagnostic
+    if [[ "$1" == overlap\ corpus\ lost\ frontmost* ]]; then
+        printf 'Action: leave the Mac unlocked and untouched while the corpus runs; capture stopped before accepting another app as evidence.\n' >&2
+    else
+        runtime_diagnostic
+    fi
     [[ ! -f "$HELPER_STDERR" ]] || tail -n 30 "$HELPER_STDERR" >&2
     [[ ! -f "$AGENT_STDERR" ]] || tail -n 30 "$AGENT_STDERR" >&2
     exit 1
@@ -484,12 +510,17 @@ fi
 [[ "$(stat -f '%Lp' "$READINESS_FILE")" == "600" ]] \
     || runtime_fail "capture helper readiness receipt is not mode 0600"
 
+"$FOOTPRINT_TOOL" "$HELPER_PID" 5 "$FOOTPRINT_CSV" \
+    >"$LOG_DIR/footprint.stdout" 2>"$LOG_DIR/footprint.stderr" &
+FOOTPRINT_PID=$!
+
 printf 'Capturing focused corpus for %ss...\n' "$CAPTURE_SECONDS"
 deadline=$((SECONDS + CAPTURE_SECONDS))
 while (( SECONDS < deadline )); do
     kill -0 "$CORPUS_PID" 2>/dev/null || runtime_fail "overlap corpus exited during capture"
     kill -0 "$HELPER_PID" 2>/dev/null || runtime_fail "capture helper exited during capture"
     kill -0 "$AGENT_PID" 2>/dev/null || runtime_fail "ingest agent exited during capture"
+    kill -0 "$FOOTPRINT_PID" 2>/dev/null || runtime_fail "footprint sampler exited during capture"
     front_bundle="$(frontmost_bundle_id || true)"
     [[ "$front_bundle" == "$CORPUS_BUNDLE_ID" ]] \
         || runtime_fail "overlap corpus lost frontmost status during capture (frontmost: ${front_bundle:-unknown})"
@@ -500,6 +531,8 @@ printf '\n==> Closing capture and waiting for the writer lease to release\n'
 stop_owned_process "$HELPER_PID" "capture helper" "$HELPER"
 wait "$HELPER_PID" 2>/dev/null || true
 HELPER_PID=""
+wait "$FOOTPRINT_PID" 2>/dev/null || true
+FOOTPRINT_PID=""
 exec 9>&-
 FIFO_GUARD_OPEN=0
 
@@ -556,5 +589,27 @@ if ! python3 "$MEMORY_CHECK" verify --responses "$MCP_RESPONSES" \
 fi
 cat "$VERIFY_STDOUT"
 
+printf '\n==> Summarizing content-free capture and footprint evidence\n'
+set +e
+python3 "$SOAK_REPORTER" \
+    --health-jsonl "$HEALTH_LOG" \
+    --footprint-csv "$FOOTPRINT_CSV" \
+    --memory-json "$VERIFY_STDOUT" \
+    --brain-dir "$SUPPORT_DIR" \
+    --capture-seconds "$CAPTURE_SECONDS" \
+    --output "$SOAK_REPORT"
+report_exit=$?
+set -e
+if (( report_exit == 2 )); then
+    runtime_fail "capture evidence could not be summarized"
+fi
+if (( SOAK_MODE == 1 && report_exit != 0 )); then
+    runtime_fail "30-minute capture soak did not meet its qualification gates"
+fi
+
 RUN_SUCCEEDED=1
-printf 'PASS: live focused-window overlap verified: focused token present, background token absent.\n'
+if (( SOAK_MODE == 1 )); then
+    printf 'PASS: 30-minute capture soak qualified; evidence retained at %s.\n' "$RUN_ROOT"
+else
+    printf 'PASS: live focused-window overlap verified: focused token present, background token absent.\n'
+fi
