@@ -29,10 +29,12 @@ LANES=(
     "rust-test|rust|test|cargo test --workspace"
     "rust-audit|rust|audit|cargo audit --deny warnings --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0190"
     "swift-fmt|swift|fmt|__swift_fmt_lane"
-    "swift-test-helper|swift|test|swift test --package-path adapters/macos/MCICaptureHelper"
-    "swift-test-recall-ui|swift|test|swift test --package-path apps/recall-ui"
-    "swift-test-onboarding|swift|test|swift test --package-path apps/onboarding"
-    "swift-test-hippocampus|swift|test|swift test --package-path apps/hippocampus"
+    "swift-package-wrapper|swift|test|scripts/test-swift-package.sh"
+    "swift-test-helper|swift|test|scripts/swift-package.sh test --package-path adapters/macos/MCICaptureHelper"
+    "swift-test-recall-ui|swift|test|scripts/swift-package.sh test --package-path apps/recall-ui"
+    "swift-test-onboarding|swift|test|scripts/swift-package.sh test --package-path apps/onboarding"
+    "swift-test-hippocampus|swift|test|scripts/swift-package.sh test --package-path apps/hippocampus"
+    "recall-state-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui RecallStateBehavior"
     "capture-consent-behavior|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior"
     "child-process-environment|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior"
     "capture-source-policy-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior"
@@ -93,10 +95,12 @@ LANES
     rust-test             cargo test --workspace
     rust-audit            cargo audit (with project ignores)
     swift-fmt             swiftformat --lint (SKIP if not installed)
+    swift-package-wrapper compatibility-wrapper behavior and unified-gate contract
     swift-test-helper     swift test in adapters/macos/MCICaptureHelper
     swift-test-recall-ui  swift test in apps/recall-ui
     swift-test-onboarding swift test in apps/onboarding
     swift-test-hippocampus swift test in apps/hippocampus
+    recall-state-behavior responsive Recall layout and ephemeral query-state fixture
     capture-consent-behavior executable capture authority and generation fixture
     child-process-environment prepared file-key authority reaches supervised children
     capture-source-policy-behavior browser pixels stay outside ambient OCR

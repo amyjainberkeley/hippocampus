@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER="$SCRIPT_DIR/swift-package.sh"
+CHECK="$SCRIPT_DIR/check.sh"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/swift-package-tests.XXXXXX")"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
@@ -212,11 +213,25 @@ test_retry_exit_code_propagates() {
     assert_empty_dir "$fixture/tmp" 'retry failure cleans temporary overlay'
 }
 
+test_unified_gate_uses_compatibility_wrapper() {
+    for package in \
+        adapters/macos/MCICaptureHelper \
+        apps/recall-ui \
+        apps/onboarding \
+        apps/hippocampus; do
+        assert_contains \
+            "$CHECK" \
+            "scripts/swift-package.sh test --package-path $package" \
+            "unified gate wraps Swift tests for $package"
+    done
+}
+
 test_healthy_toolchain_is_a_no_op
 test_exact_mismatch_repairs_with_public_overlay
 test_unrelated_linker_error_fails_closed
 test_other_package_description_swift_version_error_fails_closed
 test_retry_exit_code_propagates
+test_unified_gate_uses_compatibility_wrapper
 
 printf '%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [[ "$FAIL_COUNT" -eq 0 ]]
