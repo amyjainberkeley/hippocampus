@@ -65,7 +65,7 @@ The accepted machine-readable result is
 
 The September 2, 2026 run completed all 72 arm-task combinations against the
 installed, checksummed Core ML model. The repository contained unrelated
-concurrent FFI changes, which the report records, while every benchmark and
+workspace changes, which the report records, while every benchmark and
 production dependency path used by this sidecar was clean at start.
 
 Hybrid results:
@@ -74,10 +74,11 @@ Hybrid results:
 - Session recall was 0.6613 at rank 1 and 0.9355 at ranks 3 and 5.
 - Semantic relevance was 6/6, contradiction visibility 5/5, exact provenance
   5/5, abstention 5/5, and multi-source handoff utility 4/4.
+- Repeated screen OCR was collapsed to one canonical citation in all 5/5
+  duplicate cases; the lossless event store remains unchanged.
 - Exact fact coverage was 42/44 and every packet remained within budget.
 - Current evidence was present for 4/6 temporal tasks, but superseded evidence
-  was excluded in 0/6. Duplicate OCR was suppressed in 0/5; all five cases
-  consumed three citations for the same visible fact.
+  was excluded in 0/6.
 
 The lexical-only arm returned no ranked source for any of the 31 natural
 language answerable tasks. All 36 lexical calls remained typed as degraded,
@@ -85,7 +86,6 @@ not trusted matches, and all packets stayed within budget. This is a useful
 fallback failure signal: strict FTS candidate generation cannot carry the
 agent-handoff product by itself.
 
-The fixed quality gate therefore fails on temporal currency, supersession, and
-duplicate OCR in the hybrid arm, and on every utility axis in the lexical arm.
-Both `retrieval_and_handoff_qualified` and `trusted_answer_qualified` remain
-`false`.
+The fixed hybrid quality gate therefore fails only on temporal currency and
+supersession; the lexical arm still fails every utility axis. Both
+`retrieval_and_handoff_qualified` and `trusted_answer_qualified` remain false.
