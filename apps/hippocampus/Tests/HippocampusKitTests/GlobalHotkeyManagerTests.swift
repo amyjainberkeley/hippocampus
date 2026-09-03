@@ -5,7 +5,7 @@
 // production registrar on a real login session.
 
 import XCTest
-@testable import RecallUIKit
+@testable import HippocampusKit
 
 /// Mock registrar that records calls and lets the test manually fire
 /// the callback — same protocol-seam pattern as the ⌘K Action Panel

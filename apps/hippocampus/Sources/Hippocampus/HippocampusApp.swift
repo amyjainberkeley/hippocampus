@@ -246,6 +246,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         signal(SIGPIPE, SIG_IGN)
 
         Task { @MainActor in
+            let hotkeyResult = GlobalHotkeyManager.shared.registerDefault { [weak self] in
+                self?.supervisor.openRecallUI(openPopup: true)
+            }
+            if case .osError(let status) = hotkeyResult {
+                self.firstLaunchLogger.error(
+                    "global Recall hotkey registration failed: \(status)"
+                )
+            }
             self.installBrowserHostManifests()
             self.startSupervisorOrDeferUntilOnboarded()
             self.armTCCStderrTail()
@@ -370,6 +378,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cancelSentinelWatcher()
         tccStderrTail?.stop()
         tccStderrTail = nil
+        GlobalHotkeyManager.shared.unregister()
+        supervisor.closeRecallUI()
     }
 
     private func presentShutdownFailure(_ error: Error) {
@@ -434,12 +444,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for url in urls {
             guard let route = HippocampusURLRoute.parse(url) else { continue }
             switch route {
-            case .openRecall(let tab):
+            case .openRecall(let tab, let focusEventId, let openPopup):
                 // Per Brief Viewer spec: `hippocampus://recall?tab=brief`
                 // deep-links the Brief tab. Unknown tab values fall
                 // through to the recall-ui's default tab.
                 Task { @MainActor in
-                    supervisor.openRecallUI(initialTab: tab)
+                    supervisor.openRecallUI(
+                        initialTab: tab,
+                        focusEventId: focusEventId,
+                        openPopup: openPopup
+                    )
                 }
             case .showOnboarding:
                 // Cycle 8.48 — the cycle 8.46 Action Panel "Show
@@ -537,12 +551,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if OnboardingSentinel.isComplete {
                     self.sentinelLogger.info(
-                        "sentinel-watch: sentinel appeared → starting supervisor"
+                        "sentinel-watch: sentinel appeared → enabling first-run capture"
                     )
                     self.cancelSentinelWatcher()
-                    Task { @MainActor in
-                        self.supervisor.start()
-                    }
+                    self.startCaptureAfterOnboarding()
                 }
             }
             source.setCancelHandler { [weak self] in
@@ -570,10 +582,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if Task.isCancelled { return }
                 if OnboardingSentinel.isComplete {
                     self?.sentinelLogger.info(
-                        "sentinel-watch: poll caught sentinel → starting supervisor"
+                        "sentinel-watch: poll caught sentinel → enabling first-run capture"
                     )
                     self?.cancelSentinelWatcher()
-                    self?.supervisor.start()
+                    self?.startCaptureAfterOnboarding()
                     return
                 }
             }
@@ -586,5 +598,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentinelWatcher = nil
         sentinelPollTask?.cancel()
         sentinelPollTask = nil
+    }
+
+    /// Completing the first-run flow is the user's explicit capture opt-in.
+    /// Persist and launch that state as one verified supervisor transition so
+    /// the Done screen cannot lead to an inert capture-disabled process tree.
+    @MainActor
+    private func startCaptureAfterOnboarding() {
+        if supervisor.captureEnabled {
+            supervisor.start()
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.supervisor.applyCaptureEnabled(true)
+                self.firstLaunchLogger.info(
+                    "first-launch: onboarding consent persisted; capture topology ready"
+                )
+            } catch {
+                self.firstLaunchLogger.error(
+                    "first-launch: could not enable capture after onboarding: \(error.localizedDescription)"
+                )
+            }
+        }
     }
 }

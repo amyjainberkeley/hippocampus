@@ -743,6 +743,21 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertEqual(config.captureWrites, [true])
     }
 
+    func test_first_run_can_enable_capture_directly_from_idle() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(())]
+
+        try await supervisor.applyCaptureEnabled(true)
+
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertTrue(config.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [true])
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertTrue(topology.launchPlans[0].helperArguments.contains("--capture"))
+        XCTAssertEqual(topology.launchPlans[0].agentEnvironment["MCI_CAPTURE_ENABLED"], "1")
+    }
+
     func test_persistence_failure_rolls_back_to_verified_prior_topology() async throws {
         let (supervisor, _, _, config, topology, _) = makeSupervisor()
         topology.readinessResults = [.success(()), .success(()), .success(())]

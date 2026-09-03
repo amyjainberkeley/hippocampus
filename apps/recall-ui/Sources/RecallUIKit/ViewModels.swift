@@ -121,6 +121,26 @@ public final class SearchViewModel: ObservableObject {
         }
     }
 
+    /// Load one canonical event selected outside the main workspace (for
+    /// example from the global Recall popup) and reveal its detail directly.
+    public func focusEvent(id: UInt64) async {
+        guard id > 0 else { return }
+        isSearching = true
+        errorMessage = nil
+        defer { isSearching = false }
+        do {
+            let focused = try await reader.fetchEventsByIds([id])
+            hits = Array(focused.prefix(1))
+            selectedHitId = hits.first?.eventId
+            isDetailFocused = selectedHitId != nil
+        } catch {
+            hits = []
+            selectedHitId = nil
+            isDetailFocused = false
+            errorMessage = "\(error)"
+        }
+    }
+
     /// Apply window + app + URL filters that the FFI does not enforce
     /// on its own. Centralized so the filter-only path and the
     /// text+filter path stay in sync.

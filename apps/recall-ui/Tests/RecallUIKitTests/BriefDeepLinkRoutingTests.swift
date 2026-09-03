@@ -41,6 +41,28 @@ final class BriefDeepLinkRoutingTests: XCTestCase {
         // spawning the recall-ui executable; changing it without updating
         // the supervisor would silently break deep-linking.
         XCTAssertEqual(RecallTab.initialTabEnvVar, "MCI_INITIAL_TAB")
+        XCTAssertEqual(RecallLaunchRequest.focusEventEnvVar, "MCI_INITIAL_FOCUS_EVENT_ID")
+        XCTAssertEqual(RecallLaunchRequest.openPopupEnvVar, "MCI_OPEN_GLOBAL_POPUP")
+    }
+
+    func testLaunchRequestReadsTabFocusAndPopupFromEnvironment() {
+        let request = RecallLaunchRequest(environment: [
+            "MCI_INITIAL_TAB": "search",
+            "MCI_INITIAL_FOCUS_EVENT_ID": "42",
+            "MCI_OPEN_GLOBAL_POPUP": "1",
+        ])
+        XCTAssertEqual(
+            request,
+            RecallLaunchRequest(tab: .search, focusEventId: 42, openPopup: true)
+        )
+    }
+
+    func testLaunchRequestParsesFocusedEventDeepLink() {
+        let url = URL(string: "hippocampus://recall?tab=search&focus=42")!
+        XCTAssertEqual(
+            RecallLaunchRequest(url: url),
+            RecallLaunchRequest(tab: .search, focusEventId: 42, openPopup: false)
+        )
     }
 
     // MARK: URL parsing the way HippocampusApp.application(_, open:) does
