@@ -305,51 +305,21 @@ struct StatusMenuView: View {
         let childEnvironment = supervisor.sanitizedChildEnvironment()
         mcpRegistering = true
         Task.detached {
-            let proc = ChildProcessEnvironment.makeProcess(baseEnvironment: childEnvironment)
-            proc.executableURL = agentPath
-            proc.arguments = ["connect", "--all"]
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            proc.standardOutput = outPipe
-            proc.standardError = errPipe
             do {
-                try proc.run()
-                proc.waitUntilExit()
+                let message = try await AIToolConnector(
+                    agentURL: agentPath,
+                    baseEnvironment: childEnvironment
+                ).connectAll()
+                await MainActor.run {
+                    mcpRegistering = false
+                    showAlert(title: "Connected", message: message)
+                }
             } catch {
                 await MainActor.run {
                     mcpRegistering = false
-                    // Cycle 8.54 copy audit — user-facing title + no
-                    // Internal connector jargon should not leak here.
                     showAlert(
                         title: "Couldn\u{2019}t connect AI tools",
-                        message:
-                            "Try again in a moment — if it keeps "
-                            + "happening, use \u{201C}Send Feedback\u{201D} "
-                            + "from the menu bar."
-                    )
-                }
-                return
-            }
-            let stdout = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            await MainActor.run {
-                mcpRegistering = false
-                if proc.terminationStatus == 0 {
-                    let msg = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-                    showAlert(title: "Connected", message: msg.isEmpty ? "Hippocampus connected the AI tools installed on this Mac." : msg)
-                } else {
-                    // Cycle 8.54 copy audit — never surface raw
-                    // "exited with code -N" to the user. Stderr detail
-                    // is preserved for the technical case; on the
-                    // "no detail" path we swap in plain-English copy
-                    // instead of the exit-code leak.
-                    let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    showAlert(
-                        title: "Couldn\u{2019}t connect AI tools",
-                        message: detail.isEmpty
-                            ? "Try again in a moment — if it keeps happening, "
-                              + "use \u{201C}Send Feedback\u{201D} from the menu bar."
-                            : detail
+                        message: error.localizedDescription
                     )
                 }
             }

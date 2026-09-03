@@ -14,6 +14,7 @@
 import PackageDescription
 
 let standaloneFixtureSources = [
+    "AIToolConnectorBehavior.swift",
     "BriefModelPresenceBehavior.swift",
     "CaptureConsentBehavior.swift",
     "ChildProcessEnvironmentBehavior.swift",
@@ -113,6 +114,13 @@ let package = Package(
             path: "Tests/Fixtures",
             exclude: standaloneFixtureSources.filter { $0 != "ChildProcessEnvironmentBehavior.swift" },
             sources: ["ChildProcessEnvironmentBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "AIToolConnectorBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "AIToolConnectorBehavior.swift" },
+            sources: ["AIToolConnectorBehavior.swift"]
         ),
     ]
 )

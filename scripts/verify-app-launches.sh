@@ -19,7 +19,7 @@ set -euo pipefail
 #   1 — process exited or crashed within $WAIT_SECONDS, OR missing args
 #
 # Environment:
-#   VERIFY_WAIT_SECONDS  override the 5s default wait
+#   VERIFY_WAIT_SECONDS  override the 20s default wait
 #   VERIFY_CLEAN_HOME=1  launch with disposable HOME/CFFIXED_USER_HOME
 #   VERIFY_EXPECT_ONBOARDING=1  require first-run onboarding to stay alive
 #
@@ -36,7 +36,7 @@ fi
 APP="$1"
 APP_BIN="$APP/Contents/MacOS/Hippocampus"
 ONBOARDING_BIN="$APP/Contents/MacOS/onboarding"
-WAIT_SECONDS="${VERIFY_WAIT_SECONDS:-5}"
+WAIT_SECONDS="${VERIFY_WAIT_SECONDS:-20}"
 CLEAN_HOME_ENABLED="${VERIFY_CLEAN_HOME:-0}"
 EXPECT_ONBOARDING="${VERIFY_EXPECT_ONBOARDING:-0}"
 CLEAN_ROOT=""
