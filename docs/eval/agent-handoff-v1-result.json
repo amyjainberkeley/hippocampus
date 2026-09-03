@@ -6,12 +6,12 @@
   "surface": "LiveBrainReader::recall + LiveBrainReader::context (mci_context backend)",
   "measurement_boundary": "retrieval_and_context_handoff_not_answer_generation",
   "trusted_answer_qualified": false,
-  "retrieval_and_handoff_qualified": false,
+  "retrieval_and_handoff_qualified": true,
   "complete": true,
   "publishable": true,
   "run": {
-    "captured_at_utc": "2026-09-03T01:10:47Z",
-    "git_commit": "07e564e0f84bc82b8b23ccda4249fff7054e57f9",
+    "captured_at_utc": "2026-09-03T01:27:36Z",
+    "git_commit": "1a6edd922c50d6282eaa96f6bd295b076163c4ca",
     "branch": "codex/hippocampus-v1",
     "repository_dirty_at_start": true,
     "benchmark_scope_dirty_at_start": false,
@@ -43,34 +43,31 @@
       "unanswerable_tasks": 5,
       "metrics": {
         "hit_rate_at": {
-          "1": 0.9354838709677419,
-          "3": 0.9354838709677419,
-          "5": 0.9354838709677419
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0
         },
         "recall_at": {
-          "1": 0.6612903225806451,
-          "3": 0.9354838709677419,
-          "5": 0.9354838709677419
+          "1": 0.7258064516129032,
+          "3": 1.0,
+          "5": 1.0
         },
-        "mrr": 0.9354838709677419,
+        "mrr": 1.0,
         "semantic_relevance_at_3": 1.0,
-        "temporal_current_accuracy": 0.6666666666666666,
-        "superseded_exclusion_rate": 0.0,
+        "temporal_current_accuracy": 1.0,
+        "superseded_exclusion_rate": 1.0,
         "contradiction_visibility": 1.0,
         "duplicate_ocr_suppression": 1.0,
         "exact_provenance_validity": 1.0,
         "abstention_accuracy": 1.0,
         "handoff_task_success": 1.0,
-        "handoff_fact_coverage": 0.9545454545454546,
+        "handoff_fact_coverage": 1.0,
         "bounded_packet_rate": 1.0,
-        "capability_pass_rate": 0.8333333333333334
+        "capability_pass_rate": 1.0
       },
       "quality_gate": {
-        "passed": false,
-        "failures": [
-          "temporal_current_accuracy 0.6667 is below 0.9000",
-          "superseded_exclusion_rate 0.0000 is below 0.9000"
-        ]
+        "passed": true,
+        "failures": []
       }
     },
     {
@@ -80,40 +77,31 @@
       "unanswerable_tasks": 5,
       "metrics": {
         "hit_rate_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0
+          "1": 0.8709677419354839,
+          "3": 1.0,
+          "5": 1.0
         },
         "recall_at": {
-          "1": 0.0,
-          "3": 0.0,
-          "5": 0.0
+          "1": 0.5967741935483871,
+          "3": 0.989247311827957,
+          "5": 0.989247311827957
         },
-        "mrr": 0.0,
-        "semantic_relevance_at_3": 0.0,
-        "temporal_current_accuracy": 0.0,
-        "superseded_exclusion_rate": 0.0,
-        "contradiction_visibility": 0.0,
-        "duplicate_ocr_suppression": 0.0,
-        "exact_provenance_validity": 0.0,
-        "abstention_accuracy": 0.0,
-        "handoff_task_success": 0.0,
-        "handoff_fact_coverage": 0.0,
+        "mrr": 0.924731182795699,
+        "semantic_relevance_at_3": 1.0,
+        "temporal_current_accuracy": 1.0,
+        "superseded_exclusion_rate": 1.0,
+        "contradiction_visibility": 1.0,
+        "duplicate_ocr_suppression": 1.0,
+        "exact_provenance_validity": 1.0,
+        "abstention_accuracy": 1.0,
+        "handoff_task_success": 0.75,
+        "handoff_fact_coverage": 0.9772727272727273,
         "bounded_packet_rate": 1.0,
-        "capability_pass_rate": 0.0
+        "capability_pass_rate": 0.9722222222222222
       },
       "quality_gate": {
-        "passed": false,
-        "failures": [
-          "semantic_relevance_at_3 0.0000 is below 0.9000",
-          "temporal_current_accuracy 0.0000 is below 0.9000",
-          "superseded_exclusion_rate 0.0000 is below 0.9000",
-          "contradiction_visibility 0.0000 is below 0.8000",
-          "duplicate_ocr_suppression 0.0000 is below 0.8000",
-          "exact_provenance_validity 0.0000 is below 1.0000",
-          "abstention_accuracy 0.0000 is below 0.8000",
-          "handoff_task_success 0.0000 is below 0.7500"
-        ]
+        "passed": true,
+        "failures": []
       }
     }
   ],
@@ -122,17 +110,46 @@
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 778,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://distractor/semantic-0",
+            "ts_us": 1788253200000000,
+            "url": "slack://distractor/semantic-0",
+            "window_title": "Unrelated planning thread 1"
+          },
+          {
+            "app_bundle_id": "com.apple.Safari",
+            "event_id": 2,
+            "session_id": "browser://adr/0010",
+            "ts_us": 1788346800000000,
+            "url": "browser://adr/0010",
+            "window_title": "Agent memory decision 1"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 3,
+            "session_id": "linear://distractor/semantic-0",
+            "ts_us": 1788354000000000,
+            "url": "linear://distractor/semantic-0",
+            "window_title": "UI polish issue 1"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.linear: UI polish issue 1\nObserved com.apple.Safari: Agent memory decision 1\nObserved com.tinyspeck.slackmacgap: Unrelated planning thread 1\nEvent 3: [app=com.linear | title=UI polish issue 1 | url=linear://distractor/semantic-0 | ts=2026-09-02T13:00:00.000Z]\nThe settings sidebar needs an alignment pass before screenshots are refreshed.\nEvent 2: [app=com.apple.Safari | title=Agent memory decision 1 | url=browser://adr/0010 | ts=2026-09-02T11:00:00.000Z]\nEmbedding scores are retrieval hints only; a source-backed verifier must establish support.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Unrelated planning thread 1 | url=slack://distractor/semantic-0 | ts=2026-09-01T09:00:00.000Z]\nThe design review moved to Friday and the notes need a final formatting pass.",
+        "token_estimate": 91,
         "truncated": false
       },
       "question_id": "semantic-embeddings-advisory",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "browser://adr/0010",
+        "linear://distractor/semantic-0",
+        "slack://distractor/semantic-0"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "semantic_relevance",
@@ -140,41 +157,52 @@
       "answer_session_ids": [
         "browser://adr/0010"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 271,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "linear://HIP-311",
+            "ts_us": 1788346800000000,
+            "url": "linear://HIP-311",
+            "window_title": "Agent memory decision 2"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Agent memory decision 2\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 2 | url=linear://HIP-311 | ts=2026-09-02T11:00:00.000Z]\nHIP-311 is blocked because the release machine has no Developer ID Application signing identity.",
+        "token_estimate": 32,
         "truncated": false
       },
       "question_id": "semantic-release-upload-blocker",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "linear://HIP-311"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "semantic_relevance",
@@ -182,41 +210,52 @@
       "answer_session_ids": [
         "linear://HIP-311"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 278,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "github://hippocampus/pull/517",
+            "ts_us": 1788346800000000,
+            "url": "github://hippocampus/pull/517",
+            "window_title": "Agent memory decision 3"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Agent memory decision 3\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 3 | url=github://hippocampus/pull/517 | ts=2026-09-02T11:00:00.000Z]\nPR 517 moved the global Shift Command Space hotkey into the always-running menu-bar shell.",
+        "token_estimate": 32,
         "truncated": false
       },
       "question_id": "semantic-global-recall-hotkey",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "github://hippocampus/pull/517"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "semantic_relevance",
@@ -224,41 +263,52 @@
       "answer_session_ids": [
         "github://hippocampus/pull/517"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 293,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "file:///docs/agent-context.md",
+            "ts_us": 1788346800000000,
+            "url": "file:///docs/agent-context.md",
+            "window_title": "Agent memory decision 4"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Agent memory decision 4\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 4 | url=file:///docs/agent-context.md | ts=2026-09-02T11:00:00.000Z]\nThe mci_context handoff compiles a bounded cited packet for the current focus instead of dumping history.",
+        "token_estimate": 34,
         "truncated": false
       },
       "question_id": "semantic-bounded-agent-context",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "file:///docs/agent-context.md"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "semantic_relevance",
@@ -266,41 +316,70 @@
       "answer_session_ids": [
         "file:///docs/agent-context.md"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 829,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://distractor/semantic-4",
+            "ts_us": 1788253200000000,
+            "url": "slack://distractor/semantic-4",
+            "window_title": "Unrelated planning thread 5"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "terminal://zsh/embedder-health",
+            "ts_us": 1788346800000000,
+            "url": "terminal://zsh/embedder-health",
+            "window_title": "Agent memory decision 5"
+          },
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 3,
+            "session_id": "linear://distractor/semantic-4",
+            "ts_us": 1788354000000000,
+            "url": "linear://distractor/semantic-4",
+            "window_title": "UI polish issue 5"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.linear: UI polish issue 5\nObserved com.microsoft.VSCode: Agent memory decision 5\nObserved com.tinyspeck.slackmacgap: Unrelated planning thread 5\nEvent 3: [app=com.linear | title=UI polish issue 5 | url=linear://distractor/semantic-4 | ts=2026-09-02T13:00:00.000Z]\nThe settings sidebar needs an alignment pass before screenshots are refreshed.\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 5 | url=terminal://zsh/embedder-health | ts=2026-09-02T11:00:00.000Z]\nWhen Arctic Embed S is unavailable, recall reports embeddings_unavailable and exposes lexical related context as degraded.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Unrelated planning thread 5 | url=slack://distractor/semantic-4 | ts=2026-09-01T09:00:00.000Z]\nThe design review moved to Friday and the notes need a final formatting pass.",
+        "token_estimate": 95,
         "truncated": false
       },
       "question_id": "semantic-missing-embedder",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "terminal://zsh/embedder-health",
+        "linear://distractor/semantic-4",
+        "slack://distractor/semantic-4"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "semantic_relevance",
@@ -308,41 +387,52 @@
       "answer_session_ids": [
         "terminal://zsh/embedder-health"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 304,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "file:///docs/privacy/focus-gate.md",
+            "ts_us": 1788346800000000,
+            "url": "file:///docs/privacy/focus-gate.md",
+            "window_title": "Agent memory decision 6"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Agent memory decision 6\nEvent 2: [app=com.microsoft.VSCode | title=Agent memory decision 6 | url=file:///docs/privacy/focus-gate.md | ts=2026-09-02T11:00:00.000Z]\nThe focus-generation gate binds each frame to the current Accessibility window snapshot before pixel admission.",
+        "token_estimate": 33,
         "truncated": false
       },
       "question_id": "semantic-pre-pixel-privacy",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "file:///docs/privacy/focus-gate.md"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "semantic_relevance",
@@ -350,41 +440,53 @@
       "answer_session_ids": [
         "file:///docs/privacy/focus-gate.md"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 206,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "linear://HIP-204/current",
+            "ts_us": 1788357600000000,
+            "url": "linear://HIP-204/current",
+            "window_title": "Current state 1"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.linear: Current state 1\nEvent 2: [app=com.linear | title=Current state 1 | url=linear://HIP-204/current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: Priya. This supersedes the previous plan.",
+        "token_estimate": 24,
         "truncated": false
       },
       "question_id": "temporal-owner",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "linear://HIP-204/old",
+        "linear://HIP-204/current"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "temporal_supersession",
@@ -392,41 +494,53 @@
       "answer_session_ids": [
         "linear://HIP-204/current"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 2,
       "recall_at": {
         "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 285,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "file:///current-model-path",
+            "ts_us": 1788357600000000,
+            "url": "file:///current-model-path",
+            "window_title": "Current state 2"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.linear: Current state 2\nEvent 2: [app=com.linear | title=Current state 2 | url=file:///current-model-path | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc. This supersedes the previous plan.",
+        "token_estimate": 24,
         "truncated": false
       },
       "question_id": "temporal-model-path",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "file:///current-model-path",
+        "file:///old-model-path"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "temporal_supersession",
@@ -434,41 +548,53 @@
       "answer_session_ids": [
         "file:///current-model-path"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 214,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "linear://ATLAS-90/current",
+            "ts_us": 1788357600000000,
+            "url": "linear://ATLAS-90/current",
+            "window_title": "Current state 3"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.linear: Current state 3\nEvent 2: [app=com.linear | title=Current state 3 | url=linear://ATLAS-90/current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: September 15. This supersedes the previous plan.",
+        "token_estimate": 25,
         "truncated": false
       },
       "question_id": "temporal-launch-date",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "linear://ATLAS-90/current",
+        "slack://atlas/launch-old"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "temporal_supersession",
@@ -476,41 +602,53 @@
       "answer_session_ids": [
         "linear://ATLAS-90/current"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 216,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "file:///benchmark-count-current",
+            "ts_us": 1788357600000000,
+            "url": "file:///benchmark-count-current",
+            "window_title": "Current state 4"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.linear: Current state 4\nEvent 2: [app=com.linear | title=Current state 4 | url=file:///benchmark-count-current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: 36 tasks. This supersedes the previous plan.",
+        "token_estimate": 25,
         "truncated": false
       },
       "question_id": "temporal-benchmark-count",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "file:///benchmark-count-old",
+        "file:///benchmark-count-current"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "temporal_supersession",
@@ -518,41 +656,62 @@
       "answer_session_ids": [
         "file:///benchmark-count-current"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 2,
       "recall_at": {
         "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 429,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "file:///signing-team-current",
+            "ts_us": 1788357600000000,
+            "url": "file:///signing-team-current",
+            "window_title": "Current state 5"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "terminal://distractor/temporal-4",
+            "ts_us": 1788361200000000,
+            "url": "",
+            "window_title": "Unrelated test run 5"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Unrelated test run 5\nObserved com.linear: Current state 5\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 5 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 5 | url=file:///signing-team-current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: NEWTEAM73. This supersedes the previous plan.",
+        "token_estimate": 51,
         "truncated": false
       },
       "question_id": "temporal-signing-team",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "terminal://distractor/temporal-4",
+        "file:///signing-team-old",
+        "file:///signing-team-current"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "temporal_supersession",
@@ -560,41 +719,62 @@
       "answer_session_ids": [
         "file:///signing-team-current"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 3,
       "recall_at": {
         "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 474,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "github://capture/current",
+            "ts_us": 1788357600000000,
+            "url": "github://capture/current",
+            "window_title": "Current state 6"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "terminal://distractor/temporal-5",
+            "ts_us": 1788361200000000,
+            "url": "",
+            "window_title": "Unrelated test run 6"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Unrelated test run 6\nObserved com.linear: Current state 6\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 6 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 6 | url=github://capture/current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: capture is enabled and the verified helper topology starts. This supersedes the previous plan.",
+        "token_estimate": 59,
         "truncated": false
       },
       "question_id": "temporal-capture-state",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "terminal://distractor/temporal-5",
+        "github://capture/old",
+        "github://capture/current"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "temporal_supersession",
@@ -602,41 +782,70 @@
       "answer_session_ids": [
         "github://capture/current"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 3,
       "recall_at": {
         "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 639,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/0/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/0/left",
+            "window_title": "Conflict note 1 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/0/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/0/right",
+            "window_title": "Conflict note 1 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/0/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 1"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 1 B\nObserved com.tinyspeck.slackmacgap: Conflict note 1 A\nObserved com.apple.TextEdit: Background 1\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 1 B | url=github://conflict/0/right | ts=2026-09-02T10:05:00.000Z]\nscreenshots are retained for 90 days.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 1 A | url=slack://conflict/0/left | ts=2026-09-02T10:00:00.000Z]\nscreenshots are retained for 30 days.\nEvent 3: [app=com.apple.TextEdit | title=Background 1 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 72,
         "truncated": false
       },
       "question_id": "contradiction-retention",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "slack://conflict/0/left",
+        "github://conflict/0/right",
+        "file:///conflict/0/background"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "contradiction",
@@ -645,41 +854,70 @@
         "slack://conflict/0/left",
         "github://conflict/0/right"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
-      "contradiction_visible": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 2,
       "facts_required": 2,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 644,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/1/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/1/left",
+            "window_title": "Conflict note 2 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/1/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/1/right",
+            "window_title": "Conflict note 2 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/1/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 2"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 2 B\nObserved com.tinyspeck.slackmacgap: Conflict note 2 A\nObserved com.apple.TextEdit: Background 2\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 2 B | url=github://conflict/1/right | ts=2026-09-02T10:05:00.000Z]\nraw captures are uploaded for remote indexing.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 2 A | url=slack://conflict/1/left | ts=2026-09-02T10:00:00.000Z]\nraw captures never leave the Mac.\nEvent 3: [app=com.apple.TextEdit | title=Background 2 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 73,
         "truncated": false
       },
       "question_id": "contradiction-cloud",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "github://conflict/1/right",
+        "slack://conflict/1/left",
+        "file:///conflict/1/background"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "contradiction",
@@ -688,41 +926,70 @@
         "slack://conflict/1/left",
         "github://conflict/1/right"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
-      "contradiction_visible": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 2,
       "facts_required": 2,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 610,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/2/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/2/left",
+            "window_title": "Conflict note 3 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/2/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/2/right",
+            "window_title": "Conflict note 3 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/2/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 3"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 3 B\nObserved com.tinyspeck.slackmacgap: Conflict note 3 A\nObserved com.apple.TextEdit: Background 3\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 3 B | url=github://conflict/2/right | ts=2026-09-02T10:05:00.000Z]\nPR 522 is blocked on review.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 3 A | url=slack://conflict/2/left | ts=2026-09-02T10:00:00.000Z]\nPR 522 is merged.\nEvent 3: [app=com.apple.TextEdit | title=Background 3 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 70,
         "truncated": false
       },
       "question_id": "contradiction-pr-state",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "slack://conflict/2/left",
+        "github://conflict/2/right",
+        "file:///conflict/2/background"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "contradiction",
@@ -731,41 +998,70 @@
         "slack://conflict/2/left",
         "github://conflict/2/right"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
-      "contradiction_visible": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 2,
       "facts_required": 2,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 608,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/3/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/3/left",
+            "window_title": "Conflict note 4 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/3/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/3/right",
+            "window_title": "Conflict note 4 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/3/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 4"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 4 B\nObserved com.tinyspeck.slackmacgap: Conflict note 4 A\nObserved com.apple.TextEdit: Background 4\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 4 B | url=github://conflict/3/right | ts=2026-09-02T10:05:00.000Z]\nSSO ships in Q4.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 4 A | url=slack://conflict/3/left | ts=2026-09-02T10:00:00.000Z]\nSSO ships by the end of Q3.\nEvent 3: [app=com.apple.TextEdit | title=Background 4 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 71,
         "truncated": false
       },
       "question_id": "contradiction-customer-date",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "github://conflict/3/right",
+        "slack://conflict/3/left",
+        "file:///conflict/3/background"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "contradiction",
@@ -774,41 +1070,70 @@
         "slack://conflict/3/left",
         "github://conflict/3/right"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
-      "contradiction_visible": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 2,
       "facts_required": 2,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 663,
+        "citations": [
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 1,
+            "session_id": "slack://conflict/4/left",
+            "ts_us": 1788343200000000,
+            "url": "slack://conflict/4/left",
+            "window_title": "Conflict note 5 A"
+          },
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 2,
+            "session_id": "github://conflict/4/right",
+            "ts_us": 1788343500000000,
+            "url": "github://conflict/4/right",
+            "window_title": "Conflict note 5 B"
+          },
+          {
+            "app_bundle_id": "com.apple.TextEdit",
+            "event_id": 3,
+            "session_id": "file:///conflict/4/background",
+            "ts_us": 1788249600000000,
+            "url": "",
+            "window_title": "Background 5"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: Conflict note 5 B\nObserved com.tinyspeck.slackmacgap: Conflict note 5 A\nObserved com.apple.TextEdit: Background 5\nEvent 2: [app=com.github.GitHubClient | title=Conflict note 5 B | url=github://conflict/4/right | ts=2026-09-02T10:05:00.000Z]\npassword-manager windows may be captured when focused.\nEvent 1: [app=com.tinyspeck.slackmacgap | title=Conflict note 5 A | url=slack://conflict/4/left | ts=2026-09-02T10:00:00.000Z]\npassword-manager windows are always blocked.\nEvent 3: [app=com.apple.TextEdit | title=Background 5 | url= | ts=2026-09-01T08:00:00.000Z]\nThe release checklist requires conflicts to remain visible until resolved.",
+        "token_estimate": 72,
         "truncated": false
       },
       "question_id": "contradiction-password-manager",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "github://conflict/4/right",
+        "slack://conflict/4/left",
+        "file:///conflict/4/background"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "contradiction",
@@ -817,41 +1142,54 @@
         "slack://conflict/4/left",
         "github://conflict/4/right"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
-      "contradiction_visible": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
+      "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 2,
       "facts_required": 2,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 214,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/0/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/0",
+            "window_title": "Repeated status 1"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 1\nEvent 3: [app=com.apple.Terminal | title=Repeated status 1 | url=screen://duplicate/0 | ts=2026-09-02T12:03:00.000Z]\nThe notarized release build completed successfully.",
+        "token_estimate": 22,
         "truncated": false
       },
       "question_id": "duplicate-build-status",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "screen://duplicate/0/1",
+        "screen://duplicate/0/2",
+        "screen://duplicate/0/3"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "duplicate_ocr",
@@ -861,41 +1199,54 @@
         "screen://duplicate/0/2",
         "screen://duplicate/0/3"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
       },
       "required_sources_present": true,
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 0,
-      "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
+      "facts_complete": true,
       "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 216,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/1/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/1",
+            "window_title": "Repeated status 2"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 2\nEvent 3: [app=com.apple.Terminal | title=Repeated status 2 | url=screen://duplicate/1 | ts=2026-09-02T12:03:00.000Z]\nThe capture privacy test blocked the password window.",
+        "token_estimate": 24,
         "truncated": false
       },
       "question_id": "duplicate-test-status",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "screen://duplicate/1/1",
+        "screen://duplicate/1/2",
+        "screen://duplicate/1/3"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "duplicate_ocr",
@@ -905,41 +1256,54 @@
         "screen://duplicate/1/2",
         "screen://duplicate/1/3"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
       },
       "required_sources_present": true,
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 0,
-      "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
+      "facts_complete": true,
       "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 209,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/2/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/2",
+            "window_title": "Repeated status 3"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 3\nEvent 3: [app=com.apple.Terminal | title=Repeated status 3 | url=screen://duplicate/2 | ts=2026-09-02T12:03:00.000Z]\nPriya accepted the memory benchmark follow-up.",
+        "token_estimate": 22,
         "truncated": false
       },
       "question_id": "duplicate-owner-status",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "screen://duplicate/2/1",
+        "screen://duplicate/2/2",
+        "screen://duplicate/2/3"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "duplicate_ocr",
@@ -949,41 +1313,54 @@
         "screen://duplicate/2/2",
         "screen://duplicate/2/3"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
       },
       "required_sources_present": true,
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 0,
-      "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
+      "facts_complete": true,
       "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 207,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/3/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/3",
+            "window_title": "Repeated status 4"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 4\nEvent 3: [app=com.apple.Terminal | title=Repeated status 4 | url=screen://duplicate/3 | ts=2026-09-02T12:03:00.000Z]\nThe documentation deploy reached production.",
+        "token_estimate": 21,
         "truncated": false
       },
       "question_id": "duplicate-deploy-status",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "screen://duplicate/3/1",
+        "screen://duplicate/3/2",
+        "screen://duplicate/3/3"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "duplicate_ocr",
@@ -993,41 +1370,54 @@
         "screen://duplicate/3/2",
         "screen://duplicate/3/3"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
       },
       "required_sources_present": true,
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 0,
-      "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
+      "facts_complete": true,
       "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 222,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "screen://duplicate/4/3",
+            "ts_us": 1788350580000000,
+            "url": "screen://duplicate/4",
+            "window_title": "Repeated status 5"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Repeated status 5\nEvent 3: [app=com.apple.Terminal | title=Repeated status 5 | url=screen://duplicate/4 | ts=2026-09-02T12:03:00.000Z]\nThe MCP synchronization imported twelve approved resources.",
+        "token_estimate": 23,
         "truncated": false
       },
       "question_id": "duplicate-sync-status",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "screen://duplicate/4/1",
+        "screen://duplicate/4/2",
+        "screen://duplicate/4/3"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "duplicate_ocr",
@@ -1037,41 +1427,52 @@
         "screen://duplicate/4/2",
         "screen://duplicate/4/3"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
       },
       "required_sources_present": true,
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 0,
-      "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
+      "facts_complete": true,
       "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 276,
+        "citations": [
+          {
+            "app_bundle_id": "com.github.GitHubClient",
+            "event_id": 1,
+            "session_id": "github://hippocampus/pull/531",
+            "ts_us": 1788341400000000,
+            "url": "github://hippocampus/pull/531",
+            "window_title": "PR 531 bounded agent handoff"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.github.GitHubClient: PR 531 bounded agent handoff\nEvent 1: [app=com.github.GitHubClient | title=PR 531 bounded agent handoff | url=github://hippocampus/pull/531 | ts=2026-09-02T09:30:00.000Z]\nPR 531 says mci_context emits a bounded packet with canonical citations.",
+        "token_estimate": 31,
         "truncated": false
       },
       "question_id": "provenance-pr",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "github://hippocampus/pull/531"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "exact_provenance",
@@ -1079,41 +1480,52 @@
       "answer_session_ids": [
         "github://hippocampus/pull/531"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 232,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 1,
+            "session_id": "linear://HIP-311/comment-7",
+            "ts_us": 1788341400000000,
+            "url": "linear://HIP-311/comment-7",
+            "window_title": "HIP-311 signing blocker"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.linear: HIP-311 signing blocker\nEvent 1: [app=com.linear | title=HIP-311 signing blocker | url=linear://HIP-311/comment-7 | ts=2026-09-02T09:30:00.000Z]\nHIP-311 comment 7 assigns the signing blocker to the release owner.",
+        "token_estimate": 27,
         "truncated": false
       },
       "question_id": "provenance-linear",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "linear://HIP-311/comment-7"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "exact_provenance",
@@ -1121,41 +1533,52 @@
       "answer_session_ids": [
         "linear://HIP-311/comment-7"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 280,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Safari",
+            "event_id": 1,
+            "session_id": "https://hippocampus.local/privacy",
+            "ts_us": 1788341400000000,
+            "url": "https://hippocampus.local/privacy",
+            "window_title": "Hippocampus privacy architecture"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Safari: Hippocampus privacy architecture\nEvent 1: [app=com.apple.Safari | title=Hippocampus privacy architecture | url=https://hippocampus.local/privacy | ts=2026-09-02T09:30:00.000Z]\nThe privacy architecture says raw memory remains in the local encrypted brain.",
+        "token_estimate": 28,
         "truncated": false
       },
       "question_id": "provenance-browser",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "https://hippocampus.local/privacy"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "exact_provenance",
@@ -1163,41 +1586,61 @@
       "answer_session_ids": [
         "https://hippocampus.local/privacy"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 502,
+        "citations": [
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 1,
+            "session_id": "terminal://zsh/agent-handoff-run",
+            "ts_us": 1788341400000000,
+            "url": "terminal://zsh/agent-handoff-run",
+            "window_title": "Terminal agent handoff benchmark"
+          },
+          {
+            "app_bundle_id": "com.tinyspeck.slackmacgap",
+            "event_id": 2,
+            "session_id": "slack://provenance/3/distractor",
+            "ts_us": 1788341700000000,
+            "url": "",
+            "window_title": "Nearby source 4"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.tinyspeck.slackmacgap: Nearby source 4\nObserved com.apple.Terminal: Terminal agent handoff benchmark\nEvent 2: [app=com.tinyspeck.slackmacgap | title=Nearby source 4 | url= | ts=2026-09-02T09:35:00.000Z]\nA nearby thread mentions the same project but does not contain the requested record.\nEvent 1: [app=com.apple.Terminal | title=Terminal agent handoff benchmark | url=terminal://zsh/agent-handoff-run | ts=2026-09-02T09:30:00.000Z]\nCommand: scripts/eval/agent-handoff/run.sh --out result.json",
+        "token_estimate": 52,
         "truncated": false
       },
       "question_id": "provenance-terminal",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "terminal://zsh/agent-handoff-run",
+        "slack://provenance/3/distractor"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "exact_provenance",
@@ -1205,41 +1648,52 @@
       "answer_session_ids": [
         "terminal://zsh/agent-handoff-run"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 291,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///docs/eval/agent-handoff-v1.md",
+            "ts_us": 1788341400000000,
+            "url": "file:///docs/eval/agent-handoff-v1.md",
+            "window_title": "agent-handoff-v1.md"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: agent-handoff-v1.md\nEvent 1: [app=com.microsoft.VSCode | title=agent-handoff-v1.md | url=file:///docs/eval/agent-handoff-v1.md | ts=2026-09-02T09:30:00.000Z]\nThe benchmark document states trusted_answer_qualified remains false until a qualified verifier exists.",
+        "token_estimate": 24,
         "truncated": false
       },
       "question_id": "provenance-file",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "file:///docs/eval/agent-handoff-v1.md"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "exact_provenance",
@@ -1247,34 +1701,34 @@
       "answer_session_ids": [
         "file:///docs/eval/agent-handoff-v1.md"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
         "byte_estimate": 0,
         "citations": [],
-        "focus_retrieval_reason": "embeddings_unavailable",
-        "focus_retrieval_status": "degraded",
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
         "outcome": "nothing_available",
         "text": "",
         "token_estimate": 0,
@@ -1282,8 +1736,8 @@
       },
       "question_id": "abstain-approver",
       "ranked_session_ids": [],
-      "recall_disposition": "degraded",
-      "recall_reason": "embeddings_unavailable",
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
       "capability": "abstention",
       "unanswerable": true,
       "answer_session_ids": [],
@@ -1303,18 +1757,18 @@
       "facts_required": 0,
       "facts_complete": true,
       "provenance_exact": true,
-      "abstained": false,
+      "abstained": true,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
         "byte_estimate": 0,
         "citations": [],
-        "focus_retrieval_reason": "embeddings_unavailable",
-        "focus_retrieval_status": "degraded",
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
         "outcome": "nothing_available",
         "text": "",
         "token_estimate": 0,
@@ -1322,8 +1776,8 @@
       },
       "question_id": "abstain-due-date",
       "ranked_session_ids": [],
-      "recall_disposition": "degraded",
-      "recall_reason": "embeddings_unavailable",
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
       "capability": "abstention",
       "unanswerable": true,
       "answer_session_ids": [],
@@ -1343,18 +1797,18 @@
       "facts_required": 0,
       "facts_complete": true,
       "provenance_exact": true,
-      "abstained": false,
+      "abstained": true,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
         "byte_estimate": 0,
         "citations": [],
-        "focus_retrieval_reason": "embeddings_unavailable",
-        "focus_retrieval_status": "degraded",
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
         "outcome": "nothing_available",
         "text": "",
         "token_estimate": 0,
@@ -1362,8 +1816,8 @@
       },
       "question_id": "abstain-duration",
       "ranked_session_ids": [],
-      "recall_disposition": "degraded",
-      "recall_reason": "embeddings_unavailable",
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
       "capability": "abstention",
       "unanswerable": true,
       "answer_session_ids": [],
@@ -1383,18 +1837,18 @@
       "facts_required": 0,
       "facts_complete": true,
       "provenance_exact": true,
-      "abstained": false,
+      "abstained": true,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
         "byte_estimate": 0,
         "citations": [],
-        "focus_retrieval_reason": "embeddings_unavailable",
-        "focus_retrieval_status": "degraded",
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
         "outcome": "nothing_available",
         "text": "",
         "token_estimate": 0,
@@ -1402,8 +1856,8 @@
       },
       "question_id": "abstain-count",
       "ranked_session_ids": [],
-      "recall_disposition": "degraded",
-      "recall_reason": "embeddings_unavailable",
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
       "capability": "abstention",
       "unanswerable": true,
       "answer_session_ids": [],
@@ -1423,18 +1877,18 @@
       "facts_required": 0,
       "facts_complete": true,
       "provenance_exact": true,
-      "abstained": false,
+      "abstained": true,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
         "byte_estimate": 0,
         "citations": [],
-        "focus_retrieval_reason": "embeddings_unavailable",
-        "focus_retrieval_status": "degraded",
+        "focus_retrieval_reason": "evidence_floor",
+        "focus_retrieval_status": "nothing_matched",
         "outcome": "nothing_available",
         "text": "",
         "token_estimate": 0,
@@ -1442,8 +1896,8 @@
       },
       "question_id": "abstain-owner",
       "ranked_session_ids": [],
-      "recall_disposition": "degraded",
-      "recall_reason": "embeddings_unavailable",
+      "recall_disposition": "nothing_matched",
+      "recall_reason": "evidence_floor",
       "capability": "abstention",
       "unanswerable": true,
       "answer_session_ids": [],
@@ -1463,25 +1917,54 @@
       "facts_required": 0,
       "facts_complete": true,
       "provenance_exact": true,
-      "abstained": false,
+      "abstained": true,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 718,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "linear://release/blocker",
+            "ts_us": 1788354060000000,
+            "url": "linear://release/blocker",
+            "window_title": "Handoff source 1.1"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "github://release/hotkey",
+            "ts_us": 1788354120000000,
+            "url": "github://release/hotkey",
+            "window_title": "Handoff source 1.2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 3,
+            "session_id": "file:///release/checklist",
+            "ts_us": 1788354180000000,
+            "url": "file:///release/checklist",
+            "window_title": "Handoff source 1.3"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Handoff source 1.3\nObserved com.microsoft.VSCode: Handoff source 1.2\nObserved com.microsoft.VSCode: Handoff source 1.1\nEvent 3: [app=com.microsoft.VSCode | title=Handoff source 1.3 | url=file:///release/checklist | ts=2026-09-02T13:03:00.000Z]\nThe release checklist still requires notarization and a real capture soak.\nEvent 2: [app=com.microsoft.VSCode | title=Handoff source 1.2 | url=github://release/hotkey | ts=2026-09-02T13:02:00.000Z]\nThe menu-bar shell now owns the global recall hotkey.\nEvent 1: [app=com.microsoft.VSCode | title=Handoff source 1.1 | url=linear://release/blocker | ts=2026-09-02T13:01:00.000Z]\nThe release is blocked by the missing Developer ID Application identity.",
+        "token_estimate": 79,
         "truncated": false
       },
       "question_id": "handoff-release-brief",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "linear://release/blocker",
+        "file:///release/checklist",
+        "github://release/hotkey"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "handoff_utility",
@@ -1491,41 +1974,70 @@
         "github://release/hotkey",
         "file:///release/checklist"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 3,
       "facts_required": 3,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 765,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///memory/retrieval",
+            "ts_us": 1788354060000000,
+            "url": "file:///memory/retrieval",
+            "window_title": "Handoff source 2.1"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "linear://memory/verifier",
+            "ts_us": 1788354120000000,
+            "url": "linear://memory/verifier",
+            "window_title": "Handoff source 2.2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 3,
+            "session_id": "github://memory/provenance",
+            "ts_us": 1788354180000000,
+            "url": "github://memory/provenance",
+            "window_title": "Handoff source 2.3"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Handoff source 2.3\nObserved com.microsoft.VSCode: Handoff source 2.2\nObserved com.microsoft.VSCode: Handoff source 2.1\nEvent 3: [app=com.microsoft.VSCode | title=Handoff source 2.3 | url=github://memory/provenance | ts=2026-09-02T13:03:00.000Z]\nEvery context item must retain its canonical event citation.\nEvent 2: [app=com.microsoft.VSCode | title=Handoff source 2.2 | url=linear://memory/verifier | ts=2026-09-02T13:02:00.000Z]\nTrusted semantic support remains blocked because no verifier model is validation-qualified.\nEvent 1: [app=com.microsoft.VSCode | title=Handoff source 2.1 | url=file:///memory/retrieval | ts=2026-09-02T13:01:00.000Z]\nHybrid retrieval reaches all expected sources at rank three in the small work-memory fixture.",
+        "token_estimate": 82,
         "truncated": false
       },
       "question_id": "handoff-memory-quality",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "github://memory/provenance",
+        "file:///memory/retrieval",
+        "linear://memory/verifier"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "handoff_utility",
@@ -1535,41 +2047,70 @@
         "linear://memory/verifier",
         "github://memory/provenance"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 3,
       "facts_required": 3,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 764,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 1,
+            "session_id": "file:///privacy/cascade",
+            "ts_us": 1788354060000000,
+            "url": "file:///privacy/cascade",
+            "window_title": "Handoff source 3.1"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "github://privacy/generation",
+            "ts_us": 1788354120000000,
+            "url": "github://privacy/generation",
+            "window_title": "Handoff source 3.2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 3,
+            "session_id": "linear://privacy/permission",
+            "ts_us": 1788354180000000,
+            "url": "linear://privacy/permission",
+            "window_title": "Handoff source 3.3"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Handoff source 3.3\nObserved com.microsoft.VSCode: Handoff source 3.2\nObserved com.microsoft.VSCode: Handoff source 3.1\nEvent 3: [app=com.microsoft.VSCode | title=Handoff source 3.3 | url=linear://privacy/permission | ts=2026-09-02T13:03:00.000Z]\nAccessibility and Screen Recording are required onboarding permissions.\nEvent 2: [app=com.microsoft.VSCode | title=Handoff source 3.2 | url=github://privacy/generation | ts=2026-09-02T13:02:00.000Z]\nThe focus generation race gate rejects frames captured against stale window state.\nEvent 1: [app=com.microsoft.VSCode | title=Handoff source 3.1 | url=file:///privacy/cascade | ts=2026-09-02T13:01:00.000Z]\nThe suppression cascade fails closed when Accessibility window identity is unavailable.",
+        "token_estimate": 79,
         "truncated": false
       },
       "question_id": "handoff-privacy-review",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "github://privacy/generation",
+        "linear://privacy/permission",
+        "file:///privacy/cascade"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "handoff_utility",
@@ -1579,41 +2120,61 @@
         "github://privacy/generation",
         "linear://privacy/permission"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 3,
       "facts_required": 3,
-      "facts_complete": false,
-      "provenance_exact": false,
+      "facts_complete": true,
+      "provenance_exact": true,
       "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "lexical",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
+        "byte_estimate": 483,
+        "citations": [
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 2,
+            "session_id": "github://agents/mcp",
+            "ts_us": 1788354120000000,
+            "url": "github://agents/mcp",
+            "window_title": "Handoff source 4.2"
+          },
+          {
+            "app_bundle_id": "com.microsoft.VSCode",
+            "event_id": 3,
+            "session_id": "terminal://agents/status",
+            "ts_us": 1788354180000000,
+            "url": "terminal://agents/status",
+            "window_title": "Handoff source 4.3"
+          }
+        ],
         "focus_retrieval_reason": "embeddings_unavailable",
         "focus_retrieval_status": "degraded",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "outcome": "observations_only",
+        "text": "Observed com.microsoft.VSCode: Handoff source 4.3\nObserved com.microsoft.VSCode: Handoff source 4.2\nEvent 3: [app=com.microsoft.VSCode | title=Handoff source 4.3 | url=terminal://agents/status | ts=2026-09-02T13:03:00.000Z]\nConnection status must distinguish installed clients from skipped clients.\nEvent 2: [app=com.microsoft.VSCode | title=Handoff source 4.2 | url=github://agents/mcp | ts=2026-09-02T13:02:00.000Z]\nThe local MCP server exposes read-only recall and mci_context tools.",
+        "token_estimate": 51,
         "truncated": false
       },
       "question_id": "handoff-agent-integration",
-      "ranked_session_ids": [],
+      "ranked_session_ids": [
+        "terminal://agents/status",
+        "github://agents/mcp"
+      ],
       "recall_disposition": "degraded",
       "recall_reason": "embeddings_unavailable",
       "capability": "handoff_utility",
@@ -1623,11 +2184,11 @@
         "github://agents/mcp",
         "terminal://agents/status"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 0.3333333333333333,
+        "3": 0.6666666666666666,
+        "5": 0.6666666666666666
       },
       "required_sources_present": false,
       "current_source_present": false,
@@ -1635,7 +2196,7 @@
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 2,
       "facts_required": 3,
       "facts_complete": false,
       "provenance_exact": false,
@@ -2073,58 +2634,71 @@
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
-        "focus_retrieval_reason": "evidence_floor",
-        "focus_retrieval_status": "nothing_matched",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "byte_estimate": 421,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "linear://HIP-204/current",
+            "ts_us": 1788357600000000,
+            "url": "linear://HIP-204/current",
+            "window_title": "Current state 1"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "terminal://distractor/temporal-0",
+            "ts_us": 1788361200000000,
+            "url": "",
+            "window_title": "Unrelated test run 1"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Unrelated test run 1\nObserved com.linear: Current state 1\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 1 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 1 | url=linear://HIP-204/current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: Priya. This supersedes the previous plan.",
+        "token_estimate": 51,
         "truncated": false
       },
       "question_id": "temporal-owner",
-      "ranked_session_ids": [],
-      "recall_disposition": "nothing_matched",
-      "recall_reason": "evidence_floor",
+      "ranked_session_ids": [
+        "linear://HIP-204/current",
+        "linear://HIP-204/old",
+        "terminal://distractor/temporal-0"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
       "capability": "temporal_supersession",
       "unanswerable": false,
       "answer_session_ids": [
         "linear://HIP-204/current"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
-      "abstained": true,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 718,
+        "byte_estimate": 500,
         "citations": [
-          {
-            "app_bundle_id": "com.microsoft.VSCode",
-            "event_id": 1,
-            "session_id": "file:///old-model-path",
-            "ts_us": 1788253200000000,
-            "url": "file:///old-model-path",
-            "window_title": "Previous state 2"
-          },
           {
             "app_bundle_id": "com.linear",
             "event_id": 2,
@@ -2145,8 +2719,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Unrelated test run 2\nObserved com.linear: Current state 2\nObserved com.microsoft.VSCode: Previous state 2\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 2 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 2 | url=file:///current-model-path | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc. This supersedes the previous plan.\nEvent 1: [app=com.microsoft.VSCode | title=Previous state 2 | url=file:///old-model-path | ts=2026-09-01T09:00:00.000Z]\nPrevious plan: ~/Models/ArcticEmbedS_INT8.mlmodelc.",
-        "token_estimate": 70,
+        "text": "Observed com.apple.Terminal: Unrelated test run 2\nObserved com.linear: Current state 2\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 2 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 2 | url=file:///current-model-path | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc. This supersedes the previous plan.",
+        "token_estimate": 51,
         "truncated": false
       },
       "question_id": "temporal-model-path",
@@ -2170,7 +2744,7 @@
       },
       "required_sources_present": true,
       "current_source_present": true,
-      "superseded_sources_excluded": false,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
@@ -2181,63 +2755,76 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 0,
-        "citations": [],
-        "focus_retrieval_reason": "evidence_floor",
-        "focus_retrieval_status": "nothing_matched",
-        "outcome": "nothing_available",
-        "text": "",
-        "token_estimate": 0,
+        "byte_estimate": 429,
+        "citations": [
+          {
+            "app_bundle_id": "com.linear",
+            "event_id": 2,
+            "session_id": "linear://ATLAS-90/current",
+            "ts_us": 1788357600000000,
+            "url": "linear://ATLAS-90/current",
+            "window_title": "Current state 3"
+          },
+          {
+            "app_bundle_id": "com.apple.Terminal",
+            "event_id": 3,
+            "session_id": "terminal://distractor/temporal-2",
+            "ts_us": 1788361200000000,
+            "url": "",
+            "window_title": "Unrelated test run 3"
+          }
+        ],
+        "focus_retrieval_reason": "evidence_verifier_unavailable",
+        "focus_retrieval_status": "degraded",
+        "outcome": "observations_only",
+        "text": "Observed com.apple.Terminal: Unrelated test run 3\nObserved com.linear: Current state 3\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 3 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 3 | url=linear://ATLAS-90/current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: September 15. This supersedes the previous plan.",
+        "token_estimate": 52,
         "truncated": false
       },
       "question_id": "temporal-launch-date",
-      "ranked_session_ids": [],
-      "recall_disposition": "nothing_matched",
-      "recall_reason": "evidence_floor",
+      "ranked_session_ids": [
+        "linear://ATLAS-90/current",
+        "slack://atlas/launch-old",
+        "terminal://distractor/temporal-2"
+      ],
+      "recall_disposition": "degraded",
+      "recall_reason": "evidence_verifier_unavailable",
       "capability": "temporal_supersession",
       "unanswerable": false,
       "answer_session_ids": [
         "linear://ATLAS-90/current"
       ],
-      "first_hit_rank": null,
+      "first_hit_rank": 1,
       "recall_at": {
-        "1": 0.0,
-        "3": 0.0,
-        "5": 0.0
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
       },
-      "required_sources_present": false,
-      "current_source_present": false,
-      "superseded_sources_excluded": false,
+      "required_sources_present": true,
+      "current_source_present": true,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
-      "facts_present": 0,
+      "facts_present": 1,
       "facts_required": 1,
-      "facts_complete": false,
-      "provenance_exact": false,
-      "abstained": true,
+      "facts_complete": true,
+      "provenance_exact": true,
+      "abstained": false,
       "packet_bounded": true,
-      "handoff_complete": false,
-      "capability_passed": false
+      "handoff_complete": true,
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 627,
+        "byte_estimate": 431,
         "citations": [
-          {
-            "app_bundle_id": "com.microsoft.VSCode",
-            "event_id": 1,
-            "session_id": "file:///benchmark-count-old",
-            "ts_us": 1788253200000000,
-            "url": "file:///benchmark-count-old",
-            "window_title": "Previous state 4"
-          },
           {
             "app_bundle_id": "com.linear",
             "event_id": 2,
@@ -2258,8 +2845,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Unrelated test run 4\nObserved com.linear: Current state 4\nObserved com.microsoft.VSCode: Previous state 4\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 4 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 4 | url=file:///benchmark-count-current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: 36 tasks. This supersedes the previous plan.\nEvent 1: [app=com.microsoft.VSCode | title=Previous state 4 | url=file:///benchmark-count-old | ts=2026-09-01T09:00:00.000Z]\nPrevious plan: 24 tasks.",
-        "token_estimate": 72,
+        "text": "Observed com.apple.Terminal: Unrelated test run 4\nObserved com.linear: Current state 4\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 4 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 4 | url=file:///benchmark-count-current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: 36 tasks. This supersedes the previous plan.",
+        "token_estimate": 52,
         "truncated": false
       },
       "question_id": "temporal-benchmark-count",
@@ -2283,7 +2870,7 @@
       },
       "required_sources_present": true,
       "current_source_present": true,
-      "superseded_sources_excluded": false,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
@@ -2294,21 +2881,13 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 623,
+        "byte_estimate": 429,
         "citations": [
-          {
-            "app_bundle_id": "com.microsoft.VSCode",
-            "event_id": 1,
-            "session_id": "file:///signing-team-old",
-            "ts_us": 1788253200000000,
-            "url": "file:///signing-team-old",
-            "window_title": "Previous state 5"
-          },
           {
             "app_bundle_id": "com.linear",
             "event_id": 2,
@@ -2329,8 +2908,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Unrelated test run 5\nObserved com.linear: Current state 5\nObserved com.microsoft.VSCode: Previous state 5\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 5 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 5 | url=file:///signing-team-current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: NEWTEAM73. This supersedes the previous plan.\nEvent 1: [app=com.microsoft.VSCode | title=Previous state 5 | url=file:///signing-team-old | ts=2026-09-01T09:00:00.000Z]\nPrevious plan: OLDTEAM42.",
-        "token_estimate": 70,
+        "text": "Observed com.apple.Terminal: Unrelated test run 5\nObserved com.linear: Current state 5\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 5 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 5 | url=file:///signing-team-current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: NEWTEAM73. This supersedes the previous plan.",
+        "token_estimate": 51,
         "truncated": false
       },
       "question_id": "temporal-signing-team",
@@ -2354,7 +2933,7 @@
       },
       "required_sources_present": true,
       "current_source_present": true,
-      "superseded_sources_excluded": false,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
@@ -2365,21 +2944,13 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 679,
+        "byte_estimate": 474,
         "citations": [
-          {
-            "app_bundle_id": "com.microsoft.VSCode",
-            "event_id": 1,
-            "session_id": "github://capture/old",
-            "ts_us": 1788253200000000,
-            "url": "github://capture/old",
-            "window_title": "Previous state 6"
-          },
           {
             "app_bundle_id": "com.linear",
             "event_id": 2,
@@ -2400,8 +2971,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Unrelated test run 6\nObserved com.linear: Current state 6\nObserved com.microsoft.VSCode: Previous state 6\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 6 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 6 | url=github://capture/current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: capture is enabled and the verified helper topology starts. This supersedes the previous plan.\nEvent 1: [app=com.microsoft.VSCode | title=Previous state 6 | url=github://capture/old | ts=2026-09-01T09:00:00.000Z]\nPrevious plan: capture remains disabled.",
-        "token_estimate": 80,
+        "text": "Observed com.apple.Terminal: Unrelated test run 6\nObserved com.linear: Current state 6\nEvent 3: [app=com.apple.Terminal | title=Unrelated test run 6 | url= | ts=2026-09-02T15:00:00.000Z]\nThe focused package tests completed without changing the decision.\nEvent 2: [app=com.linear | title=Current state 6 | url=github://capture/current | ts=2026-09-02T14:00:00.000Z]\nCurrent decision: capture is enabled and the verified helper topology starts. This supersedes the previous plan.",
+        "token_estimate": 59,
         "truncated": false
       },
       "question_id": "temporal-capture-state",
@@ -2425,7 +2996,7 @@
       },
       "required_sources_present": true,
       "current_source_present": true,
-      "superseded_sources_excluded": false,
+      "superseded_sources_excluded": true,
       "contradiction_visible": true,
       "duplicate_citations": 0,
       "duplicate_ocr_suppressed": false,
@@ -2436,7 +3007,7 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
