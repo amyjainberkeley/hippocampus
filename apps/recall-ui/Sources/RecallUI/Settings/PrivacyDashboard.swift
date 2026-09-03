@@ -119,6 +119,10 @@ struct PrivacyDashboard: View {
         }
         .background(Color.brandBgPrimary)
         .task { await reloadAll() }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
+            _ in
+            Task { await reloadAll() }
+        }
         .sheet(item: $confirmation) { box in
             ConfirmDeleteSheet(kind: box.kind) { confirmed in
                 confirmation = nil

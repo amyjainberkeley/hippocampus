@@ -102,14 +102,16 @@ or signed-update Keychain continuity. The product is much closer to a working
 development build than the old web demo suggests, but it is not yet a public
 Apple release.
 
-### 3. Retrieval ranking is ahead of retrieval judgment
+### 3. Retrieval ranking is ahead of trusted-answer judgment
 
-The accepted 24-case work-memory corpus shows that hybrid candidate generation
-finds the answerable evidence and, as every nearest-neighbor system will, also
-finds nearby material for deliberately unanswerable queries. The production
-decision path abstains on all three unanswerable cases, but still labels every
-answerable ranking as verifier-unavailable rather than a trusted match. General
-semantic support and contradiction judgment remains a launch gate, not polish.
+The accepted work-memory and agent-handoff corpora show that hybrid candidate
+generation finds answerable evidence and, as every nearest-neighbor system
+will, also finds nearby material for deliberately unanswerable queries. The
+production path preserves those candidates as degraded related context rather
+than trusted matches. That is enough for a cited evidence-memory V1, which does
+not generate or advertise verified answers. General semantic support and
+contradiction judgment remains a hard gate before V2 may call an answer or
+claim trusted; it is not a reason to mislabel ranking or block useful recall.
 
 ### 4. The visual system hides the quality of the engine
 
@@ -340,10 +342,10 @@ The order is based on dependency and falsifiability, not calendar estimates.
 |---:|---|---|---|
 | 1 | Canonical repository and release truth | No benchmark or release matters if it targets the wrong product | Established |
 | 2 | Reliable supervised runtime and key custody | Capture, deletion, and agent handoff require one healthy local authority | Development path and owner-death shutdown verified; public signing remains external |
-| 3 | Capture privacy and terminal failure | Bad input poisons every later memory layer | Browser authorization, private-context exclusion, pause, lock, and TCC behavior are executable; a real ScreenCaptureKit sample reached the helper, but denied Accessibility kept OCR out of the brain and exact overlap proof remains open |
+| 3 | Capture privacy and terminal failure | Bad input poisons every later memory layer | Browser authorization, private-context exclusion, pause, lock, and TCC behavior are executable; Accessibility now permits OCR and the real focused-window/background-exclusion overlap gate passes |
 | 4 | Retention, deletion, and writer quiescence | A user must be able to withdraw evidence safely | Complete, including process-held writer lease and orphan reconciliation |
-| 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | Deterministic overlap app built; the helper receives live frames and the isolated encrypted brain opens, but denied Accessibility produced zero OCR events, so focused-token/background-token proof and soak remain pending |
-| 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | Retrieval ranking and explicit relation veto pass; the host provenance contract and fail-closed Core ML adapter exist, but no task-trained artifact or manifest has passed blind qualification |
+| 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | A real 20-second run recalled the focused token, excluded the overlapping background token, and persisted 18 OCR events; the metrics-bearing 30-minute soak remains pending an uninterrupted foreground window |
+| 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | V1 retrieval and bounded cited handoff pass their accepted 36-task benchmark and keep semantic neighbors explicitly degraded; the host provenance contract and fail-closed Core ML adapter exist, but no task-trained artifact or manifest has passed the separate V2 trusted-answer qualification |
 | 7 | Native product experience | A correct engine users cannot understand will not be trusted | Light native UI and release assets implemented; the disposable product capture visibly proves three authenticated keyframes, 20 events, and one brief |
 | 8 | Signed distribution and update proof | Public use requires identity, notarization, models, and continuity | Ad-hoc bundle passes launch/owner-death checks; Developer ID and notarization remain external |
 
@@ -358,7 +360,9 @@ These are capability boundaries, not promises that unverified work ships.
 - Structured browser capture only in proven non-private contexts.
 - Encrypted local events and sparse encrypted visual evidence.
 - Search, timeline, episodes, "Now," and a daily work brief.
-- Source/time citations and calibrated insufficient-evidence responses.
+- Source/time citations and typed matched, insufficient, contradicted, and
+  degraded retrieval outcomes. Unverified semantic candidates are presented as
+  related evidence, never as a verified answer.
 - One-click Claude Code and Codex connection.
 - Bounded `mci_context` packets; no full-history prompt injection.
 - Inspect, pause, exclude, retain, export, delete, and wipe.
@@ -366,6 +370,9 @@ These are capability boundaries, not promises that unverified work ships.
 
 ### V2: current-state and workflow memory
 
+- A task-trained local claim/evidence verifier that passes blind,
+  scenario-disjoint support, contradiction, abstention, citation-binding, and
+  signed-runtime gates.
 - Evidence-backed claims with supersession, contradiction, and retraction.
 - Project and person scopes inferred locally, then editable by the person.
 - Commitments, decisions, open loops, and changed assumptions in briefs.

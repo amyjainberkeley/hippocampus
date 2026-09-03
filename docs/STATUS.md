@@ -2,13 +2,29 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `e548541`
+Audited code baseline: `24c5ace`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## Product Boundary
+
+The launchable V1 is a local evidence-memory product. It captures permitted
+work context, preserves source and time, retrieves and displays related
+evidence, produces citation-preserving extractive briefs, and hands bounded
+context to Claude Code and Codex. It does not generate or advertise verified
+answers. Production labels unverified semantic candidates as degraded related
+context, while `Matched` remains unreachable without a separately qualified
+verifier.
+
+The task-trained claim/evidence verifier is a V2 capability gate. It must pass
+the blind qualification below before Hippocampus may present a generated claim
+or answer as trusted. This boundary does not weaken abstention or citation
+requirements; it prevents an untrained model artifact from blocking a useful,
+truthfully scoped evidence product.
 
 ## What Works
 
@@ -34,10 +50,13 @@ more than this page.
   `mci-agent context` opens the encrypted brain read-only, uses the production
   hybrid-or-lexical retrieval path, enforces the shared token and citation
   limits, and prints prompt-ready Markdown or typed JSON. Recall exposes this
-  as an explicit clipboard action beside search. Production resolves only the
-  app-bundled sibling agent; an external agent path is accepted only in the
-  build-gated development key mode. Exported Markdown labels observations as
-  unverified reference data and retains exact canonical event citations.
+  as an explicit clipboard action beside search and on the primary Now screen.
+  Production resolves only the app-bundled sibling agent; an external agent
+  path is accepted only in the build-gated development key mode. The UI runner
+  now has a hard 15-second deadline, requests graceful termination, and kills a
+  wedged child after a bounded grace period instead of leaving the interface
+  spinning forever. Exported Markdown labels observations as unverified
+  reference data and retains exact canonical event citations.
 - Temporal handoff no longer treats recency as truth. A current-state query can
   remove an older raw observation only when a newer source explicitly declares
   that it supersedes or replaces a source labeled as previous or old. Competing
@@ -50,6 +69,16 @@ more than this page.
   the menu app. The global Recall shortcut opens that process, and search can
   deep-link to one exact canonical event instead of silently reusing stale
   popup results.
+- Recall's global refresh command now publishes one content-free local signal
+  and the visible filmstrip, Now, Search, Timeline, Episodes, Briefs, Sources,
+  and Privacy surfaces execute their real `BrainReader` reloads. The old timed
+  simulation and false "Brain refreshed" success claim are gone. A no-XCTest
+  executable behavior check verifies signal delivery, active-query rerun, and
+  observed-source refresh on this host.
+- The unshipped canned Chat preview, fake assistant response model, and
+  `?tab=chat` route have been removed from the compiled product. V1 uses the
+  agents people already have through bounded handoff instead of presenting a
+  mock chat surface as future functionality.
 - The supervisor preserves one database-key authority across capture, Recall,
   onboarding, and AI-tool connection children. The packaged demo gives
   Foundation an isolated `HOME` and `CFFIXED_USER_HOME`, and its seeder and
@@ -357,10 +386,12 @@ immutable signed runtime is required before a production verifier can qualify.
   revocation behavior, then complete the 30-minute resource and privacy soak.
 - Provision and reconstruct the immutable Arctic retrieval archive named by
   `release-models.json`, then pass its integrity and completeness checks.
-- Train and qualify the claim/evidence-set verifier on a blind,
-  scenario-disjoint corpus; prove citation binding, Core ML parity, calibrated
-  abstention, and signed-runtime latency before adding it to the release
-  manifest.
+- Before shipping trusted-answer or evidence-backed-claim features, train and
+  qualify the claim/evidence-set verifier on a blind, scenario-disjoint corpus;
+  prove citation binding, Core ML parity, calibrated abstention, and
+  signed-runtime latency before adding it to the release manifest. The
+  evidence-memory V1 keeps this artifact absent and semantic candidates typed
+  as degraded related context.
 - Install full Xcode, a Developer ID Application identity with private key,
   and the `notarytool-profile`; verify the Sparkle private/public pair without
   recording secret values.

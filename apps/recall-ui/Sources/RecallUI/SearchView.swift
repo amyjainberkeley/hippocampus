@@ -40,6 +40,10 @@ struct SearchView: View {
         .task {
             await viewModel.reloadObservedApps()
         }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
+            _ in
+            Task { await viewModel.refresh() }
+        }
         .task(id: focusRequest) {
             if let focusRequest {
                 await viewModel.focusEvent(id: focusRequest.eventId)

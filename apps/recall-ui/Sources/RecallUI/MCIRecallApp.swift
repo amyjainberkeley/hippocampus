@@ -255,14 +255,10 @@ struct RootView: View {
             ) {
                 Task { @MainActor in
                     actionPanelRegistry.beginRefresh()
-                    // Simulated async re-query pass. Brain is read-only
-                    // via FFI (ADR-0016 §4.3) — the actual work is a
-                    // best-effort flush of caches on the search view
-                    // model. Kept off the UI thread so the spinner
-                    // renders even on cold-start slow FFI opens.
-                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    MemoryRefreshSignal.post()
+                    await Task.yield()
                     actionPanelRegistry.endRefresh()
-                    ToastNotifier.shared.notify("Brain refreshed")
+                    ToastNotifier.shared.notify("Refreshing memory")
                 }
             },
             .init(

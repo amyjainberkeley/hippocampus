@@ -357,11 +357,11 @@ private struct EntityChipTrigger<PopoverContent: View>: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: MCI.Radius.m)
                     .fill(Color.brandMintSubtle)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: MCI.Radius.m)
                     .stroke(Color.brandMintDim, lineWidth: 0.5)
             )
             .foregroundStyle(Color.brandMint)
@@ -381,7 +381,7 @@ private struct EntityChipTrigger<PopoverContent: View>: View {
             }
             .popover(
                 isPresented: Binding(
-                    get: isFlyoutActive,
+                    get: { isFlyoutActive() },
                     // Set(false) fires when the popover closes (click-outside /
                     // ESC). Set(true) is a no-op — parent controls opening
                     // via `onOpen` (tap / long-hover).
