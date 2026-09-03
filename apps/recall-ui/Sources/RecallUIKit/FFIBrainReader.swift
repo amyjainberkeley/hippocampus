@@ -50,10 +50,15 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
     /// - Throws: `BrainReaderError.openFailed` with the FFI's last-error
     ///   diagnostic on any failure (missing file, wrong key, malformed
     ///   key hex, etc.).
-    public init(path: String, keyHex: String) throws {
+    public init(path: String, keyHex: String, modelPath: String? = nil) throws {
         let h: OpaquePointer? = path.withCString { pPath in
             keyHex.withCString { pKey in
-                mci_brain_ffi_open(pPath, pKey)
+                if let modelPath {
+                    return modelPath.withCString { pModel in
+                        mci_brain_ffi_open_with_model(pPath, pKey, pModel)
+                    }
+                }
+                return mci_brain_ffi_open(pPath, pKey)
             }
         }
         guard let h else {

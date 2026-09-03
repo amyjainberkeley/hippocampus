@@ -42,6 +42,15 @@ typedef struct McibrainHandle McibrainHandle;
  * for a diagnostic. The connection is READ-ONLY. */
 McibrainHandle *mci_brain_ffi_open(const char *path, const char *key_hex);
 
+/* Open the same READ-ONLY brain with an explicit Arctic Embed S Core ML
+ * model. A missing, incompatible, or non-predicting model returns NULL;
+ * callers may retry mci_brain_ffi_open for lexical-only recall. */
+McibrainHandle *mci_brain_ffi_open_with_model(
+    const char *path,
+    const char *key_hex,
+    const char *model_path
+);
+
 /* Close a handle. NULL is a no-op. Double-close is undefined. */
 void mci_brain_ffi_close(McibrainHandle *h);
 
@@ -83,8 +92,8 @@ char *mci_brain_ffi_timeline_events(McibrainHandle *h, const char *query_json);
  * Each row carries ONLY {ts_us, app_bundle_id?, reason_code}.
  * NEVER OCR text / keyframe / windowTitle / url
  * (ADR-0017 §5.1 + ADR-0016 §4.5).
- * P3.9b returns an empty list — the tombstone source is a separate
- * file (`mci-tombstones.bin`) and surfacing it is P3.9c. */
+ * Returns an empty list until the separate append-only tombstone file
+ * (`mci-tombstones.bin`) is exposed through this read-only boundary. */
 char *mci_brain_ffi_recent_privacy_moments(McibrainHandle *h, uint32_t limit);
 
 /* List the most-observed app_bundle_id values + their event counts.

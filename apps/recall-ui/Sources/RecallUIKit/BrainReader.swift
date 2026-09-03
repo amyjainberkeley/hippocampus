@@ -4,11 +4,10 @@
 // a `BrainReader`. Two impls exist:
 //
 //   - `StubBrainReader` (this file) — canned data for headless tests and
-//     the v1 demo. No FFI, no SQLCipher, no disk I/O.
+//     explicit previews. No FFI, no SQLCipher, no disk I/O.
 //   - `FFIBrainReader` (separate file) — calls the C ABI in
-//     `adapters/macos/mci-brain-ffi/` via `MciBrainFFI.swift`. Compiled
-//     in P3.9a but does not yet link a non-empty static lib; P3.9b
-//     finishes the binding.
+//     `adapters/macos/mci-brain-ffi/` and supports read-only lexical or
+//     Core ML-backed hybrid retrieval.
 //
 // Read-only by construction: the protocol has no `put`/`delete`/`mutate`
 // surface (ADR-0016 §4.3 + ADR-0017 §5 invariants). Adding one is an
@@ -27,9 +26,8 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     public let url: String?
     /// Truncated OCR snippet (caps at ~280 chars at the FFI boundary).
     public let ocrTextSnippet: String
-    /// Where the row came from: "lexical" / "hybrid" / "timeline".
-    /// P3.9a: timeline = "timeline"; search results from the stub use
-    /// "lexical"; P3.9b adds "hybrid" when HybridRetriever lights up.
+    /// Where the row came from: lexical, verified hybrid, unverified related
+    /// context, conflict evidence, or timeline ordering.
     public let source: String
     /// Fused score [0,1] for search; `nil` for plain timeline rows.
     public let score: Float?
@@ -547,10 +545,9 @@ public struct SummaryStats: Sendable, Equatable, Codable {
 }
 
 /// In-memory stub reader. Returns deterministic canned data so the
-/// SwiftUI scenes have something to render in v1 and the unit tests
-/// can assert against known rows. **Never** runs in a release build —
-/// the executable target's launch path wires `FFIBrainReader` once
-/// P3.9b lands.
+/// SwiftUI previews have something to render and unit tests can assert
+/// against known rows. **Never** runs in the release launch path; the
+/// executable wires `FFIBrainReader` against the local encrypted brain.
 public struct StubBrainReader: BrainReader {
     /// Canned demo corpus. Stable order so tests can assert on it.
     ///

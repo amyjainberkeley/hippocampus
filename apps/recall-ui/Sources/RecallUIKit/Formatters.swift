@@ -116,6 +116,8 @@ public enum Formatters {
         switch s {
         case "lexical": return "lex"
         case "hybrid": return "hyb"
+        case "hybrid-related", "semantic-related": return "related"
+        case "hybrid-conflict": return "conflict"
         case "timeline": return "time"
         default: return s
         }
@@ -129,8 +131,9 @@ public enum Formatters {
     /// leak raw jargon into the UI).
     ///
     /// - `"lexical"` → `"Matched: text"` (BM25 / FTS5 keyword match)
-    /// - `"hybrid"`  → `"Matched: meaning"` (fused BM25 + embeddings +
-    ///   entity path — Phase-6 fusion)
+    /// - `"hybrid"` → `"Matched: meaning"` after evidence verification
+    /// - `"hybrid-related"` / `"semantic-related"` → unverified related context
+    /// - `"hybrid-conflict"` → evidence the verifier marked contradictory
     /// - `"timeline"` → `nil`
     /// - unknown → `nil`
     ///
@@ -140,6 +143,8 @@ public enum Formatters {
         switch s {
         case "lexical": return "Matched: text"
         case "hybrid": return "Matched: meaning"
+        case "hybrid-related", "semantic-related": return "Related by meaning"
+        case "hybrid-conflict": return "Conflicting evidence"
         case "timeline": return nil
         default: return nil
         }
