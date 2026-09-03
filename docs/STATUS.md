@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-03._
 
-Audited code baseline: `4ee43d8`
+Audited code baseline: `368062d`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -140,8 +140,17 @@ truthfully scoped evidence product.
   skip helper and agent termination during quit, pause, or reconfiguration.
 - The production capture session now owns a live TCC monitor. A permission
   denied before helper startup is applied as an immediate fail-closed pause and
-  emits the same content-free, actionable app status as a mid-run revoke;
-  restoration remains direction-asymmetric and requires two granted samples.
+  emits the same content-free, actionable app status as a mid-run revoke.
+  Restoration remains direction-asymmetric, requires two granted samples, and
+  resets its grant evidence after a failed reconstruction attempt.
+- Focused-window capture now binds every callback to the immutable generation
+  of the `SCStream` that produced it. Focus changes build a replacement stream;
+  stale generations fail closed before pixel admission, and terminal stream
+  loss stops the helper instead of leaving a falsely healthy process. OCR queue
+  eviction, timeout, and empty recognition explicitly reopen only that exact
+  frame's visual baseline. A complete later static frame can then receive one
+  full-frame retry without disabling the normal no-dirty-rectangle energy gate
+  or crossing a focused-window generation.
 - Semantic recall works when the Arctic Embed S Core ML artifact is present
   and backfill has run. The macOS runtime explicitly permits CPU plus Neural
   Engine for inference and uses a Rust cosine scan over vectors stored inside
@@ -253,8 +262,11 @@ truthfully scoped evidence product.
 - The capture stream's active-work ceiling is now 2 fps, matching the product
   footprint design instead of the prior 5 fps default. The 1 Hz privacy
   cascade floor remains independent, so lower frame delivery cannot suppress
-  periodic protected-surface checks. The source contract and capture helper
-  build pass; a rebuilt-app live resource soak remains required.
+  periodic protected-surface checks. Fresh 5-second and 20-second runs against
+  the exact rebuilt ad-hoc app recalled the focused corpus token, excluded the
+  overlapping background token, and retained one authenticated keyframe. The
+  20-second run delivered 38 frames with zero backpressure or late-ack drops;
+  it is a functional privacy proof, not a resource-soak qualification.
 - The most recently verified `182 MB` debug ad-hoc app at
   `apps/hippocampus/dist/Hippocampus.app` includes Arctic
   Embed S as its only bundled model, passes signed App Group and model
@@ -277,24 +289,27 @@ truthfully scoped evidence product.
 
 ## What Is Not Yet Proven
 
-- Real `ScreenCaptureKit` capture remains off by default. The executable
+- Real `ScreenCaptureKit` capture remains opt-in and is not yet release
+  qualified. The executable
   `scripts/run-live-capture-overlap.sh` gate assembles an exact ad-hoc app,
   requires Screen Recording and Accessibility for that helper, foregrounds a
   synthetic overlapping-window corpus, captures through the bundled helper and
   agent, and proves focused-window recall plus background-window abstention. A
-  live run on the audited Mac passed with 16 retained corpus events: the exact
-  focused token was recalled and the overlapped background token was absent
-  from timeline, application-scoped events, and full-text retrieval. The same
-  fail-closed gate aborts if another app becomes frontmost. `--soak` now fixes
+  fresh 5-second and 20-second runs on the audited Mac passed with one retained
+  corpus event and one authenticated keyframe each: the exact focused token was
+  recalled and the overlapped background token was absent from timeline,
+  application-scoped events, and full-text retrieval. The same fail-closed gate
+  aborts if another app becomes frontmost. `--soak` fixes
   the duration at 1,800 seconds, samples helper CPU/RSS every five seconds,
   retains evidence, and emits a machine-readable qualification report covering
   frame, OCR, keyframe, memory, storage, privacy, and resource-SLO evidence.
-  A 5 fps diagnostic soak was stopped after 91 footprint samples once it had
-  already established a 39.8% helper CPU p95 against the 15% ceiling; that run
-  did not qualify. The helper now builds at the documented 2 fps active-work
-  ceiling. Its rebuilt-app reruns correctly stopped when VS Code or Chrome
-  became frontmost, so the required uninterrupted 30-minute privacy and
-  resource run remains unqualified rather than being inferred from source.
+  An earlier 5 fps diagnostic soak was stopped after 91 footprint samples once
+  it had already established a 39.8% helper CPU p95 against the 15% ceiling;
+  that run did not qualify. The helper now builds at the documented 2 fps active-work
+  ceiling. Short-window CPU percentiles are dominated by startup and do not
+  qualify the 15% p95 resource target. The required uninterrupted 30-minute
+  privacy and resource run remains unqualified rather than being inferred from
+  source or from the short functional proofs.
 - OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
   ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
   use separate structured capture paths that reject private contexts before
@@ -416,8 +431,9 @@ immutable signed runtime is required before a production verifier can qualify.
   commit. Full XCTest remains a full-Xcode gate on this host.
 - Complete a real 30-minute capture soak with frame, OCR, retained-keyframe,
   CPU, memory, disk, pause, and protected-surface observations.
-- Run the focused-window overlap gate on an unlocked Mac, prove live TCC
-  revocation behavior, then complete the 30-minute resource and privacy soak.
+- Repeat the focused-window overlap gate from the release commit, prove live
+  TCC revocation/restoration behavior, then complete the 30-minute resource and
+  privacy soak.
 - Provision and reconstruct the immutable Arctic retrieval archive named by
   `release-models.json`, then pass its integrity and completeness checks.
 - Before shipping trusted-answer or evidence-backed-claim features, train and
