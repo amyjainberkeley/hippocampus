@@ -51,6 +51,37 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         return environment
     }
 
+    package static func recallEnvironment(
+        baseEnvironment: [String: String],
+        dbPath: URL,
+        keyReference: KeychainKeyReference,
+        developmentKeyMode: DevelopmentFileKeyMode? = nil,
+        initialTab: String?,
+        focusEventId: UInt64?,
+        openPopup: Bool,
+        agentURL: URL?
+    ) -> [String: String] {
+        var environment = sanitizedEnvironment(
+            baseEnvironment: baseEnvironment,
+            dbPath: dbPath,
+            keyReference: keyReference,
+            developmentKeyMode: developmentKeyMode
+        )
+        if let initialTab, !initialTab.isEmpty {
+            environment["MCI_INITIAL_TAB"] = initialTab
+        }
+        if let focusEventId, focusEventId > 0 {
+            environment["MCI_INITIAL_FOCUS_EVENT_ID"] = String(focusEventId)
+        }
+        if openPopup {
+            environment["MCI_OPEN_GLOBAL_POPUP"] = "1"
+        }
+        if developmentKeyMode != nil, let agentURL {
+            environment["MCI_AGENT_PATH"] = agentURL.path
+        }
+        return environment
+    }
+
     package static func make(
         helperURL: URL,
         agentURL: URL,
@@ -739,25 +770,21 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         recallProcess = nil
 
         guard let recallPath = locator.recallUIPath() else { return }
-        var environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+        let environment = ProcessSupervisorLaunchPlan.recallEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,
             dbPath: dbPath,
             keyReference: currentKeyReference,
-            developmentKeyMode: developmentKeyMode
+            developmentKeyMode: developmentKeyMode,
+            initialTab: initialTab,
+            focusEventId: focusEventId,
+            openPopup: openPopup,
+            agentURL: locator.agentPath()
         )
-        if let initialTab, !initialTab.isEmpty { environment["MCI_INITIAL_TAB"] = initialTab }
-        if let focusEventId, focusEventId > 0 {
-            environment["MCI_INITIAL_FOCUS_EVENT_ID"] = String(focusEventId)
-        }
-        if openPopup {
-            environment["MCI_OPEN_GLOBAL_POPUP"] = "1"
-        }
-        if developmentKeyMode != nil, let agentPath = locator.agentPath() {
-            environment["MCI_AGENT_PATH"] = agentPath.path
-        }
-        let task = ChildProcessEnvironment.makeProcess(baseEnvironment: environment)
-        task.executableURL = recallPath
         do {
+            let task = try ChildProcessEnvironment.makeProcess(
+                preparedEnvironment: environment
+            )
+            task.executableURL = recallPath
             try task.run()
             recallProcess = task
         } catch {

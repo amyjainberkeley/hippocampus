@@ -8,6 +8,7 @@ struct ChildProcessEnvironmentBehavior {
         try provePreparedEnvironmentIsPreserved()
         proveMalformedPreparedEnvironmentsAreRejected()
         proveOnboardingPreservesDevelopmentKeyAuthority()
+        try proveRecallPreservesPreparedDevelopmentAuthority()
     }
 
     private static func proveAmbientEnvironmentIsScrubbed() throws {
@@ -67,6 +68,32 @@ struct ChildProcessEnvironmentBehavior {
         precondition(environment["MCI_DB_KEY_FILE"] == keyURL.path)
         precondition(environment["MCI_DB_KEYCHAIN_SERVICE"] == nil)
         precondition(environment["MCI_DB_KEYCHAIN_ACCOUNT"] == nil)
+    }
+
+    private static func proveRecallPreservesPreparedDevelopmentAuthority() throws {
+        let keyURL = URL(fileURLWithPath: "/tmp/fixed-user-owned/dev.key")
+        let agentURL = URL(fileURLWithPath: "/Applications/Hippocampus.app/Contents/MacOS/mci-agent")
+        let environment = ProcessSupervisorLaunchPlan.recallEnvironment(
+            baseEnvironment: ["MCI_EPHEMERAL_UI_STATE": "1"],
+            dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey,
+            developmentKeyMode: DevelopmentFileKeyMode(keyURL: keyURL),
+            initialTab: "search",
+            focusEventId: 42,
+            openPopup: false,
+            agentURL: agentURL
+        )
+
+        let received = try run(
+            try ChildProcessEnvironment.makeProcess(preparedEnvironment: environment)
+        )
+        precondition(received.contains("MCI_DEVELOPMENT_FILE_KEY=1"))
+        precondition(received.contains("MCI_DB_KEY_FILE=\(keyURL.path)"))
+        precondition(received.contains("MCI_INITIAL_TAB=search"))
+        precondition(received.contains("MCI_INITIAL_FOCUS_EVENT_ID=42"))
+        precondition(received.contains("MCI_EPHEMERAL_UI_STATE=1"))
+        precondition(received.contains("MCI_AGENT_PATH=\(agentURL.path)"))
+        precondition(!received.contains("MCI_DB_KEY_HEX="))
     }
 
     private static func expectPreparedEnvironmentError(
