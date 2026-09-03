@@ -484,6 +484,42 @@ fn explicit_person_question_abstains_when_ranked_context_contains_no_person_answ
 }
 
 #[test]
+fn explicit_current_update_keeps_ranked_context_untrusted_when_relation_is_sparse() {
+    let store = Arc::new(InMemoryBrainStore::new());
+    let current_id = store
+        .put_event(&event(
+            "Current decision: Priya. This supersedes the previous plan.",
+            Some("linear://HIP-204/current"),
+        ))
+        .unwrap();
+    store
+        .put_event(&event(
+            "Previous plan: Martin.",
+            Some("linear://HIP-204/old"),
+        ))
+        .unwrap();
+    let retriever = HybridRetriever::new(store, Arc::new(PerfectEmbedder), 20);
+
+    let RetrievalOutcome::Degraded {
+        degradation,
+        fallback_matches,
+    } = retriever
+        .retrieve_outcome(&query("Who owns HIP-204 now?"))
+        .unwrap()
+    else {
+        panic!("explicitly superseding current context must remain available but untrusted");
+    };
+
+    assert_eq!(
+        degradation,
+        RetrievalDegradation::EvidenceVerifierUnavailable
+    );
+    assert!(fallback_matches
+        .iter()
+        .any(|value| value.hit.event_id == current_id));
+}
+
+#[test]
 fn legacy_retrieve_rejects_unqualified_ranked_context() {
     let store = Arc::new(InMemoryBrainStore::new());
     store

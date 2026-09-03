@@ -400,7 +400,7 @@ fn recall_fts5_finds_seeded_event_by_keyword() {
 }
 
 #[test]
-fn recall_fts5_returns_empty_for_unmatched_query() {
+fn recall_fts5_returns_typed_no_match_for_unmatched_query() {
     let (_dir, store) = open_temp_store();
     store
         .put_event(&make_event("apple banana cherry", 1_000_000))
@@ -414,11 +414,10 @@ fn recall_fts5_returns_empty_for_unmatched_query() {
             "arguments": {"query": "quantum entanglement", "limit": 10}
         })),
     )));
-    let related_context = degraded_context(&result, "embeddings_unavailable");
-    assert!(
-        related_context.is_empty(),
-        "no related context expected for unrelated query"
-    );
+    assert_eq!(result["outcome"], "nothing_matched");
+    assert_eq!(result["reason"], "no_candidates");
+    assert_eq!(result["hits"], serde_json::json!([]));
+    assert_eq!(result["related_context"], serde_json::json!([]));
 }
 
 #[test]

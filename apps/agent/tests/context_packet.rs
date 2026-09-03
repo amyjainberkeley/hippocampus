@@ -397,6 +397,59 @@ fn repeated_screen_ocr_uses_only_the_newest_canonical_citation() {
 }
 
 #[test]
+fn current_focus_excludes_only_explicitly_superseded_observations() {
+    let previous = event(80, 1_700_000, "Previous plan: Martin.");
+    let current = event(
+        81,
+        1_900_000,
+        "Current decision: Priya. This supersedes the previous plan.",
+    );
+    let packet = compile_context_packet(
+        Some("Who owns HIP-204 now?"),
+        NOW_US,
+        ContextBudget::new(200, 6),
+        ContextSources {
+            claims: Vec::new(),
+            evidence: [previous, current]
+                .iter()
+                .map(|source| {
+                    ContextEvidence::from_event(source, EvidencePriority::Focused, Some(0.8))
+                })
+                .collect(),
+        },
+    );
+
+    let cited = packet
+        .citations
+        .iter()
+        .map(|citation| citation.event_id)
+        .collect::<Vec<_>>();
+    assert_eq!(cited, vec![81]);
+}
+
+#[test]
+fn current_focus_preserves_competing_observations_without_supersession_marker() {
+    let first = event(90, 1_700_000, "Martin owns HIP-204.");
+    let second = event(91, 1_900_000, "Priya owns HIP-204.");
+    let packet = compile_context_packet(
+        Some("Who owns HIP-204 now?"),
+        NOW_US,
+        ContextBudget::new(200, 6),
+        ContextSources {
+            claims: Vec::new(),
+            evidence: [first, second]
+                .iter()
+                .map(|source| {
+                    ContextEvidence::from_event(source, EvidencePriority::Focused, Some(0.8))
+                })
+                .collect(),
+        },
+    );
+
+    assert_eq!(packet.citations.len(), 2);
+}
+
+#[test]
 fn empty_sources_return_a_typed_empty_packet() {
     let packet = compile_context_packet(
         None,

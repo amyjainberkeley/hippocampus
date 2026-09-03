@@ -85,8 +85,9 @@ use std::sync::Arc;
 use crate::extraction::tier1::{Tier1Extractor, KIND_REDACTED_TOKEN};
 use crate::extraction::tier2::{KIND_LOCATION, KIND_ORGANIZATION, KIND_PERSON_NAME};
 use crate::{
-    evidence_features_for_candidates, explicit_evidence_signal, BrainStore, Embedder, EntityId,
-    EventId, EvidenceCandidate, EvidenceExcerpt, EvidenceSufficiencyPolicy, EvidenceVerdict,
+    evidence_features_for_candidates, explicit_evidence_signal,
+    has_explicit_current_supersession_context, BrainStore, Embedder, EntityId, EventId,
+    EvidenceCandidate, EvidenceExcerpt, EvidenceSufficiencyPolicy, EvidenceVerdict,
     EvidenceVerifier, ExplicitEvidenceSignal, RetrievalHit, RetrievalQuery, RetrieveError,
     Retriever, TimeRange,
 };
@@ -828,7 +829,8 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
         if matches!(
             explicit_evidence_signal(&query.text, &candidates),
             ExplicitEvidenceSignal::RelationUnsupported
-        ) {
+        ) && !has_explicit_current_supersession_context(&query.text, &candidates)
+        {
             return EvidenceAssessment::Unsupported;
         }
 
