@@ -74,6 +74,17 @@ final class SearchViewModelTests: XCTestCase {
         XCTAssertNil(vm.errorMessage)
     }
 
+    func testRefreshRerunsActiveQueryAndObservedApps() async {
+        let vm = SearchViewModel(reader: StubBrainReader())
+        vm.query = "privacy"
+
+        await vm.refresh()
+
+        XCTAssertEqual(vm.hits.map(\.eventId), [101])
+        XCTAssertFalse(vm.observedApps.isEmpty)
+        XCTAssertNil(vm.errorMessage)
+    }
+
     func testReaderErrorIsSurfacedAndHitsCleared() async {
         let vm = SearchViewModel(reader: FailingReader())
         vm.query = "anything"

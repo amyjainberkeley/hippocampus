@@ -67,6 +67,15 @@ public final class SearchViewModel: ObservableObject {
         }
     }
 
+    /// Re-run every read represented by the current search surface.
+    public func refresh() async {
+        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || filters.anyActive {
+            await runSearch()
+        }
+        await reloadObservedApps()
+    }
+
     public var selectedHit: Hit? {
         guard let id = selectedHitId else { return nil }
         return hits.first { $0.id == id }

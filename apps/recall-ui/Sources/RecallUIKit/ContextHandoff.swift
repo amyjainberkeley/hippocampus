@@ -1,8 +1,10 @@
+import Darwin
 import Foundation
 
 public enum ContextHandoffError: Error, Equatable, LocalizedError {
     case agentUnavailable
     case launchFailed
+    case timedOut
     case commandFailed
     case emptyOutput
 
@@ -12,6 +14,8 @@ public enum ContextHandoffError: Error, Equatable, LocalizedError {
             "The local context service is unavailable."
         case .launchFailed:
             "The local context service could not start."
+        case .timedOut:
+            "The local context service did not respond in time."
         case .commandFailed:
             "Hippocampus could not prepare context for this task."
         case .emptyOutput:
@@ -74,6 +78,8 @@ public struct ContextHandoffCommand: Equatable, Sendable {
 
 /// Runs the local read-only handoff command away from the main actor.
 public enum ContextHandoffExporter {
+    public static let defaultTimeoutSeconds: TimeInterval = 15
+
     public static func export(
         focus: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -84,6 +90,19 @@ public enum ContextHandoffExporter {
             environment: environment,
             recallExecutableURL: recallExecutableURL
         )
+        return try await run(command: command)
+    }
+
+    /// Execute a local context command with a hard wall-clock bound.
+    /// Timeout first requests a normal exit, then uses `SIGKILL` if the
+    /// bundled child does not honor the grace period.
+    public static func run(
+        command: ContextHandoffCommand,
+        timeoutSeconds: TimeInterval = defaultTimeoutSeconds
+    ) async throws -> String {
+        guard timeoutSeconds.isFinite, timeoutSeconds > 0 else {
+            throw ContextHandoffError.timedOut
+        }
         return try await Task.detached(priority: .userInitiated) {
             let process = Process()
             let outputPipe = Pipe()
@@ -96,8 +115,35 @@ public enum ContextHandoffExporter {
             } catch {
                 throw ContextHandoffError.launchFailed
             }
-            process.waitUntilExit()
-            let output = outputPipe.fileHandleForReading.readDataToEndOfFile()
+
+            let outputReader = Task.detached(priority: .userInitiated) {
+                outputPipe.fileHandleForReading.readDataToEndOfFile()
+            }
+            let deadline = Date().addingTimeInterval(timeoutSeconds)
+            while process.isRunning, Date() < deadline {
+                try? await Task<Never, Never>.sleep(nanoseconds: 25_000_000)
+            }
+            if process.isRunning {
+                process.terminate()
+                let gracefulDeadline = Date().addingTimeInterval(0.25)
+                while process.isRunning, Date() < gracefulDeadline {
+                    try? await Task<Never, Never>.sleep(nanoseconds: 25_000_000)
+                }
+                if process.isRunning {
+                    _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                }
+                let killedDeadline = Date().addingTimeInterval(1)
+                while process.isRunning, Date() < killedDeadline {
+                    try? await Task<Never, Never>.sleep(nanoseconds: 25_000_000)
+                }
+                if process.isRunning {
+                    outputPipe.fileHandleForReading.closeFile()
+                }
+                _ = await outputReader.value
+                throw ContextHandoffError.timedOut
+            }
+
+            let output = await outputReader.value
             guard process.terminationStatus == 0 else {
                 throw ContextHandoffError.commandFailed
             }

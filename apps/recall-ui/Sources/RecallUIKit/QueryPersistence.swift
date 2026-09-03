@@ -77,13 +77,27 @@ public protocol KeyValueStore: AnyObject, Sendable {
     func removeObject(forKey key: String)
 }
 
-extension UserDefaults: KeyValueStore, @unchecked Sendable {
+public final class UserDefaultsKeyValueStore: KeyValueStore, @unchecked Sendable {
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    public func data(forKey key: String) -> Data? {
+        defaults.data(forKey: key)
+    }
+
     public func set(_ data: Data?, forKey key: String) {
         if let data {
-            self.set(data as Any, forKey: key)
+            defaults.set(data as Any, forKey: key)
         } else {
-            self.removeObject(forKey: key)
+            defaults.removeObject(forKey: key)
         }
+    }
+
+    public func removeObject(forKey key: String) {
+        defaults.removeObject(forKey: key)
     }
 }
 
@@ -100,7 +114,7 @@ public struct QueryPersistence: Sendable {
 
     public init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        store: KeyValueStore = UserDefaults.standard,
+        store: KeyValueStore = UserDefaultsKeyValueStore(),
         key: String = QueryPersistence.defaultKey
     ) {
         self.store = store

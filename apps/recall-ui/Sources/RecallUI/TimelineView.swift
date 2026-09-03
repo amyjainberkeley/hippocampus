@@ -25,6 +25,10 @@ struct TimelineView: View {
         .task {
             await viewModel.reload()
         }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
+            _ in
+            Task { await viewModel.reload() }
+        }
     }
 
     private var emptyView: some View {

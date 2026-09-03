@@ -35,6 +35,8 @@ LANES=(
     "swift-test-onboarding|swift|test|scripts/swift-package.sh test --package-path apps/onboarding"
     "swift-test-hippocampus|swift|test|scripts/swift-package.sh test --package-path apps/hippocampus"
     "recall-state-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui RecallStateBehavior"
+    "recall-refresh-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui MemoryRefreshBehavior"
+    "context-handoff-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui ContextHandoffBehavior"
     "capture-consent-behavior|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior"
     "child-process-environment|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior"
     "capture-source-policy-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior"
@@ -101,6 +103,8 @@ LANES
     swift-test-onboarding swift test in apps/onboarding
     swift-test-hippocampus swift test in apps/hippocampus
     recall-state-behavior responsive Recall layout and ephemeral query-state fixture
+    recall-refresh-behavior real process-local refresh signal and re-query behavior
+    context-handoff-behavior bounded child completion and timeout cleanup
     capture-consent-behavior executable capture authority and generation fixture
     child-process-environment prepared file-key authority reaches supervised children
     capture-source-policy-behavior browser pixels stay outside ambient OCR

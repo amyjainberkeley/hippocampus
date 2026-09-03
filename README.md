@@ -351,25 +351,33 @@ Most projects bury this. It should be near the top, because it decides whether t
 | **On-device embeddings** | **Works.** Runs through Core ML with the runtime pinned to CPU, with a regression test asserting the vectors still match a known-good reference. |
 | **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
 | **Reading Mail and Messages** | **Partly wired.** The agent-side deep-hook pumps can persist allowed Mail and Messages content into the brain after their cascade checks, but they are not part of the default demo flow and still depend on explicit allowlists / FDA. |
-| **Live screen capture** | **Built, unproven, defaults OFF.** The persisted Preferences toggle is the only capture authority; enable commits only after a generation-bound helper readiness receipt. All-day soak and release verification are still owed. |
+| **Live screen capture** | **Built, live-overlap verified, defaults OFF.** The persisted Preferences toggle is the only capture authority; enable commits only after a generation-bound helper readiness receipt. A real 20-second focused-window run recalled the foreground token, excluded the overlapping background token, and wrote 18 OCR events to an isolated encrypted brain. The 30-minute resource soak and public signed-release verification are still owed. |
 | **Sync between machines** | **Skeleton.** The crypto is there. Proof that two devices converge is not. |
 | **Windows** | **Not started.** An empty crate with the right shape. |
 
-The test suite is 535 tests on the core (`cargo test -p mci-brain`). The build is not signed or notarized under my own Apple Developer ID yet, so a build you make yourself needs to be allowed through Gatekeeper by hand.
+The core test suite runs with `cargo test -p mci-brain`; the repository-wide
+gate is `scripts/check.sh`. The build is not signed or notarized under my own
+Apple Developer ID yet, so a build you make yourself needs to be allowed
+through Gatekeeper by hand.
 
-If you only take one thing from this table: **capture is off by default and unverified.** Everything you can try today is the recall half.
+If you only take one thing from this table: **capture is off by default and the
+development path has passed focused-window overlap, but the public release is
+not yet soak-, Developer ID-, or notarization-qualified.**
 
 ---
 
 ## How this compares
 
-The obvious question is how this differs from [mem0](https://github.com/mem0ai/mem0) (62k stars) and [supermemory](https://github.com/supermemoryai/supermemory) (29k stars). They are good and they are more mature. They also solve a different problem.
+The obvious question is how this differs from
+[mem0](https://github.com/mem0ai/mem0) and
+[supermemory](https://github.com/supermemoryai/supermemory). They are good and
+they are more mature. They also solve a different problem.
 
 **They remember what you tell them. This remembers what you saw.**
 
 mem0 and supermemory are memory layers for agents. You hand them a conversation, a document, or a fact, and they store and retrieve it. The input is text you deliberately give them.
 
-Hippocampus's intended input is permitted screen context, which reaches the details you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once. In the current preview, live capture remains an explicit persisted preference while release verification is pending.
+Hippocampus's intended input is permitted screen context, which reaches the details you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once. Live capture remains an explicit persisted preference. The current development app has passed a real focused-window/background-exclusion overlap gate; the longer resource soak and signed distribution gates remain pending.
 
 | | mem0 | supermemory | Hippocampus |
 |---|---|---|---|
@@ -377,9 +385,21 @@ Hippocampus's intended input is permitted screen context, which reaches the deta
 | Runs offline | Yes, library mode | Yes, local binary | Yes, and there is no cloud mode |
 | Retrieval | Vector, plus a graph store | Embedded graph engine | Keyword + vector fused; semantic uses a Rust-side cosine scan over SQLCipher-stored vectors |
 | Where memories live | Your DB or their cloud | Your machine or their cloud | SQLCipher plus local blobs, only your machine |
-| Maturity | Production, 62k stars | Production, 29k stars | Recall works; capture unproven |
+| Maturity | Production | Production | Development MVP; focused capture and recall work, soak/signing pending |
 
-**On benchmarks, plainly:** a committed 24-case synthetic work-memory retrieval baseline now exists, but Task 3 review is still pending and it is not comparable to LoCoMo or LongMemEval. Lexical retrieval matched 7 of 21 answerable cases and abstained on all 3 unanswerable cases. Hybrid retrieval matched all 21 answerable cases, but produced false positives on all 3 unanswerable cases. Answer generation was not measured. The artifact and full metrics are in [docs/eval/work-memory-baseline.json](docs/eval/work-memory-baseline.json); current acceptance status is in [docs/STATUS.md](docs/STATUS.md).
+**On benchmarks, plainly:** the accepted 36-task agent-handoff benchmark runs
+both production hybrid and lexical paths over disposable encrypted brains.
+Hybrid reaches 100% Hit@1/3/5, 100% Recall@3/5, and 100% on temporal currency,
+superseded exclusion, contradiction visibility, duplicate suppression,
+provenance, abstention, handoff utility, fact coverage, bounded packets, and
+capability checks. Lexical reaches 100% Hit@3/5 and misses one of 36 capability
+checks. These results qualify retrieval and bounded cited handoff, not answer
+generation. Semantic neighbors remain explicitly degraded related context
+until a separately trained claim/evidence verifier passes its blind gate. The
+checksummed artifact is
+[docs/eval/agent-handoff-v1-result.json](docs/eval/agent-handoff-v1-result.json);
+current acceptance status and the smaller 24-case baseline are in
+[docs/STATUS.md](docs/STATUS.md).
 
 ---
 

@@ -30,8 +30,6 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
             self = .privacy
         case .settings:
             self = .settings
-        case .chat:
-            self = .now
         }
     }
 
@@ -275,6 +273,10 @@ private struct WorkspaceFilmstrip: View {
         .task {
             await load()
         }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
+            _ in
+            Task { await load() }
+        }
     }
 
     private var countLabel: String {
@@ -374,6 +376,8 @@ private struct NowWorkspaceView: View {
     @State private var recentHits: [Hit] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var isExportingContext = false
+    @State private var showsContextHandoffError = false
 
     var body: some View {
         let storedEvents = summary.map(MCI.Workspace.historicalEventMetric(for:))
@@ -381,9 +385,27 @@ private struct NowWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: MCI.Spacing.xl) {
                 VStack(alignment: .leading, spacing: MCI.Spacing.m) {
-                    Text("Today")
-                        .mciFont(.title)
-                        .foregroundStyle(Color.brandFgPrimary)
+                    HStack(alignment: .center, spacing: MCI.Spacing.m) {
+                        Text("Today")
+                            .mciFont(.title)
+                            .foregroundStyle(Color.brandFgPrimary)
+                        Spacer(minLength: MCI.Spacing.l)
+                        Button {
+                            copyAgentContext()
+                        } label: {
+                            Label("Copy agent context", systemImage: "doc.on.clipboard")
+                                .opacity(isExportingContext ? 0 : 1)
+                                .overlay {
+                                    if isExportingContext {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.brandMint)
+                        .disabled(isExportingContext)
+                        .help("Copy a bounded, cited context packet")
+                    }
                     Text("A live view of the memory available to you and your connected tools.")
                         .mciFont(.body)
                         .foregroundStyle(Color.brandFgSecondary)
@@ -450,6 +472,15 @@ private struct NowWorkspaceView: View {
         .task {
             await load()
         }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
+            _ in
+            Task { await load() }
+        }
+        .alert("Couldn’t copy agent context", isPresented: $showsContextHandoffError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Open Hippocampus and try again.")
+        }
     }
 
     private var historicalEventValue: String {
@@ -494,6 +525,25 @@ private struct NowWorkspaceView: View {
             latestBrief = nil
             recentHits = []
             errorMessage = UserFacingCopy.memoryUnreachableBody
+        }
+    }
+
+    private func copyAgentContext() {
+        guard !isExportingContext else { return }
+        isExportingContext = true
+        Task {
+            defer { isExportingContext = false }
+            do {
+                let packet = try await ContextHandoffExporter.export(focus: "")
+                NSPasteboard.general.clearContents()
+                guard NSPasteboard.general.setString(packet, forType: .string) else {
+                    showsContextHandoffError = true
+                    return
+                }
+                ToastNotifier.shared.notify("Agent context copied")
+            } catch {
+                showsContextHandoffError = true
+            }
         }
     }
 }
@@ -599,6 +649,10 @@ private struct SourcesWorkspaceView: View {
         .refreshable { await load() }
         .task {
             await load()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
+            _ in
+            Task { await load() }
         }
     }
 

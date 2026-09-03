@@ -1,5 +1,5 @@
 // ToastNotifierTests.swift — lifecycle coverage for the shared toast
-// notifier used by ⌘R "Brain refreshed" feedback (cycle 8.51 PR #74
+// notifier used by ⌘R "Refreshing memory" feedback (cycle 8.51 PR #74
 // follow-up).
 //
 // The AppKit NSPanel path is skipped by setting `testMode = true`;
@@ -20,8 +20,8 @@ final class ToastNotifierTests: XCTestCase {
     func testNotifyPresentsMessage() {
         let n = freshNotifier()
         XCTAssertNil(n.currentMessage)
-        n.notify("Brain refreshed", hold: 0.05)
-        XCTAssertEqual(n.currentMessage, "Brain refreshed")
+        n.notify("Refreshing memory", hold: 0.05)
+        XCTAssertEqual(n.currentMessage, "Refreshing memory")
     }
 
     /// Wait until `condition` holds, or fail after `timeout`.
@@ -50,8 +50,8 @@ final class ToastNotifierTests: XCTestCase {
 
     func testHoldThenClears() async throws {
         let n = freshNotifier()
-        n.notify("Brain refreshed", hold: 0.05)
-        XCTAssertEqual(n.currentMessage, "Brain refreshed")
+        n.notify("Refreshing memory", hold: 0.05)
+        XCTAssertEqual(n.currentMessage, "Refreshing memory")
         await waitUntil("the message to clear after its hold") {
             n.currentMessage == nil
         }
