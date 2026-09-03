@@ -105,23 +105,31 @@ public struct FocusedWindowSnapshot: Sendable, Equatable {
 ///
 /// ## Trait-level invariants (binding on every impl)
 ///
-/// - **MUST be non-blocking on the hot path.** The tracker polls at 1 Hz
-///   on a dedicated background queue; the SCStream callback never invokes
-///   this trait directly. Production reads MUST respect the timeout
-///   discipline (`AXFocusedWindowReader` caps the AX read at 250 ms; the
-///   tick falls back to a CGWindowList enumeration if AX times out).
+/// - **MUST keep identity reads bounded on the hot path.** The tracker polls
+///   full geometry at 1 Hz on a dedicated background queue. The SCStream
+///   callback invokes `readFocusedWindowIdentity()` only; production omits
+///   the bounded AX geometry request from that method.
 /// - **MUST return `nil` cleanly on every failure mode.** Permission
 ///   denial, no frontmost app, Electron AX intermittency, AX timeout,
 ///   missing `kAXFocusedWindowAttribute`, hostile non-AXUIElement
 ///   responses — every one resolves to `nil`. Impls do not throw, do
 ///   not log noisily, do not retry within the same call.
-/// - **MUST be `Sendable`.** The tick runs on a detached background
-///   queue; the snapshot store receives values across an isolation
-///   boundary.
+/// - **MUST be `Sendable`.** The tick runs on a background queue and the
+///   callback-time identity refresh runs on the SCStream sample queue.
 public protocol FocusedWindowReader: Sendable {
     /// Synchronous read of the current focused window. `nil` cleanly
     /// for every failure mode per the trait invariants above.
     func readFocusedWindow() -> FocusedWindow?
+
+    /// Lightweight capture-binding identity for callback-time validation.
+    /// Implementations may omit observability-only geometry.
+    func readFocusedWindowIdentity() -> FocusedWindow?
+}
+
+public extension FocusedWindowReader {
+    func readFocusedWindowIdentity() -> FocusedWindow? {
+        readFocusedWindow()
+    }
 }
 
 // MARK: - FocusedWindowStore
@@ -146,16 +154,29 @@ public actor FocusedWindowStore {
         self.cell = OSAllocatedUnfairLock(initialState: initial)
     }
 
-    /// Replace the stored snapshot. The generation increments iff the
-    /// new `focused` value differs from the existing one (Equatable on
-    /// the whole struct — bundleId / windowId / axRect compared
-    /// field-by-field).
+    /// Replace the stored snapshot. The generation tracks the capture-filter
+    /// identity (`bundleId`, `windowId`) only. Geometry remains current for
+    /// diagnostics without forcing a filter rebind when a window moves or AX
+    /// reports a slightly different rectangle.
     public func store(_ focused: FocusedWindow?) async {
+        storeSync(focused)
+    }
+
+    /// Synchronous form for the tracker's serial timer queue. Publishing under
+    /// the cell lock preserves observation order without spawning detached tasks.
+    public nonisolated func storeSync(_ focused: FocusedWindow?) {
         cell.withLock { state in
-            if state.focused != focused {
+            let bindingChanged = state.focused?.bundleId != focused?.bundleId
+                || state.focused?.windowId != focused?.windowId
+            if bindingChanged {
                 state = FocusedWindowSnapshot(
                     focused: focused,
                     generation: state.generation &+ 1
+                )
+            } else if state.focused != focused {
+                state = FocusedWindowSnapshot(
+                    focused: focused,
+                    generation: state.generation
                 )
             }
         }
@@ -171,10 +192,10 @@ public actor FocusedWindowStore {
 
 // MARK: - FocusTracker
 
-/// Production `FocusTracker`. Polls a `FocusedWindowReader` at a
-/// configurable cadence (default 1000 ms — matches
-/// `StreamPolicy.cascadeFloorIntervalMs` from PR #39 + ADR-0015 §3) and
-/// pushes each observation to the shared `FocusedWindowStore`.
+/// Production `FocusTracker`. Polls lightweight focused-window identity at a
+/// configurable cadence (default 200 ms) and pushes each observation to the
+/// shared `FocusedWindowStore`. AX geometry is excluded from the production
+/// cadence because it is not needed to bind a capture filter.
 ///
 /// `start()` is idempotent (second call while running is a no-op).
 /// `stop()` cancels the timer; calling `stop()` before `start()` is also
@@ -194,7 +215,7 @@ public final class FocusTracker: @unchecked Sendable {
     /// `AXFocusedWindowReader`. Tests: stub.
     private let reader: any FocusedWindowReader
 
-    /// Polling cadence, milliseconds. Default 1000 ms (1 Hz).
+    /// Polling cadence, milliseconds. Default 200 ms (5 Hz).
     private let intervalMs: UInt64
 
     /// Serial queue the timer fires on. Dedicated to the focus tracker
@@ -220,7 +241,7 @@ public final class FocusTracker: @unchecked Sendable {
     public init(
         store: FocusedWindowStore = FocusedWindowStore(),
         reader: any FocusedWindowReader = AXFocusedWindowReader(),
-        intervalMs: UInt64 = 1000,
+        intervalMs: UInt64 = 200,
         queue: DispatchQueue = DispatchQueue(
             label: "mci.context.focustracker",
             qos: .utility
@@ -284,21 +305,29 @@ public final class FocusTracker: @unchecked Sendable {
         store.currentSync()
     }
 
+    /// Read and publish one focused-window observation before an owner chooses
+    /// its initial ScreenCaptureKit filter. Unlike `start()`, this method is
+    /// awaitable, so callers never need to race the timer queue's first write.
+    public func refreshOnce() async {
+        let focused = reader.readFocusedWindowIdentity()
+        store.storeSync(focused)
+    }
+
+    /// Revalidate identity immediately before an extracted frame can reach raw
+    /// pixel admission. Callers invoke this only for complete frames with a
+    /// dirty region, so idle callbacks never enumerate WindowServer windows.
+    public func refreshBindingOnceSync() {
+        store.storeSync(reader.readFocusedWindowIdentity())
+    }
+
     /// One poll tick — read the source, push to the store. Static so
     /// the timer block does not capture `self`.
     private static func tick(
         reader: any FocusedWindowReader,
         store: FocusedWindowStore
     ) {
-        let focused = reader.readFocusedWindow()
-        // The actor-isolated `store(_:)` is `async`; schedule onto a
-        // detached task. Ordering across ticks is preserved by the
-        // serial timer queue (tick N+1 cannot enqueue before tick N
-        // has handed off to the actor — `Task` enqueue order from a
-        // serial queue is deterministic).
-        Task.detached(priority: .utility) {
-            await store.store(focused)
-        }
+        let focused = reader.readFocusedWindowIdentity()
+        store.storeSync(focused)
     }
 
     /// Synchronous test hook — one tick, awaiting the store write.
@@ -348,6 +377,25 @@ public struct AXFocusedWindowReader: FocusedWindowReader {
     }
 
     public func readFocusedWindow() -> FocusedWindow? {
+        guard let observed = readIdentityWithPid() else { return nil }
+        let (pid, identity) = observed
+
+        // AX rect is observability-only inside V2-P1; nil is acceptable.
+        // Pass the timeout that matches `RealAXTitleReader`'s 250 ms cap.
+        let axRect = axRectReader.readRect(pid: pid, timeoutMs: 250)
+
+        return FocusedWindow(
+            bundleId: identity.bundleId,
+            windowId: identity.windowId,
+            axRect: axRect
+        )
+    }
+
+    public func readFocusedWindowIdentity() -> FocusedWindow? {
+        readIdentityWithPid()?.1
+    }
+
+    private func readIdentityWithPid() -> (pid_t, FocusedWindow)? {
         guard let pidBundle = pidSource.frontmostPidAndBundle() else { return nil }
         let (pid, bundleId) = pidBundle
 
@@ -359,14 +407,19 @@ public struct AXFocusedWindowReader: FocusedWindowReader {
             return nil
         }
 
-        // AX rect is observability-only inside V2-P1; nil is acceptable.
-        // Pass the timeout that matches `RealAXTitleReader`'s 250 ms cap.
-        let axRect = axRectReader.readRect(pid: pid, timeoutMs: 250)
+        // The process can change while WindowServer is being queried. Re-read
+        // the frontmost identity before publishing so a pid/window pair from an
+        // earlier app cannot be attributed to the newly active app.
+        guard let confirmed = pidSource.frontmostPidAndBundle(),
+              confirmed.0 == pid,
+              confirmed.1 == bundleId
+        else {
+            return nil
+        }
 
-        return FocusedWindow(
-            bundleId: bundleId,
-            windowId: windowId,
-            axRect: axRect
+        return (
+            pid,
+            FocusedWindow(bundleId: bundleId, windowId: windowId, axRect: nil)
         )
     }
 }

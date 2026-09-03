@@ -34,7 +34,7 @@ import Foundation
 ///     to enqueue work; results land on the supplied @Sendable
 ///     completion
 ///   - call `stop()` to cancel the consumer; pending jobs are
-///     discarded (completions are NOT invoked for discarded jobs)
+///     discarded through their `onDrop` callbacks
 ///
 /// `start()` and `stop()` are idempotent; submitting after `stop()`
 /// silently drops the work (it cannot run — by design; a stopped
@@ -91,7 +91,11 @@ public actor VisionOCRWorker {
         guard !stopped else { return }
         stopped = true
         consumer?.cancel()
+        let abandoned = queue
         queue.removeAll()
+        for job in abandoned {
+            job.onDrop()
+        }
         if let a = awaiter {
             awaiter = nil
             a.resume()
@@ -110,12 +114,9 @@ public actor VisionOCRWorker {
 
     /// Submit one OCR job. If the queue is at capacity, the oldest
     /// pending job is dropped, `ocr_dropped_count` (`droppedCount()`)
-    /// is incremented, and the new job is enqueued. A dropped job's
-    /// completion is NOT invoked — the caller treats fire-and-forget
-    /// submission with no delivery guarantee, exactly mirroring the
-    /// `frames_redacted_by_failsafe` pattern from PR #47.
-    ///
-    /// Submits on a stopped worker are silently discarded.
+    /// is incremented, and the new job is enqueued. This compatibility
+    /// overload does not expose drop notification; baseline-owning callers use
+    /// the `onDrop` overload below. Submits on a stopped worker are discarded.
     public func submit(
         pixelBuffer: CVPixelBuffer,
         dirtyRectsBoundingROI: CGRect,
@@ -138,12 +139,28 @@ public actor VisionOCRWorker {
         input: OCREngineInput,
         completion: @Sendable @escaping (OCRResult) -> Void
     ) {
-        guard !stopped else { return }
-        if queue.count >= capacity {
-            _ = queue.removeFirst()
-            dropped &+= 1
+        submit(input: input, onDrop: {}, completion: completion)
+    }
+
+    /// Submission variant for owners that must roll back state when OCR work
+    /// cannot run. `onDrop` fires exactly once for stopped-worker rejection,
+    /// queue eviction, or shutdown abandonment; it never fires for a job whose
+    /// result completion runs.
+    public func submit(
+        input: OCREngineInput,
+        onDrop: @Sendable @escaping () -> Void,
+        completion: @Sendable @escaping (OCRResult) -> Void
+    ) {
+        guard !stopped else {
+            onDrop()
+            return
         }
-        queue.append(Job(input: input, completion: completion))
+        if queue.count >= capacity {
+            let evicted = queue.removeFirst()
+            dropped &+= 1
+            evicted.onDrop()
+        }
+        queue.append(Job(input: input, onDrop: onDrop, completion: completion))
         if let a = awaiter {
             awaiter = nil
             a.resume()
@@ -212,6 +229,7 @@ public actor VisionOCRWorker {
 
     private struct Job {
         let input: OCREngineInput
+        let onDrop: @Sendable () -> Void
         let completion: @Sendable (OCRResult) -> Void
     }
 }

@@ -155,6 +155,7 @@ struct Task4CaptureBehavior {
         )
         precondition(secret.files.isEmpty)
         precondition(secret.frames.count == 1 && isTombstone(secret.frames[0]))
+        precondition(secret.dispositions == [.finalized])
 
         let timedOut = await runEmitter(
             result: OCRResult(recognizedLines: [], durationMs: 1_000, timedOut: true),
@@ -163,8 +164,35 @@ struct Task4CaptureBehavior {
             policy: policy
         )
         precondition(timedOut.files.isEmpty)
-        precondition(timedOut.frames.count == 1)
-        precondition(keyframeHash(timedOut.frames[0]).allSatisfy { $0 == 0 })
+        precondition(timedOut.frames.isEmpty, "timed-out OCR must publish no memory event")
+        precondition(
+            timedOut.dispositions == [.retryableNoContent],
+            "timed-out OCR must reopen the visual baseline for retry"
+        )
+
+        let empty = await runEmitter(
+            result: OCRResult(recognizedLines: [], durationMs: 1, timedOut: false),
+            root: root.appendingPathComponent("empty"),
+            pixels: pixels,
+            policy: policy
+        )
+        precondition(empty.files.isEmpty)
+        precondition(empty.frames.isEmpty, "empty OCR must publish no memory event")
+        precondition(empty.dispositions == [.retryableNoContent])
+
+        let whitespace = await runEmitter(
+            result: OCRResult(
+                recognizedLines: [OCRLine(text: "  \n\t ", boundingBox: .zero, confidence: 1)],
+                durationMs: 1,
+                timedOut: false
+            ),
+            root: root.appendingPathComponent("whitespace"),
+            pixels: pixels,
+            policy: policy
+        )
+        precondition(whitespace.files.isEmpty)
+        precondition(whitespace.frames.isEmpty, "whitespace-only OCR must publish no memory event")
+        precondition(whitespace.dispositions == [.retryableNoContent])
 
         let overflow = await runEmitter(
             context: WorkflowContext(
@@ -182,6 +210,7 @@ struct Task4CaptureBehavior {
         )
         precondition(overflow.files.isEmpty)
         precondition(overflow.frames.count == 1 && isTombstone(overflow.frames[0]))
+        precondition(overflow.dispositions == [.finalized])
 
         let clean = await runEmitter(
             result: OCRResult(
@@ -195,9 +224,41 @@ struct Task4CaptureBehavior {
         )
         precondition(clean.frames.count == 1)
         precondition(clean.files.count == 1)
+        precondition(clean.dispositions == [.finalized])
         let cleanHash = keyframeHash(clean.frames[0])
         precondition(!cleanHash.allSatisfy { $0 == 0 })
         precondition(clean.files[0] == cleanHash.map { String(format: "%02x", $0) }.joined() + ".bin")
+
+        let dropEngine = BlockingOCREngine()
+        let dropWorker = VisionOCRWorker(engine: dropEngine, capacity: 1)
+        let droppedOrdinals = FixtureOrdinalCollector()
+        await dropWorker.start()
+        await dropWorker.submit(
+            input: OCREngineInput(pixelBuffer: pixels, roi: .zero),
+            onDrop: { Task { await droppedOrdinals.append(1) } },
+            completion: { _ in }
+        )
+        await dropEngine.waitUntilFirstCallStarts()
+        await dropWorker.submit(
+            input: OCREngineInput(pixelBuffer: pixels, roi: .zero),
+            onDrop: { Task { await droppedOrdinals.append(2) } },
+            completion: { _ in }
+        )
+        await dropWorker.submit(
+            input: OCREngineInput(pixelBuffer: pixels, roi: .zero),
+            onDrop: { Task { await droppedOrdinals.append(3) } },
+            completion: { _ in }
+        )
+        for _ in 0..<100 where await droppedOrdinals.values().isEmpty {
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        let droppedValues = await droppedOrdinals.values()
+        precondition(
+            droppedValues == [2],
+            "drop-oldest must notify the exact submission whose OCR will never complete"
+        )
+        await dropEngine.releaseFirstCall()
+        await dropWorker.stopAndDrain()
         CascadeTwiceOCREmitter.activateM4Lift(enabled: false)
     }
 
@@ -207,7 +268,7 @@ struct Task4CaptureBehavior {
         root: URL,
         pixels: CVPixelBuffer,
         policy: KeyframePolicy
-    ) async -> (frames: [Data], files: [String]) {
+    ) async -> (frames: [Data], files: [String], dispositions: [OCRPostAllowDisposition]) {
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let sink = FixtureFrameSink()
         let worker = VisionOCRWorker(engine: FixtureOCREngine(result: result))
@@ -224,8 +285,10 @@ struct Task4CaptureBehavior {
             counters: HelperHealthCounters(),
             keyframeRetainer: retainer
         )
+        let dispositionCollector = FixtureDispositionCollector()
         await worker.start()
         await emitter.processAfterAllow(
+            captureOrdinal: 1,
             tsUs: 1,
             context: context,
             input: OCREngineInput(
@@ -237,16 +300,19 @@ struct Task4CaptureBehavior {
                 focusedWindowId: 7,
                 dhash: DHash(bits: 0),
                 monotonicNanoseconds: 1
-            )
+            ),
+            disposition: { value in
+                Task { await dispositionCollector.append(value) }
+            }
         )
         for _ in 0..<200 {
-            if await sink.count() >= 1 { break }
+            if await dispositionCollector.count() >= 1 { break }
             try? await Task.sleep(for: .milliseconds(5))
         }
         await emitter.stopAndDrain()
         let frames = await sink.frames()
         let files = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
-        return (frames, files.sorted())
+        return (frames, files.sorted(), await dispositionCollector.values())
     }
 
     private static func fixtureCascade() -> SuppressionCascade {
@@ -291,6 +357,49 @@ struct Task4CaptureBehavior {
         }
         CVPixelBufferUnlockBaseAddress(output, [])
         return output
+    }
+}
+
+private actor FixtureDispositionCollector {
+    private var recorded: [OCRPostAllowDisposition] = []
+
+    func append(_ value: OCRPostAllowDisposition) { recorded.append(value) }
+    func count() -> Int { recorded.count }
+    func values() -> [OCRPostAllowDisposition] { recorded }
+}
+
+private actor FixtureOrdinalCollector {
+    private var recorded: [Int] = []
+
+    func append(_ value: Int) { recorded.append(value) }
+    func values() -> [Int] { recorded }
+}
+
+private actor BlockingOCREngine: OCREngine {
+    private var calls = 0
+    private var firstCallStarted = false
+    private var firstCallRelease: CheckedContinuation<Void, Never>?
+
+    func recognize(input _: OCREngineInput, timeoutMs _: Int) async -> OCRResult {
+        calls += 1
+        if calls == 1 {
+            firstCallStarted = true
+            await withCheckedContinuation { continuation in
+                firstCallRelease = continuation
+            }
+        }
+        return .empty
+    }
+
+    func waitUntilFirstCallStarts() async {
+        while !firstCallStarted {
+            await Task.yield()
+        }
+    }
+
+    func releaseFirstCall() {
+        firstCallRelease?.resume()
+        firstCallRelease = nil
     }
 }
 

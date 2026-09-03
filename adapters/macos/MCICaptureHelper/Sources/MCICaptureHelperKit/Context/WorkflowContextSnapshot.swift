@@ -40,6 +40,16 @@ import os
 /// §7 catchall, which is the safe direction during P2.1 (the
 /// provider is not wired into the SCStream callback yet; PR P2.5
 /// lands the wiring).
+public struct WorkflowContextObservation: Sendable, Equatable {
+    public let context: WorkflowContext
+    public let focusGeneration: UInt64?
+
+    public init(context: WorkflowContext, focusGeneration: UInt64? = nil) {
+        self.context = context
+        self.focusGeneration = focusGeneration
+    }
+}
+
 public actor WorkflowContextSnapshot {
     /// Lock-guarded storage cell. Marked `nonisolated` (via being a
     /// `let` containing internal mutability) so `currentSync()` can
@@ -47,16 +57,30 @@ public actor WorkflowContextSnapshot {
     /// actor on the write path AND by the lock on every access; the
     /// double-barrier is intentional fan-in protection for the
     /// P2.2/P2.3/P2.4 pollers landing later.
-    private let cell = OSAllocatedUnfairLock(initialState: WorkflowContext())
+    private let cell = OSAllocatedUnfairLock(
+        initialState: WorkflowContextObservation(context: WorkflowContext())
+    )
 
     public init() {}
 
     /// Replace the stored snapshot with `ctx`. Actor-isolated;
     /// `await` from background pollers. The write itself completes
     /// while holding the lock — bounded time, no allocation, no I/O.
-    public func store(_ ctx: WorkflowContext) async {
+    public func store(_ ctx: WorkflowContext, focusGeneration: UInt64? = nil) async {
+        storeSync(ctx, focusGeneration: focusGeneration)
+    }
+
+    /// Synchronous writer for serial polling queues. Keeping the context and
+    /// its focus provenance in one lock-protected value prevents torn reads.
+    public nonisolated func storeSync(
+        _ ctx: WorkflowContext,
+        focusGeneration: UInt64? = nil
+    ) {
         cell.withLock { state in
-            state = ctx
+            state = WorkflowContextObservation(
+                context: ctx,
+                focusGeneration: focusGeneration
+            )
         }
     }
 
@@ -65,6 +89,12 @@ public actor WorkflowContextSnapshot {
     /// lock only long enough to copy out four optional strings
     /// (≪ 1 µs uncontended).
     public nonisolated func currentSync() -> WorkflowContext {
+        cell.withLock { state in
+            state.context
+        }
+    }
+
+    public nonisolated func currentObservationSync() -> WorkflowContextObservation {
         cell.withLock { state in
             state
         }
