@@ -1607,13 +1607,53 @@ fn validate_threshold_shape(
 
 /// Compare measured summaries against a compatible committed baseline.
 #[must_use]
-#[allow(clippy::too_many_lines)] // The contract reads more safely as one ordered checklist.
 pub fn compare_against_baseline(
     summaries: &[Summary],
     baseline: &BaselineFile,
     dataset_id: &str,
     dataset_checksum_sha256: &str,
     run: &RunMetadata,
+) -> RegressionReport {
+    compare_against_baseline_with_policy(
+        summaries,
+        baseline,
+        dataset_id,
+        dataset_checksum_sha256,
+        run,
+        false,
+    )
+}
+
+/// Compare a deliberate model/corpus identity migration against the previous
+/// baseline's measured thresholds. Dataset id, run shape, and baseline
+/// provenance remain binding; only dataset bytes and model runtime identity
+/// may change.
+#[must_use]
+pub fn compare_against_baseline_for_identity_migration(
+    summaries: &[Summary],
+    baseline: &BaselineFile,
+    dataset_id: &str,
+    dataset_checksum_sha256: &str,
+    run: &RunMetadata,
+) -> RegressionReport {
+    compare_against_baseline_with_policy(
+        summaries,
+        baseline,
+        dataset_id,
+        dataset_checksum_sha256,
+        run,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_lines)] // The contract reads more safely as one ordered checklist.
+fn compare_against_baseline_with_policy(
+    summaries: &[Summary],
+    baseline: &BaselineFile,
+    dataset_id: &str,
+    dataset_checksum_sha256: &str,
+    run: &RunMetadata,
+    allow_identity_migration: bool,
 ) -> RegressionReport {
     let mut failures = Vec::new();
     if !baseline.complete {
@@ -1628,7 +1668,7 @@ pub fn compare_against_baseline(
             baseline.dataset_id, dataset_id
         ));
     }
-    if baseline.dataset_checksum_sha256 != dataset_checksum_sha256 {
+    if !allow_identity_migration && baseline.dataset_checksum_sha256 != dataset_checksum_sha256 {
         failures.push("baseline dataset checksum does not match current dataset".to_string());
     }
     if baseline.run.ks != run.ks {
@@ -1685,15 +1725,16 @@ pub fn compare_against_baseline(
     }
 
     if required_arms.contains("hybrid") {
-        if baseline.run.model_family != run.model_family {
+        if !allow_identity_migration && baseline.run.model_family != run.model_family {
             failures.push("baseline model family does not match current model".to_string());
         }
-        if baseline.run.model_checksum_sha256.is_none()
-            || baseline.run.model_checksum_sha256 != run.model_checksum_sha256
+        if !allow_identity_migration
+            && (baseline.run.model_checksum_sha256.is_none()
+                || baseline.run.model_checksum_sha256 != run.model_checksum_sha256)
         {
             failures.push("baseline model checksum does not match current model".to_string());
         }
-        if baseline.run.compute_mode != run.compute_mode {
+        if !allow_identity_migration && baseline.run.compute_mode != run.compute_mode {
             failures.push("baseline compute mode does not match current run".to_string());
         }
     }
@@ -2234,6 +2275,128 @@ mod tests {
         assert!(
             Some(summary.index_size_bytes.p95) <= thresholds.index_size_p95_bytes_max,
             "index-size threshold must accept its source metric"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // Keep every identity and threshold boundary in one contract.
+    fn identity_migration_still_enforces_measured_regression_thresholds() {
+        let current_run = RunMetadata {
+            captured_at_utc: "2026-09-03T00:00:00Z".into(),
+            git_commit: "a".repeat(40),
+            git_dirty_at_start: false,
+            branch: "main".into(),
+            command: "mci-bench".into(),
+            arguments: Vec::new(),
+            rustc_version: "rustc".into(),
+            cargo_version: "cargo".into(),
+            os_name: "macOS".into(),
+            os_version: "14.0".into(),
+            os_build: "build".into(),
+            architecture: "arm64".into(),
+            hardware_model: None,
+            hardware_chip: None,
+            ram_bytes: None,
+            compute_mode: "coreml_cpu_and_ne".into(),
+            model_family: Some("new-model".into()),
+            model_path: Some("external-model://new.mlmodelc".into()),
+            model_checksum_sha256: Some("2".repeat(64)),
+            requested_arms: vec!["hybrid".into()],
+            ks: Vec::new(),
+            limit: None,
+            original_instances: 24,
+            evaluated_instances: 24,
+        };
+        let summary = Summary {
+            arm: "hybrid".into(),
+            instances: 24,
+            hit_rate_at: BTreeMap::new(),
+            recall_at: BTreeMap::new(),
+            provenance_coverage_at: BTreeMap::new(),
+            false_positive_rate_at: BTreeMap::new(),
+            abstention_separation_at: BTreeMap::new(),
+            mrr: None,
+            complete_misses: 0,
+            outcomes: OutcomeCounts::default(),
+            answerable_instances: 0,
+            unanswerable_instances: 0,
+            latency_ms: DistributionStats {
+                p95: 10.0,
+                ..DistributionStats::default()
+            },
+            index_size_bytes: DistributionStats {
+                p95: 100.0,
+                ..DistributionStats::default()
+            },
+        };
+        let mut old_run = current_run.clone();
+        old_run.compute_mode = "coreml_cpu_only".into();
+        old_run.model_family = Some("old-model".into());
+        old_run.model_checksum_sha256 = Some("1".repeat(64));
+        let baseline = BaselineFile {
+            complete: true,
+            publishable: true,
+            dataset_id: "synthetic-work-memory-v1".into(),
+            dataset_checksum_sha256: "0".repeat(64),
+            overall: vec![BaselineArmSummary {
+                arm: "hybrid".into(),
+                answerable_instances: 0,
+                unanswerable_instances: 0,
+            }],
+            regression_thresholds: [(
+                "hybrid".into(),
+                RegressionThresholds {
+                    latency_p95_ms_max: Some(20.0),
+                    index_size_p95_bytes_max: Some(200.0),
+                    ..RegressionThresholds::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            run: old_run,
+        };
+
+        let exact = compare_against_baseline(
+            std::slice::from_ref(&summary),
+            &baseline,
+            "synthetic-work-memory-v1",
+            &"3".repeat(64),
+            &current_run,
+        );
+        assert!(
+            !exact.passed,
+            "normal comparisons must reject identity drift"
+        );
+
+        let migrated = compare_against_baseline_for_identity_migration(
+            std::slice::from_ref(&summary),
+            &baseline,
+            "synthetic-work-memory-v1",
+            &"3".repeat(64),
+            &current_run,
+        );
+        assert!(
+            migrated.passed,
+            "an explicit identity migration may cross identity only: {:?}",
+            migrated.failures
+        );
+
+        let mut slow_summary = summary;
+        slow_summary.latency_ms.p95 = 30.0;
+        let regressed = compare_against_baseline_for_identity_migration(
+            &[slow_summary],
+            &baseline,
+            "synthetic-work-memory-v1",
+            &"3".repeat(64),
+            &current_run,
+        );
+        assert!(
+            !regressed.passed
+                && regressed
+                    .failures
+                    .iter()
+                    .any(|failure| failure.contains("latency_p95_ms")),
+            "identity migration must not bypass measured regressions"
         );
     }
 

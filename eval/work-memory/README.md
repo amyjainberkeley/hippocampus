@@ -115,6 +115,17 @@ Update the committed baseline after an intentional benchmark change:
 scripts/eval/work-memory/run.sh --update-baseline
 ```
 
+When the intentional change alters the corpus bytes, embedding model, or Core
+ML compute mode, make that boundary explicit:
+
+```bash
+scripts/eval/work-memory/run.sh --update-baseline --accept-identity-change
+```
+
+That mode permits only dataset-checksum and model-runtime identity changes. It
+still requires the old clean, publishable baseline and enforces every measured
+regression threshold before promoting the new report.
+
 The update promotes the canonical report and refreshes its single pinned
 SHA-256 sidecar. A normal run refuses a missing, malformed, or mismatched
 sidecar before invoking the benchmark.

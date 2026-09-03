@@ -42,6 +42,7 @@ SIGNING_SCRATCH=""
 DMG_STAGING=""
 TEMP_DMG=""
 APP_ZIP=""
+FINAL_DMG_PENDING=""
 
 installer_on_exit() {
     local status=$?
@@ -603,6 +604,7 @@ mkdir -p "$DIST_DIR"
 
 TEMP_DMG="$DIST_DIR/${DMG_NAME}-temp.dmg"
 FINAL_DMG="$DIST_DIR/${DMG_NAME}.dmg"
+FINAL_DMG_PENDING="$FINAL_DMG"
 
 # Remove stale outputs
 rm -f "$TEMP_DMG" "$FINAL_DMG" "${FINAL_DMG}.sha256"
@@ -788,6 +790,7 @@ echo "--- Computing SHA-256 ---"
 
 SHASUM=$(shasum -a 256 "$FINAL_DMG" | awk '{print $1}')
 echo "$SHASUM  $(basename "$FINAL_DMG")" > "${FINAL_DMG}.sha256"
+FINAL_DMG_PENDING=""
 
 # --- Done ---
 

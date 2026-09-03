@@ -12,6 +12,7 @@ DATASET_SHA256="f56ec3a13733343b6819edd86782d28c4ec9f6c5ee9fbb3a2d0b19c03282ae4d
 DEFAULT_MODEL="/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc"
 
 UPDATE_BASELINE=0
+ACCEPT_IDENTITY_CHANGE=0
 OUT=""
 PASS_ARGS=()
 
@@ -20,6 +21,14 @@ while (($# > 0)); do
         --update-baseline)
             UPDATE_BASELINE=1
             shift
+            ;;
+        --accept-identity-change)
+            ACCEPT_IDENTITY_CHANGE=1
+            shift
+            ;;
+        --allow-baseline-identity-migration)
+            echo "work-memory runner: --allow-baseline-identity-migration is an internal flag" >&2
+            exit 2
             ;;
         --no-baseline)
             echo "work-memory runner: the accepted baseline comparison is mandatory" >&2
@@ -43,6 +52,11 @@ while (($# > 0)); do
             ;;
     esac
 done
+
+if [[ $ACCEPT_IDENTITY_CHANGE -eq 1 && $UPDATE_BASELINE -ne 1 ]]; then
+    echo "work-memory runner: --accept-identity-change requires --update-baseline" >&2
+    exit 2
+fi
 
 cd "$REPO_ROOT"
 export MCI_BENCH_REPO_ROOT="$REPO_ROOT"
@@ -199,6 +213,9 @@ if [[ $UPDATE_BASELINE -eq 1 ]]; then
         --out "$BASELINE_NEXT"
         --baseline "$BASELINE"
     )
+    if [[ $ACCEPT_IDENTITY_CHANGE -eq 1 ]]; then
+        UPDATE_CMD+=(--allow-baseline-identity-migration)
+    fi
     if [[ ${#PASS_ARGS[@]} -gt 0 ]]; then
         UPDATE_CMD+=("${PASS_ARGS[@]}")
     fi

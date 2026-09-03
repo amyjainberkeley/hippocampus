@@ -13,9 +13,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_agent::bench_longmemeval::{
     absolute_quality_targets, best_threshold, compare_against_baseline,
-    derive_regression_thresholds, evaluate_quality_gate, load_dataset, run_abstention_probe,
-    run_instance, summarize, AbstentionSample, Arm, BaselineFile, Embedders, InstanceResult,
-    LoadedDataset, RegressionReport, Report, RunFailure, RunMetadata, ScratchRun, Summary,
+    compare_against_baseline_for_identity_migration, derive_regression_thresholds,
+    evaluate_quality_gate, load_dataset, run_abstention_probe, run_instance, summarize,
+    AbstentionSample, Arm, BaselineFile, Embedders, InstanceResult, LoadedDataset,
+    RegressionReport, Report, RunFailure, RunMetadata, ScratchRun, Summary,
 };
 use mci_agent::child_command_environment::sanitized_command;
 use mci_brain::{EVIDENCE_VERIFIER_QUALIFICATION, EXPLICIT_EVIDENCE_VETO_QUALIFICATION};
@@ -41,6 +42,8 @@ fn usage() {
          \x20 --k LIST         cutoffs, comma-separated (default: 1,3,5,10)\n\
          \x20 --out PATH       write the full JSON report here\n\
          \x20 --baseline PATH  compare against committed regression thresholds\n\
+         \x20 --allow-baseline-identity-migration\n\
+         \x20                  compare new model/corpus identity against old metrics\n\
          \x20 --workdir PATH   scratch for per-instance databases\n\
          \x20 --allow-smoke    allow an intentional --limit smoke run to exit zero;\n\
          \x20                  smoke reports remain incomplete and nonpublishable\n\
@@ -473,6 +476,7 @@ fn main() -> ExitCode {
     let mut workdir = std::env::temp_dir().join("mci-bench");
     let mut abstention: Option<usize> = None;
     let mut allow_smoke = false;
+    let mut allow_baseline_identity_migration = false;
 
     let mut i = 1;
     while i < argv.len() {
@@ -525,6 +529,9 @@ fn main() -> ExitCode {
                 i += 1;
             }
             "--allow-smoke" => allow_smoke = true,
+            "--allow-baseline-identity-migration" => {
+                allow_baseline_identity_migration = true;
+            }
             "-h" | "--help" => {
                 usage();
                 return ExitCode::SUCCESS;
@@ -890,13 +897,25 @@ fn main() -> ExitCode {
             failures: vec![error],
         }),
         (Ok(()), Some(path)) => match parse_baseline(path) {
-            Ok(baseline) => Some(compare_against_baseline(
-                &overall,
-                &baseline,
-                &dataset.dataset_id,
-                &dataset_checksum_sha256,
-                &metadata,
-            )),
+            Ok(baseline) => Some(
+                if allow_baseline_identity_migration && canonical_dataset_scope {
+                    compare_against_baseline_for_identity_migration(
+                        &overall,
+                        &baseline,
+                        &dataset.dataset_id,
+                        &dataset_checksum_sha256,
+                        &metadata,
+                    )
+                } else {
+                    compare_against_baseline(
+                        &overall,
+                        &baseline,
+                        &dataset.dataset_id,
+                        &dataset_checksum_sha256,
+                        &metadata,
+                    )
+                },
+            ),
             Err(error) => Some(RegressionReport {
                 passed: false,
                 failures: vec![error],

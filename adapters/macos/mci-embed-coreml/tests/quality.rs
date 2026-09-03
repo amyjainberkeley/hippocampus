@@ -17,24 +17,27 @@
 //! (~75 KB) are produced by `scripts/convert_embedder.py --verify
 //! --fixtures` and live under the repo's `models/` and
 //! `tests/fixtures/` directories respectively. CI / headless dev
-//! environments may not have them — every test in this file calls
-//! [`model_and_reference_or_skip`] first and `println!`-returns when
-//! either is missing. This mirrors the P3.11 live-Mac audit pattern
-//! from ADR-0016 §7.
+//! environments may not have them. Local tests print and return when
+//! an artifact is absent. Release CI sets `MCI_REQUIRE_COREML_QUALITY=1`,
+//! which makes an absent or unreadable artifact a hard failure.
 
 #![cfg(target_os = "macos")]
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
 
 use mci_brain::arctic_embed_s::{EmbedderBackend, ARCTIC_EMBED_S_DIMENSION};
-use mci_embed_coreml::CoreMLBackend;
+use mci_embed_coreml::{ComputeUnits, CoreMLBackend};
 
 const FIXTURE_SENTENCES: &str = "tests/fixtures/arctic_embed_sentences.txt";
 const FIXTURE_REFERENCE: &str = "tests/fixtures/arctic_embed_reference.npy";
+const EXPECTED_FIXTURE_ROWS: usize = 50;
 
 // Try a few sensible locations for the compiled Core ML model. Order
 // mirrors `apps/agent`'s candidate-paths fallback chain.
 fn model_path() -> Option<PathBuf> {
+    if let Some(explicit) = std::env::var_os("MCI_ARCTIC_MODEL_PATH") {
+        return Some(PathBuf::from(explicit));
+    }
     // CARGO_MANIFEST_DIR = adapters/macos/mci-embed-coreml when this
     // test is run via `cargo test -p mci-embed-coreml --test quality`.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -45,6 +48,39 @@ fn model_path() -> Option<PathBuf> {
         repo_root.join("models/ArcticEmbedS_FP16.mlpackage"),
     ];
     candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn quality_gate_required() -> bool {
+    std::env::var_os("MCI_REQUIRE_COREML_QUALITY").is_some()
+}
+
+fn unavailable<T>(message: impl AsRef<str>) -> Option<T> {
+    let message = message.as_ref();
+    assert!(
+        !quality_gate_required(),
+        "quality.rs: release quality gate unavailable: {message}"
+    );
+    println!("quality.rs: skipping - {message}");
+    None
+}
+
+fn validate_fixture_cardinality(
+    sentences: &[String],
+    reference: &[Vec<f32>],
+) -> Result<(), String> {
+    if sentences.len() != EXPECTED_FIXTURE_ROWS {
+        return Err(format!(
+            "expected exactly {EXPECTED_FIXTURE_ROWS} fixture sentences, found {}",
+            sentences.len()
+        ));
+    }
+    if reference.len() != EXPECTED_FIXTURE_ROWS {
+        return Err(format!(
+            "expected exactly {EXPECTED_FIXTURE_ROWS} reference rows, found {}",
+            reference.len()
+        ));
+    }
+    Ok(())
 }
 
 fn reference_path() -> Option<PathBuf> {
@@ -73,44 +109,39 @@ fn sentences_path() -> Option<PathBuf> {
 /// `None` so the test passes (skipped) under that condition.
 fn model_and_reference_or_skip() -> Option<(CoreMLBackend, Vec<String>, Vec<Vec<f32>>)> {
     let Some(model) = model_path() else {
-        println!(
-            "quality.rs: skipping — no ArcticEmbedS_FP16.mlmodelc or .mlpackage \
+        return unavailable(
+            "no ArcticEmbedS_FP16.mlmodelc or .mlpackage \
              found under <repo>/models/. Run scripts/convert_embedder.py \
              --output models/ArcticEmbedS_FP16.mlpackage --verify --fixtures \
-             to produce it."
+             to produce it.",
         );
-        return None;
     };
     let Some(ref_path) = reference_path() else {
-        println!(
-            "quality.rs: skipping — no Python FP32 reference fixture at \
+        return unavailable(
+            "no Python FP32 reference fixture at \
              {FIXTURE_REFERENCE}. Run scripts/convert_embedder.py with \
-             --fixtures to write it."
+             --fixtures to write it.",
         );
-        return None;
     };
     let Some(sentences_p) = sentences_path() else {
-        println!(
-            "quality.rs: skipping — no fixture sentences file at \
+        return unavailable(
+            "no fixture sentences file at \
              {FIXTURE_SENTENCES}. Run scripts/convert_embedder.py with \
-             --fixtures to write it."
+             --fixtures to write it.",
         );
-        return None;
     };
 
     let backend = match CoreMLBackend::open(&model) {
         Ok(b) => b,
         Err(e) => {
-            println!("quality.rs: skipping — CoreMLBackend::open failed: {e:?}");
-            return None;
+            return unavailable(format!("CoreMLBackend::open failed: {e:?}"));
         }
     };
 
     let sentences_text = match std::fs::read_to_string(&sentences_p) {
         Ok(s) => s,
         Err(e) => {
-            println!("quality.rs: skipping — read sentences: {e}");
-            return None;
+            return unavailable(format!("read sentences: {e}"));
         }
     };
     // Trailing newline at EOF would otherwise produce an extra empty
@@ -121,19 +152,12 @@ fn model_and_reference_or_skip() -> Option<(CoreMLBackend, Vec<String>, Vec<Vec<
     let reference = match read_npy_f32_2d(&ref_path) {
         Ok(r) => r,
         Err(e) => {
-            println!("quality.rs: skipping — read {FIXTURE_REFERENCE}: {e}");
-            return None;
+            return unavailable(format!("read {FIXTURE_REFERENCE}: {e}"));
         }
     };
 
-    if reference.len() != sentences.len() {
-        println!(
-            "quality.rs: skipping — fixture row count mismatch: {} sentences \
-             vs {} reference rows",
-            sentences.len(),
-            reference.len()
-        );
-        return None;
+    if let Err(error) = validate_fixture_cardinality(&sentences, &reference) {
+        return unavailable(error);
     }
 
     Some((backend, sentences, reference))
@@ -177,6 +201,67 @@ fn cosine_similarity_matches_python_reference() {
         sentences.len(),
         failures
     );
+}
+
+#[test]
+fn shipping_graph_is_finite_and_matches_reference_on_cpu_and_neural_engine() {
+    let Some(model) = model_path() else {
+        unavailable::<()>("dual-compute gate has no compiled model");
+        return;
+    };
+    let Some(ref_path) = reference_path() else {
+        unavailable::<()>("dual-compute gate has no reference fixture");
+        return;
+    };
+    let Some(sentences_p) = sentences_path() else {
+        unavailable::<()>("dual-compute gate has no sentence fixture");
+        return;
+    };
+    let sentences_text = std::fs::read_to_string(sentences_p).expect("read fixture sentences");
+    let sentences: Vec<String> = sentences_text
+        .strip_suffix('\n')
+        .unwrap_or(&sentences_text)
+        .split('\n')
+        .map(str::to_string)
+        .collect();
+    let reference = read_npy_f32_2d(&ref_path).expect("read FP32 reference fixture");
+    validate_fixture_cardinality(&sentences, &reference)
+        .unwrap_or_else(|error| panic!("invalid shipping quality fixture: {error}"));
+    let sentence_count = u32::try_from(sentences.len()).expect("fixture count fits in u32");
+
+    for units in [ComputeUnits::CpuOnly, ComputeUnits::CpuAndNeuralEngine] {
+        let backend = CoreMLBackend::open_with_compute_units(&model, units)
+            .unwrap_or_else(|error| panic!("load {units:?}: {error:?}"));
+        let started = Instant::now();
+        for (row, (sentence, expected)) in sentences.iter().zip(&reference).enumerate() {
+            let actual = backend
+                .forward(sentence)
+                .unwrap_or_else(|error| panic!("{units:?} row {row}: {error:?}"));
+            assert!(
+                actual.iter().all(|value| value.is_finite()),
+                "{units:?} row {row} produced a non-finite embedding"
+            );
+            let cosine = cosine_similarity(&actual, expected);
+            assert!(
+                cosine >= 0.999,
+                "{units:?} row {row} ({sentence:?}) cosine={cosine}, expected >= 0.999"
+            );
+        }
+        println!(
+            "{units:?}: {:.2} ms/embedding across {} reference sentences",
+            started.elapsed().as_secs_f64() * 1_000.0 / f64::from(sentence_count),
+            sentences.len()
+        );
+    }
+}
+
+#[test]
+fn shipping_fixture_cardinality_is_exactly_fifty() {
+    let fifty_sentences = vec![String::new(); EXPECTED_FIXTURE_ROWS];
+    let fifty_references = vec![Vec::new(); EXPECTED_FIXTURE_ROWS];
+    assert!(validate_fixture_cardinality(&fifty_sentences, &fifty_references).is_ok());
+    assert!(validate_fixture_cardinality(&fifty_sentences[..49], &fifty_references).is_err());
+    assert!(validate_fixture_cardinality(&fifty_sentences, &fifty_references[..49]).is_err());
 }
 
 #[test]

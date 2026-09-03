@@ -143,7 +143,8 @@ truthfully scoped evidence product.
   emits the same content-free, actionable app status as a mid-run revoke;
   restoration remains direction-asymmetric and requires two granted samples.
 - Semantic recall works when the Arctic Embed S Core ML artifact is present
-  and backfill has run. The macOS runtime uses CPU Core ML for inference and a
+  and backfill has run. The macOS runtime explicitly permits CPU plus Neural
+  Engine for inference and uses a
   Rust cosine scan over vectors stored inside SQLCipher; there is no separate
   vector service or shipped sqlite-vec retrieval path.
 - Empty or whitespace-only observations no longer enter the embedding queue.
