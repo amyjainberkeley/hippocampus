@@ -34,8 +34,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_brain::graph::{Entity, EntityIdentity};
 use mci_brain::{
-    BrainStats, BrainStore, EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId,
-    EventRecord, HybridRetriever, IdentityId, NothingMatchedReason, RetrievalMatch,
+    explicit_evidence_signal, has_explicit_current_supersession_context, BrainStats, BrainStore,
+    EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId, EventRecord, EvidenceCandidate,
+    ExplicitEvidenceSignal, HybridRetriever, IdentityId, NothingMatchedReason, RetrievalMatch,
     RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, StoreError,
 };
 use mci_core::crypto::DbKey;
@@ -315,14 +316,33 @@ impl LiveBrainReader {
                 reason: NothingMatchedReason::NoCandidates,
             });
         }
-        let Ok(raw) = self.store.fts5_search(&sanitized, limit) else {
+        let Ok(mut raw) = self.store.fts5_search(&sanitized, limit) else {
             return Ok(McpRecallOutcome::Degraded {
                 degradation: mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
                 related_context: Vec::new(),
             });
         };
+        if raw.is_empty() {
+            let relaxed = relaxed_fts5_query(query);
+            if !relaxed.is_empty() && relaxed != sanitized {
+                let Ok(relaxed_hits) = self.store.fts5_search(&relaxed, limit) else {
+                    return Ok(McpRecallOutcome::Degraded {
+                        degradation:
+                            mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                        related_context: Vec::new(),
+                    });
+                };
+                raw = relaxed_hits;
+            }
+        }
+        if raw.is_empty() {
+            return Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::NoCandidates,
+            });
+        }
 
         let mut out: Vec<McpHit> = Vec::with_capacity(raw.len());
+        let mut evidence_candidates = Vec::with_capacity(raw.len());
         for (event_id, score) in raw {
             let Some(event) = self
                 .store
@@ -331,6 +351,7 @@ impl LiveBrainReader {
             else {
                 continue;
             };
+            evidence_candidates.push((event_id, event.text.clone()));
             let (entities, linked_event_ids) = self.enrich_hit(event_id);
             out.push(McpHit {
                 record: EventRecord {
@@ -344,6 +365,21 @@ impl LiveBrainReader {
                 score,
                 entities,
                 linked_event_ids,
+            });
+        }
+        let evidence = evidence_candidates
+            .iter()
+            .map(|(event_id, text)| EvidenceCandidate {
+                stable_id: event_id.0,
+                text,
+                raw_semantic_cosine: 0.0,
+            })
+            .collect::<Vec<_>>();
+        if explicit_evidence_signal(query, &evidence) == ExplicitEvidenceSignal::RelationUnsupported
+            && !has_explicit_current_supersession_context(query, &evidence)
+        {
+            return Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::EvidenceFloor,
             });
         }
         Ok(McpRecallOutcome::Degraded {
@@ -580,6 +616,32 @@ impl BrainReader for LiveBrainReader {
     }
 }
 
+fn relaxed_fts5_query(query: &str) -> String {
+    const STOPWORDS: &[&str] = &[
+        "a", "about", "an", "and", "are", "as", "at", "be", "before", "did", "do", "does", "for",
+        "from", "how", "i", "in", "is", "it", "made", "of", "on", "only", "or", "should", "source",
+        "that", "the", "this", "to", "was", "we", "what", "when", "where", "which", "who", "why",
+        "with",
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    query
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .filter_map(|token| {
+            let normalized = token.to_lowercase();
+            if normalized.len() < 2
+                || STOPWORDS.contains(&normalized.as_str())
+                || !seen.insert(normalized)
+            {
+                return None;
+            }
+            let sanitized = sanitize_fts5_query(token);
+            (!sanitized.is_empty()).then_some(sanitized)
+        })
+        .take(12)
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests — sanitizer
 // ---------------------------------------------------------------------------
@@ -643,6 +705,85 @@ mod tests {
                 || err_msg.contains("read-only"),
             "error should indicate read-only rejection, got: {err_msg}"
         );
+    }
+
+    #[test]
+    fn lexical_fallback_relaxes_a_natural_language_query_into_related_context() {
+        let (_dir, path, key) = make_test_db();
+        let writer = SqlCipherBrainStore::new(&path, &key).unwrap();
+        let event_id = writer
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 1_000_000,
+                app_bundle_id: Some("com.apple.Terminal".into()),
+                window_title: Some("Agent memory decision".into()),
+                url: Some("file:///docs/agent-context.md".into()),
+                text: "The mci_context handoff compiles a bounded cited packet for the current focus instead of dumping history.".into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: None,
+                tab_id: None,
+                embedding: None,
+            })
+            .unwrap();
+        drop(writer);
+        let reader = LiveBrainReader::open_with_embedder(&path, &key, None).unwrap();
+
+        let McpRecallOutcome::Degraded {
+            degradation,
+            related_context,
+        } = reader
+            .recall(
+                "How do we keep an AI handoff from swallowing the whole activity history?",
+                5,
+            )
+            .unwrap()
+        else {
+            panic!("lexical fallback must remain explicitly degraded");
+        };
+
+        assert_eq!(
+            degradation,
+            mci_brain::RetrievalDegradation::EmbeddingsUnavailable
+        );
+        assert!(related_context
+            .iter()
+            .any(|hit| hit.record.event_id == event_id));
+    }
+
+    #[test]
+    fn lexical_fallback_abstains_when_an_explicit_answer_relation_is_missing() {
+        let (_dir, path, key) = make_test_db();
+        let writer = SqlCipherBrainStore::new(&path, &key).unwrap();
+        writer
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 1_000_000,
+                app_bundle_id: Some("com.github.GitHubClient".into()),
+                window_title: Some("PR 531".into()),
+                url: Some("github://pull/531".into()),
+                text: "PR 531 describes bounded context packets but does not name an approver."
+                    .into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: None,
+                tab_id: None,
+                embedding: None,
+            })
+            .unwrap();
+        drop(writer);
+        let reader = LiveBrainReader::open_with_embedder(&path, &key, None).unwrap();
+
+        assert!(matches!(
+            reader.recall("Who approved PR 531?", 5).unwrap(),
+            McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::EvidenceFloor
+            }
+        ));
     }
 
     #[test]
@@ -715,5 +856,13 @@ mod tests {
     #[test]
     fn sanitize_asterisk_quoted() {
         assert_eq!(sanitize_fts5_query("test*"), "\"test*\"");
+    }
+
+    #[test]
+    fn relaxed_query_splits_hyphenated_prose_and_drops_source_boilerplate() {
+        assert_eq!(
+            relaxed_fts5_query("Which source describes the local-only storage promise?"),
+            "describes OR local OR storage OR promise"
+        );
     }
 }

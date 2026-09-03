@@ -257,7 +257,8 @@ pub mod hybrid_retriever;
 
 pub use episode_segmenter::EpisodeId;
 pub use evidence_sufficiency::{
-    evidence_features_for_candidates, explicit_evidence_signal, EvidenceCandidate, EvidenceExcerpt,
+    evidence_features_for_candidates, explicit_evidence_signal,
+    has_explicit_current_supersession_context, EvidenceCandidate, EvidenceExcerpt,
     EvidenceFeatures, EvidenceSufficiencyPolicy, EvidenceVerdict, EvidenceVerifier,
     EvidenceVerifierError, EvidenceVerifierQualification, ExplicitEvidenceSignal,
     ExplicitEvidenceVetoQualification, EVIDENCE_SUFFICIENCY_POLICY,

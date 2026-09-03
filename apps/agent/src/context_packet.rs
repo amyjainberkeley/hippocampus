@@ -669,6 +669,16 @@ fn normalize_evidence<'a>(
             .then_with(|| left.event_id.cmp(&right.event_id))
     });
     let focus = focus.map(str::to_lowercase);
+    let superseding_ts = focus
+        .as_deref()
+        .filter(|value| focus_requests_current_state(value))
+        .and_then(|_| {
+            evidence
+                .iter()
+                .filter(|candidate| candidate_declares_supersession(candidate))
+                .map(|candidate| candidate.ts_us)
+                .max()
+        });
     let mut seen_event_ids = BTreeSet::new();
     let mut seen_screen_ocr = BTreeSet::new();
     evidence
@@ -682,12 +692,46 @@ fn normalize_evidence<'a>(
         })
         .filter(|candidate| seen_event_ids.insert(candidate.event_id))
         .filter(|candidate| {
+            !superseding_ts.is_some_and(|ts_us| {
+                candidate.priority != EvidencePriority::Claim
+                    && candidate.ts_us < ts_us
+                    && candidate_is_explicitly_historical(candidate)
+            })
+        })
+        .filter(|candidate| {
             let Some(fingerprint) = screen_ocr_fingerprint(candidate) else {
                 return true;
             };
             seen_screen_ocr.insert(fingerprint)
         })
         .collect()
+}
+
+fn focus_requests_current_state(focus: &str) -> bool {
+    focus
+        .split(|character: char| !character.is_alphanumeric())
+        .any(|term| matches!(term, "current" | "currently" | "latest" | "now"))
+}
+
+fn candidate_declares_supersession(candidate: &ContextEvidence) -> bool {
+    let body = context_body(&candidate.excerpt).to_ascii_lowercase();
+    (body.contains("supersedes") || body.contains("replaces")) && body.contains("previous")
+}
+
+fn candidate_is_explicitly_historical(candidate: &ContextEvidence) -> bool {
+    let body = context_body(&candidate.excerpt)
+        .trim_start()
+        .to_ascii_lowercase();
+    [
+        "previous plan:",
+        "previous decision:",
+        "previous state:",
+        "old plan:",
+        "old decision:",
+        "old state:",
+    ]
+    .iter()
+    .any(|prefix| body.starts_with(prefix))
 }
 
 fn screen_ocr_fingerprint(candidate: &ContextEvidence) -> Option<String> {

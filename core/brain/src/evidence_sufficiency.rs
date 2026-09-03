@@ -323,6 +323,27 @@ pub fn explicit_evidence_signal(
     }
 }
 
+/// Whether an explicit current-state query has source text that declares an
+/// update supersedes or replaces a previous state.
+///
+/// This signal may preserve ranked context as explicitly untrusted when the
+/// relation veto cannot ground an answer. It must never promote evidence to a
+/// trusted match or resolve a contradiction by recency alone.
+#[must_use]
+pub fn has_explicit_current_supersession_context(
+    query: &str,
+    candidates: &[EvidenceCandidate<'_>],
+) -> bool {
+    let asks_for_current_state = normalized_tokens(query)
+        .iter()
+        .any(|term| matches!(term.as_str(), "current" | "currently" | "latest" | "now"));
+    asks_for_current_state
+        && candidates.iter().any(|candidate| {
+            let body = evidence_body(candidate.text).to_ascii_lowercase();
+            (body.contains("supersedes") || body.contains("replaces")) && body.contains("previous")
+        })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExplicitAnswerType {
     Person,
