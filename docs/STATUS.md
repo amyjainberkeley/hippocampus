@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `a46b602`
+Audited code baseline: `335a3ff`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -168,7 +168,10 @@ more than this page.
   root view behind the title bar; fresh windows default to `1024x700`. The demo
   opts out of saved query/filter state and its automated screenshot path treats
   denied Screen Recording as an explicit nonfatal result rather than aborting
-  or accepting a stale temporary image.
+  or accepting a stale temporary image. Demo boot now hands the packaged app to
+  LaunchServices, records the resulting application PID, and verifies that it
+  remains alive before reporting success, so a short-lived invoking shell
+  cannot orphan onboarding or falsely claim that the menu app is running.
 - Runlog remains an audited research input rather than a runtime dependency.
   It does use 768-dimensional Gemini vectors and Firestore cosine search; its
   useful hypothesis is hybrid candidate generation plus source-region
