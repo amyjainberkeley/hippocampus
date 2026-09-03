@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-03._
 
-Audited code baseline: `15570c1`
+Audited code baseline: `4ee43d8`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -255,7 +255,7 @@ truthfully scoped evidence product.
   cascade floor remains independent, so lower frame delivery cannot suppress
   periodic protected-surface checks. The source contract and capture helper
   build pass; a rebuilt-app live resource soak remains required.
-- The most recently verified `181 MB` debug ad-hoc app at
+- The most recently verified `182 MB` debug ad-hoc app at
   `apps/hippocampus/dist/Hippocampus.app` includes Arctic
   Embed S as its only bundled model, passes signed App Group and model
   validation, and survives the disposable-home first-launch and owner-death
@@ -282,15 +282,19 @@ truthfully scoped evidence product.
   requires Screen Recording and Accessibility for that helper, foregrounds a
   synthetic overlapping-window corpus, captures through the bundled helper and
   agent, and proves focused-window recall plus background-window abstention. A
-  live run on the audited Mac passed with 18 retained corpus events: the exact
+  live run on the audited Mac passed with 16 retained corpus events: the exact
   focused token was recalled and the overlapped background token was absent
   from timeline, application-scoped events, and full-text retrieval. The same
   fail-closed gate aborts if another app becomes frontmost. `--soak` now fixes
   the duration at 1,800 seconds, samples helper CPU/RSS every five seconds,
   retains evidence, and emits a machine-readable qualification report covering
   frame, OCR, keyframe, memory, storage, privacy, and resource-SLO evidence.
-  The required uninterrupted 30-minute run has not completed because subsequent
-  attempts correctly stopped when Chrome, Codex, or WhatsApp became frontmost.
+  A 5 fps diagnostic soak was stopped after 91 footprint samples once it had
+  already established a 39.8% helper CPU p95 against the 15% ceiling; that run
+  did not qualify. The helper now builds at the documented 2 fps active-work
+  ceiling. Its rebuilt-app reruns correctly stopped when VS Code or Chrome
+  became frontmost, so the required uninterrupted 30-minute privacy and
+  resource run remains unqualified rather than being inferred from source.
 - OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
   ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
   use separate structured capture paths that reject private contexts before
