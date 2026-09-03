@@ -752,6 +752,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         if openPopup {
             environment["MCI_OPEN_GLOBAL_POPUP"] = "1"
         }
+        if developmentKeyMode != nil, let agentPath = locator.agentPath() {
+            environment["MCI_AGENT_PATH"] = agentPath.path
+        }
         let task = ChildProcessEnvironment.makeProcess(baseEnvironment: environment)
         task.executableURL = recallPath
         do {

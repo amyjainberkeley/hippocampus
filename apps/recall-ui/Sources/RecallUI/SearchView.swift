@@ -18,6 +18,8 @@ struct SearchView: View {
     /// field alongside the toast. Non-owning reference — the registry
     /// singleton lives on RootView.
     @ObservedObject private var actionPanelRegistry = ActionPanelRegistry.shared
+    @State private var isExportingContext = false
+    @State private var showsContextHandoffError = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,8 +57,23 @@ struct SearchView: View {
                 isEnabled: { !viewModel.query.isEmpty || viewModel.filters.anyActive }
             ) {
                 viewModel.clear()
+            },
+            .init(
+                id: "search.copyAgentContext",
+                title: "Copy Agent Context",
+                shortcut: "",
+                category: .search,
+                description: "Copy a bounded, cited packet for the current task.",
+                isEnabled: { !isExportingContext }
+            ) {
+                copyAgentContext()
             }
         ])
+        .alert("Couldn’t copy agent context", isPresented: $showsContextHandoffError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Open Hippocampus and try again.")
+        }
     }
 
     private var searchBar: some View {
@@ -78,6 +95,23 @@ struct SearchView: View {
             if viewModel.isSearching || actionPanelRegistry.isRefreshing {
                 ProgressView().controlSize(.small)
             }
+            Button {
+                copyAgentContext()
+            } label: {
+                Group {
+                    if isExportingContext {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "doc.on.clipboard")
+                    }
+                }
+                .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .disabled(isExportingContext)
+            .help("Copy a bounded, cited context packet for an agent")
+            .accessibilityLabel("Copy agent context")
+            .accessibilityHint("Copies memory related to this search with source citations")
             if !viewModel.query.isEmpty || viewModel.filters.anyActive {
                 Button {
                     viewModel.clear()
@@ -185,6 +219,26 @@ struct SearchView: View {
                 if newValue != nil {
                     viewModel.isDetailFocused = true
                 }
+            }
+        }
+    }
+
+    private func copyAgentContext() {
+        guard !isExportingContext else { return }
+        isExportingContext = true
+        let focus = viewModel.query
+        Task {
+            defer { isExportingContext = false }
+            do {
+                let packet = try await ContextHandoffExporter.export(focus: focus)
+                NSPasteboard.general.clearContents()
+                guard NSPasteboard.general.setString(packet, forType: .string) else {
+                    showsContextHandoffError = true
+                    return
+                }
+                ToastNotifier.shared.notify("Agent context copied")
+            } catch {
+                showsContextHandoffError = true
             }
         }
     }
