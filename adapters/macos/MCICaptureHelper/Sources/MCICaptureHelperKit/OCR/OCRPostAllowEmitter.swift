@@ -14,7 +14,9 @@
 // Sequence per cleared-once-on-pixels frame:
 //   1. Submit `(CVPixelBuffer, dirtyRectsBoundingROI)` to the OCR worker.
 //   2. Worker returns `OCRResult` (recognizedLines + durationMs + timedOut).
-//   3. Join `result.recognizedLines.text` into a single string.
+//   3. Join `result.recognizedLines.text` into a single string. Timeout,
+//      engine-error, empty, and whitespace-only results stop here: no event
+//      and no visual retention.
 //   4. Re-run cascade via `cascade.decideOcr(text:context:)`.
 //        - `.suppress(reason: .ocrTimeSecret)` ⇒ emit
 //          `PrivacyTombstone(reason: 6)`. NO OCR text bytes reach the
@@ -39,6 +41,14 @@ import CoreGraphics
 import CoreVideo
 import Foundation
 
+/// Tells the capture baseline whether this exact visual should be considered
+/// handled. Empty/timed-out/dropped OCR is retryable; every emitted event or
+/// privacy tombstone is terminal for the visual.
+public enum OCRPostAllowDisposition: Sendable, Equatable {
+    case finalized
+    case retryableNoContent
+}
+
 /// Protocol indirection so headless tests can substitute a stub
 /// emitter. Production impl is `CascadeTwiceOCREmitter`.
 public protocol OCRPostAllowEmitter: Sendable {
@@ -49,14 +59,9 @@ public protocol OCRPostAllowEmitter: Sendable {
     /// an emitter-owned bounded serial coordinator; no free task may outlive
     /// the capture session.
     ///
-    /// Drop-oldest queue overflow in the OCR worker means the
-    /// completion callback may never fire for this submission. That
-    /// is the documented fire-and-forget arm (`ocr_dropped_count`
-    /// telemetry surface; ADR-0016 §3); the emitter does NOT emit any
-    /// wire frame for a dropped submission. This is correct per the
-    /// privacy invariants — a frame the helper could not OCR is
-    /// indistinguishable from a frame whose OCR text was empty; either
-    /// way nothing usable flows downstream.
+    /// Drop-oldest overflow emits no wire frame. The disposition-aware
+    /// overload reports the drop as retryable so the exact capture baseline
+    /// can be reopened without weakening the privacy cascade.
     func processAfterAllow(
         tsUs: UInt64,
         context: WorkflowContext,
@@ -76,6 +81,15 @@ public protocol OCRPostAllowEmitter: Sendable {
         context: WorkflowContext,
         input: OCREngineInput,
         evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async
+
+    func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
     ) async
 
     func stopAndDrain() async
@@ -104,6 +118,24 @@ public extension OCRPostAllowEmitter {
             input: input,
             evidenceCandidate: evidenceCandidate
         )
+    }
+
+    func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) async {
+        await processAfterAllow(
+            captureOrdinal: captureOrdinal,
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: evidenceCandidate
+        )
+        disposition(.finalized)
     }
 
 }
@@ -289,6 +321,24 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         input: OCREngineInput,
         evidenceCandidate: KeyframeEvidenceCandidate?
     ) async {
+        await processAfterAllow(
+            captureOrdinal: captureOrdinal,
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: evidenceCandidate,
+            disposition: { _ in }
+        )
+    }
+
+    public func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) async {
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 env-gated trace at the
         // post-allow entry. Logs bundle id + kill-switch state so the
         // operator can attribute the M4 short-circuit fork live.
@@ -319,6 +369,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 sequence: sequence,
                 counters: counters
             )
+            disposition(.finalized)
             return
         }
 
@@ -332,7 +383,13 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         // buffer stays alive until the job completes (held by the
         // worker's Job struct + this captured reference).
         let inputSnapshot = input
-        await worker.submit(input: input) { result in
+        await worker.submit(
+            input: input,
+            onDrop: {
+                disposition(.retryableNoContent)
+            }
+        ) { result in
+            let resultDisposition = Self.disposition(for: result)
             // VisionOCRWorker invokes completions serially in submission
             // order. The owned coordinator preserves that order while
             // bounding post-OCR persistence/publication work.
@@ -351,10 +408,21 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                         keyframeRetainer: keyframeRetainerSnapshot,
                         evidenceCandidate: evidenceCandidate
                     )
+                    disposition(resultDisposition)
                 },
-                onDrop: {}
+                onDrop: {
+                    disposition(.retryableNoContent)
+                }
             )
         }
+    }
+
+    private static func disposition(for result: OCRResult) -> OCRPostAllowDisposition {
+        let text = result.recognizedLines.map(\.text).joined(separator: "\n")
+        if result.timedOut || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .retryableNoContent
+        }
+        return .finalized
     }
 
     /// Close result ingress first, then cancel/drain OCR. A late completion
@@ -393,6 +461,18 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         evidenceCandidate: KeyframeEvidenceCandidate? = nil
     ) async {
         let text = result.recognizedLines.map(\.text).joined(separator: "\n")
+        guard !result.timedOut,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            OCRTrace.emit(
+                "ocr-post-allow-result",
+                "bundle=\(context.appBundleId ?? "nil") "
+                    + "decision=no_content "
+                    + "ocr_len=\(text.utf8.count) "
+                    + "ocr_lines=\(result.recognizedLines.count)"
+            )
+            return
+        }
         let decision = cascade.decideOcr(text: text, context: context)
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 trace at the post-allow
         // OCR completion. Logs bundle id + cascade-twice §6 decision
@@ -452,10 +532,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 return
             }
 
-            // OCR timeout is not an OCR privacy approval. It may preserve
-            // the text-free event, but screenshot persistence stays closed.
-            guard !result.timedOut,
-                  !Task.isCancelled,
+            guard !Task.isCancelled,
                   let pixelBuffer,
                   let evidenceCandidate,
                   let keyframeRetainer

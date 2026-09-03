@@ -431,6 +431,8 @@ if captureOptions.captureEnabled {
     // constructed only under the explicit argv authority and retained with
     // the stream for exactly the same lifetime.
     let contextSnapshot = WorkflowContextSnapshot()
+    let focusedWindowStore = FocusedWindowStore()
+    let focusedWindowReader = AXFocusedWindowReader()
     let urlProvider: any URLProvider = CompositeURLProvider()
     let calendarAttribution = CalendarAttribution()
     let nowPlayingAttribution = NowPlayingAttribution()
@@ -439,6 +441,8 @@ if captureOptions.captureEnabled {
         snapshotStore: contextSnapshot,
         source: NSWorkspaceFrontmostAppSource(),
         windowTitleProvider: AXWindowTitleProvider(),
+        focusedWindowStore: focusedWindowStore,
+        focusedWindowReader: focusedWindowReader,
         calendarSource: calendarAttribution,
         nowPlayingSource: nowPlayingAttribution,
         contactsSource: contactsAttribution
@@ -530,8 +534,10 @@ if captureOptions.captureEnabled {
     // ADR-0031 V2-P1 third-lift wiring uses the API-correct include-only
     // `SCContentFilter` path. This block is reachable only under explicit
     // supervisor argv; capture-off launches never construct these resources.
-    let focusedWindowStore = FocusedWindowStore()
-    let focusTracker = FocusTracker(store: focusedWindowStore)
+    let focusTracker = FocusTracker(
+        store: focusedWindowStore,
+        reader: focusedWindowReader
+    )
     let tccStatusMonitor = TCCStatusMonitor()
     let captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(

@@ -233,6 +233,17 @@ public final class TCCStatusMonitor: @unchecked Sendable {
         return published
     }
 
+    /// Put a surface back behind the denied-to-granted debounce after an
+    /// observer could not act on a published grant. Without this reset, the
+    /// monitor would keep seeing `granted == granted` and never notify the
+    /// observer to retry its failed resume.
+    public func requireFreshGrantForRetry(surface: TCCSurface) {
+        lock.lock(); defer { lock.unlock() }
+        guard surfaces.contains(surface) else { return }
+        published[surface] = .denied
+        grantRepeats[surface] = 0
+    }
+
     /// Start the poll loop. Idempotent. Callers should invoke
     /// `seedInitialSnapshot()` first (this method does NOT seed —
     /// otherwise the first tick would fire a spurious transition for
@@ -253,11 +264,24 @@ public final class TCCStatusMonitor: @unchecked Sendable {
 
     /// Stop the poll loop. Idempotent.
     public func stop() {
+        let t = takePollTask()
+        t?.cancel()
+    }
+
+    /// Cancel the poll loop and wait for any in-flight observer callback. This
+    /// is the shutdown boundary used by the capture owner.
+    public func stopAndDrain() async {
+        let t = takePollTask()
+        t?.cancel()
+        await t?.value
+    }
+
+    private func takePollTask() -> Task<Void, Never>? {
         lock.lock()
         let t = pollTask
         pollTask = nil
         lock.unlock()
-        t?.cancel()
+        return t
     }
 
     /// One poll cycle across all surfaces. `internal` so tests can

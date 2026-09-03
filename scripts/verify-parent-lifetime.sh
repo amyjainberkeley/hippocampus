@@ -19,7 +19,12 @@ LOG="$ROOT/app.log"
 APP_PID=""
 HELPER_PID=""
 AGENT_PID=""
-EXIT_TIMEOUT_SECONDS=10
+# A cold Core ML backend smoke can occupy the agent's startup path for more
+# than ten seconds before it reaches the already-closed helper pipe. Capture
+# itself is owned by the helper and still exits immediately; allow the agent a
+# bounded window to consume EOF, release its writer lock, and remove the crash
+# marker cleanly.
+EXIT_TIMEOUT_SECONDS=30
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2

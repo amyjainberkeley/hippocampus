@@ -7,6 +7,8 @@ SESSION_CHECK="$SCRIPT_DIR/live-capture/check_session.py"
 MEMORY_CHECK="$SCRIPT_DIR/live-capture/verify_memory.py"
 SOAK_REPORT="$SCRIPT_DIR/live-capture/summarize_soak.py"
 STREAM_POLICY="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/StreamConfig.swift"
+CAPTURE_SESSION="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SCStreamCaptureSession.swift"
+FOCUS_TRACKER="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Context/FocusTracker.swift"
 FIXTURE_DIR="$SCRIPT_DIR/live-capture/fixtures"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-live-contract.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -28,6 +30,42 @@ require_literal() {
 [[ -x "$SOAK_REPORT" ]] || fail "capture soak reporter is missing or not executable"
 rg -Fq 'minimumFrameIntervalMs: 500,' "$STREAM_POLICY" \
     || fail "active capture default must honor the documented 2 fps energy ceiling"
+if rg -Fq 'SCScreenshotManager.captureSampleBuffer(' "$CAPTURE_SESSION"; then
+    fail "capture snapshots must not bypass stream lifecycle and ordering ownership"
+fi
+if rg -Fq 'updateContentFilter(' "$CAPTURE_SESSION"; then
+    fail "focus changes must replace the stream so callbacks keep immutable generation provenance"
+fi
+rg -Fq 'requiredFocusGeneration: streamFocusGeneration(stream)' "$CAPTURE_SESSION" \
+    || fail "every stream callback must carry the generation of the stream that produced it"
+rg -Fq 'status == .complete || status == .started' "$CAPTURE_SESSION" \
+    || fail "a new stream must admit its initial started frame for static windows"
+rg -Fq 'focusTracker?.refreshBindingOnceSync()' "$CAPTURE_SESSION" \
+    || fail "an OCR-eligible callback must revalidate focus before generation admission"
+rg -Fq 'await focusTracker?.refreshOnce()' "$CAPTURE_SESSION" \
+    || fail "startup must await an initial focus observation before choosing a capture filter"
+rg -Fq 'public func refreshOnce() async' "$FOCUS_TRACKER" \
+    || fail "the focus tracker must expose a deterministic one-shot startup refresh"
+rg -Fq 'store.storeSync(focused)' "$FOCUS_TRACKER" \
+    || fail "focus polling must publish in serial queue order without detached-task reordering"
+if rg -Fq 'Task.detached(priority: .utility)' "$FOCUS_TRACKER"; then
+    fail "focus polling must not publish observations through unordered detached tasks"
+fi
+python3 - "$CAPTURE_SESSION" <<'PY'
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+gate = source.index("if focusedWindowStore != nil {")
+privacy = source.index("let privacySnapshot = pipelineSnapshot.snapshotPixelPrivacy(")
+baseline = source.index("self.commitPriorDHash(")
+refresh = source.index("focusTracker?.refreshBindingOnceSync()")
+if refresh > gate:
+    raise SystemExit("focus identity must be revalidated before generation admission")
+if baseline < gate:
+    raise SystemExit("race-rejected frames must not mutate the accepted-frame dHash baseline")
+if baseline < privacy:
+    raise SystemExit("privacy-suppressed frames must not mutate the accepted-frame dHash baseline")
+PY
 
 bash -n "$RUNNER"
 PYTHONPYCACHEPREFIX="$TMP_ROOT/pycache" python3 -m py_compile "$SESSION_CHECK"
