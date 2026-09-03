@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-02._
 
-Audited code baseline: `335a3ff`
+Audited code baseline: `e548541`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -109,6 +109,13 @@ more than this page.
   and backfill has run. The macOS runtime uses CPU Core ML for inference and a
   Rust cosine scan over vectors stored inside SQLCipher; there is no separate
   vector service or shipped sqlite-vec retrieval path.
+- Empty or whitespace-only observations no longer enter the embedding queue.
+  One-shot backfill now stops when the current batch makes no progress, and the
+  long-running worker waits on its normal idle interval before retrying a
+  rejected batch. A live capture audit previously drove one empty row through
+  hundreds of thousands of immediate retries; the fixed packaged agent drains
+  the same retained encrypted brain with zero pending batches and no retry
+  storm.
 - Explicit person, count, duration, and date questions now pass a
   relation-grounded negative guard before retrieval can be called a match. The
   guard strips capture headers, keeps values within sentence and topic
@@ -213,27 +220,26 @@ more than this page.
 ## What Is Not Yet Proven
 
 - Real `ScreenCaptureKit` capture remains off by default. The executable
-  `scripts/run-live-capture-overlap.sh` gate now assembles an exact ad-hoc app,
+  `scripts/run-live-capture-overlap.sh` gate assembles an exact ad-hoc app,
   requires Screen Recording and Accessibility for that helper, foregrounds a
   synthetic overlapping-window corpus, captures through the bundled helper and
-  agent, and proves focused-window recall plus background-window abstention.
-  Its contract is tested and the unlocked-session preflight passes. The latest
-  attempt reached a real ScreenCaptureKit sample, installed the focused-window
-  include set, opened the isolated encrypted brain, and loaded Arctic Embed S.
-  Accessibility was denied for the bundled helper, so the agent drained 11
-  frames but committed zero content events; no OCR was retained. The harness
-  now closes its FIFO guard descriptor in both child processes, so EOF reliably
-  stops the ingest agent, and its result check uses valid ripgrep flags. The
-  harness uses a short `/tmp` root so its isolated Unix socket remains below
-  Darwin's 104-byte path limit. A fresh run with Accessibility granted, an
-  uninterrupted foreground corpus, and the required 30-minute soak remain open.
+  agent, and proves focused-window recall plus background-window abstention. A
+  live run on the audited Mac passed with 18 retained corpus events: the exact
+  focused token was recalled and the overlapped background token was absent
+  from timeline, application-scoped events, and full-text retrieval. The same
+  fail-closed gate aborts if another app becomes frontmost. `--soak` now fixes
+  the duration at 1,800 seconds, samples helper CPU/RSS every five seconds,
+  retains evidence, and emits a machine-readable qualification report covering
+  frame, OCR, keyframe, memory, storage, privacy, and resource-SLO evidence.
+  The required uninterrupted 30-minute run has not completed because subsequent
+  attempts correctly stopped when Chrome became frontmost.
 - OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
   ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
   use separate structured capture paths that reject private contexts before
   reading page content, with executable release tests. The narrow live OCR
   qualification capability exists only in debug builds and is proven absent
   from the release helper binary. Automatic OCR enablement remains blocked until
-  the overlapping-window corpus and live soak pass.
+  the 30-minute live soak passes.
 - The production-wired TCC revocation monitor is not yet proven by a live
   grant/revoke/restore run. macOS exposes no qualified public signal that a
   different app has started sharing or recording the screen, so Hippocampus
