@@ -10,8 +10,8 @@
   "complete": true,
   "publishable": true,
   "run": {
-    "captured_at_utc": "2026-09-03T00:52:24Z",
-    "git_commit": "9b8300f2e511ee7adf4e17a80eec1850a56e22a3",
+    "captured_at_utc": "2026-09-03T01:10:47Z",
+    "git_commit": "07e564e0f84bc82b8b23ccda4249fff7054e57f9",
     "branch": "codex/hippocampus-v1",
     "repository_dirty_at_start": true,
     "benchmark_scope_dirty_at_start": false,
@@ -57,20 +57,19 @@
         "temporal_current_accuracy": 0.6666666666666666,
         "superseded_exclusion_rate": 0.0,
         "contradiction_visibility": 1.0,
-        "duplicate_ocr_suppression": 0.0,
+        "duplicate_ocr_suppression": 1.0,
         "exact_provenance_validity": 1.0,
         "abstention_accuracy": 1.0,
         "handoff_task_success": 1.0,
         "handoff_fact_coverage": 0.9545454545454546,
         "bounded_packet_rate": 1.0,
-        "capability_pass_rate": 0.6944444444444444
+        "capability_pass_rate": 0.8333333333333334
       },
       "quality_gate": {
         "passed": false,
         "failures": [
           "temporal_current_accuracy 0.6667 is below 0.9000",
-          "superseded_exclusion_rate 0.0000 is below 0.9000",
-          "duplicate_ocr_suppression 0.0000 is below 0.8000"
+          "superseded_exclusion_rate 0.0000 is below 0.9000"
         ]
       }
     },
@@ -2802,24 +2801,8 @@
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 769,
+        "byte_estimate": 433,
         "citations": [
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 1,
-            "session_id": "screen://duplicate/0/1",
-            "ts_us": 1788350460000000,
-            "url": "screen://duplicate/0",
-            "window_title": "Repeated status 1"
-          },
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 2,
-            "session_id": "screen://duplicate/0/2",
-            "ts_us": 1788350520000000,
-            "url": "screen://duplicate/0",
-            "window_title": "Repeated status 1"
-          },
           {
             "app_bundle_id": "com.apple.Terminal",
             "event_id": 3,
@@ -2840,8 +2823,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Repeated status 1\nObserved com.tinyspeck.slackmacgap: Unrelated status 1\nEvent 3: [app=com.apple.Terminal | title=Repeated status 1 | url=screen://duplicate/0 | ts=2026-09-02T12:03:00.000Z]\nThe notarized release build completed successfully.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 1 | url=screen://duplicate/0 | ts=2026-09-02T12:02:00.000Z]\nThe notarized release build completed successfully.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 1 | url=screen://duplicate/0 | ts=2026-09-02T12:01:00.000Z]\nThe notarized release build completed successfully.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 1 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
-        "token_estimate": 81,
+        "text": "Observed com.apple.Terminal: Repeated status 1\nObserved com.tinyspeck.slackmacgap: Unrelated status 1\nEvent 3: [app=com.apple.Terminal | title=Repeated status 1 | url=screen://duplicate/0 | ts=2026-09-02T12:03:00.000Z]\nThe notarized release build completed successfully.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 1 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 47,
         "truncated": false
       },
       "question_id": "duplicate-build-status",
@@ -2870,8 +2853,8 @@
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 3,
-      "duplicate_ocr_suppressed": false,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
       "facts_present": 1,
       "facts_required": 1,
       "facts_complete": true,
@@ -2879,29 +2862,13 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 775,
+        "byte_estimate": 435,
         "citations": [
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 1,
-            "session_id": "screen://duplicate/1/1",
-            "ts_us": 1788350460000000,
-            "url": "screen://duplicate/1",
-            "window_title": "Repeated status 2"
-          },
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 2,
-            "session_id": "screen://duplicate/1/2",
-            "ts_us": 1788350520000000,
-            "url": "screen://duplicate/1",
-            "window_title": "Repeated status 2"
-          },
           {
             "app_bundle_id": "com.apple.Terminal",
             "event_id": 3,
@@ -2922,8 +2889,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Repeated status 2\nObserved com.tinyspeck.slackmacgap: Unrelated status 2\nEvent 3: [app=com.apple.Terminal | title=Repeated status 2 | url=screen://duplicate/1 | ts=2026-09-02T12:03:00.000Z]\nThe capture privacy test blocked the password window.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 2 | url=screen://duplicate/1 | ts=2026-09-02T12:02:00.000Z]\nThe capture privacy test blocked the password window.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 2 | url=screen://duplicate/1 | ts=2026-09-02T12:01:00.000Z]\nThe capture privacy test blocked the password window.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 2 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
-        "token_estimate": 87,
+        "text": "Observed com.apple.Terminal: Repeated status 2\nObserved com.tinyspeck.slackmacgap: Unrelated status 2\nEvent 3: [app=com.apple.Terminal | title=Repeated status 2 | url=screen://duplicate/1 | ts=2026-09-02T12:03:00.000Z]\nThe capture privacy test blocked the password window.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 2 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 49,
         "truncated": false
       },
       "question_id": "duplicate-test-status",
@@ -2952,8 +2919,8 @@
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 3,
-      "duplicate_ocr_suppressed": false,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
       "facts_present": 1,
       "facts_required": 1,
       "facts_complete": true,
@@ -2961,29 +2928,13 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 754,
+        "byte_estimate": 428,
         "citations": [
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 1,
-            "session_id": "screen://duplicate/2/1",
-            "ts_us": 1788350460000000,
-            "url": "screen://duplicate/2",
-            "window_title": "Repeated status 3"
-          },
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 2,
-            "session_id": "screen://duplicate/2/2",
-            "ts_us": 1788350520000000,
-            "url": "screen://duplicate/2",
-            "window_title": "Repeated status 3"
-          },
           {
             "app_bundle_id": "com.apple.Terminal",
             "event_id": 3,
@@ -3004,8 +2955,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Repeated status 3\nObserved com.tinyspeck.slackmacgap: Unrelated status 3\nEvent 3: [app=com.apple.Terminal | title=Repeated status 3 | url=screen://duplicate/2 | ts=2026-09-02T12:03:00.000Z]\nPriya accepted the memory benchmark follow-up.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 3 | url=screen://duplicate/2 | ts=2026-09-02T12:02:00.000Z]\nPriya accepted the memory benchmark follow-up.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 3 | url=screen://duplicate/2 | ts=2026-09-02T12:01:00.000Z]\nPriya accepted the memory benchmark follow-up.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 3 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
-        "token_estimate": 81,
+        "text": "Observed com.apple.Terminal: Repeated status 3\nObserved com.tinyspeck.slackmacgap: Unrelated status 3\nEvent 3: [app=com.apple.Terminal | title=Repeated status 3 | url=screen://duplicate/2 | ts=2026-09-02T12:03:00.000Z]\nPriya accepted the memory benchmark follow-up.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 3 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 47,
         "truncated": false
       },
       "question_id": "duplicate-owner-status",
@@ -3034,8 +2985,8 @@
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 3,
-      "duplicate_ocr_suppressed": false,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
       "facts_present": 1,
       "facts_required": 1,
       "facts_complete": true,
@@ -3043,29 +2994,13 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 748,
+        "byte_estimate": 426,
         "citations": [
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 1,
-            "session_id": "screen://duplicate/3/1",
-            "ts_us": 1788350460000000,
-            "url": "screen://duplicate/3",
-            "window_title": "Repeated status 4"
-          },
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 2,
-            "session_id": "screen://duplicate/3/2",
-            "ts_us": 1788350520000000,
-            "url": "screen://duplicate/3",
-            "window_title": "Repeated status 4"
-          },
           {
             "app_bundle_id": "com.apple.Terminal",
             "event_id": 3,
@@ -3086,8 +3021,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Repeated status 4\nObserved com.tinyspeck.slackmacgap: Unrelated status 4\nEvent 3: [app=com.apple.Terminal | title=Repeated status 4 | url=screen://duplicate/3 | ts=2026-09-02T12:03:00.000Z]\nThe documentation deploy reached production.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 4 | url=screen://duplicate/3 | ts=2026-09-02T12:02:00.000Z]\nThe documentation deploy reached production.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 4 | url=screen://duplicate/3 | ts=2026-09-02T12:01:00.000Z]\nThe documentation deploy reached production.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 4 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
-        "token_estimate": 78,
+        "text": "Observed com.apple.Terminal: Repeated status 4\nObserved com.tinyspeck.slackmacgap: Unrelated status 4\nEvent 3: [app=com.apple.Terminal | title=Repeated status 4 | url=screen://duplicate/3 | ts=2026-09-02T12:03:00.000Z]\nThe documentation deploy reached production.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 4 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 46,
         "truncated": false
       },
       "question_id": "duplicate-deploy-status",
@@ -3116,8 +3051,8 @@
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 3,
-      "duplicate_ocr_suppressed": false,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
       "facts_present": 1,
       "facts_required": 1,
       "facts_complete": true,
@@ -3125,29 +3060,13 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
       "packet": {
-        "byte_estimate": 793,
+        "byte_estimate": 441,
         "citations": [
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 1,
-            "session_id": "screen://duplicate/4/1",
-            "ts_us": 1788350460000000,
-            "url": "screen://duplicate/4",
-            "window_title": "Repeated status 5"
-          },
-          {
-            "app_bundle_id": "com.apple.Terminal",
-            "event_id": 2,
-            "session_id": "screen://duplicate/4/2",
-            "ts_us": 1788350520000000,
-            "url": "screen://duplicate/4",
-            "window_title": "Repeated status 5"
-          },
           {
             "app_bundle_id": "com.apple.Terminal",
             "event_id": 3,
@@ -3168,8 +3087,8 @@
         "focus_retrieval_reason": "evidence_verifier_unavailable",
         "focus_retrieval_status": "degraded",
         "outcome": "observations_only",
-        "text": "Observed com.apple.Terminal: Repeated status 5\nObserved com.tinyspeck.slackmacgap: Unrelated status 5\nEvent 3: [app=com.apple.Terminal | title=Repeated status 5 | url=screen://duplicate/4 | ts=2026-09-02T12:03:00.000Z]\nThe MCP synchronization imported twelve approved resources.\nEvent 2: [app=com.apple.Terminal | title=Repeated status 5 | url=screen://duplicate/4 | ts=2026-09-02T12:02:00.000Z]\nThe MCP synchronization imported twelve approved resources.\nEvent 1: [app=com.apple.Terminal | title=Repeated status 5 | url=screen://duplicate/4 | ts=2026-09-02T12:01:00.000Z]\nThe MCP synchronization imported twelve approved resources.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 5 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
-        "token_estimate": 84,
+        "text": "Observed com.apple.Terminal: Repeated status 5\nObserved com.tinyspeck.slackmacgap: Unrelated status 5\nEvent 3: [app=com.apple.Terminal | title=Repeated status 5 | url=screen://duplicate/4 | ts=2026-09-02T12:03:00.000Z]\nThe MCP synchronization imported twelve approved resources.\nEvent 4: [app=com.tinyspeck.slackmacgap | title=Unrelated status 5 | url= | ts=2026-09-02T11:00:00.000Z]\nThe product review agenda has three unrelated design topics.",
+        "token_estimate": 48,
         "truncated": false
       },
       "question_id": "duplicate-sync-status",
@@ -3198,8 +3117,8 @@
       "current_source_present": true,
       "superseded_sources_excluded": true,
       "contradiction_visible": true,
-      "duplicate_citations": 3,
-      "duplicate_ocr_suppressed": false,
+      "duplicate_citations": 1,
+      "duplicate_ocr_suppressed": true,
       "facts_present": 1,
       "facts_required": 1,
       "facts_complete": true,
@@ -3207,7 +3126,7 @@
       "abstained": false,
       "packet_bounded": true,
       "handoff_complete": true,
-      "capability_passed": false
+      "capability_passed": true
     },
     {
       "arm": "hybrid",
