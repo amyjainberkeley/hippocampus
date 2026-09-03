@@ -351,6 +351,52 @@ fn raw_recent_activity_is_labeled_observation_not_grounded_claim() {
 }
 
 #[test]
+fn repeated_screen_ocr_uses_only_the_newest_canonical_citation() {
+    let oldest = event(
+        70,
+        1_700_000,
+        "[app=com.apple.Terminal | title=Build | url=? | ts=1970-01-01T00:00:01.700Z]\nThe notarized release build completed successfully.",
+    );
+    let middle = event(
+        71,
+        1_800_000,
+        "[app=com.apple.Terminal | title=Build | url=? | ts=1970-01-01T00:00:01.800Z]\nThe notarized release build completed successfully.",
+    );
+    let newest = event(
+        72,
+        1_900_000,
+        "[app=com.apple.Terminal | title=Build | url=? | ts=1970-01-01T00:00:01.900Z]\n  The notarized release BUILD completed successfully.  ",
+    );
+    let packet = compile_context_packet(
+        Some("release build"),
+        NOW_US,
+        ContextBudget::new(200, 6),
+        ContextSources {
+            claims: Vec::new(),
+            evidence: [oldest, newest, middle]
+                .iter()
+                .map(|source| {
+                    ContextEvidence::from_event(source, EvidencePriority::Focused, Some(0.8))
+                })
+                .collect(),
+        },
+    );
+
+    assert_eq!(
+        packet
+            .citations
+            .iter()
+            .map(|citation| citation.event_id)
+            .collect::<Vec<_>>(),
+        vec![72]
+    );
+    assert_eq!(
+        section(&packet, ContextSectionKind::Evidence).items.len(),
+        1
+    );
+}
+
+#[test]
 fn empty_sources_return_a_typed_empty_packet() {
     let packet = compile_context_packet(
         None,

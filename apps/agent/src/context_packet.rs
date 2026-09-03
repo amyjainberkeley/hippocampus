@@ -669,7 +669,8 @@ fn normalize_evidence<'a>(
             .then_with(|| left.event_id.cmp(&right.event_id))
     });
     let focus = focus.map(str::to_lowercase);
-    let mut seen = BTreeSet::new();
+    let mut seen_event_ids = BTreeSet::new();
+    let mut seen_screen_ocr = BTreeSet::new();
     evidence
         .iter()
         .filter(|candidate| match candidate.priority {
@@ -679,8 +680,43 @@ fn normalize_evidence<'a>(
                 .as_ref()
                 .is_none_or(|needle| evidence_search_text(candidate).contains(needle.as_str())),
         })
-        .filter(|candidate| seen.insert(candidate.event_id))
+        .filter(|candidate| seen_event_ids.insert(candidate.event_id))
+        .filter(|candidate| {
+            let Some(fingerprint) = screen_ocr_fingerprint(candidate) else {
+                return true;
+            };
+            seen_screen_ocr.insert(fingerprint)
+        })
         .collect()
+}
+
+fn screen_ocr_fingerprint(candidate: &ContextEvidence) -> Option<String> {
+    if candidate.priority == EvidencePriority::Claim || candidate.source_kind != "screen_ocr" {
+        return None;
+    }
+    let body = context_body(&candidate.excerpt);
+    let fingerprint = body
+        .split_whitespace()
+        .flat_map(str::chars)
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    (!fingerprint.is_empty()).then_some(fingerprint)
+}
+
+fn context_body(excerpt: &str) -> &str {
+    let Some((header, body)) = excerpt.split_once('\n') else {
+        return excerpt;
+    };
+    if header.starts_with("[app=")
+        && header.contains(" | title=")
+        && header.contains(" | url=")
+        && header.contains(" | ts=")
+        && header.ends_with(']')
+    {
+        body
+    } else {
+        excerpt
+    }
 }
 
 fn evidence_search_text(candidate: &ContextEvidence) -> String {
