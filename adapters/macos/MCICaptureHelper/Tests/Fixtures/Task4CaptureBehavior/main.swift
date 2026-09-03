@@ -229,6 +229,29 @@ struct Task4CaptureBehavior {
         precondition(!cleanHash.allSatisfy { $0 == 0 })
         precondition(clean.files[0] == cleanHash.map { String(format: "%02x", $0) }.joined() + ".bin")
 
+        let retryEngine = SequencedOCREngine(results: [
+            .empty,
+            OCRResult(
+                recognizedLines: [OCRLine(text: "recovered", boundingBox: .zero, confidence: 1)],
+                durationMs: 1,
+                timedOut: false
+            ),
+        ])
+        let recovered = await runEmitter(
+            engine: retryEngine,
+            root: root.appendingPathComponent("same-buffer-retry"),
+            pixels: pixels,
+            policy: policy
+        )
+        let retryCalls = await retryEngine.callCount()
+        precondition(
+            retryCalls == 2,
+            "empty OCR must retry the same retained pixel buffer exactly once"
+        )
+        precondition(recovered.frames.count == 1)
+        precondition(recovered.files.count == 1)
+        precondition(recovered.dispositions == [.finalized])
+
         let dropEngine = BlockingOCREngine()
         let dropWorker = VisionOCRWorker(engine: dropEngine, capacity: 1)
         let droppedOrdinals = FixtureOrdinalCollector()
@@ -269,9 +292,25 @@ struct Task4CaptureBehavior {
         pixels: CVPixelBuffer,
         policy: KeyframePolicy
     ) async -> (frames: [Data], files: [String], dispositions: [OCRPostAllowDisposition]) {
+        await runEmitter(
+            context: context,
+            engine: FixtureOCREngine(result: result),
+            root: root,
+            pixels: pixels,
+            policy: policy
+        )
+    }
+
+    private static func runEmitter(
+        context: WorkflowContext = WorkflowContext(appBundleId: "com.example.app"),
+        engine: any OCREngine,
+        root: URL,
+        pixels: CVPixelBuffer,
+        policy: KeyframePolicy
+    ) async -> (frames: [Data], files: [String], dispositions: [OCRPostAllowDisposition]) {
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let sink = FixtureFrameSink()
-        let worker = VisionOCRWorker(engine: FixtureOCREngine(result: result))
+        let worker = VisionOCRWorker(engine: engine)
         let retainer = KeyframeRetentionCoordinator(
             blobDirectory: root,
             keyMaterial: Data((0..<32).map(UInt8.init)),
@@ -409,6 +448,24 @@ private struct FixtureOCREngine: OCREngine {
     func recognize(input _: OCREngineInput, timeoutMs _: Int) async -> OCRResult {
         result
     }
+}
+
+private actor SequencedOCREngine: OCREngine {
+    private let results: [OCRResult]
+    private var calls = 0
+
+    init(results: [OCRResult]) {
+        precondition(!results.isEmpty)
+        self.results = results
+    }
+
+    func recognize(input _: OCREngineInput, timeoutMs _: Int) async -> OCRResult {
+        let index = min(calls, results.count - 1)
+        calls += 1
+        return results[index]
+    }
+
+    func callCount() -> Int { calls }
 }
 
 private actor FixtureFrameSink: FrameSink {

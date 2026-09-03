@@ -155,9 +155,9 @@ public enum AXBackstopOutcome: Sendable, Equatable {
 }
 
 /// Structured snapshot of one `focusedHasSecureSubrole()` call, used by
-/// the `--probe-debug` diagnostic sink. Plain-data + `Sendable` so it
-/// can cross task boundaries; the helper just stringifies it onto
-/// stderr.
+/// the `--probe-debug` diagnostic sink. Raw values stay in memory so the
+/// classifier can make its decision; the diagnostic renderer below emits only
+/// presence and enum outcomes.
 ///
 /// Never serialized to the wire. Never reaches the Rust core. Never
 /// touches the encoded frame path. Diagnostic-only.
@@ -210,6 +210,41 @@ public struct AXProbeObservation: Sendable, Equatable {
         self.valueAttributeHidden = valueAttributeHidden
         self.identifierRegexMatch = identifierRegexMatch
         self.classification = classification
+    }
+}
+
+/// Content-free formatter for live AX probe diagnostics. Attribute values may
+/// contain document names, customer identifiers, or secrets and must never be
+/// written to stderr, even in a development qualification run.
+public enum AXProbeDiagnostic {
+    public static func render(_ observation: AXProbeObservation) -> String {
+        func presence(_ value: String?) -> String {
+            value == nil ? "absent" : "present"
+        }
+        func outcome(_ value: AXBackstopOutcome) -> String {
+            switch value {
+            case .positive: return "pos"
+            case .negative: return "neg"
+            case .errored: return "err"
+            }
+        }
+        let classification: String
+        switch observation.classification {
+        case .some(true): classification = "true"
+        case .some(false): classification = "false"
+        case .none: classification = "nil"
+        }
+        let focus = observation.focusResult == .success ? "success" : "error"
+        return "mci-capture-helper: probe(ax-subrole) "
+            + "focus=\(focus) "
+            + "role=\(presence(observation.role)) "
+            + "subrole=\(presence(observation.subrole)) "
+            + "id=\(presence(observation.identifier)) "
+            + "title=\(presence(observation.title)) "
+            + "descendant=\(outcome(observation.descendantSecure)) "
+            + "value-hidden=\(outcome(observation.valueAttributeHidden)) "
+            + "id-regex=\(outcome(observation.identifierRegexMatch)) "
+            + "result=\(classification)\n"
     }
 }
 

@@ -64,7 +64,6 @@ public enum LiveOCRQualification {
     ) -> Bool {
         isRequested(arguments)
             && arguments.contains(CaptureLaunchOptions.captureFlag)
-            && arguments.contains("--probe-debug")
             && environment["MCI_DEVELOPMENT_FILE_KEY"] == "1"
             && environment["MCI_OCR_TRACE"] == "1"
     }

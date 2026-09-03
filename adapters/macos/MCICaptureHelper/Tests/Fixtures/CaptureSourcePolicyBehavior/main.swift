@@ -1,10 +1,41 @@
 import CoreGraphics
+import Foundation
 import MCICaptureHelperKit
 
 private struct FixedFocusedWindowReader: FocusedWindowReader {
     let focused: FocusedWindow?
 
     func readFocusedWindow() -> FocusedWindow? { focused }
+}
+
+private final class SequencedRectReader: AXFocusedWindowRectReader, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [CGRect]
+
+    init(_ values: [CGRect]) {
+        self.values = values
+    }
+
+    func readRect(pid _: pid_t, timeoutMs _: Int) -> CGRect? {
+        lock.withLock {
+            guard !values.isEmpty else { return nil }
+            return values.removeFirst()
+        }
+    }
+}
+
+private struct StablePidSource: FrontmostPidSource {
+    func frontmostPidAndBundle() -> (pid_t, String)? {
+        (pid_t(41), "com.example.Editor")
+    }
+}
+
+private struct RectMappedWindowSource: FocusedWindowIDSource {
+    let firstRect: CGRect
+
+    func focusedWindowID(pid _: pid_t, axFocusedRect: CGRect) -> CGWindowID? {
+        axFocusedRect == firstRect ? 101 : 202
+    }
 }
 
 private struct SecureInput: SecureEventInputProbe {
@@ -31,7 +62,6 @@ struct CaptureSourcePolicyBehavior {
         let qualificationArguments = [
             "mci-capture-helper",
             "--capture",
-            "--probe-debug",
             LiveOCRQualification.flag,
         ]
         let qualificationEnvironment = [
@@ -54,6 +84,68 @@ struct CaptureSourcePolicyBehavior {
                 environment: qualificationEnvironment.filter { $0.key != omittedVariable }
             ))
         }
+
+        let focusedRect = CGRect(x: 120, y: 80, width: 900, height: 700)
+        let focusedCandidates = [
+            CGWindowIdentityCandidate(
+                windowId: 10,
+                bounds: CGRect(x: 0, y: 0, width: 1400, height: 900)
+            ),
+            CGWindowIdentityCandidate(windowId: 11, bounds: focusedRect),
+        ]
+        precondition(
+            FocusedWindowIdentityPolicy.selectWindowID(
+                axFocusedRect: focusedRect,
+                frontToBackCandidates: focusedCandidates
+            ) == 11,
+            "capture identity must match the AX-focused window geometry, not the first app window"
+        )
+        precondition(
+            FocusedWindowIdentityPolicy.selectWindowID(
+                axFocusedRect: focusedRect,
+                frontToBackCandidates: [focusedCandidates[0]]
+            ) == nil,
+            "capture must fail closed when WindowServer cannot match the AX-focused window"
+        )
+        precondition(
+            FocusedWindowIdentityPolicy.selectWindowID(
+                axFocusedRect: focusedRect,
+                frontToBackCandidates: [
+                    focusedCandidates[1],
+                    CGWindowIdentityCandidate(windowId: 12, bounds: focusedRect),
+                ]
+            ) == nil,
+            "capture must fail closed when multiple WindowServer surfaces match AX geometry"
+        )
+
+        let switchedRect = CGRect(x: 180, y: 100, width: 900, height: 700)
+        let racingReader = AXFocusedWindowReader(
+            pidSource: StablePidSource(),
+            axRectReader: SequencedRectReader([focusedRect, switchedRect]),
+            windowIdSource: RectMappedWindowSource(firstRect: focusedRect)
+        )
+        precondition(
+            racingReader.readFocusedWindowIdentity() == nil,
+            "a same-application focused-window switch must fail closed during identity confirmation"
+        )
+
+        let privateIdentifier = "customer-secret-field"
+        let privateTitle = "Meridian renewal password"
+        let diagnostic = AXProbeDiagnostic.render(AXProbeObservation(
+            focusResult: .success,
+            role: "AXTextField",
+            subrole: "AXSecureTextField",
+            identifier: privateIdentifier,
+            title: privateTitle,
+            descendantSecure: .positive,
+            valueAttributeHidden: .negative,
+            identifierRegexMatch: .positive,
+            classification: true
+        ))
+        precondition(!diagnostic.contains(privateIdentifier))
+        precondition(!diagnostic.contains(privateTitle))
+        precondition(diagnostic.contains("role=present"))
+        precondition(diagnostic.contains("title=present"))
 
         let cascade = SuppressionCascade(
             secureEventInput: SecureInput(),
