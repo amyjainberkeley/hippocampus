@@ -1,4 +1,4 @@
-//! Integration tests for the P3.9b FFI wiring against a real ephemeral
+//! Integration tests for the FFI wiring against a real ephemeral
 //! `SQLCipher` brain DB.
 //!
 //! # The CSO load-bearing test (`ffi_open_yields_a_strictly_read_only_brain`)
@@ -44,10 +44,10 @@ use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
 use mci_brain_ffi::{
     mci_brain_ffi_close, mci_brain_ffi_delete_event, mci_brain_ffi_delete_events_in_range,
     mci_brain_ffi_events_by_ids, mci_brain_ffi_last_error_message, mci_brain_ffi_list_episodes,
-    mci_brain_ffi_list_observed_apps, mci_brain_ffi_open, mci_brain_ffi_prepare_wipe,
-    mci_brain_ffi_recent_events, mci_brain_ffi_recent_privacy_moments, mci_brain_ffi_search,
-    mci_brain_ffi_string_free, mci_brain_ffi_wipe_brain, DeleteResultJson, HitJson,
-    PrivacyMomentJson,
+    mci_brain_ffi_list_observed_apps, mci_brain_ffi_open, mci_brain_ffi_open_with_model,
+    mci_brain_ffi_prepare_wipe, mci_brain_ffi_recent_events, mci_brain_ffi_recent_privacy_moments,
+    mci_brain_ffi_search, mci_brain_ffi_string_free, mci_brain_ffi_wipe_brain, DeleteResultJson,
+    HitJson, PrivacyMomentJson,
 };
 use mci_core::crypto::DbKey;
 use mci_core::store::open_readonly as mci_core_open_readonly;
@@ -204,7 +204,7 @@ fn ffi_open_yields_a_strictly_read_only_brain() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. FFI search returns lexical hits (P3.9b: FTS5-only; hybrid is P3.3 swap)
+// 2. The compatibility open path returns lexical FTS5 hits.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -570,6 +570,7 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     // read-only allow-list.
     let allowed_reads: &[&str] = &[
         "mci_brain_ffi_open",
+        "mci_brain_ffi_open_with_model",
         "mci_brain_ffi_close",
         "mci_brain_ffi_search",
         "mci_brain_ffi_recent_events",
@@ -614,6 +615,7 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     // symbols at runtime; this is a positive-list smoke check.)
     let _: &[*const ()] = &[
         mci_brain_ffi_open as *const (),
+        mci_brain_ffi_open_with_model as *const (),
         mci_brain_ffi_close as *const (),
         mci_brain_ffi_search as *const (),
         mci_brain_ffi_recent_events as *const (),
@@ -637,9 +639,9 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     ];
     assert_eq!(
         allowed_reads.len(),
-        15,
-        "read-tier FFI surface size pinned at 15 \
-         (V2-P13 timeline scaffold added mci_brain_ffi_timeline_events)"
+        16,
+        "read-tier FFI surface size pinned at 16 \
+         (model-backed open adds semantic retrieval without adding mutation)"
     );
     assert_eq!(
         allowed_mutations.len(),

@@ -1,40 +1,42 @@
-//! MCI macOS adapter — C-ABI FFI shim exposing a **READ-ONLY** view of the
-//! Phase-3 brain to the Swift recall-ui app (`apps/recall-ui/`).
+//! MCI macOS adapter — C-ABI FFI shim exposing read-only recall plus a narrow,
+//! user-gated privacy deletion surface to the Swift app (`apps/recall-ui/`).
 //!
-//! # Scope: P3.9b — real read-only store wired
+//! # Read-only Recall boundary
 //!
 //! Every entry point now holds a live read-only `SqlCipherBrainStore`
 //! handle. `mci_brain_ffi_open` decodes the hex `SQLCipher` key, opens the
 //! store via [`mci_brain::SqlCipherBrainStore::open_readonly`] (which goes
 //! through [`mci_core::store::open_readonly`] with `SQLITE_OPEN_READ_ONLY |
 //! SQLITE_OPEN_NO_MUTEX | SQLITE_OPEN_URI`), and stashes it in an opaque
-//! [`Handle`]. `mci_brain_ffi_search` runs FTS5 lexical search (the
-//! `HybridRetriever` from P3.7 needs an [`mci_brain::Embedder`] backed by
-//! the bundled arctic-embed-s `.mlpackage`; P3.3's Core ML runtime is the
-//! follow-on PR that wires that, at which point search swaps to the full
-//! hybrid path with a one-line ctor change). `mci_brain_ffi_recent_events`
+//! [`Handle`]. `mci_brain_ffi_open_with_model` additionally loads the bundled
+//! Arctic Embed S Core ML model and makes `mci_brain_ffi_search` use the same
+//! `HybridRetriever` as the MCP agent. The original open function remains a
+//! compatibility-safe lexical mode. `mci_brain_ffi_recent_events`
 //! issues `SELECT ... FROM events ORDER BY ts_us DESC LIMIT ?` via the
 //! store's `recent_events` helper. `mci_brain_ffi_recent_privacy_moments`
 //! returns an empty list — the tombstone log lives in a separate
 //! `mci-tombstones.bin` file and surfacing it in the recall UI is P3.9c
 //! (see the function-level deferral note).
 //!
-//! # READ-ONLY by construction (ADR-0017 §5 / ADR-0016 §4.3 invariant)
+//! # Read-only recall by construction (ADR-0017 §5 / ADR-0016 §4.3)
 //!
 //! [`mci_core::store::open_readonly`] sets `SQLITE_OPEN_READ_ONLY` on the
 //! underlying connection. Any `INSERT` / `UPDATE` / `DELETE` / `CREATE` /
 //! `DROP` issued through the resulting `rusqlite::Connection` fails at the
 //! driver level with `SQLITE_READONLY` (extended code 8). The recall-ui
-//! app is structurally a **consumer** of the brain; it cannot write to it.
-//! The FFI surface mirrors that discipline — there is no `put_event` /
-//! `delete_event` / `mutate_*` function exported. Adding one is an
-//! `AGENT_PROTOCOL` §5 protected-set violation.
+//! ordinary recall path is structurally a **consumer** of the brain. The only
+//! writes exposed by this crate are the enumerated Privacy Dashboard deletion
+//! and wipe functions. They require explicit confirmation, take the shared
+//! writer lease, and reopen a short-lived writable store; there is no general
+//! ingest or arbitrary mutation API. Adding another write entry point is an
+//! `AGENT_PROTOCOL` §5 protected-set change.
 //!
 //! The CSO read-only verification is load-bearing: it lives in
 //! `core/src/store/open.rs::tests::open_readonly_round_trips_then_refuses_writes`
 //! (driver-level proof of `SQLITE_READONLY`) and in
 //! `tests/readonly_invariant.rs` (this crate's integration test that opens
-//! via the FFI shim and confirms the brain is read-only end-to-end).
+//! via the FFI shim and confirms both the read-only query handle and the exact
+//! exported mutation allowlist end-to-end).
 //!
 //! # Allocator discipline
 //!
@@ -57,11 +59,21 @@ use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
+use std::time::{SystemTime, UNIX_EPOCH};
+
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
-use mci_brain::{BrainStore, DeletionOutcome, EventId, SqlCipherBrainStore};
+#[cfg(target_os = "macos")]
+use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
+use mci_brain::{
+    BrainStore, DeletionOutcome, Embedder, EventId, HybridRetriever, RetrievalDegradation,
+    RetrievalMatch, RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, TimeRange,
+};
 use mci_core::crypto::DbKey;
+#[cfg(target_os = "macos")]
+use mci_embed_coreml::CoreMLBackend;
 #[cfg(unix)]
 use rustix::fs::{flock, FlockOperation, OFlags};
 use serde::{Deserialize, Serialize};
@@ -93,10 +105,11 @@ pub struct HitJson {
     /// boundary so the Swift list cells never receive megabytes of OCR
     /// text per row.
     pub ocr_text_snippet: String,
-    /// Which retrieval source produced this hit. `"lexical"` for plain
-    /// FTS5 search (P3.9b); `"timeline"` for recent-events list;
-    /// `"hybrid"` once the `HybridRetriever` + Core ML embedder backend
-    /// (P3.3) is wired.
+    /// Which retrieval source produced this hit. `"lexical"` is plain
+    /// FTS5 search; `"timeline"` is the recent-events list. Model-backed
+    /// handles may return `"hybrid"`, `"hybrid-related"`,
+    /// `"hybrid-conflict"`, or `"semantic-related"` according to the
+    /// retriever's evidence and degradation state.
     pub source: String,
     /// Fused score in `[0.0, 1.0]` (P3.7 hybrid) or BM25-derived
     /// monotone-with-relevance lexical score. `None` for plain timeline
@@ -350,6 +363,10 @@ pub struct SummaryStatsJson {
 /// duration the recall-ui keeps the brain open.
 pub struct Handle {
     store: Arc<SqlCipherBrainStore>,
+    /// Query-side Arctic embedder. Present only for the explicit model-backed
+    /// open path; the compatibility open remains lexical-only.
+    #[cfg(target_os = "macos")]
+    query_embedder: Option<Arc<ArcticEmbedSEmbedder>>,
     /// Directory that holds the encrypted keyframe blobs (`<brain_dir>/blobs/`).
     /// Populated at `open()` from the brain file's parent directory; used to
     /// derive [`HitJson::thumbnail_path`] (cycle 8.35 PR-4). Never used to
@@ -388,6 +405,54 @@ pub struct Handle {
     /// wipe entry point checks (a) token matches, (b) not expired, then
     /// clears the slot regardless of outcome (single-use).
     pending_wipe: Mutex<Option<(Instant, String)>>,
+}
+
+fn open_handle(path: &str, key_hex: &str, model_path: Option<&Path>) -> Result<Handle, String> {
+    let key_bytes = decode_hex_key(key_hex)?;
+    let key = DbKey::from_bytes(key_bytes);
+    let brain_path = PathBuf::from(path);
+    let store =
+        SqlCipherBrainStore::open_readonly(&brain_path, &key).map_err(|error| error.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    let query_embedder = model_path
+        .map(|path| {
+            let backend = CoreMLBackend::open(path)
+                .map_err(|error| format!("embedding model load failed: {error}"))?;
+            let embedder = ArcticEmbedSEmbedder::new_query(Arc::new(backend));
+            let smoke = embedder
+                .embed_one("hippocampus semantic recall smoke probe")
+                .map_err(|error| format!("embedding model prediction failed: {error}"))?;
+            let norm = smoke.iter().map(|value| value * value).sum::<f32>().sqrt();
+            if smoke.len() != 384 || !norm.is_finite() || (norm - 1.0).abs() >= 1e-2 {
+                return Err(format!(
+                    "embedding model smoke vector invalid: dim={} norm={norm:.4}",
+                    smoke.len()
+                ));
+            }
+            Ok(Arc::new(embedder))
+        })
+        .transpose()?;
+
+    #[cfg(not(target_os = "macos"))]
+    if model_path.is_some() {
+        return Err("model-backed recall is available only on macOS".into());
+    }
+
+    let blob_dir = brain_path
+        .parent()
+        .map_or_else(|| PathBuf::from("blobs"), |parent| parent.join("blobs"));
+    let run_lock_path = mutation_run_lock_path(&brain_path);
+    Ok(Handle {
+        store: Arc::new(store),
+        #[cfg(target_os = "macos")]
+        query_embedder,
+        blob_dir,
+        brain_path,
+        run_lock_path,
+        db_key: key.clone(),
+        pending_wipe: Mutex::new(None),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -431,48 +496,63 @@ pub unsafe extern "C" fn mci_brain_ffi_open(
         return ptr::null_mut();
     };
 
-    let key_bytes = match decode_hex_key(key_str) {
-        Ok(b) => b,
+    let handle = match open_handle(path_str, key_str, None) {
+        Ok(handle) => handle,
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_open: {e}"));
             return ptr::null_mut();
         }
     };
-    let key = DbKey::from_bytes(key_bytes);
-
-    let p = PathBuf::from(path_str);
-    let store = match SqlCipherBrainStore::open_readonly(&p, &key) {
-        Ok(s) => s,
-        Err(e) => {
-            set_last_error(&format!("mci_brain_ffi_open: {e}"));
-            return ptr::null_mut();
-        }
-    };
-
     clear_last_error();
-    // Blob dir convention (P3.6.5, KeyframeBlobWriter): sibling `blobs/`
-    // directory next to the brain file. `~/Library/Application Support/MCI/mci.sqlite`
-    // → `~/Library/Application Support/MCI/blobs/`. If the brain path has
-    // no parent (`/mci.sqlite`), fall back to `./blobs` — surfacing this
-    // as an error would gratuitously fail brain open for a corner case
-    // that never arises in production (the launch path always writes the
-    // brain into Application Support).
-    let blob_dir = p
-        .parent()
-        .map_or_else(|| PathBuf::from("blobs"), |parent| parent.join("blobs"));
-    // Retain a clone of the DbKey so the mutation entry points can open
-    // a transient writer. `DbKey: Clone` copies the 32-byte buffer; both
-    // clones zeroize on drop.
-    let db_key = key.clone();
-    let h = Box::new(Handle {
-        store: Arc::new(store),
-        blob_dir,
-        run_lock_path: mutation_run_lock_path(&p),
-        brain_path: p,
-        db_key,
-        pending_wipe: Mutex::new(None),
-    });
-    Box::into_raw(h)
+    Box::into_raw(Box::new(handle))
+}
+
+/// Open a read-only brain and a query-side Core ML embedding model.
+///
+/// Unlike [`mci_brain_ffi_open`], this function is strict about the model:
+/// a missing, incompatible, or non-predicting model returns null with a useful
+/// diagnostic. Callers that want graceful lexical fallback can retry through
+/// the compatibility open without weakening access to the encrypted brain.
+///
+/// # Safety
+///
+/// All three pointers must be non-null, null-terminated UTF-8 C strings and
+/// remain valid for this call. The pointers are borrowed only until return.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_open_with_model(
+    path: *const c_char,
+    key_hex: *const c_char,
+    model_path: *const c_char,
+) -> *mut Handle {
+    if path.is_null() || key_hex.is_null() || model_path.is_null() {
+        set_last_error("mci_brain_ffi_open_with_model: null pointer argument");
+        return ptr::null_mut();
+    }
+    let Ok(path_str) = unsafe { CStr::from_ptr(path) }.to_str() else {
+        set_last_error("mci_brain_ffi_open_with_model: non-UTF8 path");
+        return ptr::null_mut();
+    };
+    let Ok(key_str) = unsafe { CStr::from_ptr(key_hex) }.to_str() else {
+        set_last_error("mci_brain_ffi_open_with_model: non-UTF8 key_hex");
+        return ptr::null_mut();
+    };
+    let Ok(model_str) = unsafe { CStr::from_ptr(model_path) }.to_str() else {
+        set_last_error("mci_brain_ffi_open_with_model: non-UTF8 model path");
+        return ptr::null_mut();
+    };
+    if model_str.is_empty() {
+        set_last_error("mci_brain_ffi_open_with_model: empty model path");
+        return ptr::null_mut();
+    }
+    let handle = match open_handle(path_str, key_str, Some(Path::new(model_str))) {
+        Ok(handle) => handle,
+        Err(error) => {
+            set_last_error(&format!("mci_brain_ffi_open_with_model: {error}"));
+            return ptr::null_mut();
+        }
+    };
+    clear_last_error();
+    Box::into_raw(Box::new(handle))
 }
 
 /// Close a handle previously returned by [`mci_brain_ffi_open`].
@@ -498,11 +578,12 @@ pub unsafe extern "C" fn mci_brain_ffi_close(h: *mut Handle) {
 /// rows. Allocated by Rust — caller MUST pass the returned pointer back
 /// to [`mci_brain_ffi_string_free`].
 ///
-/// P3.9b uses lexical FTS5 only (`source: "lexical"`); the full
-/// `HybridRetriever` (P3.7) needs an `Embedder` backed by the bundled
-/// arctic-embed-s `.mlpackage`, which is the P3.3 Core ML adapter's
-/// payload. When that lands, this function swaps to `HybridRetriever`
-/// with a one-line ctor change and the `source` tag flips to `"hybrid"`.
+/// Handles created by [`mci_brain_ffi_open_with_model`] use the same
+/// [`HybridRetriever`] as the MCP agent with a query-side Arctic Embed S
+/// Core ML embedder. Compatibility handles created by
+/// [`mci_brain_ffi_open`] use lexical FTS5 only. The `source` field reports
+/// the actual route and never upgrades unverified related context to a
+/// verified match.
 ///
 /// Returns null on input-parse failure or unexpected internal error;
 /// [`mci_brain_ffi_last_error_message`] carries the diagnostic.
@@ -555,54 +636,158 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
     // `expand_query_with_user_aliases` for the expansion rules.
     let expanded = expand_query_with_user_aliases(&query.text, &query.user_aliases);
 
-    // P3.9b: FTS5-only lexical search. See module docs for the HybridRetriever
-    // swap point (P3.3 Core ML embedder needs to land first).
-    let hits_raw = match handle.store.fts5_search(&expanded, limit) {
-        Ok(v) => v,
-        Err(e) => {
-            set_last_error(&format!("mci_brain_ffi_search: fts5_search: {e}"));
-            return ptr::null_mut();
-        }
-    };
+    #[cfg(target_os = "macos")]
+    if handle.query_embedder.is_some() {
+        return match search_hybrid(handle, &query, limit) {
+            Ok(hits) => json_to_c_string(&hits),
+            Err(error) => {
+                set_last_error(&format!("mci_brain_ffi_search: {error}"));
+                ptr::null_mut()
+            }
+        };
+    }
 
-    let mut hits_json: Vec<HitJson> = Vec::with_capacity(hits_raw.len());
-    for (event_id, score) in hits_raw {
-        match handle.store.get_event(event_id) {
-            Ok(Some(ev)) => {
-                if !passes_filters(
-                    ev.ts_us,
-                    ev.app_bundle_id.as_deref(),
-                    query.time_from_us,
-                    query.time_to_us,
-                    query.app_filter.as_deref(),
-                ) {
-                    continue;
-                }
-                let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
-                let thumbnail_path =
-                    thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
-                hits_json.push(HitJson {
-                    event_id: event_id.0,
-                    ts_us: ev.ts_us,
-                    app_bundle_id: ev.app_bundle_id,
-                    window_title: ev.window_title,
-                    url: ev.url,
-                    ocr_text_snippet: snippet(&ev.text),
-                    source: "lexical".into(),
-                    score: Some(score),
-                    entities,
-                    linked_event_ids,
-                    thumbnail_path,
-                });
-            }
-            Ok(None) => {}
-            Err(e) => {
-                set_last_error(&format!("mci_brain_ffi_search: get_event: {e}"));
-                return ptr::null_mut();
-            }
+    match search_lexical(handle, &query, &expanded, limit) {
+        Ok(hits) => json_to_c_string(&hits),
+        Err(error) => {
+            set_last_error(&format!("mci_brain_ffi_search: {error}"));
+            ptr::null_mut()
         }
     }
-    json_to_c_string(&hits_json)
+}
+
+fn search_lexical(
+    handle: &Handle,
+    query: &QueryJson,
+    expanded: &str,
+    limit: usize,
+) -> Result<Vec<HitJson>, String> {
+    let hits_raw = handle
+        .store
+        .fts5_search(expanded, limit)
+        .map_err(|error| format!("fts5_search: {error}"))?;
+    let mut hits_json = Vec::with_capacity(hits_raw.len());
+    for (event_id, score) in hits_raw {
+        let Some(event) = handle
+            .store
+            .get_event(event_id)
+            .map_err(|error| format!("get_event: {error}"))?
+        else {
+            continue;
+        };
+        if !passes_filters(
+            event.ts_us,
+            event.app_bundle_id.as_deref(),
+            query.time_from_us,
+            query.time_to_us,
+            query.app_filter.as_deref(),
+        ) {
+            continue;
+        }
+        hits_json.push(hit_json(handle, event_id, event, "lexical", Some(score)));
+    }
+    Ok(hits_json)
+}
+
+#[cfg(target_os = "macos")]
+fn search_hybrid(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec<HitJson>, String> {
+    let embedder = handle
+        .query_embedder
+        .as_ref()
+        .ok_or_else(|| "hybrid search requested without an embedding model".to_string())?;
+    #[allow(clippy::cast_possible_truncation)]
+    let now_us = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
+    let time_filter = match (query.time_from_us, query.time_to_us) {
+        (None, None) => None,
+        (from, to) => Some(TimeRange {
+            from_us: from.unwrap_or(0),
+            to_us: to.unwrap_or(u64::MAX),
+        }),
+    };
+    let retrieval_query = RetrievalQuery {
+        text: query.text.clone(),
+        limit,
+        time_filter,
+        app_filter: query.app_filter.clone(),
+    };
+    let retriever = HybridRetriever::new(Arc::clone(&handle.store), Arc::clone(embedder), now_us);
+    let outcome = retriever
+        .retrieve_outcome(&retrieval_query)
+        .map_err(|error| format!("hybrid retrieve: {error}"))?;
+    let (matches, source) = match outcome {
+        RetrievalOutcome::Matched { matches } => (matches, "hybrid"),
+        RetrievalOutcome::Contradicted { matches } => (matches, "hybrid-conflict"),
+        RetrievalOutcome::NothingMatched { .. } => return Ok(Vec::new()),
+        RetrievalOutcome::Degraded {
+            degradation,
+            fallback_matches,
+        } => {
+            let source = match degradation {
+                RetrievalDegradation::EmbeddingsUnavailable => "lexical",
+                RetrievalDegradation::LexicalUnavailable => "semantic-related",
+                RetrievalDegradation::LexicalAndEmbeddingsUnavailable => return Ok(Vec::new()),
+                RetrievalDegradation::EvidenceSufficiencyUnqualified
+                | RetrievalDegradation::EvidenceVerifierUnavailable => "hybrid-related",
+            };
+            (fallback_matches, source)
+        }
+    };
+    materialize_retrieval_matches(handle, matches, source, limit)
+}
+
+#[cfg(target_os = "macos")]
+fn materialize_retrieval_matches(
+    handle: &Handle,
+    matches: Vec<RetrievalMatch>,
+    source: &str,
+    limit: usize,
+) -> Result<Vec<HitJson>, String> {
+    let mut hits = Vec::with_capacity(matches.len().min(limit));
+    for value in matches.into_iter().take(limit) {
+        let event_id = value.hit.event_id;
+        let Some(event) = handle
+            .store
+            .get_event(event_id)
+            .map_err(|error| format!("get_event: {error}"))?
+        else {
+            continue;
+        };
+        hits.push(hit_json(
+            handle,
+            event_id,
+            event,
+            source,
+            Some(value.hit.score_combined),
+        ));
+    }
+    Ok(hits)
+}
+
+fn hit_json(
+    handle: &Handle,
+    event_id: EventId,
+    event: mci_brain::Event,
+    source: &str,
+    score: Option<f32>,
+) -> HitJson {
+    let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
+    let thumbnail_path = thumbnail_path_for(&handle.blob_dir, event.keyframe_blob.as_deref());
+    HitJson {
+        event_id: event_id.0,
+        ts_us: event.ts_us,
+        app_bundle_id: event.app_bundle_id,
+        window_title: event.window_title,
+        url: event.url,
+        ocr_text_snippet: snippet(&event.text),
+        source: source.into(),
+        score,
+        entities,
+        linked_event_ids,
+        thumbnail_path,
+    }
 }
 
 /// Fetch the N most recent events for the plain timeline view. Returns

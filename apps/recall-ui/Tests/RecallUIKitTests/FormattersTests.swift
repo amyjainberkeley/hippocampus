@@ -113,6 +113,8 @@ final class FormattersTests: XCTestCase {
     func testSourceTagMapping() {
         XCTAssertEqual(Formatters.sourceTag("lexical"), "lex")
         XCTAssertEqual(Formatters.sourceTag("hybrid"), "hyb")
+        XCTAssertEqual(Formatters.sourceTag("hybrid-related"), "related")
+        XCTAssertEqual(Formatters.sourceTag("hybrid-conflict"), "conflict")
         XCTAssertEqual(Formatters.sourceTag("timeline"), "time")
         XCTAssertEqual(Formatters.sourceTag("custom"), "custom")
     }
@@ -125,6 +127,11 @@ final class FormattersTests: XCTestCase {
 
     func testMatchReasonMapsHybridToPlainEnglish() {
         XCTAssertEqual(Formatters.matchReason("hybrid"), "Matched: meaning")
+    }
+
+    func testMatchReasonKeepsUnverifiedHybridResultsHonest() {
+        XCTAssertEqual(Formatters.matchReason("hybrid-related"), "Related by meaning")
+        XCTAssertEqual(Formatters.matchReason("hybrid-conflict"), "Conflicting evidence")
     }
 
     func testMatchReasonTimelineIsNil() {

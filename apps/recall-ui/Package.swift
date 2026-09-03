@@ -1,25 +1,17 @@
 // swift-tools-version: 6.0
 //
-// MCI recall-ui — SwiftUI macOS app, Phase 3 P3.9 (ADR-0016 §6).
+// MCI recall-ui — SwiftUI macOS app (ADR-0016 §6).
 //
-// Read-only consumer of the Phase-3 brain. The app NEVER writes to the
-// brain — it links the C-ABI FFI shim at `adapters/macos/mci-brain-ffi/`
-// which opens the SQLCipher connection with `SQLITE_OPEN_READ_ONLY`.
+// Recall and timeline are read-only consumers of the brain. The app links the
+// C-ABI FFI shim at `adapters/macos/mci-brain-ffi/`, which opens query handles
+// with `SQLITE_OPEN_READ_ONLY`. Explicit Privacy Dashboard delete/wipe actions
+// are the only enumerated write escape hatch.
 //
-// # P3.9 sequence
-//
-// - P3.9a (PR #78): SwiftUI app + view models + `BrainReader` protocol with
-//   a Swift-side `StubBrainReader` (canned demo data) so the views had
-//   something to render and the unit tests ran headlessly. The FFI shim
-//   was scaffolded with stub bodies; the Swift side never linked it.
-//
-// - **P3.9b (this PR)**: FFI bodies wired to the real read-only
-//   `SqlCipherBrainStore` + FTS5 search. New `CMciBrainFFI` system-library
-//   target wraps the canonical C header so Swift can `import CMciBrainFFI`;
-//   new `FFIBrainReader` Swift type adapts the C ABI to the `BrainReader`
-//   protocol; the executable target wires `FFIBrainReader` against
-//   `~/Library/Application Support/MCI/mci.sqlite` using the bundled
-//   executable's file-Keychain ACL and content-free service/account reference.
+// `CMciBrainFFI` wraps the canonical C header. `FFIBrainReader` opens the
+// user's brain with the content-free Keychain reference and uses the bundled
+// Arctic Embed S Core ML model for hybrid recall. If the model cannot load,
+// launch falls back to the compatibility lexical path without weakening the
+// read-only boundary.
 //
 // # Build precondition
 //
@@ -98,6 +90,7 @@ let package = Package(
                     ["-L.build/mci-brain-ffi/release"],
                     .when(configuration: .release)
                 ),
+                .linkedFramework("CoreML"),
                 .linkedFramework("Security"),
             ]
         ),

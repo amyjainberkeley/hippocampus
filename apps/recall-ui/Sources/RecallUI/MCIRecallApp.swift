@@ -122,6 +122,20 @@ struct MCIRecallApp: App {
             let keyHex = try DevelopmentDatabaseKeyMaterial.hex(from: environment)
                 ?? KeychainDatabaseKeyResolver().resolveHex(reference: reference)
             let path = environment["MCI_DB_PATH"] ?? defaultBrainPath()
+            if let modelPath = embeddingModelPath(environment: environment) {
+                do {
+                    return try FFIBrainReader(
+                        path: path,
+                        keyHex: keyHex,
+                        modelPath: modelPath
+                    )
+                } catch {
+                    NSLog(
+                        "MCI: semantic Recall unavailable; retrying lexical mode: %@",
+                        error.localizedDescription
+                    )
+                }
+            }
             return try FFIBrainReader(path: path, keyHex: keyHex)
         } catch {
             let message = "Recall cannot open the encrypted brain: \(error.localizedDescription)"
@@ -139,6 +153,17 @@ struct MCIRecallApp: App {
         ).first ?? NSTemporaryDirectory()
         return (supportDir as NSString)
             .appendingPathComponent("MCI/mci.sqlite")
+    }
+
+    private static func embeddingModelPath(environment: [String: String]) -> String? {
+        if let configured = environment["MCI_ARCTIC_MODEL_PATH"], !configured.isEmpty {
+            return configured
+        }
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        let bundled = resources
+            .appendingPathComponent("Models", isDirectory: true)
+            .appendingPathComponent("ArcticEmbedS_INT8.mlmodelc", isDirectory: true)
+        return FileManager.default.fileExists(atPath: bundled.path) ? bundled.path : nil
     }
 }
 
