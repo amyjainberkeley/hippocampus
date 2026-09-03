@@ -582,9 +582,15 @@ if [[ ! -f "$BACKGROUND_PNG" ]]; then
     fi
 fi
 
-# Legal artifacts were verified against their source before any release work.
+# The legal artifact was verified against its source before any release work.
+# Modern macOS no longer supports the old unflatten/Rez/flatten mount-time SLA
+# flow, so ship the canonical terms as a visible document in the image.
 EULA_RTF="$INSTALLER_ASSETS/EULA.rtf"
-SLA_R="$INSTALLER_ASSETS/sla.r"
+if [[ ! -f "$EULA_RTF" ]]; then
+    echo "ERROR: Generated license is missing: $EULA_RTF" >&2
+    exit 1
+fi
+cp "$EULA_RTF" "$DMG_STAGING/License.rtf"
 
 # Create .background directory (hidden in DMG)
 if [[ -f "$BACKGROUND_PNG" ]]; then
@@ -594,6 +600,7 @@ fi
 
 echo "  Hippocampus.app -> staging/"
 echo "  Applications symlink -> staging/"
+echo "  License.rtf -> staging/"
 
 # --- Step 4: Create temporary read-write DMG ---
 
@@ -726,32 +733,6 @@ hdiutil convert \
 
 rm -f "$TEMP_DMG"
 TEMP_DMG=""
-
-# --- Step 6.5: Attach Software License Agreement ---
-
-SLA_R="$INSTALLER_ASSETS/sla.r"
-if [[ -f "$SLA_R" ]]; then
-    if command -v Rez &>/dev/null; then
-        echo ""
-        echo "--- Attaching Software License Agreement ---"
-        if hdiutil unflatten "$FINAL_DMG" 2>/dev/null; then
-            if Rez -append "$SLA_R" -o "$FINAL_DMG" 2>/dev/null; then
-                hdiutil flatten "$FINAL_DMG" 2>/dev/null
-                echo "  SLA attached (license shown on DMG mount)."
-            else
-                echo "WARNING: Rez failed — SLA not attached (non-fatal)."
-                echo "         EULA available at hippocampus.ai/legal"
-                hdiutil flatten "$FINAL_DMG" 2>/dev/null || true
-            fi
-        else
-            echo "WARNING: hdiutil unflatten failed — SLA not attached (non-fatal)."
-        fi
-    else
-        echo ""
-        echo "NOTE: Rez not found — skipping SLA attachment."
-        echo "      Install Xcode Command Line Tools for SLA support."
-    fi
-fi
 
 # --- Step 7: Sign the outer disk image ---
 

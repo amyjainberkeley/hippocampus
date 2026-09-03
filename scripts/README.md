@@ -85,13 +85,13 @@ dist/Hippocampus-0.1.0.dmg.sha256  # SHA-256 checksum sidecar
 
 ### Regenerating installer assets
 
-The DMG background, EULA, and SLA resources are generated from source files. Committed versions are ready to use; regenerate only when sources change.
+The DMG background and EULA are generated from source files. Committed versions are ready to use; regenerate only when sources change.
 
 ```bash
 # Background (1280x800 Retina PNG from the canonical light brand system)
 python3 assets/installer/generate-background.py
 
-# EULA.rtf + sla.r (from docs/legal/terms-of-service.md)
+# EULA.rtf (from docs/legal/terms-of-service.md)
 python3 assets/installer/generate-eula.py
 
 # Volume icon mirror (the build verifies it against the canonical icon)
@@ -107,16 +107,15 @@ Both generators are pure Python stdlib (no Pillow, no external deps). The build 
 |---|---|---|
 | `assets/installer/background.png` | `assets/branding/colors.json` + layered-memory mark | `generate-background.py` |
 | `assets/installer/EULA.rtf` | `docs/legal/terms-of-service.md` | `generate-eula.py` |
-| `assets/installer/sla.r` | `docs/legal/terms-of-service.md` | `generate-eula.py` |
 | `assets/installer/volume-icon.icns` | `assets/branding/AppIcon.icns` | verified mirror; the build stages the canonical file directly |
 
 ### What the DMG contains
 
 - `Hippocampus.app` — the application bundle
 - `Applications` symlink — drag-target for installation
+- `License.rtf` — the canonical software license terms
 - `.background/background.png` — branded Finder background (hidden, 1280x800 Retina)
 - `.VolumeIcon.icns` — volume icon (hidden)
-- Software License Agreement — displayed on mount if SLA resources attached (requires Rez)
 
 ### Installing from the DMG
 

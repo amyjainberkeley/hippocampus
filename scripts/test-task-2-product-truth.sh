@@ -6,7 +6,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 GENERATOR="$REPO_ROOT/assets/installer/generate-eula.py"
 SOURCE="$REPO_ROOT/docs/legal/terms-of-service.md"
 EULA="$REPO_ROOT/assets/installer/EULA.rtf"
-SLA="$REPO_ROOT/assets/installer/sla.r"
 INSTALLER="$REPO_ROOT/scripts/build-installer.sh"
 PREFERENCES_STORE="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift"
 PREFERENCES_WINDOW="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
@@ -36,6 +35,11 @@ fi
 rg -Fq 'Deleted memories are removed as database rows and local storage is compacted.' \
     "$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift"
 rg -Fq 'python3 "$GENERATE_EULA" --check' "$INSTALLER"
+rg -Fq 'cp "$EULA_RTF" "$DMG_STAGING/License.rtf"' "$INSTALLER"
+if rg -q 'hdiutil (unflatten|flatten)|Rez -append' "$INSTALLER"; then
+    echo "FAIL: installer still uses the removed legacy DMG SLA resource flow" >&2
+    exit 1
+fi
 rg -Fq '.appendingPathComponent("MCI")' "$PREFERENCES_STORE"
 rg -Fq '.appendingPathComponent("retention.json")' "$PREFERENCES_STORE"
 rg -Fq 'replaceItemAt(' "$PREFERENCES_STORE"
@@ -79,7 +83,7 @@ for prohibited in \
     'sqlite[[:space:]-]*vec' \
     'no[[:space:]]+third[[:space:]]+party[[:space:]]+can[[:space:]]+decrypt'; do
     if rg -i -q -- "$prohibited" \
-        "$SOURCE" "$EULA" "$SLA" \
+        "$SOURCE" "$EULA" \
         "$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift" \
         "$REPO_ROOT/apps/agent/src/bin/mci_seed_brain.rs" \
         "$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift" \
@@ -92,7 +96,7 @@ done
 FIXTURE="$(mktemp -d -t hippocampus-legal-contract)"
 trap 'rm -rf "$FIXTURE"' EXIT
 mkdir -p "$FIXTURE/assets/installer" "$FIXTURE/docs/legal"
-cp "$GENERATOR" "$EULA" "$SLA" "$FIXTURE/assets/installer/"
+cp "$GENERATOR" "$EULA" "$FIXTURE/assets/installer/"
 cp "$SOURCE" "$FIXTURE/docs/legal/"
 
 printf '\nDRIFT\n' >>"$FIXTURE/assets/installer/EULA.rtf"
