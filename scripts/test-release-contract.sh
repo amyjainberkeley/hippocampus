@@ -248,7 +248,7 @@ require_pattern "$CHECK" 'retention-policy-contract\|bash\|test\|scripts/test-re
     'the unified local gate runs the picker-to-worker retention contract'
 require_pattern "$CHECK" 'clean-home-contract\|bash\|lint\|scripts/test-e2e-clean-home-contract\.sh' \
     'the unified local gate enforces the clean-home product contract'
-require_pattern "$CHECK" 'swift-test-hippocampus\|swift\|test\|swift test --package-path apps/hippocampus' \
+require_pattern "$CHECK" 'swift-test-hippocampus\|swift\|test\|scripts/swift-package\.sh test --package-path apps/hippocampus' \
     'the unified local gate runs the app supervisor and capture-consent tests'
 require_literal "$SWIFT_CI" 'swift test --package-path apps/hippocampus' \
     'Swift CI runs the Hippocampus app tests'
