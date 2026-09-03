@@ -53,7 +53,7 @@ public enum SCStreamConfigFactory {
         let cfg = SCStreamConfiguration()
         cfg.showsCursor = policy.showsCursor // MUST be false (SLO).
         cfg.queueDepth = policy.queueDepth
-        // 5 fps default → minimumFrameInterval = 1/5 s. CMTime with a
+        // 2 fps default -> minimumFrameInterval = 1/2 s. CMTime with a
         // 1000-tick timescale keeps the ms policy exact.
         cfg.minimumFrameInterval = CMTime(
             value: CMTimeValue(policy.minimumFrameIntervalMs),
