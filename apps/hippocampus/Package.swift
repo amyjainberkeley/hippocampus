@@ -67,7 +67,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HippocampusKitTests",
-            dependencies: ["HippocampusKit"],
+            dependencies: [
+                "HippocampusKit",
+                .product(name: "TOMLKit", package: "TOMLKit"),
+            ],
             path: "Tests/HippocampusKitTests",
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),

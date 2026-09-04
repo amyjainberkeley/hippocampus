@@ -1,14 +1,16 @@
+#![cfg(debug_assertions)]
+
 use std::fs::OpenOptions;
 use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::{symlink, FileExt as _, MetadataExt};
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Barrier};
 
 use mci_agent::client_registry::{
-    ClientRegistration, ClientRegistry, RegistrationChange, RegistrationErrorKind,
-    RegistrationRepair, RegistrationStatus,
+    ClientRegistration, ClientRegistry, ClientRegistryDebugEvent, RegistrationChange,
+    RegistrationErrorKind, RegistrationRepair, RegistrationStatus,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -364,30 +366,25 @@ fn repair_detects_same_byte_inode_replacement_before_atomic_replace() {
     std::fs::write(&config, &original).unwrap();
     let replacement = codex_home.join("same-byte-replacement.toml");
     std::fs::write(&replacement, &original).unwrap();
-    let watched_home = codex_home.clone();
-    let watched_config = config.clone();
-    let replacer = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline {
-            let temp_exists = std::fs::read_dir(&watched_home).unwrap().any(|entry| {
-                entry
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".config.toml.tmp-")
-            });
-            if temp_exists {
-                std::fs::rename(&replacement, &watched_config).unwrap();
-                return std::fs::metadata(&watched_config).unwrap().ino();
+    let ready = Arc::new(Barrier::new(2));
+    let resume = Arc::new(Barrier::new(2));
+    let ready_hook = Arc::clone(&ready);
+    let resume_hook = Arc::clone(&resume);
+    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home))
+        .with_debug_hook(Arc::new(move |event| {
+            if event == ClientRegistryDebugEvent::BeforeAtomicReplace {
+                ready_hook.wait();
+                resume_hook.wait();
             }
-            std::thread::yield_now();
-        }
-        panic!("repair never exposed its atomic-replace temp file");
-    });
-    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home));
+        }));
+    let brain = home.join("brain.sqlite");
+    let repairer = std::thread::spawn(move || registry.repair_existing_registrations(&brain));
 
-    let report = registry.repair_existing_registrations(&home.join("brain.sqlite"));
-    let replacement_inode = replacer.join().unwrap();
+    ready.wait();
+    std::fs::rename(&replacement, &config).unwrap();
+    let replacement_inode = std::fs::metadata(&config).unwrap().ino();
+    resume.wait();
+    let report = repairer.join().unwrap();
 
     assert_eq!(
         report.codex.unwrap_err().kind,
@@ -416,30 +413,24 @@ fn repair_preserves_concurrent_symlink_replacement_and_reports_concurrent_change
     std::fs::write(&alternate, &original).unwrap();
     let replacement = codex_home.join("concurrent-link.toml");
     symlink(Path::new("concurrent-config.toml"), &replacement).unwrap();
-    let watched_home = codex_home.clone();
-    let watched_config = config.clone();
-    let replacer = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline {
-            let temp_exists = std::fs::read_dir(&watched_home).unwrap().any(|entry| {
-                entry
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".config.toml.tmp-")
-            });
-            if temp_exists {
-                std::fs::rename(&replacement, &watched_config).unwrap();
-                return;
+    let ready = Arc::new(Barrier::new(2));
+    let resume = Arc::new(Barrier::new(2));
+    let ready_hook = Arc::clone(&ready);
+    let resume_hook = Arc::clone(&resume);
+    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home))
+        .with_debug_hook(Arc::new(move |event| {
+            if event == ClientRegistryDebugEvent::BeforeAtomicReplace {
+                ready_hook.wait();
+                resume_hook.wait();
             }
-            std::thread::yield_now();
-        }
-        panic!("repair never exposed its atomic-replace temp file");
-    });
-    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home));
+        }));
+    let brain = home.join("brain.sqlite");
+    let repairer = std::thread::spawn(move || registry.repair_existing_registrations(&brain));
 
-    let report = registry.repair_existing_registrations(&home.join("brain.sqlite"));
-    replacer.join().unwrap();
+    ready.wait();
+    std::fs::rename(&replacement, &config).unwrap();
+    resume.wait();
+    let report = repairer.join().unwrap();
 
     assert_eq!(
         report.codex.unwrap_err().kind,
@@ -505,32 +496,27 @@ fn repair_detects_logical_symlink_chain_retarget_during_atomic_prepare() {
     symlink(Path::new("old-claude.json"), &intermediate).unwrap();
     let config = home.join(".claude.json");
     symlink(Path::new("dotfiles/current-claude.json"), &config).unwrap();
-    let watched_home = dotfiles.clone();
-    let watched_intermediate = intermediate.clone();
-    let retargeter = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline {
-            let temp_exists = std::fs::read_dir(&watched_home).unwrap().any(|entry| {
-                entry
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".old-claude.json.tmp-")
-            });
-            if temp_exists {
-                let replacement = watched_home.join("retargeted-link");
-                symlink(Path::new("new-claude.json"), &replacement).unwrap();
-                std::fs::rename(replacement, watched_intermediate).unwrap();
-                return;
+    let ready = Arc::new(Barrier::new(2));
+    let resume = Arc::new(Barrier::new(2));
+    let ready_hook = Arc::clone(&ready);
+    let resume_hook = Arc::clone(&resume);
+    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, None).with_debug_hook(
+        Arc::new(move |event| {
+            if event == ClientRegistryDebugEvent::BeforeAtomicReplace {
+                ready_hook.wait();
+                resume_hook.wait();
             }
-            std::thread::yield_now();
-        }
-        panic!("repair never exposed its atomic-replace temp file");
-    });
+        }),
+    );
+    let brain = home.join("brain.sqlite");
+    let repairer = std::thread::spawn(move || registry.repair_existing_registrations(&brain));
 
-    let report =
-        registry(home, &agent, None).repair_existing_registrations(&home.join("brain.sqlite"));
-    retargeter.join().unwrap();
+    ready.wait();
+    let replacement = dotfiles.join("retargeted-link");
+    symlink(Path::new("new-claude.json"), &replacement).unwrap();
+    std::fs::rename(replacement, &intermediate).unwrap();
+    resume.wait();
+    let report = repairer.join().unwrap();
 
     assert_eq!(
         report.claude.unwrap_err().kind,
@@ -570,33 +556,26 @@ fn repair_detects_parent_symlink_chain_retarget_without_leaving_transaction_resi
     symlink(Path::new("old"), &current).unwrap();
     let codex_home = home.join("codex-home");
     symlink(Path::new("roots/current"), &codex_home).unwrap();
-    let watched_old_home = old_home.clone();
-    let watched_roots = roots.clone();
-    let watched_current = current.clone();
-    let retargeter = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline {
-            let temp_exists = std::fs::read_dir(&watched_old_home).unwrap().any(|entry| {
-                entry
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".config.toml.tmp-")
-            });
-            if temp_exists {
-                let replacement = watched_roots.join("retargeted-current");
-                symlink(Path::new("new"), &replacement).unwrap();
-                std::fs::rename(replacement, watched_current).unwrap();
-                return;
+    let ready = Arc::new(Barrier::new(2));
+    let resume = Arc::new(Barrier::new(2));
+    let ready_hook = Arc::clone(&ready);
+    let resume_hook = Arc::clone(&resume);
+    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home))
+        .with_debug_hook(Arc::new(move |event| {
+            if event == ClientRegistryDebugEvent::BeforeAtomicReplace {
+                ready_hook.wait();
+                resume_hook.wait();
             }
-            std::thread::yield_now();
-        }
-        panic!("repair never exposed its atomic-replace temp file");
-    });
-    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home));
+        }));
+    let brain = home.join("brain.sqlite");
+    let repairer = std::thread::spawn(move || registry.repair_existing_registrations(&brain));
 
-    let report = registry.repair_existing_registrations(&home.join("brain.sqlite"));
-    retargeter.join().unwrap();
+    ready.wait();
+    let replacement = roots.join("retargeted-current");
+    symlink(Path::new("new"), &replacement).unwrap();
+    std::fs::rename(replacement, &current).unwrap();
+    resume.wait();
+    let report = repairer.join().unwrap();
 
     assert_eq!(
         report.codex.unwrap_err().kind,
@@ -627,25 +606,26 @@ fn repair_rolls_back_when_retained_original_descriptor_changes_after_exchange() 
     )
     .into_bytes();
     std::fs::write(&config, &original).unwrap();
-    let original_inode = std::fs::metadata(&config).unwrap().ino();
     let retained = OpenOptions::new().write(true).open(&config).unwrap();
-    let watched_config = config.clone();
-    let writer = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while Instant::now() < deadline {
-            if std::fs::metadata(&watched_config).unwrap().ino() != original_inode {
-                retained.write_all_at(b"b", 12).unwrap();
-                retained.sync_all().unwrap();
-                return;
+    let ready = Arc::new(Barrier::new(2));
+    let resume = Arc::new(Barrier::new(2));
+    let ready_hook = Arc::clone(&ready);
+    let resume_hook = Arc::clone(&resume);
+    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home))
+        .with_debug_hook(Arc::new(move |event| {
+            if event == ClientRegistryDebugEvent::AfterAtomicExchange {
+                ready_hook.wait();
+                resume_hook.wait();
             }
-            std::thread::yield_now();
-        }
-        panic!("repair never exchanged the original config");
-    });
-    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home));
+        }));
+    let brain = home.join("brain.sqlite");
+    let repairer = std::thread::spawn(move || registry.repair_existing_registrations(&brain));
 
-    let report = registry.repair_existing_registrations(&home.join("brain.sqlite"));
-    writer.join().unwrap();
+    ready.wait();
+    retained.write_all_at(b"b", 12).unwrap();
+    retained.sync_all().unwrap();
+    resume.wait();
+    let report = repairer.join().unwrap();
 
     assert_eq!(
         report.codex.unwrap_err().kind,
@@ -677,37 +657,37 @@ fn repair_rolls_back_when_displaced_original_gains_a_hard_link() {
     std::fs::write(&config, &original).unwrap();
     let original_inode = std::fs::metadata(&config).unwrap().ino();
     let leaked_link = codex_home.join("concurrent-original-link.toml");
-    let watched_home = codex_home.clone();
-    let watched_config = config.clone();
-    let watched_link = leaked_link.clone();
-    let linker = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while Instant::now() < deadline {
-            if std::fs::metadata(&watched_config).unwrap().ino() != original_inode {
-                let displaced = std::fs::read_dir(&watched_home)
-                    .unwrap()
-                    .filter_map(Result::ok)
-                    .find(|entry| {
-                        entry
-                            .file_name()
-                            .to_string_lossy()
-                            .starts_with(".config.toml.tmp-")
-                            && entry
-                                .metadata()
-                                .is_ok_and(|metadata| metadata.ino() == original_inode)
-                    })
-                    .expect("displaced original remains named until validation");
-                std::fs::hard_link(displaced.path(), watched_link).unwrap();
-                return;
+    let ready = Arc::new(Barrier::new(2));
+    let resume = Arc::new(Barrier::new(2));
+    let ready_hook = Arc::clone(&ready);
+    let resume_hook = Arc::clone(&resume);
+    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home.clone()))
+        .with_debug_hook(Arc::new(move |event| {
+            if event == ClientRegistryDebugEvent::AfterAtomicExchange {
+                ready_hook.wait();
+                resume_hook.wait();
             }
-            std::thread::yield_now();
-        }
-        panic!("repair never exchanged the original config");
-    });
-    let registry = ClientRegistry::new(home.to_path_buf(), agent, None, Some(codex_home));
+        }));
+    let brain = home.join("brain.sqlite");
+    let repairer = std::thread::spawn(move || registry.repair_existing_registrations(&brain));
 
-    let report = registry.repair_existing_registrations(&home.join("brain.sqlite"));
-    linker.join().unwrap();
+    ready.wait();
+    let displaced = std::fs::read_dir(&codex_home)
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".config.toml.tmp-")
+                && entry
+                    .metadata()
+                    .is_ok_and(|metadata| metadata.ino() == original_inode)
+        })
+        .expect("displaced original remains named until validation");
+    std::fs::hard_link(displaced.path(), &leaked_link).unwrap();
+    resume.wait();
+    let report = repairer.join().unwrap();
 
     assert_eq!(
         report.codex.unwrap_err().kind,

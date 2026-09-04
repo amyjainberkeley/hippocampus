@@ -89,6 +89,9 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
         XCTAssertTrue(vm.canAdvance)
         vm.advance()
+        XCTAssertEqual(vm.currentStep, .primaryHotkey)
+        vm.markHotkeyPracticed()
+        vm.advance()
         XCTAssertEqual(vm.currentStep, .allowlist)
     }
 
@@ -140,7 +143,8 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
     func testCanAdvanceOnOtherSlides() {
         let (vm, _, _) = makeVM(srStatus: .denied)
-        for step in OnboardingStep.allCases where step != .permissions && step != .done {
+        for step in OnboardingStep.allCases
+            where step != .permissions && step != .primaryHotkey && step != .done {
             vm.goTo(step)
             XCTAssertTrue(vm.canAdvance, "Should be able to advance from \(step)")
         }

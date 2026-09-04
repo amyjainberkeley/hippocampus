@@ -126,6 +126,45 @@ final class UserPauseControllerTests: XCTestCase {
         XCTAssertEqual(controller.isPaused, toggles % 2 == 1)
     }
 
+    func testConcurrentToggles_emitSinkTransitionsInStateOrder() {
+        let controller = UserPauseController()
+        let box = SinkBox()
+        let firstSinkEntered = DispatchSemaphore(value: 0)
+        let releaseFirstSink = DispatchSemaphore(value: 0)
+        let secondSinkEntered = DispatchSemaphore(value: 0)
+        controller.addSink { paused in
+            if paused {
+                firstSinkEntered.signal()
+                releaseFirstSink.wait()
+            } else {
+                secondSinkEntered.signal()
+            }
+            box.append(paused)
+        }
+
+        let done = XCTestExpectation(description: "ordered concurrent toggles")
+        done.expectedFulfillmentCount = 2
+        DispatchQueue.global().async {
+            controller.togglePaused()
+            done.fulfill()
+        }
+        XCTAssertEqual(firstSinkEntered.wait(timeout: .now() + 1), .success)
+
+        DispatchQueue.global().async {
+            controller.togglePaused()
+            done.fulfill()
+        }
+        XCTAssertEqual(
+            secondSinkEntered.wait(timeout: .now() + 0.25),
+            .timedOut,
+            "the second transition sink must not overtake the first"
+        )
+
+        releaseFirstSink.signal()
+        wait(for: [done], timeout: 2)
+        XCTAssertEqual(box.snapshot(), [true, false])
+    }
+
     /// Concurrent readers alongside writers — no crashes, no torn
     /// reads. This isn't quite a Sanitizer TSAN check (that runs at
     /// build time with `-sanitize=thread`) but it catches the coarse

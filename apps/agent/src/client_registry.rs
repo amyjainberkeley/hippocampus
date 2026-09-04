@@ -13,6 +13,8 @@ use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::unix::fs::{FileExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(debug_assertions)]
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustix::fs::{flock, renameat_with, FlockOperation, OFlags, RenameFlags, CWD};
@@ -28,6 +30,22 @@ const SERVER_NAME: &str = "hippocampus";
 const KEYCHAIN_SERVICE_ENV: &str = "MCI_DB_KEYCHAIN_SERVICE";
 const EXCHANGE_MARKER_VERSION: u8 = 2;
 const MAX_EXCHANGE_MARKER_BYTES: u64 = 8 * 1024;
+
+#[cfg(debug_assertions)]
+type ClientRegistryDebugHook = Arc<dyn Fn(ClientRegistryDebugEvent) + Send + Sync>;
+#[cfg(not(debug_assertions))]
+type ClientRegistryDebugHook = ();
+
+/// Atomic transaction boundaries exposed only to deterministic debug tests.
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientRegistryDebugEvent {
+    /// The durable temp file and recovery marker exist, before replacement.
+    BeforeAtomicReplace,
+    /// The exchange completed, before post-exchange validation and cleanup.
+    AfterAtomicExchange,
+}
 
 /// Whether one registration changed client configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,13 +152,28 @@ pub struct RepairReport {
 }
 
 /// Paths and client detection used by the registry.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClientRegistry {
     home: PathBuf,
     agent_executable: PathBuf,
     codex_executable: Option<PathBuf>,
     codex_home: Option<PathBuf>,
     claude_detected: bool,
+    #[cfg(debug_assertions)]
+    debug_hook: Option<ClientRegistryDebugHook>,
+}
+
+impl fmt::Debug for ClientRegistry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClientRegistry")
+            .field("home", &self.home)
+            .field("agent_executable", &self.agent_executable)
+            .field("codex_executable", &self.codex_executable)
+            .field("codex_home", &self.codex_home)
+            .field("claude_detected", &self.claude_detected)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ClientRegistry {
@@ -158,7 +191,21 @@ impl ClientRegistry {
             codex_executable,
             codex_home,
             claude_detected: true,
+            #[cfg(debug_assertions)]
+            debug_hook: None,
         }
+    }
+
+    /// Install deterministic transaction synchronization points for tests.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_debug_hook(
+        mut self,
+        hook: Arc<dyn Fn(ClientRegistryDebugEvent) + Send + Sync>,
+    ) -> Self {
+        self.debug_hook = Some(hook);
+        self
     }
 
     /// Discover the current agent, home directory, and installed clients.
@@ -189,6 +236,8 @@ impl ClientRegistry {
             codex_executable,
             codex_home,
             claude_detected,
+            #[cfg(debug_assertions)]
+            debug_hook: None,
         })
     }
 
@@ -270,9 +319,12 @@ impl ClientRegistry {
             return Ok(RegistrationRepair::NotRegistered);
         }
         let desired = self.desired_entry(db_path)?;
-        repair_existing_config(&path, &journal_directory, |bytes| {
-            repair_claude_json(bytes, &desired)
-        })
+        repair_existing_config(
+            &path,
+            &journal_directory,
+            |bytes| repair_claude_json(bytes, &desired),
+            self.debug_hook(),
+        )
     }
 
     fn repair_existing_codex(
@@ -285,9 +337,22 @@ impl ClientRegistry {
             return Ok(RegistrationRepair::NotRegistered);
         }
         let desired = self.desired_entry(db_path)?;
-        repair_existing_config(&path, &journal_directory, |bytes| {
-            repair_codex_toml(bytes, &desired)
-        })
+        repair_existing_config(
+            &path,
+            &journal_directory,
+            |bytes| repair_codex_toml(bytes, &desired),
+            self.debug_hook(),
+        )
+    }
+
+    #[cfg(debug_assertions)]
+    fn debug_hook(&self) -> Option<&ClientRegistryDebugHook> {
+        self.debug_hook.as_ref()
+    }
+
+    #[cfg(not(debug_assertions))]
+    const fn debug_hook(&self) -> Option<&ClientRegistryDebugHook> {
+        None
     }
 
     fn desired_entry(&self, db_path: &Path) -> Result<DesiredEntry, RegistrationError> {
@@ -984,6 +1049,7 @@ where
         &output,
         before.mode(),
         &before,
+        None,
     )?;
     let committed = read_target_snapshot(&resolved.target)?;
     if committed.bytes() != Some(output.as_slice()) {
@@ -1010,6 +1076,7 @@ fn repair_existing_config<F>(
     logical_path: &Path,
     journal_directory: &Path,
     patcher: F,
+    debug_hook: Option<&ClientRegistryDebugHook>,
 ) -> Result<RegistrationRepair, RegistrationError>
 where
     F: Fn(Option<&[u8]>) -> Result<PatchOutcome, RegistrationError>,
@@ -1038,6 +1105,7 @@ where
         &output,
         before.mode(),
         &before,
+        debug_hook,
     )?;
     let committed = read_target_snapshot(&resolved.target)?;
     if committed.bytes() != Some(output.as_slice()) {
@@ -1886,10 +1954,15 @@ fn atomic_replace(
     bytes: &[u8],
     mode: u32,
     expected: &TargetSnapshot,
+    debug_hook: Option<&ClientRegistryDebugHook>,
 ) -> Result<(), RegistrationError> {
     let transaction =
         prepare_exchange_transaction(resolved, journal_directory, bytes, mode, expected)?;
-    let result = commit_exchange_transaction(resolved, expected, &transaction);
+    #[cfg(debug_assertions)]
+    if let Some(hook) = debug_hook {
+        hook(ClientRegistryDebugEvent::BeforeAtomicReplace);
+    }
+    let result = commit_exchange_transaction(resolved, expected, &transaction, debug_hook);
     if result.is_err() {
         cleanup_exchange_transaction(
             &transaction.temp_path,
@@ -1998,6 +2071,7 @@ fn commit_exchange_transaction(
     resolved: &ResolvedConfigTarget,
     expected: &TargetSnapshot,
     transaction: &ExchangeTransaction,
+    debug_hook: Option<&ClientRegistryDebugHook>,
 ) -> Result<(), RegistrationError> {
     let path = &resolved.target;
     if !target_matches_snapshot(path, expected)? {
@@ -2011,6 +2085,12 @@ fn commit_exchange_transaction(
         ));
     }
     exchange_config(path, &transaction.temp_path, expected.exists())?;
+    #[cfg(debug_assertions)]
+    if let Some(hook) = debug_hook {
+        hook(ClientRegistryDebugEvent::AfterAtomicExchange);
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = debug_hook;
     if expected.exists() {
         verify_existing_exchange(resolved, expected, transaction)?;
     } else if !resolution_is_current(resolved)? {

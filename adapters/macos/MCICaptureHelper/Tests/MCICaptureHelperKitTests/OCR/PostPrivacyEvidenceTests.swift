@@ -10,8 +10,8 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         let retainer = CountingRetainer()
         let sink = RecordingSink()
 
-        await drive(
-            result: result(text: "password: private"),
+        await Self.drive(
+            result: Self.result(text: "password: private"),
             sink: sink,
             retainer: retainer
         )
@@ -22,11 +22,11 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         XCTAssertTrue(frames.first.map(isTombstone) == true)
     }
 
-    func testTimedOutOCRNeverInvokesRetentionAndEmitsZeroHash() async {
+    func testTimedOutOCRNeverInvokesRetentionOrPublishesEvidence() async {
         let retainer = CountingRetainer()
         let sink = RecordingSink()
 
-        await drive(
+        await Self.drive(
             result: OCRResult(recognizedLines: [], durationMs: 1_000, timedOut: true),
             sink: sink,
             retainer: retainer
@@ -35,19 +35,19 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         let retainCount = await retainer.retainCount()
         let frames = await sink.frames()
         XCTAssertEqual(retainCount, 0)
-        XCTAssertEqual(frames.first.flatMap(keyframeHash), zeroHash)
+        XCTAssertTrue(frames.isEmpty)
     }
 
     func testFieldOverflowIsValidatedBeforeRetention() async {
         let retainer = CountingRetainer()
         let sink = RecordingSink()
 
-        await drive(
+        await Self.drive(
             context: WorkflowContext(
                 appBundleId: "com.example.app",
                 windowTitle: String(repeating: "w", count: Int(UInt16.max) + 1)
             ),
-            result: result(text: "clean"),
+            result: Self.result(text: "clean"),
             sink: sink,
             retainer: retainer
         )
@@ -66,8 +66,8 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         let retainer = CountingRetainer(retention: KeyframeRetention(sealedBlob: sealed))
         let sink = RecordingSink()
 
-        await drive(
-            result: result(text: "clean"),
+        await Self.drive(
+            result: Self.result(text: "clean"),
             sink: sink,
             retainer: retainer
         )
@@ -88,8 +88,8 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         let retainer = CountingRetainer(retention: KeyframeRetention(sealedBlob: sealed))
         let sink = RecordingSink(failFirstWrite: true)
 
-        await drive(
-            result: result(text: "clean"),
+        await Self.drive(
+            result: Self.result(text: "clean"),
             sink: sink,
             retainer: retainer
         )
@@ -105,10 +105,10 @@ final class PostPrivacyEvidenceTests: XCTestCase {
     func testCancellationNeverInvokesRetentionAndEmitsZeroHash() async {
         let retainer = CountingRetainer()
         let sink = RecordingSink()
-        let task = Task {
+        let task = Task.detached { @Sendable [sink, retainer] in
             withUnsafeCurrentTask { $0?.cancel() }
-            await self.drive(
-                result: self.result(text: "clean"),
+            await Self.drive(
+                result: Self.result(text: "clean"),
                 sink: sink,
                 retainer: retainer
             )
@@ -125,7 +125,7 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         [UInt8](repeating: 0, count: ocrEventKeyframeHashLen)
     }
 
-    private func drive(
+    private static func drive(
         context: WorkflowContext = WorkflowContext(appBundleId: "com.example.app"),
         result: OCRResult,
         sink: any FrameSink,
@@ -135,11 +135,11 @@ final class PostPrivacyEvidenceTests: XCTestCase {
             tsUs: 1,
             context: context,
             result: result,
-            cascade: allowCascade(),
+            cascade: Self.allowCascade(),
             sink: sink,
             sequence: FrameSequence(),
             counters: HelperHealthCounters(),
-            pixelBuffer: makePixelBuffer(),
+            pixelBuffer: Self.makePixelBuffer(),
             keyframeRetainer: retainer,
             evidenceCandidate: KeyframeEvidenceCandidate(
                 captureOrdinal: 1,
@@ -150,7 +150,7 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         )
     }
 
-    private func result(text: String) -> OCRResult {
+    private static func result(text: String) -> OCRResult {
         OCRResult(
             recognizedLines: [OCRLine(text: text, boundingBox: .zero, confidence: 1)],
             durationMs: 1,
@@ -158,7 +158,7 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         )
     }
 
-    private func allowCascade() -> SuppressionCascade {
+    private static func allowCascade() -> SuppressionCascade {
         SuppressionCascade(
             secureEventInput: NoSecureEventInputForEvidence(),
             axSecureSubrole: NonSecureAXForEvidence(),
@@ -168,7 +168,7 @@ final class PostPrivacyEvidenceTests: XCTestCase {
         )
     }
 
-    private func makePixelBuffer() -> CVPixelBuffer {
+    private static func makePixelBuffer() -> CVPixelBuffer {
         var output: CVPixelBuffer?
         let attributes: [CFString: Any] = [
             kCVPixelBufferCGImageCompatibilityKey: true,

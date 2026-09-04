@@ -152,7 +152,7 @@ final class MainSwiftWiringTests: XCTestCase {
         // Positive assertion 2: `main.swift` constructs a `FocusTracker`
         // and passes the store to it. Redesign memo §2.3 wiring shape.
         XCTAssertTrue(
-            src.contains("FocusTracker(store: focusedWindowStore)"),
+            src.contains("FocusTracker(\n        store: focusedWindowStore,"),
             "main.swift MUST construct a FocusTracker(store: focusedWindowStore)."
         )
 

@@ -85,6 +85,9 @@ final class BuildAppScriptTests: XCTestCase {
         guard let modelsManifestURL = modelsManifestPath() else {
             throw XCTSkip("models.json not found in HippocampusKit resources")
         }
+        guard let sourceRepositoryRoot = repositoryRoot() else {
+            throw XCTSkip("repository root not found from build-app.sh")
+        }
 
         let fileManager = FileManager.default
         let repoRoot = fileManager.temporaryDirectory
@@ -100,15 +103,46 @@ final class BuildAppScriptTests: XCTestCase {
         let scriptURL = resourcesDir.appendingPathComponent("build-app.sh")
         try fileManager.copyItem(at: URL(fileURLWithPath: scriptPath), to: scriptURL)
         try fileManager.copyItem(at: infoPlistURL, to: resourcesDir.appendingPathComponent("Info.plist"))
+        let staticDependencies = [
+            "NOTICE",
+            "scripts/lib/app-group-contract.sh",
+            "scripts/verify-toml-license-contract.py",
+            "third_party/licenses",
+            "apps/hippocampus/Package.swift",
+            "apps/hippocampus/Package.resolved",
+            "apps/hippocampus/Resources/Hippocampus.entitlements",
+            "apps/hippocampus/Sources/HippocampusKit/Resources/keychain-sharing-contract.json",
+            "extensions/safari/appex/HippocampusSafariExtension.entitlements",
+        ]
+        for relativePath in staticDependencies {
+            let source = sourceRepositoryRoot.appendingPathComponent(relativePath)
+            let destination = repoRoot.appendingPathComponent(relativePath)
+            try fileManager.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try fileManager.copyItem(at: source, to: destination)
+        }
 
-        try writeFile(packageRoot.appendingPathComponent(".build/release/Hippocampus"))
-        try writeFile(repoRoot.appendingPathComponent("adapters/macos/MCICaptureHelper/.build/release/mci-capture-helper"))
-        try writeFile(repoRoot.appendingPathComponent("target/release/mci-agent"))
-        try writeFile(repoRoot.appendingPathComponent("apps/recall-ui/.build/release/recall-ui"))
-        try writeFile(repoRoot.appendingPathComponent("apps/onboarding/.build/release/onboarding"))
-        try writeFile(repoRoot.appendingPathComponent("target/release/hippocampus-native-host"))
+        let executableFixture = URL(fileURLWithPath: "/usr/bin/true")
+        let executablePaths = [
+            "apps/hippocampus/.build/debug/Hippocampus",
+            "adapters/macos/MCICaptureHelper/.build/debug/mci-capture-helper",
+            "target/debug/mci-agent",
+            "apps/recall-ui/.build/debug/recall-ui",
+            "apps/onboarding/.build/debug/onboarding",
+            "target/debug/hippocampus-native-host",
+        ]
+        for relativePath in executablePaths {
+            let destination = repoRoot.appendingPathComponent(relativePath)
+            try fileManager.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try fileManager.copyItem(at: executableFixture, to: destination)
+        }
 
-        let kitBundle = packageRoot.appendingPathComponent(".build/release/Hippocampus_HippocampusKit.bundle")
+        let kitBundle = packageRoot.appendingPathComponent(".build/debug/Hippocampus_HippocampusKit.bundle")
         try fileManager.createDirectory(at: kitBundle, withIntermediateDirectories: true)
         try writeFile(kitBundle.appendingPathComponent("placeholder.txt"), contents: "fixture\n")
         try writeFile(repoRoot.appendingPathComponent("assets/branding/AppIcon.icns"))
@@ -283,13 +317,11 @@ final class BuildAppScriptTests: XCTestCase {
     }
 
     private func runFixture(_ fixture: ScriptFixture) throws -> ScriptRunResult {
-        var fixtureEnvironment = ProcessInfo.processInfo.environment
-        fixtureEnvironment["DEVELOPER_ID"] = "Test Identity"
-        try runCommand(
+        return try runCommand(
             "/bin/bash",
-            [fixture.scriptURL.path],
+            [fixture.scriptURL.path, "--debug", "--development-ad-hoc"],
             in: fixture.repoRoot,
-            environment: fixtureEnvironment
+            environment: ProcessInfo.processInfo.environment
         )
     }
 
@@ -359,6 +391,16 @@ final class BuildAppScriptTests: XCTestCase {
         process.waitUntilExit()
 
         XCTAssertNotEqual(process.terminationStatus, 0, "build-app.sh --bogus should exit nonzero")
+    }
+
+    func test_missing_sparkle_is_only_tolerated_for_ad_hoc_development() throws {
+        guard let path = scriptPath else {
+            throw XCTSkip("build-app.sh not found at expected source-tree location")
+        }
+        let source = try String(contentsOfFile: path, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("if [[ \"$SIGNING_MODE\" == \"ad-hoc\" ]]; then"))
+        XCTAssertTrue(source.contains("Sparkle.framework was not embedded"))
     }
 
     func test_missing_changelog_exits_with_rebuild_command() throws {

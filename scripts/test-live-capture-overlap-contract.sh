@@ -335,6 +335,11 @@ require_literal 'BACKGROUND_SECRET_NEBULA_7713' \
     "runner must verify the deterministic background token is absent"
 require_literal 'lsappinfo front' \
     "runner must prove the corpus is frontmost"
+require_literal '/usr/bin/open "$CORPUS_APP" >/dev/null 2>&1' \
+    "runner must retry LaunchServices activation within the startup deadline"
+if rg -Fq '/usr/bin/osascript' "$RUNNER"; then
+    fail "corpus activation must not add an Automation or Accessibility permission dependency"
+fi
 require_literal 'check_session.py' \
     "runner must fail closed when the GUI session is unavailable or locked"
 require_literal 'Evidence retained at:' \

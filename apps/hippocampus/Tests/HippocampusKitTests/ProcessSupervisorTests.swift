@@ -201,7 +201,7 @@ final class ProcessSupervisorTests: XCTestCase {
         locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
         locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
         let keyStore = FakeKeyStore()
-        keyStore.storedKey = "ab".repeat(32)
+        keyStore.storedKey = String(repeating: "ab", count: 32)
         let config = FakeRuntimeConfig(captureEnabled: captureEnabled)
         let topology = FakeSupervisorTopology()
         let custody = FakeKeyCustodyPreparer()
@@ -237,7 +237,7 @@ final class ProcessSupervisorTests: XCTestCase {
             crashReportOptedIn: false,
             generation: generation,
             baseEnvironment: [
-                "MCI_DB_KEY_HEX": "ef".repeat(32),
+                "MCI_DB_KEY_HEX": String(repeating: "ef", count: 32),
                 "MCI_DEVELOPMENT_FILE_KEY": "1",
                 "HIPPOCAMPUS_ENABLE_V2P1": "1",
             ]
@@ -286,7 +286,7 @@ final class ProcessSupervisorTests: XCTestCase {
             captureEnabled: true,
             crashReportOptedIn: false,
             generation: generation(captureEnabled: true),
-            baseEnvironment: ["MCI_DB_KEY_HEX": "ef".repeat(32)]
+            baseEnvironment: ["MCI_DB_KEY_HEX": String(repeating: "ef", count: 32)]
         )
 
         for environment in [plan.helperEnvironment, plan.agentEnvironment] {
@@ -808,7 +808,7 @@ final class ProcessSupervisorTests: XCTestCase {
     func test_onboarding_environment_routes_to_real_allowlist_editor() {
         let environment = ProcessSupervisorLaunchPlan.onboardingEnvironment(
             baseEnvironment: [
-                "MCI_DB_KEY_HEX": "ef".repeat(32),
+                "MCI_DB_KEY_HEX": String(repeating: "ef", count: 32),
                 "UNRELATED": "kept",
             ],
             dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
@@ -822,6 +822,7 @@ final class ProcessSupervisorTests: XCTestCase {
     }
 }
 
+@MainActor
 private func XCTAssertThrowsErrorAsync<T>(
     _ expression: @autoclosure () async throws -> T,
     file: StaticString = #filePath,

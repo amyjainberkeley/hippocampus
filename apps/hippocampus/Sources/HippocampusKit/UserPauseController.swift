@@ -25,10 +25,9 @@
 // synchronous and we need a `Bool` back for immediate title flip.
 //
 // Breadcrumb emission: on every state flip we call `sink(paused)` on
-// a background dispatch queue so the menu-bar closure returns
-// immediately. In production `sink` is a Logger; in tests it captures
-// into an array so `UserPauseControllerTests` can assert the emission
-// order. See PR #77's MenuBarStatus tests for the same pattern.
+// the same serial queue as the state transition. This keeps observable
+// transitions ordered under concurrent callers. Sinks must remain short
+// and must not call back into this controller.
 
 import Foundation
 import os
@@ -80,18 +79,14 @@ public final class UserPauseController: @unchecked Sendable {
     /// menu-title flip should render.
     @discardableResult
     public func setPaused(_ paused: Bool) -> Bool {
-        let didChange: Bool = queue.sync {
-            guard _isPaused != paused else { return false }
+        queue.sync {
+            guard _isPaused != paused else { return paused }
             _isPaused = paused
-            return true
-        }
-        if didChange {
-            let sinks = queue.sync { _sinks }
-            for sink in sinks {
+            for sink in _sinks {
                 sink(paused)
             }
+            return paused
         }
-        return paused
     }
 
     /// Toggle and return the new state. Used by the ⌘⇧P menu-bar
@@ -99,14 +94,19 @@ public final class UserPauseController: @unchecked Sendable {
     /// was — it just wants a flip.
     @discardableResult
     public func togglePaused() -> Bool {
-        let next = queue.sync { !_isPaused }
-        return setPaused(next)
+        queue.sync {
+            _isPaused.toggle()
+            for sink in _sinks {
+                sink(_isPaused)
+            }
+            return _isPaused
+        }
     }
 
     /// Attach an additional breadcrumb sink. Called during
     /// initialisation (default logger) and from tests. Sinks fire on
-    /// state transitions only, on the same serial queue as the write
-    /// — they must not block for long.
+    /// state transitions only, on the same serial queue as the write.
+    /// They must not block or call back into this controller.
     public func addSink(_ sink: @escaping (Bool) -> Void) {
         queue.sync {
             _sinks.append(sink)
