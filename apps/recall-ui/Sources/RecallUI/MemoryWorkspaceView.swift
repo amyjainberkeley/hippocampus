@@ -227,7 +227,7 @@ private struct WorkspaceFilmstrip: View {
                     .mciFont(.caption)
                     .foregroundStyle(Color.brandFgMuted)
             }
-            .frame(width: isCompact ? 128 : 148, alignment: .leading)
+            .frame(width: isCompact ? 164 : 176, alignment: .leading)
 
             if isLoading {
                 ProgressView()

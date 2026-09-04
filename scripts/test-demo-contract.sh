@@ -29,6 +29,18 @@ grep -Fq -- '--keyframe-digest' "$DEMO" || fail "demo seed must include authenti
 grep -Fq 'mci-seed-brief' "$DEMO" || fail "demo seed must include a daily brief"
 grep -Fq -- '--model-id "hippocampus-extractive"' "$DEMO" || fail "demo brief must disclose extractive provenance"
 grep -Fq 'target/release/mci-agent" enrich' "$DEMO" || fail "demo seed must run the production understanding pipeline"
+grep -Fq 'DEMO_ARCTIC_MODEL="$REPO_ROOT/models/ArcticEmbedS_FP16.mlmodelc"' "$DEMO" \
+    || fail "demo must resolve the verified repo-local Arctic model explicitly"
+grep -Fq 'export MCI_ARCTIC_MODEL_PATH="$DEMO_ARCTIC_MODEL"' "$DEMO" \
+    || fail "demo enrichment must receive the resolved Arctic model path"
+grep -Fq 'DEGRADED: Arctic model unavailable; demo recall will be lexical-only.' "$DEMO" \
+    || fail "demo must disclose lexical-only mode when Arctic is unavailable"
+grep -Fq 'if (( embedded_count != 20 ))' "$DEMO" \
+    || fail "semantic demo mode must assert that all synthetic events were embedded"
+grep -Fq 'Semantic enrichment verified: 20/20 events embedded.' "$DEMO" \
+    || fail "demo must report its verified semantic enrichment result"
+grep -Fq 'sanitize-png-metadata.py' "$DEMO" \
+    || fail "demo must remove private metadata from generated product captures"
 grep -Fq '"name":"mci_episodes"' "$DEMO" || fail "MCP demo must exercise derived work episodes"
 
 if grep -Fq 'MCI_DIR="$HOME/Library/Application Support/MCI"' "$DEMO"; then

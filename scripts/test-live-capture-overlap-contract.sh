@@ -301,10 +301,12 @@ require_literal 'trap on_signal INT TERM HUP' \
     "runner must clean up after interruption"
 require_literal 'mkfifo "$CAPTURE_FIFO"' \
     "runner must use an isolated capture FIFO"
-require_literal '9>&- < "$CAPTURE_FIFO"' \
-    "ingest agent must not inherit the FIFO guard writer"
-require_literal '9>&- >"$HELPER_STDOUT"' \
-    "capture helper must not inherit the FIFO guard writer"
+require_literal '8>&- 9>&- < "$CAPTURE_FIFO"' \
+    "ingest agent must not inherit either FIFO guard writer"
+require_literal '8>&- 9>&- < "$HELPER_LEASE_FIFO"' \
+    "capture helper must not inherit either FIFO guard writer"
+require_literal '"$FOOTPRINT_TOOL" "$HELPER_PID" 5 "$FOOTPRINT_CSV" 8>&- 9>&-' \
+    "footprint sampler must not keep either FIFO guard writer alive"
 require_literal 'MCI_DEVELOPMENT_FILE_KEY=1' \
     "runner must explicitly gate development file custody"
 require_literal 'MCI_DB_KEY_FILE="$KEY_FILE"' \
@@ -317,6 +319,10 @@ require_literal 'mktemp -d "/tmp/hippo-live.XXXXXX"' \
     "runner must keep isolated Unix socket paths below macOS SUN_LEN"
 require_literal '"$HELPER" --capture' \
     "runner must exercise the explicit live helper path"
+require_literal '--parent-lease-stdin' \
+    "runner must stop capture through the packaged parent-lifetime lease"
+require_literal 'exec 8>&-' \
+    "runner must close its helper lease writer to request graceful capture drain"
 require_literal '--live-overlap-qualification' \
     "runner must use the narrow pre-release OCR qualification capability"
 require_literal 'MCI_OCR_TRACE=1' \
@@ -333,6 +339,11 @@ require_literal 'check_session.py' \
     "runner must fail closed when the GUI session is unavailable or locked"
 require_literal 'Evidence retained at:' \
     "runner must disclose retained failure evidence"
+require_literal 'integrity_check FAILED' \
+    "brain diagnostics must distinguish a failed integrity check from an ok result"
+if rg -Fq "'BRAIN OPEN FAILED|open brain|integrity_check|writer.*lease'" "$RUNNER"; then
+    fail "brain diagnostics must not classify integrity_check ok as a database failure"
+fi
 
 if rg -n '\$HELPER.*--probe-debug' "$RUNNER"; then
     fail "live qualification must not enable AX value logging"
@@ -347,6 +358,15 @@ require_literal 'helper_exit=$?' \
     "runner must retain the capture helper exit status"
 require_literal '(( helper_exit == 0 )) || runtime_fail' \
     "runner must fail qualification when the capture helper exits nonzero"
+python3 - "$RUNNER" <<'PY'
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+close_lease = source.index('exec 8>&-', source.index('==> Closing capture'))
+wait_helper = source.index('wait "$HELPER_PID"', close_lease)
+if close_lease > wait_helper:
+    raise SystemExit("helper lease must close before waiting for graceful shutdown")
+PY
 rg -Fq 'exit(82)' "$HELPER_MAIN" \
     || fail "capture helper must exit nonzero when shutdown cannot stop capture"
 python3 - "$HELPER_MAIN" <<'PY'

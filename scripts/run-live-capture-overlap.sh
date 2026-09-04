@@ -30,6 +30,8 @@ EVIDENCE_CREATED=0
 RUN_SUCCEEDED=0
 CAPTURE_FIFO=""
 FIFO_GUARD_OPEN=0
+HELPER_LEASE_FIFO=""
+HELPER_LEASE_GUARD_OPEN=0
 CORPUS_PID=""
 HELPER_PID=""
 AGENT_PID=""
@@ -133,6 +135,10 @@ cleanup() {
     set +e
     trap - EXIT INT TERM HUP
 
+    if (( HELPER_LEASE_GUARD_OPEN == 1 )); then
+        exec 8>&-
+        HELPER_LEASE_GUARD_OPEN=0
+    fi
     if (( FIFO_GUARD_OPEN == 1 )); then
         exec 9>&-
         FIFO_GUARD_OPEN=0
@@ -144,6 +150,9 @@ cleanup() {
     stop_owned_process "$CORPUS_PID" "overlap corpus" "capture-overlap-corpus"
     if [[ -n "$CAPTURE_FIFO" && -p "$CAPTURE_FIFO" ]]; then
         rm -f "$CAPTURE_FIFO"
+    fi
+    if [[ -n "$HELPER_LEASE_FIFO" && -p "$HELPER_LEASE_FIFO" ]]; then
+        rm -f "$HELPER_LEASE_FIFO"
     fi
 
     if (( EVIDENCE_CREATED == 1 )); then
@@ -298,6 +307,7 @@ ALLOWLIST_FILE="$SUPPORT_DIR/user-allowlist.toml"
 DEVICE_ID="$ISOLATED_HOME/.mci/device-id"
 HEALTH_LOG="$RUN_ROOT/logs/helper-health.jsonl"
 CAPTURE_FIFO="$RUN_ROOT/capture.fifo"
+HELPER_LEASE_FIFO="$RUN_ROOT/helper-lease.fifo"
 READINESS_FILE="$RUN_ROOT/helper-readiness.json"
 CORPUS_APP="$RUN_ROOT/CaptureOverlapCorpus.app"
 CORPUS_STDOUT="$LOG_DIR/corpus.stdout"
@@ -435,17 +445,22 @@ mkfifo "$CAPTURE_FIFO"
 chmod 600 "$CAPTURE_FIFO"
 exec 9<> "$CAPTURE_FIFO"
 FIFO_GUARD_OPEN=1
+mkfifo "$HELPER_LEASE_FIFO"
+chmod 600 "$HELPER_LEASE_FIFO"
+exec 8<> "$HELPER_LEASE_FIFO"
+HELPER_LEASE_GUARD_OPEN=1
 
 "$AGENT" --device-id-path "$DEVICE_ID" --log-path "$HEALTH_LOG" \
-    --db-path "$DB_PATH" --drain-stdin --strict 9>&- < "$CAPTURE_FIFO" \
+    --db-path "$DB_PATH" --drain-stdin --strict 8>&- 9>&- < "$CAPTURE_FIFO" \
     >"$AGENT_STDOUT" 2>"$AGENT_STDERR" &
 AGENT_PID=$!
 
 generation="live-overlap-$(date +%s)-$$"
-"$HELPER" --capture --live-overlap-qualification \
+"$HELPER" --capture --parent-lease-stdin --live-overlap-qualification \
     --output "$CAPTURE_FIFO" \
     --heartbeat-seconds 2 --readiness-file "$READINESS_FILE" \
-    --generation "$generation" 9>&- >"$HELPER_STDOUT" 2>"$HELPER_STDERR" &
+    --generation "$generation" 8>&- 9>&- < "$HELPER_LEASE_FIFO" \
+    >"$HELPER_STDOUT" 2>"$HELPER_STDERR" &
 HELPER_PID=$!
 
 runtime_diagnostic() {
@@ -458,7 +473,7 @@ runtime_diagnostic() {
     elif { [[ -f "$helper_log" ]] && rg -qi 'database key unavailable|development.*key|keychain' "$helper_log"; } \
         || { [[ -f "$agent_log" ]] && rg -qi 'brain key|development.*key|keychain|MCI_DB_KEY_FILE' "$agent_log"; }; then
         printf 'Action: development key custody failed. Inspect key-probe/helper logs; the key path must be the isolated ~/Library/Application Support/MCI/dev.key and mode 0600.\n' >&2
-    elif [[ -f "$agent_log" ]] && rg -qi 'BRAIN OPEN FAILED|open brain|integrity_check|writer.*lease' "$agent_log"; then
+    elif [[ -f "$agent_log" ]] && rg -qi 'BRAIN OPEN FAILED|open brain|integrity_check FAILED|writer.*lease' "$agent_log"; then
         printf 'Action: the isolated encrypted brain could not open safely. Inspect agent.stderr and confirm no prior verifier process still owns the writer lease.\n' >&2
     else
         printf 'Action: inspect helper.stderr and agent.stderr in the retained evidence directory; no live success was recorded.\n' >&2
@@ -510,7 +525,7 @@ fi
 [[ "$(stat -f '%Lp' "$READINESS_FILE")" == "600" ]] \
     || runtime_fail "capture helper readiness receipt is not mode 0600"
 
-"$FOOTPRINT_TOOL" "$HELPER_PID" 5 "$FOOTPRINT_CSV" \
+"$FOOTPRINT_TOOL" "$HELPER_PID" 5 "$FOOTPRINT_CSV" 8>&- 9>&- \
     >"$LOG_DIR/footprint.stdout" 2>"$LOG_DIR/footprint.stderr" &
 FOOTPRINT_PID=$!
 
@@ -528,13 +543,23 @@ while (( SECONDS < deadline )); do
 done
 
 printf '\n==> Closing capture and waiting for the writer lease to release\n'
-stop_owned_process "$HELPER_PID" "capture helper" "$HELPER"
+exec 8>&-
+HELPER_LEASE_GUARD_OPEN=0
+deadline=$((SECONDS + STARTUP_TIMEOUT))
+while kill -0 "$HELPER_PID" 2>/dev/null && (( SECONDS < deadline )); do
+    sleep 0.1
+done
+if kill -0 "$HELPER_PID" 2>/dev/null; then
+    runtime_fail "capture helper did not exit after its parent-lifetime lease closed"
+fi
 set +e
 wait "$HELPER_PID" 2>/dev/null
 helper_exit=$?
 set -e
 HELPER_PID=""
 (( helper_exit == 0 )) || runtime_fail "capture helper exited with status $helper_exit"
+rm -f "$HELPER_LEASE_FIFO"
+HELPER_LEASE_FIFO=""
 wait "$FOOTPRINT_PID" 2>/dev/null || true
 FOOTPRINT_PID=""
 exec 9>&-
