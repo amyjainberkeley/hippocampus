@@ -59,6 +59,7 @@ private struct NoBlackRegion: BlackedRegionProbe {
 @main
 struct CaptureSourcePolicyBehavior {
     static func main() async {
+        #if DEBUG
         let qualificationArguments = [
             "mci-capture-helper",
             "--capture",
@@ -84,6 +85,7 @@ struct CaptureSourcePolicyBehavior {
                 environment: qualificationEnvironment.filter { $0.key != omittedVariable }
             ))
         }
+        #endif
 
         let focusedRect = CGRect(x: 120, y: 80, width: 900, height: 700)
         let focusedCandidates = [
