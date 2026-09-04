@@ -35,6 +35,7 @@ DEMO_KEYCHAIN_ACCOUNT="database-key"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
 APP_DIST="$REPO_ROOT/apps/hippocampus/dist"
 APP_PATH="$APP_DIST/Hippocampus.app"
+DEMO_ARCTIC_MODEL="$REPO_ROOT/models/ArcticEmbedS_FP16.mlmodelc"
 
 # macOS Tahoe (26.x) toolchain note (PR #95):
 # SwiftPM may warn about deployment target vs SDK version.
@@ -103,6 +104,7 @@ normalize_screenshot() {
     fi
     sips -s format png -z "$scaled_height" "$scaled_width" "$input" --out "$temp" >/dev/null
     sips -s format png -p 800 1280 --padColor F6F8FB "$temp" --out "$output" >/dev/null
+    python3 "$REPO_ROOT/scripts/sanitize-png-metadata.py" "$output"
     rm -f "$temp"
 }
 
@@ -186,6 +188,8 @@ do_seed() {
     bold "=== demo seed ==="
     require_cmd openssl
     require_cmd cargo
+    local expect_semantic=0
+    local enrich_output embedded_count
 
     ensure_demo_dirs
     echo "Generating ephemeral SQLCipher key..."
@@ -196,6 +200,18 @@ do_seed() {
     export MCI_DB_KEY_HEX
     export MCI_DEVELOPMENT_FILE_KEY=1
     MCI_DB_KEY_HEX=$(tr -d '\r\n' < "$KEY_FILE")
+    if [[ -n "${MCI_ARCTIC_MODEL_PATH:-}" ]]; then
+        if [[ ! -d "$MCI_ARCTIC_MODEL_PATH" ]]; then
+            red "ERROR: MCI_ARCTIC_MODEL_PATH is not a compiled model directory"
+            return 1
+        fi
+        expect_semantic=1
+    elif [[ -d "$DEMO_ARCTIC_MODEL" ]]; then
+        export MCI_ARCTIC_MODEL_PATH="$DEMO_ARCTIC_MODEL"
+        expect_semantic=1
+    else
+        dim "DEGRADED: Arctic model unavailable; demo recall will be lexical-only."
+    fi
 
     echo "Building the synthetic memory and brief seeders..."
     cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release \
@@ -230,7 +246,26 @@ do_seed() {
     "$REPO_ROOT/target/release/mci-seed-brain" "${seed_args[@]}"
 
     echo "Running the production understanding pipeline..."
-    "$REPO_ROOT/target/release/mci-agent" enrich --db-path "$DB_PATH"
+    if ! enrich_output=$("$REPO_ROOT/target/release/mci-agent" enrich --db-path "$DB_PATH" 2>&1); then
+        printf '%s\n' "$enrich_output" >&2
+        red "ERROR: production understanding pipeline failed"
+        return 1
+    fi
+    printf '%s\n' "$enrich_output"
+    embedded_count=$(sed -nE \
+        's/^mci-agent enrich: done\..*, ([0-9]+) embedded,.*/\1/p' \
+        <<< "$enrich_output" | tail -n 1)
+    if [[ ! "$embedded_count" =~ ^[0-9]+$ ]]; then
+        red "ERROR: understanding pipeline did not report an embedding count"
+        return 1
+    fi
+    if (( expect_semantic == 1 )); then
+        if (( embedded_count != 20 )); then
+            red "ERROR: semantic demo expected 20 embeddings but produced $embedded_count"
+            return 1
+        fi
+        green "Semantic enrichment verified: 20/20 events embedded."
+    fi
 
     echo "Seeding a synthetic daily brief..."
     "$REPO_ROOT/target/release/mci-seed-brief" \
@@ -529,6 +564,7 @@ do_screenshot_auto() {
 
     echo ""
     bold "Privacy check:"
+    python3 "$REPO_ROOT/scripts/sanitize-png-metadata.py" "$SCREENSHOTS"/*.png
     file "$SCREENSHOTS"/*.png 2>/dev/null
     "$REPO_ROOT/scripts/test-screenshot-assets.sh"
     echo ""

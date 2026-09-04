@@ -17,6 +17,19 @@ commits are intentionally omitted from release notes.
   instead of leaving a healthy-looking helper with no live capture source.
 - Keep qualification diagnostics content-free and fail the live gate when the
   capture helper cannot shut down cleanly.
+- End live qualification through the packaged parent-lifetime lease and prevent
+  resource samplers from holding capture pipes open during graceful shutdown.
+
+### Product and demo truth
+
+- Keep the Recall evidence-strip label readable beside real encrypted keyframe
+  previews and verify the label in the canonical product screenshot.
+- Resolve the verified repository-local Arctic model explicitly in disposable
+  demos, require all 20 synthetic events to be embedded in semantic mode, and
+  disclose degraded lexical-only mode when the artifact is absent.
+- Strip text and EXIF metadata from canonical product captures and reject
+  personal paths, email addresses, and common credential shapes during OCR
+  asset verification.
 
 ## [0.1.0] - 2026-09-01
 

@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-03._
 
-Audited code baseline: `368062d`
+Audited code baseline: `b845c59`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -225,7 +225,8 @@ truthfully scoped evidence product.
   capture is generated from a disposable SQLCipher brain and visibly proves
   three authenticated encrypted keyframes, 20 synthetic events, and one current
   synthetic brief. Recall's recent-evidence strip now shows sharp 16:9 source
-  previews, cleaned two-line evidence summaries, source/time context, and an
+  previews, an untruncated section label, cleaned two-line evidence summaries,
+  source/time context, and an
   inspectable detail popover instead of blurred passive thumbnails. It compacts
   to screenshot plus summary cards in short windows instead of expanding the
   root view behind the title bar; fresh windows default to `1024x700`. The Now
@@ -285,7 +286,14 @@ truthfully scoped evidence product.
   and uninstalls without isolated product residue.
 - The disposable visual demo now runs the production enrichment pipeline over
   its 20 synthetic events before launch, producing 13 entity mentions, 20
-  embeddings, and 20 inspectable work episodes on the audited Mac. Its MCP
+  embeddings, and 20 inspectable work episodes on the audited Mac. An isolated
+  `HOME` no longer hides the verified repository-local Arctic artifact: the demo
+  resolves and exports its explicit path before enrichment when no caller
+  override is present. Semantic mode now fails unless the production pipeline
+  reports all 20 synthetic events embedded; an absent artifact is disclosed as
+  degraded lexical-only mode. Canonical captures are stripped of EXIF and text
+  metadata, and their OCR contract rejects personal home paths, email addresses,
+  and common credential shapes. Its MCP
   trace exercises recall, cited context, stats, and episodes. MCP copy says
   capture begins only after opt-in and distinguishes the absence of a
   Hippocampus cloud copy from the policy of whichever AI client receives a
@@ -299,7 +307,7 @@ truthfully scoped evidence product.
   requires Screen Recording and Accessibility for that helper, foregrounds a
   synthetic overlapping-window corpus, captures through the bundled helper and
   agent, and proves focused-window recall plus background-window abstention. A
-  fresh 5-second and 20-second runs on the audited Mac passed with one retained
+  Earlier 5-second and 20-second runs on the audited Mac passed with one retained
   corpus event and one authenticated keyframe each: the exact focused token was
   recalled and the overlapped background token was absent from timeline,
   application-scoped events, and full-text retrieval. The same fail-closed gate
@@ -307,6 +315,15 @@ truthfully scoped evidence product.
   the duration at 1,800 seconds, samples helper CPU/RSS every five seconds,
   retains evidence, and emits a machine-readable qualification report covering
   frame, OCR, keyframe, memory, storage, privacy, and resource-SLO evidence.
+  The verifier now closes the same parent-lifetime lease used by the packaged
+  supervisor and proves a zero-status graceful helper drain; its footprint
+  sampler cannot inherit either FIFO guard writer. A fresh one-second run on
+  the current audited source completed that lifecycle and repeated the exact
+  focused-token/background-abstention MCP proof. Two subsequent five-second
+  attempts stopped fail-closed when another user application became frontmost;
+  neither is
+  counted as a functional pass. The canonical current-source 20-second rerun
+  therefore remains pending alongside the soak.
   An earlier 5 fps diagnostic soak was stopped after 91 footprint samples once
   it had already established a 39.8% helper CPU p95 against the 15% ceiling;
   that run did not qualify. The helper now builds at the documented 2 fps active-work
@@ -350,8 +367,12 @@ truthfully scoped evidence product.
   BERT NER is absent and Tier-1 entity extraction remains active. Qwen3 is
   absent and evidence-cited extractive briefs remain active. Qwen is an
   optional custom-build experiment, not a shipped download or release gate.
-  The immutable Arctic release archive is still unprovisioned, and the debug
-  app is not distributable.
+  A local archive containing only that compiled Arctic bundle was created and
+  reconstructed through `scripts/prepare-release-models.sh`; its SHA-256 is
+  `31da35fffb853a9442cef582f3319206496a00808da1ab3cbeca711b11a766f3`.
+  It is not hosted, and `release-models.json` deliberately remains
+  `UNPROVISIONED`, so the release model is still unprovisioned and the debug app
+  is not distributable.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status
@@ -386,6 +407,15 @@ The accepted, reproducible 24-case synthetic work-memory retrieval artifact is
 intentionally unanswerable cases across GitHub, terminal, browser, Slack,
 Linear, and files. It measures retrieval and provenance, not answer generation,
 and is not comparable to LoCoMo or LongMemEval.
+
+A clean clone at `b845c59` reproduced the accepted quality exactly: hybrid
+Hit@1 95.2%, Recall@1 88.1%, Recall@3 100%, MRR 0.976, exact provenance, and
+zero unanswerable false positives. Two warm scenario runs measured 46.0 ms and
+52.2 ms p95; one cold run measured 156.9 ms. This timer includes disposable
+brain creation, seeding, document embedding, retrieval, and index measurement,
+so it is a load-sensitive scenario latency rather than a pure query timer. The
+same clean clone reproduced the accepted agent-handoff result and remained
+`trusted_answer_qualified: false`.
 
 | Arm | Answerable outcome | Hit rate @1 | Recall @1 / @3 | MRR | Unanswerable outcome | p95 latency |
 |---|---:|---:|---:|---:|---:|---:|
@@ -438,8 +468,9 @@ immutable signed runtime is required before a production verifier can qualify.
 - Repeat the focused-window overlap gate from the release commit, prove live
   TCC revocation/restoration behavior, then complete the 30-minute resource and
   privacy soak.
-- Provision and reconstruct the immutable Arctic retrieval archive named by
-  `release-models.json`, then pass its integrity and completeness checks.
+- Upload the verified immutable Arctic retrieval archive, replace the explicit
+  `UNPROVISIONED` manifest fields only after its stable URL exists, and repeat
+  reconstruction, integrity, and completeness checks from the release commit.
 - Before shipping trusted-answer or evidence-backed-claim features, train and
   qualify the claim/evidence-set verifier on a blind, scenario-disjoint corpus;
   prove citation binding, Core ML parity, calibrated abstention, and

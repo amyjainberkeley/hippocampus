@@ -94,10 +94,34 @@ guard darkRatio < 0.65, average > 100, turquoiseRatio < 0.002 else { exit(4) }
 SWIFT
 done
 
+python3 - "$SCREENSHOTS"/*.png <<'PY' \
+    || fail "product captures contain private PNG metadata chunks"
+import struct
+import sys
+
+private_chunks = {b"eXIf", b"iTXt", b"tEXt", b"zTXt"}
+for path in sys.argv[1:]:
+    with open(path, "rb") as handle:
+        if handle.read(8) != b"\x89PNG\r\n\x1a\n":
+            raise SystemExit(f"not a PNG: {path}")
+        while True:
+            length_bytes = handle.read(4)
+            if len(length_bytes) != 4:
+                raise SystemExit(f"truncated PNG: {path}")
+            length = struct.unpack(">I", length_bytes)[0]
+            chunk_type = handle.read(4)
+            handle.seek(length + 4, 1)
+            if chunk_type in private_chunks:
+                raise SystemExit(f"private metadata chunk {chunk_type!r}: {path}")
+            if chunk_type == b"IEND":
+                break
+PY
+
 xcrun swift - \
     "$SCREENSHOTS/hero-onboarding-welcome.png" "Your memory, on your Mac" \
     "$SCREENSHOTS/hero-onboarding-trust-panel.png" "Built for trust" \
     "$SCREENSHOTS/hero-recall-ui.png" "Latest memory" \
+    "$SCREENSHOTS/hero-recall-ui.png" "Recent evidence" \
     "$SCREENSHOTS/hero-recall-ui.png" "3 keyframes" \
     "$SCREENSHOTS/hero-cli.png" "Launch qualified: false" \
     "$SCREENSHOTS/hero-cli.png" "false positives" \
@@ -125,6 +149,15 @@ for offset in stride(from: 0, to: arguments.count, by: 2) {
         .compactMap { $0.topCandidates(1).first?.string }
         .joined(separator: " ")
     guard text.localizedCaseInsensitiveContains(expected) else { exit(4) }
+    let sensitivePatterns = [
+        #"(?i)(?:/Users|/home)/[A-Za-z0-9._-]+"#,
+        #"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"#,
+        #"(?i)\b(?:sk-[a-z0-9]{16,}|ghp_[a-z0-9]{16,}|AKIA[A-Z0-9]{16})\b"#,
+        #"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"#,
+    ]
+    for pattern in sensitivePatterns {
+        if text.range(of: pattern, options: .regularExpression) != nil { exit(7) }
+    }
     if path.hasSuffix("hero-recall-ui.png"),
        text.localizedCaseInsensitiveContains("No recent keyframes") {
         exit(6)
