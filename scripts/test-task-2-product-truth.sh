@@ -16,6 +16,7 @@ AGENT_MAIN="$REPO_ROOT/apps/agent/src/bin/mci_agent.rs"
 STATUS_MENU="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"
 APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift"
 README="$REPO_ROOT/README.md"
+STATUS="$REPO_ROOT/docs/STATUS.md"
 ONBOARDING_RETENTION_STORE="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift"
 ONBOARDING_RETENTION_MODEL="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift"
 ONBOARDING_FLOW="$REPO_ROOT/apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift"
@@ -31,6 +32,20 @@ if rg -Fq 'nothing is sent anywhere' "$README"; then
     echo "FAIL: README hides the connected AI provider boundary" >&2
     exit 1
 fi
+
+for stale_release_claim in \
+    'This machine has Command Line Tools rather than full Xcode' \
+    'The build is not signed or notarized under my own Apple Developer ID yet' \
+    'It is not notarized under my own Apple Developer ID yet'; do
+    if rg -Fq "$stale_release_claim" "$README" "$STATUS"; then
+        echo "FAIL: stale owner release prerequisite remains: $stale_release_claim" >&2
+        exit 1
+    fi
+done
+rg -Uq 'Full Xcode 26\.6 is installed and selected' "$STATUS"
+rg -Uq 'The Developer ID Application[[:space:]]+identity and its private key are installed' "$STATUS"
+rg -Uq '`notarytool-profile` authenticates[[:space:]]+successfully' "$STATUS"
+rg -Uq 'Sparkle private/public key pair matches' "$STATUS"
 
 rg -Fq 'Deleted memories are removed as database rows and local storage is compacted.' \
     "$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift"

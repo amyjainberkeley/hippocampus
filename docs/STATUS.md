@@ -1,8 +1,8 @@
 # Hippocampus Status
 
-_Audited on 2026-09-03._
+_Audited on 2026-09-04._
 
-Audited code baseline: `b845c59`
+Audited code baseline: `8afb141`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -355,12 +355,15 @@ truthfully scoped evidence product.
   processes only that path plus an explicit development marker, never raw key
   bytes. Developer ID bundles omit the capability and remain Keychain-only.
   Signed clean-install and cross-version ACL continuity cannot be accepted
-  until a stable Developer ID bundle is available.
-- This machine has Command Line Tools rather than full Xcode, zero valid code
-  signing identities, and no `notarytool-profile`. It cannot produce or claim a
-  Developer ID-signed, notarized public release. Apple Developer Program
-  membership alone does not place the Developer ID certificate and its private
-  key on this Mac or create notarization credentials.
+  until the first stable Developer ID bundle completes the release gates.
+- Full Xcode 26.6 is installed and selected. The Developer ID Application
+  identity and its private key are installed, `notarytool-profile` authenticates
+  successfully, and the Sparkle private/public key pair matches the public key
+  in the shipping Info.plist. The first canonical signing attempt reached the
+  macOS private-key authorization prompt and was cancelled without retaining or
+  claiming a partial app. A Developer ID-signed, notarized artifact therefore
+  remains unproven until that owner authorization and the complete installer
+  pipeline succeed.
 - A verified local Arctic Embed S Core ML bundle is present in the gitignored
   development model directory and is included by debug ad-hoc assembly, so that
   artifact supports semantic recall. It is the sole required release model.
@@ -371,8 +374,8 @@ truthfully scoped evidence product.
   reconstructed through `scripts/prepare-release-models.sh`; its SHA-256 is
   `31da35fffb853a9442cef582f3319206496a00808da1ab3cbeca711b11a766f3`.
   It is not hosted, and `release-models.json` deliberately remains
-  `UNPROVISIONED`, so the release model is still unprovisioned and the debug app
-  is not distributable.
+  `UNPROVISIONED`, so a public updater release cannot yet be reconstructed or
+  published from immutable model inputs.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status
@@ -462,7 +465,8 @@ immutable signed runtime is required before a production verifier can qualify.
 
 - Run `scripts/check.sh`, `scripts/e2e-clean-home.sh`, every Swift package test,
   strict workspace Clippy, and the full workspace test suite on the release
-  commit. Full XCTest remains a full-Xcode gate on this host.
+  commit. Full Xcode is now available; the 2026-09-04 post-review matrix passed
+  all 51 invoked lanes with only optional `swiftformat` absent.
 - Complete a real 30-minute capture soak with frame, OCR, retained-keyframe,
   CPU, memory, disk, pause, and protected-surface observations.
 - Repeat the focused-window overlap gate from the release commit, prove live
@@ -477,9 +481,9 @@ immutable signed runtime is required before a production verifier can qualify.
   signed-runtime latency before adding it to the release manifest. The
   evidence-memory V1 keeps this artifact absent and semantic candidates typed
   as degraded related context.
-- Install full Xcode, a Developer ID Application identity with private key,
-  and the `notarytool-profile`; verify the Sparkle private/public pair without
-  recording secret values.
+- Authorize `/usr/bin/codesign` to use the installed Developer ID private key,
+  rerun the canonical installer, and inspect the retained app and DMG
+  notarization submission records and logs. Do not record secret values.
 - Build, sign, notarize, staple, install, and launch on a clean second Mac;
   verify Keychain continuity across an update before publishing.
 - Keep capture off by default and hybrid recall unqualified until their

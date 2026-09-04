@@ -359,9 +359,11 @@ Most projects bury this. It should be near the top, because it decides whether t
 | **Windows** | **Not started.** An empty crate with the right shape. |
 
 The core test suite runs with `cargo test -p mci-brain`; the repository-wide
-gate is `scripts/check.sh`. The build is not signed or notarized under my own
-Apple Developer ID yet, so a build you make yourself needs to be allowed
-through Gatekeeper by hand.
+gate is `scripts/check.sh`. The owner release machine now has full Xcode, a
+Developer ID identity, notarization credentials, and a verified Sparkle key.
+Those prerequisites are ready, but no current public artifact is claimed as
+signed or notarized until the canonical pipeline completes and its retained
+Apple records are inspected.
 
 If you only take one thing from this table: **capture is off by default and the
 development path has passed focused-window overlap, but the public release is
@@ -512,7 +514,11 @@ cargo test --workspace       # everything
 
 **I want my demo brain gone**. `rm -rf ./hippocampus-demo`. The key lives only in that folder, so deleting it makes the data unrecoverable.
 
-**The app will not open**. It is not notarized under my own Apple Developer ID yet. Right-click the app and choose Open, or allow it in System Settings under Privacy and Security.
+**A local source build will not open normally**. Ad-hoc development builds are
+not notarized; right-click the app and choose Open, or allow it in System
+Settings under Privacy and Security. Official release artifacts must instead
+pass Developer ID signing, app and DMG notarization, stapling, and Gatekeeper
+verification before publication.
 
 ---
 
