@@ -424,6 +424,12 @@ while (( SECONDS < deadline )); do
         CORPUS_PID="$(corpus_pid_from_launch_services || true)"
     fi
     front_bundle="$(frontmost_bundle_id || true)"
+    if [[ -n "$CORPUS_PID" && "$front_bundle" != "$CORPUS_BUNDLE_ID" ]]; then
+        # Reopening an already-running app asks LaunchServices to activate it
+        # without adding an Automation/Accessibility permission dependency.
+        /usr/bin/open "$CORPUS_APP" >/dev/null 2>&1 || true
+        front_bundle="$(frontmost_bundle_id || true)"
+    fi
     if [[ -n "$CORPUS_PID" ]] \
         && [[ "$front_bundle" == "$CORPUS_BUNDLE_ID" ]] \
         && rg -q '^capture-overlap-corpus ready$' "$CORPUS_STDOUT" 2>/dev/null; then

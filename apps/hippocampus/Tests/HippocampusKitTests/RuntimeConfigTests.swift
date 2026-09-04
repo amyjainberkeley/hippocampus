@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: TBD-private
+import TOMLKit
 import XCTest
 @testable import HippocampusKit
 
@@ -291,8 +292,9 @@ final class RuntimeConfigTests: XCTestCase {
         XCTAssertFalse(cfg.captureEnabled)
         try cfg.setCaptureEnabled(true)
         let content = try String(contentsOf: cfg.path, encoding: .utf8)
+        let parsed = try TOMLTable(string: content)
 
-        XCTAssertTrue(content.contains("title = \"preferences\""))
+        XCTAssertEqual(parsed["title"]?.string, "preferences")
         XCTAssertTrue(RuntimeConfig(path: cfg.path).captureEnabled)
         XCTAssertTrue(content.contains("[capture]"))
     }

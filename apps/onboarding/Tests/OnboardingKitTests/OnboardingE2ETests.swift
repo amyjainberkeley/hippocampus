@@ -368,6 +368,10 @@ final class OnboardingE2ETests: XCTestCase {
         )
         vm.goTo(.permissions)
 
+        // Preflight detects that the user intends to enable Safari, so
+        // Automation joins the sequence before earlier surfaces resolve.
+        vm.markPermissionApplicable(.automation)
+
         // User grants SR.
         (vm.screenRecordingPermission as! StubTCCPermission).simulateGrant()
         vm.recordPermissionOutcome(.screenRecording, .granted)
@@ -375,10 +379,6 @@ final class OnboardingE2ETests: XCTestCase {
         // User skips AX.
         vm.recordPermissionOutcome(.accessibility, .skipped)
 
-        // Automation is only applicable if the user plans to use
-        // Safari — assume they do (BrowserExtensionSlide would call
-        // this in production).
-        vm.markPermissionApplicable(.automation)
         XCTAssertEqual(vm.currentPermissionSurface, .automation)
         vm.recordPermissionOutcome(.automation, .denied)
 

@@ -261,10 +261,10 @@ if [[ -z "${DEVELOPER_ID:-}" ]]; then
         sed 's/.*"\(.*\)"/\1/' || true)
 fi
 
-if [[ -n "$DEVELOPER_ID" ]]; then
-    SIGNING_MODE="developer-id"
-elif [[ "$PROFILE" == "debug" && "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+if [[ "$PROFILE" == "debug" && "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
     SIGNING_MODE="ad-hoc"
+elif [[ -n "$DEVELOPER_ID" ]]; then
+    SIGNING_MODE="developer-id"
 elif [[ "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
     fatal \
         "Ad-hoc signing is development-only and requires --debug" \
@@ -856,7 +856,15 @@ echo "  Signed App Group contract valid."
 
 # Verify rpath was added correctly
 echo "Verifying rpath..."
-if otool -l "$MACOS/Hippocampus" | grep -A 2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then
+if [[ ! -d "$FRAMEWORKS/Sparkle.framework" ]]; then
+    if [[ "$SIGNING_MODE" == "ad-hoc" ]]; then
+        echo "  Skipped for ad-hoc development: Sparkle.framework was not embedded."
+    else
+        fatal \
+            "Sparkle.framework was not embedded" \
+            "Build apps/hippocampus with the release profile before Developer ID assembly."
+    fi
+elif otool -l "$MACOS/Hippocampus" | grep -A 2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then
     echo "  rpath OK: @executable_path/../Frameworks present"
 else
     echo "  ERROR: rpath missing — app will fail to launch"

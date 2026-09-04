@@ -14,7 +14,7 @@ final class KeyStoreTests: XCTestCase {
 
         func readGenericPassword(query: KeychainItemQuery) -> KeychainReadResult {
             readQueries.append(query)
-            readResult
+            return readResult
         }
 
         func addGenericPassword(

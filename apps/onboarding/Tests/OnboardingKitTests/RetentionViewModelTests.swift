@@ -15,7 +15,8 @@ final class RetentionViewModelTests: XCTestCase {
         let store = StubRetentionStore()
         let vm = RetentionViewModel(store: store)
         vm.selectedPolicy = .thirtyDays
-        XCTAssertTrue(await vm.save())
+        let didSave = await vm.save()
+        XCTAssertTrue(didSave)
         let saved = await store.currentPolicy()
         XCTAssertEqual(saved, .thirtyDays)
     }
@@ -25,7 +26,8 @@ final class RetentionViewModelTests: XCTestCase {
         let vm = RetentionViewModel(store: store)
         vm.selectedPolicy = .custom
         vm.customDays = 42
-        XCTAssertTrue(await vm.save())
+        let didSave = await vm.save()
+        XCTAssertTrue(didSave)
         let days = await store.currentCustomDays()
         XCTAssertEqual(days, 42)
     }
@@ -34,7 +36,8 @@ final class RetentionViewModelTests: XCTestCase {
         let store = StubRetentionStore()
         let vm = RetentionViewModel(store: store)
         vm.selectedPolicy = .sevenDays
-        XCTAssertTrue(await vm.save())
+        let didSave = await vm.save()
+        XCTAssertTrue(didSave)
         let days = await store.currentCustomDays()
         XCTAssertNil(days)
     }

@@ -39,7 +39,7 @@ public enum ClaudeCodeRegistrarError: Error, Equatable {
         // remain available via the associated values for logging.
         switch self {
         case .agentNotFound:
-            return "Hippocampus can\u{2019}t find its agent connector. Try reinstalling Hippocampus."
+            return "Hippocampus can\u{2019}t find its agent connector. Reinstall Hippocampus, then try connecting again."
         case .launchFailed, .timedOut:
             return "Couldn\u{2019}t connect AI tools. Try again — if it keeps happening, use \u{201C}Send Feedback\u{201D} from the menu bar."
         case .nonZeroExit:

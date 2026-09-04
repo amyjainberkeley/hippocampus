@@ -9,7 +9,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
     private let key = Data((0..<32).map(UInt8.init))
 
     func testEncoderUsesSharedV2Codec() throws {
-        let pixels = makePixelBuffer()
+        let pixels = Self.makePixelBuffer()
         let sealed = try XCTUnwrap(
             KeyframeBlobEncoder.encodeAndEncrypt(
                 pixelBuffer: pixels,
@@ -26,13 +26,13 @@ final class KeyframeBlobWriterTests: XCTestCase {
     func testDurableWritePrecedesRetentionAndUnchangedFrameSkips() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let pixels = makePixelBuffer()
+        let pixels = Self.makePixelBuffer()
         let coordinator = KeyframeRetentionCoordinator(
             blobDirectory: root,
             keyMaterial: key,
             policy: KeyframePolicy(materialDistance: 12, maxSilenceNanoseconds: 300)
         )
-        let first = candidate(ordinal: 1)
+        let first = Self.candidate(ordinal: 1)
 
         let retainedValue = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
@@ -49,14 +49,14 @@ final class KeyframeBlobWriterTests: XCTestCase {
 
         let duplicate = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
-            candidate: candidate(ordinal: 2)
+            candidate: Self.candidate(ordinal: 2)
         )
         XCTAssertNil(duplicate)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).count, 1)
     }
 
     func testWriteFailureDoesNotAdvancePolicyState() async throws {
-        let pixels = makePixelBuffer()
+        let pixels = Self.makePixelBuffer()
         let store = ToggleStore()
         let coordinator = KeyframeRetentionCoordinator(
             policy: .default,
@@ -69,7 +69,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
                 )
             }
         )
-        let first = candidate(ordinal: 1)
+        let first = Self.candidate(ordinal: 1)
 
         let failed = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
@@ -87,12 +87,12 @@ final class KeyframeBlobWriterTests: XCTestCase {
     func testDiscardDeletesBlobAndRollsPolicyStateBack() async throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let pixels = makePixelBuffer()
+        let pixels = Self.makePixelBuffer()
         let coordinator = KeyframeRetentionCoordinator(
             blobDirectory: root,
             keyMaterial: key
         )
-        let first = candidate(ordinal: 1)
+        let first = Self.candidate(ordinal: 1)
         let retainedValue = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
             candidate: first
@@ -120,12 +120,11 @@ final class KeyframeBlobWriterTests: XCTestCase {
             blobDirectory: root,
             keyMaterial: key
         )
-        let pixels = makePixelBuffer()
-        let task = Task {
+        let task = Task.detached { @Sendable in
             withUnsafeCurrentTask { $0?.cancel() }
             return try await coordinator.retain(
-                input: KeyframePixelInput(pixelBuffer: pixels),
-                candidate: candidate(ordinal: 1)
+                input: KeyframePixelInput(pixelBuffer: Self.makePixelBuffer()),
+                candidate: Self.candidate(ordinal: 1)
             )
         }
 
@@ -136,7 +135,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
 
     func testCancellationAfterStorePublicationRollsBlobBack() async throws {
         let store = CancellingStore()
-        let pixels = makePixelBuffer()
+        let pixels = Self.makePixelBuffer()
         let coordinator = KeyframeRetentionCoordinator(
             policy: .default,
             keyMaterial: key,
@@ -151,7 +150,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
 
         let retention = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
-            candidate: candidate(ordinal: 1)
+            candidate: Self.candidate(ordinal: 1)
         )
         let removeCount = store.removeCount()
         let previous = await coordinator.currentPreviousRetainedForTesting()
@@ -163,7 +162,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
     func testPendingCommitStateIsBounded() async throws {
         let store = ToggleStore()
         store.allowWrites()
-        let pixels = makePixelBuffer()
+        let pixels = Self.makePixelBuffer()
         let coordinator = KeyframeRetentionCoordinator(
             policy: .default,
             keyMaterial: key,
@@ -202,7 +201,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
 
     func testCleanupFailureRetriesAndKeepsPendingCommitRetryable() async throws {
         let store = RemovalRetryStore(failuresBeforeSuccess: 3)
-        let pixels = makePixelBuffer()
+        let pixels = Self.makePixelBuffer()
         let coordinator = KeyframeRetentionCoordinator(
             policy: .default,
             keyMaterial: key,
@@ -216,7 +215,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
         )
         let retainedValue = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
-            candidate: candidate(ordinal: 1)
+            candidate: Self.candidate(ordinal: 1)
         )
         let retained = try XCTUnwrap(retainedValue)
 
@@ -234,12 +233,12 @@ final class KeyframeBlobWriterTests: XCTestCase {
         )
         let retried = try await coordinator.retain(
             input: KeyframePixelInput(pixelBuffer: pixels),
-            candidate: candidate(ordinal: 1)
+            candidate: Self.candidate(ordinal: 1)
         )
         XCTAssertNotNil(retried)
     }
 
-    private func candidate(ordinal: UInt64) -> KeyframeEvidenceCandidate {
+    private static func candidate(ordinal: UInt64) -> KeyframeEvidenceCandidate {
         KeyframeEvidenceCandidate(
             captureOrdinal: ordinal,
             focusedWindowId: 7,
@@ -255,7 +254,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
         return url
     }
 
-    private func makePixelBuffer() -> CVPixelBuffer {
+    private static func makePixelBuffer() -> CVPixelBuffer {
         var output: CVPixelBuffer?
         let attributes: [CFString: Any] = [
             kCVPixelBufferCGImageCompatibilityKey: true,

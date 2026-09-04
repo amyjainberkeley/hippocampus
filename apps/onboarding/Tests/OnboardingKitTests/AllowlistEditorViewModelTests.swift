@@ -147,7 +147,8 @@ final class AllowlistEditorViewModelTests: XCTestCase {
         persisted = await userStore.entriesForTest()
         XCTAssertEqual(persisted.first?.captureEnabled, true)
         XCTAssertEqual(persisted.first?.deepHookEnabled, true)
-        XCTAssertEqual(await fda.status(), .requested)
+        let status = await fda.status()
+        XCTAssertEqual(status, .requested)
     }
 
     func testBaselineDeepHookOptInCreatesMutableConsent() async {
