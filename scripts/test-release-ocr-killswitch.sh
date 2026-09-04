@@ -14,8 +14,10 @@ fail() {
     exit 1
 }
 
+# Build the complete package so debug-only qualification fixtures cannot make
+# the release graph uncompilable while the shipping product still builds.
 "$SCRIPT_DIR/swift-package.sh" build -c release \
-    --package-path "$PACKAGE" --product mci-capture-helper >/dev/null
+    --package-path "$PACKAGE" >/dev/null
 
 [[ -x "$BINARY" ]] || fail "release capture helper was not built"
 strings "$BINARY" > "$STRINGS_OUTPUT"
