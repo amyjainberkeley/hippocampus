@@ -416,7 +416,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             initialFocusGeneration = 0
             initialIncludeListSize = 0
         }
-        let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
+        let configuration = try SCStreamConfigFactory.makeConfiguration(policy: policy, filter: filter)
         let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try scStream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
         guard registerCandidateStream(
@@ -835,7 +835,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             return
         }
 
-        let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
+        let configuration = try SCStreamConfigFactory.makeConfiguration(policy: policy, filter: newFilter)
         let replacement = SCStream(
             filter: newFilter,
             configuration: configuration,
@@ -1028,7 +1028,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
             initialFocusGeneration = 0
         }
-        let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
+        let configuration = try SCStreamConfigFactory.makeConfiguration(policy: policy, filter: filter)
         let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try scStream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
         guard registerCandidateStream(

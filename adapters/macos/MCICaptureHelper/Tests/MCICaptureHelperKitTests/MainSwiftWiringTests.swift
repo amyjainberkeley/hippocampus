@@ -138,6 +138,29 @@ final class MainSwiftWiringTests: XCTestCase {
                        "A first-display include list can return blank pixels for a window on another display")
     }
 
+    func testAllThreeStreamConstructionPathsUseTheirSelectedFiltersCanvas() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "Sources/MCICaptureHelperKit/Capture/SCStreamCaptureSession.swift"
+        ), encoding: .utf8)
+        let call = "let configuration = try SCStreamConfigFactory.makeConfiguration(policy: policy, filter: "
+        XCTAssertEqual(source.components(separatedBy: call).count - 1, 3,
+                       "Startup, focus rebind, and permission recovery must size the selected filter")
+        let paths = [
+            ("public func start() async throws {", "public func stop() async throws {", "filter"),
+            ("public func rebindFocusedWindow(", "internal func claimFirstSampleLogSlot()", "newFilter"),
+            ("private func bringUpSCStreamOnly(lifecycleEpoch:", "internal func activateTCCMonitoring()", "filter"),
+        ]
+        for (start, end, filter) in paths {
+            let startRange = try XCTUnwrap(source.range(of: start))
+            let endRange = try XCTUnwrap(source.range(of: end, range: startRange.upperBound..<source.endIndex))
+            let body = source[startRange.upperBound..<endRange.lowerBound]
+            XCTAssertEqual(body.components(separatedBy: call + filter + ")").count - 1, 1, start)
+            XCTAssertFalse(body.contains("let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)"), start)
+        }
+    }
+
     /// The wiring PR's mandatory grep-in-place assertion — pins the
     /// construction-graph shape at `main.swift`. Redesign memo §2.3 +
     /// §5.1 + [[project-v2p1-unit-tests-passed-but-never-wired]] make

@@ -61,6 +61,62 @@ public enum SCStreamConfigFactory {
         )
         return cfg
     }
+
+    /// SCStream.h (macOS 14+): contentRect is in points; pointPixelScale
+    /// converts it to pixels. Only independent-window filters use this sizing.
+    public static func makeConfiguration(
+        policy: StreamPolicy = .default,
+        filter: SCContentFilter
+    ) throws -> SCStreamConfiguration {
+        guard filter.style == .window else {
+            return makeConfiguration(policy: policy)
+        }
+        return try makeFocusedWindowConfiguration(
+            policy: policy,
+            contentRect: filter.contentRect,
+            pointPixelScale: filter.pointPixelScale
+        )
+    }
+
+    /// Value-only sizing, shared by startup, focus rebind, and TCC recovery.
+    /// A same-window resize stays aspect-fit in this bounded canvas until the
+    /// next bind. Changed aspect ratios may letterbox; no focus generation or
+    /// source crop is changed to track geometry.
+    internal static func makeFocusedWindowConfiguration(
+        policy: StreamPolicy = .default,
+        contentRect: CGRect,
+        pointPixelScale: Float
+    ) throws -> SCStreamConfiguration {
+        let width = contentRect.size.width
+        let height = contentRect.size.height
+        guard !contentRect.isNull, !contentRect.isInfinite,
+              contentRect.origin.x.isFinite, contentRect.origin.y.isFinite,
+              width.isFinite, height.isFinite, width > 0, height > 0,
+              pointPixelScale.isFinite, pointPixelScale > 0
+        else {
+            throw SCStreamPipelineError.invalidFocusedWindowGeometry
+        }
+
+        // Bound the multiplier before multiplying or converting to Int, even
+        // for enormous finite geometry. Keep native resolution below the cap.
+        let maximumLongEdge: CGFloat = 1920
+        let scale = min(CGFloat(pointPixelScale), maximumLongEdge / max(width, height))
+        let pixelWidth = width * scale
+        let pixelHeight = height * scale
+        guard pixelWidth.isFinite, pixelHeight.isFinite,
+              pixelWidth >= 1, pixelHeight >= 1
+        else {
+            // Do not stretch a subpixel short edge to manufacture valid geometry.
+            throw SCStreamPipelineError.invalidFocusedWindowGeometry
+        }
+
+        let cfg = makeConfiguration(policy: policy)
+        cfg.width = Int(min(maximumLongEdge, pixelWidth.rounded()))
+        cfg.height = Int(min(maximumLongEdge, pixelHeight.rounded()))
+        cfg.scalesToFit = true
+        cfg.preservesAspectRatio = true
+        return cfg
+    }
 }
 
 /// Builds the `SCContentFilter` with the parsed [`Denylist`] app
@@ -408,6 +464,8 @@ public enum SCContentFilterFactory {
 public enum SCStreamPipelineError: Error, Equatable {
     /// `SCShareableContent` reported no display.
     case noDisplay
+    /// The focused window cannot be represented by a bounded pixel canvas.
+    case invalidFocusedWindowGeometry
     /// An encode was attempted without a prior `.allow` decision —
     /// an internal invariant breach. Should be impossible by
     /// construction; asserted so a refactor can't regress the gate.
