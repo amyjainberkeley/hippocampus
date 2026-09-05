@@ -31,7 +31,7 @@ struct BriefView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
             _ in
-            Task { await viewModel.reload() }
+            Task { await viewModel.reload(forceDate: viewModel.selectedDate) }
         }
     }
 
@@ -276,7 +276,7 @@ struct BriefFooterActions: View {
             Button {
                 onRegenerate()
             } label: {
-                Label("Regenerate", systemImage: "arrow.clockwise")
+                Label("Refresh", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
             .foregroundStyle(Color.brandMintDim)

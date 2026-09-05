@@ -215,7 +215,7 @@ struct SearchView: View {
 
                 if viewModel.isDetailFocused, let hit = viewModel.selectedHit {
                     Divider().background(Color.brandCardBorder)
-                    DetailPaneView(hit: hit, reader: reader)
+                    DetailPaneView(hit: hit, reader: reader, screenshotEventIDs: MCI.Workspace.recentKeyframes(from: viewModel.hits).map(\.id))
                         .frame(minWidth: 300, idealWidth: 400)
                 }
             }

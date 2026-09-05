@@ -8,27 +8,44 @@ struct EvidenceThumbnail: View {
     let size: CGSize
     let maxPixelSize: Int
     var placeholderSymbol = "photo"
+    var contentMode: ContentMode = .fit
+    var showsStatus = false
     var provider: any ThumbnailDataProviding = ThumbnailDataProvider.shared
 
     @State private var image: NSImage?
+    @State private var isLoading = false
 
     var body: some View {
         Group {
             if let image {
                 Image(nsImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .aspectRatio(contentMode: contentMode)
                     .frame(width: size.width, height: size.height)
                     .clipped()
                     .accessibilityHidden(true)
             } else {
                 ZStack {
                     Color.brandCardBg
-                    Image(systemName: placeholderSymbol)
-                        .font(.system(size: min(size.height * 0.3, 16)))
+                    if isLoading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: placeholderSymbol)
+                                .font(.system(size: min(size.height * 0.3, 20)))
+                            if showsStatus {
+                                Text(url == nil ? "No screenshot stored" : "Screenshot unavailable")
+                                    .font(.caption)
+                                if url != nil {
+                                    Text("The saved image could not be opened.")
+                                        .font(.caption2)
+                                }
+                            }
+                        }
                         .foregroundStyle(Color.brandFgMuted)
+                    }
                 }
-                .accessibilityLabel("No preview available")
+                .accessibilityLabel(isLoading ? "Loading screenshot" : (url == nil ? "No screenshot stored" : "Screenshot unavailable"))
             }
         }
         .frame(width: size.width, height: size.height)
@@ -39,6 +56,8 @@ struct EvidenceThumbnail: View {
         }
         .task(id: url) {
             image = nil
+            isLoading = url != nil
+            defer { if !Task.isCancelled { isLoading = false } }
             guard let url else { return }
             let data = await provider.thumbnailData(for: url, maxPixelSize: maxPixelSize)
             guard !Task.isCancelled, let data else { return }

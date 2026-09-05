@@ -11,6 +11,7 @@ import SwiftUI
 /// duration, and the event count for that segment.
 struct EpisodesView: View {
     @StateObject var viewModel: EpisodesViewModel
+    var reader: BrainReader? = nil
 
     var body: some View {
         Group {
@@ -61,6 +62,17 @@ struct EpisodesView: View {
     }
 
     private var contentView: some View {
+        HSplitView {
+            episodeList
+            if let episode = viewModel.selectedEpisode, let reader {
+                EpisodeEvidencePanel(episode: episode, reader: reader)
+                    .id(episode.id)
+                    .frame(minWidth: 300, idealWidth: 380)
+            }
+        }
+    }
+
+    private var episodeList: some View {
         List(viewModel.episodes, selection: $viewModel.selectedEpisodeId) { episode in
             EpisodeCard(episode: episode)
                 .tag(episode.id)
@@ -72,6 +84,7 @@ struct EpisodesView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.brandBgPrimary)
+        .frame(minWidth: 280)
         .refreshable { await viewModel.reload() }
     }
 }
@@ -105,7 +118,7 @@ private struct EpisodeCard: View {
                     .foregroundStyle(Color.brandMint)
                     .help(Formatters.tsString(usSinceEpoch: episode.tsStartUs))
                 Text("·").foregroundStyle(Color.brandFgMuted)
-                Text(durationLabel)
+                Text("\(durationLabel) observed span")
                     .font(.system(.caption, design: .default))
                     .foregroundStyle(Color.brandFgSecondary)
             }
@@ -142,5 +155,76 @@ private struct EpisodeCard: View {
         let h = Int(seconds / 3600)
         let m = Int((seconds.truncatingRemainder(dividingBy: 3600)) / 60)
         return m == 0 ? "\(h)h" : "\(h)h \(m)m"
+    }
+}
+
+private struct EpisodeEvidencePanel: View {
+    let episode: Episode
+    let reader: BrainReader
+    @State private var screenshots: [TimelineEvent] = []
+    @State private var isLoading = true
+    @State private var failed = false
+    @State private var selection: ScreenshotSelection?
+    @State private var loadGeneration = UUID()
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(Formatters.appDisplayName(episode.appBundleId)).font(.headline)
+                Text(Formatters.tsString(usSinceEpoch: episode.tsStartUs)).font(.caption)
+                Text("Episode spans include unmeasured idle time and may include non-screen records.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if isLoading {
+                    ProgressView("Reading episode")
+                } else if failed {
+                    Text("Episode evidence is unavailable. Try refreshing memory.")
+                        .foregroundStyle(Color.brandError)
+                } else if screenshots.isEmpty {
+                    ContentUnavailableView("No saved screenshots", systemImage: "doc.text",
+                                           description: Text("This episode has no available screenshot samples."))
+                } else {
+                    ForEach(screenshots) { event in
+                        Button {
+                            selection = ScreenshotSelection(eventIDs: screenshots.map(\.id), initialID: event.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                GeometryReader { geometry in
+                                    EvidenceThumbnail(url: event.thumbnailURL, size: geometry.size, maxPixelSize: 640)
+                                }
+                                .aspectRatio(16 / 10, contentMode: .fit)
+                                Text(Date(timeIntervalSince1970: Double(event.tsUs) / 1_000_000), format: .dateTime.hour().minute().second())
+                                Text(MemorySourceKind.label(event.sourceKind)).foregroundStyle(.secondary)
+                            }
+                            .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open episode screenshot")
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .task(id: episode) { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) { _ in
+            Task { await load() }
+        }
+        .sheet(item: $selection) { selection in ScreenshotViewer(selection: selection, reader: reader) }
+    }
+
+    private func load() async {
+        let request = UUID()
+        loadGeneration = request
+        isLoading = screenshots.isEmpty
+        failed = false
+        do {
+            let events = try await reader.timelineEvents(startTsUs: episode.tsStartUs, endTsUs: episode.tsEndUs, resolution: .minute)
+            guard !Task.isCancelled, request == loadGeneration else { return }
+            screenshots = events.filter { $0.hasScreenshot && $0.appBundleId == episode.appBundleId }
+        } catch {
+            guard !Task.isCancelled, request == loadGeneration else { return }
+            screenshots = []
+            failed = true
+        }
+        isLoading = false
     }
 }
