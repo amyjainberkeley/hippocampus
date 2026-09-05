@@ -1432,8 +1432,27 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let pipelineSnapshot = self.pipeline
         let privacySnapshot = pipelineSnapshot.snapshotPixelPrivacy(
             context: context,
-            hasBlackedRegion: frameHasBlackedRegion
+            hasBlackedRegion: frameHasBlackedRegion,
+            capturedWindow: focusedSnapshot?.focused
         )
+        if privacySnapshot.permitsRawPixels, focusedWindowStore != nil {
+            // Accessibility and browser queries can outlive a focus switch.
+            // Rebind before retaining pixels, never authorize a queued old window.
+            focusTracker?.refreshBindingOnceSync()
+            if !CaptureGenerationPolicy.shouldAdmit(
+                streamGeneration: requiredFocusGeneration,
+                installedGeneration: currentInstalledFocusGeneration(),
+                observedGeneration: focusedWindowStore?.currentSync().generation
+            ) {
+                let lease = SurfaceLease(releaser: BorrowedNoRetainReleaser())
+                captureDispatcher.submit(captureOrdinal: callbackOrdinal, operation: {
+                    try? await pipelineSnapshot.emitFocusRaceDropped(
+                        tsUs: nowUs, appBundle: context.appBundleId ?? "", lease: lease
+                    )
+                }, onDrop: { lease.release() })
+                return
+            }
+        }
         if !privacySnapshot.permitsRawPixels {
             let lease = SurfaceLease(releaser: BorrowedNoRetainReleaser())
             captureDispatcher.submit(

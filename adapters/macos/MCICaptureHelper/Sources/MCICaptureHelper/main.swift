@@ -314,10 +314,12 @@ let cascadeEligibleBundles = allowlist.bundleIdSet
 let cascade = SuppressionCascade(
     secureEventInput: CarbonSecureEventInputProbe(),
     axSecureSubrole: AXSubroleProbe(debugLog: axProbeDebugSink),
-    denylist: Denylist(entries: denylistEntries),
+    denylist: SensitiveCaptureDenylist(entries: denylistEntries),
     blackedRegion: blackedRegionProbe,
     knownSafeAppBundles: cascadeEligibleBundles,
-    rawPixelExcludedAppBundles: BrowserPixelCapturePolicy.excludedBundleIds
+    rawPixelExcludedAppBundles: BrowserPixelCapturePolicy.excludedBundleIds,
+    admissionPolicy: .ordinaryApplications,
+    browserWindowPrivacy: BrowserWindowPrivacyProbe()
 )
 
 let loop = HelperMainLoop(

@@ -634,11 +634,13 @@ public struct SCStreamPipeline: Sendable {
     /// asynchronous path for that frame.
     public func snapshotPixelPrivacy(
         context: WorkflowContext,
-        hasBlackedRegion: Bool? = nil
+        hasBlackedRegion: Bool? = nil,
+        capturedWindow: FocusedWindow? = nil
     ) -> PixelPrivacySnapshot {
         cascade.snapshotPixelPrivacy(
             context: context,
-            hasBlackedRegion: hasBlackedRegion
+            hasBlackedRegion: hasBlackedRegion,
+            capturedWindow: capturedWindow
         )
     }
 
