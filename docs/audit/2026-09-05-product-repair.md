@@ -293,6 +293,11 @@ show those pixels in Recall, and return the same event through recall/context.
   ordinary-app capture resumed. The browser test did not pass, and no consent
   was approved or reset through automation. Do not describe the whole capture
   pipeline as currently blocked solely because that browser gate is pending.
+- Shutdown/focus-window transitions still produced logged
+  `streamStoppedUnexpectedly` restarts. The supervisor recovered, and the
+  committed receipt advanced to 64 screen records and 16 screenshots at
+  `2026-09-05T12:52:40.260Z`. This does not qualify uninterrupted capture or a
+  final-artifact soak; investigate restart frequency during lifecycle testing.
 
 ## Remaining Acceptance Gates
 
