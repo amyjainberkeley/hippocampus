@@ -8,6 +8,28 @@ final class WorkspacePreferencesRoutingTests: XCTestCase {
     private var parent: URL { bundle.appendingPathComponent("Contents/MacOS/Hippocampus") }
 
     @MainActor
+    func testParentLookupIgnoresTheBundlesCachedChildExecutable() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let app = root.appendingPathComponent("Hippocampus.app")
+        let macos = app.appendingPathComponent("Contents/MacOS")
+        try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let parent = macos.appendingPathComponent("Hippocampus")
+        let child = macos.appendingPathComponent("recall-ui")
+        try Data().write(to: parent)
+        try Data().write(to: child)
+        let info = try PropertyListSerialization.data(fromPropertyList: [
+            "CFBundleIdentifier": "ai.hippocampus.routing-test.\(UUID().uuidString)",
+            "CFBundleExecutable": "recall-ui", "CFBundlePackageType": "APPL",
+        ], format: .xml, options: 0)
+        try info.write(to: app.appendingPathComponent("Contents/Info.plist"))
+        let cachedBundle = try XCTUnwrap(Bundle(url: app))
+        XCTAssertEqual(cachedBundle.executableURL?.resolvingSymlinksInPath(), child.resolvingSymlinksInPath())
+        XCTAssertEqual(WorkspacePreferencesRouter.parentExecutable(bundleURL: app), parent.resolvingSymlinksInPath())
+        withExtendedLifetime(cachedBundle) {}
+    }
+
+    @MainActor
     func testProcessIdentityReadsActualTestProcessAndRejectsMissingPIDs() async throws {
         let executable = try XCTUnwrap(WorkspacePreferencesRouter.executableURL(processID: getpid()))
         XCTAssertTrue(executable.isFileURL)
