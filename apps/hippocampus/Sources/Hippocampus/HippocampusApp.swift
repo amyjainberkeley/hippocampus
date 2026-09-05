@@ -6,7 +6,6 @@ import os
 import AppKit
 #endif
 
-@main
 struct HippocampusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var loginItemVM = LoginItemViewModel(service: SMLoginItemService())

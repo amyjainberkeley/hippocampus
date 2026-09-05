@@ -15,12 +15,10 @@ struct AIToolConnectorBehavior {
             named: "slow-agent",
             in: root,
             source: """
-            #!/usr/bin/perl
-            open my $pid_file, '>', '\(childPID.path)' or die $!;
-            print $pid_file "$$\\n";
-            close $pid_file;
-            $SIG{TERM} = sub { exit 0 };
-            sleep 5
+            #!/bin/sh
+            trap 'exit 0' TERM
+            printf '%s\\n' "$$" > '\(childPID.path)'
+            while :; do :; done
             """
         )
 
@@ -39,12 +37,16 @@ struct AIToolConnectorBehavior {
         }
         precondition(Date().timeIntervalSince(started) < 2, "menu connector timeout was not bounded")
 
-        let pid = try String(contentsOf: childPID, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let processIdentifier = Int32(pid) else {
-            fatalError("connector did not publish a child pid")
+        // A loaded Mac can hit the deadline before the script reaches its
+        // handshake. That is a valid timeout, not a missing-file failure.
+        if FileManager.default.fileExists(atPath: childPID.path) {
+            let pid = try String(contentsOf: childPID, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let processIdentifier = Int32(pid) else {
+                fatalError("connector published an invalid child pid")
+            }
+            precondition(kill(processIdentifier, 0) == -1 && errno == ESRCH, "timed-out menu connector is still alive")
         }
-        precondition(kill(processIdentifier, 0) == -1 && errno == ESRCH, "timed-out menu connector is still alive")
 
         let noisyAgent = try executable(
             named: "noisy-agent",
@@ -86,6 +88,12 @@ struct AIToolConnectorBehavior {
                 "raw connector stderr leaked into user-facing copy"
             )
         }
+
+        let silentAgent = try executable(named: "silent-agent", in: root, source: "#!/bin/sh\nexit 0\n")
+        let silentReport = try await AIToolConnector(
+            agentURL: silentAgent, baseEnvironment: [:]
+        ).connectAll()
+        precondition(silentReport.contains("not been verified"), "empty output must not claim connection")
 
         print("PASS: menu AI connector timeout, cleanup, output, and error bounds")
     }

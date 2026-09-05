@@ -96,7 +96,7 @@ public struct AIToolConnector: Sendable {
             )
         }
         return output.isEmpty
-            ? "Hippocampus connected the AI tools installed on this Mac."
+            ? "The registration command returned no report. Client connection has not been verified."
             : output
     }
 
