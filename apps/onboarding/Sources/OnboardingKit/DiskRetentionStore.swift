@@ -91,7 +91,7 @@ public actor DiskRetentionStore: RetentionStore {
         return cached?.days
     }
 
-    public func needsReview() -> Bool {
+    public func needsReview() async -> Bool {
         loadIfNeeded()
         return cached?.needsReview ?? false
     }

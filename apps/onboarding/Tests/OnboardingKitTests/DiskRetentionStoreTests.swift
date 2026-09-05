@@ -96,6 +96,9 @@ final class DiskRetentionStoreTests: XCTestCase {
         let needsReview = await store.needsReview()
         XCTAssertEqual(policy, .sevenDays)
         XCTAssertTrue(needsReview)
+        let protocolStore: any RetentionStore = store
+        let protocolReview = await protocolStore.needsReview()
+        XCTAssertTrue(protocolReview, "The view model must see persisted review state through the protocol")
         XCTAssertEqual(try Data(contentsOf: file), original)
         try await store.setPolicy(.ninetyDays, customDays: nil)
         let reviewed = await store.needsReview()
