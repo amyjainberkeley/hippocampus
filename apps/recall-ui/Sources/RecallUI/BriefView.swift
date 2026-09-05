@@ -192,7 +192,7 @@ struct DateSelectorBar: View {
 
 struct BriefBodyView: View {
     let brief: Brief
-    var onRegenerate: () -> Void = {}
+    let onRefresh: () -> Void
 
     var body: some View {
         ScrollView {
@@ -206,7 +206,7 @@ struct BriefBodyView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
 
-                BriefFooterActions(brief: brief, onRegenerate: onRegenerate)
+                BriefFooterActions(brief: brief, onRefresh: onRefresh)
                     .padding(.top, 8)
             }
             .padding(.horizontal, 16)
@@ -248,7 +248,7 @@ struct BriefHeaderView: View {
 
 struct BriefFooterActions: View {
     let brief: Brief
-    var onRegenerate: () -> Void = {}
+    let onRefresh: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -274,15 +274,13 @@ struct BriefFooterActions: View {
             Spacer()
 
             Button {
-                onRegenerate()
+                onRefresh()
             } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
             .foregroundStyle(Color.brandMintDim)
-            .help(
-                "Re-fetch the latest brief for this date. The brief author runs on a schedule; this does not trigger a new generation."
-            )
+            .help("Refresh the saved brief for this date")
         }
         .font(.callout)
     }

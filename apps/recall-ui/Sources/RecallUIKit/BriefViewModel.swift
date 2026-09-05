@@ -99,7 +99,7 @@ public final class BriefViewModel: ObservableObject {
     /// Re-query the brain, picking the latest brief (or whatever the
     /// caller asked for via `forceDate`) and updating `knownDates`.
     ///
-    /// Called once on tab appearance, again after a Regenerate, and any time
+    /// Called once on tab appearance, when refreshing a saved brief, and any time
     /// the deep-link router lands the user on this tab.
     public func reload(forceDate: String? = nil) async {
         scene = .loading
