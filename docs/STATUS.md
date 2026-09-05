@@ -1,14 +1,63 @@
 # Hippocampus Status
 
-_Audited on 2026-09-04._
+_Audited on 2026-09-05._
 
-Audited code baseline: `79576d3`
+Audited code baseline: `f424d94`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## Installed Product Repair
+
+The September 5 owner audit found that the installed e7be6f0 app had no
+production screenshot blobs and drained thousands of frames with zero stored
+screen events. Earlier isolated capture qualification used a special app
+allowlist; it did not establish usable capture under the owner's normal
+configuration. The historical component qualifications below are not an
+end-to-end claim for the repaired installed product.
+
+Current repair implementation and focused tests cover:
+
+- Ordinary identifiable applications are admitted after global capture consent,
+  with secure-input, AX uncertainty, explicit exclusions, sensitive-source
+  defaults, OCR secret checks, and focused-window generation checks retained.
+  Browser pixels require a positively classified normal window with matching
+  identity, geometry, and URL. Unsupported/private/ambiguous browser windows
+  remain excluded. Live browser qualification is still pending.
+- Committed capture receipts distinguish saved records/screenshots, suppression,
+  disconnected helpers, and storage failures. Imports have separate acquisition
+  provenance; unknown historical rows are not guessed to be screen captures.
+- New installs default to 90-day retention. Unversioned finite policies require
+  review before automatic deletion. The owner's existing seven-day file was
+  backed up and explicitly changed to a reviewed 90-day policy.
+- Recall opens a light Today workspace with real screenshot references, date
+  navigation, screenshot search, visual episodes, an authenticated image viewer,
+  source/time details, refresh, and bounded cited exports. Observed spans are
+  not measured active time.
+- Today generates a model-free cited draft after useful current-day evidence
+  arrives. Checks run each minute; subsequent changed-evidence rebuilds are
+  limited to once per five minutes. The morning brief owns yesterday's local
+  calendar date. Neither unattended path loads Qwen. Optional Qwen NER now
+  requires the exact explicit opt-in `MCI_QWEN_NER_ENABLED=1` before model load.
+- The old menu process was sampled at roughly 40 GB physical footprint in a
+  SwiftUI menu-update loop. Its animated periodic icon was removed and image
+  construction bounded. A separate orphan agent was blocked in Core ML while
+  Tokio waited for blocking workers; daemon EOF shutdown now has a bounded
+  runtime teardown. Fresh installed resource/lifecycle proof is still pending.
+- Claude SessionStart context and Codex instruction integration are explicit,
+  ownership-safe opt-ins. They preserve bounded canonical citations and do not
+  install themselves into unrelated client configuration.
+
+All six repaired release executables built successfully. Installed capture-to-screenshot/search/context
+readback, UI inspection, pause/relaunch proof, and refreshed synthetic benchmark
+are in progress. The full debug capture suite passed 624 of 625 tests; its
+100-microsecond timing gate measured 107 microseconds under concurrent build
+load. The optimized shipping-profile suite is being checked without changing
+the limit. Do not call the installed repair complete until those results
+are recorded in `docs/audit/2026-09-05-product-repair.md`.
 
 ## Product Boundary
 
@@ -115,7 +164,7 @@ truthfully scoped evidence product.
   encrypted keyframe blobs. Every retention cycle also reconciles canonical
   crash orphans and stale managed temporary files after a one-hour grace
   period, without following symlinks or deleting unknown entries. A missing
-  retention file receives the fresh-install `forever` default; an existing
+  retention file receives the fresh-install 90-day default; an existing
   unreadable, malformed, or unknown-value file fails closed and skips both
   expiry and reconciliation instead of silently changing policy.
 - A process-lifetime operating-system writer lease now covers the daemon,
@@ -269,7 +318,8 @@ truthfully scoped evidence product.
   helper passed a 20-second live overlap proof with two distinct application
   identities: 38 frames, one focused OCR event, one retained authenticated
   keyframe, no background token, no foreign event, and no ingest drop or
-  failure. The separate 1,800-second soak delivered 3,610 frames, exercised 37
+  failure. This used an isolated qualification allowlist, not the owner's
+  production configuration. The separate 1,800-second soak delivered 3,610 frames, exercised 37
   fail-closed focus-race drops (`1.0249%`), retained 38 OCR events and 37
   keyframes, and measured helper CPU p95 `3.7%`, RSS p95 `92,012,544` bytes,
   and projected storage `3,222,844` bytes/hour. The exact report and limitations
@@ -279,7 +329,7 @@ truthfully scoped evidence product.
   S as its only bundled model, passes signed App Group and model validation,
   survives the disposable-home first-launch gate, and carries the stable Team
   identifier `BV6KGKFKP4`. It is a debug qualification artifact, not the
-  distributable release. The post-M4 production rebuild remains a release gate.
+  distributable release. It does not qualify the September 5 repair.
 - A throwaway-home E2E installs the engine, starts with capture disabled,
   imports 20 synthetic events, injects one shared-encoder `OCREvent` through
   production `--drain-stdin --strict`, derives episodes, persists and reads
@@ -326,13 +376,14 @@ truthfully scoped evidence product.
   successfully, and the Sparkle private/public key pair matches the public key
   in the shipping Info.plist. The pre-lift app and DMG completed Developer ID
   signing, Apple notarization, stapling, and verification. The production
-  artifact must now be rebuilt through that pipeline from the standalone M4
-  lift before it replaces the installed app or is considered publishable.
+  artifact must now be rebuilt through that pipeline from the September 5
+  repair before it replaces the installed app or is considered publishable.
 - A verified local Arctic Embed S Core ML bundle is present in the gitignored
   development model directory and is included by debug ad-hoc assembly, so that
   artifact supports semantic recall. It is the sole required release model.
-  BERT NER is absent and Tier-1 entity extraction remains active. Qwen3 is
-  absent and evidence-cited extractive briefs remain active. Qwen is an
+  Tier-1 entity extraction remains active. This owner's custom local model
+  directory contains Qwen3; that presence no longer starts unattended Qwen
+  inference. Evidence-cited extractive briefs remain active. Qwen is an
   optional custom-build experiment, not a shipped download or release gate.
   A local archive containing only that compiled Arctic bundle was created and
   reconstructed through `scripts/prepare-release-models.sh`; its SHA-256 is
