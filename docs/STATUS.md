@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-05._
 
-Audited code baseline: `1e5b288`
+Audited code baseline: `1e19cb1`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -75,7 +75,10 @@ Current repair implementation and focused tests cover:
   Recall, whose bundle identity is shared. The new router targets the exact
   parent executable, acknowledges pane opening, and prevents duplicate parent
   processes with a lifetime lock. Release binaries are built; installed routing
-  qualification remains pending.
+  qualification initially failed because the main-bundle executable lookup
+  resolved Recall itself. The named-sibling lookup correction is now verified
+  in the installed app: a cold launch opens AI Context, receives its
+  acknowledgement and starts one parent without an extra Recall window.
 - macOS TCC logs confirmed browser Automation prompts were prohibited because
   the signed parent lacked the Apple Events entitlement. Parent and capture
   helper now receive that capability through both signing paths; other children
@@ -105,11 +108,24 @@ The first images revealed fixed-canvas black margins. The geometry/focus/hook
 repair (`bea62b3`) was signed, notarized, stapled and installed; event 1629's
 authenticated native viewer shows the corrected canvas without black margins.
 Proof: `/tmp/hippocampus-focus-repair-image-proof-20260905.jpeg`.
-The currently installed `c6d23c0` is a Developer ID signed local validation build,
-not the final notarized artifact. Its preceding notarized app is preserved at
-`/Applications/Hippocampus Before Contention Repair 2026-09-05.app`.
+The browser-capability build `81e0cb6` was signed, notarized, stapled and installed.
+Its 79 MB DMG is `/tmp/hippocampus-release-20260905-browser-routing/Hippocampus-0.1.0.dmg`,
+SHA-256 `6ca2ddff5abf47c15c3d23c25cc13be8aac057925acc4c63ce65654c3ee11c78`.
+The currently installed `2726eaf` is the Developer ID signed local routing
+validation build, not the final notarized artifact. The preceding notarized app
+is preserved at `/Users/amy/hippo-work/releases/backups/Hippocampus-notarized-81e0cb6.app`.
+Pause/resume was exercised through its native control: the receipt recorded
+`capture_disabled` while off and cleared that reason after restart.
 Normal/private-browser live proof and permission-revocation recovery remain
-unqualified.
+unqualified. A macOS security dialog remains foreground; the owner must handle
+it. No access has been granted or reset by automation.
+
+The latest preview correction strips the complete indexing header before the
+timeline's 80-character budget. Search-derived cards normalize the same body
+contract; views do not strip a second time. Stored text, search indexing,
+citations and detail-hit wire semantics are unchanged. All 109 Rust bridge
+tests and 79 focused optimized Recall tests pass. Final packaging and native
+preview readback are pending this source refresh.
 
 A real Claude SessionStart invocation exposed an oversized-packet failure even
 though direct MCP worked. The hook now requests 600 tokens/four citations and
@@ -134,8 +150,8 @@ including the newest AppleScript change.
 Eighteen focused release workspace/date/receipt tests also pass.
 The earlier debug suite's 107-microsecond
 timing result versus its 100-microsecond gate remains recorded, not hidden.
-The newest preferences and browser capability changes must pass installed
-verification before those repairs can be called complete.
+The remaining browser and final-preview checks must pass installed verification
+before those repairs can be called complete.
 
 ## Product Boundary
 

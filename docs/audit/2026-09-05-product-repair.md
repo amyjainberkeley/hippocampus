@@ -223,3 +223,36 @@ show those pixels in Recall, and return the same event through recall/context.
   OS script cannot be cancelled here; it can occupy the single slot until the
   OS returns, while callers continue to time out and deny browser pixels.
   The next signed app must still be tested against real browser consent.
+
+## Native Routing And Preview Readability
+
+- `81e0cb6` passed app and DMG notarization, stapling and Gatekeeper assessment.
+  App submission: `4caf6d3d-5c5b-4113-a71a-534e03cdef7f`; DMG submission:
+  `bbb5dd43-79f0-4f86-8ea6-4abca82ef386`. DMG SHA-256:
+  `6ca2ddff5abf47c15c3d23c25cc13be8aac057925acc4c63ce65654c3ee11c78`.
+- Its real cold-parent navigation failed immediately, despite unit tests.
+  The router's `Bundle.executableURL` check identified the child as the main
+  executable. A new cached-child regression failed and the named auxiliary
+  executable lookup made it pass. This behavior is consistent with the
+  [CoreFoundation main-bundle initialization](https://github.com/swiftlang/swift-corelibs-foundation/blob/main/Sources/CoreFoundation/CFBundle_Main.c)
+  and [executable-path cache](https://github.com/swiftlang/swift-corelibs-foundation/blob/main/Sources/CoreFoundation/CFBundle_Executable.c).
+  The installed signed validation build `2726eaf` subsequently opened the real
+  AI Context pane from Recall with the parent stopped, received acknowledgement,
+  and started one parent without a second Recall window. Native pane readback
+  showed both client integrations still configured.
+- Native Capture Off/On controls were exercised. Off produced a fresh
+  `capture_disabled` receipt; resume cleared that reason and restored enabled
+  UI state after the supervised restart. This does not prove browser capture.
+- The native Today cards revealed internal metadata instead of OCR because
+  the bridge truncated text to 80 characters before display could remove the
+  longer indexing header. `1e19cb1` strips one complete header before the
+  timeline cap; malformed headers remain intact. Search-to-card mapping and
+  the fallback timeline reader share that display-body contract, and cards no
+  longer strip again. Full detail/search hit snippets keep their existing wire
+  semantics. Stored records, index text and citations are untouched.
+  Rust regressions failed first; all 109 bridge tests then passed. The Swift
+  mapping regression also failed first; 79 focused optimized Recall tests pass.
+- Browser qualification is waiting on owner handling of a foreground macOS
+  security dialog. The agent cannot operate it. A separate temporary metadata
+  diagnostic encountered a Gatekeeper prompt and was terminated; no protection
+  was bypassed or permission granted. That diagnostic is not required setup.
