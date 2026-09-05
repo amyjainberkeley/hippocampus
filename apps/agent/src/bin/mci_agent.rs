@@ -67,6 +67,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DEFAULT_HEALTH_SUMMARY_WINDOW_SECONDS: u64 = 3_600; // 1 hour
 const COMMAND_INTEGRITY_FAILURE_EXIT_CODE: u8 = 22;
+const DAEMON_RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 struct Args {
     device_id_path: PathBuf,
@@ -591,11 +592,35 @@ fn print_usage() {
     );
 }
 
-#[allow(clippy::too_many_lines)]
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     mci_agent::panic_hook::install();
+    let raw_argv: Vec<String> = std::env::args().collect();
+    let args = parse_args(&raw_argv);
+    let shutdown_timeout =
+        matches!(&args.mode, Mode::DrainStdin { .. }).then_some(DAEMON_RUNTIME_SHUTDOWN_TIMEOUT);
+    run_with_runtime(run_agent(args), shutdown_timeout)
+}
 
+fn run_with_runtime(
+    future: impl std::future::Future<Output = ExitCode>,
+    shutdown_timeout: Option<std::time::Duration>,
+) -> ExitCode {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build agent runtime");
+    let result = runtime.block_on(future);
+    if let Some(timeout) = shutdown_timeout {
+        // A started spawn_blocking Core ML call cannot be aborted. The daemon
+        // must return from main after EOF, not wait indefinitely in Runtime::drop.
+        // Its writer lease remains held until the OS tears down the process.
+        runtime.shutdown_timeout(timeout);
+    }
+    result
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_agent(args: Args) -> ExitCode {
     // Best-effort drain of prior crash reports. Spawned early so it
     // runs in the background while the main mode proceeds. Default
     // OFF — both MCI_CRASH_REPORT_URL and MCI_CRASH_REPORT_OPTED_IN=1
@@ -610,9 +635,6 @@ async fn main() -> ExitCode {
             }
         });
     }
-
-    let raw_argv: Vec<String> = std::env::args().collect();
-    let args = parse_args(&raw_argv);
 
     match args.mode {
         Mode::Version => {
@@ -2946,6 +2968,106 @@ fn hex_nibble(b: u8) -> Option<u8> {
         b'a'..=b'f' => Some(b - b'a' + 10),
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod runtime_shutdown_tests {
+    use super::*;
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    struct ChildGuard(Child);
+
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            if self.0.try_wait().ok().flatten().is_none() {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+    }
+
+    #[test]
+    fn daemon_exits_after_eof_with_inflight_blocking_work() {
+        let root = tempfile::tempdir().expect("temporary runtime fixture");
+        let mut child = ChildGuard(
+            Command::new(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    "runtime_shutdown_tests::child_drains_with_blocked_worker",
+                    "--nocapture",
+                ])
+                .env("MCI_TEST_DRAIN_RUNTIME_ROOT", root.path())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn runtime fixture"),
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let status = loop {
+            if let Some(status) = child.0.try_wait().expect("poll runtime fixture") {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "completed stdin drain remained pinned by a blocking worker"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert!(status.success(), "runtime fixture failed: {status}");
+        assert!(root.path().join("drained").exists(), "EOF was not reached");
+        let (_, lock) = acquire_lock(&root.path().join(".running"))
+            .expect("kernel releases the daemon writer lease on process exit");
+        lock.release().expect("release fixture lease");
+    }
+
+    #[test]
+    fn child_drains_with_blocked_worker() {
+        let Some(root) = std::env::var_os("MCI_TEST_DRAIN_RUNTIME_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let (_, lease) = acquire_lock(&root.join(".running")).expect("fixture writer lease");
+        let result = run_with_runtime(
+            async {
+                let (started, ready) = tokio::sync::oneshot::channel();
+                tokio::task::spawn_blocking(move || {
+                    let _ = started.send(());
+                    // Models may remain inside synchronous inference after cancellation.
+                    loop {
+                        std::thread::park();
+                    }
+                });
+                ready.await.expect("blocking job started");
+                let (device, _) = load_or_generate(root.join("device-id"))
+                    .await
+                    .expect("fixture device id");
+                let log = HealthLog::new(HealthLogConfig {
+                    path: root.join("health.jsonl"),
+                    max_bytes: 1024,
+                });
+                let stats = drain_with_capture_status(
+                    &mut tokio::io::empty(),
+                    &log,
+                    &SystemWallClock,
+                    &device,
+                    None,
+                    None,
+                )
+                .await
+                .expect("empty stdin reaches EOF");
+                assert_eq!(stats.frames_seen, 0);
+                lease
+                    .release_at_process_exit()
+                    .expect("retain lease until exit");
+                std::fs::write(root.join("drained"), b"done").expect("publish EOF receipt");
+                ExitCode::SUCCESS
+            },
+            Some(DAEMON_RUNTIME_SHUTDOWN_TIMEOUT),
+        );
+        assert_eq!(result, ExitCode::SUCCESS);
     }
 }
 
