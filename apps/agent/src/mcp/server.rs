@@ -40,7 +40,7 @@ const MAX_EPISODES_LIMIT: usize = 100;
 /// Default `limit` for `mci_events_by_app` when the client omits it.
 const DEFAULT_EVENTS_BY_APP_LIMIT: usize = 50;
 /// Hard cap for `mci_events_by_app`'s `limit` parameter.
-const MAX_EVENTS_BY_APP_LIMIT: usize = 500;
+const MAX_EVENTS_BY_APP_LIMIT: usize = 1000;
 /// MCP protocol version this server advertises in `initialize`.
 ///
 /// The MCP spec uses calendar-versioned protocol revisions; Claude Code

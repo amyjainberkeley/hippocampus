@@ -9,6 +9,9 @@ SOAK_REPORT="$SCRIPT_DIR/live-capture/summarize_soak.py"
 STREAM_POLICY="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/StreamConfig.swift"
 CAPTURE_SESSION="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SCStreamCaptureSession.swift"
 FOCUS_TRACKER="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Context/FocusTracker.swift"
+CORPUS_SOURCE="$SCRIPT_DIR/../tools/capture-overlap-corpus/Sources/CaptureOverlapCorpus/main.swift"
+CORPUS_BUILD="$SCRIPT_DIR/../tools/capture-overlap-corpus/build-app.sh"
+BACKGROUND_PLIST="$SCRIPT_DIR/../tools/capture-overlap-corpus/Background-Info.plist"
 HELPER_MAIN="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift"
 OCR_EMITTER="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/OCRPostAllowEmitter.swift"
 SUPPRESSION_CASCADE="$SCRIPT_DIR/../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift"
@@ -88,7 +91,7 @@ ts_unix,helper_pid,rss_kb,cpu_pct
 EOF
 
 cat > "$TMP_ROOT/memory.json" <<'EOF'
-{"background_token_present":false,"corpus_event_count":600,"focused_recall_outcome":"degraded","focused_token_present":true,"timeline_event_count":600}
+{"background_token_present":false,"corpus_event_count":600,"focused_recall_outcome":"degraded","focused_token_present":true,"focus_control_token_present":true,"foreign_event_count":0,"timeline_event_count":600}
 EOF
 
 mkdir -p "$TMP_ROOT/brain/blobs"
@@ -113,6 +116,7 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     report = json.load(handle)
 assert report["qualified"] is True, report
 assert report["capture"]["frames_delivered"] == 900, report
+assert report["capture"]["focus_race_drop_fraction"] < 0.05, report
 assert report["capture"]["ocr_events"] == 600, report
 assert report["capture"]["keyframes_retained"] == 1, report
 assert report["resources"]["helper_cpu_pct_p95"] == 12.0, report
@@ -167,7 +171,7 @@ assert "helper_cpu_p95_above_15_percent" in report["failures"], report
 PY
 
 cat > "$TMP_ROOT/leaked-memory.json" <<'EOF'
-{"background_token_present":true,"corpus_event_count":600,"focused_recall_outcome":"degraded","focused_token_present":true,"timeline_event_count":600}
+{"background_token_present":true,"corpus_event_count":600,"focused_recall_outcome":"degraded","focused_token_present":true,"focus_control_token_present":true,"foreign_event_count":0,"timeline_event_count":600}
 EOF
 if python3 "$SOAK_REPORT" \
     --health-jsonl "$TMP_ROOT/health.jsonl" \
@@ -188,6 +192,123 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     report = json.load(handle)
 assert "background_token_present" in report["failures"], report
 PY
+
+cat > "$TMP_ROOT/foreign-memory.json" <<'EOF'
+{"background_token_present":false,"corpus_event_count":600,"focused_recall_outcome":"degraded","focused_token_present":true,"focus_control_token_present":true,"foreign_event_count":1,"timeline_event_count":601}
+EOF
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/foreign-memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/foreign-report.json" > /dev/null; then
+    fail "a persisted non-corpus event must not qualify"
+fi
+python3 - "$TMP_ROOT/foreign-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+assert "foreign_event_present" in report["failures"], report
+PY
+
+sed 's/"focus_control_token_present":true/"focus_control_token_present":false/' \
+    "$TMP_ROOT/memory.json" > "$TMP_ROOT/no-focus-control-memory.json"
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/no-focus-control-memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/no-focus-control-report.json" > /dev/null; then
+    fail "a soak without persisted focus-rebind evidence must not qualify"
+fi
+rg -q 'focus_control_token_missing' "$TMP_ROOT/no-focus-control-report.json" \
+    || fail "missing focus-control evidence is not reported"
+
+sed 's/"frames_focus_race_dropped":1/"frames_focus_race_dropped":0/' \
+    "$TMP_ROOT/health.jsonl" > "$TMP_ROOT/no-race-health.jsonl"
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/no-race-health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/no-race-report.json" > /dev/null; then
+    fail "a soak that never exercises the focus-race gate must not qualify"
+fi
+python3 - "$TMP_ROOT/no-race-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+assert "focus_race_gate_unexercised" in report["failures"], report
+PY
+
+sed -e '$s/"frames_delivered":900/"frames_delivered":100/' \
+    -e '$s/"frames_focus_race_dropped":1/"frames_focus_race_dropped":5/' \
+    "$TMP_ROOT/health.jsonl" > "$TMP_ROOT/five-percent-race-health.jsonl"
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/five-percent-race-health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/five-percent-race-report.json" > /dev/null; then
+    fail "a 5 percent focus-race drop fraction must not qualify"
+fi
+python3 - "$TMP_ROOT/five-percent-race-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+assert report["capture"]["focus_race_drop_fraction"] == 0.05, report
+assert "focus_race_drop_fraction_at_or_above_5_percent" in report["failures"], report
+PY
+
+sed '$s/"frames_dropped_backpressure":0/"frames_dropped_backpressure":1/' \
+    "$TMP_ROOT/health.jsonl" > "$TMP_ROOT/backpressure-health.jsonl"
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/backpressure-health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/backpressure-report.json" > /dev/null; then
+    fail "a soak with a backpressure drop must not qualify"
+fi
+rg -q 'frame_backpressure_drops' "$TMP_ROOT/backpressure-report.json" \
+    || fail "backpressure-drop failure is not reported"
+
+sed '$s/"frames_dropped_late_ack":0/"frames_dropped_late_ack":1/' \
+    "$TMP_ROOT/health.jsonl" > "$TMP_ROOT/late-ack-health.jsonl"
+if python3 "$SOAK_REPORT" \
+    --health-jsonl "$TMP_ROOT/late-ack-health.jsonl" \
+    --footprint-csv "$TMP_ROOT/footprint.csv" \
+    --memory-json "$TMP_ROOT/memory.json" \
+    --brain-dir "$TMP_ROOT/brain" \
+    --capture-seconds 1800 \
+    --minimum-health-samples 2 \
+    --minimum-footprint-samples 3 \
+    --output "$TMP_ROOT/late-ack-report.json" > /dev/null; then
+    fail "a soak with a late-ack drop must not qualify"
+fi
+rg -q 'frame_late_ack_drops' "$TMP_ROOT/late-ack-report.json" \
+    || fail "late-ack-drop failure is not reported"
 
 if python3 "$SOAK_REPORT" \
     --health-jsonl "$TMP_ROOT/health.jsonl" \
@@ -220,6 +341,10 @@ if "$RUNNER" --app >"$TMP_ROOT/missing-value.out" 2>&1; then
 fi
 rg -q -- '--app requires' "$TMP_ROOT/missing-value.out" \
     || fail "missing --app value is not actionable"
+
+"$RUNNER" --help >"$TMP_ROOT/help.out"
+rg -q -- '--signed-debug-qualification' "$TMP_ROOT/help.out" \
+    || fail "runner must expose the stable Developer ID qualification mode"
 
 if "$RUNNER" --app "$TMP_ROOT/Missing.app" --capture-seconds 0 \
     >"$TMP_ROOT/bad-timeout.out" 2>&1; then
@@ -271,13 +396,58 @@ rg -q 'does not belong to the invoking user' "$TMP_ROOT/wrong-user.out" \
     || fail "foreign-session failure is not actionable"
 
 python3 "$MEMORY_CHECK" emit > "$TMP_ROOT/mcp.requests.jsonl"
-[[ "$(wc -l < "$TMP_ROOT/mcp.requests.jsonl" | tr -d ' ')" == "5" ]] \
+[[ "$(wc -l < "$TMP_ROOT/mcp.requests.jsonl" | tr -d ' ')" == "6" ]] \
     || fail "memory checker did not emit the complete deterministic MCP probe"
+python3 - "$TMP_ROOT/mcp.requests.jsonl" <<'PY'
+import json
+import sys
+
+requests = {item["id"]: item for item in map(json.loads, open(sys.argv[1], encoding="utf-8"))}
+for request_id in (4, 5):
+    limit = requests[request_id]["params"]["arguments"].get("limit")
+    if limit != 1000:
+        raise SystemExit(f"MCP request {request_id} is capped at {limit}, expected 1000")
+PY
 python3 "$MEMORY_CHECK" verify \
     --responses "$FIXTURE_DIR/mcp-focused-only.jsonl" \
     > "$TMP_ROOT/mcp-success.out"
 rg -q '"focused_token_present": true' "$TMP_ROOT/mcp-success.out" \
     || fail "focused-only MCP fixture was not accepted"
+
+sed '2s/FOCUSED_EVIDENCE_ZEPHYR_9241/FOCUSED_EVIDENCE_ZEPHYR_9241 BACKGROUND_SECRET_NEBULA_7713/' \
+    "$FIXTURE_DIR/mcp-focused-only.jsonl" > "$TMP_ROOT/mcp-focused-recall-leak.jsonl"
+if python3 "$MEMORY_CHECK" verify \
+    --responses "$TMP_ROOT/mcp-focused-recall-leak.jsonl" \
+    > "$TMP_ROOT/mcp-focused-recall-leak.out" 2>&1; then
+    fail "memory checker must scan focused recall for background-token leaks"
+fi
+rg -q 'background token leaked into the focused recall result' \
+    "$TMP_ROOT/mcp-focused-recall-leak.out" \
+    || fail "focused-recall leak failure is not actionable"
+
+if python3 "$MEMORY_CHECK" verify --require-focus-control \
+    --responses "$FIXTURE_DIR/mcp-focused-only.jsonl" \
+    > "$TMP_ROOT/mcp-missing-focus-control.out" 2>&1; then
+    fail "soak memory proof must reject missing focus-rebind evidence"
+fi
+rg -q 'focus-rebind control token is absent' \
+    "$TMP_ROOT/mcp-missing-focus-control.out" \
+    || fail "missing focus-control failure is not actionable"
+python3 "$MEMORY_CHECK" verify --require-focus-control \
+    --responses "$FIXTURE_DIR/mcp-focus-churn.jsonl" \
+    > "$TMP_ROOT/mcp-focus-churn.out"
+rg -q '"focus_control_token_present": true' "$TMP_ROOT/mcp-focus-churn.out" \
+    || fail "focus-churn MCP fixture was not accepted"
+
+sed 's/"event_count":1/"event_count":201/' \
+    "$FIXTURE_DIR/mcp-focused-only.jsonl" > "$TMP_ROOT/mcp-truncated.jsonl"
+if python3 "$MEMORY_CHECK" verify \
+    --responses "$TMP_ROOT/mcp-truncated.jsonl" \
+    > "$TMP_ROOT/mcp-truncated.out" 2>&1; then
+    fail "memory checker must reject a non-exhaustive timeline result"
+fi
+rg -q 'timeline result is not exhaustive' "$TMP_ROOT/mcp-truncated.out" \
+    || fail "truncated-timeline failure is not actionable"
 
 if python3 "$MEMORY_CHECK" verify \
     --responses "$FIXTURE_DIR/mcp-background-leak.jsonl" \
@@ -295,6 +465,14 @@ fi
 rg -q 'full-text background query found a candidate' "$TMP_ROOT/mcp-hidden-hit.out" \
     || fail "hidden full-text candidate failure is not actionable"
 
+if python3 "$MEMORY_CHECK" verify \
+    --responses "$FIXTURE_DIR/mcp-foreign-event.jsonl" \
+    > "$TMP_ROOT/mcp-foreign.out" 2>&1; then
+    fail "memory checker must reject content attributed to a non-corpus app"
+fi
+rg -q 'non-corpus event' "$TMP_ROOT/mcp-foreign.out" \
+    || fail "foreign-event failure is not actionable"
+
 require_literal 'trap cleanup EXIT' \
     "runner must clean up on normal exit"
 require_literal 'trap on_signal INT TERM HUP' \
@@ -311,6 +489,29 @@ require_literal 'MCI_DEVELOPMENT_FILE_KEY=1' \
     "runner must explicitly gate development file custody"
 require_literal 'MCI_DB_KEY_FILE="$KEY_FILE"' \
     "runner must pass the key by file path"
+require_literal 'SIGNED_DEBUG_QUALIFICATION=1' \
+    "runner must explicitly select the signed debug qualification mode"
+require_literal 'developer-id qualification requires a stable TeamIdentifier' \
+    "signed qualification must reject unstable signing identities"
+require_literal 'signed debug qualification helper requires a Developer ID Application authority' \
+    "signed qualification must require Developer ID authority on the helper"
+require_literal 'codesign --verify --strict --test-requirement' \
+    "signed qualification must evaluate an explicit code-signing requirement"
+require_literal 'anchor apple generic' \
+    "signed qualification must require an Apple-anchored certificate chain"
+require_literal 'certificate 1[field.1.2.840.113635.100.6.2.6] exists' \
+    "signed qualification must require the Developer ID intermediate"
+require_literal 'certificate leaf[field.1.2.840.113635.100.6.1.13] exists' \
+    "signed qualification must require a Developer ID Application leaf"
+require_literal 'EXPECTED_QUALIFICATION_TEAM_ID="BV6KGKFKP4"' \
+    "signed qualification must pin the production TeamIdentifier"
+require_literal '"$app_team_id" == "$EXPECTED_QUALIFICATION_TEAM_ID"' \
+    "signed qualification must reject a different Developer ID team"
+require_literal 'strings -a "$HELPER"' \
+    "signed qualification must prove the helper contains the debug-only capability"
+if rg -Fq 'strings -a "$HELPER" | rg -Fq' "$RUNNER"; then
+    fail "capability detection must not trip pipefail when ripgrep exits after its first match"
+fi
 require_literal 'unset MCI_DB_KEY_HEX' \
     "runner must not fall back to a raw key environment variable"
 require_literal 'CFFIXED_USER_HOME="$ISOLATED_HOME"' \
@@ -335,6 +536,49 @@ require_literal 'BACKGROUND_SECRET_NEBULA_7713' \
     "runner must verify the deterministic background token is absent"
 require_literal 'lsappinfo front' \
     "runner must prove the corpus is frontmost"
+require_literal 'frontmost query unavailable during' \
+    "runner must distinguish a failed frontmost query from an actual focus change"
+if rg -Fq 'focus interruption recovered' "$RUNNER"; then
+    fail "the verifier must fail closed instead of recovering from foreground-app changes"
+fi
+if rg -Fq 'FOCUS_RECOVERY_COUNT' "$RUNNER"; then
+    fail "the verifier must not retain a focus-recovery path"
+fi
+rg -Fq -- '--focus-churn' "$CORPUS_SOURCE" \
+    || fail "the soak corpus must exercise focused-window rebinding deterministically"
+rg -Fq -- '--background-only' "$CORPUS_SOURCE" \
+    || fail "the overlap corpus must expose a separate deterministic background-app mode"
+rg -Fq 'ai.hippocampus.CaptureOverlapBackground' "$BACKGROUND_PLIST" \
+    || fail "the background corpus must use a distinct application identity"
+rg -Fq 'CaptureOverlapBackground.app' "$RUNNER" \
+    || fail "the live verifier must build and launch the cross-app background corpus"
+require_literal 'stop_owned_bundle_process "$CORPUS_BUNDLE_ID"' \
+    "cleanup must rediscover the focused corpus when PID discovery was delayed"
+require_literal 'stop_owned_bundle_process "$BACKGROUND_BUNDLE_ID"' \
+    "cleanup must rediscover the background corpus when PID discovery was delayed"
+require_literal 'for attempt in {1..50}; do' \
+    "cleanup must retry LaunchServices PID discovery for a bounded interval"
+require_literal 'if (( CORPUS_LAUNCH_ATTEMPTED == 1 )); then' \
+    "cleanup must rediscover a focused corpus after this run attempts launch"
+require_literal 'if (( BACKGROUND_LAUNCH_ATTEMPTED == 1 )); then' \
+    "cleanup must rediscover a background corpus after this run attempts launch"
+python3 - "$RUNNER" <<'PY'
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+background_arm = source.index("BACKGROUND_LAUNCH_ATTEMPTED=1", source.index("Launching separate background corpus"))
+background_open = source.index('/usr/bin/open -n -F -o "$BACKGROUND_STDOUT"', background_arm)
+corpus_arm = source.index("CORPUS_LAUNCH_ATTEMPTED=1", source.index("Launching focused corpus"))
+corpus_open = source.index('/usr/bin/open "${CORPUS_OPEN_ARGS[@]}"', corpus_arm)
+if background_arm > background_open or corpus_arm > corpus_open:
+    raise SystemExit("LaunchServices cleanup ownership must be armed before open can be interrupted")
+PY
+rg -Fq '"$CORPUS_BUILD" "$CORPUS_APP" "$BACKGROUND_APP"' "$RUNNER" \
+    || fail "the live verifier must assemble both sides of the cross-app overlap corpus"
+require_literal '--args --focus-churn' \
+    "soak mode must enable deterministic focused-window churn"
+require_literal 'VERIFY_ARGS+=(--require-focus-control)' \
+    "soak mode must require persisted focus-rebind evidence"
 require_literal '/usr/bin/open "$CORPUS_APP" >/dev/null 2>&1' \
     "runner must retry LaunchServices activation within the startup deadline"
 if rg -Fq '/usr/bin/osascript' "$RUNNER"; then

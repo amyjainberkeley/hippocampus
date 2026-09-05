@@ -220,6 +220,14 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     ///     lift can succeed; tracked: follow-on memo
     ///     `v2-p1-redesign-includingwindows`. ADR-0031 §Status amended
     ///     in lockstep with this REVERT.
+    ///   - **2026-09-04 M4 THIRD LIFT — qualified production default.**
+    ///     The API-correct include-only filter, generation-bound rebind,
+    ///     and fail-closed race gate passed a Developer ID-signed live-Mac
+    ///     overlap proof and a 1,800-second focus-churn soak. The soak
+    ///     persisted the exact focused token, excluded the overlapping
+    ///     background token and every foreign-app event, delivered 3,612
+    ///     frames with zero encode/backpressure/late-ack failures, and
+    ///     dropped 30 focus-race frames (0.82%, below the 5% gate).
     ///
     /// PROTECTED-SET per AGENT_PROTOCOL §5.
     ///
@@ -234,18 +242,16 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     /// required by Swift 6 strict concurrency for a static `var`;
     /// safe here because writes are confined to test setup/teardown
     /// and reads in production are pure load.
-    nonisolated(unsafe) internal static var killOcrEmit: Bool = true
+    nonisolated(unsafe) internal static var killOcrEmit: Bool = false
 
-    /// M4-LIFT activator — the ONE production entry point that flips
-    /// `killOcrEmit` from the explicit `--capture` argv decision. Called
-    /// exactly once per helper process from `main.swift`.
+    /// Emergency/test activator for the source-controlled M4 switch.
     ///
     /// This method exists so the executable target (`MCICaptureHelper`)
-    /// can flip the internal `killOcrEmit` gate without loosening its
+    /// can exercise the internal `killOcrEmit` gate without loosening its
     /// `internal` scope (the field stays `internal` so tests keep the
     /// only other legitimate write path via `@testable import`). The
-    /// method name is verbose so a grep for the M4-lift runtime
-    /// activation lands here immediately.
+    /// method name is retained for fixture compatibility; shipping startup
+    /// does not call it.
     ///
     /// - Parameter enabled: `true` ⇒ flip `killOcrEmit = false` so the
     ///   cascade-twice OCR-emit path is armed. `false` ⇒ engage the

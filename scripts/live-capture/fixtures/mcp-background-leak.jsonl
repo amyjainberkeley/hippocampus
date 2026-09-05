@@ -3,3 +3,4 @@
 {"jsonrpc":"2.0","id":3,"result":{"outcome":"nothing_matched","reason":"no_candidates","hits":[],"related_context":[],"isError":false}}
 {"jsonrpc":"2.0","id":4,"result":{"events":[{"event_id":1,"ts_us":1000,"app_bundle_id":"ai.hippocampus.CaptureOverlapCorpus","window_title":"Focused Evidence","url":null,"text_snippet":"FOCUSED_EVIDENCE_ZEPHYR_9241 BACKGROUND_SECRET_NEBULA_7713"}],"isError":false}}
 {"jsonrpc":"2.0","id":5,"result":{"events":[{"event_id":1,"ts_us":1000,"app_bundle_id":"ai.hippocampus.CaptureOverlapCorpus","window_title":"Focused Evidence","url":null,"text_snippet":"FOCUSED_EVIDENCE_ZEPHYR_9241 BACKGROUND_SECRET_NEBULA_7713"}],"isError":false}}
+{"jsonrpc":"2.0","id":6,"result":{"stats":{"event_count":1},"isError":false}}

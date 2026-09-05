@@ -167,9 +167,6 @@ if qualificationRequested && !qualificationAuthorized {
     )
     exit(64)
 }
-if qualificationAuthorized {
-    CascadeTwiceOCREmitter.activateM4Lift(enabled: true)
-}
 #endif
 
 let readiness: HelperReadinessReceipt?

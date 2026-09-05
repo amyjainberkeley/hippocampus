@@ -46,6 +46,7 @@ LANES=(
     "helper-readiness-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior"
     "capture-overlap-corpus|swift|test|scripts/test-capture-overlap-corpus.sh"
     "live-capture-overlap-contract|bash|test|scripts/test-live-capture-overlap-contract.sh"
+    "product-source-provenance|bash|test|scripts/test-product-source-provenance.sh"
     "onboarding-route-behavior|swift|test|scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior"
     "safari-private-context|bash|test|node --test extensions/safari/__tests__/content.test.cjs"
     "bash-syntax|bash|lint|__bash_syntax_lane"
@@ -120,6 +121,7 @@ LANES
     helper-readiness-behavior readiness publication is private, atomic, and add-only
     capture-overlap-corpus deterministic focused/background window fixture builds
     live-capture-overlap-contract live verifier preflight and cleanup remain fail-closed
+    product-source-provenance signed qualification source and binary binding contract
     onboarding-route-behavior executable route to the durable app-access editor
     safari-private-context structured browser capture fails closed in private tabs
     bash-syntax           bash -n across repo *.sh files

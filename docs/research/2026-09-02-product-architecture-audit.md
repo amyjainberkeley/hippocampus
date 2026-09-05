@@ -341,13 +341,13 @@ The order is based on dependency and falsifiability, not calendar estimates.
 | Order | Gate | Why it gates later work | Current sprint state |
 |---:|---|---|---|
 | 1 | Canonical repository and release truth | No benchmark or release matters if it targets the wrong product | Established |
-| 2 | Reliable supervised runtime and key custody | Capture, deletion, and agent handoff require one healthy local authority | Development path and owner-death shutdown verified; public signing remains external |
+| 2 | Reliable supervised runtime and key custody | Capture, deletion, and agent handoff require one healthy local authority | Supervision and owner-death shutdown verified; the Keychain-only Developer ID path works on the owner Mac, with second-Mac continuity still pending |
 | 3 | Capture privacy and terminal failure | Bad input poisons every later memory layer | Browser authorization, private-context exclusion, pause, lock, and TCC behavior are executable; Accessibility now permits OCR and the real focused-window/background-exclusion overlap gate passes |
 | 4 | Retention, deletion, and writer quiescence | A user must be able to withdraw evidence safely | Complete, including process-held writer lease and orphan reconciliation |
-| 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | A real 20-second run recalled the focused token, excluded the overlapping background token, and persisted 18 OCR events; the metrics-bearing 30-minute soak remains pending an uninterrupted foreground window |
+| 5 | Live focused-window corpus and soak | Synthetic wire tests cannot qualify real capture | Qualified: a Developer ID-signed current-source helper passed a separate-app overlap proof, and the corrected 30-minute soak delivered 3,610 frames with a 1.02% race-drop fraction, 3.7% CPU p95, 92.0 MB RSS p95, zero ingest drops/failures, complete focus-control readback, and no background or foreign event |
 | 6 | Evidence sufficiency benchmark | Useful memory must know when not to answer | V1 retrieval and bounded cited handoff pass their accepted 36-task benchmark and keep semantic neighbors explicitly degraded; the host provenance contract and fail-closed Core ML adapter exist, but no task-trained artifact or manifest has passed the separate V2 trusted-answer qualification |
 | 7 | Native product experience | A correct engine users cannot understand will not be trusted | Light native UI and release assets implemented; the disposable product capture visibly proves three authenticated keyframes, 20 events, and one brief |
-| 8 | Signed distribution and update proof | Public use requires identity, notarization, models, and continuity | Ad-hoc bundle passes launch/owner-death checks; Developer ID and notarization remain external |
+| 8 | Signed distribution and update proof | Public use requires identity, notarization, models, and continuity | Developer ID app and DMG signing/notarization have passed once; the post-M4-lift rebuild and clean second-Mac update/Keychain continuity proof remain |
 
 ## V1, V2, And V3 Product Boundary
 

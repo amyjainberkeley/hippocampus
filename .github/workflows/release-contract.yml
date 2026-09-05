@@ -37,6 +37,9 @@ on:
       - 'scripts/test-capture-overlap-corpus.sh'
       - 'scripts/run-live-capture-overlap.sh'
       - 'scripts/test-live-capture-overlap-contract.sh'
+      - 'scripts/product-source-digest.py'
+      - 'scripts/build-provenance.py'
+      - 'scripts/test-product-source-provenance.sh'
       - 'scripts/live-capture/**'
       - 'tools/capture-overlap-corpus/**'
       - 'scripts/demo.sh'
@@ -163,6 +166,9 @@ on:
       - 'scripts/test-capture-overlap-corpus.sh'
       - 'scripts/run-live-capture-overlap.sh'
       - 'scripts/test-live-capture-overlap-contract.sh'
+      - 'scripts/product-source-digest.py'
+      - 'scripts/build-provenance.py'
+      - 'scripts/test-product-source-provenance.sh'
       - 'scripts/live-capture/**'
       - 'tools/capture-overlap-corpus/**'
       - 'scripts/demo.sh'
@@ -287,6 +293,7 @@ jobs:
       - run: scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior
       - run: scripts/test-capture-overlap-corpus.sh
       - run: scripts/test-live-capture-overlap-contract.sh
+      - run: scripts/test-product-source-provenance.sh
       - run: scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior
       - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
       - run: scripts/test-release-identity.sh

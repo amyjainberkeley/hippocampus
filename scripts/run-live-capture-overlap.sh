@@ -2,19 +2,25 @@
 set -euo pipefail
 
 # Truthful live gate for focused-window-only ScreenCaptureKit ingestion.
-# This script never changes TCC or Gatekeeper state. It requires an explicitly
-# assembled development app so both helper and agent use the artifact under test.
+# This script never changes TCC or Gatekeeper state. It accepts either an
+# explicitly ad-hoc development app or a Developer ID signed debug qualification
+# app, so the live proof can bind TCC to the stable distribution identity.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SESSION_CHECK="$SCRIPT_DIR/live-capture/check_session.py"
 MEMORY_CHECK="$SCRIPT_DIR/live-capture/verify_memory.py"
 SOAK_REPORTER="$SCRIPT_DIR/live-capture/summarize_soak.py"
+PRODUCT_SOURCE_DIGEST_TOOL="$SCRIPT_DIR/product-source-digest.py"
+BUILD_PROVENANCE_TOOL="$SCRIPT_DIR/build-provenance.py"
 FOOTPRINT_TOOL="$REPO_ROOT/tools/footprint_measure.sh"
 CORPUS_BUILD="$REPO_ROOT/tools/capture-overlap-corpus/build-app.sh"
 CORPUS_BUNDLE_ID="ai.hippocampus.CaptureOverlapCorpus"
+BACKGROUND_BUNDLE_ID="ai.hippocampus.CaptureOverlapBackground"
 FOCUSED_TOKEN="FOCUSED_EVIDENCE_ZEPHYR_9241"
 BACKGROUND_TOKEN="BACKGROUND_SECRET_NEBULA_7713"
+FOCUS_CONTROL_TOKEN="FOCUS_REBIND_CONTROL_3087"
+EXPECTED_QUALIFICATION_TEAM_ID="BV6KGKFKP4"
 
 APP_PATH=""
 CAPTURE_SECONDS=20
@@ -24,8 +30,13 @@ PREFLIGHT_ONLY=0
 KEEP_ARTIFACTS=0
 DISCARD_FAILURE_ARTIFACTS=0
 SOAK_MODE=0
+SIGNED_DEBUG_QUALIFICATION=0
+CORPUS_LAUNCH_ATTEMPTED=0
+BACKGROUND_LAUNCH_ATTEMPTED=0
 
 RUN_ROOT=""
+CORPUS_APP=""
+BACKGROUND_APP=""
 EVIDENCE_CREATED=0
 RUN_SUCCEEDED=0
 CAPTURE_FIFO=""
@@ -33,6 +44,7 @@ FIFO_GUARD_OPEN=0
 HELPER_LEASE_FIFO=""
 HELPER_LEASE_GUARD_OPEN=0
 CORPUS_PID=""
+BACKGROUND_PID=""
 HELPER_PID=""
 AGENT_PID=""
 QUERY_PID=""
@@ -47,15 +59,18 @@ Usage:
   scripts/run-live-capture-overlap.sh --app /absolute/path/Hippocampus.app [OPTIONS]
 
 Required:
-  --app PATH              Assembled ad-hoc development Hippocampus.app.
+  --app PATH              Assembled Hippocampus.app qualification artifact.
 
 Options:
   --capture-seconds N     Keep the corpus focused for 1-30 seconds (default 20).
-  --soak                  Run the release soak for exactly 30 minutes, retain
-                          evidence, and enforce the documented resource SLO.
+  --soak                  Run the release soak for exactly 30 uninterrupted
+                          minutes, retain evidence, and enforce the resource SLO.
   --startup-timeout N     Bound app/helper startup in seconds (default 20).
   --query-timeout N       Bound MCP readback in seconds (default 20).
   --preflight-only        Validate the host and app; never launch capture.
+  --signed-debug-qualification
+                          Require a Developer ID signed debug helper carrying
+                          the narrow live OCR qualification capability.
   --keep-artifacts        Retain successful evidence as well as failures.
   --discard-on-failure    Delete failed evidence instead of retaining it.
   -h, --help              Show this help.
@@ -64,7 +79,7 @@ Prerequisites:
   - The Mac is unlocked with an active display.
   - Screen Recording and Accessibility are granted to the exact assembled
     MCICaptureHelper identity. The script never grants or resets permissions.
-  - Build the app with the current sources using:
+  - Build an ad-hoc development app with the current sources using:
       scripts/swift-package.sh build --package-path apps/hippocampus
       scripts/swift-package.sh build --package-path adapters/macos/MCICaptureHelper
       scripts/swift-package.sh build --package-path apps/recall-ui
@@ -72,6 +87,13 @@ Prerequisites:
       cargo build -p mci-agent --bins -p hippocampus-native-host
       apps/hippocampus/Resources/build-app.sh --debug \
         --development-ad-hoc --development-lite --dist /tmp/hippocampus-live-app
+
+    To bind the proof to a stable TCC identity and the current source, run:
+      apps/hippocampus/Resources/build-app.sh --debug \
+        --current-source-qualification --dist /tmp/hippocampus-signed-qualification
+    Then pass the resulting app with
+    --signed-debug-qualification. That artifact is for qualification only and
+    must never be distributed.
 
 The only success condition is exact focused-token readback with exact background-
 token absence from the isolated encrypted brain. Failed evidence is mode 0700 and
@@ -106,6 +128,15 @@ owned_command() {
     /bin/ps -p "$pid" -o command= 2>/dev/null || true
 }
 
+app_pid_from_launch_services() {
+    local bundle_id="$1"
+    local asn
+    asn="$(/usr/bin/lsappinfo find bundleid="$bundle_id" 2>/dev/null || true)"
+    [[ -n "$asn" ]] || return 1
+    /usr/bin/lsappinfo info -only pid "$asn" 2>/dev/null \
+        | sed -nE 's/^"pid"=([0-9]+)$/\1/p'
+}
+
 stop_owned_process() {
     local pid="$1"
     local label="$2"
@@ -130,6 +161,23 @@ stop_owned_process() {
     kill -KILL "$pid" 2>/dev/null || true
 }
 
+stop_owned_bundle_process() {
+    local bundle_id="$1"
+    local label="$2"
+    local expected="$3"
+    [[ -n "$expected" ]] || return 0
+
+    local attempt pid
+    for attempt in {1..50}; do
+        pid="$(app_pid_from_launch_services "$bundle_id" || true)"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            stop_owned_process "$pid" "$label" "$expected"
+            return 0
+        fi
+        sleep 0.1
+    done
+}
+
 cleanup() {
     CLEANUP_EXIT_CODE=$?
     set +e
@@ -148,6 +196,15 @@ cleanup() {
     stop_owned_process "$HELPER_PID" "capture helper" "$HELPER"
     stop_owned_process "$AGENT_PID" "ingest agent" "$AGENT"
     stop_owned_process "$CORPUS_PID" "overlap corpus" "capture-overlap-corpus"
+    stop_owned_process "$BACKGROUND_PID" "background corpus" "capture-overlap-background"
+    if (( CORPUS_LAUNCH_ATTEMPTED == 1 )); then
+        stop_owned_bundle_process "$CORPUS_BUNDLE_ID" "overlap corpus" \
+            "$CORPUS_APP/Contents/MacOS/capture-overlap-corpus"
+    fi
+    if (( BACKGROUND_LAUNCH_ATTEMPTED == 1 )); then
+        stop_owned_bundle_process "$BACKGROUND_BUNDLE_ID" "background corpus" \
+            "$BACKGROUND_APP/Contents/MacOS/capture-overlap-background"
+    fi
     if [[ -n "$CAPTURE_FIFO" && -p "$CAPTURE_FIFO" ]]; then
         rm -f "$CAPTURE_FIFO"
     fi
@@ -204,6 +261,10 @@ while [[ $# -gt 0 ]]; do
             PREFLIGHT_ONLY=1
             shift
             ;;
+        --signed-debug-qualification)
+            SIGNED_DEBUG_QUALIFICATION=1
+            shift
+            ;;
         --keep-artifacts)
             KEEP_ARTIFACTS=1
             shift
@@ -242,7 +303,7 @@ require_bounded_integer "--query-timeout" "$QUERY_TIMEOUT" 300
 [[ -d "$APP_PATH" ]] || fail "assembled app does not exist: $APP_PATH"
 APP_PATH="$(cd "$(dirname "$APP_PATH")" && pwd -P)/$(basename "$APP_PATH")"
 
-for command in codesign openssl python3 rg strings; do
+for command in awk codesign openssl python3 rg shasum strings; do
     command -v "$command" >/dev/null 2>&1 || fail "required command is missing: $command"
 done
 for executable in /usr/bin/open /usr/bin/lsappinfo /usr/sbin/ioreg /usr/libexec/PlistBuddy; do
@@ -251,28 +312,93 @@ done
 [[ -x "$SESSION_CHECK" ]] || fail "session checker is missing: $SESSION_CHECK"
 [[ -x "$MEMORY_CHECK" ]] || fail "memory checker is missing: $MEMORY_CHECK"
 [[ -x "$SOAK_REPORTER" ]] || fail "soak reporter is missing: $SOAK_REPORTER"
+[[ -x "$PRODUCT_SOURCE_DIGEST_TOOL" ]] \
+    || fail "product source digest tool is missing: $PRODUCT_SOURCE_DIGEST_TOOL"
+[[ -x "$BUILD_PROVENANCE_TOOL" ]] \
+    || fail "build provenance tool is missing: $BUILD_PROVENANCE_TOOL"
 [[ -x "$FOOTPRINT_TOOL" ]] || fail "footprint sampler is missing: $FOOTPRINT_TOOL"
 [[ -x "$CORPUS_BUILD" ]] || fail "overlap corpus builder is missing: $CORPUS_BUILD"
 
 INFO_PLIST="$APP_PATH/Contents/Info.plist"
 HELPER="$APP_PATH/Contents/MacOS/MCICaptureHelper"
 AGENT="$APP_PATH/Contents/MacOS/mci-agent"
+BUILD_PROVENANCE="$APP_PATH/Contents/Resources/build-provenance.json"
 [[ -f "$INFO_PLIST" ]] || fail "assembled app has no Contents/Info.plist"
 [[ -x "$HELPER" ]] || fail "assembled app has no executable MCICaptureHelper"
 [[ -x "$AGENT" ]] || fail "assembled app has no executable mci-agent"
+[[ -f "$BUILD_PROVENANCE" ]] \
+    || fail "assembled app has no signed build-provenance.json"
+
+repo_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" \
+    || fail "could not resolve the qualification checkout HEAD"
+source_digest="$(python3 "$PRODUCT_SOURCE_DIGEST_TOOL" --repo-root "$REPO_ROOT")" \
+    || fail "could not compute the qualification checkout source digest"
+PROVENANCE_VERIFY_ARGS=(
+    verify
+    --app "$APP_PATH"
+    --expected-source-head "$repo_head"
+    --expected-source-digest "$source_digest"
+)
+if (( SIGNED_DEBUG_QUALIFICATION == 1 )); then
+    PROVENANCE_VERIFY_ARGS+=(--require-current-source)
+fi
+if ! python3 "$BUILD_PROVENANCE_TOOL" "${PROVENANCE_VERIFY_ARGS[@]}"; then
+    fail "assembled app is not mechanically bound to the current product source"
+fi
+
+sha256_file() {
+    shasum -a 256 "$1" | awk '{print $1}'
+}
+app_sha256="$(sha256_file "$APP_PATH/Contents/MacOS/Hippocampus")"
+helper_sha256="$(sha256_file "$HELPER")"
+agent_sha256="$(sha256_file "$AGENT")"
 
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST" 2>/dev/null || true)"
 [[ "$bundle_id" == "ai.hippocampus" ]] \
     || fail "unexpected Hippocampus bundle id: ${bundle_id:-missing}"
 development_key_enabled="$(/usr/libexec/PlistBuddy \
     -c 'Print :MCIDevelopmentFileKeyEnabled' "$INFO_PLIST" 2>/dev/null || true)"
-[[ "$development_key_enabled" == "true" ]] \
-    || fail "app is not an explicit development-file-key artifact; assemble with --debug --development-ad-hoc"
-
 codesign --verify --deep --strict "$APP_PATH" >/dev/null 2>&1 \
     || fail "assembled app fails codesign verification"
-if ! codesign -dv --verbose=2 "$APP_PATH" 2>&1 | rg -q '^Signature=adhoc$'; then
-    fail "development-file-key verifier requires an ad-hoc development app"
+app_signature="$(codesign -dv --verbose=4 "$APP_PATH" 2>&1)"
+helper_signature="$(codesign -dv --verbose=4 "$HELPER" 2>&1)"
+app_cdhash="$(printf '%s\n' "$app_signature" | sed -n 's/^CDHash=//p')"
+helper_cdhash="$(printf '%s\n' "$helper_signature" | sed -n 's/^CDHash=//p')"
+if (( SIGNED_DEBUG_QUALIFICATION == 1 )); then
+    apple_developer_id_requirement="=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"$EXPECTED_QUALIFICATION_TEAM_ID\""
+    verify_apple_developer_id_trust() {
+        local executable="$1"
+        local label="$2"
+        codesign --verify --strict --test-requirement \
+            "$apple_developer_id_requirement" "$executable" >/dev/null 2>&1 \
+            || fail "$label is not signed by the Apple-anchored production Developer ID identity"
+    }
+    verify_apple_developer_id_trust "$APP_PATH" "qualification host app"
+    verify_apple_developer_id_trust "$HELPER" "qualification capture helper"
+    [[ "$development_key_enabled" != "true" ]] \
+        || fail "signed debug qualification app must not expose file-key authority through its Info.plist"
+    app_team_id="$(printf '%s\n' "$app_signature" | sed -n 's/^TeamIdentifier=//p')"
+    helper_team_id="$(printf '%s\n' "$helper_signature" | sed -n 's/^TeamIdentifier=//p')"
+    [[ -n "$app_team_id" && "$app_team_id" != "not set" ]] \
+        || fail "developer-id qualification requires a stable TeamIdentifier"
+    [[ "$helper_team_id" == "$app_team_id" ]] \
+        || fail "qualification helper TeamIdentifier does not match its host app"
+    [[ "$app_team_id" == "$EXPECTED_QUALIFICATION_TEAM_ID" ]] \
+        || fail "qualification identity does not match the production TeamIdentifier $EXPECTED_QUALIFICATION_TEAM_ID"
+    printf '%s\n' "$app_signature" | rg -q '^Authority=Developer ID Application:' \
+        || fail "signed debug qualification requires a Developer ID Application authority"
+    printf '%s\n' "$helper_signature" | rg -q '^Authority=Developer ID Application:' \
+        || fail "signed debug qualification helper requires a Developer ID Application authority"
+    helper_strings="$(strings -a "$HELPER")"
+    [[ "$helper_strings" == *"--live-overlap-qualification"* ]] \
+        || fail "signed helper does not contain the debug-only live OCR qualification capability"
+    unset helper_strings
+else
+    [[ "$development_key_enabled" == "true" ]] \
+        || fail "app is not an explicit development-file-key artifact; assemble with --debug --development-ad-hoc"
+    if ! codesign -dv --verbose=2 "$APP_PATH" 2>&1 | rg -q '^Signature=adhoc$'; then
+        fail "development-file-key verifier requires an ad-hoc development app"
+    fi
 fi
 
 session_summary="$(/usr/sbin/ioreg -n Root -d1 -a \
@@ -283,6 +409,9 @@ printf 'Preflight: %s\n' "$session_summary"
 existing_corpus_asn="$(/usr/bin/lsappinfo find bundleid="$CORPUS_BUNDLE_ID" 2>/dev/null || true)"
 [[ -z "$existing_corpus_asn" ]] \
     || fail "the overlap corpus is already running; quit that instance so PID ownership is unambiguous"
+existing_background_asn="$(/usr/bin/lsappinfo find bundleid="$BACKGROUND_BUNDLE_ID" 2>/dev/null || true)"
+[[ -z "$existing_background_asn" ]] \
+    || fail "the background corpus is already running; quit that instance so PID ownership is unambiguous"
 
 if (( PREFLIGHT_ONLY == 1 )); then
     printf 'PREFLIGHT ONLY: app and unlocked-session gates passed; configured capture_seconds=%s soak=%s; live capture was not run.\n' \
@@ -310,8 +439,11 @@ CAPTURE_FIFO="$RUN_ROOT/capture.fifo"
 HELPER_LEASE_FIFO="$RUN_ROOT/helper-lease.fifo"
 READINESS_FILE="$RUN_ROOT/helper-readiness.json"
 CORPUS_APP="$RUN_ROOT/CaptureOverlapCorpus.app"
+BACKGROUND_APP="$RUN_ROOT/CaptureOverlapBackground.app"
 CORPUS_STDOUT="$LOG_DIR/corpus.stdout"
 CORPUS_STDERR="$LOG_DIR/corpus.stderr"
+BACKGROUND_STDOUT="$LOG_DIR/background.stdout"
+BACKGROUND_STDERR="$LOG_DIR/background.stderr"
 HELPER_STDOUT="$LOG_DIR/helper.stdout"
 HELPER_STDERR="$LOG_DIR/helper.stderr"
 AGENT_STDOUT="$LOG_DIR/agent.stdout"
@@ -329,31 +461,47 @@ chmod 700 "$ISOLATED_HOME" "$SUPPORT_DIR" "$(dirname "$DEVICE_ID")"
 
 {
     printf 'started_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'repo_head=%s\n' "$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf unknown)"
+    printf 'repo_head=%s\n' "$repo_head"
+    printf 'source_digest=%s\n' "$source_digest"
+    printf 'app_binary_sha256=%s\n' "$app_sha256"
+    printf 'helper_sha256=%s\n' "$helper_sha256"
+    printf 'agent_sha256=%s\n' "$agent_sha256"
+    printf 'app_cdhash=%s\n' "$app_cdhash"
+    printf 'helper_cdhash=%s\n' "$helper_cdhash"
     printf 'app=%s\n' "$APP_PATH"
+    printf 'background_app=%s\n' "$BACKGROUND_APP"
     printf 'helper=%s\n' "$HELPER"
     printf 'agent=%s\n' "$AGENT"
     printf 'capture_seconds=%s\n' "$CAPTURE_SECONDS"
+    printf 'signed_debug_qualification=%s\n' "$SIGNED_DEBUG_QUALIFICATION"
+    printf 'expected_qualification_team_id=%s\n' "$EXPECTED_QUALIFICATION_TEAM_ID"
     printf 'focused_token=%s\n' "$FOCUSED_TOKEN"
     printf 'background_token=%s\n' "$BACKGROUND_TOKEN"
+    printf 'focus_control_token=%s\n' "$FOCUS_CONTROL_TOKEN"
     printf 'session=%s\n' "$session_summary"
 } > "$RUN_ROOT/metadata.txt"
 chmod 600 "$RUN_ROOT/metadata.txt"
 
 printf '\n==> Building deterministic overlap corpus\n'
-if ! "$CORPUS_BUILD" "$CORPUS_APP" \
+if ! "$CORPUS_BUILD" "$CORPUS_APP" "$BACKGROUND_APP" \
     >"$LOG_DIR/corpus-build.stdout" 2>"$LOG_DIR/corpus-build.stderr"; then
     tail -n 40 "$LOG_DIR/corpus-build.stderr" >&2 || true
     fail "overlap corpus build failed"
 fi
 codesign --verify --strict "$CORPUS_APP" >/dev/null 2>&1 \
     || fail "built overlap corpus fails codesign verification"
+codesign --verify --strict "$BACKGROUND_APP" >/dev/null 2>&1 \
+    || fail "built background corpus fails codesign verification"
 strings "$CORPUS_APP/Contents/MacOS/capture-overlap-corpus" \
     > "$LOG_DIR/corpus-executable.strings"
-for token in "$FOCUSED_TOKEN" "$BACKGROUND_TOKEN"; do
+strings "$BACKGROUND_APP/Contents/MacOS/capture-overlap-background" \
+    > "$LOG_DIR/background-executable.strings"
+for token in "$FOCUSED_TOKEN" "$BACKGROUND_TOKEN" "$FOCUS_CONTROL_TOKEN"; do
     grep -Fq "$token" "$LOG_DIR/corpus-executable.strings" \
         || fail "built overlap corpus is missing deterministic token: $token"
 done
+grep -Fq "$BACKGROUND_TOKEN" "$LOG_DIR/background-executable.strings" \
+    || fail "built background corpus is missing its deterministic token"
 
 printf '\n==> Preparing isolated encrypted brain and file-key custody\n'
 ( umask 077; openssl rand -hex 32 > "$KEY_FILE" )
@@ -398,10 +546,6 @@ if ! printf '' | "$AGENT" --device-id-path "$DEVICE_ID" \
 fi
 [[ -f "$DB_PATH" ]] || fail "key probe exited without creating the isolated brain"
 
-printf '\n==> Launching corpus and proving it is frontmost\n'
-/usr/bin/open -n -F -o "$CORPUS_STDOUT" --stderr "$CORPUS_STDERR" "$CORPUS_APP" \
-    || fail "LaunchServices could not open the overlap corpus"
-
 frontmost_bundle_id() {
     local asn
     asn="$(/usr/bin/lsappinfo front 2>/dev/null || true)"
@@ -410,18 +554,42 @@ frontmost_bundle_id() {
         | sed -nE 's/^"CFBundleIdentifier"="(.*)"$/\1/p'
 }
 
-corpus_pid_from_launch_services() {
-    local asn
-    asn="$(/usr/bin/lsappinfo find bundleid="$CORPUS_BUNDLE_ID" 2>/dev/null || true)"
-    [[ -n "$asn" ]] || return 1
-    /usr/bin/lsappinfo info -only pid "$asn" 2>/dev/null \
-        | sed -nE 's/^"pid"=([0-9]+)$/\1/p'
-}
+printf '\n==> Launching separate background corpus\n'
+BACKGROUND_LAUNCH_ATTEMPTED=1
+/usr/bin/open -n -F -o "$BACKGROUND_STDOUT" --stderr "$BACKGROUND_STDERR" \
+    "$BACKGROUND_APP" --args --background-only \
+    || fail "LaunchServices could not open the background corpus"
+
+deadline=$((SECONDS + STARTUP_TIMEOUT))
+while (( SECONDS < deadline )); do
+    if [[ -z "$BACKGROUND_PID" ]]; then
+        BACKGROUND_PID="$(app_pid_from_launch_services "$BACKGROUND_BUNDLE_ID" || true)"
+    fi
+    if [[ -n "$BACKGROUND_PID" ]] \
+        && rg -q '^capture-overlap-background ready$' "$BACKGROUND_STDOUT" 2>/dev/null; then
+        break
+    fi
+    sleep 0.25
+done
+[[ -n "$BACKGROUND_PID" ]] \
+    || fail "background corpus launched but no owned PID appeared in LaunchServices"
+kill -0 "$BACKGROUND_PID" 2>/dev/null || fail "background corpus exited during startup"
+rg -q '^capture-overlap-background ready$' "$BACKGROUND_STDOUT" 2>/dev/null \
+    || fail "background corpus did not publish its readiness line"
+
+printf '\n==> Launching focused corpus and proving it is frontmost\n'
+CORPUS_OPEN_ARGS=(-n -F -o "$CORPUS_STDOUT" --stderr "$CORPUS_STDERR" "$CORPUS_APP")
+if (( SOAK_MODE == 1 )); then
+    CORPUS_OPEN_ARGS+=(--args --focus-churn)
+fi
+CORPUS_LAUNCH_ATTEMPTED=1
+/usr/bin/open "${CORPUS_OPEN_ARGS[@]}" \
+    || fail "LaunchServices could not open the overlap corpus"
 
 deadline=$((SECONDS + STARTUP_TIMEOUT))
 while (( SECONDS < deadline )); do
     if [[ -z "$CORPUS_PID" ]]; then
-        CORPUS_PID="$(corpus_pid_from_launch_services || true)"
+        CORPUS_PID="$(app_pid_from_launch_services "$CORPUS_BUNDLE_ID" || true)"
     fi
     front_bundle="$(frontmost_bundle_id || true)"
     if [[ -n "$CORPUS_PID" && "$front_bundle" != "$CORPUS_BUNDLE_ID" ]]; then
@@ -498,14 +666,28 @@ runtime_fail() {
     exit 1
 }
 
+frontmost_runtime_fail() {
+    local phase="$1"
+    if [[ -z "$front_bundle" ]]; then
+        runtime_fail "frontmost query unavailable during $phase"
+    fi
+    runtime_fail "overlap corpus lost frontmost status during $phase"
+}
+
+ensure_corpus_frontmost() {
+    local phase="$1"
+    [[ "$front_bundle" == "$CORPUS_BUNDLE_ID" ]] && return 0
+    frontmost_runtime_fail "$phase"
+}
+
 deadline=$((SECONDS + STARTUP_TIMEOUT))
 while [[ ! -f "$READINESS_FILE" ]] && (( SECONDS < deadline )); do
+    kill -0 "$BACKGROUND_PID" 2>/dev/null || runtime_fail "background corpus exited before helper readiness"
     kill -0 "$CORPUS_PID" 2>/dev/null || runtime_fail "overlap corpus exited before helper readiness"
     kill -0 "$HELPER_PID" 2>/dev/null || runtime_fail "capture helper exited before readiness"
     kill -0 "$AGENT_PID" 2>/dev/null || runtime_fail "ingest agent exited before helper readiness"
     front_bundle="$(frontmost_bundle_id || true)"
-    [[ "$front_bundle" == "$CORPUS_BUNDLE_ID" ]] \
-        || runtime_fail "overlap corpus lost frontmost status during helper startup"
+    ensure_corpus_frontmost "helper startup"
     sleep 0.25
 done
 [[ -f "$READINESS_FILE" ]] \
@@ -538,13 +720,13 @@ FOOTPRINT_PID=$!
 printf 'Capturing focused corpus for %ss...\n' "$CAPTURE_SECONDS"
 deadline=$((SECONDS + CAPTURE_SECONDS))
 while (( SECONDS < deadline )); do
+    kill -0 "$BACKGROUND_PID" 2>/dev/null || runtime_fail "background corpus exited during capture"
     kill -0 "$CORPUS_PID" 2>/dev/null || runtime_fail "overlap corpus exited during capture"
     kill -0 "$HELPER_PID" 2>/dev/null || runtime_fail "capture helper exited during capture"
     kill -0 "$AGENT_PID" 2>/dev/null || runtime_fail "ingest agent exited during capture"
     kill -0 "$FOOTPRINT_PID" 2>/dev/null || runtime_fail "footprint sampler exited during capture"
     front_bundle="$(frontmost_bundle_id || true)"
-    [[ "$front_bundle" == "$CORPUS_BUNDLE_ID" ]] \
-        || runtime_fail "overlap corpus lost frontmost status during capture"
+    ensure_corpus_frontmost "capture"
     sleep 0.5
 done
 
@@ -617,7 +799,11 @@ if (( query_exit != 0 )); then
     runtime_fail "assembled mci-agent MCP readback exited with status $query_exit"
 fi
 
-if ! python3 "$MEMORY_CHECK" verify --responses "$MCP_RESPONSES" \
+VERIFY_ARGS=(verify --responses "$MCP_RESPONSES")
+if (( SOAK_MODE == 1 )); then
+    VERIFY_ARGS+=(--require-focus-control)
+fi
+if ! python3 "$MEMORY_CHECK" "${VERIFY_ARGS[@]}" \
     > "$VERIFY_STDOUT" 2> "$VERIFY_STDERR"; then
     cat "$VERIFY_STDERR" >&2
     runtime_fail "focused-only memory proof failed"

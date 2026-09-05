@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-04._
 
-Audited code baseline: `8afb141`
+Audited code baseline: `79576d3`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -154,7 +154,10 @@ truthfully scoped evidence product.
   eviction, timeout, and empty recognition explicitly reopen only that exact
   frame's visual baseline. A complete later static frame can then receive one
   full-frame retry without disabling the normal no-dirty-rectangle energy gate
-  or crossing a focused-window generation.
+  or crossing a focused-window generation. The standalone 2026-09-04 M4 third
+  lift enables production OCR by default after the live qualification below;
+  the emergency switch remains tested and the debug qualification capability
+  remains absent from release binaries.
 - Semantic recall works when the Arctic Embed S Core ML artifact is present
   and backfill has run. The macOS runtime explicitly permits CPU plus Neural
   Engine for inference and uses a Rust cosine scan over vectors stored inside
@@ -250,13 +253,10 @@ truthfully scoped evidence product.
   passes formatting, all-target workspace Clippy, every workspace test, and
   dependency audit. The shell and executable behavior lanes pass, including
   capture/privacy, release identity, model integrity, product truth, clean-home,
-  app launch, and visual contracts. The current verified matrix reports 43
-  passing lanes, four XCTest-only failures, and one unavailable SwiftFormat
-  skip. The local gate now routes package tests through the repository's
-  manifest-compatibility wrapper instead of failing before test compilation.
-  This host's current Command Line Tools installation does not include XCTest,
-  so full Swift package test execution requires full Xcode or CI; production
-  package builds and executable fixtures remain locally runnable.
+  app launch, and visual contracts. The current verified matrix reports 52
+  passing lanes, zero failures, and one unavailable SwiftFormat skip. Full
+  Xcode 26.6 is selected, so all Swift package tests and executable fixtures run
+  locally through the repository's manifest-compatibility wrapper.
 - Installer subprocesses run in isolated POSIX process groups with bounded
   TERM/KILL escalation. Executable fixtures prove ordinary descendants and
   descendants created by TERM handlers are gone before timeout returns. Failed
@@ -264,20 +264,22 @@ truthfully scoped evidence product.
   preserves completed artifacts. The DMG stages the generated canonical terms
   as a visible `License.rtf`; the removed macOS unflatten/Rez/flatten flow is no
   longer treated as an optional success path.
-- The capture stream's active-work ceiling is now 2 fps, matching the product
-  footprint design instead of the prior 5 fps default. The 1 Hz privacy
-  cascade floor remains independent, so lower frame delivery cannot suppress
-  periodic protected-surface checks. Fresh 5-second and 20-second runs against
-  the exact rebuilt ad-hoc app recalled the focused corpus token, excluded the
-  overlapping background token, and retained one authenticated keyframe. The
-  20-second run delivered 38 frames with zero backpressure or late-ack drops;
-  it is a functional privacy proof, not a resource-soak qualification.
-- The most recently verified `182 MB` debug ad-hoc app at
-  `apps/hippocampus/dist/Hippocampus.app` includes Arctic
-  Embed S as its only bundled model, passes signed App Group and model
-  validation, and survives the disposable-home first-launch and owner-death
-  gates. This proves a runnable development bundle, not a distributable Apple
-  release.
+- The capture stream's active-work ceiling is 2 fps and the 1 Hz privacy
+  cascade floor remains independent. A Developer ID-signed current-source
+  helper passed a 20-second live overlap proof with two distinct application
+  identities: 38 frames, one focused OCR event, one retained authenticated
+  keyframe, no background token, no foreign event, and no ingest drop or
+  failure. The separate 1,800-second soak delivered 3,610 frames, exercised 37
+  fail-closed focus-race drops (`1.0249%`), retained 38 OCR events and 37
+  keyframes, and measured helper CPU p95 `3.7%`, RSS p95 `92,012,544` bytes,
+  and projected storage `3,222,844` bytes/hour. The exact report and limitations
+  are in `docs/audit/2026-09-04-focused-window-live-qualification.md`.
+- The current-source Developer ID qualification app at
+  `/tmp/hippocampus-signed-qualification/Hippocampus.app` includes Arctic Embed
+  S as its only bundled model, passes signed App Group and model validation,
+  survives the disposable-home first-launch gate, and carries the stable Team
+  identifier `BV6KGKFKP4`. It is a debug qualification artifact, not the
+  distributable release. The post-M4 production rebuild remains a release gate.
 - A throwaway-home E2E installs the engine, starts with capture disabled,
   imports 20 synthetic events, injects one shared-encoder `OCREvent` through
   production `--drain-stdin --strict`, derives episodes, persists and reads
@@ -301,43 +303,6 @@ truthfully scoped evidence product.
 
 ## What Is Not Yet Proven
 
-- Real `ScreenCaptureKit` capture remains opt-in and is not yet release
-  qualified. The executable
-  `scripts/run-live-capture-overlap.sh` gate assembles an exact ad-hoc app,
-  requires Screen Recording and Accessibility for that helper, foregrounds a
-  synthetic overlapping-window corpus, captures through the bundled helper and
-  agent, and proves focused-window recall plus background-window abstention. A
-  Earlier 5-second and 20-second runs on the audited Mac passed with one retained
-  corpus event and one authenticated keyframe each: the exact focused token was
-  recalled and the overlapped background token was absent from timeline,
-  application-scoped events, and full-text retrieval. The same fail-closed gate
-  aborts if another app becomes frontmost. `--soak` fixes
-  the duration at 1,800 seconds, samples helper CPU/RSS every five seconds,
-  retains evidence, and emits a machine-readable qualification report covering
-  frame, OCR, keyframe, memory, storage, privacy, and resource-SLO evidence.
-  The verifier now closes the same parent-lifetime lease used by the packaged
-  supervisor and proves a zero-status graceful helper drain; its footprint
-  sampler cannot inherit either FIFO guard writer. A fresh one-second run on
-  the current audited source completed that lifecycle and repeated the exact
-  focused-token/background-abstention MCP proof. Two subsequent five-second
-  attempts stopped fail-closed when another user application became frontmost;
-  neither is
-  counted as a functional pass. The canonical current-source 20-second rerun
-  therefore remains pending alongside the soak.
-  An earlier 5 fps diagnostic soak was stopped after 91 footprint samples once
-  it had already established a 39.8% helper CPU p95 against the 15% ceiling;
-  that run did not qualify. The helper now builds at the documented 2 fps active-work
-  ceiling. Short-window CPU percentiles are dominated by startup and do not
-  qualify the 15% p95 resource target. The required uninterrupted 30-minute
-  privacy and resource run remains unqualified rather than being inferred from
-  source or from the short functional proofs.
-- OCR is therefore not yet launch-qualified against cross-window leakage. Ambient
-  ScreenCaptureKit OCR excludes browser windows entirely; Safari and Chromium
-  use separate structured capture paths that reject private contexts before
-  reading page content, with executable release tests. The narrow live OCR
-  qualification capability exists only in debug builds and is proven absent
-  from the release helper binary. Automatic OCR enablement remains blocked until
-  the 30-minute live soak passes.
 - The production-wired TCC revocation monitor is not yet proven by a live
   grant/revoke/restore run. macOS exposes no qualified public signal that a
   different app has started sharing or recording the screen, so Hippocampus
@@ -354,16 +319,15 @@ truthfully scoped evidence product.
   capability that permits the fixed user-owned `dev.key` path, and pass child
   processes only that path plus an explicit development marker, never raw key
   bytes. Developer ID bundles omit the capability and remain Keychain-only.
-  Signed clean-install and cross-version ACL continuity cannot be accepted
-  until the first stable Developer ID bundle completes the release gates.
+  A Developer ID release has completed signing and notarization on this Mac;
+  second-Mac clean-install and cross-version ACL continuity remain unqualified.
 - Full Xcode 26.6 is installed and selected. The Developer ID Application
   identity and its private key are installed, `notarytool-profile` authenticates
   successfully, and the Sparkle private/public key pair matches the public key
-  in the shipping Info.plist. The first canonical signing attempt reached the
-  macOS private-key authorization prompt and was cancelled without retaining or
-  claiming a partial app. A Developer ID-signed, notarized artifact therefore
-  remains unproven until that owner authorization and the complete installer
-  pipeline succeed.
+  in the shipping Info.plist. The pre-lift app and DMG completed Developer ID
+  signing, Apple notarization, stapling, and verification. The production
+  artifact must now be rebuilt through that pipeline from the standalone M4
+  lift before it replaces the installed app or is considered publishable.
 - A verified local Arctic Embed S Core ML bundle is present in the gitignored
   development model directory and is included by debug ad-hoc assembly, so that
   artifact supports semantic recall. It is the sole required release model.
@@ -466,12 +430,10 @@ immutable signed runtime is required before a production verifier can qualify.
 - Run `scripts/check.sh`, `scripts/e2e-clean-home.sh`, every Swift package test,
   strict workspace Clippy, and the full workspace test suite on the release
   commit. Full Xcode is now available; the 2026-09-04 post-review matrix passed
-  all 51 invoked lanes with only optional `swiftformat` absent.
-- Complete a real 30-minute capture soak with frame, OCR, retained-keyframe,
-  CPU, memory, disk, pause, and protected-surface observations.
-- Repeat the focused-window overlap gate from the release commit, prove live
-  TCC revocation/restoration behavior, then complete the 30-minute resource and
-  privacy soak.
+  all 52 invoked lanes with only optional `swiftformat` absent.
+- Keep the committed 30-minute capture-soak and current-source cross-app overlap
+  evidence reproducible from the release commit. Prove the independent live TCC
+  revocation/restoration path before calling permission recovery qualified.
 - Upload the verified immutable Arctic retrieval archive, replace the explicit
   `UNPROVISIONED` manifest fields only after its stable URL exists, and repeat
   reconstruction, integrity, and completeness checks from the release commit.
@@ -481,13 +443,13 @@ immutable signed runtime is required before a production verifier can qualify.
   signed-runtime latency before adding it to the release manifest. The
   evidence-memory V1 keeps this artifact absent and semantic candidates typed
   as degraded related context.
-- Authorize `/usr/bin/codesign` to use the installed Developer ID private key,
-  rerun the canonical installer, and inspect the retained app and DMG
-  notarization submission records and logs. Do not record secret values.
+- Rebuild the post-M4 app and DMG with the canonical installer, then inspect the
+  retained signing, notarization, staple, Gatekeeper, and checksum evidence. Do
+  not record secret values.
 - Build, sign, notarize, staple, install, and launch on a clean second Mac;
   verify Keychain continuity across an update before publishing.
-- Keep capture off by default and hybrid recall unqualified until their
-  respective measured gates pass.
+- Keep capture off by default. Keep trusted-answer presentation unavailable
+  until the separate evidence-verifier gate passes.
 
 ## Owner Actions
 

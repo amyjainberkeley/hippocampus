@@ -317,3 +317,34 @@ Orchestrator (role-play as driver-CSO per CEO-INFRA-001; the `cso` sub-agent has
 | 6 | Construction-graph wiring row is MANDATORY in any future V2-P1 §5 sign-off | [[project-v2p1-unit-tests-passed-but-never-wired]] + [[project-v2p1-exceptingwindows-misuse]] |
 
 — Orchestrator (driver-CSO per CEO-INFRA-001), 2026-05-31
+
+### 2026-09-04 — M4 THIRD LIFT
+
+The standalone third lift sets `CascadeTwiceOCREmitter.killOcrEmit = false`
+after the required live evidence, without changing the focused-window filter,
+stream lifecycle, generation gate, cascade, redaction, wire schema, or key
+custody in the lift itself. The emergency switch branch remains executable and
+covered by `CascadeTwiceOCREmitterTests`.
+
+The literal Messages-behind-System-Preferences replay was replaced with the
+same privacy boundary using deterministic synthetic applications. This avoids
+placing personal Messages content inside a retained qualification artifact
+while testing the material property: pixels owned by one visible,
+non-frontmost application must not enter an event attributed to another
+frontmost application.
+
+| Binding third-lift condition | Verdict | Evidence |
+|---|---|---|
+| Correct public API form and production construction graph | PASS | `SCContentFilter(display:including:exceptingWindows:)` receives a non-empty focused-window include list. `MainSwiftWiringTests` and `MultiWindowFilterScopeFenceTests` pin the production wiring and reject the historical `exceptingWindows` misuse. |
+| Real ScreenCaptureKit behavior, overlap, and `-3815` regression | PASS | Developer ID-signed helper ran against the live Apple API. Same-app and separately bundled cross-app overlap proofs recalled only `FOCUSED_EVIDENCE_ZEPHYR_9241`; `BACKGROUND_SECRET_NEBULA_7713` was absent; foreign-event count was zero; helper stderr contained no `-3815`. See `docs/audit/2026-09-04-focused-window-live-qualification.md`. |
+| Focus-rebind race and resource envelope | PASS | The corrected 1,800-second soak delivered 3,610 frames, exercised 37 race drops (`1.0249%` of delivered frames), persisted the focus-rebind control token, recorded zero backpressure/late-ack/encode failures, measured helper CPU p95 `3.7%`, RSS p95 `92,012,544` bytes, and projected `3,222,844` bytes/hour. See `docs/audit/2026-09-04-focused-window-soak.json`. |
+| Protected-set review | PASS | Filter factory, stream replacement, immutable generation provenance, synchronous pre-admission focus refresh, production construction graph, release-only capability exclusion, and emergency switch behavior are pinned by source and tests. The lift adds no new permission, IPC, wire, redaction, or network surface. |
+
+**Verdict: APPROVED for the standalone M4 third lift.** The live
+revoke/restore behavior of the independent TCC monitor is still unqualified and
+must remain disclosed; it does not reopen pixel attribution after a valid
+grant. Any later focused-window filter, generation, or cascade change reopens
+this review and may re-engage M4.
+
+— Principal Engineer acting as driver-CSO under the repository's existing
+driver-CSO discipline, 2026-09-04

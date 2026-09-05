@@ -354,20 +354,21 @@ Most projects bury this. It should be near the top, because it decides whether t
 | **On-device embeddings** | **Works.** Runs through Core ML with an explicit CPU+Neural Engine policy. The release gate also runs CPU-only and asserts both modes stay finite and match a known-good reference. |
 | **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
 | **Reading Mail and Messages** | **Partly wired.** The agent-side deep-hook pumps can persist allowed Mail and Messages content into the brain after their cascade checks, but they are not part of the default demo flow and still depend on explicit allowlists / FDA. |
-| **Live screen capture** | **Built, live-overlap verified, defaults OFF.** The persisted Preferences toggle is the only capture authority; enable commits only after a generation-bound helper readiness receipt. A real 20-second focused-window run recalled the foreground token, excluded the overlapping background token, and wrote 18 OCR events to an isolated encrypted brain. The 30-minute resource soak and public signed-release verification are still owed. |
+| **Live screen capture** | **Built, live-overlap and 30-minute soak verified, defaults OFF.** The persisted Preferences toggle is the only capture authority; enable commits only after a generation-bound helper readiness receipt. A Developer ID-signed helper recalled the focused token, excluded a separately bundled background app, and the soak met its privacy and resource gates. Live TCC recovery and second-Mac continuity remain unqualified. |
 | **Sync between machines** | **Skeleton.** The crypto is there. Proof that two devices converge is not. |
 | **Windows** | **Not started.** An empty crate with the right shape. |
 
 The core test suite runs with `cargo test -p mci-brain`; the repository-wide
-gate is `scripts/check.sh`. The owner release machine now has full Xcode, a
+gate is `scripts/check.sh`. The owner release machine has full Xcode, a
 Developer ID identity, notarization credentials, and a verified Sparkle key.
-Those prerequisites are ready, but no current public artifact is claimed as
-signed or notarized until the canonical pipeline completes and its retained
-Apple records are inspected.
+The canonical pipeline has completed Developer ID signing, app and DMG
+notarization, stapling, and Gatekeeper verification once; the production
+artifact is rebuilt after every capture-policy change before publication.
 
-If you only take one thing from this table: **capture is off by default and the
-development path has passed focused-window overlap, but the public release is
-not yet soak-, Developer ID-, or notarization-qualified.**
+If you only take one thing from this table: **capture is off by default; the
+focused-window privacy/resource gate and stable Apple distribution identity are
+qualified on the audit Mac, while live TCC recovery, second-Mac continuity, and
+public model hosting remain separate release gates.**
 
 ---
 
@@ -382,7 +383,7 @@ they are more mature. They also solve a different problem.
 
 mem0 and supermemory are memory layers for agents. You hand them a conversation, a document, or a fact, and they store and retrieve it. The input is text you deliberately give them.
 
-Hippocampus's intended input is permitted screen context, which reaches the details you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once. Live capture remains an explicit persisted preference. The current development app has passed a real focused-window/background-exclusion overlap gate; the longer resource soak and signed distribution gates remain pending.
+Hippocampus's intended input is permitted screen context, which reaches the details you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once. Live capture remains an explicit persisted preference. A Developer ID-signed current-source helper has passed real focused-window, separate-app background-exclusion, and 30-minute resource/privacy gates. The post-policy-change production rebuild, live TCC recovery, and second-Mac continuity remain pending.
 
 | | mem0 | supermemory | Hippocampus |
 |---|---|---|---|
@@ -390,7 +391,7 @@ Hippocampus's intended input is permitted screen context, which reaches the deta
 | Runs offline | Yes, library mode | Yes, local binary | Yes, and there is no cloud mode |
 | Retrieval | Vector, plus a graph store | Embedded graph engine | Keyword + vector fused; semantic uses a Rust-side cosine scan over SQLCipher-stored vectors |
 | Where memories live | Your DB or their cloud | Your machine or their cloud | SQLCipher plus local blobs, only your machine |
-| Maturity | Production | Production | Development MVP; focused capture and recall work, soak/signing pending |
+| Maturity | Production | Production | Development MVP; focused capture, recall, soak, and Apple distribution work on the audit Mac; second-Mac continuity pending |
 
 **On benchmarks, plainly:** the accepted 36-task agent-handoff benchmark runs
 both production hybrid and lexical paths over disposable encrypted brains.
