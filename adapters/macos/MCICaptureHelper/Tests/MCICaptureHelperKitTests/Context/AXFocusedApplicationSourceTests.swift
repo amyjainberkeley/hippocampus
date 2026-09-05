@@ -72,4 +72,32 @@ final class AXFocusedApplicationSourceTests: XCTestCase {
         } while next == nil && ProcessInfo.processInfo.systemUptime < deadline
         XCTAssertEqual(next, 20, "The late answer from the timed-out request must never be reused")
     }
+
+    func testContendingReaderWaitsWithinItsBudgetThenMakesAFreshQuery() {
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let query = BoundedFocusedPIDQuery {
+            let call = calls.withLock { $0 += 1; return $0 }
+            if call == 1 {
+                entered.signal()
+                release.wait()
+            }
+            return pid_t(call)
+        }
+        defer { release.signal() }
+        DispatchQueue.global().async {
+            _ = query.read(timeoutMs: 500)
+            finished.signal()
+        }
+        XCTAssertEqual(entered.wait(timeout: .now() + 1), .success)
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(10)) {
+            release.signal()
+        }
+        XCTAssertEqual(query.read(timeoutMs: 500), 2,
+                       "An ordinary overlapping query must not invalidate stable focus or reuse the first answer")
+        XCTAssertEqual(finished.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(calls.withLock { $0 }, 2)
+    }
 }

@@ -16,8 +16,11 @@ import CoreVideo
 
 private actor StubFrameSink: FrameSink {
     private(set) var writes: [Data] = []
+    private let onWrite: (@Sendable () -> Void)?
+    init(onWrite: (@Sendable () -> Void)? = nil) { self.onWrite = onWrite }
     func write(_ data: Data) async throws {
         writes.append(data)
+        onWrite?()
     }
     func snapshot() -> [Data] { writes }
 }
@@ -326,7 +329,8 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
     /// failsafeUnknown; NO OCREvent emitted. ADR-0013 §7 / ADR-0016 §4.9.
     func testOverCapOCRTextFailsClosed() async {
         let oversized = String(repeating: "a", count: maxOCRTextBytes + 1)
-        let sink = StubFrameSink()
+        let written = expectation(description: "Over-cap OCR publishes its privacy tombstone")
+        let sink = StubFrameSink(onWrite: { written.fulfill() })
         let emitter = CascadeTwiceOCREmitter(
             worker: VisionOCRWorker(engine: StubOCREngine(mode: .canned(OCRResult(
                 recognizedLines: [
@@ -346,14 +350,14 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
             context: WorkflowContext(appBundleId: "com.example.app"),
             input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: .init(x: 0, y: 0, width: 1, height: 1))
         )
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        await fulfillment(of: [written], timeout: 5)
+        await emitter.stopAndDrain()
         let frames = await sink.snapshot()
         XCTAssertEqual(frames.count, 1)
         guard let bytes = frames.first else { return XCTFail() }
         XCTAssertEqual(bytes[2], 0x11, "must be a PrivacyTombstone, not OCREvent")
         XCTAssertEqual(bytes.last, RedactionReason.failsafeUnknown.rawValue,
                        "fail-closed reason on over-cap")
-        await emitter.stopAndDrain()
     }
 
     /// CSO escalation 2026-05-29 — Phase A interim mitigation (option

@@ -50,11 +50,11 @@ public struct AXFocusedApplicationSource: FrontmostPidSource, FrontmostAppSource
     }
 }
 
-/// At most one AX request exists even if the OS fails to return. Late answers
-/// are discarded; later callers fail closed instead of accumulating requests.
+/// At most one AX request exists even if the OS fails to return. Callers may
+/// wait for its slot within their total budget, but always issue a fresh read.
 internal final class BoundedFocusedPIDQuery: @unchecked Sendable {
     private let queue = DispatchQueue(label: "mci.context.focused-application", qos: .userInitiated)
-    private let occupied = OSAllocatedUnfairLock(initialState: false)
+    private let slot = DispatchSemaphore(value: 1)
     private let perform: @Sendable () -> pid_t?
 
     init(perform: @escaping @Sendable () -> pid_t?) {
@@ -62,21 +62,18 @@ internal final class BoundedFocusedPIDQuery: @unchecked Sendable {
     }
 
     func read(timeoutMs: Int = 50) -> pid_t? {
-        guard occupied.withLock({ busy in
-            guard !busy else { return false }
-            busy = true
-            return true
-        }) else { return nil }
+        let deadline = DispatchTime.now() + .milliseconds(max(1, timeoutMs))
+        guard slot.wait(timeout: deadline) == .success else { return nil }
 
         let result = OSAllocatedUnfairLock<pid_t?>(initialState: nil)
         let completion = DispatchSemaphore(value: 0)
         queue.async { [self] in
             let pid = perform()
             result.withLock { $0 = pid }
-            occupied.withLock { $0 = false }
+            slot.signal()
             completion.signal()
         }
-        guard completion.wait(timeout: .now() + .milliseconds(max(1, timeoutMs))) == .success
+        guard completion.wait(timeout: deadline) == .success
         else { return nil }
         return result.withLock { $0 }
     }
