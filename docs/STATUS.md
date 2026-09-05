@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-05._
 
-Audited code baseline: `dd16407`
+Audited code baseline: `af64871`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -33,6 +33,12 @@ Current repair implementation and focused tests cover:
   requires full-window OCR before the secret gate; dirty-region OCR cannot
   authorize a whole-window screenshot. System consent/security dialogs are
   excluded in addition to the memory application's own windows.
+- Fresh AX focused-process queries replace cached NSWorkspace foreground reads.
+  A background-timer reproduction showed the cache remaining on the prior app
+  after a real foreground switch. Queries now fail closed after 50 ms, allow
+  only one outstanding OS request, and never reuse a timed-out result. Focused
+  screenshot canvases follow window geometry and are bounded to 1920 pixels
+  on the long edge. Both changes have release tests; installed proof is pending.
 - Committed capture receipts distinguish saved records/screenshots, suppression,
   disconnected helpers, and storage failures. Imports have separate acquisition
   provenance; unknown historical rows are not guessed to be screen captures.
@@ -58,23 +64,48 @@ Current repair implementation and focused tests cover:
 - Claude SessionStart context and Codex instruction integration are explicit,
   ownership-safe opt-ins. They preserve bounded canonical citations and do not
   install themselves into unrelated client configuration.
+- The Recall workspace now links directly to capture, privacy, and AI-context
+  preferences. Parent-owned preferences dependencies exist before URL delivery.
+  Sources and Settings no longer show an irrelevant screenshot filmstrip.
 
 All six repaired release executables built successfully. The first repair app
 and DMG were signed, notarized, stapled and installed, but the positive fixture
 capture did not pass. One stored screenshot was a system consent dialog, which
 exposed the new exclusion requirement; it is not useful-work capture proof.
-The subsequent focused-window/full-OCR repair is being packaged and retested.
+The subsequent focused-window/full-OCR repair (`17a5fdd`) is installed, signed,
+notarized, and stapled. Production event 1626 contains the synthetic focused
+window token and an encrypted screenshot. The installed native viewer decrypted
+and displayed those pixels; native Search returned that event. A normal restart
+saved event 1627, which the real Hippocampus MCP connection in Codex returned
+with its `screen_ocr` citation. This is observed evidence, not a verified answer.
+The native image proof is `/tmp/hippocampus-production-image-proof-20260905.jpeg`.
+
+The automated production proof remains incomplete: its bounded negative query
+hit the 100-candidate limit and it has no authenticated-image tool. Native image
+verification supplements it, but does not turn that script into a passing test.
+The first images also revealed fixed-canvas black margins; the geometry fix
+above is built but not yet installed. Normal/private-browser live proof and
+permission-revocation recovery remain unqualified.
+
+A real Claude SessionStart invocation exposed an oversized-packet failure even
+though direct MCP worked. The hook now requests 600 tokens/four citations and
+retries only oversized output at 256 tokens/one citation, preserving the same
+focus and total deadline. Regression tests pass, including full citations and
+failure isolation. A direct smaller production CLI query returned the fixture
+in 2,332 bytes; the repaired signed hook must still be verified after install.
+Automatic integration has not yet been enabled in the owner's client settings.
 
 The 36-task synthetic benchmark passes retrieval/handoff gates on both arms.
 Hybrid recall@3 and handoff-task success are 100%; top-one hit rate is 96.8%.
 The benchmark's source seeder was corrected to preserve explicit `screen://`
 acquisition metadata. Corpus, answers and thresholds are unchanged. These are
 synthetic retrieval results, not live capture or generated-answer qualification.
-The optimized capture suite passed 628 tests before the display-binding change;
-the expanded suite is being rerun. The earlier debug suite's 107-microsecond
+The expanded optimized capture suite passed 651 tests with zero failures.
+Eighteen focused release workspace/date/receipt tests also pass.
+The earlier debug suite's 107-microsecond
 timing result versus its 100-microsecond gate remains recorded, not hidden.
-Installed capture/search/context, authenticated screenshot display, and
-pause/relaunch proof remain required before claiming the repair complete.
+The newest focus, canvas, preferences, and hook changes must pass installed
+verification before those repairs can be called complete.
 
 ## Product Boundary
 
@@ -393,8 +424,8 @@ truthfully scoped evidence product.
   successfully, and the Sparkle private/public key pair matches the public key
   in the shipping Info.plist. The pre-lift app and DMG completed Developer ID
   signing, Apple notarization, stapling, and verification. The production
-  artifact must now be rebuilt through that pipeline from the September 5
-  repair before it replaces the installed app or is considered publishable.
+  focused-window repair also completed that pipeline and is installed. The
+  newer focus/canvas/preferences/hook repair is being built and qualified.
 - A verified local Arctic Embed S Core ML bundle is present in the gitignored
   development model directory and is included by debug ad-hoc assembly, so that
   artifact supports semantic recall. It is the sole required release model.

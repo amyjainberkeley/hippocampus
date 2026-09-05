@@ -137,3 +137,46 @@ show those pixels in Recall, and return the same event through recall/context.
   acquisition provenance. Only explicit screen locators now assert screen
   origin, independently of app names, question tags and expected answers.
   Seven harness regressions pass; the pinned corpus and thresholds did not change.
+
+## Production Evidence And Focus Repair
+
+- The second repaired installed app is `17a5fdd`, source digest
+  `861bc2d9f6f209d827604c35c9166139ae3528f36d7df1743e482915d59f54e9`.
+  Its signed/stapled DMG SHA-256 is
+  `52586e95c3815350712ca0c1cc70977272b6bcfd80619d3d3d784da1a8b54ead`.
+- Event 1626 at `2026-09-05T10:53:09.008Z` is actual focused-window OCR and
+  encrypted pixels from the synthetic corpus, not an import. Native Search
+  found it after clearing a persisted GitHub-only filter. The native image
+  viewer authenticated and displayed it. Proof screenshot:
+  `/tmp/hippocampus-production-image-proof-20260905.jpeg`.
+- A normal restart saved event 1627 at `2026-09-05T11:05:59.838Z`. The real
+  Codex Hippocampus MCP tool returned the focused token with event 1627 and
+  `source_kind=screen_ocr`. The packet abstained on decisions and open loops,
+  with `observations_only` and `evidence_verifier_unavailable` truth state.
+- The scripted production proof has six positive checks but remains incomplete:
+  its bounded negative query hit the recall limit, and it has no authenticated
+  screenshot RPC. The native viewer separately proves authenticated pixels.
+  No success status or negative-query threshold was weakened to hide this.
+- A standalone content-free probe reproduced stale
+  `NSWorkspace.shared.frontmostApplication` reads on a background timer, even
+  after main-thread initialization. A main-actor probe followed switches.
+  Production now queries the AX focused process freshly, checks bundle/PID
+  continuity, and fails closed on uncertainty. One serial OS query may remain
+  outstanding; each caller waits at most 50 ms and never receives its late value.
+  Independent static review found no blocker; live AX/TCC behavior is pending.
+- Saved pixels revealed fixed 1920x1080 letterboxing. Capture configuration now
+  derives the canvas from the selected window and pixel scale at startup,
+  rebind, and recovery, with a 1920-pixel maximum edge and finite-size guards.
+  Same-window aspect changes may still letterbox until rebind. The integrated
+  release capture suite passed 651 tests with zero failures.
+- Recall has a narrower sidebar, useful Sources/Settings layouts, and direct
+  links to real capture/privacy/AI-context preferences. Parent launch owns and
+  initializes one preferences dependency set before handling these URLs.
+  Eighteen focused release workspace tests and 25 parent debug routing tests
+  pass; installed routing remains to be verified.
+- A real installed Claude hook returned the 149-byte oversized failure envelope.
+  Direct retrieval at 600 tokens/four sources returned 2,332 bytes with the
+  fixture. The repaired hook uses that budget and one smaller same-focus retry
+  within the original deadline. The new regression failed before the change
+  and passed after it. Independent static review found no blocker. No owner
+  integration settings were changed while the automatic hook was broken.
