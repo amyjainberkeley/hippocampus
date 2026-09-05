@@ -53,12 +53,8 @@ public enum MenuBarStatus: Equatable, Sendable {
         }
     }
 
-    /// Whether the icon should pulse. Only `.recording` pulses — this
-    /// is the "capture is live" ambient signal from the Raycast study.
-    public var shouldPulse: Bool {
-        if case .recording = self { return true }
-        return false
-    }
+    /// Menu-bar status is static, including while saving memory.
+    public var shouldPulse: Bool { false }
 
     /// Explicit off/pause wins; permission and storage failures then take
     /// precedence over evidence of previous successful saves.
@@ -105,7 +101,7 @@ public enum MenuBarStatus: Equatable, Sendable {
             return .noMemory
         }
         // Storage heartbeat is not capture activity. A new run must save its own
-        // frame before it can pulse; static-screen dedup stays neutral.
+        // frame before showing saving status; static-screen dedup stays neutral.
         if captureStartedAt.map({ saved >= $0 }) ?? false,
            now.timeIntervalSince(saved) >= 0,
            now.timeIntervalSince(saved) <= 600,
@@ -269,63 +265,18 @@ public enum TCCRevokedReason: String, Sendable, Equatable, CaseIterable {
 
 // MARK: - View
 
-/// The label SwiftUI hands to `MenuBarExtra`. Wraps
-/// `MenuBarStatusIcon` (the raw NSImage renderer) in a view that owns
-/// the pulse animation and the overlay glyphs.
-///
-/// Pulse implementation: a `TimelineView` on `.periodic(by: 2.0)`
-/// fires exactly once every 2 seconds — this is a plain
-/// Core-Foundation timer under the hood, NOT a display-link. Each
-/// tick alternates the target opacity between 1.0 and 0.7, and the
-/// `.animation(.easeInOut(duration: 2.0))` modifier lets Core
-/// Animation interpolate the layer opacity on GPU with no CPU
-/// wake-ups between ticks. Total cost: one main-thread callback per
-/// 2 s, plus the CA implicit animation the OS was going to run
-/// anyway. This is the "CALayer + implicit animation, not display
-/// link" approach the agent brief calls for. When
-/// `shouldPulse == false` we pin opacity to 1.0 and don't install a
-/// schedule at all.
+/// A static label for MenuBarExtra. Animating its opacity repeatedly updates
+/// the AppKit status button and layout; no clock or animation belongs here.
 public struct MenuBarStatusLabel: View {
     public let status: MenuBarStatus
-
-    /// Pulse period: opacity ping-pongs between `pulseMin` and 1.0
-    /// with this cadence. 2 s matches the agent brief.
-    static let pulsePeriod: TimeInterval = 2.0
-    static let pulseMin: Double = 0.7
 
     public init(status: MenuBarStatus) {
         self.status = status
     }
 
     public var body: some View {
-        Group {
-            if status.shouldPulse {
-                TimelineView(.periodic(from: .now, by: Self.pulsePeriod)) { context in
-                    iconImage
-                        .opacity(Self.pulseOpacity(at: context.date))
-                        .animation(
-                            .easeInOut(duration: Self.pulsePeriod),
-                            value: Self.pulseOpacity(at: context.date)
-                        )
-                }
-            } else {
-                iconImage.opacity(1.0)
-            }
-        }
-        .accessibilityLabel("Hippocampus — \(status.displayText)")
-    }
-
-    /// Alternates between `pulseMin` and 1.0 on `pulsePeriod`
-    /// boundaries. Together with `.easeInOut(duration: pulsePeriod)`
-    /// this produces a smooth breathing curve — the animation
-    /// modifier interpolates the endpoints, so we only need to
-    /// deliver the target value, not the continuous curve. Pure
-    /// function → trivially testable.
-    static func pulseOpacity(at date: Date) -> Double {
-        let period = pulsePeriod * 2.0  // full cycle = min → max → min
-        let t = date.timeIntervalSinceReferenceDate
-            .truncatingRemainder(dividingBy: period)
-        return t < pulsePeriod ? 1.0 : pulseMin
+        iconImage
+            .accessibilityLabel("Hippocampus — \(status.displayText)")
     }
 
     @ViewBuilder
@@ -352,43 +303,49 @@ public struct MenuBarStatusLabel: View {
 /// duplicate the lookup here so `HippocampusKit` doesn't depend on
 /// the executable target — the load falls back to a 22×22 blank
 /// canvas if the resource is missing (unit tests, headless CI).
+@MainActor
 public enum MenuBarStatusIcon {
 
     /// Canonical NSStatusItem size on macOS 14+. Matches the
     /// existing MenuBarIcon fallback.
     static let baseSize = NSSize(width: 22, height: 22)
 
+    // Fixed, reason-independent cache: repeated health updates must not load
+    // templates or allocate another rendered image for the same visual state.
+    private static let base = loadBaseTemplate()
+    private static let idle = withAlpha(base, alpha: 0.55)
+    private static let starting = overlay(base: base, glyph: "clock", tint: nil)
+    private static let paused = overlay(base: base, glyph: "pause.fill", tint: nil)
+    private static let error = overlay(base: base, glyph: "circle.fill", tint: .systemRed)
+    private static let permission = overlay(base: base, glyph: "lock.fill", tint: .systemOrange)
+    private static let blocked = overlay(base: base, glyph: "exclamationmark.triangle.fill", tint: .systemOrange)
+    private static let stale = overlay(base: base, glyph: "clock.fill", tint: .systemOrange)
+    private static let unchanged = overlay(base: base, glyph: "minus", tint: nil)
+
     public static func image(for status: MenuBarStatus) -> NSImage {
-        let base = loadBaseTemplate()
         switch status {
         case .idle:
-            // Slightly muted; NSStatusItem template tinting already
-            // adapts to the menu bar, but a subtle alpha communicates
-            // "not actively capturing" without going grey-out.
-            return withAlpha(base, alpha: 0.55)
+            return idle
         case .recording:
-            // Pulse handled at the view level; the base glyph is
-            // untouched here so the animation reads as opacity change
-            // rather than a jerky glyph swap.
             return base
         case .starting:
-            return overlay(base: base, glyph: "clock", tint: nil)
+            return starting
         case .paused:
-            return overlay(base: base, glyph: "pause.fill", tint: nil)
+            return paused
         case .error:
-            return overlay(base: base, glyph: "circle.fill", tint: .systemRed)
+            return error
         case .needsPermission:
-            return overlay(base: base, glyph: "lock.fill", tint: .systemOrange)
+            return permission
         case .blocked, .noMemory:
-            return overlay(base: base, glyph: "exclamationmark.triangle.fill", tint: .systemOrange)
+            return blocked
         case .stale:
-            return overlay(base: base, glyph: "clock.fill", tint: .systemOrange)
+            return stale
         case .unchanged:
-            return overlay(base: base, glyph: "minus", tint: nil)
+            return unchanged
         }
     }
 
-    static func loadBaseTemplate() -> NSImage {
+    private static func loadBaseTemplate() -> NSImage {
         if let bundled = NSImage(named: "statusbar-icon") {
             bundled.isTemplate = true
             return bundled
