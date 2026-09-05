@@ -11,6 +11,14 @@ struct RetentionPersistenceBehavior {
         let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 
         let seed = DiskRetentionStore(directory: root)
+        let freshPolicy = await seed.currentPolicy()
+        precondition(freshPolicy == .ninetyDays)
+        try await seed.setPolicy(.ninetyDays, customDays: nil)
+        let reviewedJSON = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: root.appendingPathComponent("retention.json"))
+        ) as! [String: Any]
+        precondition(reviewedJSON["schema_version"] as? Int == 2)
+        precondition(reviewedJSON["mode"] as? String == "ninetyDays")
         try await seed.setPolicy(.sevenDays, customDays: nil)
         let replacement = DiskRetentionStore(directory: root)
         try await replacement.setPolicy(.custom, customDays: 365)

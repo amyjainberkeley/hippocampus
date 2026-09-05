@@ -48,16 +48,18 @@ public struct AtomicRetentionFileWriter: RetentionFileWriting {
 
 public actor DiskRetentionStore: RetentionStore {
     private struct Persisted: Codable {
+        var schema_version: Int?
         var mode: String
         var days: Int?
-        var updated_at: String
+        var updated_at: String?
 
         private enum CodingKeys: String, CodingKey {
-            case mode, days, updated_at
+            case schema_version, mode, days, updated_at
         }
 
         func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(schema_version, forKey: .schema_version)
             try container.encode(mode, forKey: .mode)
             try container.encode(days, forKey: .days)
             try container.encode(updated_at, forKey: .updated_at)
@@ -66,7 +68,7 @@ public actor DiskRetentionStore: RetentionStore {
 
     private let fileURL: URL
     private let writer: any RetentionFileWriting
-    private var cached: (policy: RetentionPolicy, days: Int?)?
+    private var cached: (policy: RetentionPolicy, days: Int?, needsReview: Bool)?
 
     public init(
         directory: URL? = nil,
@@ -81,7 +83,7 @@ public actor DiskRetentionStore: RetentionStore {
 
     public func currentPolicy() -> RetentionPolicy {
         loadIfNeeded()
-        return cached?.policy ?? .forever
+        return cached?.policy ?? .ninetyDays
     }
 
     public func currentCustomDays() -> Int? {
@@ -89,26 +91,35 @@ public actor DiskRetentionStore: RetentionStore {
         return cached?.days
     }
 
+    public func needsReview() -> Bool {
+        loadIfNeeded()
+        return cached?.needsReview ?? false
+    }
+
     public func setPolicy(_ policy: RetentionPolicy, customDays: Int?) throws {
         let validatedDays = try policy.validatedCustomDays(customDays)
         let data = try encodedPolicy(policy, days: validatedDays)
         try writer.write(data, to: fileURL)
-        cached = (policy, validatedDays)
+        cached = (policy, validatedDays, false)
     }
 
     private func loadIfNeeded() {
         if cached != nil { return }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            cached = (.ninetyDays, nil, false)
+            return
+        }
         guard let data = try? Data(contentsOf: fileURL),
               let persisted = try? JSONDecoder().decode(Persisted.self, from: data),
               let policy = RetentionPolicy(rawValue: persisted.mode) else {
-            cached = (.forever, nil)
+            cached = (.forever, nil, false)
             return
         }
         do {
             let validatedDays = try policy.validatedCustomDays(persisted.days)
-            cached = (policy, validatedDays)
+            cached = (policy, validatedDays, policy != .forever && persisted.schema_version != 2)
         } catch {
-            cached = (.forever, nil)
+            cached = (.forever, nil, false)
         }
     }
 
@@ -116,6 +127,7 @@ public actor DiskRetentionStore: RetentionStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let persisted = Persisted(
+            schema_version: 2,
             mode: policy.rawValue,
             days: days,
             updated_at: ISO8601DateFormatter().string(from: Date())

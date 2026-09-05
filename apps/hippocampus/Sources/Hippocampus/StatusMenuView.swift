@@ -109,17 +109,6 @@ struct StatusMenuView: View {
         }
     }
 
-    /// The single source of truth the header uses; matches the dot
-    /// baked into the menu-bar icon overlay so the two surfaces
-    /// always agree. See `MenuBarStatus.derive` for precedence rules.
-    private var menuBarStatus: MenuBarStatus {
-        MenuBarStatus.derive(
-            from: supervisor.state,
-            captureEnabled: supervisor.captureEnabled,
-            tccRevokedSurface: supervisor.tccRevokedSurface
-        )
-    }
-
     /// Always-visible quick actions a user needs regardless of state:
     ///
     ///   - Pause / Resume Capture  ⌘⇧P  (toggle; label flips per state)
@@ -174,35 +163,11 @@ struct StatusMenuView: View {
     @ViewBuilder
     private var statusHeader: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                Text("Hippocampus")
-                    .font(.headline)
-                Spacer(minLength: 12)
-                Circle()
-                    .fill(menuBarStatus.indicatorColor)
-                    .frame(width: 7, height: 7)
-                Text(menuBarStatus.displayText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if supervisor.captureEnabled {
-                if let health = supervisor.health {
-                    Text(health.displayText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if supervisor.state.isActive {
-                    Text("Waiting for first capture…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Text("Screen capture is off")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Text("Hippocampus").font(.headline)
+            CaptureHealthView(supervisor: supervisor) {
+                PreferencesWindowController.shared.show(section: .capture)
             }
         }
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder

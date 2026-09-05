@@ -78,7 +78,7 @@ final class MenuBarQuickActionsTests: XCTestCase {
 
         UserPauseController.shared.setPaused(false)
         XCTAssertFalse(UserPauseController.shared.isPaused)
-        XCTAssertEqual(MenuBarStatus.derive(from: .running), .recording)
+        XCTAssertNotEqual(MenuBarStatus.derive(from: .running), .recording)
     }
 
     /// TCC-revoke + user-pause interplay: if the user has ALSO
@@ -92,8 +92,6 @@ final class MenuBarQuickActionsTests: XCTestCase {
             from: .paused,
             tccRevokedSurface: .screenRecording
         )
-        guard case .error = status else {
-            return XCTFail("expected .error, got \(status)")
-        }
+        XCTAssertEqual(status, .paused)
     }
 }

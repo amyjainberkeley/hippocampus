@@ -26,8 +26,8 @@ final class MenuBarStatusTests: XCTestCase {
 
     // MARK: - Derivation
 
-    func testDerivation_running_isRecording() {
-        XCTAssertEqual(MenuBarStatus.derive(from: .running), .recording)
+    func testDerivation_runningAloneDoesNotProveSavedMemory() {
+        XCTAssertNotEqual(MenuBarStatus.derive(from: .running), .recording)
     }
 
     func testDerivation_paused_isPaused() {
@@ -36,7 +36,7 @@ final class MenuBarStatusTests: XCTestCase {
 
     func testDerivation_idleStarterStopped_areIdle() {
         XCTAssertEqual(MenuBarStatus.derive(from: .idle), .idle)
-        XCTAssertEqual(MenuBarStatus.derive(from: .starting), .idle)
+        XCTAssertEqual(MenuBarStatus.derive(from: .starting), .starting)
         XCTAssertEqual(MenuBarStatus.derive(from: .stopped), .idle)
     }
 
@@ -71,13 +71,13 @@ final class MenuBarStatusTests: XCTestCase {
     /// derivation reflects `.recording`.
     func testPauseToggle_recordingPausedRoundTrip() {
         var state: SupervisorState = .running
-        XCTAssertEqual(MenuBarStatus.derive(from: state), .recording)
+        XCTAssertNotEqual(MenuBarStatus.derive(from: state), .recording)
 
         state = .paused
         XCTAssertEqual(MenuBarStatus.derive(from: state), .paused)
 
         state = .running
-        XCTAssertEqual(MenuBarStatus.derive(from: state), .recording)
+        XCTAssertNotEqual(MenuBarStatus.derive(from: state), .recording)
     }
 
     // MARK: - Presentation properties

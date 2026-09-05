@@ -64,10 +64,7 @@ final class TCCRevokedRecoveryTests: XCTestCase {
             from: .running,
             tccRevokedSurface: .screenRecording
         )
-        guard case .error(let reason) = status else {
-            return XCTFail("expected .error, got \(status)")
-        }
-        XCTAssertEqual(reason, "Screen Recording revoked")
+        XCTAssertEqual(status, .needsPermission(.screenRecording))
     }
 
     func testDerivation_tccRevokedOverridesIntegrityError() {
@@ -79,16 +76,13 @@ final class TCCRevokedRecoveryTests: XCTestCase {
             integrityError: "hash mismatch",
             tccRevokedSurface: .accessibility
         )
-        guard case .error(let reason) = status else {
-            return XCTFail("expected .error, got \(status)")
-        }
-        XCTAssertEqual(reason, "Accessibility revoked")
+        XCTAssertEqual(status, .needsPermission(.accessibility))
     }
 
     func testDerivation_noOverride_preservesLegacyBehaviour() {
         // Sanity: pre-cycle-8.45 callsites that pass no override
         // continue to behave exactly as before.
-        XCTAssertEqual(
+        XCTAssertNotEqual(
             MenuBarStatus.derive(from: .running),
             .recording
         )

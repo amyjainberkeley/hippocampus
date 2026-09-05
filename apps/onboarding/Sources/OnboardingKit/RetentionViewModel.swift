@@ -2,8 +2,9 @@ import Foundation
 
 @MainActor
 public final class RetentionViewModel: ObservableObject {
-    @Published public var selectedPolicy: RetentionPolicy = .forever
-    @Published public var customDays: Int = 14
+    @Published public var selectedPolicy: RetentionPolicy = .ninetyDays
+    @Published public var customDays: Int = 90
+    @Published public private(set) var needsReview: Bool = false
     @Published public private(set) var isLoading: Bool = false
     @Published public private(set) var isSaving: Bool = false
     @Published public private(set) var saveError: String?
@@ -18,7 +19,8 @@ public final class RetentionViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         selectedPolicy = await store.currentPolicy()
-        customDays = await store.currentCustomDays() ?? 14
+        customDays = await store.currentCustomDays() ?? 90
+        needsReview = await store.needsReview()
     }
 
     @discardableResult
@@ -29,6 +31,7 @@ public final class RetentionViewModel: ObservableObject {
         let days = selectedPolicy == .custom ? customDays : nil
         do {
             try await store.setPolicy(selectedPolicy, customDays: days)
+            needsReview = false
             return true
         } catch {
             saveError = error.localizedDescription
