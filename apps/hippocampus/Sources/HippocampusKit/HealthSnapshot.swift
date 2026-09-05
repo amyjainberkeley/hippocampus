@@ -20,14 +20,7 @@ public struct HealthSnapshot: Sendable, Equatable {
     }
 
     public var displayText: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        if let ts = lastCaptureTs {
-            let ago = formatter.localizedString(for: ts, relativeTo: Date())
-            return "\(framesDelivered) frames processed · last \(ago)"
-        }
-        let ago = formatter.localizedString(for: lastUpdated, relativeTo: Date())
-        return "\(framesDelivered) frames processed · \(ago)"
+        "Helper: \(framesDelivered) delivered · \(framesSuppressed) suppressed (not saved counts)"
     }
 
     // MARK: - Health log parsing
@@ -39,7 +32,13 @@ public struct HealthSnapshot: Sendable, Equatable {
     }
 
     public static func readFromLog(at path: URL) -> HealthSnapshot? {
-        guard let data = try? Data(contentsOf: path),
+        guard let handle = try? FileHandle(forReadingFrom: path) else { return nil }
+        defer { try? handle.close() }
+        // Read a bounded tail even after the helper has run for days.
+        guard let size = try? handle.seekToEnd() else { return nil }
+        do { try handle.seek(toOffset: size > 65_536 ? size - 65_536 : 0) }
+        catch { return nil }
+        guard let data = try? handle.readToEnd(),
               let lastLine = String(data: data, encoding: .utf8)?
                 .split(separator: "\n")
                 .last,
@@ -50,14 +49,13 @@ public struct HealthSnapshot: Sendable, Equatable {
         let framesSuppressed = (json["frames_suppressed"] as? Int) ?? 0
         let wallTs = (json["wall_ts"] as? String) ?? ""
 
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = fmt.date(from: wallTs) ?? Date()
+        guard let date = CaptureStatusReceipt.parseTimestamp(wallTs),
+              framesDelivered >= 0, framesSuppressed >= 0 else { return nil }
 
         return HealthSnapshot(
             framesDelivered: framesDelivered,
             framesSuppressed: framesSuppressed,
-            lastCaptureTs: date,
+            lastCaptureTs: nil,
             lastUpdated: date
         )
     }

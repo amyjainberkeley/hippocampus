@@ -13,10 +13,9 @@
 //   - **One retention authority**: cosmetic and workflow preferences
 //     live in UserDefaults, while retention is written atomically to
 //     the same `retention.json` the agent reads.
-//   - **Default = current behavior**: every preference defaults to
-//     the value the app already ships with today. Flipping a
-//     preference is a deliberate opt-in / opt-out; a first-run user
-//     who never opens Preferences sees zero behavior change.
+//   - **Preserve choices**: fresh retention defaults to 90 days;
+//     explicit existing selections are preserved, with review before
+//     finite legacy selections authorize deletion.
 //   - **Testable in isolation**: the store accepts an injected
 //     `UserDefaults` so `PreferencesStoreTests` can use an ephemeral
 //     suite and never touch the process-wide standard defaults.
@@ -53,11 +52,11 @@ public enum PreferredRecallTab: String, CaseIterable, Sendable, Codable {
     }
 }
 
-/// How long the brain keeps captured events before the retention
-/// sweeper prunes them. `.forever` is the current default — the sweeper
-/// is a no-op unless the user explicitly narrows the window.
+/// Retention uses the agent's canonical policy names. New installations
+/// default to 90 days; existing explicit choices remain selected.
 public enum RetentionPolicy: String, CaseIterable, Sendable, Codable {
     case forever
+    case ninetyDays
     case thirtyDays
     case sevenDays
     case custom
@@ -65,6 +64,7 @@ public enum RetentionPolicy: String, CaseIterable, Sendable, Codable {
     public var displayLabel: String {
         switch self {
         case .forever: return "Forever"
+        case .ninetyDays: return "90 days"
         case .thirtyDays: return "30 days"
         case .sevenDays: return "7 days"
         case .custom: return "Custom"
@@ -77,6 +77,7 @@ public enum RetentionPolicy: String, CaseIterable, Sendable, Codable {
     public var maxAgeSeconds: TimeInterval? {
         switch self {
         case .forever: return nil
+        case .ninetyDays: return 90 * 24 * 3600
         case .thirtyDays: return 30 * 24 * 3600
         case .sevenDays: return 7 * 24 * 3600
         case .custom: return nil
@@ -116,12 +117,11 @@ public final class PreferencesStore: ObservableObject {
 
     // MARK: Privacy
 
-    /// Retention window applied by the brain-pruner. Defaults to
-    /// `.forever` to match current behavior — the pruner is idle
-    /// unless the user opts in.
+    /// Finite legacy selections require review before the agent deletes data.
     @Published public private(set) var retentionPolicy: RetentionPolicy
     @Published public private(set) var retentionCustomDays: Int?
     @Published public private(set) var retentionWriteError: String?
+    @Published public private(set) var retentionNeedsReview: Bool = false
 
     // MARK: Advanced
 
@@ -140,11 +140,13 @@ public final class PreferencesStore: ObservableObject {
     private let now: () -> Date
 
     private struct PersistedRetention: Codable {
+        var schema_version: Int?
         let mode: String
         let days: Int?
-        let updated_at: String
+        let updated_at: String?
 
         enum CodingKeys: String, CodingKey {
+            case schema_version
             case mode
             case days
             case updated_at
@@ -152,6 +154,7 @@ public final class PreferencesStore: ObservableObject {
 
         func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(schema_version, forKey: .schema_version)
             try container.encode(mode, forKey: .mode)
             if let days {
                 try container.encode(days, forKey: .days)
@@ -192,13 +195,25 @@ public final class PreferencesStore: ObservableObject {
                 let loaded = try Self.loadRetention(from: retentionURL)
                 self.retentionPolicy = loaded.policy
                 self.retentionCustomDays = loaded.days
+                self.retentionNeedsReview = loaded.needsReview
             } catch {
                 self.retentionWriteError = "Retention policy could not be read; keeping events forever."
             }
         } else if let migrated = Self.legacyRetention(
             defaults.string(forKey: Keys.retentionPolicy)
         ) {
-            _ = setRetentionPolicy(migrated.policy, customDays: migrated.days)
+            self.retentionPolicy = migrated.policy
+            self.retentionCustomDays = migrated.days
+            self.retentionNeedsReview = migrated.policy != .forever
+            // Migrate the selection without silently authorizing finite deletion.
+            do {
+                try writeRetention(policy: migrated.policy, days: migrated.days, schemaVersion: nil)
+                defaults.removeObject(forKey: Keys.retentionPolicy)
+            } catch {
+                self.retentionWriteError = "Retention policy was not migrated: \(error.localizedDescription)"
+            }
+        } else {
+            self.retentionPolicy = .ninetyDays
         }
     }
 
@@ -224,7 +239,7 @@ public final class PreferencesStore: ObservableObject {
                 return false
             }
             normalizedDays = customDays
-        case .forever, .thirtyDays, .sevenDays:
+        case .forever, .ninetyDays, .thirtyDays, .sevenDays:
             normalizedDays = nil
         }
 
@@ -233,6 +248,7 @@ public final class PreferencesStore: ObservableObject {
             retentionPolicy = policy
             retentionCustomDays = normalizedDays
             retentionWriteError = nil
+            retentionNeedsReview = false
             defaults.removeObject(forKey: Keys.retentionPolicy)
             return true
         } catch {
@@ -243,7 +259,7 @@ public final class PreferencesStore: ObservableObject {
 
     private static func loadRetention(
         from url: URL
-    ) throws -> (policy: RetentionPolicy, days: Int?) {
+    ) throws -> (policy: RetentionPolicy, days: Int?, needsReview: Bool) {
         let persisted = try JSONDecoder().decode(
             PersistedRetention.self,
             from: Data(contentsOf: url)
@@ -255,9 +271,9 @@ public final class PreferencesStore: ObservableObject {
             guard let days = persisted.days, (1...365).contains(days) else {
                 throw CocoaError(.fileReadCorruptFile)
             }
-            return (policy, days)
+            return (policy, days, persisted.schema_version != 2)
         }
-        return (policy, nil)
+        return (policy, nil, policy != .forever && persisted.schema_version != 2)
     }
 
     private static func legacyRetention(
@@ -267,11 +283,14 @@ public final class PreferencesStore: ObservableObject {
         case "days30": return (.thirtyDays, nil)
         case "days90": return (.custom, 90)
         case "forever": return (.forever, nil)
+        case "sevenDays": return (.sevenDays, nil)
+        case "thirtyDays": return (.thirtyDays, nil)
+        case "ninetyDays": return (.ninetyDays, nil)
         default: return nil
         }
     }
 
-    private func writeRetention(policy: RetentionPolicy, days: Int?) throws {
+    private func writeRetention(policy: RetentionPolicy, days: Int?, schemaVersion: Int? = 2) throws {
         let directory = retentionURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(
             at: directory,
@@ -281,6 +300,7 @@ public final class PreferencesStore: ObservableObject {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         let payload = PersistedRetention(
+            schema_version: schemaVersion,
             mode: policy.rawValue,
             days: days,
             updated_at: formatter.string(from: now())

@@ -31,9 +31,7 @@
 // PreferencesStyle below; a future refactor can bridge the two if
 // design-token drift becomes a problem.
 //
-// About every preference we render, defaults MUST match current
-// behavior — a first-run user who never opens Preferences sees zero
-// behavior change. Retention writes atomically to the agent's canonical
+// Retention writes atomically to the agent's canonical
 // `retention.json`; cosmetic settings remain in UserDefaults.
 
 import SwiftUI
@@ -93,6 +91,7 @@ struct PreferencesRootView: View {
     @Binding var section: PreferencesSection
     @ObservedObject var loginItemVM: LoginItemViewModel
     @ObservedObject var captureController: CapturePreferenceController
+    @ObservedObject var supervisor: ProcessSupervisor
     let updater: SparkleUpdaterService
     let dbPath: String
     let onOpenRecallTab: (String) -> Void
@@ -158,8 +157,24 @@ struct PreferencesRootView: View {
         VStack(alignment: .leading, spacing: PreferencesStyle.sectionSpacing) {
             sectionHeader("Capture")
 
+            CaptureHealthView(supervisor: supervisor, onReviewCapture: onOpenAllowlistEditor)
+
+            HStack {
+                Button { supervisor.refreshCaptureStatus() } label: {
+                    Label("Refresh Status", systemImage: "arrow.clockwise")
+                }
+                Button {
+                    NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser
+                        .appendingPathComponent("Library/Logs/MCI"))
+                } label: {
+                    Label("Open Capture Logs", systemImage: "doc.text.magnifyingglass")
+                }
+            }
+
+            Divider()
+
             Toggle("Capture screen activity", isOn: Binding(
-                get: { captureController.captureEnabled },
+                get: { supervisor.captureEnabled },
                 set: { on in
                     Task { @MainActor in
                         await captureController.setCaptureEnabled(on)
@@ -167,9 +182,9 @@ struct PreferencesRootView: View {
                 }
             ))
             .disabled(captureController.isApplying)
-            Text(captureController.captureEnabled
-                 ? "Capture is enabled. While Hippocampus is running, the helper uses screen access."
-                 : "Off means no screen stream is initialized.")
+            Text(supervisor.captureEnabled
+                 ? "Screen capture is enabled."
+                 : "Screen capture is off.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
             if let errorMessage = captureController.errorMessage {
@@ -205,7 +220,7 @@ struct PreferencesRootView: View {
                     _ = store.setRetentionPolicy(
                         policy,
                         customDays: policy == .custom
-                            ? (store.retentionCustomDays ?? 30)
+                            ? (store.retentionCustomDays ?? 90)
                             : nil
                     )
                 }
@@ -217,9 +232,9 @@ struct PreferencesRootView: View {
             .pickerStyle(.menu)
             if store.retentionPolicy == .custom {
                 Stepper(
-                    "Keep events for \(store.retentionCustomDays ?? 30) days",
+                    "Keep events for \(store.retentionCustomDays ?? 90) days",
                     value: Binding(
-                        get: { store.retentionCustomDays ?? 30 },
+                        get: { store.retentionCustomDays ?? 90 },
                         set: { days in
                             _ = store.setRetentionPolicy(.custom, customDays: days)
                         }
@@ -227,9 +242,17 @@ struct PreferencesRootView: View {
                     in: 1...365
                 )
             }
-            Text("Older events are pruned automatically. Default: forever (no pruning).")
+            Text("Default: 90 days. Older memories are deleted automatically after the selected period.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
+            if store.retentionNeedsReview {
+                Label("Needs review: your earlier retention choice has not been confirmed. Automatic deletion is on hold; capture continues.", systemImage: "exclamationmark.triangle")
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.orange)
+                Button("Confirm Retention Choice") {
+                    _ = store.setRetentionPolicy(store.retentionPolicy, customDays: store.retentionCustomDays)
+                }
+            }
             if let retentionWriteError = store.retentionWriteError {
                 Text(retentionWriteError)
                     .font(PreferencesStyle.captionFont)
@@ -375,6 +398,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     private var loginItemVM: LoginItemViewModel?
     private var updater: SparkleUpdaterService?
     private var captureController: CapturePreferenceController?
+    private var supervisor: ProcessSupervisor?
     private var dbPath: String = "~/Library/Application Support/Hippocampus/mci.sqlite"
     private var onOpenRecallTab: (String) -> Void = { _ in }
     private var onOpenDenylistEditor: () -> Void = {}
@@ -389,6 +413,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         loginItemVM: LoginItemViewModel,
         updater: SparkleUpdaterService,
         captureApplier: any CaptureSettingApplying,
+        supervisor: ProcessSupervisor,
         dbPath: String,
         onOpenRecallTab: @escaping (String) -> Void,
         onOpenDenylistEditor: @escaping () -> Void,
@@ -399,6 +424,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         self.loginItemVM = loginItemVM
         self.updater = updater
         self.captureController = CapturePreferenceController(applier: captureApplier)
+        self.supervisor = supervisor
         self.dbPath = dbPath
         self.onOpenRecallTab = onOpenRecallTab
         self.onOpenDenylistEditor = onOpenDenylistEditor
@@ -407,7 +433,8 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     }
 
     /// Open (or focus) the preferences window.
-    func show() {
+    func show(section requestedSection: PreferencesSection? = nil) {
+        if let requestedSection { setSection(requestedSection) }
         guard let store, let loginItemVM, let updater, let captureController else {
             // Not configured yet — silently no-op. The app's first ⌘,
             // arrives after `configure` from AppDelegate, so this only
@@ -465,6 +492,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     /// Programmatically switch section — used by the toolbar action.
     private func setSection(_ new: PreferencesSection) {
         section = new
+        panel?.toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(new.rawValue)
         guard let store, let loginItemVM, let updater, let captureController, let panel else { return }
         rebuildContent(
             store: store,
@@ -482,6 +510,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         updater: SparkleUpdaterService,
         panel: NSPanel
     ) {
+        guard let supervisor else { return }
         let sectionBinding = Binding<PreferencesSection>(
             get: { [weak self] in self?.section ?? .general },
             set: { [weak self] new in self?.setSection(new) }
@@ -491,6 +520,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
             section: sectionBinding,
             loginItemVM: loginItemVM,
             captureController: captureController,
+            supervisor: supervisor,
             updater: updater,
             dbPath: dbPath,
             onOpenRecallTab: onOpenRecallTab,

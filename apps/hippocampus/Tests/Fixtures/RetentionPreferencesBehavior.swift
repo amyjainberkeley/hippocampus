@@ -16,6 +16,7 @@ struct RetentionPreferencesBehavior {
 
         let cases: [(String, RetentionPolicy, Int?, String, Int?)] = [
             ("forever", .forever, nil, "forever", nil),
+            ("ninety-days", .ninetyDays, nil, "ninetyDays", nil),
             ("thirty-days", .thirtyDays, nil, "thirtyDays", nil),
             ("seven-days", .sevenDays, nil, "sevenDays", nil),
             ("custom-one", .custom, 1, "custom", 1),
@@ -42,6 +43,7 @@ struct RetentionPreferencesBehavior {
                 preconditionFailure("retention payload object")
             }
             precondition(json["mode"] as? String == expectedMode)
+            precondition(json["schema_version"] as? Int == 2)
             if let expectedDays {
                 precondition(json["days"] as? Int == expectedDays)
             } else {
@@ -59,6 +61,7 @@ struct RetentionPreferencesBehavior {
             let reloaded = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
             precondition(reloaded.retentionPolicy == policy)
             precondition(reloaded.retentionCustomDays == customDays)
+            precondition(!reloaded.retentionNeedsReview)
         }
 
         let replacementDirectory = outputDirectory.appendingPathComponent(
@@ -152,7 +155,7 @@ struct RetentionPreferencesBehavior {
             retentionURL: blockedParent.appendingPathComponent("retention.json")
         )
         precondition(!failedStore.setRetentionPolicy(.sevenDays))
-        precondition(failedStore.retentionPolicy == .forever)
+        precondition(failedStore.retentionPolicy == .ninetyDays)
         precondition(failedStore.retentionWriteError != nil)
 
         precondition(

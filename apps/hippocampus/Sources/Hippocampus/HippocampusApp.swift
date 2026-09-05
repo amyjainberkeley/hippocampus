@@ -66,6 +66,7 @@ struct HippocampusApp: App {
             loginItemVM: loginItemVM,
             updater: updater,
             captureApplier: supervisor,
+            supervisor: supervisor,
             dbPath: supervisor.dbPath.path,
             onOpenRecallTab: { tab in
                 Task { @MainActor in
@@ -96,22 +97,13 @@ struct HippocampusApp: App {
 
 /// Menu-bar icon rendered as a status light.
 ///
-/// Cycle 8.45 Raycast/Cotypist peer study pattern #3 (P0) + cycle 8.44
-/// product-readiness audit polish gap #1. Four visually distinct
-/// states — idle / recording / paused / error — driven by
-/// `ProcessSupervisor.state` (existing @Published surface, no new XPC
-/// bridge). See `HippocampusKit/MenuBarStatus.swift` for the state
-/// derivation + pulse animation.
+/// Shares the receipt-backed status used in the menu and Preferences.
 struct MenuBarIcon: View {
     @ObservedObject var supervisor: ProcessSupervisor
 
     var body: some View {
         MenuBarStatusLabel(
-            status: MenuBarStatus.derive(
-                from: supervisor.state,
-                captureEnabled: supervisor.captureEnabled,
-                tccRevokedSurface: supervisor.tccRevokedSurface
-            )
+            status: supervisor.menuBarStatus
         )
     }
 }
@@ -491,18 +483,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///     sentinel, the watch fires and the supervisor starts —
     ///     no relaunch required.
     ///
-    /// Once the sentinel exists, this method is a plain
-    /// `supervisor.start()`.
+    /// Once the sentinel exists, start the supervisor and present Recall
+    /// once the verified topology is ready.
     @MainActor
     private func startSupervisorOrDeferUntilOnboarded() {
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
+            supervisor.openRecallWhenReady(initialLaunch: true)
             supervisor.start()
             return
         }
 
         guard supervisor.hasOnboarding else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
+            supervisor.openRecallWhenReady(initialLaunch: true)
             supervisor.start()
             return
         }
@@ -605,6 +599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the Done screen cannot lead to an inert capture-disabled process tree.
     @MainActor
     private func startCaptureAfterOnboarding() {
+        supervisor.openRecallWhenReady(initialLaunch: true)
         if supervisor.captureEnabled {
             supervisor.start()
             return
@@ -622,5 +617,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !OnboardingSentinel.isComplete && supervisor.hasOnboarding {
+            _ = supervisor.openOnboarding()
+            return false
+        }
+        supervisor.openRecallWhenReady()
+        if !supervisor.state.isActive && supervisor.state != .starting {
+            supervisor.start()
+        }
+        return false
     }
 }

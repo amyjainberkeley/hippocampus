@@ -55,8 +55,8 @@ final class PreferencesStoreTests: XCTestCase {
                       "menu-bar icon defaults ON (current behavior)")
         XCTAssertEqual(store.defaultRecallTab, .search,
                        "recall UI defaults to Search tab")
-        XCTAssertEqual(store.retentionPolicy, .forever,
-                       "retention defaults to forever (pruner idle)")
+        XCTAssertEqual(store.retentionPolicy, .ninetyDays,
+                       "fresh retention defaults to 90 days")
         XCTAssertEqual(store.customDatabasePath, "",
                        "DB path defaults empty (canonical location)")
 
@@ -95,7 +95,7 @@ final class PreferencesStoreTests: XCTestCase {
 
         let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
         XCTAssertEqual(store.defaultRecallTab, .search)
-        XCTAssertEqual(store.retentionPolicy, .forever)
+        XCTAssertEqual(store.retentionPolicy, .ninetyDays)
     }
 
     // MARK: - Enum display metadata
@@ -119,10 +119,34 @@ final class PreferencesStoreTests: XCTestCase {
     /// pruner; pin the arithmetic so a `days30 → days60` typo is
     /// caught before it hits the brain.
     func testRetentionPolicy_maxAgeSecondsMatches() {
+        XCTAssertEqual(RetentionPolicy.ninetyDays.maxAgeSeconds, 90 * 24 * 3600)
         XCTAssertEqual(RetentionPolicy.thirtyDays.maxAgeSeconds, 30 * 24 * 3600)
         XCTAssertEqual(RetentionPolicy.sevenDays.maxAgeSeconds, 7 * 24 * 3600)
         XCTAssertNil(RetentionPolicy.forever.maxAgeSeconds)
         XCTAssertNil(RetentionPolicy.custom.maxAgeSeconds)
+    }
+
+    func testLegacyFiniteSelectionNeedsReviewWithoutChangingFile() throws {
+        try FileManager.default.createDirectory(at: retentionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = Data(#"{"mode":"sevenDays","days":null,"updated_at":"2026-09-01T00:00:00Z"}"#.utf8)
+        try original.write(to: retentionURL)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+        XCTAssertEqual(store.retentionPolicy, .sevenDays)
+        XCTAssertTrue(store.retentionNeedsReview)
+        XCTAssertEqual(try Data(contentsOf: retentionURL), original)
+        XCTAssertTrue(store.setRetentionPolicy(.ninetyDays))
+        XCTAssertFalse(store.retentionNeedsReview)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: retentionURL)) as? [String: Any])
+        XCTAssertEqual(json["schema_version"] as? Int, 2)
+        XCTAssertEqual(json["mode"] as? String, "ninetyDays")
+    }
+
+    func testLegacyForeverNeedsNoReview() throws {
+        try FileManager.default.createDirectory(at: retentionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"mode":"forever","days":null,"updated_at":"2026-09-01T00:00:00Z"}"#.utf8).write(to: retentionURL)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+        XCTAssertEqual(store.retentionPolicy, .forever)
+        XCTAssertFalse(store.retentionNeedsReview)
     }
 
     func testRetentionPickerWritesWorkerCompatibleJsonAndReloadsIt() throws {
@@ -158,6 +182,8 @@ final class PreferencesStoreTests: XCTestCase {
         let json = try XCTUnwrap(object as? [String: Any])
         XCTAssertEqual(json["mode"] as? String, "custom")
         XCTAssertEqual(json["days"] as? Int, 90)
+        XCTAssertTrue(store.retentionNeedsReview)
+        XCTAssertNil(json["schema_version"], "Migration must not silently authorize deletion")
     }
 
     // MARK: - Namespacing

@@ -2,6 +2,7 @@ import Foundation
 
 public enum RetentionPolicy: String, Sendable, Equatable, CaseIterable, Identifiable {
     case forever
+    case ninetyDays
     case thirtyDays
     case sevenDays
     case custom
@@ -11,6 +12,7 @@ public enum RetentionPolicy: String, Sendable, Equatable, CaseIterable, Identifi
     public var displayName: String {
         switch self {
         case .forever: return "Forever"
+        case .ninetyDays: return "90 days"
         case .thirtyDays: return "30 days"
         case .sevenDays: return "7 days"
         case .custom: return "Custom"
@@ -20,6 +22,7 @@ public enum RetentionPolicy: String, Sendable, Equatable, CaseIterable, Identifi
     public var days: Int? {
         switch self {
         case .forever: return nil
+        case .ninetyDays: return 90
         case .thirtyDays: return 30
         case .sevenDays: return 7
         case .custom: return nil
@@ -52,13 +55,18 @@ public protocol RetentionStore: Sendable {
     func currentPolicy() async -> RetentionPolicy
     func currentCustomDays() async -> Int?
     func setPolicy(_ policy: RetentionPolicy, customDays: Int?) async throws
+    func needsReview() async -> Bool
+}
+
+extension RetentionStore {
+    public func needsReview() async -> Bool { false }
 }
 
 public actor StubRetentionStore: RetentionStore {
-    private var policy: RetentionPolicy = .forever
+    private var policy: RetentionPolicy = .ninetyDays
     private var customDays: Int?
 
-    public init(policy: RetentionPolicy = .forever, customDays: Int? = nil) {
+    public init(policy: RetentionPolicy = .ninetyDays, customDays: Int? = nil) {
         self.policy = policy
         self.customDays = customDays
     }

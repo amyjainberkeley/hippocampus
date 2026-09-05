@@ -135,6 +135,16 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
 public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var state: SupervisorState = .idle
     @Published public private(set) var health: HealthSnapshot?
+    @Published public private(set) var captureReceipt: CaptureStatusReceipt?
+    public private(set) var captureStartedAt: Date?
+
+    public var menuBarStatus: MenuBarStatus {
+        MenuBarStatus.derive(
+            from: state, captureEnabled: captureEnabled,
+            tccRevokedSurface: tccRevokedSurface, receipt: captureReceipt,
+            helperHealth: health, captureStartedAt: captureStartedAt
+        )
+    }
     @Published public private(set) var captureEnabled: Bool
     @Published public internal(set) var tccRevokedSurface: TCCRevokedReason?
 
@@ -162,6 +172,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// handle prevents every menu action or hotkey press from launching a
     /// competing window and duplicate database reader.
     private var recallProcess: Process?
+    private var recallPresentationGate = RecallPresentationGate()
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -550,6 +561,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 crashReportOptedIn: runtimeConfig.crashReportOptedIn,
                 generation: generation
             )
+            captureStartedAt = Date()
+            captureReceipt = nil
+            health = nil
             try await topology.launch(
                 plan: plan,
                 generation: generation,
@@ -595,6 +609,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.captureEnabled = captureEnabled
         state = .running
         startHealthPolling()
+        if recallPresentationGate.consumeIfReady(state: state) {
+            openRecallUI(initialTab: "now")
+        }
     }
 
     private func prepareCaptureBoundary(
@@ -726,10 +743,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private func startHealthPolling() {
         healthTimer?.invalidate()
-        healthTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.health = HealthSnapshot.readFromLog() }
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshCaptureStatus() }
         }
+        healthTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        refreshCaptureStatus()
+    }
+
+    public func refreshCaptureStatus() {
         health = HealthSnapshot.readFromLog()
+        captureReceipt = CaptureStatusReceipt.read()
     }
 
     private func stopAncillaryServices(revokeCaptureConsent: Bool = true) {
@@ -744,6 +768,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         safariInboxReader = nil
         healthTimer?.invalidate()
         healthTimer = nil
+    }
+
+    public func openRecallWhenReady(initialLaunch: Bool = false) {
+        if recallPresentationGate.request(initialLaunch: initialLaunch, state: state) {
+            openRecallUI(initialTab: "now")
+        }
     }
 
     public func openRecallUI(

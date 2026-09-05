@@ -4,10 +4,10 @@ import XCTest
 @MainActor
 final class RetentionViewModelTests: XCTestCase {
 
-    func testDefaultPolicyIsForever() async {
+    func testDefaultPolicyIsNinetyDays() async {
         let vm = RetentionViewModel(store: StubRetentionStore())
         await vm.load()
-        XCTAssertEqual(vm.selectedPolicy, .forever)
+        XCTAssertEqual(vm.selectedPolicy, .ninetyDays)
         XCTAssertFalse(vm.isLoading)
     }
 

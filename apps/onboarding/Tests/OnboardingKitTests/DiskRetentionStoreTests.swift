@@ -16,10 +16,10 @@ final class DiskRetentionStoreTests: XCTestCase {
         super.tearDown()
     }
 
-    func testDefaultPolicyIsForever() async {
+    func testDefaultPolicyIsNinetyDays() async {
         let store = DiskRetentionStore(directory: tmpDir)
         let policy = await store.currentPolicy()
-        XCTAssertEqual(policy, .forever)
+        XCTAssertEqual(policy, .ninetyDays)
         let days = await store.currentCustomDays()
         XCTAssertNil(days)
     }
@@ -77,7 +77,7 @@ final class DiskRetentionStoreTests: XCTestCase {
     }
 
     func testAllPoliciesRoundTrip() async throws {
-        for p in [RetentionPolicy.forever, .thirtyDays, .sevenDays, .custom] {
+        for p in RetentionPolicy.allCases {
             let store = DiskRetentionStore(directory: tmpDir)
             try await store.setPolicy(p, customDays: p == .custom ? 99 : nil)
 
@@ -85,6 +85,24 @@ final class DiskRetentionStoreTests: XCTestCase {
             let loaded = await store2.currentPolicy()
             XCTAssertEqual(loaded, p, "Policy \(p) should round-trip")
         }
+    }
+
+    func testLegacyFiniteChoiceNeedsExplicitReview() async throws {
+        let file = tmpDir.appendingPathComponent("retention.json")
+        let original = Data(#"{"mode":"sevenDays","days":null,"updated_at":"2026-09-01T00:00:00Z"}"#.utf8)
+        try original.write(to: file)
+        let store = DiskRetentionStore(directory: tmpDir)
+        let policy = await store.currentPolicy()
+        let needsReview = await store.needsReview()
+        XCTAssertEqual(policy, .sevenDays)
+        XCTAssertTrue(needsReview)
+        XCTAssertEqual(try Data(contentsOf: file), original)
+        try await store.setPolicy(.ninetyDays, customDays: nil)
+        let reviewed = await store.needsReview()
+        XCTAssertFalse(reviewed)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        XCTAssertEqual(json["schema_version"] as? Int, 2)
+        XCTAssertEqual(json["mode"] as? String, "ninetyDays")
     }
 
     func testCustomSchemaRejectsMissingZeroAndAboveMaximum() async throws {
