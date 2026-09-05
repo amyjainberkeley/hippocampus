@@ -50,8 +50,7 @@ public protocol FrontmostAppSource: Sendable {
     func currentBundleId() -> String?
 }
 
-/// Default production `FrontmostAppSource` over
-/// `NSWorkspace.shared.frontmostApplication`.
+/// Compatibility name for the fresh AX-backed production focus source.
 ///
 /// AppKit import is guarded by `#if canImport(AppKit)` so the target
 /// still compiles in headless / Linux CI contexts; the
@@ -61,11 +60,7 @@ public struct NSWorkspaceFrontmostAppSource: FrontmostAppSource {
     public init() {}
 
     public func currentBundleId() -> String? {
-        #if canImport(AppKit)
-        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        #else
-        return nil
-        #endif
+        AXFocusedApplicationSource().currentBundleId()
     }
 }
 

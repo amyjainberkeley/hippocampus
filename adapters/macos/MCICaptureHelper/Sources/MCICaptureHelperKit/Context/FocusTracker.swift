@@ -442,19 +442,12 @@ public protocol FrontmostPidSource: Sendable {
     func frontmostPidAndBundle() -> (pid_t, String)?
 }
 
-/// Production `FrontmostPidSource` over
-/// `NSWorkspace.shared.frontmostApplication`.
+/// Compatibility name for the fresh AX-backed production focus source.
 public struct NSWorkspaceFrontmostPidSource: FrontmostPidSource {
     public init() {}
 
     public func frontmostPidAndBundle() -> (pid_t, String)? {
-        #if canImport(AppKit)
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        guard let bundleId = app.bundleIdentifier else { return nil }
-        return (app.processIdentifier, bundleId)
-        #else
-        return nil
-        #endif
+        AXFocusedApplicationSource().frontmostPidAndBundle()
     }
 }
 
