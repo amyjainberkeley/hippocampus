@@ -116,14 +116,36 @@ func stub(_ script: String) throws {
     try Data(("#!/bin/sh\n" + script).utf8).write(to: agent)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: agent.path)
 }
-let hostileCWD = "/tmp/$(touch \(sandbox.path)/injected);'quoted'"
+let hostileFocus = "$(touch injected);'quoted'"
+let hostileCWD = "/tmp/" + hostileFocus
 let input = try JSONSerialization.data(withJSONObject: [
     "hook_event_name": "SessionStart", "source": "resume", "cwd": hostileCWD,
     "transcript_path": "/never/read/this"
 ])
 let request = try SessionContextHook.request(from: input)
-check(request.focus == hostileCWD, "cwd is data, not shell")
-check(SessionContextHook.arguments(dbURL: installer.dbURL, request: request).suffix(2) == ["--focus", hostileCWD], "cwd is one argument")
+check(request.cwd == hostileCWD, "cwd is parsed as data, not shell")
+check(try SessionContextHook.arguments(dbURL: installer.dbURL, request: request, homeURL: sandbox).suffix(2) == ["--focus", hostileFocus], "Only the last project component is one focus argument")
+let focusCases: [(String, String?)] = [
+    ("/Users/amy/hippo-work/hippocampus-v1", "hippocampus-v1"),
+    ("/Users/amy/My Project/./", "My Project"),
+    ("/Users/amy/My Project/nested/..", "My Project"),
+    ("/Users/amy", nil), ("/Users/amy/./", nil), ("/", nil), ("////", nil),
+    ("/Users/amy-not-home", "amy-not-home"),
+    ("/Users/amy/--options;$(touch injected)", "--options;$(touch injected)"),
+]
+for (cwd, expected) in focusCases {
+    let arguments = try SessionContextHook.arguments(
+        dbURL: installer.dbURL, request: .init(cwd: cwd), homeURL: URL(fileURLWithPath: "/Users/amy")
+    )
+    if let expected {
+        check(arguments.suffix(2) == ["--focus", expected], "Project focus: \(cwd)")
+    } else {
+        check(!arguments.contains("--focus") && arguments.count == 9, "Recent context only at home/root")
+    }
+}
+expectRefusal {
+    _ = try SessionContextHook.arguments(dbURL: installer.dbURL, request: .init(cwd: "/projects/   "), homeURL: sandbox)
+}
 expectRefusal { _ = try SessionContextHook.request(from: Data(#"{"hook_event_name":"Stop","source":"resume","cwd":"/tmp"}"#.utf8)) }
 expectRefusal { _ = try SessionContextHook.request(from: Data(repeating: 65, count: 65_537)) }
 for source in ["startup", "resume", "clear", "compact"] {
@@ -132,7 +154,7 @@ for source in ["startup", "resume", "clear", "compact"] {
     ]))
 }
 try stub("""
-test "${11}" = \(SessionContextInstaller.shellQuote(hostileCWD)) || exit 1
+test "${11}" = \(SessionContextInstaller.shellQuote(hostileFocus)) || exit 1
 test -z "${MCI_DB_KEY_HEX+x}${ANTHROPIC_API_KEY+x}${OPENAI_API_KEY+x}${MCI_DB_PATH+x}" || exit 2
 test "$MCI_DB_KEYCHAIN_SERVICE" = ai.hippocampus.brain || exit 3
 printf '# Hippocampus context\\nTruth status: grounded\\n- Saved observation [event 42]\\n## Sources\\n- [event 42] timestamp_us=42\\n'
@@ -142,12 +164,25 @@ let response = try JSONSerialization.jsonObject(with: output) as! [String: Any]
 let context = (response["hookSpecificOutput"] as! [String: Any])["additionalContext"] as! String
 check(context.contains("[event 42] timestamp_us=42"), "Preserve citations")
 check(!FileManager.default.fileExists(atPath: sandbox.appendingPathComponent("injected").path), "No cwd execution")
-try stub("printf 'PRIVATE DIAGNOSTIC' >&2\nexit 13\n")
+let calls = sandbox.appendingPathComponent("retrieval-calls")
+let countCall = "printf 'call\\n' >> \(SessionContextInstaller.shellQuote(calls.path))\n"
+try stub(countCall + "printf 'PRIVATE DIAGNOSTIC' >&2\nexit 13\n")
 let failure = String(decoding: SessionContextHook.response(input: input, agentURL: agent, dbURL: installer.dbURL, homeURL: sandbox), as: UTF8.self)
 check(failure.contains("unavailable") && !failure.contains("PRIVATE"), "Fail open with content-free diagnostic")
-try stub("printf '# Hippocampus context\\nTruth status: empty\\nNo relevant local memory was available within this packet limits.\\n'\n")
+check(try String(contentsOf: calls, encoding: .utf8) == "call\n", "Project failure must not retry without focus")
+try Data().write(to: calls)
+try stub(countCall + "printf '# Hippocampus context\\nTruth status: empty\\nNo relevant local memory was available within this packet limits.\\n'\n")
 let empty = String(decoding: SessionContextHook.response(input: input, agentURL: agent, dbURL: installer.dbURL, homeURL: sandbox), as: UTF8.self)
 check(empty.contains("No relevant local memory"), "Empty stays empty")
+check(try String(contentsOf: calls, encoding: .utf8) == "call\n", "Empty project result must not retry without focus")
+try stub("test \"$#\" -eq 9 || exit 1\nprintf '# Hippocampus context\\nTruth status: observed\\nRecent local observation [event 7]\\n'\n")
+for cwd in [sandbox.path, "/"] {
+    let input = try JSONSerialization.data(withJSONObject: [
+        "hook_event_name": "SessionStart", "source": "startup", "cwd": cwd
+    ])
+    let recent = SessionContextHook.response(input: input, agentURL: agent, dbURL: installer.dbURL, homeURL: sandbox)
+    check(String(decoding: recent, as: UTF8.self).contains("Recent local observation [event 7]"), "Home/root response uses supplied home and no focus")
+}
 try stub("/usr/bin/yes x | /usr/bin/head -c 20000\n")
 let oversized = String(decoding: SessionContextHook.response(input: input, agentURL: agent, dbURL: installer.dbURL, homeURL: sandbox), as: UTF8.self)
 check(oversized.contains("limit") && !oversized.contains("xxx"), "Never sever citations by truncating a packet")

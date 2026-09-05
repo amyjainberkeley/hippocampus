@@ -16,11 +16,15 @@ an edited or stale entry requires review instead of silent replacement.
 
 This mode runs before SwiftUI, the supervisor, and Recall are constructed. It
 reads at most 64 KiB of hook input, with a one-second input deadline. It ignores
-transcript paths and passes the working directory as one `--focus` argument to
+transcript paths and passes the last normalized working-directory component as
+one `--focus` argument to
 the bundled sibling `mci-agent context --max-tokens 1000 --max-evidence 12
 --format markdown`. The directory is not executed or used as the child process
-working directory. Focus is a relevance query, **not project isolation**: results
-can contain memory from other projects.
+working directory. At the user's HOME or filesystem root, `--focus` is omitted
+to request recent bounded observations. Named-project failures or empty results
+never retry without focus. Whitespace-only project names are refused, not treated
+as recent-context requests. Focus is a relevance query, **not project isolation**:
+results can contain memory from other projects.
 
 Retrieval has a six-second deadline and an 8 KiB output bound. The whole canonical
 packet, including truth state and event citations, is returned as SessionStart

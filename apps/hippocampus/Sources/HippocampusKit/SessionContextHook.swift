@@ -10,7 +10,7 @@ public enum SessionContextHook {
     static let sources = ["startup", "resume", "clear", "compact"]
 
     struct Request {
-        let focus: String
+        let cwd: String
     }
 
     enum Failure: Error {
@@ -26,12 +26,23 @@ public enum SessionContextHook {
               cwd.utf8.count <= 2_048, !cwd.contains("\0") else {
             throw Failure.invalidInput
         }
-        return Request(focus: cwd)
+        return Request(cwd: cwd)
     }
 
-    static func arguments(dbURL: URL, request: Request) -> [String] {
-        ["context", "--db-path", dbURL.path, "--max-tokens", "1000",
-         "--max-evidence", "12", "--format", "markdown", "--focus", request.focus]
+    static func arguments(dbURL: URL, request: Request, homeURL: URL) throws -> [String] {
+        var arguments = ["context", "--db-path", dbURL.path, "--max-tokens", "1000",
+                         "--max-evidence", "12", "--format", "markdown"]
+        let directory = URL(fileURLWithPath: request.cwd, isDirectory: true).standardizedFileURL
+        // HOME and root have no project focus. Other directories always remain
+        // focused, including when their retrieval fails or finds no evidence.
+        if directory.path != "/", directory.path != homeURL.standardizedFileURL.path {
+            let focus = directory.lastPathComponent
+            guard !focus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw Failure.invalidInput
+            }
+            arguments.append(contentsOf: ["--focus", focus])
+        }
+        return arguments
     }
 
     public static func runCLI(arguments: [String], executableURL: URL?) {
@@ -92,7 +103,7 @@ public enum SessionContextHook {
             "MCI_DB_KEYCHAIN_STORAGE_MODEL": "file-keychain-acl-v1",
         ])
         process.executableURL = agentURL
-        process.arguments = arguments(dbURL: dbURL, request: request)
+        process.arguments = try arguments(dbURL: dbURL, request: request, homeURL: homeURL)
         process.currentDirectoryURL = homeURL
         process.standardInput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
