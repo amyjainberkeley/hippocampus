@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-05._
 
-Audited code baseline: `1e19cb1`
+Audited code baseline: `fe285ee`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -111,21 +111,38 @@ Proof: `/tmp/hippocampus-focus-repair-image-proof-20260905.jpeg`.
 The browser-capability build `81e0cb6` was signed, notarized, stapled and installed.
 Its 79 MB DMG is `/tmp/hippocampus-release-20260905-browser-routing/Hippocampus-0.1.0.dmg`,
 SHA-256 `6ca2ddff5abf47c15c3d23c25cc13be8aac057925acc4c63ce65654c3ee11c78`.
-The currently installed `2726eaf` is the Developer ID signed local routing
-validation build, not the final notarized artifact. The preceding notarized app
-is preserved at `/Users/amy/hippo-work/releases/backups/Hippocampus-notarized-81e0cb6.app`.
-Pause/resume was exercised through its native control: the receipt recorded
-`capture_disabled` while off and cleared that reason after restart.
+The installed app is now the final repair artifact `fe285ee`, Developer ID
+signed, notarized and stapled. Installed provenance, deep/strict codesign,
+stapler validation and Gatekeeper assessment passed. The durable installer is
+`/Users/amy/hippo-work/releases/2026-09-05-fe285ee/Hippocampus-0.1.0.dmg`,
+SHA-256 `b29eaee8058bb5671d17038fb5d2e48c333904212b98281f8ee3fe0361ed74a5`.
+Its product-source digest is
+`07e27a1c7abf88f92d9af58bb617550a994e68054aa9f39a08a39fd5f58c05fa`.
+The preceding validation app is preserved at
+`/Users/amy/hippo-work/releases/backups/Hippocampus-routing-validation-2726eaf.app`.
+Pause/resume was exercised in that validation app: the receipt recorded
+`capture_disabled` while off and cleared that reason after restart. Both cold
+and warm Sources-to-AI-Context routing acknowledged successfully in the final
+installed app, without duplicate parent or Recall processes.
 Normal/private-browser live proof and permission-revocation recovery remain
-unqualified. A macOS security dialog remains foreground; the owner must handle
-it. No access has been granted or reset by automation.
+unqualified. A macOS security dialog interrupted browser qualification; only
+the owner may handle that consent. Subsequent ordinary-window capture resumed.
+No access has been granted or reset by automation.
 
 The latest preview correction strips the complete indexing header before the
 timeline's 80-character budget. Search-derived cards normalize the same body
 contract; views do not strip a second time. Stored text, search indexing,
 citations and detail-hit wire semantics are unchanged. All 109 Rust bridge
-tests and 79 focused optimized Recall tests pass. Final packaging and native
-preview readback are pending this source refresh.
+tests and the full optimized Recall suite (396 XCTest plus three handoff tests)
+pass. The final native Today previews show OCR rather than indexing metadata.
+The final installed build captured event 1679 at `2026-09-05T12:50:07.106Z`
+under the ordinary production policy. Codex's live `mci_events_since` returned
+its synthetic marker, and the native authenticated viewer displayed the same
+event's stored pixels, OCR, source and timestamp. The committed receipt then
+reported 55 screen records and 15 screenshot references. Proof:
+`/Users/amy/hippo-work/releases/2026-09-05-fe285ee/hippocampus-final-fresh-screen-proof-20260905.jpeg`.
+This proves the positive installed screen-to-memory loop, not all-app coverage
+or the separate negative privacy and permission-recovery gates.
 
 A real Claude SessionStart invocation exposed an oversized-packet failure even
 though direct MCP worked. The hook now requests 600 tokens/four citations and
@@ -150,8 +167,8 @@ including the newest AppleScript change.
 Eighteen focused release workspace/date/receipt tests also pass.
 The earlier debug suite's 107-microsecond
 timing result versus its 100-microsecond gate remains recorded, not hidden.
-The remaining browser and final-preview checks must pass installed verification
-before those repairs can be called complete.
+The remaining browser checks must pass installed verification before browser
+capture can be called qualified. Final installed preview readback passed.
 
 ## Product Boundary
 
@@ -471,7 +488,8 @@ truthfully scoped evidence product.
   in the shipping Info.plist. The pre-lift app and DMG completed Developer ID
   signing, Apple notarization, stapling, and verification. The production
   focused-window repair also completed that pipeline and is installed. The
-  newer focus/canvas/preferences/hook repair is being built and qualified.
+  final focus/canvas/preferences/hook repair is also notarized and installed;
+  its positive capture, stored-image and MCP readbacks are recorded above.
 - A verified local Arctic Embed S Core ML bundle is present in the gitignored
   development model directory and is included by debug ad-hoc assembly, so that
   artifact supports semantic recall. It is the sole required release model.

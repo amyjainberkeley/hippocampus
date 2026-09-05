@@ -256,3 +256,59 @@ show those pixels in Recall, and return the same event through recall/context.
   security dialog. The agent cannot operate it. A separate temporary metadata
   diagnostic encountered a Gatekeeper prompt and was terminated; no protection
   was bypassed or permission granted. That diagnostic is not required setup.
+
+## Final Installed Repair Evidence
+
+- Artifact source: `fe285eecb926340750d1f441cb1d74879d85e071`; product digest:
+  `07e27a1c7abf88f92d9af58bb617550a994e68054aa9f39a08a39fd5f58c05fa`.
+  Product source was frozen during assembly and installer generation. This
+  documentation refresh does not change that pinned artifact identity.
+- App notarization `5f6bad15-d904-4048-a7de-e6b8f06c4509` and DMG notarization
+  `258c0782-e500-48ce-bfff-5ae642639c36` both returned Accepted. Both tickets
+  are stapled. Installed provenance, codesign deep/strict, stapler and Gatekeeper
+  checks passed. The prior validation app was preserved; the production database
+  and Keychain item were not replaced.
+- Durable installer:
+  `/Users/amy/hippo-work/releases/2026-09-05-fe285ee/Hippocampus-0.1.0.dmg`.
+  SHA-256: `b29eaee8058bb5671d17038fb5d2e48c333904212b98281f8ee3fe0361ed74a5`.
+  Apple submission receipts are preserved beside it. No public updater release
+  or App Store submission was performed.
+- The full optimized Recall suite passed 396 XCTest cases plus three context
+  handoff tests. Combined with the 654 optimized capture tests, 109 Rust bridge
+  tests and targeted signing/hook regressions, this covers the modified paths;
+  it is not a claim that every repository lane ran again on this artifact.
+- Final installed Today cards display the actual OCR body instead of a chopped
+  indexing header. Its authenticated viewer opened stored event 1666 correctly.
+  Both cold and warm AI Context navigation received their acknowledgements;
+  one parent and one Recall process remained. Capture restarted normally.
+- The final artifact then stored event 1679 at `2026-09-05T12:50:07.106Z` from
+  the synthetic focused fixture under the owner's ordinary production policy.
+  The real Codex MCP connection returned that exact event and marker. The native
+  viewer displayed event 1679's authenticated screenshot, OCR, source and time.
+  Today refreshed to 55 retained screen records and 15 screenshots. This is a
+  downstream positive proof, not an injected event or helper-frame count.
+  Image evidence:
+  `/Users/amy/hippo-work/releases/2026-09-05-fe285ee/hippocampus-final-fresh-screen-proof-20260905.jpeg`.
+- Browser qualification was interrupted by protected OS consent UI; subsequent
+  ordinary-app capture resumed. The browser test did not pass, and no consent
+  was approved or reset through automation. Do not describe the whole capture
+  pipeline as currently blocked solely because that browser gate is pending.
+
+## Remaining Acceptance Gates
+
+| Priority | Capability | Current truth and next proof |
+| --- | --- | --- |
+| 1 | Browser coverage | Owner resolves the exact Hippocampus-to-browser Automation prompt; prove normal-page retention and private-window exclusion with distinct synthetic markers. |
+| 2 | Permission recovery | Owner-controlled revoke/restore cycle, with no silent data loss and honest native status throughout. |
+| 3 | Daily understanding | Current briefs are citation-preserving extracts, not useful semantic summaries yet. Score importance, duplication, contradictions and personal/work separation on held-out days. |
+| 4 | Actual active time | Current visual episodes report observed spans. Add measured idle/active signals before presenting time worked. |
+| 5 | Commitments | No qualified commitment extraction or automatic closure exists. Require explicit source-bound candidates, corrections and abstention before reminders. |
+| 6 | Agent continuity | Codex retrieval and real Claude SessionStart delivery passed. A remote Claude answer did not complete; cross-client ongoing awareness is not universal. |
+| 7 | Public distribution | This Mac has a working notarized artifact. Immutable hosted model inputs, second-Mac install/update/Keychain continuity and release qualification remain. |
+| 8 | Larger vision | Team context, remote control, multi-device memory and autonomous actions are not shipped by this repair. |
+
+The earlier run optimized component completion without proving the installed
+positive loop soon enough. The external review correctly called out that failure,
+but its empty-allowlist and missing-key diagnoses were not accurate for the
+installed source. Fixes were driven by reproduced failures and downstream
+readback, not by accepting the review's proposed implementation wholesale.
