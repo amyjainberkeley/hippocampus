@@ -323,9 +323,18 @@ pub fn render(checks: &[Check]) -> String {
         .filter(|c| c.status == Status::Warn && !c.fix.is_empty())
         .collect();
 
-    if blockers.is_empty() && advisories.is_empty() {
+    if checks.is_empty() {
+        out.push_str("\n  No checks were run.\n");
+        return out;
+    }
+
+    if checks.iter().all(|c| c.status == Status::Pass) {
         out.push_str("\n  Nothing to fix.\n");
         return out;
+    }
+
+    if blockers.is_empty() {
+        out.push_str("\n  Review warnings above.\n");
     }
 
     if !blockers.is_empty() {
@@ -446,11 +455,54 @@ mod tests {
         assert!(out.contains("Blocking:"));
         assert!(out.contains("Worth doing:"));
         assert!(out.contains("do this"));
+        assert!(out.contains("maybe this"));
+        assert!(!out.contains("Nothing to fix."));
+        assert!(!out.contains("Review warnings above."));
     }
 
     #[test]
     fn render_says_so_when_everything_is_fine() {
         let out = render(&[Check::new("a", Status::Pass, "fine", "")]);
         assert!(out.contains("Nothing to fix."));
+    }
+
+    #[test]
+    fn render_reviews_warnings_without_remediation() {
+        let warning = Check::new(
+            "capture runtime",
+            Status::Warn,
+            "suppressed: denylist-source",
+            "",
+        );
+        for checks in [
+            vec![warning.clone()],
+            vec![Check::new("a", Status::Pass, "fine", ""), warning],
+        ] {
+            let out = render(&checks);
+            assert!(!out.contains("Nothing to fix."));
+            assert!(out.contains("Review warnings above."));
+            assert!(out.contains("[warn]"));
+            assert!(out.contains("denylist-source"));
+            assert!(!out.contains("Blocking:"));
+            assert!(!out.contains("Worth doing:"));
+        }
+    }
+
+    #[test]
+    fn render_reviews_warnings_with_remediation() {
+        let out = render(&[Check::new("a", Status::Warn, "meh", "maybe this")]);
+        assert!(out.contains("Review warnings above."));
+        assert!(out.contains("Worth doing:"));
+        assert!(out.contains("maybe this"));
+        assert!(!out.contains("Nothing to fix."));
+        assert!(!out.contains("Blocking:"));
+    }
+
+    #[test]
+    fn render_does_not_claim_clean_when_no_checks_ran() {
+        let out = render(&[]);
+        assert!(!out.contains("Nothing to fix."));
+        assert!(out.contains("No checks were run."));
+        assert!(!out.contains("Review warnings above."));
     }
 }
