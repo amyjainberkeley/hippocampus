@@ -31,7 +31,7 @@
     <key>NSAccessibilityUsageDescription</key>
     <string>Hippocampus uses Accessibility to detect password fields and secure input, so it can automatically stop capturing when you type sensitive information.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Hippocampus reads the URL of your active browser tab so your brain knows what page you were looking at. No page content is sent anywhere.</string>
+    <string>Hippocampus reads your active browser tab's URL and checks whether the window is normal or private so it can exclude private windows from capture and save allowed browsing context to your local memory. Your memory stays on this Mac unless you choose to share it.</string>
     <key>NSCalendarsUsageDescription</key>
     <string>Hippocampus reads your current calendar event so each captured moment is tagged with "what meeting was happening right now." Only events whose time window covers right now are read; no past events, no event bodies, no attendee lists leave your Mac.</string>
     <key>NSContactsUsageDescription</key>
