@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 SOURCE_PATHS = (
+    ".cargo/config.toml",
     "Cargo.lock",
     "Cargo.toml",
     "CHANGELOG.md",
