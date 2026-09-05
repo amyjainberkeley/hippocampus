@@ -54,4 +54,12 @@ final class OrdinaryApplicationCaptureTests: XCTestCase {
     func testBrowserRemainsExcludedWithoutPositiveNormalWindowEvidence() {
         XCTAssertEqual(cascade().decide(context: WorkflowContext(appBundleId: "com.google.Chrome")), .suppress(reason: .failsafeUnknown))
     }
+
+    func testMemorySurfacesDoNotRecaptureTheirOwnEvidence() {
+        for bundle in ["ai.hippocampus", "recall-ui", "onboarding"] {
+            XCTAssertEqual(cascade().decide(context: WorkflowContext(appBundleId: bundle)),
+                           .suppress(reason: .denylistSource))
+        }
+        XCTAssertEqual(cascade().decide(context: WorkflowContext(appBundleId: "ai.hippocampus.CaptureOverlapCorpus")), .allow)
+    }
 }
