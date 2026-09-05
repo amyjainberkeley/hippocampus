@@ -1,21 +1,21 @@
-//! Daily-brief generator cron — ADR-0028 + ADR-0018.
+//! Calendar-day briefs: ambient Today and a scheduled completed-day brief.
 //!
 //! Same shutdown-channel / tokio task shape as
 //! [`retention_worker`](crate::retention_worker). Each cycle:
 //!
 //! 1. Sleep until the next local-time fire (default 06:00).
-//! 2. Query the last 24 h of OCR events from the brain.
+//! 2. Query the previous local calendar day using OS timezone rules.
 //! 3. Pass them to a freshly-constructed [`BriefAuthor`]. The default
 //!    extractive author has no model dependency; an installed Qwen author
 //!    is loaded lazily so its working set is resident only during generation.
 //! 4. Insert the resulting brief into the `briefs` table.
 //!
-//! # First-launch path
+//! # Ambient Today
 //!
-//! If the briefs table is empty AND the brain has captured events for
-//! ≥4 h of wall-clock, the worker fires a "partial day" brief on the
-//! spot so the user sees their first brief end-of-day-one instead of
-//! day-two morning.
+//! A separate model-free worker checks current-day evidence every minute.
+//! The first check with useful evidence produces a cited draft; later
+//! changes rebuild at most every five minutes. Unchanged evidence does not
+//! rewrite the draft. Morning generation owns yesterday's row, never Today.
 //!
 //! # Disable path
 //!
@@ -26,28 +26,27 @@
 //! # Privacy invariants
 //!
 //! - WRITES only `briefs` rows; never modifies `events` (ADR-0018 §4.2).
-//! - Reads only `.allow`-stored events via `events_since` (suppressed
-//!   events have no row in `events` by construction; ADR-0016 §4.3).
+//! - Reads retained events from a bounded calendar window. Suppressed
+//!   captures have no event row by construction (ADR-0016 §4.3).
 //! - The author runs entirely on-device — no network. ADR-0018 §4.6.
 //! - Brief is written in `Draft` state structurally; auto-approve is
 //!   structurally banned (ADR-0018 §4.1). The lifecycle state lives in
 //!   the brief row's content; the briefs table itself does not store
 //!   `BriefState` — Tier-2 syncs are gated separately by ADR-0019.
 //!
-//! # One pass, two callers
+//! # Shared authoring
 //!
-//! [`generate_brief_once`] is the whole unit of work: select the source
-//! events, author, run the tripwire, persist. The scheduled loop calls it
-//! once per fire; `mci-agent brief` calls the same function once and exits.
-//! Neither owns a copy of the body, so the cron path and the CLI path
-//! cannot drift.
+//! [`generate_brief_once`] selects sources, authors, validates and persists
+//! for scheduled and explicit CLI runs. Today shares the authoring/persistence
+//! path after comparing its bounded evidence snapshot. It refuses citation
+//! violations instead of publishing an invalid ambient draft.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use mci_brain::{BrainStore, BriefRow, SqlCipherBrainStore};
-use mci_brief::author::BriefAuthor;
+use mci_brain::{BrainStore, BriefRow, EventRecord, SqlCipherBrainStore};
+use mci_brief::author::{AuthorError, BriefAuthor};
 use mci_brief::extractive_author::ExtractiveBriefAuthor;
 use mci_brief::model::BriefState;
 use mci_brief::tripwire::validate_citations;
@@ -59,13 +58,19 @@ use crate::wall_clock::format_unix_ms;
 /// Default target hour for the daily brief, local time. 06:00.
 pub const DEFAULT_BRIEF_HOUR: u32 = 6;
 
+/// Ambient evidence checks run once per minute, never per frame.
+pub const TODAY_BRIEF_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Minimum interval between successful rebuilds within the same local day.
+pub const TODAY_BRIEF_REBUILD_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
 /// Cap on events fed to the author in one cycle. ~2 K events is well
 /// past the Qwen3-1.7B fixed-2048-token context — the author truncates
 /// internally. The cap is a defence against the brain runaway case.
 pub const MAX_EVENTS_PER_BRIEF: usize = 2048;
 
-/// Minimum wall-clock elapsed since the oldest event before the
-/// first-launch path fires a partial-day brief.
+/// Legacy first-launch policy, retained for callers of [`should_fire_first_brief`].
+/// Production Today generation no longer uses an age gate.
 pub const FIRST_BRIEF_MIN_AGE: Duration = Duration::from_secs(4 * 3600);
 
 /// Minimum sleep between fires. Guards against clock-skew + DST shifts
@@ -75,6 +80,9 @@ pub const MIN_SLEEP: Duration = Duration::from_secs(60);
 /// Errors the brief worker can surface.
 #[derive(Debug, thiserror::Error)]
 pub enum BriefWorkerError {
+    /// Calendar bounds could not be resolved; never guess a day or UTC fallback.
+    #[error("brief-worker: calendar: {0}")]
+    Calendar(String),
     /// A cycle failed fatally (join error).
     #[error("brief-worker: {0}")]
     Fatal(String),
@@ -99,7 +107,7 @@ pub struct BriefWorkerStats {
     /// Number of briefs generated and stored.
     pub briefs_generated: u64,
     /// Number of cycles that ran but produced no brief because the
-    /// 24 h window held no events.
+    /// selected window held no useful events.
     pub cycles_skipped_empty: u64,
     /// Cycles that errored (logged, not fatal).
     pub cycle_errors: u64,
@@ -205,11 +213,164 @@ pub fn extractive_author_factory() -> AuthorFactory {
     Arc::new(|| Ok(Box::new(ExtractiveBriefAuthor) as Box<dyn BriefAuthor>))
 }
 
-/// Run the daily brief loop until the shutdown signal fires.
+type TodayClock = Arc<dyn Fn() -> Result<(u64, BriefWindow), BriefWorkerError> + Send + Sync>;
+
+#[derive(Default)]
+struct TodayBriefState {
+    day: Option<BriefWindow>,
+    last_evidence: Option<Vec<EventRecord>>,
+    last_generated_us: Option<u64>,
+}
+
+impl TodayBriefState {
+    fn refresh(
+        &mut self,
+        store: &SqlCipherBrainStore,
+        now_us: u64,
+        day: &BriefWindow,
+        shutdown: &watch::Receiver<bool>,
+    ) -> Result<Option<BriefOutcome>, BriefWorkerError> {
+        if *shutdown.borrow() || shutdown.has_changed().is_err() {
+            return Ok(None);
+        }
+        if now_us < day.since_us || now_us >= day.until_us {
+            return Err(BriefWorkerError::Calendar(
+                "clock is outside its local day".into(),
+            ));
+        }
+        let topic = format!("Day so far - {}", day.date_local);
+        if self.day.as_ref() != Some(day) {
+            let last_generated_us = store
+                .brief_for_date(&day.date_local)
+                .map_err(|e| BriefWorkerError::Store(format!("read Today brief: {e}")))?
+                .filter(|row| row.model_id == "hippocampus-extractive" && row.title == topic)
+                .map(|row| row.generated_ts_us);
+            self.day = Some(day.clone());
+            self.last_evidence = None;
+            self.last_generated_us = last_generated_us;
+        }
+        let minimum_us =
+            u64::try_from(TODAY_BRIEF_REBUILD_INTERVAL.as_micros()).unwrap_or(u64::MAX);
+        if self
+            .last_generated_us
+            .is_some_and(|last| now_us.saturating_sub(last) < minimum_us)
+        {
+            return Ok(None);
+        }
+        let window = BriefWindow {
+            until_us: day.until_us.min(now_us.saturating_add(1)),
+            ..day.clone()
+        };
+        // Reuse the range-limited, evenly sampled daily read. No full-corpus
+        // stats, per-frame query, or author/model construction on unchanged data.
+        let records = store
+            .sampled_events_between(window.since_us, window.until_us, MAX_EVENTS_PER_BRIEF)
+            .map_err(|e| BriefWorkerError::Store(format!("sample Today evidence: {e}")))?;
+        if self.last_evidence.as_deref() == Some(records.as_slice())
+            || *shutdown.borrow()
+            || shutdown.has_changed().is_err()
+        {
+            return Ok(None);
+        }
+        // A restart loses the in-memory snapshot. Preserve an identical persisted
+        // draft rather than falsely advancing its generation timestamp.
+        if self.last_evidence.is_none() {
+            if let Some(existing) = store
+                .brief_for_date(&day.date_local)
+                .map_err(|e| BriefWorkerError::Store(format!("read Today draft: {e}")))?
+                .filter(|row| {
+                    row.model_id == ExtractiveBriefAuthor.model_id()
+                        && row.model_version == ExtractiveBriefAuthor.model_version()
+                        && row.title == topic
+                })
+            {
+                if let Ok(draft) = ExtractiveBriefAuthor.author(&records, &topic) {
+                    if draft.body == existing.body
+                        && usize::try_from(existing.source_event_count).ok() == Some(records.len())
+                    {
+                        self.last_evidence = Some(records);
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        let outcome = author_and_store_brief(
+            store,
+            &extractive_author_factory(),
+            &topic,
+            &window,
+            now_us,
+            &records,
+            true,
+        )?;
+        if matches!(outcome, BriefOutcome::Stored { .. }) {
+            self.last_generated_us = Some(now_us);
+        }
+        self.last_evidence = Some(records);
+        Ok(Some(outcome))
+    }
+}
+
+/// Keep the current local day's draft useful without loading a model.
+pub async fn run_today_brief_worker(
+    store: Arc<SqlCipherBrainStore>,
+    shutdown: watch::Receiver<bool>,
+) -> Result<BriefWorkerStats, BriefWorkerError> {
+    let clock: TodayClock = Arc::new(|| {
+        let now = unix_now_us();
+        Ok((now, calendar_day_window(now, 0)?))
+    });
+    run_today_brief_worker_with_clock(store, clock, shutdown).await
+}
+
+async fn run_today_brief_worker_with_clock(
+    store: Arc<SqlCipherBrainStore>,
+    clock: TodayClock,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<BriefWorkerStats, BriefWorkerError> {
+    let mut stats = BriefWorkerStats::default();
+    let mut state = TodayBriefState::default();
+    loop {
+        if *shutdown.borrow() {
+            break;
+        }
+        let store = Arc::clone(&store);
+        let clock = Arc::clone(&clock);
+        let stopped = shutdown.clone();
+        let mut task = tokio::task::spawn_blocking(move || {
+            let result = clock().and_then(|(now, day)| state.refresh(&store, now, &day, &stopped));
+            (state, result)
+        });
+        let result = tokio::select! {
+            biased;
+            _ = shutdown.changed() => { task.abort(); break; }
+            result = &mut task => result,
+        }
+        .map_err(|e| BriefWorkerError::Fatal(format!("Today cycle join: {e}")))?;
+        state = result.0;
+        match result.1 {
+            Ok(Some(BriefOutcome::Stored { .. })) => stats.briefs_generated += 1,
+            Ok(Some(BriefOutcome::SkippedEmpty)) => stats.cycles_skipped_empty += 1,
+            Ok(None) => {}
+            Err(e) => {
+                stats.cycle_errors += 1;
+                eprintln!("mci-agent: Today brief cycle skipped: {e}");
+            }
+        }
+        tokio::select! {
+            _ = shutdown.changed() => break,
+            () = tokio::time::sleep(TODAY_BRIEF_CHECK_INTERVAL) => {}
+        }
+    }
+    Ok(stats)
+}
+
+/// Run the previous-calendar-day brief loop until the shutdown signal fires.
 ///
 /// `tz_offset_resolver` returns the local timezone offset (in seconds
 /// east of UTC) — production passes [`current_tz_offset_secs`], tests
-/// pass a fixed offset.
+/// pass a fixed offset. This schedules the wake only; source window bounds
+/// independently use the OS timezone rules at each calendar midnight.
 pub async fn run_brief_worker(
     store: Arc<SqlCipherBrainStore>,
     author_factory: AuthorFactory,
@@ -218,38 +379,6 @@ pub async fn run_brief_worker(
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<BriefWorkerStats, BriefWorkerError> {
     let mut stats = BriefWorkerStats::default();
-
-    // First-launch check: fire a partial-day brief if appropriate.
-    match first_launch_decision(&store).await {
-        Ok(true) => {
-            match run_one_cycle(&store, &author_factory, "First brief", &tz_offset_resolver).await {
-                Ok(BriefOutcome::Stored {
-                    date_local,
-                    word_count,
-                    event_count,
-                    id,
-                    citation_violations,
-                }) => {
-                    stats.briefs_generated += 1;
-                    eprintln!(
-                    "mci-agent: brief generated for {date_local} (first-launch, id={id}, {event_count} events, {word_count} words, {citation_violations} citation violations)"
-                );
-                }
-                Ok(BriefOutcome::SkippedEmpty) => {
-                    stats.cycles_skipped_empty += 1;
-                }
-                Err(e) => {
-                    stats.cycle_errors += 1;
-                    eprintln!("mci-agent: first-launch brief error: {e}");
-                }
-            }
-        }
-        Ok(false) => {}
-        Err(e) => {
-            stats.cycle_errors += 1;
-            eprintln!("mci-agent: first-launch decision error: {e}");
-        }
-    }
 
     loop {
         if *shutdown.borrow() {
@@ -272,7 +401,12 @@ pub async fn run_brief_worker(
             break;
         }
 
-        match run_one_cycle(&store, &author_factory, "Daily brief", &tz_offset_resolver).await {
+        let result = tokio::select! {
+            biased;
+            _ = shutdown.changed() => break,
+            result = run_one_cycle(&store, &author_factory) => result,
+        };
+        match result {
             Ok(BriefOutcome::Stored {
                 date_local,
                 word_count,
@@ -287,7 +421,7 @@ pub async fn run_brief_worker(
             }
             Ok(BriefOutcome::SkippedEmpty) => {
                 stats.cycles_skipped_empty += 1;
-                eprintln!("mci-agent: brief skipped (no events in 24 h window)");
+                eprintln!("mci-agent: brief skipped (no useful events in previous local day)");
             }
             Err(e) => {
                 stats.cycle_errors += 1;
@@ -301,7 +435,7 @@ pub async fn run_brief_worker(
 
 /// Disabled-idle mode: log once, then sleep on the shutdown channel.
 ///
-/// Used when the model is not present OR `MCI_BRIEFS_DISABLED=1`. The
+/// Used when `MCI_BRIEFS_DISABLED=1`. A missing model uses extractive briefs. The
 /// task exits cleanly on shutdown; no work happens between launch and
 /// exit beyond the single log line.
 pub async fn run_disabled_idle(
@@ -333,19 +467,16 @@ pub struct BriefWindow {
 }
 
 impl BriefWindow {
-    /// The scheduled worker's window: the 24 h ending now, filed under
-    /// today's local date.
+    /// Explicit on-demand window: the 24 h ending now, filed under
+    /// today's local date. Scheduled generation uses the previous calendar day.
     ///
-    /// The upper bound is open on purpose. Generation takes seconds, and an
-    /// event captured while the author is running still happened today —
-    /// clipping at the instant the cycle started would drop it from a brief
-    /// that no later cycle will ever cover.
+    /// Future-dated events are excluded, including those after this snapshot.
     #[must_use]
     pub fn trailing_24h(now_us: u64, tz_offset_secs: i32) -> Self {
         let now_secs = i64::try_from(now_us / 1_000_000).unwrap_or(i64::MAX);
         Self {
             since_us: now_us.saturating_sub(24 * 3600 * 1_000_000),
-            until_us: u64::MAX,
+            until_us: now_us.saturating_add(1),
             date_local: local_date_string(now_secs, tz_offset_secs),
         }
     }
@@ -380,12 +511,12 @@ pub enum BriefOutcome {
         event_count: u32,
         /// Row id assigned by the store.
         id: u64,
-        /// Citation violations the tripwire found. Non-zero does NOT stop
-        /// the draft being written — a draft is exactly the thing a human
-        /// reviews. It blocks approval later, in `lifecycle::advance`.
+        /// Citation violations the tripwire found. Scheduled/explicit drafts
+        /// retain these for review, with approval blocked in `lifecycle::advance`.
+        /// Ambient Today refuses drafts with any violations.
         citation_violations: usize,
     },
-    /// The window held no events, so there was nothing to summarize.
+    /// The window held no useful evidence, so there was nothing to summarize.
     SkippedEmpty,
 }
 
@@ -422,6 +553,26 @@ pub fn generate_brief_once(
         .sampled_events_between(window.since_us, window.until_us, MAX_EVENTS_PER_BRIEF)
         .map_err(|e| BriefWorkerError::Store(format!("sampled_events_between: {e}")))?;
 
+    author_and_store_brief(
+        store,
+        factory,
+        topic,
+        window,
+        generated_ts_us,
+        &records,
+        false,
+    )
+}
+
+fn author_and_store_brief(
+    store: &SqlCipherBrainStore,
+    factory: &AuthorFactory,
+    topic: &str,
+    window: &BriefWindow,
+    generated_ts_us: u64,
+    records: &[EventRecord],
+    require_valid_citations: bool,
+) -> Result<BriefOutcome, BriefWorkerError> {
     if records.is_empty() {
         return Ok(BriefOutcome::SkippedEmpty);
     }
@@ -433,9 +584,11 @@ pub fn generate_brief_once(
     let author = (factory)()?;
     let model_id = author.model_id().to_owned();
     let model_version = author.model_version().to_owned();
-    let brief = author
-        .author(&records, topic)
-        .map_err(|e| BriefWorkerError::Author(e.to_string()))?;
+    let brief = match author.author(records, topic) {
+        Ok(brief) => brief,
+        Err(AuthorError::NoEvents) => return Ok(BriefOutcome::SkippedEmpty),
+        Err(e) => return Err(BriefWorkerError::Author(e.to_string())),
+    };
     drop(author);
 
     if brief.state != BriefState::Draft || brief.human_approver_id.is_some() {
@@ -446,9 +599,14 @@ pub fn generate_brief_once(
     }
 
     // Runs on every generated brief so the count is visible at generation
-    // time rather than only when somebody opens the review UI. Advisory
-    // here; structural at the approval chokepoint.
+    // time rather than only when somebody opens the review UI. Ambient drafts
+    // require valid citations before publication; approval always requires them.
     let citation_violations = validate_citations(&brief, store as &dyn BrainStore).len();
+    if require_valid_citations && citation_violations != 0 {
+        return Err(BriefWorkerError::Author(format!(
+            "refused ambient draft with {citation_violations} citation violations"
+        )));
+    }
 
     let word_count = u32::try_from(brief.body.split_whitespace().count()).unwrap_or(u32::MAX);
     let row = BriefRow {
@@ -484,45 +642,21 @@ pub fn generate_brief_once(
 async fn run_one_cycle(
     store: &Arc<SqlCipherBrainStore>,
     factory: &AuthorFactory,
-    topic: &str,
-    tz_offset_resolver: &Arc<dyn Fn() -> i32 + Send + Sync>,
 ) -> Result<BriefOutcome, BriefWorkerError> {
     let now_us = unix_now_us();
-    let window = BriefWindow::trailing_24h(now_us, (tz_offset_resolver)());
 
     let store_c = Arc::clone(store);
     let factory_c = Arc::clone(factory);
-    let topic_owned = topic.to_owned();
     tokio::task::spawn_blocking(move || {
-        generate_brief_once(&store_c, &factory_c, &topic_owned, &window, now_us)
+        let window = calendar_day_window(now_us, 1)?;
+        let topic = format!("Daily brief - {}", window.date_local);
+        generate_brief_once(&store_c, &factory_c, &topic, &window, now_us)
     })
     .await
     .map_err(|e| BriefWorkerError::Fatal(format!("brief cycle join: {e}")))?
 }
 
-/// Decide whether the first-launch path should fire on startup.
-///
-/// Fires iff the briefs table is empty AND the brain has at least one
-/// event AND the oldest event is at least [`FIRST_BRIEF_MIN_AGE`] old.
-async fn first_launch_decision(store: &Arc<SqlCipherBrainStore>) -> Result<bool, BriefWorkerError> {
-    let store_c = Arc::clone(store);
-    let (brief_count, oldest_ts_us) = tokio::task::spawn_blocking(move || {
-        let bc = store_c.brief_count()?;
-        let stats = store_c.stats()?;
-        Ok::<_, mci_brain::StoreError>((bc, stats.oldest_ts_us))
-    })
-    .await
-    .map_err(|e| BriefWorkerError::Fatal(format!("first_launch join: {e}")))?
-    .map_err(|e| BriefWorkerError::Store(format!("first_launch read: {e}")))?;
-
-    Ok(should_fire_first_brief(
-        brief_count,
-        oldest_ts_us,
-        unix_now_us(),
-    ))
-}
-
-/// Pure: should the first-launch brief fire?
+/// Legacy age-gate helper. Production first evidence is handled by the Today worker.
 #[must_use]
 pub fn should_fire_first_brief(
     brief_count: u64,
@@ -617,6 +751,90 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
+fn calendar_day_window(now_us: u64, days_before: u32) -> Result<BriefWindow, BriefWorkerError> {
+    if let Ok(value) = std::env::var("MCI_BRIEF_TZ_OFFSET_SECONDS") {
+        let offset = value
+            .parse::<i32>()
+            .ok()
+            .filter(|value| (-86_399..=86_399).contains(value))
+            .ok_or_else(|| BriefWorkerError::Calendar("invalid fixed timezone override".into()))?;
+        let now_secs = i64::try_from(now_us / 1_000_000)
+            .map_err(|e| BriefWorkerError::Calendar(e.to_string()))?;
+        let today = local_date_string(now_secs, offset);
+        let date = shifted_calendar_date(&today, -i64::from(days_before))?;
+        return BriefWindow::for_local_date(&date, offset)
+            .ok_or_else(|| BriefWorkerError::Calendar("invalid fixed-offset day".into()));
+    }
+    local_day_window_in_zone(now_us, days_before, None)
+}
+
+fn shifted_calendar_date(date: &str, days: i64) -> Result<String, BriefWorkerError> {
+    let midnight = local_date_start_secs(date, 0)
+        .and_then(|value| value.checked_add(days.checked_mul(86_400)?))
+        .filter(|value| *value >= 0)
+        .ok_or_else(|| BriefWorkerError::Calendar("invalid calendar date".into()))?;
+    Ok(local_date_string(midnight, 0))
+}
+
+fn calendar_date_output(args: &[&str], timezone: Option<&str>) -> Result<String, BriefWorkerError> {
+    let mut command = sanitized_command("/bin/date");
+    command.args(args);
+    if let Some(timezone) = timezone {
+        command.env("TZ", timezone);
+    }
+    let output = command
+        .output()
+        .map_err(|e| BriefWorkerError::Calendar(e.to_string()))?;
+    if !output.status.success() {
+        return Err(BriefWorkerError::Calendar(
+            "OS date conversion failed".into(),
+        ));
+    }
+    String::from_utf8(output.stdout)
+        .map(|value| value.trim().to_owned())
+        .map_err(|e| BriefWorkerError::Calendar(e.to_string()))
+}
+
+fn local_day_window_in_zone(
+    now_us: u64,
+    days_before: u32,
+    timezone: Option<&str>,
+) -> Result<BriefWindow, BriefWorkerError> {
+    let seconds = (now_us / 1_000_000).to_string();
+    #[cfg(target_os = "macos")]
+    let today = calendar_date_output(&["-r", &seconds, "+%Y-%m-%d"], timezone)?;
+    #[cfg(not(target_os = "macos"))]
+    let today = calendar_date_output(&["-d", &format!("@{seconds}"), "+%Y-%m-%d"], timezone)?;
+    let date = shifted_calendar_date(&today, -i64::from(days_before))?;
+    let next = shifted_calendar_date(&date, 1)?;
+    let midnight = |date: &str| -> Result<u64, BriefWorkerError> {
+        let civil = format!("{date} 00:00:00");
+        // Resolve each midnight separately: a calendar day may have 23 or 25 hours.
+        #[cfg(target_os = "macos")]
+        let seconds =
+            calendar_date_output(&["-j", "-f", "%Y-%m-%d %H:%M:%S", &civil, "+%s"], timezone)?;
+        #[cfg(not(target_os = "macos"))]
+        let seconds = calendar_date_output(&["-d", &civil, "+%s"], timezone)?;
+        seconds
+            .parse::<u64>()
+            .ok()
+            .and_then(|value| value.checked_mul(1_000_000))
+            .ok_or_else(|| BriefWorkerError::Calendar("invalid OS midnight".into()))
+    };
+    let since_us = midnight(&date)?;
+    let until_us = midnight(&next)?;
+    if since_us >= until_us {
+        return Err(BriefWorkerError::Calendar(
+            "invalid OS day boundaries".into(),
+        ));
+    }
+    Ok(BriefWindow {
+        since_us,
+        until_us,
+        date_local: date,
+    })
+}
+
 /// Resolve the system's current local-zone offset in seconds east of
 /// UTC by shelling out to `date +%z`. Returns 0 on any failure.
 ///
@@ -680,6 +898,303 @@ fn unix_now_us() -> u64 {
             .as_micros(),
     )
     .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod today_tests {
+    use super::*;
+    use mci_brain::{Event, EventId, EventSource};
+    use mci_core::crypto::DbKey;
+
+    fn store(dir: &tempfile::TempDir) -> Arc<SqlCipherBrainStore> {
+        Arc::new(
+            SqlCipherBrainStore::new(
+                &dir.path().join("brain.sqlite"),
+                &DbKey::from_bytes([61; 32]),
+            )
+            .unwrap(),
+        )
+    }
+
+    fn record(store: &SqlCipherBrainStore, ts_us: u64, text: &str) -> EventId {
+        store
+            .put_event_with_source(
+                &Event {
+                    id: EventId(0),
+                    ts_us,
+                    app_bundle_id: Some("test.screen".into()),
+                    window_title: None,
+                    url: None,
+                    text: text.into(),
+                    summary: None,
+                    entities: None,
+                    episode_id: None,
+                    cascade_reason: 0,
+                    keyframe_blob: None,
+                    tab_id: None,
+                    embedding: None,
+                },
+                EventSource::ScreenOcr,
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn first_three_screen_records_produce_a_cited_day_draft_without_age_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+        record(
+            &store,
+            day.since_us - 1,
+            "Yesterday secret fixture must stay outside Today",
+        );
+        let ids = [
+            "Completed the release checklist",
+            "Follow up on the signing certificate",
+            "Reading the capture implementation",
+        ]
+        .map(|text| record(&store, day.since_us + 1_000_000, text));
+        record(
+            &store,
+            day.until_us,
+            "Tomorrow fixture must not leak into Today",
+        );
+        let (_tx, rx) = watch::channel(false);
+        let mut state = TodayBriefState::default();
+        let result = state
+            .refresh(&store, day.since_us + 2_000_000, &day, &rx)
+            .unwrap();
+        assert!(matches!(
+            result,
+            Some(BriefOutcome::Stored {
+                event_count: 3,
+                citation_violations: 0,
+                ..
+            })
+        ));
+        let row = store.brief_for_date(&day.date_local).unwrap().unwrap();
+        assert_eq!(row.model_id, "hippocampus-extractive");
+        assert_eq!(row.title, "Day so far - 2026-09-05");
+        for id in ids {
+            assert!(row.body.contains(&format!("[event:{}]", id.0)));
+        }
+        assert!(!row.body.contains("Yesterday"));
+        assert!(!row.body.contains("Tomorrow"));
+    }
+
+    #[test]
+    fn empty_or_metadata_only_evidence_never_creates_a_brief() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+        let (_tx, rx) = watch::channel(false);
+        let mut state = TodayBriefState::default();
+        assert_eq!(
+            state.refresh(&store, day.since_us, &day, &rx).unwrap(),
+            Some(BriefOutcome::SkippedEmpty)
+        );
+        record(&store, day.since_us, "[app=test.screen]\n   ");
+        assert_eq!(
+            state.refresh(&store, day.since_us + 1, &day, &rx).unwrap(),
+            Some(BriefOutcome::SkippedEmpty)
+        );
+        assert_eq!(store.brief_count().unwrap(), 0);
+        record(
+            &store,
+            day.since_us + 2,
+            "Completed the first useful captured note",
+        );
+        assert!(matches!(
+            state.refresh(&store, day.since_us + 3, &day, &rx).unwrap(),
+            Some(BriefOutcome::Stored { .. })
+        ));
+    }
+
+    #[test]
+    fn unchanged_evidence_does_not_rewrite_and_new_evidence_waits_five_minutes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+        let now = day.since_us + 10_000_000;
+        record(&store, now, "Completed the first useful captured note");
+        let (_tx, rx) = watch::channel(false);
+        let mut state = TodayBriefState::default();
+        state.refresh(&store, now, &day, &rx).unwrap();
+        let first = store.brief_for_date(&day.date_local).unwrap().unwrap();
+        let later = record(&store, now + 1, "Waiting for the next release approval");
+        assert_eq!(
+            state.refresh(&store, now + 60_000_000, &day, &rx).unwrap(),
+            None
+        );
+        assert_eq!(
+            store.brief_for_date(&day.date_local).unwrap().unwrap().id,
+            first.id
+        );
+        assert!(matches!(
+            state.refresh(&store, now + 300_000_000, &day, &rx).unwrap(),
+            Some(BriefOutcome::Stored { .. })
+        ));
+        let refreshed = store.brief_for_date(&day.date_local).unwrap().unwrap();
+        assert!(refreshed.body.contains(&format!("[event:{}]", later.0)));
+        assert_eq!(
+            state
+                .refresh(&store, now + 3_600_000_000, &day, &rx)
+                .unwrap(),
+            None
+        );
+        let unchanged = store.brief_for_date(&day.date_local).unwrap().unwrap();
+        assert_eq!(unchanged.id, refreshed.id);
+        assert_eq!(unchanged.generated_ts_us, refreshed.generated_ts_us);
+        let mut restarted = TodayBriefState::default();
+        assert_eq!(
+            restarted
+                .refresh(&store, now + 3_700_000_000, &day, &rx)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store.brief_for_date(&day.date_local).unwrap().unwrap(),
+            unchanged
+        );
+    }
+
+    #[test]
+    fn midnight_resets_evidence_and_allows_a_prompt_new_day_draft() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+        let next = BriefWindow::for_local_date("2026-09-06", 0).unwrap();
+        let old = record(&store, day.until_us - 1, "Completed yesterday's release");
+        let new = record(&store, next.since_us, "Review today's new rollout");
+        let (_tx, rx) = watch::channel(false);
+        let mut state = TodayBriefState::default();
+        state.refresh(&store, day.until_us - 1, &day, &rx).unwrap();
+        state
+            .refresh(&store, next.since_us + 1, &next, &rx)
+            .unwrap();
+        let row = store.brief_for_date(&next.date_local).unwrap().unwrap();
+        assert!(row.body.contains(&format!("[event:{}]", new.0)));
+        assert!(!row.body.contains(&format!("[event:{}]", old.0)));
+        assert_eq!(store.brief_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn os_day_boundaries_follow_dst_instead_of_the_current_offset() {
+        for (instant, date, hours) in [
+            ("2026-03-08T19:00:00.000Z", "2026-03-08", 23),
+            ("2026-11-01T20:00:00.000Z", "2026-11-01", 25),
+        ] {
+            let now = crate::wall_clock::parse_unix_ms(instant).unwrap() * 1000;
+            let day = local_day_window_in_zone(now, 0, Some("America/Los_Angeles")).unwrap();
+            assert_eq!(day.date_local, date);
+            assert_eq!(day.until_us - day.since_us, hours * 3_600_000_000);
+            assert!(day.since_us <= now && now < day.until_us);
+        }
+    }
+
+    #[test]
+    fn scheduled_previous_day_uses_dst_boundaries_without_overwriting_today() {
+        for (instant, previous_date, hours) in [
+            ("2026-03-09T16:00:00.000Z", "2026-03-08", 23),
+            ("2026-11-02T16:00:00.000Z", "2026-11-01", 25),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = store(&dir);
+            let now = crate::wall_clock::parse_unix_ms(instant).unwrap() * 1000;
+            let previous = local_day_window_in_zone(now, 1, Some("America/Los_Angeles")).unwrap();
+            let today = local_day_window_in_zone(now, 0, Some("America/Los_Angeles")).unwrap();
+            assert_eq!(previous.date_local, previous_date);
+            assert_eq!(previous.until_us - previous.since_us, hours * 3_600_000_000);
+            assert_eq!(previous.until_us, today.since_us);
+            record(
+                &store,
+                previous.since_us - 1,
+                "Outside the completed calendar day",
+            );
+            let start = record(
+                &store,
+                previous.since_us,
+                "Completed the morning release checklist",
+            );
+            let end = record(
+                &store,
+                previous.until_us - 1,
+                "Completed the final evening review",
+            );
+            let current = record(
+                &store,
+                today.since_us,
+                "Waiting for today's release approval",
+            );
+            let (_tx, rx) = watch::channel(false);
+            TodayBriefState::default()
+                .refresh(&store, now, &today, &rx)
+                .unwrap();
+            let current_row = store.brief_for_date(&today.date_local).unwrap().unwrap();
+            let outcome = generate_brief_once(
+                &store,
+                &extractive_author_factory(),
+                &format!("Daily brief - {previous_date}"),
+                &previous,
+                now,
+            )
+            .unwrap();
+            assert!(matches!(
+                outcome,
+                BriefOutcome::Stored {
+                    event_count: 2,
+                    citation_violations: 0,
+                    ..
+                }
+            ));
+            let row = store.brief_for_date(previous_date).unwrap().unwrap();
+            assert!(row.body.contains(&format!("[event:{}]", start.0)));
+            assert!(row.body.contains(&format!("[event:{}]", end.0)));
+            assert!(!row.body.contains(&format!("[event:{}]", current.0)));
+            assert_eq!(
+                store.brief_for_date(&today.date_local).unwrap().unwrap().id,
+                current_row.id
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_does_not_wait_for_an_active_clock_or_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let gate = Arc::clone(&release);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let started = std::sync::Mutex::new(Some(started_tx));
+        let clock: TodayClock = Arc::new(move || {
+            if let Some(tx) = started.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+            gate.wait();
+            let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+            Ok((day.since_us, day))
+        });
+        let (tx, rx) = watch::channel(false);
+        let task = tokio::spawn(run_today_brief_worker_with_clock(
+            Arc::clone(&store),
+            clock,
+            rx,
+        ));
+        started_rx.await.unwrap();
+        tx.send(true).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), task).await;
+        release.wait();
+        assert_eq!(
+            result
+                .expect("worker must stop promptly")
+                .unwrap()
+                .unwrap()
+                .briefs_generated,
+            0
+        );
+        assert_eq!(store.brief_count().unwrap(), 0);
+    }
 }
 
 #[cfg(test)]
@@ -884,15 +1399,11 @@ mod tests {
     // ---------------- BriefWindow ----------------
 
     #[test]
-    fn trailing_window_covers_the_last_24h_and_stays_open_at_the_top() {
+    fn trailing_window_covers_the_last_24h_without_future_events() {
         let now_us = 1_779_163_200_000_000_u64; // 2026-05-19T04:00:00Z
         let w = BriefWindow::trailing_24h(now_us, 0);
         assert_eq!(w.since_us, now_us - 24 * 3600 * 1_000_000);
-        assert_eq!(
-            w.until_us,
-            u64::MAX,
-            "an event captured during generation still belongs to today"
-        );
+        assert_eq!(w.until_us, now_us + 1);
         assert_eq!(w.date_local, "2026-05-19");
     }
 

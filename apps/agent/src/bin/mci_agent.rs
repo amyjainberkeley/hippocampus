@@ -128,8 +128,8 @@ enum Mode {
     /// way it never fired, and there was no command that produced a brief.
     Brief {
         db_path: PathBuf,
-        /// `YYYY-MM-DD` local day to summarize. `None` = the last 24 h,
-        /// which is what the scheduled worker covers.
+        /// `YYYY-MM-DD` local day to summarize. `None` explicitly requests
+        /// the last 24 h; scheduled generation covers yesterday instead.
         date: Option<String>,
         /// Directory holding an optional Qwen3 `.mlmodelc`. `None` = the
         /// default install location; a missing model uses the extractive author.
@@ -561,7 +561,7 @@ fn print_usage() {
         \x20 --since-seconds N          (with stats) lookback window. Default 30.\n\
         \x20 --batch-size N             (with embed-backfill) events per batch. Default 32.\n\
         \x20 --date YYYY-MM-DD          (with brief) summarize that local day. Default is\n\
-        \x20                            the last 24 hours, same window as the worker.\n\
+        \x20                            the last 24 hours (explicit on-demand window).\n\
         \x20 --model-dir PATH           (with brief) where an optional Qwen3 .mlmodelc lives.\n\
         \x20                            Without it, the extractive author runs.\n\
         \x20                            Default ~/Library/Application Support/MCI/Models\n\
@@ -1029,9 +1029,9 @@ async fn run_agent(args: Args) -> ExitCode {
                                     }
                                 });
 
-                                // ADR-0028 — daily brief worker. Fires at
-                                // 06:00 local. Qwen is preferred when present;
-                                // the extractive author is always available.
+                                // Today stays extractive and current; the 06:00
+                                // worker owns the previous calendar day's row.
+                                spawn_today_brief_worker(Arc::clone(&store), shutdown_rx.clone());
                                 spawn_brief_worker(Arc::clone(&store), shutdown_rx.clone());
 
                                 // V2-P5 — Tier 2 Qwen NER idle-batch
@@ -2335,7 +2335,7 @@ fn run_brief_cmd(
 
     let topic = match date {
         Some(d) => format!("Daily brief for {d}"),
-        None => "Daily brief".to_owned(),
+        None => "Last 24 hours".to_owned(),
     };
     let (factory, author_id) = preferred_brief_author_factory(&model_dir);
 
@@ -2660,7 +2660,26 @@ fn preferred_brief_author_factory(
     }
 }
 
-/// Spawn the daily-brief worker. Qwen is preferred when installed; the
+/// Spawn the model-free current-day worker, independent of scheduled inference.
+fn spawn_today_brief_worker(
+    store: Arc<mci_brain::SqlCipherBrainStore>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    if brief_worker::briefs_disabled_via_env() {
+        return;
+    }
+    tokio::spawn(async move {
+        match brief_worker::run_today_brief_worker(store, shutdown).await {
+            Ok(stats) => eprintln!(
+                "mci-agent: Today brief worker exited. generated={} skipped_empty={} errors={}",
+                stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
+            ),
+            Err(e) => eprintln!("mci-agent: Today brief worker error: {e}"),
+        }
+    });
+}
+
+/// Spawn the previous-calendar-day worker. Qwen is preferred when installed; the
 /// evidence-cited extractive author keeps the feature available otherwise.
 #[cfg(target_os = "macos")]
 fn spawn_brief_worker(
