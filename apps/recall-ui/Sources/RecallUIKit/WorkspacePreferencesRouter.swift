@@ -15,7 +15,7 @@ public final class WorkspacePreferencesRouter {
         let pending = launchedParent?.isRunning == true ? launchedParent?.executableURL : nil
         guard let plan = destination.routingPlan(bundleURL: bundleURL,
                                                 runningExecutableURLs: running, launchedExecutableURL: pending),
-              Bundle(url: bundleURL)?.executableURL?.resolvingSymlinksInPath() == plan.executable,
+              Self.parentExecutable(bundleURL: bundleURL) == plan.executable,
               FileManager.default.isExecutableFile(atPath: plan.executable.path)
         else { return false }
 
@@ -56,6 +56,13 @@ public final class WorkspacePreferencesRouter {
             do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
         }
         return acknowledged.withLock { $0 }
+    }
+
+    static func parentExecutable(bundleURL: URL) -> URL? {
+        guard WorkspacePreferencesDestination.hostApplication(bundleURL: bundleURL) != nil else { return nil }
+        // Main-bundle executableURL can be cached as recall-ui in this process.
+        // Resolve the named sibling instead of consulting that process cache.
+        return Bundle(url: bundleURL)?.url(forAuxiliaryExecutable: "Hippocampus")?.resolvingSymlinksInPath()
     }
 
     // Bundle IDs and Launch Services metadata are shared by both executables.
