@@ -426,7 +426,10 @@ impl MessagesPluginPump {
             tab_id: None,
             embedding,
         };
-        let id = match self.store.put_event(&event) {
+        let id = match self
+            .store
+            .put_event_with_source(&event, mci_brain::EventSource::StructuredApp)
+        {
             Ok(id) => id,
             Err(err) => {
                 self.counter.store_errors.fetch_add(1, Ordering::Relaxed);

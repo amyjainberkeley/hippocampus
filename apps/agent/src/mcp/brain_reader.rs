@@ -92,6 +92,11 @@ pub enum BrainReaderError {
 /// - `StubBrainReader` (test-only) returns canned data so the JSON-RPC
 ///   framing can be exercised without a real `mci.sqlite`.
 pub trait BrainReader: Send + Sync {
+    /// Acquisition source, independent of retrieval outcome. Older readers
+    /// cannot assert acquisition provenance and return unknown.
+    fn event_source(&self, _id: mci_brain::EventId) -> mci_brain::EventSource {
+        mci_brain::EventSource::Unknown
+    }
     /// Lexical+(eventually-semantic) recall. P3.10b ships lexical-only
     /// FTS5; the Core ML embedder lands ahead of hybrid recall reaching
     /// this surface.

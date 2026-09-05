@@ -56,7 +56,7 @@ use mci_agent::panic_uploader::{self, PanicUploader};
 #[cfg(target_os = "macos")]
 use mci_agent::pump_supervisor::PumpSupervisor;
 use mci_agent::retention_worker;
-use mci_agent::runner::{drain_to_log, drain_to_log_with_brain};
+use mci_agent::runner::drain_with_capture_status;
 #[cfg(unix)]
 use mci_agent::user_allowlist::default_user_allowlist_path;
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
@@ -241,11 +241,6 @@ fn default_db_path() -> PathBuf {
     // Expand $HOME at run-time (no glob-style ~ expansion in env vars).
     let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     home.join("Library/Application Support/MCI/mci.sqlite")
-}
-
-fn default_retention_json_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
-    home.join("Library/Application Support/MCI/retention.json")
 }
 
 const DEFAULT_STATS_WINDOW_SECONDS: u64 = 30;
@@ -699,6 +694,7 @@ async fn main() -> ExitCode {
             // None when the model is absent (opt-in download) or non-macOS.
             let mut ner_sync_backend: Option<Arc<dyn mci_brain::NerBackend>> = None;
             let mut writer_run_lock = None;
+            let mut capture_status = None;
 
             let brain_pump: Option<(BrainPump, Arc<SqlCipherBrainStore>)> = match resolve_key_hex()
             {
@@ -812,6 +808,14 @@ async fn main() -> ExitCode {
                                         return ExitCode::from(22);
                                     }
                                 }
+                                let status =
+                                    Arc::new(mci_agent::capture_status::CaptureStatusWriter::new(
+                                        Arc::clone(&store),
+                                        db_path.with_file_name("capture-status.json"),
+                                        capture_ingestion_enabled,
+                                    ));
+                                status.refresh(&clock);
+                                capture_status = Some(status);
                                 let embedder = load_embedder_backend();
                                 // V2-P5+ construction-graph wire: build
                                 // the sync BERT NER backend and inject it
@@ -972,13 +976,15 @@ async fn main() -> ExitCode {
 
                                 let retention_store = Arc::clone(&store);
                                 let retention_shutdown = shutdown_rx.clone();
-                                let retention_json = default_retention_json_path();
+                                let retention_json = db_path.with_file_name("retention.json");
+                                let retention_status = capture_status.clone();
                                 tokio::spawn(async move {
-                                    match retention_worker::run_retention_worker(
+                                    match retention_worker::run_retention_worker_with_status(
                                         retention_store,
                                         retention_json,
                                         std::time::Duration::from_secs(86_400),
                                         retention_shutdown,
+                                        retention_status,
                                     )
                                     .await
                                     {
@@ -1193,12 +1199,29 @@ async fn main() -> ExitCode {
                 None
             };
 
-            let drain_result = match (capture_ingestion_enabled, brain_pump.as_ref()) {
-                (true, Some((pump, _store))) => {
-                    drain_to_log_with_brain(&mut stdin, &log, &clock, &device_id, pump).await
-                }
-                _ => drain_to_log(&mut stdin, &log, &clock, &device_id).await,
-            };
+            let ingest = brain_pump
+                .as_ref()
+                .filter(|_| capture_ingestion_enabled)
+                .map(|(pump, _)| pump as &dyn BrainIngestor);
+            let drain_result = drain_with_capture_status(
+                &mut stdin,
+                &log,
+                &clock,
+                &device_id,
+                ingest,
+                capture_status.as_deref(),
+            )
+            .await;
+            if let Some(status) = &capture_status {
+                status.blocked(
+                    if drain_result.is_ok() {
+                        "helper_disconnected"
+                    } else {
+                        "capture_failed"
+                    },
+                    &clock,
+                );
+            }
 
             // Signal shutdown to idle-batch + episode workers.
             let _ = shutdown_tx.send(true);

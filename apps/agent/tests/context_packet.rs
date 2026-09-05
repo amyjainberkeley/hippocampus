@@ -377,7 +377,10 @@ fn repeated_screen_ocr_uses_only_the_newest_canonical_citation() {
             evidence: [oldest, newest, middle]
                 .iter()
                 .map(|source| {
-                    ContextEvidence::from_event(source, EvidencePriority::Focused, Some(0.8))
+                    let mut evidence =
+                        ContextEvidence::from_event(source, EvidencePriority::Focused, Some(0.8));
+                    evidence.source_kind = "screen_ocr".into();
+                    evidence
                 })
                 .collect(),
         },

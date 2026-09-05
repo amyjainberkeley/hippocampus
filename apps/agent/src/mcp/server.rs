@@ -298,7 +298,9 @@ impl Server {
             .clamp(1, MAX_RECALL_LIMIT);
 
         match self.reader.recall(&parsed.query, limit) {
-            Ok(outcome) => JsonRpcResponse::ok(id, recall_wire_result(outcome)),
+            Ok(outcome) => {
+                JsonRpcResponse::ok(id, recall_wire_result(outcome, self.reader.as_ref()))
+            }
             Err(e) => brain_err_to_response(id, &e),
         }
     }
@@ -337,6 +339,7 @@ impl Server {
                             "window_title": r.window_title,
                             "url": r.url,
                             "text_snippet": r.text_snippet,
+                            "source_kind": self.reader.event_source(r.event_id).as_str(),
                         })
                     })
                     .collect();
@@ -481,6 +484,7 @@ impl Server {
                             "window_title": r.window_title,
                             "url": r.url,
                             "text_snippet": r.text_snippet,
+                            "source_kind": self.reader.event_source(r.event_id).as_str(),
                         })
                     })
                     .collect();
@@ -560,7 +564,7 @@ impl Server {
     }
 }
 
-fn hit_json(hit: &McpHit) -> serde_json::Value {
+fn hit_json(hit: &McpHit, reader: &dyn BrainReader) -> serde_json::Value {
     serde_json::json!({
         "event_id": hit.record.event_id.0,
         "ts_us": hit.record.ts_us,
@@ -568,17 +572,18 @@ fn hit_json(hit: &McpHit) -> serde_json::Value {
         "window_title": hit.record.window_title,
         "url": hit.record.url,
         "text_snippet": hit.record.text_snippet,
+        "source_kind": reader.event_source(hit.record.event_id).as_str(),
         "score": hit.score,
         "entities": hit.entities,
         "linked_event_ids": hit.linked_event_ids,
     })
 }
 
-fn recall_wire_result(outcome: McpRecallOutcome) -> serde_json::Value {
+fn recall_wire_result(outcome: McpRecallOutcome, reader: &dyn BrainReader) -> serde_json::Value {
     let payload = match outcome {
         McpRecallOutcome::Matched { hits } => serde_json::json!({
             "outcome": "matched",
-            "hits": hits.iter().map(hit_json).collect::<Vec<_>>(),
+            "hits": hits.iter().map(|hit| hit_json(hit, reader)).collect::<Vec<_>>(),
             "related_context": [],
             "contradicting_context": [],
         }),
@@ -586,7 +591,7 @@ fn recall_wire_result(outcome: McpRecallOutcome) -> serde_json::Value {
             "outcome": "contradicted",
             "hits": [],
             "related_context": [],
-            "contradicting_context": evidence.iter().map(hit_json).collect::<Vec<_>>(),
+            "contradicting_context": evidence.iter().map(|hit| hit_json(hit, reader)).collect::<Vec<_>>(),
         }),
         McpRecallOutcome::NothingMatched { reason } => serde_json::json!({
             "outcome": "nothing_matched",
@@ -612,7 +617,7 @@ fn recall_wire_result(outcome: McpRecallOutcome) -> serde_json::Value {
                 mci_brain::RetrievalDegradation::EvidenceVerifierUnavailable => "evidence_verifier_unavailable",
             },
             "hits": [],
-            "related_context": related_context.iter().map(hit_json).collect::<Vec<_>>(),
+            "related_context": related_context.iter().map(|hit| hit_json(hit, reader)).collect::<Vec<_>>(),
             "contradicting_context": [],
         }),
     };

@@ -148,7 +148,7 @@ fn migration_0004_creates_graph_tables_and_indexes() {
             |r| r.get(0),
         )
         .expect("schema version");
-    assert_eq!(version, "8");
+    assert_eq!(version, "9");
     let vec_mirror: String = db
         .conn()
         .query_row(
@@ -177,7 +177,7 @@ fn migration_0004_is_idempotent_on_reopen() {
             |r| r.get(0),
         )
         .expect("schema version");
-    assert_eq!(version, "8");
+    assert_eq!(version, "9");
 }
 
 // ---------------------------------------------------------------------------

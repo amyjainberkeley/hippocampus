@@ -485,15 +485,17 @@ impl LiveBrainReader {
         else {
             return Ok(None);
         };
-        Ok(Some(ContextEvidence::from_event(
-            &event,
-            EvidencePriority::Focused,
-            Some(hit.score),
-        )))
+        let mut evidence =
+            ContextEvidence::from_event(&event, EvidencePriority::Focused, Some(hit.score));
+        evidence.source_kind = self.event_source(event.id).as_str().into();
+        Ok(Some(evidence))
     }
 }
 
 impl BrainReader for LiveBrainReader {
+    fn event_source(&self, id: EventId) -> mci_brain::EventSource {
+        self.store.event_source(id).unwrap_or_default()
+    }
     fn recall(&self, query: &str, limit: usize) -> Result<McpRecallOutcome, BrainReaderError> {
         if query.trim().is_empty() {
             return Err(BrainReaderError::InvalidInput("empty query".into()));
@@ -563,7 +565,7 @@ impl BrainReader for LiveBrainReader {
                 })? {
                     let mut candidate =
                         ContextEvidence::from_event(&event, EvidencePriority::Claim, None);
-                    candidate.source_kind.clone_from(&reference.source_kind);
+                    candidate.source_kind = self.event_source(event.id).as_str().into();
                     evidence.push(candidate);
                 }
             }
@@ -602,11 +604,12 @@ impl BrainReader for LiveBrainReader {
             let recent = self.store.recent_events(recent_limit).map_err(|error| {
                 BrainReaderError::Backend(format!("read recent events: {error}"))
             })?;
-            evidence.extend(
-                recent.iter().map(|event| {
-                    ContextEvidence::from_event(event, EvidencePriority::Recent, None)
-                }),
-            );
+            evidence.extend(recent.iter().map(|event| {
+                let mut candidate =
+                    ContextEvidence::from_event(event, EvidencePriority::Recent, None);
+                candidate.source_kind = self.event_source(event.id).as_str().into();
+                candidate
+            }));
         }
 
         let mut packet =
