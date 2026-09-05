@@ -17,6 +17,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
+BUILD_PROVENANCE_TOOL="$REPO_ROOT/scripts/build-provenance.py"
+PRODUCT_SOURCE_DIGEST_TOOL="$REPO_ROOT/scripts/product-source-digest.py"
 APP_GROUP_CONTRACT="$REPO_ROOT/scripts/lib/app-group-contract.sh"
 INSTALLER_RUNTIME="$REPO_ROOT/scripts/lib/installer-runtime.sh"
 INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
@@ -30,6 +32,14 @@ if [[ ! -f "$APP_GROUP_CONTRACT" ]]; then
 fi
 if [[ ! -f "$INSTALLER_RUNTIME" ]]; then
     echo "FATAL: Installer runtime helper missing at $INSTALLER_RUNTIME" >&2
+    exit 1
+fi
+if [[ ! -x "$BUILD_PROVENANCE_TOOL" ]]; then
+    echo "FATAL: Build provenance tool missing at $BUILD_PROVENANCE_TOOL" >&2
+    exit 1
+fi
+if [[ ! -x "$PRODUCT_SOURCE_DIGEST_TOOL" ]]; then
+    echo "FATAL: Product source digest tool missing at $PRODUCT_SOURCE_DIGEST_TOOL" >&2
     exit 1
 fi
 # shellcheck source=/dev/null
@@ -279,6 +289,13 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
+SOURCE_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+SOURCE_DIGEST="$(python3 "$PRODUCT_SOURCE_DIGEST_TOOL" --repo-root "$REPO_ROOT")"
+python3 "$BUILD_PROVENANCE_TOOL" verify --app "$APP_PATH" \
+    --expected-source-head "$SOURCE_HEAD" \
+    --expected-source-digest "$SOURCE_DIGEST" \
+    --forbid-current-source
+
 # --- Completeness gate: refuse to ship a DMG missing the bundled embedder ---
 #
 # Cycle 8.24 (`bc5af6af…`) shipped a 14 MB DMG instead of the expected ~73 MB
@@ -465,6 +482,11 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
         --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/Hippocampus"
 
+    python3 "$BUILD_PROVENANCE_TOOL" verify --app "$APP_PATH" \
+        --expected-source-head "$SOURCE_HEAD" \
+        --expected-source-digest "$SOURCE_DIGEST" \
+        --forbid-current-source
+
     # Sign top-level app bundle (covers everything)
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
@@ -546,6 +568,11 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
             echo "WARNING: syspolicy_check not found — Gatekeeper first-launch"
             echo "  predictor unavailable. Install Xcode 16 CLT to enable."
         fi
+        python3 "$BUILD_PROVENANCE_TOOL" verify --app "$APP_PATH" \
+            --expected-source-head "$SOURCE_HEAD" \
+            --expected-source-digest "$SOURCE_DIGEST" \
+            --forbid-current-source
+        echo "  Post-staple build provenance valid"
     else
         echo ""
         echo "ERROR: .app notarization failed. App is signed but NOT notarized."

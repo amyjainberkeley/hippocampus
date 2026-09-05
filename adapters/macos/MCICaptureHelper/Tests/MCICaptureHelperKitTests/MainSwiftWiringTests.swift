@@ -260,29 +260,21 @@ final class MainSwiftWiringTests: XCTestCase {
         )
     }
 
-    /// Scope-fence guard — the wiring PR MUST NOT flip `killOcrEmit`.
-    /// M4 stays RE-ENGAGED (`killOcrEmit = true`) until Phase 7 PR 14
-    /// lands after Amy's live-Mac smoke passes (redesign memo §4 +
-    /// scaffold PR §5 audit row 7). This mirrors the scaffold PR's
-    /// scope-fence test.
-    func test_wiring_pr_does_not_flip_killOcrEmit() {
-        XCTAssertTrue(
+    /// Standalone Phase 7 PR 14 guard: the production default lifts only
+    /// after the signed live-Mac privacy/resource qualification passes.
+    func test_production_default_has_lifted_killOcrEmit() {
+        XCTAssertFalse(
             CascadeTwiceOCREmitter.killOcrEmit,
-            "V2-P1 third-lift wiring PR MUST NOT flip killOcrEmit — that's Phase 7 PR 14."
+            "The qualified production capture path must emit privacy-cleared OCR."
         )
     }
 
-    func test_production_startup_only_disengages_ocr_for_the_live_qualification_capability() throws {
+    func test_production_startup_does_not_mutate_the_source_controlled_ocr_gate() throws {
         let src = try Self.readMainSwift()
 
         XCTAssertFalse(
-            src.contains("activateM4Lift(enabled: captureOptions.captureEnabled)"),
-            "The ordinary --capture path must never lift the OCR privacy switch."
-        )
-        XCTAssertTrue(
-            src.contains("if qualificationAuthorized")
-                && src.contains("CascadeTwiceOCREmitter.activateM4Lift(enabled: true)"),
-            "Only the independently gated live-overlap capability may exercise OCR before launch qualification."
+            src.contains("CascadeTwiceOCREmitter.activateM4Lift"),
+            "Production startup must not mutate the source-controlled emergency OCR switch."
         )
     }
 

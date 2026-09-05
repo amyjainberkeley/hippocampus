@@ -32,6 +32,8 @@ REPO_ROOT="$(cd "$PKG_DIR/../.." && pwd)"
 PROFILE="release"
 DEVELOPMENT_ADHOC=0
 DEVELOPMENT_LITE=0
+CURRENT_SOURCE_QUALIFICATION=0
+EXPECTED_QUALIFICATION_TEAM_ID="BV6KGKFKP4"
 DIST_DIR="$PKG_DIR/dist"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
 NOTICE_SRC="$REPO_ROOT/NOTICE"
@@ -40,6 +42,8 @@ STATUS_SRC="$REPO_ROOT/docs/STATUS.md"
 MODELS_MANIFEST_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
 KEYCHAIN_CONTRACT_SRC="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/keychain-sharing-contract.json"
 APP_GROUP_CONTRACT="$REPO_ROOT/scripts/lib/app-group-contract.sh"
+PRODUCT_SOURCE_DIGEST_TOOL="$REPO_ROOT/scripts/product-source-digest.py"
+BUILD_PROVENANCE_TOOL="$REPO_ROOT/scripts/build-provenance.py"
 STATUS_AUDIT_MAX_COMMITS=3
 
 fatal() {
@@ -151,6 +155,7 @@ usage() {
     echo "  --debug     Use debug builds instead of release"
     echo "  --development-ad-hoc  Allow unstable ad-hoc signing with --debug only"
     echo "  --development-lite  Omit unavailable Core ML models for local UI verification"
+    echo "  --current-source-qualification  Rebuild every executable before a signed debug qualification"
     echo "  --dist DIR  Output directory (default: apps/hippocampus/dist/)"
     echo "  --help      Show this help"
     echo ""
@@ -166,6 +171,7 @@ while [[ $# -gt 0 ]]; do
         --debug) PROFILE="debug"; shift ;;
         --development-ad-hoc) DEVELOPMENT_ADHOC=1; shift ;;
         --development-lite) DEVELOPMENT_LITE=1; shift ;;
+        --current-source-qualification) CURRENT_SOURCE_QUALIFICATION=1; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
         --help|-h) usage; exit 0 ;;
         *) echo "Unknown option: $1"; usage; exit 1 ;;
@@ -181,6 +187,16 @@ if [[ "$DEVELOPMENT_LITE" -eq 1 && "$DEVELOPMENT_ADHOC" -ne 1 ]]; then
     fatal \
         "development-lite requires --development-ad-hoc" \
         "A model-incomplete bundle must remain an explicitly disposable local artifact."
+fi
+if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 && "$PROFILE" != "debug" ]]; then
+    fatal \
+        "current-source qualification requires --debug" \
+        "Release builds use the normal release pipeline and its separate artifact gates."
+fi
+if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 && "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+    fatal \
+        "current-source qualification requires Developer ID signing" \
+        "Do not combine --current-source-qualification with --development-ad-hoc."
 fi
 
 APP="$DIST_DIR/Hippocampus.app"
@@ -281,6 +297,13 @@ if ! APP_GROUP_ID=$(hippocampus_resolve_app_group_id "$SIGNING_MODE" "$DEVELOPER
         "Unable to resolve the macOS App Group identity" \
         "Developer ID builds must use one Team-ID-prefixed group shared by the app and Safari extension."
 fi
+if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 ]] \
+    && [[ "${APP_GROUP_ID%%.*}" != "$EXPECTED_QUALIFICATION_TEAM_ID" ]]; then
+    fatal \
+        "current-source qualification identity does not match the production Team ID" \
+        "Expected: $EXPECTED_QUALIFICATION_TEAM_ID" \
+        "Resolved: ${APP_GROUP_ID%%.*}"
+fi
 SIGNING_SCRATCH=$(mktemp -d -t hippocampus-signing)
 trap 'rm -rf "$SIGNING_SCRATCH"' EXIT
 ENTITLEMENTS_SOURCE="$SCRIPT_DIR/Hippocampus.entitlements"
@@ -300,6 +323,19 @@ fi
 echo "App Group: $APP_GROUP_ID"
 echo "Output:    $APP"
 echo ""
+
+if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 ]]; then
+    echo "Rebuilding every shipped executable from the current checkout..."
+    "$REPO_ROOT/scripts/swift-package.sh" build --package-path "$PKG_DIR"
+    "$REPO_ROOT/scripts/swift-package.sh" build \
+        --package-path "$REPO_ROOT/adapters/macos/MCICaptureHelper"
+    "$REPO_ROOT/scripts/swift-package.sh" build \
+        --package-path "$REPO_ROOT/apps/recall-ui"
+    "$REPO_ROOT/scripts/swift-package.sh" build \
+        --package-path "$REPO_ROOT/apps/onboarding"
+    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
+        -p mci-agent --bins -p hippocampus-native-host
+fi
 
 # Verify binaries exist
 for bin_path in "$HIPPOCAMPUS_BIN" "$HELPER_BIN" "$AGENT_BIN" "$RECALL_UI_BIN" "$ONBOARDING_BIN" "$NATIVE_HOST_BIN"; do
@@ -374,6 +410,29 @@ cp "$CHANGELOG_SRC" "$RESOURCES/CHANGELOG.md"
 cp "$NOTICE_SRC" "$RESOURCES/NOTICE.txt"
 cp "$MODELS_MANIFEST_SRC" "$RESOURCES/models.json"
 cp "$KEYCHAIN_CONTRACT_SRC" "$RESOURCES/keychain-sharing-contract.json"
+if [[ ! -x "$PRODUCT_SOURCE_DIGEST_TOOL" ]]; then
+    fatal "product source digest tool missing at $PRODUCT_SOURCE_DIGEST_TOOL"
+fi
+if [[ ! -x "$BUILD_PROVENANCE_TOOL" ]]; then
+    fatal "build provenance tool missing at $BUILD_PROVENANCE_TOOL"
+fi
+SOURCE_DIGEST="$(python3 "$PRODUCT_SOURCE_DIGEST_TOOL" --repo-root "$REPO_ROOT")" \
+    || fatal "could not compute product source digest"
+SOURCE_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" \
+    || fatal "could not resolve source HEAD"
+write_build_provenance() {
+    local provenance_args=(
+        create
+        --app "$APP"
+        --source-head "$SOURCE_HEAD"
+        --source-digest "$SOURCE_DIGEST"
+    )
+    if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 ]]; then
+        provenance_args+=(--current-source-qualification)
+    fi
+    python3 "$BUILD_PROVENANCE_TOOL" "${provenance_args[@]}"
+    echo "  build provenance bundled OK → $RESOURCES/build-provenance.json"
+}
 echo "  CHANGELOG.md bundled OK → $RESOURCES/CHANGELOG.md"
 echo "  NOTICE.txt bundled OK → $RESOURCES/NOTICE.txt"
 echo "  models.json bundled OK → $RESOURCES/models.json"
@@ -816,6 +875,7 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
         --entitlements "$ENTITLEMENTS" \
         "$MACOS/Hippocampus"
 
+    write_build_provenance
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
         --entitlements "$ENTITLEMENTS" \
@@ -837,6 +897,7 @@ else
     [[ -f "$MACOS/onboarding" ]] && codesign --force --sign - "$MACOS/onboarding"
     [[ -f "$MACOS/hippocampus-native-host" ]] && codesign --force --sign - "$MACOS/hippocampus-native-host"
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$MACOS/Hippocampus"
+    write_build_provenance
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP"
 fi
 

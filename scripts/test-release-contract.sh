@@ -86,6 +86,12 @@ require_pattern "$RELEASE" 'codesign --verify --deep --strict' \
     'release workflow always verifies the app signature'
 require_pattern "$RELEASE" 'xcrun stapler validate' \
     'release workflow validates the notarization staple'
+require_literal "$RELEASE" 'scripts/build-provenance.py verify' \
+    'release workflow verifies provenance on the mounted final app'
+require_literal "$RELEASE" '--expected-source-head "$(git rev-parse HEAD)"' \
+    'release provenance is bound to the release checkout HEAD'
+require_literal "$RELEASE" '--expected-source-digest "$(python3 scripts/product-source-digest.py --repo-root .)"' \
+    'release provenance is bound to the release checkout source digest'
 require_pattern "$RELEASE" 'scripts/publish-appcast\.sh' \
     'release workflow signs the Sparkle appcast'
 require_pattern "$RELEASE" 'fetch-depth:[[:space:]]*0' \
@@ -290,6 +296,8 @@ require_literal "$RELEASE_CI" 'scripts/test-capture-overlap-corpus.sh' \
     'release CI builds and verifies the focused-window overlap corpus'
 require_literal "$RELEASE_CI" 'scripts/test-live-capture-overlap-contract.sh' \
     'release CI keeps the live focused-window verifier fail-closed'
+require_literal "$RELEASE_CI" 'scripts/test-product-source-provenance.sh' \
+    'release CI keeps signed qualification source provenance fail-closed'
 require_literal "$RELEASE_CI" 'scripts/e2e-clean-home.sh' \
     'release CI executes the clean-home product path'
 require_literal "$RELEASE_CI" 'scripts/test-toml-license-contract.sh' \
@@ -308,6 +316,8 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     scripts/verify-parent-lifetime.sh \
     scripts/test-capture-overlap-corpus.sh 'tools/capture-overlap-corpus/**' \
     scripts/run-live-capture-overlap.sh scripts/test-live-capture-overlap-contract.sh \
+    scripts/product-source-digest.py scripts/build-provenance.py \
+    scripts/test-product-source-provenance.sh \
     'scripts/live-capture/**' \
     apps/onboarding/Package.swift \
     apps/onboarding/Sources/OnboardingKit/RetentionStore.swift \

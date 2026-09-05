@@ -11,6 +11,7 @@ from typing import Any
 
 FOCUSED_TOKEN = "FOCUSED_EVIDENCE_ZEPHYR_9241"
 BACKGROUND_TOKEN = "BACKGROUND_SECRET_NEBULA_7713"
+FOCUS_CONTROL_TOKEN = "FOCUS_REBIND_CONTROL_3087"
 CORPUS_BUNDLE_ID = "ai.hippocampus.CaptureOverlapCorpus"
 
 
@@ -41,7 +42,7 @@ def requests() -> list[dict[str, Any]]:
             "method": "tools/call",
             "params": {
                 "name": "mci_events_since",
-                "arguments": {"ts_us": 0, "limit": 200},
+                "arguments": {"ts_us": 0, "limit": 1000},
             },
         },
         {
@@ -50,8 +51,14 @@ def requests() -> list[dict[str, Any]]:
             "method": "tools/call",
             "params": {
                 "name": "mci_events_by_app",
-                "arguments": {"app_bundle_id": CORPUS_BUNDLE_ID, "limit": 200},
+                "arguments": {"app_bundle_id": CORPUS_BUNDLE_ID, "limit": 1000},
             },
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {"name": "mci_stats", "arguments": {}},
         },
     ]
 
@@ -102,18 +109,19 @@ def result_for(responses: dict[int, dict[str, Any]], response_id: int) -> Any:
     return response["result"]
 
 
-def verify(path: Path) -> int:
+def verify(path: Path, require_focus_control: bool = False) -> int:
     try:
         responses = load_responses(path)
-        if set(responses) != {1, 2, 3, 4, 5}:
+        if set(responses) != {1, 2, 3, 4, 5, 6}:
             raise ValueError(
-                f"expected MCP response ids 1-5, found {sorted(responses)}"
+                f"expected MCP response ids 1-6, found {sorted(responses)}"
             )
 
         focused_recall = result_for(responses, 2)
         background_recall = result_for(responses, 3)
         timeline = result_for(responses, 4)
         by_app = result_for(responses, 5)
+        stats_result = result_for(responses, 6)
 
         if not isinstance(focused_recall, dict) or not isinstance(
             background_recall, dict
@@ -124,11 +132,36 @@ def verify(path: Path) -> int:
         app_events = by_app.get("events") if isinstance(by_app, dict) else None
         if not isinstance(events, list) or not isinstance(app_events, list):
             raise ValueError("timeline or app-scoped MCP result has no events array")
+        stats = stats_result.get("stats") if isinstance(stats_result, dict) else None
+        event_count = stats.get("event_count") if isinstance(stats, dict) else None
+        if not isinstance(event_count, int) or isinstance(event_count, bool) or event_count < 0:
+            raise ValueError("MCP stats result has no valid event_count")
+        if len(events) != event_count:
+            raise ValueError(
+                "timeline result is not exhaustive: "
+                f"returned {len(events)} of {event_count} events"
+            )
         if not events:
             raise ValueError("the isolated brain contains no captured events")
         if not app_events:
             raise ValueError(
                 "the brain contains no event attributed to the overlap corpus bundle"
+            )
+        foreign_events = [
+            event
+            for event in events
+            if not isinstance(event, dict)
+            or event.get("app_bundle_id") != CORPUS_BUNDLE_ID
+        ]
+        if foreign_events:
+            raise ValueError(
+                "the isolated brain contains a non-corpus event after the "
+                "focused-window qualification"
+            )
+        if len(app_events) != event_count:
+            raise ValueError(
+                "corpus app result is not exhaustive: "
+                f"returned {len(app_events)} of {event_count} events"
             )
 
         event_text = packed(events)
@@ -144,6 +177,14 @@ def verify(path: Path) -> int:
             raise ValueError(
                 "the focused token is stored but not returned by the recall query"
             )
+        focus_control_token_present = (
+            FOCUS_CONTROL_TOKEN in event_text
+            and FOCUS_CONTROL_TOKEN in app_event_text
+        )
+        if require_focus_control and not focus_control_token_present:
+            raise ValueError(
+                "the focus-rebind control token is absent from captured corpus events"
+            )
         if background_recall.get("outcome") != "nothing_matched" or (
             background_recall.get("reason") != "no_candidates"
         ):
@@ -156,6 +197,7 @@ def verify(path: Path) -> int:
         for surface_name, surface in (
             ("timeline", event_text),
             ("corpus app events", app_event_text),
+            ("focused recall", focused_recall_text),
             ("background recall", background_recall_text),
         ):
             if BACKGROUND_TOKEN in surface:
@@ -170,6 +212,8 @@ def verify(path: Path) -> int:
                     "corpus_event_count": len(app_events),
                     "focused_recall_outcome": focused_recall.get("outcome"),
                     "focused_token_present": True,
+                    "focus_control_token_present": focus_control_token_present,
+                    "foreign_event_count": 0,
                     "timeline_event_count": len(events),
                 },
                 sort_keys=True,
@@ -189,6 +233,11 @@ def parse_args() -> argparse.Namespace:
         "verify", help="verify MCP JSON-RPC responses"
     )
     verify_parser.add_argument("--responses", type=Path, required=True)
+    verify_parser.add_argument(
+        "--require-focus-control",
+        action="store_true",
+        help="require evidence that focused-window rebinding was captured",
+    )
     return parser.parse_args()
 
 
@@ -196,7 +245,7 @@ def main() -> int:
     args = parse_args()
     if args.command == "emit":
         return emit()
-    return verify(args.responses)
+    return verify(args.responses, require_focus_control=args.require_focus_control)
 
 
 if __name__ == "__main__":

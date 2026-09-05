@@ -173,6 +173,11 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$MOUNT/Hippocampus.app"
           xcrun stapler validate "$MOUNT/Hippocampus.app"
           spctl --assess --type execute --verbose=2 "$MOUNT/Hippocampus.app"
+          scripts/build-provenance.py verify \
+            --app "$MOUNT/Hippocampus.app" \
+            --expected-source-head "$(git rev-parse HEAD)" \
+            --expected-source-digest "$(python3 scripts/product-source-digest.py --repo-root .)" \
+            --forbid-current-source
           hdiutil detach "$MOUNT" -quiet
           trap - EXIT
 

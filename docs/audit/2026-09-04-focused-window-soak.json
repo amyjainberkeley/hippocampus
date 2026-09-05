@@ -1,0 +1,44 @@
+{
+  "capture": {
+    "cascade_forced_count": 1491,
+    "focus_race_drop_fraction": 0.010249307479224376,
+    "frames_delivered": 3610,
+    "frames_dropped_backpressure": 0,
+    "frames_dropped_late_ack": 0,
+    "frames_encode_failed": 0,
+    "frames_focus_race_dropped": 37,
+    "frames_redacted_by_failsafe": 0,
+    "frames_suppressed": 37,
+    "health_samples": 871,
+    "keyframes_retained": 37,
+    "ocr_events": 38,
+    "uptime_ms_latest": 1799459
+  },
+  "capture_seconds": 1800,
+  "failures": [],
+  "privacy": {
+    "background_token_present": false,
+    "focus_control_token_present": true,
+    "focused_recall_outcome": "degraded",
+    "focused_token_present": true,
+    "foreign_event_count": 0
+  },
+  "qualified": true,
+  "resources": {
+    "footprint_samples": 358,
+    "helper_cpu_pct_max": 42.9,
+    "helper_cpu_pct_p50": 2.1,
+    "helper_cpu_pct_p95": 3.7,
+    "helper_rss_bytes_max": 101548032,
+    "helper_rss_bytes_p50": 50970624,
+    "helper_rss_bytes_p95": 92012544
+  },
+  "schema_version": 1,
+  "storage": {
+    "blob_bytes": 1197726,
+    "database_bytes": 413696,
+    "keyframes_retained": 37,
+    "projected_bytes_per_hour": 3222844,
+    "total_bytes": 1611422
+  }
+}

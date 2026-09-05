@@ -106,6 +106,8 @@ final class BuildAppScriptTests: XCTestCase {
         let staticDependencies = [
             "NOTICE",
             "scripts/lib/app-group-contract.sh",
+            "scripts/product-source-digest.py",
+            "scripts/build-provenance.py",
             "scripts/verify-toml-license-contract.py",
             "third_party/licenses",
             "apps/hippocampus/Package.swift",

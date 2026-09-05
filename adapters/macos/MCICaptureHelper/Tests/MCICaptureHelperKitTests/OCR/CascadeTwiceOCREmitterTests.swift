@@ -156,18 +156,17 @@ final class CascadeSection6RegexTests: XCTestCase {
 final class CascadeTwiceOCREmitterTests: XCTestCase {
     /// CSO escalation 2026-05-29 — the cascade-twice §6 mechanics
     /// (this file's purpose) require `killOcrEmit == false`. The
-    /// kill-switch is `true` in shipping builds; the new
-    /// `testKillSwitchEmitsTombstoneForAllowFrames` test below pins
-    /// the production posture. The three existing tests below scope
-    /// the kill-switch OFF so they continue to exercise the §6
-    /// regex bank + the over-cap fail-closed arm.
+    /// kill-switch is `false` after live qualification; the dedicated
+    /// `testKillSwitchEmitsTombstoneForAllowFrames` test below still pins
+    /// the emergency rollback branch. These tests restore the qualified
+    /// production default after every case.
     override func setUp() {
         super.setUp()
         CascadeTwiceOCREmitter.killOcrEmit = false
     }
 
     override func tearDown() {
-        CascadeTwiceOCREmitter.killOcrEmit = true
+        CascadeTwiceOCREmitter.killOcrEmit = false
         super.tearDown()
     }
 
@@ -283,13 +282,13 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
 
     /// CSO escalation 2026-05-29 — Phase A interim mitigation (option
     /// M4 in `docs/research/capture-scope-window-vs-display-2026-05-29.md`).
-    /// With the kill-switch ON (production posture), every cleared-
+    /// With the emergency kill-switch ON, every cleared-
     /// pixel-time `.allow` frame must emit a `PrivacyTombstone(
     /// failsafeUnknown)` instead of an OCREvent — proving no OCR
     /// text bytes from the whole-display SCStream sample can reach
     /// the wire while the architectural fix bakes.
     func testKillSwitchEmitsTombstoneForAllowFrames() async {
-        // Production posture — kill-switch ON.
+        // Emergency rollback posture — kill-switch ON.
         CascadeTwiceOCREmitter.killOcrEmit = true
         defer { CascadeTwiceOCREmitter.killOcrEmit = false }
         let sink = StubFrameSink()

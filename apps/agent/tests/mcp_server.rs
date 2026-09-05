@@ -861,6 +861,25 @@ fn tools_call_mci_events_by_app_default_limit_is_fifty() {
     assert_eq!(invs.events_by_app, vec![("com.example.app".to_owned(), 50)]);
 }
 
+#[test]
+fn tools_call_mci_events_by_app_caps_at_one_thousand() {
+    let (s, stub) = server();
+    let _ = s
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_events_by_app",
+                "arguments": {"app_bundle_id": "com.example.app", "limit": 10_000}
+            })),
+        ))
+        .expect("response");
+    let invs = stub.invocations();
+    assert_eq!(
+        invs.events_by_app,
+        vec![("com.example.app".to_owned(), 1_000)]
+    );
+}
+
 // ---------------------------------------------------------------------------
 // End-to-end stdio loop: drive the server through a tokio duplex pipe and
 // observe both responses + the parse-error path.

@@ -14,6 +14,7 @@ from typing import Any
 MINIMUM_QUALIFYING_SECONDS = 30 * 60
 HELPER_CPU_P95_LIMIT = 15.0
 HELPER_RSS_P95_LIMIT_BYTES = 2 * 1024 * 1024 * 1024
+FOCUS_RACE_DROP_FRACTION_LIMIT = 0.05
 
 COUNTER_FIELDS = (
     "frames_delivered",
@@ -109,7 +110,10 @@ def load_memory(path: Path) -> dict[str, Any]:
         raise ReportInputError("memory.focused_token_present must be boolean")
     if not isinstance(memory.get("background_token_present"), bool):
         raise ReportInputError("memory.background_token_present must be boolean")
+    if not isinstance(memory.get("focus_control_token_present"), bool):
+        raise ReportInputError("memory.focus_control_token_present must be boolean")
     nonnegative_int(memory.get("corpus_event_count"), "memory.corpus_event_count")
+    nonnegative_int(memory.get("foreign_event_count"), "memory.foreign_event_count")
     return memory
 
 
@@ -163,6 +167,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
 
     cpu_p95 = float(percentile(cpu_values, 0.95))
     rss_p95 = int(percentile(rss_values, 0.95))
+    # A race-dropped frame is already included in frames_delivered by the
+    # helper pipeline, so delivered is the complete denominator.
+    focus_race_denominator = counters["frames_delivered"]
+    focus_race_drop_fraction = (
+        counters["frames_focus_race_dropped"] / focus_race_denominator
+        if focus_race_denominator > 0
+        else 0.0
+    )
     minimum_health = args.minimum_health_samples
     if minimum_health is None:
         minimum_health = max(1, math.floor((args.capture_seconds / 2) * 0.8))
@@ -177,6 +189,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         failures.append("focused_token_missing")
     if memory["background_token_present"] is not False:
         failures.append("background_token_present")
+    if memory["foreign_event_count"] != 0:
+        failures.append("foreign_event_present")
     if memory["corpus_event_count"] == 0:
         failures.append("no_ocr_events")
     if len(health) < minimum_health:
@@ -185,8 +199,19 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         failures.append("insufficient_footprint_samples")
     if counters["frames_delivered"] == 0:
         failures.append("no_frames_delivered")
+    if counters["frames_dropped_backpressure"] != 0:
+        failures.append("frame_backpressure_drops")
+    if counters["frames_dropped_late_ack"] != 0:
+        failures.append("frame_late_ack_drops")
     if counters["frames_encode_failed"] != 0:
         failures.append("frame_encode_failures")
+    if args.capture_seconds >= MINIMUM_QUALIFYING_SECONDS:
+        if memory["focus_control_token_present"] is not True:
+            failures.append("focus_control_token_missing")
+        if counters["frames_focus_race_dropped"] == 0:
+            failures.append("focus_race_gate_unexercised")
+        elif focus_race_drop_fraction >= FOCUS_RACE_DROP_FRACTION_LIMIT:
+            failures.append("focus_race_drop_fraction_at_or_above_5_percent")
     if cpu_p95 > HELPER_CPU_P95_LIMIT:
         failures.append("helper_cpu_p95_above_15_percent")
     if rss_p95 > HELPER_RSS_P95_LIMIT_BYTES:
@@ -202,9 +227,12 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "background_token_present": memory["background_token_present"],
             "focused_recall_outcome": memory.get("focused_recall_outcome"),
             "focused_token_present": memory["focused_token_present"],
+            "focus_control_token_present": memory["focus_control_token_present"],
+            "foreign_event_count": memory["foreign_event_count"],
         },
         "capture": {
             **counters,
+            "focus_race_drop_fraction": focus_race_drop_fraction,
             "health_samples": len(health),
             "keyframes_retained": keyframes_retained,
             "ocr_events": memory["corpus_event_count"],
