@@ -354,7 +354,7 @@ private struct DailyScreenshotCard: View {
             }
             .font(.callout)
             Text(MemorySourceKind.label(event.sourceKind)).font(.caption).foregroundStyle(.secondary)
-            Text(Formatters.stripContextHeader(event.snippet))
+            Text(event.snippet)
                 .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 .frame(height: 32, alignment: .topLeading)
         }
