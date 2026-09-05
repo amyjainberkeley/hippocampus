@@ -11,8 +11,8 @@
 // Layout:
 //   - NSPanel host (borderless-titled, non-modal, floating) with
 //     `contentView` set to an `NSHostingView` wrapping the SwiftUI root.
-//   - NSToolbar with five selectable items (General / Capture / Privacy
-//     / Advanced / About). Toolbar switching is the same pattern
+//   - NSToolbar with six selectable items (General / Capture / Sources
+//     / Privacy / Advanced / About). Toolbar switching is the same pattern
 //     Xcode and Slack use; feels native.
 //   - Each section is a compact SwiftUI `Form` bound directly to the
 //     `PreferencesStore` (`@ObservedObject`, so toggling writes
@@ -59,20 +59,9 @@ enum PreferencesStyle {
     static let panelHeight: CGFloat = 460
 }
 
-// MARK: - Section enum
+// MARK: - Section presentation
 
-/// The five top-level tabs. The rawValue is the NSToolbar item
-/// identifier — matched in the AppKit shim below.
-enum PreferencesSection: String, CaseIterable, Identifiable {
-    case general = "General"
-    case capture = "Capture"
-    case sources = "Sources"
-    case privacy = "Privacy"
-    case advanced = "Advanced"
-    case about = "About"
-
-    var id: String { rawValue }
-
+extension PreferencesSection {
     /// SF-Symbol icon rendered in the toolbar item.
     var symbol: String {
         switch self {
