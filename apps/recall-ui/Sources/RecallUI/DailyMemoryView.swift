@@ -135,9 +135,12 @@ struct DailyMemoryView: View {
                 Text("Memory refreshed \(date.formatted(date: .omitted, time: .standard))")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Button("Privacy", systemImage: "hand.raised", action: onOpenPrivacy)
-                .buttonStyle(.borderless)
-                .help("Open Privacy")
+            HStack(spacing: 16) {
+                WorkspacePreferencesButton(title: "Capture", systemImage: "display", destination: .capture)
+                Button("Privacy", systemImage: "hand.raised", action: onOpenPrivacy)
+                    .help("Open Privacy")
+            }
+            .buttonStyle(.borderless)
         }
     }
 

@@ -67,7 +67,7 @@ struct MemoryWorkspaceView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
-                .navigationSplitViewColumnWidth(min: 220, ideal: 252, max: 300)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 260)
         } detail: {
             workspaceDetail
         }
@@ -79,19 +79,6 @@ struct MemoryWorkspaceView: View {
                 do { try await Task.sleep(for: .seconds(10)) } catch { return }
                 guard !Task.isCancelled else { return }
                 MemoryRefreshSignal.post()
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    withAnimation(MCI.Motion.snap) {
-                        columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
-                    }
-                } label: {
-                    Image(systemName: "sidebar.leading")
-                }
-                .help("Show or hide sidebar")
-                .accessibilityLabel("Show or hide sidebar")
             }
         }
     }
@@ -124,7 +111,7 @@ struct MemoryWorkspaceView: View {
                 availableHeight: geometry.size.height
             )
             VStack(spacing: 0) {
-                if selection != .now {
+                if selection.descriptor.requiresSourceAccess && selection != .sources {
                     WorkspaceFilmstrip(
                         reader: reader,
                         isCompact: filmstripHeight < 200
@@ -160,7 +147,7 @@ struct MemoryWorkspaceView: View {
                     case .privacy:
                         PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
                     case .settings:
-                        UserDictionaryEditor()
+                        WorkspaceSettingsView()
                     }
                 }
                 .frame(minHeight: 0, maxHeight: .infinity)
@@ -191,9 +178,6 @@ private struct MemorySidebarRow: View {
             Text(item.descriptor.title)
                 .mciFont(.bodyStrong)
             Spacer(minLength: MCI.Spacing.s)
-            Text(item.keyboardShortcutLabel)
-                .font(MCI.Font.mono)
-                .foregroundStyle(Color.brandFgMuted)
         }
         .padding(.horizontal, MCI.Spacing.s)
         .padding(.vertical, MCI.Spacing.s - 2)
@@ -384,13 +368,21 @@ private struct FilmstripCard: View {
 private struct SourcesWorkspaceView: View {
     let reader: BrainReader
     @State private var observedApps: [ObservedApp] = []
-    @State private var isLoading = true
+    @State private var isLoading = false
     @State private var errorMessage: String?
 
     var body: some View {
-        Group {
-            if isLoading {
-                ShimmerLoadingView(isLoading: true)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Observed apps").font(.headline)
+                Spacer()
+                WorkspacePreferencesButton(title: "App access", systemImage: "display", destination: .capture)
+                WorkspacePreferencesButton(title: "AI context", systemImage: "point.3.connected.trianglepath.dotted", destination: .sources)
+            }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 24).padding(.top, 20)
+            if isLoading && observedApps.isEmpty {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let errorMessage {
                 ContentUnavailableView(
                     "Sources are unavailable",
@@ -432,6 +424,7 @@ private struct SourcesWorkspaceView: View {
                 .scrollContentBackground(.hidden)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.brandBgPrimary)
         .refreshable { await load() }
         .task {
@@ -445,6 +438,7 @@ private struct SourcesWorkspaceView: View {
 
     @MainActor
     private func load() async {
+        guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
