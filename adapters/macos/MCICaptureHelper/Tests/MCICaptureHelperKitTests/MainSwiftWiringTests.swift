@@ -132,9 +132,9 @@ final class MainSwiftWiringTests: XCTestCase {
         let source = try String(contentsOf: root.appendingPathComponent(
             "Sources/MCICaptureHelperKit/Capture/SCStreamCaptureSession.swift"
         ), encoding: .utf8)
-        XCTAssertEqual(source.components(separatedBy: "SCContentFilterFactory.makeFocusedWindowFilter(").count - 1, 3,
+        XCTAssertEqual(source.components(separatedBy: "try await SCContentFilterFactory.makeFocusedWindowFilter(").count - 1, 3,
                        "Startup, focus rebind, and permission recovery must bind the actual window, on any display")
-        XCTAssertFalse(source.contains("SCContentFilterFactory.makeMultiWindowFilter("),
+        XCTAssertFalse(source.contains("try await SCContentFilterFactory.makeMultiWindowFilter("),
                        "A first-display include list can return blank pixels for a window on another display")
     }
 
