@@ -26,6 +26,8 @@ public struct SensitiveCaptureDenylist: DenylistProbe {
     }
 
     public static let appBundles: Set<String> = [
+        // Memory viewers must not turn recalled evidence into new observations.
+        "ai.hippocampus", "recall-ui", "onboarding",
         "com.1password.1password", "com.1password.1password7",
         "com.agilebits.onepassword7", "com.agilebits.onepassword-osx",
         "com.bitwarden.desktop", "com.dashlane.dashlane",

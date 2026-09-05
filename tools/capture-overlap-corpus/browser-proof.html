@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hippocampus browser capture fixture</title>
+<style>
+  body { margin: 64px; color: #242426; background: #fafafa; font: 22px system-ui; }
+  h1 { font-size: 30px; }
+  code { display: block; margin: 32px 0; font-size: 26px; overflow-wrap: anywhere; }
+</style>
+<h1>Synthetic browser evidence</h1>
+<code id="marker"></code>
+<p id="description"></p>
+<script>
+  const privateFixture = location.hash === '#private';
+  document.getElementById('marker').textContent = privateFixture
+    ? 'PRIVATE_BROWSER_EVIDENCE_OBSIDIAN_4182'
+    : 'NORMAL_BROWSER_EVIDENCE_COBALT_6375';
+  document.getElementById('description').textContent = privateFixture
+    ? 'Open this fixture in a private browser window. It must not enter memory.'
+    : 'The normal browser window should produce a searchable screen record.';
+</script>
+</html>
