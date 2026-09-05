@@ -264,7 +264,7 @@ public struct TimelineEvent: Sendable, Equatable, Identifiable, Codable {
     /// Microseconds since UNIX epoch.
     public let tsUs: UInt64
     public let appBundleId: String?
-    /// Very short snippet (~80 chars) for the card's hover-preview.
+    /// Display body with the indexing header removed before truncation.
     public let snippet: String
     /// Absolute filesystem path to the encrypted keyframe blob, or nil
     /// for events without a keyframe. Same privacy invariant as
@@ -502,7 +502,7 @@ public extension BrainReader {
                     eventId: hit.eventId,
                     tsUs: hit.tsUs,
                     appBundleId: hit.appBundleId,
-                    snippet: String(hit.ocrTextSnippet.prefix(80)),
+                    snippet: String(Formatters.stripContextHeader(hit.ocrTextSnippet).prefix(80)),
                     thumbnailPath: hit.thumbnailPath,
                     sourceKind: hit.sourceKind
                 )

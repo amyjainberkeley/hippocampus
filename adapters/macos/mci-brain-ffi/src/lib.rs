@@ -302,7 +302,7 @@ pub struct TimelineEventJson {
     pub ts_us: u64,
     /// `events.app_bundle_id`, nullable in schema.
     pub app_bundle_id: Option<String>,
-    /// Very short snippet (~80 chars) for the card's hover-preview.
+    /// Display body, stripped of the indexing header before the ~80-char cap.
     pub snippet: String,
     /// Absolute filesystem path to the encrypted keyframe blob, or
     /// `None` for events with no keyframe (Messages / Mail / text-only
@@ -1813,10 +1813,32 @@ fn snippet(s: &str) -> String {
 /// **V2-P13.** Shorter snippet for timeline strip cards.
 /// [`TIMELINE_SNIPPET_CAP`] chars; multi-byte UTF-8 boundaries preserved.
 fn timeline_snippet(s: &str) -> String {
+    let s = display_body(s);
     if s.chars().count() <= TIMELINE_SNIPPET_CAP {
         return s.to_string();
     }
     s.chars().take(TIMELINE_SNIPPET_CAP).collect()
+}
+
+/// Remove only a complete leading ingestion header before budgeting UI text.
+/// The stored/indexed text and separate source metadata remain unchanged.
+fn display_body(s: &str) -> &str {
+    let Some((header, body)) = s.split_once('\n') else {
+        return s;
+    };
+    let fields = header
+        .strip_prefix("[app=")
+        .and_then(|v| v.strip_suffix(']'));
+    let complete = fields
+        .and_then(|v| v.split_once(" | title=").map(|(_, rest)| rest))
+        .and_then(|v| v.split_once(" | url=").map(|(_, rest)| rest))
+        .and_then(|v| v.split_once(" | ts=").map(|(_, rest)| rest))
+        .is_some();
+    if complete {
+        body
+    } else {
+        s
+    }
 }
 
 /// **V2-P13.** Downsample an ascending-order timeline slice to at most
@@ -2980,6 +3002,54 @@ mod tests {
     #[test]
     fn timeline_snippet_passes_short_text() {
         assert_eq!(timeline_snippet("hi"), "hi");
+    }
+
+    #[test]
+    fn display_snippet_removes_complete_search_header_before_truncating() {
+        let header = format!(
+            "[app=com.example.editor | title={} | url=? | ts=2026-09-05T12:00:00.000Z]\n",
+            "long document title ".repeat(50)
+        );
+        let text = format!("{header}The revised launch plan is ready.");
+        assert_eq!(timeline_snippet(&text), "The revised launch plan is ready.");
+        assert_eq!(
+            snippet(&text),
+            text.chars().take(SNIPPET_CHAR_CAP).collect::<String>()
+        );
+        assert!(
+            text.starts_with(&header),
+            "display must not mutate stored text"
+        );
+    }
+
+    #[test]
+    fn display_snippet_preserves_incomplete_or_non_header_text() {
+        for text in [
+            "[app=editor | title=incomplete\nVisible content",
+            "[app=editor | url=? | ts=now]\nVisible content",
+            "[app=editor | title=title | url=? | ts=now\nVisible content",
+            "Notes\n[app=editor | title=title | url=? | ts=now]\nVisible content",
+        ] {
+            assert_eq!(
+                timeline_snippet(text),
+                text.chars().take(TIMELINE_SNIPPET_CAP).collect::<String>()
+            );
+            assert_eq!(snippet(text), text);
+        }
+    }
+
+    #[test]
+    fn display_snippet_strips_only_one_header_and_preserves_unicode_boundaries() {
+        let header = "[app=editor | title=title | url=? | ts=now]\n";
+        assert_eq!(
+            timeline_snippet(&format!("{header}{header}body")),
+            format!("{header}body")
+        );
+        let body = "\u{1f9e0}".repeat(TIMELINE_SNIPPET_CAP + 1);
+        assert_eq!(
+            timeline_snippet(&format!("{header}{body}")),
+            "\u{1f9e0}".repeat(TIMELINE_SNIPPET_CAP)
+        );
     }
 
     #[test]

@@ -101,7 +101,8 @@ public final class DailyMemoryViewModel: ObservableObject {
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return screenshots }
         return searchHits.map {
             TimelineEvent(eventId: $0.id, tsUs: $0.tsUs, appBundleId: $0.appBundleId,
-                          snippet: $0.ocrTextSnippet, thumbnailPath: $0.thumbnailPath, sourceKind: $0.sourceKind)
+                          snippet: Formatters.stripContextHeader($0.ocrTextSnippet),
+                          thumbnailPath: $0.thumbnailPath, sourceKind: $0.sourceKind)
         }
     }
 

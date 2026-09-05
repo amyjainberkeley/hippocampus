@@ -122,6 +122,7 @@ final class DailyMemoryViewModelTests: XCTestCase {
         model.query = "stored text"
         await model.search()
         XCTAssertEqual(model.searchHits.map(\.id), [2])
+        XCTAssertEqual(model.visibleScreenshots.first?.snippet, "Stored text")
         let options = await reader.lastSearch
         XCTAssertEqual(options?.text, "stored text")
         XCTAssertEqual(options?.timeFromUs, model.day.startUs)
@@ -170,7 +171,8 @@ private actor DailyTestReader: BrainReader {
             Hit(eventId: 1, tsUs: opts.timeFromUs!, appBundleId: nil, windowTitle: nil,
                 url: nil, ocrTextSnippet: "Stored text", source: "lexical", score: nil),
             Hit(eventId: 2, tsUs: opts.timeFromUs!, appBundleId: nil, windowTitle: nil,
-                url: nil, ocrTextSnippet: "Stored text", source: "lexical", score: nil, thumbnailPath: "/tmp/2.bin"),
+                url: nil, ocrTextSnippet: "[app=editor | title=title | url=? | ts=now]\nStored text",
+                source: "lexical", score: nil, thumbnailPath: "/tmp/2.bin"),
             Hit(eventId: 3, tsUs: opts.timeToUs! + 1, appBundleId: nil, windowTitle: nil,
                 url: nil, ocrTextSnippet: "Stored text", source: "lexical", score: nil, thumbnailPath: "/tmp/3.bin"),
         ]
