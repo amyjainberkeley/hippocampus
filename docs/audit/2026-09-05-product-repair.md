@@ -180,3 +180,43 @@ show those pixels in Recall, and return the same event through recall/context.
   within the original deadline. The new regression failed before the change
   and passed after it. Independent static review found no blocker. No owner
   integration settings were changed while the automatic hook was broken.
+
+## Installed Continuity, Agent Delivery, And Browser Capability
+
+- Notarized `bea62b3` captured event 1629 at `2026-09-05T11:32:45.934Z`.
+  The native authenticated image viewer displayed the focused fixture without
+  the old black canvas margins. Proof:
+  `/tmp/hippocampus-focus-repair-image-proof-20260905.jpeg`.
+- A contending fresh AX PID reader could return nil immediately while another
+  reader ran, creating false unknown-focus generations. `c6d23c0` serializes
+  each fresh read within the original 50 ms deadline, with no cached answer.
+  Its regression failed before the correction. All 652 optimized capture tests
+  passed after correcting an older asynchronous test to await the actual write
+  and drain, rather than assuming 100 ms was always enough. Privacy assertions
+  remain unchanged. The installed signed validation build subsequently captured
+  event 1646 at `2026-09-05T12:05:56.285Z`; real Codex MCP returned its fixture
+  text and `screen_ocr` citation. This build is not yet notarized.
+- The installed bounded Claude hook returned 2,564 bytes with the fixture,
+  canonical event and explicit untrusted-memory warning. Native consent controls
+  then enabled the owner's Claude hook and Codex instruction integration.
+  An actual Claude Code startup with tools/MCP disabled emitted
+  `hook_response`, `SessionStart:startup`, exit code zero, and the fixture.
+  The remote API retried six times without a final answer; the bounded test
+  terminated only its own process. Delivery is proven, model answering is not.
+- Native Sources-to-preferences routing failed when only Recall remained alive:
+  Launch Services chose Recall because it shares the parent bundle identity.
+  `0bbe819` uses exact executable identity, typed content-free navigation,
+  acknowledged pane opening and a parent lifetime lock. Forty-one focused tests
+  pass and both release binaries built. Installed warm/cold routing is pending.
+- TCC's own log at `2026-09-05T11:56:11.770Z` said Apple Events requires the
+  missing Automation entitlement and policy disallows prompting `ai.hippocampus`.
+  `ba87cca` adds it only to the parent and actual helper sender, preserving it
+  across installer re-signing. The purpose string explains normal/private
+  classification and local memory. Four tests pass, including real disposable
+  code signatures; no OS access was granted or reset.
+- An unanswered Apple Events request previously accumulated expired jobs on a
+  serial queue. The behavioral test observed 12 executions instead of two.
+  `1e5b288` limits outstanding OS work to one; contending callers include their
+  wait in the original deadline and late answers are never reused. All 34
+  focused browser tests pass. The full optimized suite is running before the
+  next signed app is assembled and tested against real browser consent.
