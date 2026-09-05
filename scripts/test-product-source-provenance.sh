@@ -67,6 +67,12 @@ source_change="$(python3 "$DIGEST_TOOL" --repo-root "$TMP_ROOT")"
 [[ "$first" != "$source_change" ]] \
     || fail "a product source change did not change the digest"
 
+mkdir -p "$TMP_ROOT/.cargo"
+printf '[env]\nMACOSX_DEPLOYMENT_TARGET = "14.0"\n' > "$TMP_ROOT/.cargo/config.toml"
+cargo_config_change="$(python3 "$DIGEST_TOOL" --repo-root "$TMP_ROOT")"
+[[ "$source_change" != "$cargo_config_change" ]] \
+    || fail "native build configuration escaped the product source digest"
+
 rg -Fq 'build-provenance.json' "$BUILD_APP" \
     || fail "app assembly does not embed source provenance"
 rg -Fq 'product-source-digest.py' "$BUILD_APP" \

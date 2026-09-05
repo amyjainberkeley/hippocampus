@@ -1,0 +1,5 @@
+# Match SwiftPM and the Recall static bridge's supported macOS minimum.
+# A single value also prevents Cargo from rebuilding native dependencies when
+# moving between agent and Recall builds. Ignored by non-Apple toolchains.
+[env]
+MACOSX_DEPLOYMENT_TARGET = { value = "14.0", force = false }
