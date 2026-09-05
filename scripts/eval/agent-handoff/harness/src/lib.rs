@@ -4,12 +4,15 @@ use std::sync::Arc;
 use mci_agent::context_packet::ContextBudget;
 use mci_agent::mcp::{BrainReader, LiveBrainReader, McpHit, McpRecallOutcome};
 use mci_brain::{
-    BrainStore, Embedder, Event, EventId, NothingMatchedReason, RetrievalDegradation,
+    BrainStore, Embedder, Event, EventId, EventSource, NothingMatchedReason, RetrievalDegradation,
     SqlCipherBrainStore,
 };
 use mci_core::crypto::DbKey;
 use serde::Deserialize;
 use serde_json::{json, Value};
+
+#[cfg(test)]
+mod seed_tests;
 
 #[derive(Clone, Copy)]
 pub enum Arm {
@@ -234,6 +237,14 @@ fn seed_session(
     owners: &mut BTreeMap<u64, SessionMeta>,
 ) -> Result<(), String> {
     let base_ts = parse_dataset_timestamp(&instance.haystack_dates[session_index])?;
+    // Only explicit screen locators assert acquisition; app IDs and other URLs do not.
+    let source = if instance.haystack_session_ids[session_index].starts_with("screen://")
+        || instance.haystack_urls[session_index].starts_with("screen://")
+    {
+        EventSource::ScreenOcr
+    } else {
+        EventSource::Unknown
+    };
     for (turn_index, turn) in instance.haystack_sessions[session_index].iter().enumerate() {
         let text = turn.content.trim();
         if text.is_empty() {
@@ -280,7 +291,7 @@ fn seed_session(
             embedding,
         };
         let event_id = store
-            .put_event(&event)
+            .put_event_with_source(&event, source)
             .map_err(|error| format!("{}: store event: {error}", instance.question_id))?;
         owners.insert(
             event_id.0,
