@@ -331,28 +331,19 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// screen + Screen-Recording TCC grant. Only reachable via the
     /// non-default `--capture` dev flag (Amendment 1 §4).
     ///
-    /// ADR-0031 V2-P1 third-lift (Phase 7 PR 13 wiring): when
-    /// `focusedWindowStore` was supplied, the FocusTracker is started
-    /// first, an initial focused-window snapshot is read, and the
-    /// SCStream filter is bound to a MULTI-WINDOW include-set via
-    /// `SCContentFilterFactory.makeMultiWindowFilter(...)` — the
-    /// FORK 3 = B ratified `SCContentFilter(display:including:
-    /// exceptingWindows:)` shape (redesign memo §1.1 +
-    /// `orchestrator-ratification-state-2026-05-31.md` §1). The include
-    /// list is seeded with the focused window; co-view candidates are
-    /// currently empty pending CEO §6.1 co-view-heuristic ratification
-    /// — this matches redesign-memo §6.1 alternative A (focused-only-
-    /// via-multi-window-API), which delivers the API-correctness value
-    /// of the third lift without depending on unratified heuristics.
+    /// With a focused-window store, start the tracker first and bind Apple's
+    /// desktop-independent window filter to that identity. This avoids the
+    /// prior first-display include filter's blank output on other monitors.
+    /// Only the focused window is eligible; co-view capture is not enabled.
     ///
     /// When no focused window is observable on the initial read (login
     /// window, fast-user-switch, no eligible window), `start()` refuses
-    /// to build a multi-window filter and logs one stderr breadcrumb
+    /// to bind a window filter and logs one stderr breadcrumb
     /// (`helper_health: no_eligible_window`) to satisfy the task
     /// discipline "do NOT throw — this is a routine no-content case."
     /// The session falls back to the pre-V2-P1 `makeDisplayFilter(...)`
     /// so startup is never blocked; the background rebind task will
-    /// swap to the multi-window filter once focus becomes observable.
+    /// bind the window once focus becomes observable.
     /// The race gate covers the transition (sentinel `installedFocus
     /// Generation == 0` fail-close, §5.2 hardening).
     ///
