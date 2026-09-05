@@ -1049,9 +1049,9 @@ async fn run_agent(args: Args) -> ExitCode {
                                 // filters applied above the Qwen
                                 // backend), writes
                                 // (extractor_kind = "qwen") mentions to
-                                // `entity_mentions`. Disabled-idle when
-                                // the Qwen .mlmodelc is not downloaded
-                                // (same UX as brief worker); V2-P4
+                                // `entity_mentions`. Disabled-idle unless
+                                // MCI_QWEN_NER_ENABLED=1 and the Qwen
+                                // .mlmodelc is installed; V2-P4
                                 // Tier 1 regex mentions continue on the
                                 // hot path regardless. Construction-
                                 // graph wiring at integration site —
@@ -2607,13 +2607,11 @@ fn load_ner_sync_backend() -> Option<Arc<dyn mci_brain::NerBackend>> {
     None
 }
 
-/// Build the production brief author: Qwen3-1.7B over Core ML, loaded
-/// lazily inside the factory so the ~500 MB working set is resident only
-/// while a brief is being written (ADR-0028 §6).
+/// Build the explicit CLI brief author: Qwen3-1.7B over Core ML, loaded
+/// lazily inside the factory and released when the author is dropped.
 ///
 /// Path layout matches `ModelDownloadManager`'s unpack convention:
-/// `<model_dir>/<modelID>/<basename>/...`. Shared by the scheduled worker
-/// and `mci-agent brief` so the two cannot end up on different models.
+/// `<model_dir>/<modelID>/<basename>/...`. Background briefs are extractive.
 #[cfg(target_os = "macos")]
 fn qwen3_author_factory(model_dir: &std::path::Path) -> brief_worker::AuthorFactory {
     use mci_brief::author::BriefAuthor;
@@ -2679,8 +2677,8 @@ fn spawn_today_brief_worker(
     });
 }
 
-/// Spawn the previous-calendar-day worker. Qwen is preferred when installed; the
-/// evidence-cited extractive author keeps the feature available otherwise.
+/// Spawn the previous-calendar-day worker with deterministic extractive output.
+/// Background briefs never load Qwen, even when its model is installed.
 #[cfg(target_os = "macos")]
 fn spawn_brief_worker(
     store: Arc<mci_brain::SqlCipherBrainStore>,
@@ -2697,11 +2695,7 @@ fn spawn_brief_worker(
         return;
     }
 
-    let model_dir = brief_worker::default_model_dir();
-    let (factory, author_id) = preferred_brief_author_factory(&model_dir);
-    if author_id == "hippocampus-extractive" {
-        eprintln!("mci-agent: Qwen3 is not installed; daily briefs use hippocampus-extractive");
-    }
+    let factory = brief_worker::extractive_author_factory();
 
     let tz_resolver: Arc<dyn Fn() -> i32 + Send + Sync> =
         Arc::new(brief_worker::current_tz_offset_secs);
@@ -2763,7 +2757,7 @@ fn spawn_brief_worker(
 /// V2-P5 — spawn the Tier 2 Qwen NER idle-batch worker (FORK 8 = A;
 /// Phase 6 PR 9). Reuses the brief author's Qwen3-1.7B Core ML
 /// `LlamaBackend`; selects between the production Qwen-backed path
-/// and disabled-idle based on the `.mlmodelc` presence + the host OS.
+/// and disabled-idle based on explicit opt-in, model presence and host OS.
 /// Construction-graph wiring at integration site — this is the
 /// load-bearing call site that turns the V2-P5 module + worker into
 /// production behaviour. Per
@@ -2775,7 +2769,7 @@ fn spawn_tier2_worker(
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
     use mci_agent::tier2_qwen_backend::QwenTier2Backend;
-    use mci_agent::tier2_worker::{run_disabled_idle, run_tier2_worker};
+    use mci_agent::tier2_worker::{qwen_ner_enabled, run_disabled_idle, run_tier2_worker};
     use mci_brain::{NerBackend, Tier2Extractor};
     use mci_brief::llama_backend::LlamaBackend;
     use std::time::Duration;
@@ -2785,10 +2779,15 @@ fn spawn_tier2_worker(
     /// call site; events accumulate across cycles.
     const TIER2_BATCH_SIZE: usize = 8;
     /// Sleep between idle-batch cycles when the queue is drained.
-    /// 30 s is the same cadence as the embedder idle-batch loop;
-    /// it bounds the steady-state cost while keeping catch-up
-    /// reasonable after a long-running session.
+    /// This does not throttle inference while a backlog exists.
     const TIER2_IDLE_INTERVAL: Duration = Duration::from_secs(30);
+
+    if !qwen_ner_enabled(std::env::var("MCI_QWEN_NER_ENABLED").ok().as_deref()) {
+        tokio::spawn(async move {
+            run_disabled_idle("MCI_QWEN_NER_ENABLED is not 1", shutdown).await;
+        });
+        return;
+    }
 
     let model_dir = brief_worker::default_model_dir();
     if !brief_worker::qwen3_model_present(&model_dir) {
@@ -2806,11 +2805,9 @@ fn spawn_tier2_worker(
     }
 
     // Path layout matches `ModelDownloadManager`'s unpack convention.
-    // Same constants as `spawn_brief_worker` — both workers reuse the
-    // SAME `.mlmodelc` on disk. The model is loaded twice (once per
-    // worker) which is acceptable: each worker is single-flight, so
-    // peak RAM is bounded by one Qwen working set per workflow, not
-    // two at once.
+    // Opt-in NER retains its own model. An explicit CLI brief can load
+    // another instance; single-flight here does not bound their combined
+    // memory or concurrency. Background briefs do not load a model.
     let model_subdir = model_dir.join(brief_worker::QWEN3_MODEL_ID);
     let model_path = model_subdir.join(brief_worker::QWEN3_MODEL_BASENAME);
     let tokenizer_dir = model_subdir;
