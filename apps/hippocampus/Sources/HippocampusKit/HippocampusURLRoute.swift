@@ -14,6 +14,7 @@
 //   - `hippocampus://recall?tab=brief`           → open the Briefs workspace
 //   - `hippocampus://recall?popup=1`             → reveal global Recall
 //   - `hippocampus://recall?tab=search&focus=42` → inspect event 42
+//   - `hippocampus://preferences/sources`       → open a preferences pane
 //   - `hippocampus://onboarding/show`            → .showOnboarding
 //   - `hippocampus://onboarding?show=1`          → .showOnboarding
 //     (both forms honored — the cycle 8.46 Action Panel command
@@ -22,9 +23,24 @@
 
 import Foundation
 
+/// Shared by URL routing and the preferences toolbar. Raw values preserve
+/// the existing toolbar identifiers; canonical URL paths are lowercase.
+public enum PreferencesSection: String, CaseIterable, Identifiable, Sendable {
+    case general = "General"
+    case capture = "Capture"
+    case sources = "Sources"
+    case privacy = "Privacy"
+    case advanced = "Advanced"
+    case about = "About"
+
+    public var id: String { rawValue }
+}
+
 public enum HippocampusURLRoute: Equatable, Sendable {
     /// Open or command the Recall UI. Invalid and zero event ids are ignored.
     case openRecall(tab: String?, focusEventId: UInt64?, openPopup: Bool)
+    /// Display an existing preferences pane. Never applies settings or consent.
+    case openPreferences(section: PreferencesSection)
     /// Re-open the Onboarding executable (safe to call post-first-run).
     case showOnboarding
     /// URL scheme matched, but the host / path combination is unknown.
@@ -54,6 +70,13 @@ public enum HippocampusURLRoute: Equatable, Sendable {
                 focusEventId: focusEventId,
                 openPopup: openPopup
             )
+        case "preferences":
+            // Accept only the six canonical URLs, not decoded aliases,
+            // credentials, ports, queries, fragments, or extra path components.
+            guard let section = PreferencesSection.allCases.first(where: {
+                url.absoluteString == "hippocampus://preferences/\($0.rawValue.lowercased())"
+            }) else { return .unknown }
+            return .openPreferences(section: section)
         case "onboarding":
             let showQuery = queryItems.first(where: { $0.name == "show" })?.value
             if url.path == "/show" || showQuery == "1" {

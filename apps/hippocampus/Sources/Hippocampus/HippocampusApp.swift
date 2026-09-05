@@ -8,18 +8,15 @@ import AppKit
 
 struct HippocampusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var loginItemVM = LoginItemViewModel(service: SMLoginItemService())
-    @StateObject private var preferencesStore = PreferencesStore()
-    private let updater = SparkleUpdaterService()
 
     var body: some Scene {
         MenuBarExtra {
             StatusMenuView(
                 supervisor: appDelegate.supervisor,
                 modelProvisioner: appDelegate.modelProvisioner,
-                loginItemVM: loginItemVM,
-                updater: updater,
-                preferencesStore: preferencesStore,
+                loginItemVM: appDelegate.loginItemVM,
+                updater: appDelegate.updater,
+                preferencesStore: appDelegate.preferencesStore,
                 onRequestQuit: { appDelegate.requestQuit() },
                 onRequestRestart: { appDelegate.requestRestart() }
             )
@@ -31,18 +28,17 @@ struct HippocampusApp: App {
                 // "onboarding doesn't open unless I touch the icon").
                 // Here we only do menu-open-time chores: Sparkle updater
                 // start + the LoginItem one-time prompt mark.
-                updater.startUpdater()
+                appDelegate.updater.startUpdater()
                 // One-shot delayed background poll of the Sparkle appcast.
                 // The 10 s delay lets `ProcessSupervisor.start()` finish
                 // spinning up MCICaptureHelper + mci-agent before the
                 // updater does any network I/O + XML parse work. Gated on
                 // the user's opt-in inside `checkForUpdatesInBackground()`
                 // — no network call happens if auto-check is OFF.
-                updater.scheduleBackgroundCheck(after: 10.0)
-                if loginItemVM.shouldPrompt {
-                    loginItemVM.markPrompted()
+                appDelegate.updater.scheduleBackgroundCheck(after: 10.0)
+                if appDelegate.loginItemVM.shouldPrompt {
+                    appDelegate.loginItemVM.markPrompted()
                 }
-                configurePreferencesController()
             }
         } label: {
             MenuBarIcon(supervisor: appDelegate.supervisor)
@@ -50,48 +46,6 @@ struct HippocampusApp: App {
 
     }
 
-    /// Wire the process-wide `PreferencesWindowController.shared` with
-    /// the dependencies it needs. Idempotent; safe on every menu open.
-    /// The controller only builds the NSPanel on first `show()` — this
-    /// merely stashes the store / VM / updater references + the
-    /// callbacks the About/Privacy/Advanced sections need to defer
-    /// back to the supervisor + recall-UI.
-    @MainActor
-    private func configurePreferencesController() {
-        #if canImport(AppKit)
-        let supervisor = appDelegate.supervisor
-        PreferencesWindowController.shared.configure(
-            store: preferencesStore,
-            loginItemVM: loginItemVM,
-            updater: updater,
-            captureApplier: supervisor,
-            supervisor: supervisor,
-            dbPath: supervisor.dbPath.path,
-            onOpenRecallTab: { tab in
-                Task { @MainActor in
-                    supervisor.openRecallUI(initialTab: tab)
-                }
-            },
-            onOpenDenylistEditor: {
-                Task { @MainActor in
-                    _ = supervisor.openOnboarding(initialStep: "trust")
-                }
-            },
-            onOpenAllowlistEditor: {
-                Task { @MainActor in
-                    _ = supervisor.openOnboarding(initialStep: "allowlist")
-                }
-            },
-            onExportDebugBundle: {
-                // Open the logs folder as a debug-bundle proxy — a
-                // future PR will produce a proper .zip artefact.
-                let logDir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Logs/MCI")
-                NSWorkspace.shared.open(logDir)
-            }
-        )
-        #endif
-    }
 }
 
 /// Menu-bar icon rendered as a status light.
@@ -119,6 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// launch logic in `StatusMenuView.task`.
     let supervisor: ProcessSupervisor
     let modelProvisioner = BriefModelProvisioner()
+    let loginItemVM = LoginItemViewModel(service: SMLoginItemService())
+    let preferencesStore = PreferencesStore()
+    let updater = SparkleUpdaterService()
+    private var preferencesControllerConfigured = false
 
     private let firstLaunchLogger = Logger(
         subsystem: "ai.hippocampus", category: "first-launch"
@@ -163,6 +121,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyStore: KeychainKeyStore.defaultDatabaseKey
         )
         super.init()
+    }
+
+    /// Share launch-owned dependencies with every preferences entry point.
+    /// A cold-launch URL can arrive before applicationDidFinishLaunching.
+    private func configurePreferencesController() {
+        guard !preferencesControllerConfigured else { return }
+        let supervisor = self.supervisor
+        PreferencesWindowController.shared.configure(
+            store: preferencesStore,
+            loginItemVM: loginItemVM,
+            updater: updater,
+            captureApplier: supervisor,
+            supervisor: supervisor,
+            dbPath: supervisor.dbPath.path,
+            onOpenRecallTab: { tab in
+                Task { @MainActor in
+                    supervisor.openRecallUI(initialTab: tab)
+                }
+            },
+            onOpenDenylistEditor: {
+                Task { @MainActor in
+                    _ = supervisor.openOnboarding(initialStep: "trust")
+                }
+            },
+            onOpenAllowlistEditor: {
+                Task { @MainActor in
+                    _ = supervisor.openOnboarding(initialStep: "allowlist")
+                }
+            },
+            onExportDebugBundle: {
+                // Open the logs folder as a debug-bundle proxy.
+                let logDir = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Logs/MCI")
+                NSWorkspace.shared.open(logDir)
+            }
+        )
+        preferencesControllerConfigured = true
     }
 
     /// Called by AppKit immediately after the app finishes launching —
@@ -235,6 +230,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // library convention: Rust's `std` masks `SIGPIPE` by default
         // for the same reason.
         signal(SIGPIPE, SIG_IGN)
+
+        configurePreferencesController()
 
         Task { @MainActor in
             let hotkeyResult = GlobalHotkeyManager.shared.registerDefault { [weak self] in
@@ -446,6 +443,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         openPopup: openPopup
                     )
                 }
+            case .openPreferences(let section):
+                configurePreferencesController()
+                PreferencesWindowController.shared.show(section: section)
             case .showOnboarding:
                 // Cycle 8.48 — the cycle 8.46 Action Panel "Show
                 // Onboarding" command now works end-to-end. Re-opens
