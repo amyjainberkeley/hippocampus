@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-05._
 
-Audited code baseline: `f424d94`
+Audited code baseline: `dd16407`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -27,6 +27,12 @@ Current repair implementation and focused tests cover:
   Browser pixels require a positively classified normal window with matching
   identity, geometry, and URL. Unsupported/private/ambiguous browser windows
   remain excluded. Live browser qualification is still pending.
+- Production binds the desktop-independent focused window at startup, rebind,
+  and permission recovery. The previous first-display include filter could
+  return blank pixels for a window on another display. Visual evidence now
+  requires full-window OCR before the secret gate; dirty-region OCR cannot
+  authorize a whole-window screenshot. System consent/security dialogs are
+  excluded in addition to the memory application's own windows.
 - Committed capture receipts distinguish saved records/screenshots, suppression,
   disconnected helpers, and storage failures. Imports have separate acquisition
   provenance; unknown historical rows are not guessed to be screen captures.
@@ -46,18 +52,29 @@ Current repair implementation and focused tests cover:
   SwiftUI menu-update loop. Its animated periodic icon was removed and image
   construction bounded. A separate orphan agent was blocked in Core ML while
   Tokio waited for blocking workers; daemon EOF shutdown now has a bounded
-  runtime teardown. Fresh installed resource/lifecycle proof is still pending.
+  runtime teardown. A 24-minute installed sample used about 56 MB menu RSS,
+  35 MB helper RSS, 16 MB agent RSS and 75 MB Recall RSS. This is a point-in-time
+  sanity check, not a complete resource/lifecycle qualification.
 - Claude SessionStart context and Codex instruction integration are explicit,
   ownership-safe opt-ins. They preserve bounded canonical citations and do not
   install themselves into unrelated client configuration.
 
-All six repaired release executables built successfully. Installed capture-to-screenshot/search/context
-readback, UI inspection, pause/relaunch proof, and refreshed synthetic benchmark
-are in progress. The full debug capture suite passed 624 of 625 tests; its
-100-microsecond timing gate measured 107 microseconds under concurrent build
-load. The optimized shipping-profile suite is being checked without changing
-the limit. Do not call the installed repair complete until those results
-are recorded in `docs/audit/2026-09-05-product-repair.md`.
+All six repaired release executables built successfully. The first repair app
+and DMG were signed, notarized, stapled and installed, but the positive fixture
+capture did not pass. One stored screenshot was a system consent dialog, which
+exposed the new exclusion requirement; it is not useful-work capture proof.
+The subsequent focused-window/full-OCR repair is being packaged and retested.
+
+The 36-task synthetic benchmark passes retrieval/handoff gates on both arms.
+Hybrid recall@3 and handoff-task success are 100%; top-one hit rate is 96.8%.
+The benchmark's source seeder was corrected to preserve explicit `screen://`
+acquisition metadata. Corpus, answers and thresholds are unchanged. These are
+synthetic retrieval results, not live capture or generated-answer qualification.
+The optimized capture suite passed 628 tests before the display-binding change;
+the expanded suite is being rerun. The earlier debug suite's 107-microsecond
+timing result versus its 100-microsecond gate remains recorded, not hidden.
+Installed capture/search/context, authenticated screenshot display, and
+pause/relaunch proof remain required before claiming the repair complete.
 
 ## Product Boundary
 

@@ -69,12 +69,14 @@ builds, synthetic imports, or notarization alone do not prove capture works.
 ## Verification So Far
 
 - Recall: 53 focused XCTest cases and three context-handoff tests passed.
-  New receipt-detail/copy follow-up tests are still running.
+  The follow-up receipt/day/brief run passed 27 cases.
 - Capture: 20 focused browser, ordinary-app, self-exclusion, and process-lifetime
   tests passed. Self-exclusion failed before the fix and passed after it.
   The broader debug suite passed 624/625: its combined black-grid update timing
   test measured 106,883 ns/call against 100,000 under concurrent native builds.
-  Optimized release-profile coverage is running with the same threshold.
+  The optimized release suite passed 625 with the same threshold, then 628
+  including the full-window OCR and system-dialog regressions. The expanded
+  display-binding run is being finalized.
 - Agent: 367 library tests passed, one ignored; 17 binary tests, 16 context
   tests, 30 MCP tests, and eight data-correctness tests passed. Five Qwen opt-in
   tests passed in the subsequent targeted run.
@@ -82,8 +84,8 @@ builds, synthetic imports, or notarization alone do not prove capture works.
 - Recall FFI: 95 focused tests passed, including old-date filtering,
   acquisition provenance, read-only behavior, and encrypted-blob deletion.
 - Onboarding: 20 focused tests passed after correcting async protocol dispatch
-  for legacy retention review. Cross-language persistence test is being rerun
-  with distinct default and explicit-choice fixture cases.
+  for legacy retention review. Cross-language persistence passed with distinct
+  default and explicit-choice cases. Fifteen automatic-brief tests passed.
 - Standalone session-hook and static-menu behavior checks passed. Sixteen pure
   installed-production-proof validator tests passed.
 - Desktop control successfully read the real synthetic fixture's accessibility
@@ -94,3 +96,44 @@ builds, synthetic imports, or notarization alone do not prove capture works.
 No production success is inferred from these tests. The release must still
 capture the fixture through the normal installed policy, save encrypted pixels,
 show those pixels in Recall, and return the same event through recall/context.
+
+## Installed Findings And Follow-Up
+
+- The first repair artifact (`0fe7922`, source digest
+  `d8b1e1da11df6856a60dc7acbbdddb3bdb6b5eb089a3cecf4f5f2907d66519f8`)
+  passed Apple notarization, stapling, distribution assessment and installed
+  provenance verification. The prior app remains at
+  `/Applications/Hippocampus Before Capture Repair 2026-09-05.app`.
+- Automated fixture clicks did not leave the fixture foreground in the real
+  desktop session. A fresh OS app-identity read still identified Recall;
+  its denylist receipt was therefore correct. Opening the existing fixture
+  through Finder did change real foreground identity. No speculative change
+  to the NSWorkspace reader or privacy gate was made.
+- The ordinary-window positive test still did not produce the expected token.
+  A separately launched diagnostic helper used Codex's responsible-process
+  identity and triggered an OS screen-recording prompt. The diagnostic exited;
+  the owner was asked to dismiss the prompt. No additional OS access was granted.
+  The installed app captured that permission dialog as event 1625, revealing a
+  real missing exclusion, not proving useful capture. The next build excludes
+  `com.apple.UserNotificationCenter` and `com.apple.SecurityAgent`.
+- Code inspection found two independent capture defects. All production filter
+  transitions used the multi-window factory, which chose `displays.first` even
+  for a focused window elsewhere. Production now uses the existing
+  desktop-independent focused-window factory. This supersedes the historical
+  focused-only-via-multi-window implementation; co-view capture remains off.
+  The full JPEG could also be retained after only dirty-region OCR. Whenever
+  visual evidence is eligible, the emitter now scans the entire retained
+  surface before the OCR secret gate, including retries. A regression showed
+  a secret outside the dirty region previously reached retention; it now
+  produces only a privacy tombstone. Text-only OCR retains its bounded ROI.
+- Static independent review found no new blocker in these three fixes. It did
+  not validate ScreenCaptureKit runtime behavior, real Vision accuracy, or
+  multi-monitor/TCC recovery. Installed proof is still required.
+- Fresh 36-task benchmark output:
+  `docs/eval/agent-handoff-2026-09-05-repair.json`. Both quality gates pass;
+  hybrid capability pass rate is 100%, lexical 97.2%, and lexical handoff
+  success 75%. Generated/trusted-answer qualification remains false. The first
+  rerun's duplicate-OCR metric was zero because the fixture seeder discarded
+  acquisition provenance. Only explicit screen locators now assert screen
+  origin, independently of app names, question tags and expected answers.
+  Seven harness regressions pass; the pinned corpus and thresholds did not change.
