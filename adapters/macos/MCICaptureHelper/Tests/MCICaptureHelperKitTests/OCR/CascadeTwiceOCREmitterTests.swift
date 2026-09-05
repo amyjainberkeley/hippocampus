@@ -22,6 +22,28 @@ private actor StubFrameSink: FrameSink {
     func snapshot() -> [Data] { writes }
 }
 
+private actor RegionSensitiveEngine: OCREngine {
+    private(set) var regions: [CGRect] = []
+    func recognize(input: OCREngineInput, timeoutMs: Int) async -> OCRResult {
+        regions.append(input.roi)
+        let outsideDirtyRegion = CGRect(x: 0.7, y: 0.7, width: 0.2, height: 0.1)
+        return OCRResult(recognizedLines: [OCRLine(
+            text: input.roi.contains(outsideDirtyRegion) ? "password: hunter2" : "Updated title",
+            boundingBox: outsideDirtyRegion, confidence: 1
+        )], durationMs: 0, timedOut: false)
+    }
+}
+
+private actor CountingKeyframeRetainer: KeyframeRetaining {
+    private(set) var attempts = 0
+    func retain(input: KeyframePixelInput, candidate: KeyframeEvidenceCandidate) async throws -> KeyframeRetention? {
+        attempts += 1
+        return nil
+    }
+    func confirm(_ retention: KeyframeRetention) async {}
+    func discard(_ retention: KeyframeRetention) async throws {}
+}
+
 // Reuses the cross-test `StubOCREngine` defined in
 // `VisionOCRWorkerTests.swift` (module-level, .mode-driven).
 
@@ -168,6 +190,60 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
     override func tearDown() {
         CascadeTwiceOCREmitter.killOcrEmit = false
         super.tearDown()
+    }
+
+    func testScreenshotScansSecretOutsideDirtyRegionBeforeRetention() async {
+        let engine = RegionSensitiveEngine()
+        let sink = StubFrameSink()
+        let retainer = CountingKeyframeRetainer()
+        let emitter = CascadeTwiceOCREmitter(
+            worker: VisionOCRWorker(engine: engine), cascade: passthroughCascade(),
+            sink: sink, sequence: FrameSequence(), counters: HelperHealthCounters(),
+            keyframeRetainer: retainer
+        )
+        let finished = expectation(description: "OCR privacy decision completed")
+        await emitter.worker.start()
+        await emitter.processAfterAllow(
+            captureOrdinal: 1, tsUs: 12_345,
+            context: WorkflowContext(appBundleId: "com.example.app"),
+            input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: CGRect(x: 0, y: 0, width: 0.1, height: 0.1)),
+            evidenceCandidate: KeyframeEvidenceCandidate(
+                captureOrdinal: 1, focusedWindowId: 10, dhash: DHash(bits: 0),
+                monotonicNanoseconds: 1
+            ),
+            disposition: { _ in finished.fulfill() }
+        )
+        await fulfillment(of: [finished], timeout: 3)
+        await emitter.worker.stopAndDrain()
+        let regions = await engine.regions
+        let attempts = await retainer.attempts
+        let frames = await sink.snapshot()
+        XCTAssertEqual(regions, [CGRect(x: 0, y: 0, width: 1, height: 1)])
+        XCTAssertEqual(attempts, 0, "A secret outside the dirty region must prevent image retention")
+        XCTAssertEqual(frames.count, 1)
+        XCTAssertEqual(frames.first?[2], 0x11, "Only a privacy tombstone may be emitted")
+        XCTAssertEqual(frames.first?.last, RedactionReason.ocrTimeSecret.rawValue)
+    }
+
+    func testTextOnlyOCRPreservesRequestedRegion() async {
+        let engine = RegionSensitiveEngine()
+        let emitter = CascadeTwiceOCREmitter(
+            worker: VisionOCRWorker(engine: engine), cascade: passthroughCascade(),
+            sink: StubFrameSink(), sequence: FrameSequence(), counters: HelperHealthCounters()
+        )
+        let finished = expectation(description: "Text-only OCR completed")
+        let roi = CGRect(x: 0, y: 0, width: 0.1, height: 0.1)
+        await emitter.worker.start()
+        await emitter.processAfterAllow(
+            captureOrdinal: 1, tsUs: 12_345,
+            context: WorkflowContext(appBundleId: "com.example.app"),
+            input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: roi),
+            evidenceCandidate: nil, disposition: { _ in finished.fulfill() }
+        )
+        await fulfillment(of: [finished], timeout: 3)
+        await emitter.worker.stopAndDrain()
+        let regions = await engine.regions
+        XCTAssertEqual(regions, [roi])
     }
 
     /// SecretBench-pattern OCR text ⇒ tombstone reason=ocrTimeSecret;

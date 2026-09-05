@@ -33,6 +33,8 @@ public struct SensitiveCaptureDenylist: DenylistProbe {
         "com.bitwarden.desktop", "com.dashlane.dashlane",
         "com.lastpass.lastpass", "com.apple.keychainaccess",
         "com.apple.passwords", "com.apple.systempreferences",
+        // System consent and authentication dialogs are not work context.
+        "com.apple.usernotificationcenter", "com.apple.securityagent",
     ]
 
     public static let sensitiveDomains: Set<String> = [
