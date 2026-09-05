@@ -218,5 +218,8 @@ show those pixels in Recall, and return the same event through recall/context.
   serial queue. The behavioral test observed 12 executions instead of two.
   `1e5b288` limits outstanding OS work to one; contending callers include their
   wait in the original deadline and late answers are never reused. All 34
-  focused browser tests pass. The full optimized suite is running before the
-  next signed app is assembled and tested against real browser consent.
+  focused browser tests pass, followed by all 654 optimized capture tests.
+  Independent static review found no actionable regression. An already-running
+  OS script cannot be cancelled here; it can occupy the single slot until the
+  OS returns, while callers continue to time out and deny browser pixels.
+  The next signed app must still be tested against real browser consent.
