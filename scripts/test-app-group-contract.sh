@@ -92,3 +92,5 @@ if hippocampus_verify_signed_app_group \
 fi
 
 echo "PASS: App Group identity and entitlement rendering are fail-closed"
+
+python3 -B "$SCRIPT_DIR/test_apple_events_signing_contract.py"

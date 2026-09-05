@@ -308,6 +308,7 @@ SIGNING_SCRATCH=$(mktemp -d -t hippocampus-signing)
 trap 'rm -rf "$SIGNING_SCRATCH"' EXIT
 ENTITLEMENTS_SOURCE="$SCRIPT_DIR/Hippocampus.entitlements"
 ENTITLEMENTS="$SIGNING_SCRATCH/Hippocampus.entitlements"
+CAPTURE_HELPER_ENTITLEMENTS="$SCRIPT_DIR/MCICaptureHelper.entitlements"
 hippocampus_render_app_group_entitlements \
     "$ENTITLEMENTS_SOURCE" "$ENTITLEMENTS" "$APP_GROUP_ID"
 
@@ -794,6 +795,7 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
 
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
+        --entitlements "$CAPTURE_HELPER_ENTITLEMENTS" \
         "$MACOS/MCICaptureHelper"
 
     codesign --force --options=runtime --timestamp \
@@ -891,7 +893,9 @@ else
             --entitlements "$APPEX_ENTITLEMENTS" \
             "$APPEX_BUNDLE"
     fi
-    codesign --force --sign - "$MACOS/MCICaptureHelper"
+    codesign --force --sign - \
+        --entitlements "$CAPTURE_HELPER_ENTITLEMENTS" \
+        "$MACOS/MCICaptureHelper"
     codesign --force --sign - "$MACOS/mci-agent"
     [[ -f "$MACOS/recall-ui" ]] && codesign --force --sign - "$MACOS/recall-ui"
     [[ -f "$MACOS/onboarding" ]] && codesign --force --sign - "$MACOS/onboarding"
