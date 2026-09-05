@@ -4,6 +4,46 @@ import XCTest
 /// Structural checks for the executable's lifecycle; route behavior is tested
 /// separately without launching the app or touching owner preferences.
 final class PreferencesRoutingLifecycleTests: XCTestCase {
+    func testParentRegistersPreferencesReceiverBeforeAsyncStartup() throws {
+        let app = try source("HippocampusApp.swift")
+        let launch = try method("func applicationDidFinishLaunching(", in: app)
+        let receiver = try XCTUnwrap(launch.range(of: "installPreferencesReceiver()"))
+        let task = try XCTUnwrap(launch.range(of: "Task {"))
+        XCTAssertLessThan(receiver.lowerBound, task.lowerBound)
+        XCTAssertTrue(app.contains("PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))"))
+        let cleanup = try method("private func cleanUpLifecycle()", in: app)
+        XCTAssertTrue(cleanup.contains("DistributedNotificationCenter.default().removeObserver(self)"))
+    }
+
+    func testDistributedRequestOnlyShowsAPaneThenAcknowledges() throws {
+        let app = try source("HippocampusApp.swift")
+        let handler = try method("private func receivePreferencesRequest(", in: app)
+        let show = try XCTUnwrap(handler.range(of: "PreferencesWindowController.shared.show(section: request.section)"))
+        let acknowledge = try XCTUnwrap(handler.range(of: "request.acknowledge(from: executable)"))
+        XCTAssertLessThan(show.lowerBound, acknowledge.lowerBound)
+        XCTAssertFalse(handler.contains("Task {"))
+        XCTAssertFalse(handler.contains("setCaptureEnabled("))
+        XCTAssertFalse(handler.contains("installSessionContext"))
+        XCTAssertFalse(handler.contains("supervisor.start()"))
+    }
+
+    func testParentLeaseIsAcquiredBeforeGUIButNotForSessionHook() throws {
+        let entry = try source("HippocampusEntryPoint.swift")
+        let hook = try XCTUnwrap(entry.range(of: "SessionContextHook.runCLI("))
+        let lease = try XCTUnwrap(entry.range(of: "ParentApplicationLease.acquire("))
+        let gui = try XCTUnwrap(entry.range(of: "withExtendedLifetime(lease) { HippocampusApp.main() }"))
+        XCTAssertLessThan(hook.lowerBound, lease.lowerBound)
+        XCTAssertLessThan(lease.lowerBound, gui.lowerBound)
+        XCTAssertTrue(entry.contains("PreferencesOpenRequest(arguments: arguments)?.post(to: executable)"))
+    }
+
+    func testPreferencesLaunchDoesNotOpenASecondRecallWindowAtStartup() throws {
+        let app = try source("HippocampusApp.swift")
+        let start = try method("private func startSupervisorOrDeferUntilOnboarded()", in: app)
+        XCTAssertEqual(start.components(separatedBy:
+            "if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }").count - 1, 2)
+    }
+
     private func source(_ name: String) throws -> String {
         let package = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

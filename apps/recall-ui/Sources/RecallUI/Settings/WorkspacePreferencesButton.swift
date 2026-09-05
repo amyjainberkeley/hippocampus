@@ -7,25 +7,20 @@ struct WorkspacePreferencesButton: View {
     let systemImage: String
     let destination: WorkspacePreferencesDestination
     @State private var openFailed = false
+    @State private var opening = false
 
     var body: some View {
         Button {
-            guard let application = WorkspacePreferencesDestination.hostApplication(
-                bundleURL: Bundle.main.bundleURL
-            ) else {
-                openFailed = true
-                return
-            }
-            let configuration = NSWorkspace.OpenConfiguration()
-            NSWorkspace.shared.open([destination.url], withApplicationAt: application,
-                                    configuration: configuration) { _, error in
-                if error != nil {
-                    Task { @MainActor in openFailed = true }
-                }
+            opening = true
+            Task { @MainActor in
+                openFailed = !(await WorkspacePreferencesRouter.shared.open(
+                    destination, bundleURL: Bundle.main.bundleURL))
+                opening = false
             }
         } label: {
             Label(title, systemImage: systemImage)
         }
+        .disabled(opening)
         .alert("Preferences could not open", isPresented: $openFailed) {
             Button("OK", role: .cancel) {}
         } message: {
