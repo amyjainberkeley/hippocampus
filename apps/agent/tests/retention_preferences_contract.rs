@@ -19,7 +19,11 @@ fn picker_outputs_are_worker_compatible() {
         ("custom/retention.json", RetentionConfig::Days(90)),
         ("custom-365/retention.json", RetentionConfig::Days(365)),
         ("replacement/retention.json", RetentionConfig::Days(90)),
-        ("onboarding/retention.json", RetentionConfig::Days(90)),
+        ("onboarding/retention.json", RetentionConfig::Days(7)),
+        (
+            "onboarding/fresh-default/retention.json",
+            RetentionConfig::Days(90),
+        ),
     ];
     for (relative_path, expected) in valid_cases {
         let path = root.join(relative_path);
