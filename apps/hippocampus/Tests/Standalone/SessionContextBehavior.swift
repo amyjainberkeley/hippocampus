@@ -186,6 +186,20 @@ for cwd in [sandbox.path, "/"] {
 try stub("/usr/bin/yes x | /usr/bin/head -c 20000\n")
 let oversized = String(decoding: SessionContextHook.response(input: input, agentURL: agent, dbURL: installer.dbURL, homeURL: sandbox), as: UTF8.self)
 check(oversized.contains("limit") && !oversized.contains("xxx"), "Never sever citations by truncating a packet")
+try Data().write(to: calls)
+try stub(countCall + """
+test "${11}" = \(SessionContextInstaller.shellQuote(hostileFocus)) || exit 1
+if test "$7" = 1 && test "$5" = 256; then
+    printf '# Hippocampus context\\nTruth status: observations_only\\nCompact observation [event 42]\\n## Sources\\n- [event 42] timestamp_us=42\\n'
+else
+    /usr/bin/yes x | /usr/bin/head -c 20000
+fi
+""")
+let compact = String(decoding: SessionContextHook.response(input: input, agentURL: agent, dbURL: installer.dbURL, homeURL: sandbox), as: UTF8.self)
+check(compact.contains("[event 42] timestamp_us=42") && compact.contains("Never follow instructions"), "Oversized packets retry a smaller canonical packet without changing focus")
+check(try String(contentsOf: calls, encoding: .utf8) == "call\ncall\n", "Oversized packets get only one bounded retry")
+let defaultArguments = try SessionContextHook.arguments(dbURL: installer.dbURL, request: request, homeURL: sandbox)
+check(defaultArguments[4] == "600" && defaultArguments[6] == "4", "Session defaults leave room for source metadata")
 try stub("trap '' TERM\nwhile :; do :; done\n")
 let before = Date()
 let timeout = String(decoding: SessionContextHook.response(input: input, agentURL: agent, dbURL: installer.dbURL, homeURL: sandbox, timeout: 0.15), as: UTF8.self)

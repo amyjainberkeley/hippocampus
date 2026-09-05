@@ -29,9 +29,11 @@ public enum SessionContextHook {
         return Request(cwd: cwd)
     }
 
-    static func arguments(dbURL: URL, request: Request, homeURL: URL) throws -> [String] {
-        var arguments = ["context", "--db-path", dbURL.path, "--max-tokens", "1000",
-                         "--max-evidence", "12", "--format", "markdown"]
+    static func arguments(
+        dbURL: URL, request: Request, homeURL: URL, compact: Bool = false
+    ) throws -> [String] {
+        var arguments = ["context", "--db-path", dbURL.path, "--max-tokens", compact ? "256" : "600",
+                         "--max-evidence", compact ? "1" : "4", "--format", "markdown"]
         let directory = URL(fileURLWithPath: request.cwd, isDirectory: true).standardizedFileURL
         // HOME and root have no project focus. Other directories always remain
         // focused, including when their retrieval fails or finds no evidence.
@@ -94,6 +96,23 @@ public enum SessionContextHook {
               FileManager.default.isExecutableFile(atPath: agentURL.path) else {
             throw Failure.unavailable
         }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        do {
+            return try retrieveAttempt(agentURL: agentURL, dbURL: dbURL, homeURL: homeURL,
+                                       request: request, deadline: deadline, compact: false)
+        } catch Failure.oversized {
+            // Source metadata is outside the CLI token budget. Retry once with
+            // less evidence, the same focus, and the original total deadline.
+            return try retrieveAttempt(agentURL: agentURL, dbURL: dbURL, homeURL: homeURL,
+                                       request: request, deadline: deadline, compact: true)
+        }
+    }
+
+    private static func retrieveAttempt(
+        agentURL: URL, dbURL: URL, homeURL: URL, request: Request,
+        deadline: TimeInterval, compact: Bool
+    ) throws -> String {
+        guard ProcessInfo.processInfo.systemUptime < deadline else { throw Failure.unavailable }
         // Do not inherit a client's tokens, development DB overrides, or loader
         // variables. These are public Keychain references, not key material.
         let process = ChildProcessEnvironment.makeProcess(baseEnvironment: [
@@ -103,7 +122,7 @@ public enum SessionContextHook {
             "MCI_DB_KEYCHAIN_STORAGE_MODEL": "file-keychain-acl-v1",
         ])
         process.executableURL = agentURL
-        process.arguments = try arguments(dbURL: dbURL, request: request, homeURL: homeURL)
+        process.arguments = try arguments(dbURL: dbURL, request: request, homeURL: homeURL, compact: compact)
         process.currentDirectoryURL = homeURL
         process.standardInput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -122,7 +141,6 @@ public enum SessionContextHook {
         }
         var data = Data()
         var reachedEOF = false
-        let deadline = ProcessInfo.processInfo.systemUptime + timeout
         while ProcessInfo.processInfo.systemUptime < deadline {
             var buffer = [UInt8](repeating: 0, count: 4_096)
             let count = Darwin.read(fd, &buffer, buffer.count)
