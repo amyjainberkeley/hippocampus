@@ -88,6 +88,8 @@ public struct SuppressionCascade: Sendable {
     private let denylistDrift: any DenylistDriftProbe
     private let knownSafeAppBundles: Set<String>
     private let rawPixelExcludedAppBundles: Set<String>
+    private let admissionPolicy: CaptureAdmissionPolicy
+    private let browserWindowPrivacy: (any BrowserWindowPrivacyChecking)?
 
     /// Construct a cascade orchestrator.
     ///
@@ -110,7 +112,9 @@ public struct SuppressionCascade: Sendable {
         blackedRegion: any BlackedRegionProbe,
         denylistDrift: any DenylistDriftProbe = NoDenylistDrift(),
         knownSafeAppBundles: Set<String> = [],
-        rawPixelExcludedAppBundles: Set<String> = []
+        rawPixelExcludedAppBundles: Set<String> = [],
+        admissionPolicy: CaptureAdmissionPolicy = .approvedApplications,
+        browserWindowPrivacy: (any BrowserWindowPrivacyChecking)? = nil
     ) {
         self.secureEventInput = secureEventInput
         self.axSecureSubrole = axSecureSubrole
@@ -119,6 +123,8 @@ public struct SuppressionCascade: Sendable {
         self.denylistDrift = denylistDrift
         self.knownSafeAppBundles = knownSafeAppBundles
         self.rawPixelExcludedAppBundles = rawPixelExcludedAppBundles
+        self.admissionPolicy = admissionPolicy
+        self.browserWindowPrivacy = browserWindowPrivacy
     }
 
     /// Apply the ADR-0013 cascade in binding order. First match wins.
@@ -145,7 +151,8 @@ public struct SuppressionCascade: Sendable {
     /// read immediately here and still frozen before asynchronous dispatch.
     public func snapshotPixelPrivacy(
         context: WorkflowContext,
-        hasBlackedRegion: Bool? = nil
+        hasBlackedRegion: Bool? = nil,
+        capturedWindow: FocusedWindow? = nil
     ) -> PixelPrivacySnapshot {
         let blacked = hasBlackedRegion ?? blackedRegion.hasBlackedRegion()
         let secureInput = secureEventInput.isSecureEventInputEnabled()
@@ -154,7 +161,8 @@ public struct SuppressionCascade: Sendable {
             context: context,
             hasBlackedRegion: blacked,
             secureEventInputEnabled: secureInput,
-            axSecureSubrole: axResult
+            axSecureSubrole: axResult,
+            capturedWindow: capturedWindow
         )
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 env-gated trace.
         // Content-free: decision enum only. No bundle ID, window title, URL,
@@ -180,7 +188,8 @@ public struct SuppressionCascade: Sendable {
         context: WorkflowContext,
         hasBlackedRegion: Bool,
         secureEventInputEnabled: Bool,
-        axSecureSubrole: Bool?
+        axSecureSubrole: Bool?,
+        capturedWindow: FocusedWindow?
     ) -> SuppressionDecision {
         // §1 — source-level denylist (the load-bearing primitive).
         if let bundle = context.appBundleId, denylist.appIsDenied(bundleId: bundle) {
@@ -193,12 +202,11 @@ public struct SuppressionCascade: Sendable {
             return .suppress(reason: .denylistSource)
         }
 
-        // Browser content has a structured WebExtension path with an explicit
-        // private-tab bit. ScreenCaptureKit has no equivalent private-window
-        // classification, so configured browser bundles fail closed before
-        // the callback obtains or retains a raw pixel buffer.
+        // Browser pixels need a positive normal-window classification in
+        // addition to the ordinary capture checks. Unknown stays excluded.
         if let bundle = context.appBundleId,
-           rawPixelExcludedAppBundles.contains(bundle)
+           rawPixelExcludedAppBundles.contains(bundle),
+           browserWindowPrivacy?.permitsPixels(for: context, capturedWindow: capturedWindow) != true
         {
             return .suppress(reason: .failsafeUnknown)
         }
@@ -248,19 +256,14 @@ public struct SuppressionCascade: Sendable {
             return .suppress(reason: .denylistPostCapture)
         }
 
-        // §7 — fail-safe default: unknown ⇒ redact.
-        // The cascade treats a positive classification ("AX returned a
-        // non-secure subrole" + "no secure-event-input" + "app is on
-        // the known-safe list OR the focused element has a recognizable
-        // non-secure AX role") as the ONLY path to `.allow`. Everything
-        // else redacts.
-        let isKnownSafeApp = context.appBundleId.map(knownSafeAppBundles.contains) ?? false
+        // Admission scopes which apps the owner captures; it never substitutes
+        // for an affirmative non-secure Accessibility result.
+        let appIsAdmitted = admissionPolicy.admits(
+            bundleID: context.appBundleId, approved: knownSafeAppBundles
+        )
 
-        switch (axSecureSubrole, isKnownSafeApp) {
+        switch (axSecureSubrole, appIsAdmitted) {
         case (false, true):
-            // AX positively identified the focused element as non-secure,
-            // AND the foreground app is on the curated known-safe list.
-            // This is the only `.allow` path.
             return .allow
         default:
             return .suppress(reason: .failsafeUnknown)
