@@ -166,6 +166,21 @@ pub async fn drain_to_log_with_brain<R>(
 where
     R: AsyncRead + Unpin,
 {
+    drain_with_capture_status(rx, log, clock, device_id, Some(brain), None).await
+}
+
+/// Production drain with immediate committed-frame and helper-health receipts.
+pub async fn drain_with_capture_status<R>(
+    rx: &mut R,
+    log: &HealthLog,
+    clock: &dyn WallClock,
+    device_id: &DeviceId,
+    brain: Option<&dyn BrainIngestor>,
+    status: Option<&crate::capture_status::CaptureStatusWriter>,
+) -> Result<RunStats, RunError>
+where
+    R: AsyncRead + Unpin,
+{
     let mut reader = FrameReader::new();
     let mut stats = RunStats::default();
 
@@ -173,6 +188,9 @@ where
         stats.frames_seen += 1;
         match &frame.message {
             Message::HelperHealth { .. } => {
+                if let Some(status) = status {
+                    status.refresh(clock);
+                }
                 let routed = Routed::Health(frame);
                 match pump_one(&routed, clock, device_id) {
                     Ok(rec) => {
@@ -186,17 +204,37 @@ where
                 }
             }
             Message::OCREvent { .. } | Message::PageContentEvent { .. } => {
-                match brain.ingest_ocr_event(&frame.message)? {
+                let Some(brain) = brain else {
+                    stats.frames_non_health += 1;
+                    continue;
+                };
+                let outcome = brain.ingest_ocr_event(&frame.message).map_err(|error| {
+                    if let Some(status) = status {
+                        status.blocked("ingest_failed", clock);
+                    }
+                    error
+                })?;
+                match outcome {
                     IngestOutcome::Stored { .. } => {
                         stats.frames_to_brain += 1;
+                        if matches!(&frame.message, Message::OCREvent { .. }) {
+                            if let Some(status) = status {
+                                status.stored_frame(clock);
+                            }
+                        }
                     }
                     IngestOutcome::NotOcrEvent => {
                         stats.frames_non_health += 1;
                     }
                 }
             }
-            Message::PrivacyTombstone { .. }
-            | Message::StateTransitionEvent { .. }
+            Message::PrivacyTombstone { reason, .. } => {
+                stats.frames_non_health += 1;
+                if let Some(status) = status {
+                    status.suppressed(*reason, clock);
+                }
+            }
+            Message::StateTransitionEvent { .. }
             | Message::SurfaceReleased { .. }
             | Message::CaptureStart { .. }
             | Message::CaptureStop => {

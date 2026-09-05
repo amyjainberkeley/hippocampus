@@ -79,7 +79,8 @@ pub struct ContextEvidence {
 }
 
 impl ContextEvidence {
-    /// Convert one canonical event row into packet evidence.
+    /// Convert one canonical event row into packet evidence. Acquisition stays
+    /// unknown until the caller attaches the store's recorded event source.
     #[must_use]
     pub fn from_event(
         event: &Event,
@@ -95,7 +96,7 @@ impl ContextEvidence {
             excerpt: event.text.clone(),
             priority,
             relevance_score,
-            source_kind: "screen_ocr".into(),
+            source_kind: "unknown".into(),
         }
     }
 }

@@ -134,6 +134,8 @@ pub use sqlcipher_brain_store::{
     SqlCipherBrainStore,
 };
 
+pub mod event_source;
+pub use event_source::{CaptureStorageStats, EventSource};
 pub mod integrity_scheduler;
 pub use integrity_scheduler::{
     IntegrityScheduler, SchedulerClock, SchedulerHandle, SystemSchedulerClock,
@@ -576,6 +578,17 @@ pub trait BrainStore: Send + Sync {
     /// structurally (it's an IPC-seam-level invariant); production impls
     /// reject `event.cascade_reason != 0` as a defence-in-depth tripwire.
     fn put_event(&self, event: &Event) -> Result<EventId, StoreError>;
+
+    /// Insert with producer-asserted provenance. Legacy implementations may
+    /// retain the event without provenance; they must report it as unknown.
+    /// The production store writes both records in one transaction.
+    fn put_event_with_source(
+        &self,
+        event: &Event,
+        _source: EventSource,
+    ) -> Result<EventId, StoreError> {
+        self.put_event(event)
+    }
 
     /// Fetch a single event by id. `Ok(None)` for unknown ids — a
     /// concurrent delete or a hit-set reference past a tombstone is not

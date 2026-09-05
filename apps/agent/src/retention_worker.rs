@@ -62,6 +62,20 @@ pub enum RetentionWorkerError {
 /// Errors while reading the user-owned retention policy.
 #[derive(Debug, thiserror::Error)]
 pub enum RetentionConfigError {
+    /// Older finite policies did not record explicit review of auto-deletion.
+    #[error("retention_review_required at {}: review and save retention in Settings before automatic deletion can resume", path.display())]
+    ReviewRequired {
+        /// Configuration requiring explicit user review.
+        path: PathBuf,
+    },
+    /// Do not execute a future policy format using today's semantics.
+    #[error("unsupported retention schema version {version} at {}", path.display())]
+    UnsupportedVersion {
+        /// Configuration using an unsupported version.
+        path: PathBuf,
+        /// Persisted version.
+        version: u64,
+    },
     /// The policy file exists but could not be read.
     #[error("could not read retention configuration at {}: {source}", path.display())]
     Read {
@@ -111,6 +125,7 @@ pub enum RetentionCycleError {
 
 #[derive(Deserialize)]
 struct PersistedRetention {
+    schema_version: Option<u64>,
     mode: String,
     days: Option<u64>,
 }
@@ -118,14 +133,15 @@ struct PersistedRetention {
 /// Parse `retention.json` into a [`RetentionConfig`].
 ///
 /// A missing file is the deliberate fresh-install default of
-/// [`RetentionConfig::Forever`]. Any existing but unreadable, malformed, or
+/// 90 days. Finite persisted policies require version 2, written after explicit
+/// review in Settings. Any existing but unreadable, malformed, or
 /// unsupported file is an error: the worker must not silently reinterpret a
 /// user's finite retention policy as `forever`.
 pub fn load_retention_config(path: &Path) -> Result<RetentionConfig, RetentionConfigError> {
     let data = match std::fs::read(path) {
         Ok(data) => data,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(RetentionConfig::Forever);
+            return Ok(RetentionConfig::Days(90));
         }
         Err(source) => {
             return Err(RetentionConfigError::Read {
@@ -139,8 +155,17 @@ pub fn load_retention_config(path: &Path) -> Result<RetentionConfig, RetentionCo
             path: path.to_path_buf(),
             source,
         })?;
-    match parsed.mode.as_str() {
+    if let Some(version) = parsed.schema_version {
+        if version != 1 && version != 2 {
+            return Err(RetentionConfigError::UnsupportedVersion {
+                path: path.to_path_buf(),
+                version,
+            });
+        }
+    }
+    let config = match parsed.mode.as_str() {
         "forever" => Ok(RetentionConfig::Forever),
+        "ninetyDays" => Ok(RetentionConfig::Days(90)),
         "thirtyDays" => Ok(RetentionConfig::Days(30)),
         "sevenDays" => Ok(RetentionConfig::Days(7)),
         "custom" => match parsed.days {
@@ -154,7 +179,13 @@ pub fn load_retention_config(path: &Path) -> Result<RetentionConfig, RetentionCo
             path: path.to_path_buf(),
             mode: parsed.mode,
         }),
+    }?;
+    if matches!(config, RetentionConfig::Days(_)) && parsed.schema_version != Some(2) {
+        return Err(RetentionConfigError::ReviewRequired {
+            path: path.to_path_buf(),
+        });
     }
+    Ok(config)
 }
 
 fn now_us() -> u64 {
@@ -191,7 +222,19 @@ pub async fn run_retention_worker(
     store: Arc<SqlCipherBrainStore>,
     retention_json_path: PathBuf,
     check_interval: std::time::Duration,
+    shutdown: watch::Receiver<bool>,
+) -> Result<RetentionWorkerStats, RetentionWorkerError> {
+    run_retention_worker_with_status(store, retention_json_path, check_interval, shutdown, None)
+        .await
+}
+
+/// Run retention maintenance and refresh the UI's retained storage counts.
+pub async fn run_retention_worker_with_status(
+    store: Arc<SqlCipherBrainStore>,
+    retention_json_path: PathBuf,
+    check_interval: std::time::Duration,
     mut shutdown: watch::Receiver<bool>,
+    status: Option<Arc<crate::capture_status::CaptureStatusWriter>>,
 ) -> Result<RetentionWorkerStats, RetentionWorkerError> {
     let mut stats = RetentionWorkerStats {
         cycles_run: 0,
@@ -221,6 +264,9 @@ pub async fn run_retention_worker(
             .await
             .map_err(|e| RetentionWorkerError::Fatal(e.to_string()))?;
 
+        if let Some(status) = &status {
+            status.refresh(&crate::wall_clock::SystemWallClock);
+        }
         match result {
             Ok((ps, blobs)) => {
                 stats.cycles_run += 1;
@@ -292,7 +338,7 @@ mod tests {
         let path = dir.path().join("retention.json");
         std::fs::write(
             &path,
-            r#"{"mode":"thirtyDays","days":null,"updated_at":"2026-05-21T00:00:00Z"}"#,
+            r#"{"schema_version":2,"mode":"thirtyDays","days":null,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
         assert_eq!(
@@ -307,7 +353,7 @@ mod tests {
         let path = dir.path().join("retention.json");
         std::fs::write(
             &path,
-            r#"{"mode":"sevenDays","days":null,"updated_at":"2026-05-21T00:00:00Z"}"#,
+            r#"{"schema_version":2,"mode":"sevenDays","days":null,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
         assert_eq!(
@@ -322,7 +368,7 @@ mod tests {
         let path = dir.path().join("retention.json");
         std::fs::write(
             &path,
-            r#"{"mode":"custom","days":14,"updated_at":"2026-05-21T00:00:00Z"}"#,
+            r#"{"schema_version":2,"mode":"custom","days":14,"updated_at":"2026-05-21T00:00:00Z"}"#,
         )
         .unwrap();
         assert_eq!(
@@ -365,12 +411,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_defaults_forever() {
+    fn missing_file_defaults_ninety_days() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nonexistent.json");
         assert_eq!(
             load_retention_config(&path).expect("missing config uses fresh-install default"),
-            RetentionConfig::Forever
+            RetentionConfig::Days(90)
         );
     }
 

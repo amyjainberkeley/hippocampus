@@ -18,8 +18,12 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use crate::capture_status::CaptureStatus;
+use crate::wall_clock::parse_unix_ms;
 use mci_brain::{BrainStats, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
+
+const RECEIPT_FRESHNESS_MS: u64 = 120_000;
 
 /// How a single check came out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,38 +85,36 @@ fn tail_of(path: &Path, max_bytes: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&data[start..]).into_owned())
 }
 
-/// Did `ScreenCaptureKit` report a TCC refusal in the helper log?
+/// Historical logs cannot establish current Screen Recording permission.
 fn check_screen_recording(log: Option<&str>) -> Check {
     let Some(text) = log else {
         return Check::new(
             "screen recording",
             Status::Warn,
-            "no helper log yet, so capture has not been attempted",
+            "no fresh capture receipt; current Screen Recording status is unknown",
             "Launch the app once, then re-run doctor.",
         );
     };
     if text.contains("user declined TCC") || text.contains("declined TCC") {
         return Check::new(
             "screen recording",
-            Status::Fail,
-            "the helper log shows ScreenCaptureKit was declined",
-            "macOS remembers a refusal and will not ask again. Grant it by hand:\n      \
-             System Settings > Privacy & Security > Screen & System Audio Recording\n      \
-             enable Hippocampus, then quit and relaunch the app.",
+            Status::Warn,
+            "historical helper log contains a ScreenCaptureKit refusal; current permission is unknown",
+            "Launch Hippocampus and re-run doctor for a fresh capture receipt.",
         );
     }
     if text.contains("first sample received") {
         return Check::new(
             "screen recording",
-            Status::Pass,
-            "the helper has received frames from ScreenCaptureKit",
-            "",
+            Status::Warn,
+            "historical helper log records frames; current capture status is unknown",
+            "Launch Hippocampus and re-run doctor for a fresh capture receipt.",
         );
     }
     Check::new(
         "screen recording",
         Status::Warn,
-        "no frames and no refusal in the log",
+        "no fresh capture receipt; current Screen Recording status is unknown",
         "Launch the app and use it for a minute, then re-run doctor.",
     )
 }
@@ -122,18 +124,78 @@ fn check_helper_key(log: Option<&str>) -> Check {
     match log {
         Some(t) if t.contains("database key unavailable from Keychain") => Check::new(
             "helper db key",
-            Status::Fail,
-            "the helper could not resolve its Keychain reference",
-            "Capture fails closed until the bundled helper has access to the \
-             Hippocampus database-key item.",
+            Status::Warn,
+            "historical helper log contains a Keychain error; current key access is unknown",
+            "Launch Hippocampus and re-run doctor for current capture status.",
         ),
         _ => Check::new(
             "helper db key",
-            Status::Pass,
-            "no key complaint in the log",
+            Status::Warn,
+            "current helper key access is unknown without a fresh capture receipt",
             "",
         ),
     }
+}
+
+fn fresh_capture_checks(receipt: &CaptureStatus, now_ms: u64) -> Option<Vec<Check>> {
+    let updated = parse_unix_ms(&receipt.updated_at)?;
+    if receipt.schema_version != 1 || updated > now_ms || now_ms - updated > RECEIPT_FRESHNESS_MS {
+        return None;
+    }
+    let recent_frame = receipt
+        .last_stored_frame_at
+        .as_deref()
+        .and_then(parse_unix_ms)
+        .is_some_and(|ts| ts <= updated && now_ms.saturating_sub(ts) <= RECEIPT_FRESHNESS_MS);
+    let runtime = if let Some(reason) = &receipt.blocked_reason {
+        Check::new(
+            "capture runtime",
+            if reason == "capture_disabled" {
+                Status::Warn
+            } else {
+                Status::Fail
+            },
+            format!("fresh agent receipt reports {reason}"),
+            "Review capture status in Hippocampus.",
+        )
+    } else if let Some(reason) = &receipt.suppression_reason {
+        Check::new(
+            "capture runtime",
+            Status::Warn,
+            format!("fresh helper receipt reports suppression: {reason}"),
+            "",
+        )
+    } else if recent_frame && receipt.stored_frame_count > 0 {
+        Check::new(
+            "capture runtime",
+            Status::Pass,
+            "a screen frame was committed within the last two minutes",
+            "",
+        )
+    } else {
+        Check::new(
+            "capture runtime",
+            Status::Warn,
+            "agent receipt is fresh, but no recent saved screen frame is confirmed",
+            "Use an allowed app and check capture status in Hippocampus.",
+        )
+    };
+    Some(vec![
+        runtime,
+        Check::new(
+            "capture storage",
+            if receipt.stored_frame_count > 0 {
+                Status::Pass
+            } else {
+                Status::Warn
+            },
+            format!(
+                "{} retained screen events; {} retained screenshot references",
+                receipt.stored_frame_count, receipt.stored_screenshot_count
+            ),
+            "",
+        ),
+    ])
 }
 
 /// Is there an embedder model, and therefore semantic recall?
@@ -172,7 +234,7 @@ fn check_events(stats: &BrainStats) -> Check {
             "events",
             Status::Fail,
             "0 events",
-            "Nothing has been captured. The checks above say why.",
+            "No events are retained. Review the current capture checks.",
         );
     }
     Check::new(
@@ -220,16 +282,31 @@ pub fn diagnose(db_path: &Path, key: &DbKey) -> Result<Vec<Check>, String> {
         .map_err(|e| format!("open brain at {}: {e}", db_path.display()))?;
     let stats = store.stats().map_err(|e| format!("read stats: {e}"))?;
 
-    let log = tail_of(&helper_log_path(), 256 * 1024);
-    let log_ref = log.as_deref();
-
-    Ok(vec![
-        check_events(&stats),
-        check_screen_recording(log_ref),
-        check_helper_key(log_ref),
-        check_embedder(),
-        check_enriched(&stats),
-    ])
+    let now_ms = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
+    let receipt = std::fs::read(db_path.with_file_name("capture-status.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<CaptureStatus>(&bytes).ok());
+    let mut checks = vec![check_events(&stats)];
+    checks.extend(
+        receipt
+            .as_ref()
+            .and_then(|value| fresh_capture_checks(value, now_ms))
+            .unwrap_or_else(|| {
+                let log = tail_of(&helper_log_path(), 256 * 1024);
+                vec![
+                    check_screen_recording(log.as_deref()),
+                    check_helper_key(log.as_deref()),
+                ]
+            }),
+    );
+    checks.extend([check_embedder(), check_enriched(&stats)]);
+    Ok(checks)
 }
 
 /// Render the checks as the report the CLI prints.
@@ -300,29 +377,62 @@ mod tests {
     }
 
     #[test]
-    fn declined_tcc_is_detected_and_explains_itself() {
+    fn historical_tcc_refusal_is_not_a_current_blocker() {
         let log = "mci-capture-helper: live capture start failed: Code=-3801 \
                    \"The user declined TCC\"";
         let c = check_screen_recording(Some(log));
-        assert_eq!(c.status, Status::Fail);
-        assert!(
-            c.fix.contains("Screen & System Audio Recording"),
-            "should name the exact settings pane"
-        );
+        assert_eq!(c.status, Status::Warn);
+        assert!(c.detail.contains("current permission is unknown"));
     }
 
     #[test]
-    fn frames_received_passes() {
+    fn historical_frames_do_not_prove_current_capture() {
         let c = check_screen_recording(Some("SCStream callback alive: first sample received."));
-        assert_eq!(c.status, Status::Pass);
+        assert_eq!(c.status, Status::Warn);
     }
 
     #[test]
-    fn missing_helper_key_blocks_capture() {
+    fn historical_missing_key_is_not_a_current_blocker() {
         let c = check_helper_key(Some(
             "mci-capture-helper: database key unavailable from Keychain",
         ));
-        assert_eq!(c.status, Status::Fail);
+        assert_eq!(c.status, Status::Warn);
+    }
+
+    #[test]
+    fn receipt_freshness_and_frame_time_are_independent() {
+        let now = parse_unix_ms("2026-09-05T12:00:30.000Z").unwrap();
+        let mut receipt = CaptureStatus {
+            schema_version: 1,
+            updated_at: "2026-09-05T12:00:00.000Z".into(),
+            last_stored_frame_at: Some("2026-09-05T11:59:59.000Z".into()),
+            stored_frame_count: 4,
+            stored_screenshot_count: 2,
+            suppression_reason: None,
+            blocked_reason: None,
+        };
+        assert_eq!(
+            fresh_capture_checks(&receipt, now).unwrap()[0].status,
+            Status::Pass
+        );
+        receipt.last_stored_frame_at = Some("2026-09-01T11:59:59.000Z".into());
+        assert_eq!(
+            fresh_capture_checks(&receipt, now).unwrap()[0].status,
+            Status::Warn
+        );
+        assert!(fresh_capture_checks(&receipt, now + RECEIPT_FRESHNESS_MS).is_none());
+        assert!(fresh_capture_checks(&receipt, now - 60_000).is_none());
+        receipt.schema_version = 2;
+        assert!(fresh_capture_checks(&receipt, now).is_none());
+    }
+
+    #[test]
+    fn receipt_timestamp_parser_rejects_invalid_dates() {
+        assert!(parse_unix_ms("2026-02-30T12:00:00.000Z").is_none());
+        assert!(parse_unix_ms("2026-09-05T25:00:00.000Z").is_none());
+        assert!(parse_unix_ms("2026-09-05T12:00:00.000X").is_none());
+        assert_eq!(parse_unix_ms("1970-01-01T00:00:00.000Z"), Some(0));
+        assert!(parse_unix_ms("2024-02-29T12:00:00.123Z").is_some());
     }
 
     #[test]

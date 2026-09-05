@@ -128,7 +128,7 @@ fn new_creates_encrypted_db_and_runs_migration() {
     // V2-P3 migration 0004 adds the graph, V2-P6 migration 0005 adds
     // entity identities, and Task 5 migration 0006 adds governed memory.
     // Briefs retain their separate version key.
-    assert_eq!(v, "8");
+    assert_eq!(v, "9");
 }
 
 // ---------------------------------------------------------------------------

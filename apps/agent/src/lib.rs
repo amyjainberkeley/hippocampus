@@ -23,6 +23,7 @@ pub mod bench_longmemeval;
 pub mod brain_cli;
 pub mod brain_ingest;
 pub mod brief_worker;
+pub mod capture_status;
 /// Reusable environment scrubbing for agent-owned child processes.
 pub mod child_command_environment;
 /// Atomic, reference-only registration with supported local AI clients.

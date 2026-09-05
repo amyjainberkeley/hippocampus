@@ -233,7 +233,7 @@ pub fn import_sessions(
                     tab_id: None,
                 };
                 store
-                    .put_event(&event)
+                    .put_event_with_source(&event, mci_brain::EventSource::TranscriptImport)
                     .map_err(|e| ImportError::Store(e.to_string()))?;
                 stats.events_written += 1;
             }

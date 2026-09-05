@@ -78,6 +78,30 @@ pub fn format_unix_ms(unix_ms: u128) -> String {
     format!("{year:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}.{ms:03}Z")
 }
 
+/// Parse the canonical UTC millisecond format emitted by this module.
+/// Rejects invalid dates and alternate formats instead of guessing freshness.
+#[must_use]
+pub fn parse_unix_ms(value: &str) -> Option<u64> {
+    if value.len() != 24 || !value.is_ascii() {
+        return None;
+    }
+    let num = |start, end| value.get(start..end)?.parse::<i64>().ok();
+    let (year, month, day) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
+    if !(1970..=9999).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = adjusted_year / 400;
+    let yoe = adjusted_year - era * 400;
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    let ms = ((days * 86_400 + num(11, 13)? * 3600 + num(14, 16)? * 60 + num(17, 19)?) * 1000)
+        + num(20, 23)?;
+    let ms = u64::try_from(ms).ok()?;
+    (format_unix_ms(u128::from(ms)) == value).then_some(ms)
+}
+
 /// Test support helpers — gated on `cfg(test)` so production builds
 /// don't pull them in.
 #[cfg(test)]

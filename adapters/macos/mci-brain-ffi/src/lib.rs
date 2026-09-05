@@ -111,6 +111,9 @@ pub struct HitJson {
     /// `"hybrid-conflict"`, or `"semantic-related"` according to the
     /// retriever's evidence and degradation state.
     pub source: String,
+    /// Acquisition provenance, independent of retrieval `source`.
+    #[serde(default = "unknown_source_kind")]
+    pub source_kind: String,
     /// Fused score in `[0.0, 1.0]` (P3.7 hybrid) or BM25-derived
     /// monotone-with-relevance lexical score. `None` for plain timeline
     /// rows where no query was issued.
@@ -290,6 +293,9 @@ pub struct TimelineQueryJson {
 /// pulled via `mci_brain_ffi_events_by_ids` when the user clicks a card.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimelineEventJson {
+    /// Acquisition provenance; old rows without producer evidence are unknown.
+    #[serde(default = "unknown_source_kind")]
+    pub source_kind: String,
     /// Brain `events.id` rowid.
     pub event_id: u64,
     /// `events.ts_us` — microseconds since UNIX epoch.
@@ -766,6 +772,19 @@ fn materialize_retrieval_matches(
     Ok(hits)
 }
 
+fn unknown_source_kind() -> String {
+    "unknown".into()
+}
+
+fn acquisition_source(handle: &Handle, id: EventId) -> String {
+    handle
+        .store
+        .event_source(id)
+        .unwrap_or_default()
+        .as_str()
+        .into()
+}
+
 fn hit_json(
     handle: &Handle,
     event_id: EventId,
@@ -776,6 +795,7 @@ fn hit_json(
     let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
     let thumbnail_path = thumbnail_path_for(&handle.blob_dir, event.keyframe_blob.as_deref());
     HitJson {
+        source_kind: acquisition_source(handle, event_id),
         event_id: event_id.0,
         ts_us: event.ts_us,
         app_bundle_id: event.app_bundle_id,
@@ -822,6 +842,7 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
             let (entities, linked_event_ids) = enrich_hit(&handle.store, ev.id);
             let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             HitJson {
+                source_kind: acquisition_source(handle, ev.id),
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
                 app_bundle_id: ev.app_bundle_id,
@@ -917,6 +938,7 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
                 let thumbnail_path =
                     thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
                 out.push(HitJson {
+                    source_kind: acquisition_source(handle, EventId(id)),
                     event_id: id,
                     ts_us: ev.ts_us,
                     app_bundle_id: ev.app_bundle_id,
@@ -953,17 +975,17 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
 /// 1. Rejects windows longer than [`TIMELINE_MAX_RANGE_US`] (90 days) so
 ///    a hostile caller cannot force a full-corpus scan.
 /// 2. Rejects `start_ts_us > end_ts_us`.
-/// 3. Fetches the most-recent events (up to [`TIMELINE_HARD_CAP`]) and
-///    filters to the `[start_ts_us, end_ts_us]` window.
+/// 3. Filters to the `[start_ts_us, end_ts_us]` window in SQL, then
+///    fetches the most-recent events up to [`TIMELINE_HARD_CAP`].
 /// 4. Downsamples: if the filtered count exceeds [`TIMELINE_MAX_EVENTS`],
 ///    the result is bucketized (one representative per bucket) — bucket
 ///    width is 1 minute when the range ≤ 24 h, otherwise the ceil-divide
 ///    of (range / max-events) rounded up to the next minute.
 /// 5. Returns rows sorted by `ts_us` ASCENDING (left-to-right timeline).
 ///
-/// Read-only by construction: uses `handle.store.recent_events` (the
-/// same read-only entry point powering the flat timeline list) then
-/// filters in Rust. No writer connection is opened.
+/// Read-only by construction: uses `handle.store.events_in_range` (the
+/// same read-only entry point powering the flat timeline list).
+/// No writer connection is opened.
 ///
 /// # Safety
 ///
@@ -1012,24 +1034,23 @@ pub unsafe extern "C" fn mci_brain_ffi_timeline_events(
         return ptr::null_mut();
     }
 
-    // Fetch the most-recent slice up to the hard cap, then filter to the
-    // requested window. For a scaffold the O(N) filter is fine — the hard
-    // cap is 10_000 rows. A follow-on cycle may push the range predicate
-    // down to SQL via a store-side `events_in_range` (would require
-    // protected-set sign-off on `sqlcipher_brain_store.rs`).
-    let events = match handle.store.recent_events(TIMELINE_HARD_CAP) {
-        Ok(v) => v,
-        Err(e) => {
-            set_last_error(&format!("mci_brain_ffi_timeline_events: {e}"));
-            return ptr::null_mut();
-        }
-    };
+    let events =
+        match handle
+            .store
+            .events_in_range(query.start_ts_us, query.end_ts_us, TIMELINE_HARD_CAP)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                set_last_error(&format!("mci_brain_ffi_timeline_events: {e}"));
+                return ptr::null_mut();
+            }
+        };
     let mut filtered: Vec<TimelineEventJson> = events
         .into_iter()
-        .filter(|ev| ev.ts_us >= query.start_ts_us && ev.ts_us <= query.end_ts_us)
         .map(|ev| {
             let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             TimelineEventJson {
+                source_kind: acquisition_source(handle, ev.id),
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
                 app_bundle_id: ev.app_bundle_id,
@@ -1683,8 +1704,8 @@ pub const EVENTS_BY_IDS_CAP: usize = 32;
 /// hostile / mis-scoped request and rejected at the FFI boundary.
 pub const TIMELINE_MAX_RANGE_US: u64 = 90 * 24 * 60 * 60 * 1_000_000;
 
-/// **V2-P13.** Hard cap on rows fetched from `recent_events` before
-/// filtering to the window. Bounds the per-call allocation regardless of
+/// **V2-P13.** Hard cap on rows fetched from the requested date range before
+/// downsampling. Bounds the per-call allocation regardless of
 /// how many events exist in the requested window. `10_000` events × ~200
 /// bytes/row ≈ 2 MB — well inside the FFI's memory budget.
 pub const TIMELINE_HARD_CAP: usize = 10_000;
@@ -2393,6 +2414,7 @@ mod tests {
     #[test]
     fn hit_json_serde_round_trip() {
         let h = HitJson {
+            source_kind: "unknown".into(),
             event_id: 42,
             ts_us: 1_700_000_000_000_000,
             app_bundle_id: Some("com.apple.Safari".into()),
@@ -2419,6 +2441,7 @@ mod tests {
         // cleanly — this is the common case for the near-term corpus
         // where most hits are page-content ingest.
         let h = HitJson {
+            source_kind: "unknown".into(),
             event_id: 7,
             ts_us: 1_700_000_000_000_000,
             app_bundle_id: Some("com.apple.mail".into()),
@@ -2511,6 +2534,7 @@ mod tests {
         // the Swift `HitWire` decoder can rely on them being present when a
         // fresh Rust FFI writes the payload. This locks the wire shape.
         let h = HitJson {
+            source_kind: "unknown".into(),
             event_id: 1,
             ts_us: 0,
             app_bundle_id: None,
@@ -2913,6 +2937,7 @@ mod tests {
 
     fn mk_te(ts_us: u64, event_id: u64) -> TimelineEventJson {
         TimelineEventJson {
+            source_kind: "unknown".into(),
             event_id,
             ts_us,
             app_bundle_id: Some("com.apple.Safari".into()),

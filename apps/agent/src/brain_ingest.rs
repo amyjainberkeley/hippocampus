@@ -388,24 +388,28 @@ impl BrainPump {
     ///
     /// Both sources are already §6-secret-filtered independently
     /// (OCR by helper cascade-twice, extension by native-host filter).
-    fn maybe_merge_page_content(&self, url: Option<&str>, ocr_text: &str) -> String {
+    fn maybe_merge_page_content(
+        &self,
+        url: Option<&str>,
+        ocr_text: &str,
+    ) -> (String, mci_brain::EventSource) {
         let Some(cache) = &self.page_cache else {
-            return ocr_text.to_owned();
+            return (ocr_text.to_owned(), mci_brain::EventSource::ScreenOcr);
         };
         let Some(url) = url else {
-            return ocr_text.to_owned();
+            return (ocr_text.to_owned(), mci_brain::EventSource::ScreenOcr);
         };
         if url.is_empty() {
-            return ocr_text.to_owned();
+            return (ocr_text.to_owned(), mci_brain::EventSource::ScreenOcr);
         }
         match cache.get(url) {
             Some(cached) if !cached.text.is_empty() => {
                 let mut merged = cached.text;
                 merged.push_str(VISIBLE_OCR_SEPARATOR);
                 merged.push_str(ocr_text);
-                merged
+                (merged, mci_brain::EventSource::BrowserPageWithOcr)
             }
-            _ => ocr_text.to_owned(),
+            _ => (ocr_text.to_owned(), mci_brain::EventSource::ScreenOcr),
         }
     }
 }
@@ -413,7 +417,7 @@ impl BrainPump {
 impl BrainIngestor for BrainPump {
     #[allow(clippy::too_many_lines)]
     fn ingest_ocr_event(&self, msg: &Message) -> Result<IngestOutcome, IngestError> {
-        let (ts_us, app, title, u, text, keyframe_blob, tab_id) = match msg {
+        let (ts_us, app, title, u, text, keyframe_blob, tab_id, source) = match msg {
             Message::OCREvent {
                 seq: _,
                 ts_us,
@@ -439,10 +443,10 @@ impl BrainIngestor for BrainPump {
                 } else {
                     Some(hex_lower(keyframe_hash))
                 };
-                let merged = self.maybe_merge_page_content(u.as_deref(), ocr_text);
+                let (merged, source) = self.maybe_merge_page_content(u.as_deref(), ocr_text);
                 // OCREvent carries no per-tab signal — the helper
                 // does not observe browser-internal tab state.
-                (ts_us, app, title, u, merged, kb, None)
+                (ts_us, app, title, u, merged, kb, None, source)
             }
             Message::PageContentEvent {
                 seq: _,
@@ -472,7 +476,16 @@ impl BrainIngestor for BrainPump {
                 // — distinct from a real tab id of 0 (which
                 // browsers do not assign in practice).
                 let resolved_tab = if *tab_id == 0 { None } else { Some(*tab_id) };
-                (ts_us, app, t, u, full_text.clone(), None, resolved_tab)
+                (
+                    ts_us,
+                    app,
+                    t,
+                    u,
+                    full_text.clone(),
+                    None,
+                    resolved_tab,
+                    mci_brain::EventSource::BrowserPage,
+                )
             }
             _ => return Ok(IngestOutcome::NotOcrEvent),
         };
@@ -518,7 +531,7 @@ impl BrainIngestor for BrainPump {
         };
 
         let embedded = embedding.is_some();
-        let id = self.store.put_event(&event)?;
+        let id = self.store.put_event_with_source(&event, source)?;
         self.counter.fetch_add(1, Ordering::Relaxed);
 
         // V2-P4 — synchronous Allow-arm dispatch.

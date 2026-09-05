@@ -1302,7 +1302,7 @@ fn migration_upgrades_and_reopens_every_prior_brain_schema() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(schema, "8", "upgrade from schema {version}");
+        assert_eq!(schema, "9", "upgrade from schema {version}");
         for table in [
             "memory_deltas",
             "memory_evidence",
@@ -1390,7 +1390,7 @@ fn assert_populated_historical_memory_migration(version: u8, expected_retraction
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "8");
+    assert_eq!(version, "9");
     for (table, expected) in [
         ("memory_deltas", 2_i64),
         ("memory_evidence", 2),

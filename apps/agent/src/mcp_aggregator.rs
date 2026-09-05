@@ -559,7 +559,10 @@ impl McpAggregator {
                 if body.len() <= self.materialize_max_bytes {
                     let event =
                         Self::materialize_event(server_name, resource, &body, &revision, ts_us);
-                    match self.store.put_event(&event) {
+                    match self
+                        .store
+                        .put_event_with_source(&event, mci_brain::EventSource::McpResource)
+                    {
                         Ok(id) => {
                             self.stats
                                 .resources_materialized
@@ -666,7 +669,10 @@ impl McpAggregator {
     /// Encapsulated so both the "body too large" and "read errored"
     /// branches share the same code path.
     fn persist_catalog_event(&self, server_name: &str, event: &Event) -> bool {
-        match self.store.put_event(event) {
+        match self
+            .store
+            .put_event_with_source(event, mci_brain::EventSource::McpResource)
+        {
             Ok(_id) => {
                 self.stats
                     .resources_catalog_only

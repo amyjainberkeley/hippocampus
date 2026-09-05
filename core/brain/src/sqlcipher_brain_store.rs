@@ -54,9 +54,10 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension};
 
 use crate::{
-    BlobReconciliationStats, BrainStats, ConsolidationWatermark, Event, EventId, EventRecord,
-    ExpansionBudget, IdentityMentionSite, MemoryClaim, MemoryClaimId, MemoryDelta, MemoryExpansion,
-    MemoryRetraction, ResolutionWatermark, StoreError, TimeRange,
+    BlobReconciliationStats, BrainStats, CaptureStorageStats, ConsolidationWatermark, Event,
+    EventId, EventRecord, EventSource, ExpansionBudget, IdentityMentionSite, MemoryClaim,
+    MemoryClaimId, MemoryDelta, MemoryExpansion, MemoryRetraction, ResolutionWatermark, StoreError,
+    TimeRange,
 };
 
 /// Phase 3 production `BrainStore`.
@@ -128,6 +129,56 @@ impl DeletionOutcome {
 }
 
 impl SqlCipherBrainStore {
+    /// Acquisition provenance. Old read-only stores and unattributed rows
+    /// return unknown; neither application names nor content prove origin.
+    pub fn event_source(&self, id: EventId) -> Result<EventSource, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let conn = guard.conn();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_sources')",
+            [], |row| row.get(0),
+        ).map_err(|e| StoreError::Backend(format!("probe event sources: {e}")))?;
+        if !exists {
+            return Ok(EventSource::Unknown);
+        }
+        let source: Option<String> = conn
+            .query_row(
+                "SELECT source_kind FROM event_sources WHERE event_id=?1",
+                [i64::try_from(id.0).map_err(|e| StoreError::InvalidInput(e.to_string()))?],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| StoreError::Backend(format!("read event source: {e}")))?;
+        Ok(source
+            .as_deref()
+            .map_or(EventSource::Unknown, EventSource::from_stored))
+    }
+
+    /// Content-free retained counts. Unattributed legacy rows are not counted
+    /// as screen events. Screenshot count denotes database refs, not files.
+    pub fn capture_storage_stats(&self) -> Result<CaptureStorageStats, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .query_row(
+                "SELECT COUNT(*), MAX(e.ts_us),
+                (SELECT COUNT(*) FROM events WHERE keyframe_blob IS NOT NULL)
+             FROM event_sources s JOIN events e ON e.id=s.event_id
+             WHERE s.source_kind IN ('screen_ocr','browser_page_with_ocr')",
+                [],
+                |row| {
+                    Ok(CaptureStorageStats {
+                        stored_frame_count: u64::try_from(row.get::<_, i64>(0)?).unwrap_or(0),
+                        last_stored_frame_ts_us: row
+                            .get::<_, Option<i64>>(1)?
+                            .and_then(|ts| u64::try_from(ts).ok()),
+                        stored_screenshot_count: u64::try_from(row.get::<_, i64>(2)?).unwrap_or(0),
+                    })
+                },
+            )
+            .map_err(|e| StoreError::Backend(format!("capture storage stats: {e}")))
+    }
+
     pub(crate) fn remove_unreferenced_keyframe_candidates(
         &self,
         candidates: &[String],
@@ -293,7 +344,23 @@ impl SqlCipherBrainStore {
     /// # Errors
     /// [`StoreError::Backend`] for any underlying `SQLite` failure.
     pub fn recent_events(&self, limit: usize) -> Result<Vec<Event>, StoreError> {
-        if limit == 0 {
+        self.events_in_range(0, u64::MAX, limit)
+    }
+
+    /// Read events in an inclusive time range, newest first. The date predicate
+    /// runs before the limit so newer days cannot hide an older day's rows.
+    pub fn events_in_range(
+        &self,
+        start_ts_us: u64,
+        end_ts_us: u64,
+        limit: usize,
+    ) -> Result<Vec<Event>, StoreError> {
+        if start_ts_us > end_ts_us {
+            return Err(StoreError::InvalidInput(
+                "start timestamp exceeds end timestamp".into(),
+            ));
+        }
+        if limit == 0 || start_ts_us > i64::MAX as u64 {
             return Ok(Vec::new());
         }
         let guard = self.db.lock().expect("brain store mutex poisoned");
@@ -304,13 +371,21 @@ impl SqlCipherBrainStore {
                         text, summary, entities, episode_id,
                         cascade_reason, keyframe_blob, tab_id
                  FROM events
-                 ORDER BY ts_us DESC
-                 LIMIT ?1",
+                 WHERE ts_us >= ?1 AND ts_us <= ?2
+                 ORDER BY ts_us DESC, id DESC
+                 LIMIT ?3",
             )
             .map_err(|e| StoreError::Backend(format!("prepare recent_events: {e}")))?;
         let lim = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = stmt
-            .query_map(params![lim], row_to_event_tuple)
+            .query_map(
+                params![
+                    i64::try_from(start_ts_us).unwrap_or(i64::MAX),
+                    i64::try_from(end_ts_us).unwrap_or(i64::MAX),
+                    lim
+                ],
+                row_to_event_tuple,
+            )
             .map_err(|e| StoreError::Backend(format!("query recent_events: {e}")))?;
         let mut out: Vec<Event> = Vec::new();
         for r in rows {
@@ -2190,11 +2265,13 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     }
     validate_memory_schema(&tx)
         .map_err(|error| StoreError::Backend(format!("validate migration 0008: {error}")))?;
+    tx.execute_batch(include_str!("../migrations/0009_event_sources.sql"))
+        .map_err(|error| StoreError::Backend(format!("apply migration 0009: {error}")))?;
     tx.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '8')",
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '9')",
         [],
     )
-    .map_err(|error| StoreError::Backend(format!("stamp migration 0008: {error}")))?;
+    .map_err(|error| StoreError::Backend(format!("stamp migration 0009: {error}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
     Ok(())
@@ -3088,6 +3165,14 @@ fn blob_to_embedding(blob: &[u8]) -> Option<Vec<f32>> {
 
 impl crate::BrainStore for SqlCipherBrainStore {
     fn put_event(&self, event: &Event) -> Result<EventId, StoreError> {
+        self.put_event_with_source(event, EventSource::Unknown)
+    }
+
+    fn put_event_with_source(
+        &self,
+        event: &Event,
+        source: EventSource,
+    ) -> Result<EventId, StoreError> {
         // ADR-0016 §4.3 defence-in-depth — `.suppress` events MUST NOT
         // reach the brain ingestor. The IPC seam enforces this
         // structurally upstream; this is the wall at the store boundary.
@@ -3145,6 +3230,12 @@ impl crate::BrainStore for SqlCipherBrainStore {
 
         let row_id = tx.last_insert_rowid();
         let id = EventId(u64::try_from(row_id).unwrap_or(0));
+
+        tx.execute(
+            "INSERT INTO event_sources(event_id, source_kind) VALUES (?1, ?2)",
+            params![row_id, source.as_str()],
+        )
+        .map_err(|e| StoreError::Backend(format!("INSERT event source: {e}")))?;
 
         if let Some(emb) = &event.embedding {
             let blob = embedding_to_blob(emb);

@@ -42,6 +42,7 @@ use mci_brain_ffi::HitJson;
 #[test]
 fn hit_json_round_trips_entities_and_linked_event_ids() {
     let h = HitJson {
+        source_kind: "transcript_import".into(),
         event_id: 42,
         ts_us: 1_700_000_000_000_000,
         app_bundle_id: Some("com.apple.Safari".into()),
@@ -57,6 +58,8 @@ fn hit_json_round_trips_entities_and_linked_event_ids() {
     let s = serde_json::to_string(&h).expect("serialize");
     let back: HitJson = serde_json::from_str(&s).expect("deserialize");
     assert_eq!(h, back, "HitJson serde round trip must be lossless");
+    assert_eq!(back.source_kind, "transcript_import");
+    assert_eq!(back.source, "hybrid");
     assert_eq!(back.entities.len(), 3);
     assert_eq!(back.linked_event_ids, vec![101, 202, 303, 404]);
     assert!(back
@@ -77,6 +80,7 @@ fn hit_json_round_trips_entities_and_linked_event_ids() {
 #[test]
 fn hit_json_wire_uses_snake_case_keys_for_new_fields() {
     let h = HitJson {
+        source_kind: "unknown".into(),
         event_id: 7,
         ts_us: 100,
         app_bundle_id: None,
@@ -133,6 +137,7 @@ fn hit_json_decodes_legacy_payload_without_entity_fields() {
 #[test]
 fn hit_json_empty_entity_vecs_still_emit_the_keys() {
     let h = HitJson {
+        source_kind: "unknown".into(),
         event_id: 0,
         ts_us: 0,
         app_bundle_id: None,

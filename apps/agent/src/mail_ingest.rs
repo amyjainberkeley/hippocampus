@@ -265,7 +265,9 @@ impl MailIngestPump {
             tab_id: None,
             embedding,
         };
-        let id = self.store.put_event(&event)?;
+        let id = self
+            .store
+            .put_event_with_source(&event, mci_brain::EventSource::StructuredApp)?;
         self.counter.allowed.fetch_add(1, Ordering::Relaxed);
         Ok(MailIngestOutcome::Stored { id, embedded })
     }
@@ -302,7 +304,9 @@ impl MailIngestPump {
             tab_id: None,
             embedding: None,
         };
-        let id = self.store.put_event(&event)?;
+        let id = self
+            .store
+            .put_event_with_source(&event, mci_brain::EventSource::StructuredApp)?;
         self.counter.header_only.fetch_add(1, Ordering::Relaxed);
         Ok(MailIngestOutcome::HeaderOnlyStored {
             id,
