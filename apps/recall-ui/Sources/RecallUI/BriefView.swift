@@ -40,8 +40,8 @@ struct BriefView: View {
         switch viewModel.scene {
         case .captureCoverageUnknown:
             captureCoverageUnknownView
-        case .awaitingFirstFullDay(let hoursSoFar):
-            awaitingFirstFullDayView(hoursSoFar: hoursSoFar)
+        case .awaitingFirstFullDay:
+            captureCoverageUnknownView
         case .loading:
             ShimmerLoadingView(isLoading: true)
         case .brief(let brief):
@@ -57,25 +57,9 @@ struct BriefView: View {
 
     private var captureCoverageUnknownView: some View {
         ContentUnavailableView(
-            "Capture coverage is unknown",
-            systemImage: "questionmark.circle",
-            description: Text("Recall does not currently receive full-day coverage data.")
-        )
-        .foregroundStyle(Color.brandFgSecondary)
-        .padding(24)
-    }
-
-    private func awaitingFirstFullDayView(hoursSoFar: Double?) -> some View {
-        let hoursLabel: String = {
-            guard let h = hoursSoFar, h >= 0 else {
-                return "Measured coverage is below one full day."
-            }
-            return String(format: "Recorded capture time: %.1f hours.", h)
-        }()
-        return ContentUnavailableView(
-            "First brief generates after your first full day",
-            systemImage: "clock.badge",
-            description: Text(hoursLabel)
+            "No saved brief yet",
+            systemImage: "doc.text",
+            description: Text("Today's draft will appear after useful memories have been saved.")
         )
         .foregroundStyle(Color.brandFgSecondary)
         .padding(24)
