@@ -66,6 +66,7 @@ enum PreferencesStyle {
 enum PreferencesSection: String, CaseIterable, Identifiable {
     case general = "General"
     case capture = "Capture"
+    case sources = "Sources"
     case privacy = "Privacy"
     case advanced = "Advanced"
     case about = "About"
@@ -77,6 +78,7 @@ enum PreferencesSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .capture: return "camera.viewfinder"
+        case .sources: return "point.3.connected.trianglepath.dotted"
         case .privacy: return "hand.raised"
         case .advanced: return "slider.horizontal.3"
         case .about: return "info.circle"
@@ -117,6 +119,7 @@ struct PreferencesRootView: View {
         switch section {
         case .general: generalSection
         case .capture: captureSection
+        case .sources: SessionContextPreferencesView(supervisor: supervisor)
         case .privacy: privacySection
         case .advanced: advancedSection
         case .about: aboutSection

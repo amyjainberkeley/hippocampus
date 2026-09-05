@@ -277,7 +277,7 @@ struct StatusMenuView: View {
                 ).connectAll()
                 await MainActor.run {
                     mcpRegistering = false
-                    showAlert(title: "Connected", message: message)
+                    showAlert(title: "MCP Registration", message: message)
                 }
             } catch {
                 await MainActor.run {
