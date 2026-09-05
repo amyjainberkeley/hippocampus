@@ -386,7 +386,14 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         // writer. OCREngineInput is @unchecked Sendable; the pixel
         // buffer stays alive until the job completes (held by the
         // worker's Job struct + this captured reference).
-        let inputSnapshot = input
+        // A retained image contains the whole focused window, not just its
+        // dirty rectangle. Scan that same surface before the secret gate.
+        let inputSnapshot = keyframeRetainerSnapshot != nil && evidenceCandidate != nil
+            ? OCREngineInput(
+                pixelBuffer: input.pixelBuffer,
+                roi: CGRect(x: 0, y: 0, width: 1, height: 1)
+            )
+            : input
         await Self.submitOCRAttempt(
             worker: worker,
             completionCoordinator: completionCoordinator,

@@ -389,33 +389,17 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let initialIncludeListSize: UInt32
         if let store = focusedWindowStore {
             let initialSnapshot = store.currentSync()
-            // Runtime guard: the initial focused-window read may miss
-            // (no frontmost, login window, fast-user-switch transition,
-            // lock screen, no eligible window). Do NOT construct the
-            // multi-window filter with an empty include-set — that
-            // would throw `emptyIncludeSet` from the factory (correct
-            // fail-closed direction, but startup is not the right place
-            // to surface that as an error). Instead, log a helper_health
-            // stderr breadcrumb and fall back to the display filter so
-            // capture is never blocked; the background rebind task will
-            // pick up the first focused window observation and swap to
-            // the multi-window include-set. This satisfies the task's
-            // "graceful log-and-skip, not throw" discipline for the
-            // no-eligible-window case.
+            // Bind the window itself: choosing the first display can produce
+            // blank frames when focus is on another monitor. Until focus is
+            // observable, generation zero prevents fallback pixels reaching OCR.
             if let focused = initialSnapshot.focused,
-               let multiWindowFilter = try await SCContentFilterFactory.makeMultiWindowFilter(
-                   focusedWindowId: focused.windowId,
-                   // Seed-only include-set pending CEO §6.1 co-view
-                   // heuristic ratification. Redesign memo §6.1 alt A.
-                   coViewWindowIds: [],
+               let focusedFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
+                   windowId: focused.windowId,
                    denylist: denylist
                )
             {
-                filter = multiWindowFilter
+                filter = focusedFilter
                 initialFocusGeneration = initialSnapshot.generation
-                // Seed-only include-set ⇒ size 1. The factory's non-
-                // empty post-condition (redesign memo §1.1 + scaffold
-                // helper's precondition) guarantees ≥1.
                 initialIncludeListSize = 1
             } else {
                 // Runtime guard: no eligible window is observable at
@@ -425,8 +409,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 FileHandle.standardError.write(
                     ("mci-capture-helper: helper_health: no_eligible_window "
                      + "at startup — falling back to display filter; the "
-                     + "rebind task will swap to the multi-window include-"
-                     + "set once focus is observable.\n")
+                     + "rebind task will bind the focused window "
+                     + "once focus is observable.\n")
                         .data(using: .utf8) ?? Data()
                 )
                 filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
@@ -841,12 +825,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         snapshotGeneration: UInt64
     ) async throws {
         guard let lifecycleEpoch = currentActiveCaptureEpoch() else { return }
-        // V2-P1 third-lift (Phase 7 PR 13 wiring): the rebind path
-        // also uses the multi-window FORK 3 = B API form. Seed-only
-        // include-set pending CEO §6.1 co-view heuristic ratification.
-        guard let newFilter = try await SCContentFilterFactory.makeMultiWindowFilter(
-            focusedWindowId: focusedWindow.windowId,
-            coViewWindowIds: [],
+        guard let newFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
+            windowId: focusedWindow.windowId,
             denylist: denylist
         ) else {
             // Focused window was not in `SCShareableContent` (closed /
@@ -1042,9 +1022,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         if let store = focusedWindowStore {
             let initialSnapshot = store.currentSync()
             if let focused = initialSnapshot.focused,
-               let focusedFilter = try await SCContentFilterFactory.makeMultiWindowFilter(
-                   focusedWindowId: focused.windowId,
-                   coViewWindowIds: [],
+               let focusedFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
+                   windowId: focused.windowId,
                    denylist: denylist
                )
             {

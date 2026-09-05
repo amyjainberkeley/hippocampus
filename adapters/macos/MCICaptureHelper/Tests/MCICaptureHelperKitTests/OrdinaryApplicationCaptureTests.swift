@@ -62,4 +62,11 @@ final class OrdinaryApplicationCaptureTests: XCTestCase {
         }
         XCTAssertEqual(cascade().decide(context: WorkflowContext(appBundleId: "ai.hippocampus.CaptureOverlapCorpus")), .allow)
     }
+
+    func testSystemPermissionDialogsNeverBecomeMemory() {
+        for bundle in ["com.apple.UserNotificationCenter", "com.apple.SecurityAgent"] {
+            XCTAssertEqual(cascade().decide(context: WorkflowContext(appBundleId: bundle)),
+                           .suppress(reason: .denylistSource))
+        }
+    }
 }

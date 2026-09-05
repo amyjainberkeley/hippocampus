@@ -126,6 +126,18 @@ final class MainSwiftWiringTests: XCTestCase {
         return try String(contentsOf: mainSwiftURL, encoding: .utf8)
     }
 
+    func testProductionFocusBindingIsIndependentOfDisplayOrder() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "Sources/MCICaptureHelperKit/Capture/SCStreamCaptureSession.swift"
+        ), encoding: .utf8)
+        XCTAssertEqual(source.components(separatedBy: "SCContentFilterFactory.makeFocusedWindowFilter(").count - 1, 3,
+                       "Startup, focus rebind, and permission recovery must bind the actual window, on any display")
+        XCTAssertFalse(source.contains("SCContentFilterFactory.makeMultiWindowFilter("),
+                       "A first-display include list can return blank pixels for a window on another display")
+    }
+
     /// The wiring PR's mandatory grep-in-place assertion — pins the
     /// construction-graph shape at `main.swift`. Redesign memo §2.3 +
     /// §5.1 + [[project-v2p1-unit-tests-passed-but-never-wired]] make
