@@ -136,7 +136,7 @@ struct MemoryWorkspaceView: View {
                 Group {
                     switch selection {
                     case .now:
-                        DailyMemoryView(reader: reader)
+                        DailyMemoryView(reader: reader, onOpenPrivacy: { selection = .privacy })
                     case .search:
                         SearchView(
                             viewModel: SearchViewModel(reader: reader),

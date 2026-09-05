@@ -54,8 +54,63 @@ public struct CaptureHealthReceipt: Decodable, Equatable, Sendable {
 
     public var stateLabel: String {
         if blockedReason != nil { return "Capture blocked" }
+        if suppressionReason == "unchanged_screen" || suppressionReason == "deduplicated" {
+            return "Screen unchanged"
+        }
         if suppressionReason != nil { return "Capture withheld" }
         return storedFrameCount == 0 ? "No screen writes yet" : "Screen memory saved"
+    }
+
+    public func detailText(now: Date = Date()) -> String? {
+        guard let reason = blockedReason ?? suppressionReason else { return nil }
+        let detail = Self.reasonDetail(reason)
+        return isStale(now: now) ? "Last report: \(detail)" : detail
+    }
+
+    // Keep receipt codes content-free, including values from a newer agent.
+    private static func reasonDetail(_ code: String) -> String {
+        switch code {
+        case "app_denied", "denylist-source":
+            return "The source is excluded by a privacy rule."
+        case "denylist-postcapture":
+            return "Privacy exclusions changed during capture."
+        case "os-blacked-region":
+            return "macOS protected this screen content."
+        case "secure_input", "secure-event-input":
+            return "Secure keyboard input is active."
+        case "ax-secure-subrole":
+            return "A password field is focused."
+        case "ocr-time-secret":
+            return "Sensitive text was detected before saving."
+        case "failsafe-unknown":
+            return "The window could not be verified as safe to capture."
+        case "focus-race-dropped":
+            return "The focused window changed during capture."
+        case "private_browsing":
+            return "Private browsing is excluded from capture."
+        case "browser_window_unknown":
+            return "The browser window's privacy mode could not be verified."
+        case "app_identity_unknown":
+            return "The current app could not be identified."
+        case "screen_recording_permission":
+            return "Screen Recording permission is required."
+        case "accessibility_permission":
+            return "Accessibility permission is required to check screen content safely."
+        case "store_unavailable":
+            return "Saved memory is unavailable."
+        case "storage_error", "ingest_failed":
+            return "The captured screen could not be saved."
+        case "helper_disconnected":
+            return "The screen capture helper disconnected."
+        case "capture_failed":
+            return "Screen capture failed."
+        case "capture_disabled":
+            return "Screen capture is turned off."
+        case "unchanged_screen", "deduplicated":
+            return "No new screen content was saved."
+        default:
+            return "The capture service reported an unrecognized reason."
+        }
     }
 }
 

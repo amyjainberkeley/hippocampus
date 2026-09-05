@@ -4,6 +4,7 @@ import SwiftUI
 
 struct DailyMemoryView: View {
     let reader: BrainReader
+    let onOpenPrivacy: () -> Void
     @StateObject private var model: DailyMemoryViewModel
     @State private var selectedScreenshot: ScreenshotSelection?
     @State private var showsEpisodes = false
@@ -11,8 +12,9 @@ struct DailyMemoryView: View {
     @State private var exportError: String?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    init(reader: BrainReader) {
+    init(reader: BrainReader, onOpenPrivacy: @escaping () -> Void) {
         self.reader = reader
+        self.onOpenPrivacy = onOpenPrivacy
         _model = StateObject(wrappedValue: DailyMemoryViewModel(reader: reader))
     }
 
@@ -112,6 +114,11 @@ struct DailyMemoryView: View {
                       systemImage: receipt.isStale() || receipt.blockedReason != nil ? "exclamationmark.circle" : "display")
                     .font(.callout)
                     .foregroundStyle(receipt.isStale() || receipt.blockedReason != nil ? Color.brandWarning : Color.brandFgSecondary)
+                if let detail = receipt.detailText() {
+                    Text(detail)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(receipt.storedFrameCount) screen records / \(receipt.storedScreenshotCount) screenshots stored")
                     if let last = receipt.lastStoredFrameAt {
@@ -128,6 +135,9 @@ struct DailyMemoryView: View {
                 Text("Memory refreshed \(date.formatted(date: .omitted, time: .standard))")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Button("Privacy", systemImage: "hand.raised", action: onOpenPrivacy)
+                .buttonStyle(.borderless)
+                .help("Open Privacy")
         }
     }
 
@@ -148,8 +158,6 @@ struct DailyMemoryView: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }
-            Text("Available timeline samples. Observed spans join screenshots in the same app up to 10 minutes apart; they include unmeasured idle time. Dense days may be sampled.")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -163,6 +171,7 @@ struct DailyMemoryView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Divider()
             Text("Observed spans by app").font(.subheadline.weight(.medium))
+                .help("Observed spans join screenshots in the same app up to 10 minutes apart and include unmeasured idle time. They are not active-time measurements. Dense days may be sampled.")
             ForEach(apps, id: \.self) { app in
                 let episodes = groups[app, default: []]
                 HStack {
