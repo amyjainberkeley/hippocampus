@@ -3,6 +3,15 @@ import XCTest
 @testable import RecallUIKit
 
 final class WorkspacePreferencesTests: XCTestCase {
+    func testPreferencesButtonDoesNotUseAmbiguousBundleURLDispatch() throws {
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: package.appendingPathComponent(
+            "Sources/RecallUI/Settings/WorkspacePreferencesButton.swift"), encoding: .utf8)
+        XCTAssertFalse(source.contains("withApplicationAt:"))
+        XCTAssertTrue(source.contains("WorkspacePreferencesRouter.shared.open"))
+    }
+
     func testEveryDestinationUsesTheTypedPreferencesRoute() {
         XCTAssertEqual(WorkspacePreferencesDestination.allCases.map { $0.url.absoluteString }, [
             "hippocampus://preferences/general",

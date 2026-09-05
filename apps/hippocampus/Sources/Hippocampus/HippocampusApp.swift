@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let preferencesStore = PreferencesStore()
     let updater = SparkleUpdaterService()
     private var preferencesControllerConfigured = false
+    private let initialPreferencesRequest = PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))
 
     private let firstLaunchLogger = Logger(
         subsystem: "ai.hippocampus", category: "first-launch"
@@ -232,6 +233,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         signal(SIGPIPE, SIG_IGN)
 
         configurePreferencesController()
+        installPreferencesReceiver()
+        if let request = initialPreferencesRequest {
+            PreferencesWindowController.shared.show(section: request.section)
+        }
 
         Task { @MainActor in
             let hotkeyResult = GlobalHotkeyManager.shared.registerDefault { [weak self] in
@@ -249,6 +254,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // utility task without delaying the default extractive brief path.
             self.modelProvisioner.startIfNeeded()
         }
+    }
+
+    private func installPreferencesReceiver() {
+        guard let executable = Bundle.main.executableURL else { return }
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(receivePreferencesRequest(_:)),
+            name: PreferencesOpenRequest.notificationName,
+            object: executable.resolvingSymlinksInPath().path, suspensionBehavior: .deliverImmediately)
+    }
+
+    @objc private func receivePreferencesRequest(_ notification: Notification) {
+        guard let executable = Bundle.main.executableURL,
+              let request = PreferencesOpenRequest(notification: notification, executableURL: executable)
+        else { return }
+        configurePreferencesController()
+        PreferencesWindowController.shared.show(section: request.section)
+        request.acknowledge(from: executable)
     }
 
     /// Arm the helper-stderr TCC tail (cycle 8.47 PR #80 follow-up).
@@ -363,6 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !didCleanUpLifecycle else { return }
         didCleanUpLifecycle = true
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
         cancelSentinelWatcher()
         tccStderrTail?.stop()
         tccStderrTail = nil
@@ -488,14 +511,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startSupervisorOrDeferUntilOnboarded() {
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
-            supervisor.openRecallWhenReady(initialLaunch: true)
+            if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
 
         guard supervisor.hasOnboarding else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
-            supervisor.openRecallWhenReady(initialLaunch: true)
+            if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
