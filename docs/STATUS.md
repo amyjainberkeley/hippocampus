@@ -129,8 +129,8 @@ Hybrid recall@3 and handoff-task success are 100%; top-one hit rate is 96.8%.
 The benchmark's source seeder was corrected to preserve explicit `screen://`
 acquisition metadata. Corpus, answers and thresholds are unchanged. These are
 synthetic retrieval results, not live capture or generated-answer qualification.
-The expanded optimized capture suite passed 652 tests with zero failures before
-the newest AppleScript change; its full optimized rerun is in progress.
+The expanded optimized capture suite passed 654 tests with zero failures,
+including the newest AppleScript change.
 Eighteen focused release workspace/date/receipt tests also pass.
 The earlier debug suite's 107-microsecond
 timing result versus its 100-microsecond gate remains recorded, not hidden.
