@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-05._
 
-Audited code baseline: `af64871`
+Audited code baseline: `1e5b288`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -38,7 +38,11 @@ Current repair implementation and focused tests cover:
   after a real foreground switch. Queries now fail closed after 50 ms, allow
   only one outstanding OS request, and never reuse a timed-out result. Focused
   screenshot canvases follow window geometry and are bounded to 1920 pixels
-  on the long edge. Both changes have release tests; installed proof is pending.
+  on the long edge. Installed event 1629 and its native image viewer prove the
+  window-sized canvas. Contending focus readers now wait for their own fresh
+  query within the same deadline; they do not falsely invalidate focus merely
+  because another reader is active. Installed event 1646 reached real Codex MCP
+  after this correction.
 - Committed capture receipts distinguish saved records/screenshots, suppression,
   disconnected helpers, and storage failures. Imports have separate acquisition
   provenance; unknown historical rows are not guessed to be screen captures.
@@ -67,13 +71,27 @@ Current repair implementation and focused tests cover:
 - The Recall workspace now links directly to capture, privacy, and AI-context
   preferences. Parent-owned preferences dependencies exist before URL delivery.
   Sources and Settings no longer show an irrelevant screenshot filmstrip.
+  A live cold-parent test exposed Launch Services routing these links back to
+  Recall, whose bundle identity is shared. The new router targets the exact
+  parent executable, acknowledges pane opening, and prevents duplicate parent
+  processes with a lifetime lock. Release binaries are built; installed routing
+  qualification remains pending.
+- macOS TCC logs confirmed browser Automation prompts were prohibited because
+  the signed parent lacked the Apple Events entitlement. Parent and capture
+  helper now receive that capability through both signing paths; other children
+  do not. Four signing tests include actual disposable signature readback.
+  OS consent is still required. Browser AppleScript execution now permits only
+  one outstanding OS request, discards timed-out work instead of accumulating
+  it, and never reuses an old answer for a newer request. A behavioral regression
+  failed before this change and 34 focused tests pass afterward. Real normal
+  and private browser qualification is pending the corrected installed build.
 
 All six repaired release executables built successfully. The first repair app
 and DMG were signed, notarized, stapled and installed, but the positive fixture
 capture did not pass. One stored screenshot was a system consent dialog, which
 exposed the new exclusion requirement; it is not useful-work capture proof.
-The subsequent focused-window/full-OCR repair (`17a5fdd`) is installed, signed,
-notarized, and stapled. Production event 1626 contains the synthetic focused
+The subsequent focused-window/full-OCR repair (`17a5fdd`) was signed,
+notarized, stapled and installed. Production event 1626 contains the synthetic focused
 window token and an encrypted screenshot. The installed native viewer decrypted
 and displayed those pixels; native Search returned that event. A normal restart
 saved event 1627, which the real Hippocampus MCP connection in Codex returned
@@ -83,28 +101,40 @@ The native image proof is `/tmp/hippocampus-production-image-proof-20260905.jpeg
 The automated production proof remains incomplete: its bounded negative query
 hit the 100-candidate limit and it has no authenticated-image tool. Native image
 verification supplements it, but does not turn that script into a passing test.
-The first images also revealed fixed-canvas black margins; the geometry fix
-above is built but not yet installed. Normal/private-browser live proof and
-permission-revocation recovery remain unqualified.
+The first images revealed fixed-canvas black margins. The geometry/focus/hook
+repair (`bea62b3`) was signed, notarized, stapled and installed; event 1629's
+authenticated native viewer shows the corrected canvas without black margins.
+Proof: `/tmp/hippocampus-focus-repair-image-proof-20260905.jpeg`.
+The currently installed `c6d23c0` is a Developer ID signed local validation build,
+not the final notarized artifact. Its preceding notarized app is preserved at
+`/Applications/Hippocampus Before Contention Repair 2026-09-05.app`.
+Normal/private-browser live proof and permission-revocation recovery remain
+unqualified.
 
 A real Claude SessionStart invocation exposed an oversized-packet failure even
 though direct MCP worked. The hook now requests 600 tokens/four citations and
 retries only oversized output at 256 tokens/one citation, preserving the same
 focus and total deadline. Regression tests pass, including full citations and
-failure isolation. A direct smaller production CLI query returned the fixture
-in 2,332 bytes; the repaired signed hook must still be verified after install.
-Automatic integration has not yet been enabled in the owner's client settings.
+failure isolation. The repaired installed hook returned a complete 2,564-byte
+packet with the fixture, its canonical citation and the untrusted-memory warning.
+The native consent controls enabled the owner's Claude SessionStart hook and
+Codex instruction block without replacing unrelated configuration. An actual
+Claude Code process, with tools and MCP disabled, emitted a successful
+SessionStart hook response containing the fixture. Its remote model request
+then retried until the bounded test ended; no final model answer is claimed.
+Codex's real MCP connection has independently returned the fresh screen event.
 
 The 36-task synthetic benchmark passes retrieval/handoff gates on both arms.
 Hybrid recall@3 and handoff-task success are 100%; top-one hit rate is 96.8%.
 The benchmark's source seeder was corrected to preserve explicit `screen://`
 acquisition metadata. Corpus, answers and thresholds are unchanged. These are
 synthetic retrieval results, not live capture or generated-answer qualification.
-The expanded optimized capture suite passed 651 tests with zero failures.
+The expanded optimized capture suite passed 652 tests with zero failures before
+the newest AppleScript change; its full optimized rerun is in progress.
 Eighteen focused release workspace/date/receipt tests also pass.
 The earlier debug suite's 107-microsecond
 timing result versus its 100-microsecond gate remains recorded, not hidden.
-The newest focus, canvas, preferences, and hook changes must pass installed
+The newest preferences and browser capability changes must pass installed
 verification before those repairs can be called complete.
 
 ## Product Boundary
