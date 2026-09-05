@@ -10,6 +10,11 @@ struct RetentionPersistenceBehavior {
         }
         let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 
+        let defaultStore = DiskRetentionStore(directory: root.appendingPathComponent("fresh-default"))
+        let defaultPolicy = await defaultStore.currentPolicy()
+        precondition(defaultPolicy == .ninetyDays)
+        try await defaultStore.setPolicy(defaultPolicy, customDays: nil)
+
         let seed = DiskRetentionStore(directory: root)
         let freshPolicy = await seed.currentPolicy()
         precondition(freshPolicy == .ninetyDays)
