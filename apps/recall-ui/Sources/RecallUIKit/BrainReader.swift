@@ -29,6 +29,9 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     /// Where the row came from: lexical, verified hybrid, unverified related
     /// context, conflict evidence, or timeline ordering.
     public let source: String
+    /// Acquisition provenance, independent of the retrieval method in `source`.
+    /// Nil and unrecognized wire values are displayed as Unknown source.
+    public let sourceKind: String?
     /// Fused score [0,1] for search; `nil` for plain timeline rows.
     public let score: Float?
 
@@ -74,7 +77,7 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     /// Convenience: file URL for the thumbnail, or `nil` when no path
     /// was populated. Purely a derivation from `thumbnailPath` — no I/O.
     public var thumbnailURL: URL? {
-        guard let p = thumbnailPath, !p.isEmpty else { return nil }
+        guard let p = thumbnailPath, !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return URL(fileURLWithPath: p)
     }
 
@@ -89,7 +92,8 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         score: Float?,
         entities: [String] = [],
         linkedEventIds: [UInt64] = [],
-        thumbnailPath: String? = nil
+        thumbnailPath: String? = nil,
+        sourceKind: String? = nil
     ) {
         self.eventId = eventId
         self.tsUs = tsUs
@@ -98,6 +102,7 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         self.url = url
         self.ocrTextSnippet = ocrTextSnippet
         self.source = source
+        self.sourceKind = sourceKind
         self.score = score
         self.entities = entities
         self.linkedEventIds = linkedEventIds
@@ -265,25 +270,28 @@ public struct TimelineEvent: Sendable, Equatable, Identifiable, Codable {
     /// for events without a keyframe. Same privacy invariant as
     /// `Hit.thumbnailPath`.
     public let thumbnailPath: String?
+    public let sourceKind: String?
 
     public init(
         eventId: UInt64,
         tsUs: UInt64,
         appBundleId: String?,
         snippet: String,
-        thumbnailPath: String? = nil
+        thumbnailPath: String? = nil,
+        sourceKind: String? = nil
     ) {
         self.eventId = eventId
         self.tsUs = tsUs
         self.appBundleId = appBundleId
         self.snippet = snippet
         self.thumbnailPath = thumbnailPath
+        self.sourceKind = sourceKind
     }
 
     /// Convenience: file URL for the thumbnail, or nil when no path was
     /// populated. No I/O.
     public var thumbnailURL: URL? {
-        guard let p = thumbnailPath, !p.isEmpty else { return nil }
+        guard let p = thumbnailPath, !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return URL(fileURLWithPath: p)
     }
 }
@@ -495,7 +503,8 @@ public extension BrainReader {
                     tsUs: hit.tsUs,
                     appBundleId: hit.appBundleId,
                     snippet: String(hit.ocrTextSnippet.prefix(80)),
-                    thumbnailPath: hit.thumbnailPath
+                    thumbnailPath: hit.thumbnailPath,
+                    sourceKind: hit.sourceKind
                 )
             }
     }

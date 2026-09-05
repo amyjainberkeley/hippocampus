@@ -62,6 +62,7 @@ struct MemoryWorkspaceView: View {
     var focusRequest: RecallFocusRequest? = nil
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -71,6 +72,15 @@ struct MemoryWorkspaceView: View {
             workspaceDetail
         }
         .background(Color.brandBgPrimary)
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            MemoryRefreshSignal.post()
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                guard !Task.isCancelled else { return }
+                MemoryRefreshSignal.post()
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -114,17 +124,19 @@ struct MemoryWorkspaceView: View {
                 availableHeight: geometry.size.height
             )
             VStack(spacing: 0) {
-                WorkspaceFilmstrip(
-                    reader: reader,
-                    isCompact: filmstripHeight < 200
-                )
-                .frame(height: filmstripHeight)
-                Divider().overlay(Color.brandCardBorder)
+                if selection != .now {
+                    WorkspaceFilmstrip(
+                        reader: reader,
+                        isCompact: filmstripHeight < 200
+                    )
+                    .frame(height: filmstripHeight)
+                    Divider().overlay(Color.brandCardBorder)
+                }
 
                 Group {
                     switch selection {
                     case .now:
-                        NowWorkspaceView(reader: reader)
+                        DailyMemoryView(reader: reader)
                     case .search:
                         SearchView(
                             viewModel: SearchViewModel(reader: reader),
@@ -135,7 +147,7 @@ struct MemoryWorkspaceView: View {
                     case .timeline:
                         TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
                     case .episodes:
-                        EpisodesView(viewModel: EpisodesViewModel(reader: reader))
+                        EpisodesView(viewModel: EpisodesViewModel(reader: reader), reader: reader)
                     case .briefs:
                         BriefView(
                             viewModel: BriefViewModel(
@@ -211,7 +223,7 @@ private struct WorkspaceFilmstrip: View {
     let reader: BrainReader
     let isCompact: Bool
     @State private var hits: [Hit] = []
-    @State private var isLoading = true
+    @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var selectedHit: Hit?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -229,7 +241,7 @@ private struct WorkspaceFilmstrip: View {
             }
             .frame(width: isCompact ? 164 : 176, alignment: .leading)
 
-            if isLoading {
+            if isLoading && hits.isEmpty {
                 ProgressView()
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -266,9 +278,8 @@ private struct WorkspaceFilmstrip: View {
                 ? AnyShapeStyle(Color.brandBgSecondary)
                 : AnyShapeStyle(.ultraThinMaterial)
         )
-        .popover(item: $selectedHit, arrowEdge: .top) { hit in
-            DetailPaneView(hit: hit, reader: reader)
-                .frame(width: 440, height: 520)
+        .sheet(item: $selectedHit) { hit in
+            ScreenshotViewer(selection: ScreenshotSelection(eventIDs: hits.map(\.id), initialID: hit.id), reader: reader)
         }
         .task {
             await load()
@@ -287,11 +298,12 @@ private struct WorkspaceFilmstrip: View {
 
     @MainActor
     private func load() async {
+        guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
             errorMessage = nil
-            let events = try await reader.recentEvents(limit: 48)
+            let events = try await reader.recentEvents(limit: 500)
             hits = Array(MCI.Workspace.recentKeyframes(from: events).prefix(12))
         } catch {
             hits = []
@@ -366,231 +378,6 @@ private struct FilmstripCard: View {
             return CGSize(width: 120, height: 68)
         }
         return CGSize(width: 152, height: 86)
-    }
-}
-
-private struct NowWorkspaceView: View {
-    let reader: BrainReader
-    @State private var summary: SummaryStats?
-    @State private var latestBrief: Brief?
-    @State private var recentHits: [Hit] = []
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var isExportingContext = false
-    @State private var showsContextHandoffError = false
-
-    var body: some View {
-        let storedEvents = summary.map(MCI.Workspace.historicalEventMetric(for:))
-
-        ScrollView {
-            VStack(alignment: .leading, spacing: MCI.Spacing.xl) {
-                VStack(alignment: .leading, spacing: MCI.Spacing.m) {
-                    HStack(alignment: .center, spacing: MCI.Spacing.m) {
-                        Text("Today")
-                            .mciFont(.title)
-                            .foregroundStyle(Color.brandFgPrimary)
-                        Spacer(minLength: MCI.Spacing.l)
-                        Button {
-                            copyAgentContext()
-                        } label: {
-                            Label("Copy agent context", systemImage: "doc.on.clipboard")
-                                .opacity(isExportingContext ? 0 : 1)
-                                .overlay {
-                                    if isExportingContext {
-                                        ProgressView().controlSize(.small)
-                                    }
-                                }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color.brandMint)
-                        .disabled(isExportingContext)
-                        .help("Copy a bounded, cited context packet")
-                    }
-                    Text("A live view of the memory available to you and your connected tools.")
-                        .mciFont(.body)
-                        .foregroundStyle(Color.brandFgSecondary)
-                }
-
-                WorkspaceSummaryBar(
-                    items: [
-                        .init(
-                            label: storedEvents?.title ?? "Stored events",
-                            value: historicalEventValue,
-                            detail: storedEvents?.detail ?? "Historical memory rows"
-                        ),
-                        .init(
-                            label: "Recent events",
-                            value: recentEventValue,
-                            detail: "Latest memory rows"
-                        ),
-                        .init(label: "Latest brief", value: briefValue, detail: briefDetail),
-                    ]
-                )
-
-                if isLoading {
-                    ShimmerLoadingView(isLoading: true)
-                } else if let errorMessage {
-                    ContentUnavailableView(
-                        "Memory is unavailable",
-                        systemImage: "exclamationmark.triangle.fill",
-                        description: Text(errorMessage)
-                    )
-                    .foregroundStyle(Color.brandError)
-                } else if recentHits.isEmpty {
-                    MCIEmptyState.noTimelineEvents()
-                } else {
-                    VStack(alignment: .leading, spacing: MCI.Spacing.m) {
-                        Text("Latest memory")
-                            .mciFont(.title2)
-                            .foregroundStyle(Color.brandFgPrimary)
-                        VStack(spacing: 0) {
-                            ForEach(Array(recentHits.prefix(5).enumerated()), id: \.element.id) { index, hit in
-                                HitRow(hit: hit)
-                                    .padding(.horizontal, MCI.Spacing.m)
-                                    .padding(.vertical, MCI.Spacing.xs)
-                                if index < min(recentHits.count, 5) - 1 {
-                                    Divider().padding(.leading, 92)
-                                }
-                            }
-                        }
-                        .background(Color.brandCardBg)
-                        .clipShape(
-                            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                                .stroke(Color.brandCardBorder, lineWidth: 0.5)
-                        )
-                    }
-                }
-            }
-            .padding(MCI.Spacing.xl)
-            .frame(maxWidth: 980, alignment: .leading)
-        }
-        .background(Color.brandBgPrimary)
-        .refreshable { await load() }
-        .task {
-            await load()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
-            _ in
-            Task { await load() }
-        }
-        .alert("Couldn’t copy agent context", isPresented: $showsContextHandoffError) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Open Hippocampus and try again.")
-        }
-    }
-
-    private var historicalEventValue: String {
-        if isLoading { return "Loading" }
-        if errorMessage != nil { return "Unavailable" }
-        guard let summary else { return "Unknown" }
-        return MCI.Workspace.historicalEventMetric(for: summary).value
-    }
-
-    private var recentEventValue: String {
-        if isLoading { return "Loading" }
-        if errorMessage != nil { return "Unavailable" }
-        return "\(recentHits.count)"
-    }
-
-    private var briefValue: String {
-        if isLoading { return "Loading" }
-        if errorMessage != nil { return "Unavailable" }
-        return latestBrief?.dateLocal ?? "None saved"
-    }
-
-    private var briefDetail: String {
-        if isLoading { return "Reading saved briefs" }
-        if errorMessage != nil { return "Brief memory could not be read" }
-        return latestBrief?.title ?? "No saved brief in memory"
-    }
-
-    @MainActor
-    private func load() async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            async let stats = reader.summaryStats()
-            async let brief = reader.latestBrief()
-            async let hits = reader.recentEvents(limit: 8)
-            summary = try await stats
-            latestBrief = try await brief
-            recentHits = try await hits
-            errorMessage = nil
-        } catch {
-            summary = nil
-            latestBrief = nil
-            recentHits = []
-            errorMessage = UserFacingCopy.memoryUnreachableBody
-        }
-    }
-
-    private func copyAgentContext() {
-        guard !isExportingContext else { return }
-        isExportingContext = true
-        Task {
-            defer { isExportingContext = false }
-            do {
-                let packet = try await ContextHandoffExporter.export(focus: "")
-                NSPasteboard.general.clearContents()
-                guard NSPasteboard.general.setString(packet, forType: .string) else {
-                    showsContextHandoffError = true
-                    return
-                }
-                ToastNotifier.shared.notify("Agent context copied")
-            } catch {
-                showsContextHandoffError = true
-            }
-        }
-    }
-}
-
-private struct WorkspaceSummaryItem: Identifiable {
-    let label: String
-    let value: String
-    let detail: String
-    var id: String { label }
-}
-
-private struct WorkspaceSummaryBar: View {
-    let items: [WorkspaceSummaryItem]
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-                    Text(item.label)
-                        .mciFont(.caption)
-                        .foregroundStyle(Color.brandFgSecondary)
-                    Text(item.value)
-                        .mciFont(.title2)
-                        .foregroundStyle(Color.brandFgPrimary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                    Text(item.detail)
-                        .mciFont(.footnote)
-                        .foregroundStyle(Color.brandFgMuted)
-                        .lineLimit(2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, MCI.Spacing.l)
-
-                if index < items.count - 1 {
-                    Divider()
-                        .frame(height: 64)
-                }
-            }
-        }
-        .padding(.vertical, MCI.Spacing.l)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                .stroke(Color.brandCardBorder, lineWidth: 0.5)
-        }
     }
 }
 

@@ -416,7 +416,7 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
 // stays camelCase.
 // ---------------------------------------------------------------------------
 
-private struct HitWire: Decodable {
+struct HitWire: Decodable {
     let event_id: UInt64
     let ts_us: UInt64
     let app_bundle_id: String?
@@ -443,6 +443,7 @@ private struct HitWire: Decodable {
     /// `hit_json_wire_uses_snake_case_keys_for_new_fields` in
     /// `adapters/macos/mci-brain-ffi/tests/hit_entities_wire.rs`.
     let thumbnail_path: String?
+    let source_kind: String?
 
     func toHit() -> Hit {
         Hit(
@@ -456,7 +457,8 @@ private struct HitWire: Decodable {
             score: score,
             entities: entities ?? [],
             linkedEventIds: linked_event_ids ?? [],
-            thumbnailPath: thumbnail_path
+            thumbnailPath: thumbnail_path,
+            sourceKind: source_kind
         )
     }
 }
@@ -584,12 +586,13 @@ private struct TimelineQueryPayload: Encodable {
 
 /// **V2-P13.** Decoder side of `mci_brain_ffi_timeline_events`.
 /// Snake-case wire; converts to the public `TimelineEvent` on decode.
-private struct TimelineEventWire: Decodable {
+struct TimelineEventWire: Decodable {
     let event_id: UInt64
     let ts_us: UInt64
     let app_bundle_id: String?
     let snippet: String
     let thumbnail_path: String?
+    let source_kind: String?
 
     func toTimelineEvent() -> TimelineEvent {
         TimelineEvent(
@@ -597,7 +600,8 @@ private struct TimelineEventWire: Decodable {
             tsUs: ts_us,
             appBundleId: app_bundle_id,
             snippet: snippet,
-            thumbnailPath: thumbnail_path
+            thumbnailPath: thumbnail_path,
+            sourceKind: source_kind
         )
     }
 }

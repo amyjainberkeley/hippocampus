@@ -12,8 +12,10 @@ struct DetailPaneView: View {
     /// Bubble a selected sibling up to the parent VM so click-through
     /// on a flyout row can push it into the search / timeline selection.
     var onSelectRelated: ((Hit) -> Void)? = nil
+    var screenshotEventIDs: [UInt64] = []
 
     @State private var flyoutScope: RelatedHitsScope? = nil
+    @State private var showsScreenshot = false
 
     /// `text_snippet` with the FTS-only context header prefix
     /// (`[app=… | title=… | url=… | ts=…]\n`) stripped for display.
@@ -29,6 +31,23 @@ struct DetailPaneView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: MCI.Spacing.l) {
                 header
+                if hit.thumbnailURL != nil {
+                    Button { showsScreenshot = true } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            GeometryReader { geometry in
+                                EvidenceThumbnail(url: hit.thumbnailURL, size: geometry.size, maxPixelSize: 640, showsStatus: true)
+                            }
+                            .aspectRatio(16 / 10, contentMode: .fit)
+                            Label("Open screenshot", systemImage: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(reader == nil)
+                } else {
+                    Label("Text-only record", systemImage: "doc.text")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Divider().background(Color.brandCardBorder)
                 if !hit.entities.isEmpty {
                     entityStrip
@@ -41,6 +60,13 @@ struct DetailPaneView: View {
             .padding(MCI.Spacing.l)
         }
         .background(.thinMaterial)
+        .sheet(isPresented: $showsScreenshot) {
+            if let reader {
+                ScreenshotViewer(selection: ScreenshotSelection(
+                    eventIDs: screenshotEventIDs.contains(hit.id) ? screenshotEventIDs : [hit.id],
+                    initialID: hit.id), reader: reader)
+            }
+        }
         .focusable()
         .onCopyCommand {
             [NSItemProvider(object: displayBody as NSString)]
@@ -97,7 +123,7 @@ struct DetailPaneView: View {
                 if reader != nil, !hit.linkedEventIds.isEmpty {
                     relatedBadge
                 }
-                Text(Formatters.sourceTag(hit.source))
+                Text(MemorySourceKind.label(hit.sourceKind))
                     .font(MCI.Font.mono)
                     .padding(.horizontal, MCI.Spacing.s - 2)
                     .padding(.vertical, MCI.Spacing.xxs)
@@ -262,7 +288,7 @@ struct DetailPaneView: View {
 
     private var ocrSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(Formatters.sourceLabel(url: hit.url, textSnippet: hit.ocrTextSnippet))
+            Text(hit.sourceKind == "screen_ocr" ? "OCR snippet" : "Stored text snippet")
                 .font(.system(.caption, design: .default).weight(.semibold))
                 .foregroundStyle(Color.brandFgMuted)
             if SyntaxHighlighter.looksLikeCode(displayBody) {

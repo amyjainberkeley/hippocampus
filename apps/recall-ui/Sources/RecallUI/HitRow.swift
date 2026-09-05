@@ -55,6 +55,9 @@ struct HitRow: View {
                     .mciFont(.body)
                     .foregroundStyle(Color.brandFgSecondary)
                     .lineLimit(3)
+                Label(MemorySourceKind.label(hit.sourceKind) + (hit.thumbnailURL == nil ? " / Text only" : " / Screenshot"),
+                      systemImage: hit.thumbnailURL == nil ? "doc.text" : "photo")
+                    .font(.caption).foregroundStyle(Color.brandFgMuted)
                 // Entity chips + related-events badge. Only render the row
                 // when there's something to show, so the backward-compat
                 // zero-entity case stays visually identical to the pre-PR-2
