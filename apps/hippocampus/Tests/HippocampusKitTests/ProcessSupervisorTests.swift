@@ -166,11 +166,17 @@ final class FakeApplicationRestartLauncher: ApplicationRestartLaunching {
 
 final class FakeCaptureConsentAuthority: CaptureConsentControlling, @unchecked Sendable {
     var disableError: Error?
+    private(set) var enabledGenerationID: String?
+    private(set) var enabledGenerations: [String] = []
 
-    func enable(generationID: String) throws { _ = generationID }
+    func enable(generationID: String) throws {
+        enabledGenerationID = generationID
+        enabledGenerations.append(generationID)
+    }
 
     func disable() throws {
         if let disableError { throw disableError }
+        enabledGenerationID = nil
     }
 }
 
@@ -787,14 +793,375 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertEqual(topology.launchPlans.count, 1)
     }
 
-    func test_health_snapshot_display_reports_processed_frames() {
+    func test_explicit_stop_helper_exit_persists_off_revokes_consent_and_never_retries() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        XCTAssertNotNil(consent.enabledGenerationID)
+
+        topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 82)
+        await waitForExplicitStop(supervisor)
+        try await Task.sleep(for: .milliseconds(1150))
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertFalse(config.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertNil(consent.enabledGenerationID)
+        XCTAssertNil(supervisor.safariInboxStats)
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertEqual(supervisor.state, .stopped)
+
+        try await supervisor.applyCaptureEnabled(true)
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false, true])
+        XCTAssertEqual(consent.enabledGenerationID, topology.generations.last?.id)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_explicit_stop_cancels_retry_already_scheduled_by_agent_exit() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+
+        topology.fireUnexpectedExit(forLaunchAt: 0, label: "agent", status: 1)
+        topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 82)
+        await waitForExplicitStop(supervisor)
+        try await Task.sleep(for: .milliseconds(1150))
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertFalse(topology.isRunning)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_agent_exit82_and_helper_exit81_keep_generic_retry_behavior() async throws {
+        for (label, status): (String, Int32) in [("agent", 82), ("helper", 81)] {
+            let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+            try await supervisor.startAndWaitForReadiness()
+
+            topology.fireUnexpectedExit(forLaunchAt: 0, label: label, status: status)
+            let deadline = Date().addingTimeInterval(3)
+            while topology.launchPlans.count < 2 && Date() < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+
+            XCTAssertEqual(topology.launchPlans.count, 2)
+            XCTAssertTrue(supervisor.captureEnabled)
+            XCTAssertTrue(config.captureEnabled)
+            XCTAssertEqual(config.captureWrites, [])
+            XCTAssertTrue(topology.launchPlans.last?.helperArguments.contains("--capture") == true)
+            try await supervisor.shutdownAndWait()
+        }
+    }
+
+    func test_explicit_stop_from_retired_generation_cannot_stop_current_capture() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        try await supervisor.setPausedAndWait(true)
+        try await supervisor.setPausedAndWait(false)
+
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 82)
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertTrue(topology.isRunning)
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertEqual(config.captureWrites, [])
+        XCTAssertEqual(consent.enabledGenerationID, topology.generations[1].id)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_explicit_stop_during_start_readiness_prevents_commit() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        let readiness = TestSuspension()
+        topology.readinessSuspension = readiness
+        let startup = Task { try await supervisor.startAndWaitForReadiness() }
+        await readiness.waitUntilEntered()
+
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 82)
+        await waitForExplicitStop(supervisor)
+        readiness.resume()
+        await XCTAssertThrowsErrorAsync(try await startup.value)
+
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertEqual(consent.enabledGenerations, [])
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_explicit_stop_during_enable_readiness_prevents_commit_or_rollback() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        let readiness = TestSuspension()
+        topology.readinessSuspension = readiness
+        let enabling = Task { try await supervisor.applyCaptureEnabled(true) }
+        await readiness.waitUntilEntered()
+
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 82)
+        XCTAssertEqual(config.captureWrites, [])
+        topology.fireUnexpectedExit(forLaunchAt: 1, status: 82)
+        await waitForExplicitStop(supervisor)
+        topology.readinessSuspension = nil
+        readiness.resume()
+        await XCTAssertThrowsErrorAsync(try await enabling.value)
+
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertEqual(consent.enabledGenerations, [])
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_explicit_stop_reported_by_readiness_also_persists_off() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(82))]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+        await waitForExplicitStop(supervisor)
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_disable_persistence_failure_stays_off_stops_capture_and_blocks_implicit_start() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        config.captureWriteError = TestError.writeFailed
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(false))
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertTrue(config.captureEnabled, "the injected write failure leaves disk unchanged")
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertNil(consent.enabledGenerationID)
+        XCTAssertNil(supervisor.safariInboxStats)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        assertVisibleError(supervisor, containing: "writeFailed")
+
+        config.captureWriteError = nil
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+        supervisor.start()
+        try await Task.sleep(for: .milliseconds(1150))
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertEqual(config.captureWrites, [false], "no silent persistence retry")
+        assertVisibleError(supervisor, containing: "writeFailed")
+
+        try await supervisor.applyCaptureEnabled(true)
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false, true])
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_disable_teardown_failure_persists_off_without_rollback_or_retry() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        topology.stopResults = [.failure(TestError.partialStop)]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(false))
+        try await Task.sleep(for: .milliseconds(1150))
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertFalse(config.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertNil(consent.enabledGenerationID)
+        XCTAssertNil(supervisor.safariInboxStats)
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        assertVisibleError(supervisor, containing: "partialStop")
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_explicit_stop_preserves_both_write_and_teardown_errors_without_retry() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        config.captureWriteError = TestError.writeFailed
+        topology.stopResults = [.failure(TestError.partialStop)]
+
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 82)
+        await waitForExplicitStop(supervisor)
+        try await Task.sleep(for: .milliseconds(1150))
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertNil(consent.enabledGenerationID)
+        XCTAssertEqual(topology.stopCalls, 1)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        assertVisibleError(supervisor, containing: "writeFailed")
+        assertVisibleError(supervisor, containing: "partialStop")
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_disable_consent_failure_still_persists_off_and_stops_topology() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        consent.disableError = TestError.denied
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(false))
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertEqual(topology.stopCalls, 1)
+        assertVisibleError(supervisor, containing: "denied")
+        consent.disableError = nil
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_disable_interrupts_enable_even_before_capture_enabled_is_published() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        try await supervisor.startAndWaitForReadiness()
+        let readiness = TestSuspension()
+        topology.readinessSuspension = readiness
+        let enabling = Task { try await supervisor.applyCaptureEnabled(true) }
+        await readiness.waitUntilEntered()
+        XCTAssertFalse(supervisor.captureEnabled)
+
+        try await supervisor.applyCaptureEnabled(false)
+        topology.readinessSuspension = nil
+        readiness.resume()
+        await XCTAssertThrowsErrorAsync(try await enabling.value)
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_disable_during_key_preparation_prevents_late_capture_launch() async throws {
+        let (supervisor, _, _, config, topology, custody) = makeSupervisor(captureEnabled: true)
+        let preparation = TestSuspension()
+        custody.suspension = preparation
+        let startup = Task { try await supervisor.startAndWaitForReadiness() }
+        await preparation.waitUntilEntered()
+
+        await disableAllowingFailure(supervisor)
+        preparation.resume()
+        await XCTAssertThrowsErrorAsync(try await startup.value)
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertEqual(topology.launchPlans.count, 0)
+        XCTAssertEqual(supervisor.state, .stopped)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_disable_cancels_pending_generic_retry() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 81)
+
+        try await supervisor.applyCaptureEnabled(false)
+        try await Task.sleep(for: .milliseconds(1150))
+
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertFalse(topology.isRunning)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_disable_while_enable_stop_is_blocked_requires_old_transition_to_unwind() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        try await supervisor.startAndWaitForReadiness()
+        let stopping = TestSuspension()
+        topology.stopSuspensionOnCall = 1
+        topology.stopSuspension = stopping
+        let enabling = Task { try await supervisor.applyCaptureEnabled(true) }
+        await stopping.waitUntilEntered()
+
+        try await supervisor.applyCaptureEnabled(false)
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+        stopping.resume()
+        await XCTAssertThrowsErrorAsync(try await enabling.value)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertEqual(topology.launchPlans.count, 1)
+
+        try await supervisor.applyCaptureEnabled(true)
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertTrue(topology.isRunning)
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
+    }
+
+    private func waitForExplicitStop(_ supervisor: ProcessSupervisor) async {
+        let deadline = Date().addingTimeInterval(0.3)
+        while Date() < deadline {
+            if !supervisor.captureEnabled {
+                if supervisor.state == .stopped { return }
+                if case .crashed = supervisor.state { return }
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private func disableAllowingFailure(_ supervisor: ProcessSupervisor) async {
+        do {
+            try await supervisor.applyCaptureEnabled(false)
+        } catch {
+            XCTFail("disable must supersede an in-flight start: \(error)")
+        }
+    }
+
+    private func assertVisibleError(
+        _ supervisor: ProcessSupervisor, containing text: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        guard case .crashed(let reason) = supervisor.state else {
+            return XCTFail("expected visible error, got \(supervisor.state)", file: file, line: line)
+        }
+        XCTAssertTrue(reason.contains(text), "\(reason) must contain \(text)", file: file, line: line)
+        guard case .error = supervisor.menuBarStatus else {
+            return XCTFail("stop failures must remain visible in the menu", file: file, line: line)
+        }
+    }
+
+    func test_health_snapshot_display_does_not_claim_saved_memory() {
         let snapshot = HealthSnapshot(
             framesDelivered: 77,
             framesSuppressed: 5,
             lastCaptureTs: Date().addingTimeInterval(-60),
             lastUpdated: Date()
         )
-        XCTAssertTrue(snapshot.displayText.contains("77 frames processed"))
+        XCTAssertTrue(snapshot.displayText.contains("77 delivered"))
+        XCTAssertTrue(snapshot.displayText.contains("5 suppressed"))
+        XCTAssertTrue(snapshot.displayText.contains("not saved counts"))
         XCTAssertFalse(snapshot.displayText.contains("events captured"))
     }
 

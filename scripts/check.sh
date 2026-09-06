@@ -27,7 +27,7 @@ LANES=(
     "rust-fmt|rust|fmt|cargo fmt --check --all"
     "rust-clippy|rust|lint|cargo clippy --workspace --all-targets"
     "rust-test|rust|test|cargo test --workspace"
-    "rust-audit|rust|audit|cargo audit --deny warnings --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0190"
+    "rust-audit|rust|audit|python3 scripts/audit-supply-chain.py"
     "swift-fmt|swift|fmt|__swift_fmt_lane"
     "swift-package-wrapper|swift|test|scripts/test-swift-package.sh"
     "swift-test-helper|swift|test|scripts/swift-package.sh test --package-path adapters/macos/MCICaptureHelper"
@@ -50,6 +50,7 @@ LANES=(
     "onboarding-route-behavior|swift|test|scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior"
     "safari-private-context|bash|test|node --test extensions/safari/__tests__/content.test.cjs"
     "bash-syntax|bash|lint|__bash_syntax_lane"
+    "supply-chain-audit-contract|bash|test|python3 -B scripts/test_supply_chain_audit.py"
     "release-contract|bash|lint|scripts/test-release-contract.sh"
     "app-group-contract|bash|test|scripts/test-app-group-contract.sh"
     "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
@@ -102,7 +103,7 @@ LANES
     rust-fmt              cargo fmt --check --all
     rust-clippy           cargo clippy --workspace --all-targets
     rust-test             cargo test --workspace
-    rust-audit            cargo audit (with project ignores)
+    rust-audit            tracked Cargo.lock audits with JSON evidence and explicit waiver
     swift-fmt             swiftformat --lint (SKIP if not installed)
     swift-package-wrapper compatibility-wrapper behavior and unified-gate contract
     swift-test-helper     swift test in adapters/macos/MCICaptureHelper
@@ -125,6 +126,7 @@ LANES
     onboarding-route-behavior executable route to the durable app-access editor
     safari-private-context structured browser capture fails closed in private tabs
     bash-syntax           bash -n across repo *.sh files
+    supply-chain-audit-contract audit coverage, errors, and empty-selector regression tests
     release-contract      release graph and artifact identity contract
     toml-license-contract pinned TOML dependency license contract
     task-2-product-truth  legal artifact drift and active product-truth contract
@@ -154,9 +156,9 @@ LANES
 
 BEHAVIOR
     - Each lane runs isolated; one failure does not abort the others.
-    - Missing tools SKIP (not FAIL): e.g. no swiftformat -> swift-fmt SKIP.
+    - Optional formatter tools may SKIP; missing audit tooling FAILS.
     - Summary table printed at end with PASS/FAIL/SKIP + duration.
-    - Exit 0 only if every invoked lane PASSED (SKIP counts as pass).
+    - Exit 0 only if at least one lane ran and none FAILED (optional SKIP is allowed).
 
 ENVIRONMENT
     CHECK_SH_QUIET=1      suppress per-lane stdout (summary still printed)
@@ -321,6 +323,11 @@ for row in "${LANES[@]}"; do
 done
 
 # ---- Summary -----------------------------------------------------------------
+if [[ ${#RESULT_NAMES[@]} -eq 0 ]]; then
+    echo '{"check":"check.sh","status":"fail","reason":"no_matching_lanes"}'
+    exit 1
+fi
+
 echo "${C_BOLD}=================================================${C_RESET}"
 echo "${C_BOLD}  check.sh summary${C_RESET}"
 echo "${C_BOLD}=================================================${C_RESET}"

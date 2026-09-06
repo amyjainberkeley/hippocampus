@@ -332,6 +332,14 @@ if [[ ! -d "$EMBEDDER_PATH" ]]; then
     exit 1
 fi
 
+# Validate the entire model contract even when assembly was skipped.
+VERIFY_SCRIPT="$REPO_ROOT/scripts/verify-models.sh"
+if [[ ! -x "$VERIFY_SCRIPT" ]]; then
+    echo "FATAL: Required scripts/verify-models.sh is missing or not executable." >&2
+    exit 1
+fi
+"$VERIFY_SCRIPT" --app "$APP_PATH"
+
 # Launch-verify gate — FATAL.
 # Second invocation (build-app.sh runs it once on the just-built bundle).
 # Re-run here so --skip-build paths still trip the gate, and so the gate
@@ -344,7 +352,8 @@ if [[ -x "$LAUNCH_VERIFY" ]]; then
     echo "--- Launch-verify gate (pre-notarize) ---"
     "$LAUNCH_VERIFY" "$APP_PATH"
 else
-    echo "WARNING: scripts/verify-app-launches.sh not found — skipping launch gate."
+    echo "FATAL: Required scripts/verify-app-launches.sh is missing or not executable." >&2
+    exit 1
 fi
 
 # --- Step 2: Codesign (Developer ID or explicit debug-only ad-hoc) ---

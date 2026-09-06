@@ -9,15 +9,20 @@ use crate::model::{Brief, BriefId, BriefState};
 
 /// Zero-download brief author for the default local path.
 ///
-/// It does not infer facts. It removes capture metadata already represented
-/// by event fields, deduplicates OCR churn, and arranges verbatim evidence
-/// into useful sections. Every bullet cites the exact source event.
+/// It does not infer facts. Finite lexical rules filter recognized chrome
+/// and rank source lines. Whitespace is normalized and Markdown is escaped;
+/// every bullet cites the event containing that evidence. These rules do not
+/// establish semantic understanding or the truth of captured claims.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ExtractiveBriefAuthor;
 
 impl ExtractiveBriefAuthor {
     /// Maximum number of evidence bullets written to one brief.
     pub const MAX_BULLETS: usize = 9;
+    /// Bound the rendered body after escaping; never truncate a source sentence.
+    pub const MAX_BODY_BYTES: usize = 16_384;
+    const MAX_LINE_BYTES: usize = 2_048;
+    const MAX_SOURCE_BYTES: usize = 256;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +36,7 @@ struct DigestItem {
     event_id: EventId,
     ts_us: u64,
     section: DigestSection,
+    rank: u8,
     source: String,
     evidence: String,
 }
@@ -43,36 +49,38 @@ impl BriefAuthor for ExtractiveBriefAuthor {
 
         let mut seen = HashSet::new();
         let mut items = Vec::new();
-        for record in retrieval.iter().rev() {
-            let evidence = clean_evidence(&record.text_snippet);
-            if evidence.is_empty() || !seen.insert(evidence.to_lowercase()) {
-                continue;
+        let mut records = retrieval.iter().collect::<Vec<_>>();
+        records.sort_by_key(|record| std::cmp::Reverse((record.ts_us, record.event_id)));
+        for record in records {
+            for evidence in clean_evidence(record) {
+                // Only collapse OCR repeats in the same source context. Identical
+                // short statements in different documents may describe different work.
+                let key = (
+                    record.app_bundle_id.as_deref(),
+                    record.window_title.as_deref().map(normalize_whitespace),
+                    record.url.as_deref(),
+                    evidence.to_lowercase(),
+                );
+                if !seen.insert(key) {
+                    continue;
+                }
+                let section = classify_evidence(&evidence);
+                items.push(DigestItem {
+                    event_id: record.event_id,
+                    ts_us: record.ts_us,
+                    section,
+                    rank: evidence_rank(&evidence, section),
+                    source: evidence_source(record),
+                    evidence,
+                });
             }
-            items.push(DigestItem {
-                event_id: record.event_id,
-                ts_us: record.ts_us,
-                section: classify_evidence(&evidence),
-                source: evidence_source(record),
-                evidence,
-            });
         }
         if items.is_empty() {
             return Err(AuthorError::NoEvents);
         }
 
-        let mut selected = Vec::new();
-        for section in [
-            DigestSection::Changed,
-            DigestSection::OpenLoop,
-            DigestSection::Recent,
-        ] {
-            for item in items.iter().filter(|item| item.section == section) {
-                if selected.len() == Self::MAX_BULLETS {
-                    break;
-                }
-                selected.push(item);
-            }
-        }
+        items.sort_by_key(|item| std::cmp::Reverse((item.rank, item.ts_us, item.event_id)));
+        let selected = select_evidence(&items);
 
         let mut body = String::new();
         let mut citations = Vec::with_capacity(selected.len());
@@ -89,23 +97,38 @@ impl BriefAuthor for ExtractiveBriefAuthor {
             if section_items.is_empty() {
                 continue;
             }
-            if !body.is_empty() {
-                body.push('\n');
-            }
-            body.push_str("## ");
-            body.push_str(heading);
-            body.push('\n');
+            let mut section_started = false;
             for item in section_items {
-                body.push_str("- ");
+                let mut row = String::from("- ");
                 if !item.source.is_empty() {
-                    body.push_str(&item.source);
-                    body.push_str(": ");
+                    row.push_str(&escape_markdown(&item.source));
+                    row.push_str(": ");
                 }
-                body.push_str(&item.evidence);
-                body.push_str(" [event:");
-                body.push_str(&item.event_id.0.to_string());
-                body.push_str("]\n");
-                citations.push(item.event_id);
+                row.push_str(&escape_markdown(&item.evidence));
+                row.push_str(" [event:");
+                row.push_str(&item.event_id.0.to_string());
+                row.push_str("]\n");
+                let heading_bytes = if section_started {
+                    0
+                } else {
+                    heading.len() + 5
+                };
+                if body.len() + heading_bytes + row.len() > Self::MAX_BODY_BYTES {
+                    continue;
+                }
+                if !section_started {
+                    if !body.is_empty() {
+                        body.push('\n');
+                    }
+                    body.push_str("## ");
+                    body.push_str(heading);
+                    body.push('\n');
+                    section_started = true;
+                }
+                body.push_str(&row);
+                if !citations.contains(&item.event_id) {
+                    citations.push(item.event_id);
+                }
             }
         }
 
@@ -127,29 +150,246 @@ impl BriefAuthor for ExtractiveBriefAuthor {
     }
 
     fn model_version(&self) -> &'static str {
-        "1"
+        "2"
     }
 }
 
-fn clean_evidence(text: &str) -> String {
+fn select_evidence(items: &[DigestItem]) -> Vec<&DigestItem> {
+    let mut indices = Vec::new();
+    // Reserve room for each explicit work category before filling the cap.
+    // A burst of completed updates must not displace every open loop.
+    for section in [
+        DigestSection::Changed,
+        DigestSection::OpenLoop,
+        DigestSection::Recent,
+    ] {
+        if let Some(index) = items
+            .iter()
+            .position(|item| item.section == section && item.rank > 0)
+        {
+            indices.push(index);
+        }
+    }
+    for index in 0..items.len() {
+        if indices.len() == ExtractiveBriefAuthor::MAX_BULLETS {
+            break;
+        }
+        if !indices.contains(&index) {
+            indices.push(index);
+        }
+    }
+    indices.sort_unstable();
+    indices.iter().map(|&index| &items[index]).collect()
+}
+
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn clean_evidence(record: &EventRecord) -> Vec<String> {
+    let text = &record.text_snippet;
     let without_header = text
-        .strip_prefix('[')
+        .strip_prefix("[app=")
         .and_then(|rest| rest.split_once("]\n"))
-        .map_or(text, |(_, body)| body);
+        .map_or(text.as_str(), |(_, body)| body);
     without_header
+        .lines()
+        .filter(|line| line.len() <= ExtractiveBriefAuthor::MAX_LINE_BYTES)
+        .map(normalize_whitespace)
+        .map(|line| strip_menu_prefix(&line).to_owned())
+        .filter(|line| !line.is_empty() && !is_chrome(line, record) && !is_directive(line))
+        .collect()
+}
+
+fn strip_menu_prefix(line: &str) -> &str {
+    const MENUS: &[&str] = &[
+        "finder file edit view go window help",
+        "file edit view go window help",
+        "file edit view window help",
+    ];
+    let lower = line.to_lowercase();
+    for menu in MENUS {
+        if let Some(rest) = lower.strip_prefix(menu) {
+            if rest.is_empty() || rest.starts_with(' ') {
+                return line[menu.len()..].trim_start();
+            }
+        }
+    }
+    line
+}
+
+fn is_chrome(line: &str, record: &EventRecord) -> bool {
+    let lower = line.to_lowercase();
+    match record.app_bundle_id.as_deref() {
+        Some("com.apple.finder") => {
+            const LABELS: &[&str] = &[
+                "finder",
+                "file",
+                "edit",
+                "view",
+                "go",
+                "window",
+                "help",
+                "recents",
+                "applications",
+                "desktop",
+                "documents",
+                "downloads",
+                "airdrop",
+                "favorites",
+                "locations",
+                "tags",
+                "icloud",
+                "icloud drive",
+                "shared",
+                "network",
+                "trash",
+                "search",
+                "name",
+                "date modified",
+                "size",
+                "kind",
+            ];
+            LABELS.contains(&lower.as_str()) || finder_status(&lower)
+        }
+        Some("com.apple.controlcenter" | "com.apple.systemuiserver") => {
+            const LABELS: &[&str] = &[
+                "control center",
+                "wi-fi",
+                "bluetooth",
+                "airdrop",
+                "focus",
+                "display",
+                "sound",
+                "battery",
+                "screen mirroring",
+                "now playing",
+            ];
+            LABELS.contains(&lower.as_str())
+                || lower
+                    .strip_suffix('%')
+                    .is_some_and(|n| n.parse::<u8>().is_ok_and(|n| n <= 100))
+        }
+        _ => false,
+    }
+}
+
+fn finder_status(line: &str) -> bool {
+    let Some((count, remaining)) = line.split_once(' ') else {
+        return false;
+    };
+    if count.parse::<u64>().is_err() {
+        return false;
+    }
+    if matches!(remaining, "item" | "items") {
+        return true;
+    }
+    let Some(space) = remaining
+        .strip_prefix("items, ")
+        .or_else(|| remaining.strip_prefix("item, "))
+    else {
+        return false;
+    };
+    let words = space.split_whitespace().collect::<Vec<_>>();
+    matches!(words.as_slice(), [size, unit, "available"]
+        if size.parse::<f64>().is_ok_and(|n| n.is_finite() && n >= 0.0)
+            && matches!(*unit, "kb" | "mb" | "gb" | "tb"))
+}
+
+fn is_directive(line: &str) -> bool {
+    // A narrow filter for recognizable instruction/role lines, not an injection
+    // detector. All remaining captured text is rendered inert below.
+    let lower = line.to_lowercase();
+    [
+        "ignore previous instructions",
+        "ignore all previous instructions",
+        "ignore the above instructions",
+        "system:",
+        "assistant:",
+        "developer:",
+        "[event:",
+        "[event_id:",
+        "[eventid:",
+        "[event :",
+        "[inst]",
+        "<|im_start|>",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix))
+}
+
+fn escape_markdown(text: &str) -> String {
+    use std::fmt::Write;
+    let mut escaped = String::new();
+    let chars = text.chars().collect::<Vec<_>>();
+    for (index, &ch) in chars.iter().enumerate() {
+        // CommonMark does not emphasize intraword underscores. Preserve code
+        // identifiers in the plain-text view without admitting delimiter runs.
+        let intraword_underscore = ch == '_'
+            && index > 0
+            && chars[index - 1].is_alphanumeric()
+            && chars
+                .get(index + 1)
+                .is_some_and(|next| next.is_alphanumeric());
+        if (matches!(ch, '&' | '<' | '>' | '[' | ']' | '*' | '_' | '`' | '\\')
+            && !intraword_underscore)
+            || (index == 0 && ch == '#')
+        {
+            let _ = write!(escaped, "&#{};", u32::from(ch));
+        } else {
+            escaped.push(ch);
+        }
+    }
+    escaped
+}
+
+fn has_signal(evidence: &str, signals: &[&str]) -> bool {
+    let lower = evidence.to_lowercase();
+    let words = lower
         .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+        .map(|word| word.trim_matches(|ch: char| !ch.is_alphanumeric()))
+        .collect::<Vec<_>>();
+    signals.iter().any(|signal| {
+        let tokens = signal.split_whitespace().collect::<Vec<_>>();
+        words.windows(tokens.len()).any(|window| window == tokens)
+    })
+}
+
+fn evidence_rank(evidence: &str, section: DigestSection) -> u8 {
+    if section != DigestSection::Recent {
+        return 2;
+    }
+    u8::from(has_signal(
+        evidence,
+        &[
+            "reading",
+            "reviewing",
+            "reviewed",
+            "writing",
+            "wrote",
+            "drafting",
+            "editing",
+            "investigating",
+            "testing",
+            "tracing",
+            "research",
+            "copied",
+            "moved",
+            "cargo test",
+            "git commit",
+            "gh pr",
+        ],
+    ))
 }
 
 fn classify_evidence(evidence: &str) -> DigestSection {
     const OPEN_LOOP_SIGNALS: &[&str] = &[
         "blocked",
         "deadline",
-        "due ",
+        "due",
         "follow up",
         "follow-up",
-        "needs ",
+        "needs",
         "next step",
         "todo",
         "to do",
@@ -167,13 +407,9 @@ fn classify_evidence(evidence: &str) -> DigestSection {
         "shipped",
         "updated",
     ];
-    let lower = evidence.to_lowercase();
-    if OPEN_LOOP_SIGNALS
-        .iter()
-        .any(|signal| lower.contains(signal))
-    {
+    if has_signal(evidence, OPEN_LOOP_SIGNALS) {
         DigestSection::OpenLoop
-    } else if CHANGE_SIGNALS.iter().any(|signal| lower.contains(signal)) {
+    } else if has_signal(evidence, CHANGE_SIGNALS) {
         DigestSection::Changed
     } else {
         DigestSection::Recent
@@ -182,16 +418,18 @@ fn classify_evidence(evidence: &str) -> DigestSection {
 
 fn evidence_source(record: &EventRecord) -> String {
     if let Some(title) = record.window_title.as_deref().map(str::trim) {
-        if !title.is_empty() {
-            return title.to_owned();
+        if !title.is_empty() && title.len() <= ExtractiveBriefAuthor::MAX_SOURCE_BYTES {
+            return normalize_whitespace(title);
         }
     }
-    record
-        .app_bundle_id
-        .as_deref()
-        .and_then(|bundle| bundle.rsplit('.').next())
-        .unwrap_or("")
-        .to_owned()
+    normalize_whitespace(
+        record
+            .app_bundle_id
+            .as_deref()
+            .and_then(|bundle| bundle.rsplit('.').next())
+            .filter(|label| label.len() <= ExtractiveBriefAuthor::MAX_SOURCE_BYTES)
+            .unwrap_or(""),
+    )
 }
 
 #[cfg(test)]
@@ -256,7 +494,7 @@ mod tests {
         assert!(!brief.body.contains("[app=com.google.Chrome"));
         assert_eq!(brief.citations, vec![EventId(1), EventId(2), EventId(3)]);
         assert_eq!(author.model_id(), "hippocampus-extractive");
-        assert_eq!(author.model_version(), "1");
+        assert_eq!(author.model_version(), "2");
     }
 
     #[test]

@@ -284,7 +284,10 @@ struct DailyMemoryView: View {
             Text("Saved daily brief").font(.headline)
             if let brief = model.brief {
                 Text(brief.title).font(.subheadline.weight(.medium))
-                Text(brief.body).textSelection(.enabled)
+                if brief.modelId == "hippocampus-extractive" {
+                    Label("Draft", systemImage: "pencil").font(.caption).foregroundStyle(.secondary)
+                }
+                BriefEvidenceView(brief: brief, reader: reader)
                 Text("Generated \(Formatters.tsString(usSinceEpoch: brief.generatedTsUs)) from \(brief.sourceEventCount) memory records. May include non-screen sources.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
