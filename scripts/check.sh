@@ -51,6 +51,7 @@ LANES=(
     "safari-private-context|bash|test|node --test extensions/safari/__tests__/content.test.cjs"
     "bash-syntax|bash|lint|__bash_syntax_lane"
     "supply-chain-audit-contract|bash|test|python3 -B scripts/test_supply_chain_audit.py"
+    "release-safety-contract|bash|test|python3 -B scripts/test_release_safety.py"
     "release-contract|bash|lint|scripts/test-release-contract.sh"
     "app-group-contract|bash|test|scripts/test-app-group-contract.sh"
     "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
@@ -127,6 +128,7 @@ LANES
     safari-private-context structured browser capture fails closed in private tabs
     bash-syntax           bash -n across repo *.sh files
     supply-chain-audit-contract audit coverage, errors, and empty-selector regression tests
+    release-safety-contract mandatory model/launch gates and tag-audit failure propagation
     release-contract      release graph and artifact identity contract
     toml-license-contract pinned TOML dependency license contract
     task-2-product-truth  legal artifact drift and active product-truth contract

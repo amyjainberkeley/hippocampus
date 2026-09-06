@@ -7,13 +7,17 @@ import Foundation
 
 @MainActor
 public final class SearchViewModel: ObservableObject {
-    @Published public var query: String = ""
+    @Published public var query: String = "" {
+        didSet { if query != oldValue { searchInputChanged() } }
+    }
     @Published public private(set) var hits: [Hit] = []
     @Published public private(set) var isSearching: Bool = false
     @Published public private(set) var errorMessage: String?
     @Published public var selectedHitId: UInt64?
     @Published public var isDetailFocused: Bool = false
-    @Published public var filters: FilterState = FilterState()
+    @Published public var filters: FilterState = FilterState() {
+        didSet { if filters != oldValue { searchInputChanged() } }
+    }
     /// Top-N observed apps in the current window. The filter pills row
     /// reads this to render dynamic per-app pills + the overflow menu.
     @Published public private(set) var observedApps: [ObservedApp] = []
@@ -23,6 +27,9 @@ public final class SearchViewModel: ObservableObject {
     /// audit follow-up. Injectable so tests can pass an in-memory store.
     private let persistence: QueryPersistence
     private var persistCancellable: AnyCancellable?
+    private var pendingSearch: Task<Void, Never>?
+    private var searchGeneration: UInt64 = 0
+    private var focusedEventID: UInt64?
     /// Cycle 8.42 — snapshot of the user dictionary. Reloaded before every
     /// search so edits in the Settings tab take effect on the next query
     /// without a restart. Injectable for tests.
@@ -59,17 +66,24 @@ public final class SearchViewModel: ObservableObject {
     /// first appearance of the search tab and whenever the date-range
     /// changes (so the pills reflect the same window the search uses).
     public func reloadObservedApps() async {
-        let from = filters.timeWindowUs().fromUs
+        let requestedFilters = filters
+        let from = requestedFilters.timeWindowUs().fromUs
         do {
-            observedApps = try await reader.listObservedApps(limit: 50, timeFromUs: from)
+            let apps = try await reader.listObservedApps(limit: 50, timeFromUs: from)
+            guard requestedFilters == filters, !Task.isCancelled else { return }
+            observedApps = apps
         } catch {
+            guard requestedFilters == filters, !Task.isCancelled else { return }
             observedApps = []
         }
     }
 
     /// Re-run every read represented by the current search surface.
     public func refresh() async {
-        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !Task.isCancelled else { return }
+        if let focusedEventID {
+            await focusEvent(id: focusedEventID)
+        } else if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || filters.anyActive {
             await runSearch()
         }
@@ -82,17 +96,21 @@ public final class SearchViewModel: ObservableObject {
     }
 
     public func runSearch() async {
+        let generation = beginSearchRequest()
+        focusedEventID = nil
+        let requestedFilters = filters
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty || filters.anyActive else {
             hits = []
             errorMessage = nil
+            isSearching = false
             return
         }
         isSearching = true
         errorMessage = nil
-        defer { isSearching = false }
+        defer { if generation == searchGeneration { isSearching = false } }
         do {
-            let window = filters.timeWindowUs()
+            let window = requestedFilters.timeWindowUs()
             let results: [Hit]
             if q.isEmpty {
                 // Filter-only path. FTS5 rejects empty / `*` queries
@@ -102,6 +120,7 @@ public final class SearchViewModel: ObservableObject {
                 // dogfood window (Last 7 days at active capture rates).
                 results = try await applyClientFilters(
                     to: reader.recentEvents(limit: 500),
+                    filters: requestedFilters,
                     window: window
                 )
             } else {
@@ -113,18 +132,25 @@ public final class SearchViewModel: ObservableObject {
                 let opts = SearchOptions(
                     text: q,
                     limit: 50,
-                    appFilter: filters.appFilter,
+                    appFilter: requestedFilters.appFilter,
                     timeFromUs: window.fromUs,
                     timeToUs: window.toUs,
                     userAliases: aliasMap
                 )
                 results = try await applyClientFilters(
                     to: reader.search(opts),
+                    filters: requestedFilters,
                     window: window
                 )
             }
+            guard generation == searchGeneration, !Task.isCancelled else { return }
             hits = results
+            if let selectedHitId, !results.contains(where: { $0.id == selectedHitId }) {
+                self.selectedHitId = nil
+                isDetailFocused = false
+            }
         } catch {
+            guard generation == searchGeneration, !Task.isCancelled else { return }
             hits = []
             errorMessage = "\(error)"
         }
@@ -134,15 +160,19 @@ public final class SearchViewModel: ObservableObject {
     /// example from the global Recall popup) and reveal its detail directly.
     public func focusEvent(id: UInt64) async {
         guard id > 0 else { return }
+        let generation = beginSearchRequest()
+        focusedEventID = id
         isSearching = true
         errorMessage = nil
-        defer { isSearching = false }
+        defer { if generation == searchGeneration { isSearching = false } }
         do {
             let focused = try await reader.fetchEventsByIds([id])
+            guard generation == searchGeneration, !Task.isCancelled else { return }
             hits = Array(focused.prefix(1))
             selectedHitId = hits.first?.eventId
             isDetailFocused = selectedHitId != nil
         } catch {
+            guard generation == searchGeneration, !Task.isCancelled else { return }
             hits = []
             selectedHitId = nil
             isDetailFocused = false
@@ -155,6 +185,7 @@ public final class SearchViewModel: ObservableObject {
     /// text+filter path stay in sync.
     private func applyClientFilters(
         to results: [Hit],
+        filters: FilterState,
         window: (fromUs: UInt64?, toUs: UInt64?)
     ) -> [Hit] {
         var out = results
@@ -175,13 +206,43 @@ public final class SearchViewModel: ObservableObject {
 
     public func clear() {
         query = ""
+        filters = FilterState()
+        _ = beginSearchRequest()
+        focusedEventID = nil
         hits = []
         errorMessage = nil
-        filters = FilterState()
+        selectedHitId = nil
+        isDetailFocused = false
+        isSearching = false
         // Eagerly wipe persistence too — the debounced sink would
         // eventually erase it (empty state ⇒ delete key) but the user
         // clicked "×" so make it immediate.
         persistence.clear()
+    }
+
+    private func beginSearchRequest() -> UInt64 {
+        pendingSearch?.cancel()
+        pendingSearch = nil
+        searchGeneration &+= 1
+        return searchGeneration
+    }
+
+    private func searchInputChanged() {
+        _ = beginSearchRequest()
+        focusedEventID = nil
+        hits = []
+        selectedHitId = nil
+        isDetailFocused = false
+        errorMessage = nil
+        isSearching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || filters.anyActive
+        guard isSearching else { return }
+        pendingSearch = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.pendingSearch = nil
+            await self.refresh()
+        }
     }
 
     public func moveSelectionUp() {

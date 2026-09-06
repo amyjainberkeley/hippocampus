@@ -250,7 +250,13 @@ fn is_chrome(line: &str, record: &EventRecord) -> bool {
                 "size",
                 "kind",
             ];
-            LABELS.contains(&lower.as_str()) || finder_status(&lower)
+            // Gallery metadata and OCR-mangled sidebar icons have no stable
+            // vocabulary. Keep only substantive activity excerpts from Finder
+            // previews; the original captures remain available in memory.
+            LABELS.contains(&lower.as_str())
+                || finder_status(&lower)
+                || line.split_whitespace().count() < 3
+                || evidence_rank(line, classify_evidence(line)) == 0
         }
         Some("com.apple.controlcenter" | "com.apple.systemuiserver") => {
             const LABELS: &[&str] = &[

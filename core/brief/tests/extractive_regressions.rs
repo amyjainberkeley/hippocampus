@@ -24,6 +24,50 @@ fn chrome_only_does_not_become_a_workday() {
 }
 
 #[test]
+fn finder_gallery_metadata_and_ocr_icons_do_not_become_updates() {
+    let records = [event(
+        1,
+        1,
+        "com.apple.finder",
+        "< > tmp\n88\n000\n...\nE Shared\n& iCloud Drive\nGoogle Drive\nMacintosh HD\nApplication - 152 KB\nInformation\nCreated\nModified\nLast opened\nVersion\nAdd Tags...\nYesterday, 2:36 AM\n1.0",
+    )];
+    assert!(matches!(
+        ExtractiveBriefAuthor.author(&records, "Daily brief"),
+        Err(AuthorError::NoEvents)
+    ));
+}
+
+#[test]
+fn finder_preview_keeps_work_excerpts_without_filling_remaining_slots_with_chrome() {
+    let records = [event(
+        1,
+        1,
+        "com.apple.finder",
+        "Created\nModified\nMerged PR 412 after CI passed.\nBlocked on release checklist review.\nE Shared\n88\n000\nApplication - 152 KB",
+    )];
+    let brief = ExtractiveBriefAuthor
+        .author(&records, "Daily brief")
+        .unwrap();
+    assert_eq!(
+        brief
+            .body
+            .lines()
+            .filter(|line| line.starts_with("- "))
+            .count(),
+        2,
+        "{}",
+        brief.body
+    );
+    assert!(brief
+        .body
+        .contains("Merged PR 412 after CI passed. [event:1]"));
+    assert!(brief
+        .body
+        .contains("Blocked on release checklist review. [event:1]"));
+    assert_eq!(brief.citations, vec![EventId(1)]);
+}
+
+#[test]
 fn oversized_evidence_is_omitted_whole_without_starving_small_updates() {
     let records = [
         event(1, 1, "com.apple.Notes", "Fixed the release checklist."),

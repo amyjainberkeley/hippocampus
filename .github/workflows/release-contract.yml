@@ -272,6 +272,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: scripts/test-release-contract.sh
+      - run: python3 -B scripts/test_release_safety.py
       - run: scripts/test-app-group-contract.sh
       - run: scripts/test-toml-license-contract.sh
       - run: scripts/test-task-2-product-truth.sh
