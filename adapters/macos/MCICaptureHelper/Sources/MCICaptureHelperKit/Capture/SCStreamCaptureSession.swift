@@ -108,6 +108,25 @@ public struct InCallbackSample: Sendable, Equatable {
 /// fact that capture is no longer live.
 public enum CaptureRuntimeFailure: Error, Sendable, Equatable {
     case streamStoppedUnexpectedly
+    case userStoppedCapture
+
+    var helperExitStatus: Int32 {
+        switch self {
+        case .streamStoppedUnexpectedly: 81
+        case .userStoppedCapture: 82
+        }
+    }
+
+    static func forStreamStop(_ error: Error, sourceIsLive: Bool) -> Self? {
+        let error = error as NSError
+        if error.domain == SCStreamErrorDomain,
+           error.code == SCStreamError.Code.userStopped.rawValue
+        {
+            return .userStoppedCapture
+        }
+        guard sourceIsLive else { return nil }
+        return .streamStoppedUnexpectedly
+    }
 }
 
 /// The owner action for a terminal capture failure. Production uses the
@@ -234,12 +253,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// session. Guarded by `lock`: ScreenCaptureKit may deliver more than one
     /// error callback while its internal teardown is in flight.
     private var runtimeFailure: CaptureRuntimeFailure?
-
-    /// Streams this session deliberately stopped for shutdown or a privacy
-    /// pause. Keep a strong list until stop completion or a racing delegate
-    /// callback consumes the identity, so an expected stop cannot be mistaken
-    /// for a runtime failure and `ObjectIdentifier` cannot be reused early.
-    private var expectedTerminatedStreams: [SCStream] = []
+    private let activitySchedule = CaptureActivitySchedule()
 
     /// ADR-0031 §5.3 — the focus generation the currently-installed
     /// SCStream `SCContentFilter` was rebound under. Guarded by `lock`.
@@ -429,7 +443,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         do {
             try await scStream.startCapture()
         } catch {
-            discardCandidateStream(scStream, expectingTermination: true)
+            discardCandidateStream(scStream)
             _ = await stopExpectedStream(scStream)
             throw error
         }
@@ -439,7 +453,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             epoch: lifecycleEpoch
         )
         guard installed.installed else {
-            discardCandidateStream(scStream, expectingTermination: true)
+            discardCandidateStream(scStream)
             _ = await stopExpectedStream(scStream)
             return
         }
@@ -460,7 +474,6 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         for stream in streams {
             do {
                 try await stream.stopCapture()
-                forgetExpectedTermination(stream)
             } catch {
                 if firstStopError == nil { firstStopError = error }
             }
@@ -546,16 +559,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         return true
     }
 
-    private func discardCandidateStream(
-        _ candidate: SCStream,
-        expectingTermination: Bool
-    ) {
+    private func discardCandidateStream(_ candidate: SCStream) {
         lock.lock(); defer { lock.unlock() }
         streamFocusGenerations.removeValue(forKey: ObjectIdentifier(candidate))
         candidateStreams.removeValue(forKey: ObjectIdentifier(candidate))
-        if expectingTermination {
-            expectedTerminatedStreams.append(candidate)
-        }
         installedFocusGeneration = stream.flatMap {
             streamFocusGenerations[ObjectIdentifier($0)]
         } ?? 0
@@ -590,7 +597,6 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         retryOCRGeneration = nil
         if let old, old !== candidate {
             streamFocusGenerations.removeValue(forKey: ObjectIdentifier(old))
-            expectedTerminatedStreams.append(old)
         }
         return (true, old)
     }
@@ -616,12 +622,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         priorDHashGeneration = 0
         priorDHashCaptureOrdinal = 0
         retryOCRGeneration = nil
-        for s in streams {
-            // A stop delegate callback may be delivered asynchronously after
-            // `stopCapture()` returns. Retain identity until that callback so
-            // an intentional stop is never classified as a runtime failure.
-            expectedTerminatedStreams.append(s)
-        }
+        // Removing admission identities also retires their delegate callbacks,
+        // including callbacks delivered after stopCapture() has returned.
         return streams
     }
 
@@ -631,18 +633,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private func stopExpectedStream(_ stream: SCStream) async -> Bool {
         do {
             try await stream.stopCapture()
-            forgetExpectedTermination(stream)
             return true
         } catch {
             reportTerminalCaptureFailure()
             return false
-        }
-    }
-
-    private func forgetExpectedTermination(_ stream: SCStream) {
-        lock.lock(); defer { lock.unlock() }
-        if let index = expectedTerminatedStreams.firstIndex(where: { $0 === stream }) {
-            expectedTerminatedStreams.remove(at: index)
         }
     }
 
@@ -852,12 +846,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         do {
             try await replacement.startCapture()
         } catch {
-            discardCandidateStream(replacement, expectingTermination: true)
+            discardCandidateStream(replacement)
             _ = await stopExpectedStream(replacement)
             throw error
         }
         guard focusedWindowStore?.currentSync().generation == snapshotGeneration else {
-            discardCandidateStream(replacement, expectingTermination: true)
+            discardCandidateStream(replacement)
             _ = await stopExpectedStream(replacement)
             return
         }
@@ -867,7 +861,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             epoch: lifecycleEpoch
         )
         guard installed.installed else {
-            discardCandidateStream(replacement, expectingTermination: true)
+            discardCandidateStream(replacement)
             _ = await stopExpectedStream(replacement)
             return
         }
@@ -1041,7 +1035,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         do {
             try await scStream.startCapture()
         } catch {
-            discardCandidateStream(scStream, expectingTermination: true)
+            discardCandidateStream(scStream)
             _ = await stopExpectedStream(scStream)
             throw error
         }
@@ -1051,7 +1045,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             epoch: lifecycleEpoch
         )
         guard installed.installed else {
-            discardCandidateStream(scStream, expectingTermination: true)
+            discardCandidateStream(scStream)
             _ = await stopExpectedStream(scStream)
             throw CancellationError()
         }
@@ -1250,6 +1244,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         requiredFocusGeneration: UInt64?
     ) {
         guard let sample = Self.extractSynchronously(from: sampleBuffer) else { return }
+        guard activitySchedule.shouldProcess(
+            inputQuiet: sample.userIdle,
+            focusGeneration: requiredFocusGeneration,
+            now: DispatchTime.now().uptimeNanoseconds
+        ) else { return }
         let callbackOrdinal = allocateCaptureOrdinal()
         let baselineGeneration = requiredFocusGeneration ?? 0
         let retryPending = isOCRRetryPending(for: baselineGeneration)
@@ -1363,7 +1362,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // pixel-time privacy snapshot permits raw pixels.
         let prior = currentPriorDHash(for: baselineGeneration)
         let frame = CapturedSampleExtractor.makeCandidateFrame(
-            userIdle: sample.userIdle,
+            // Quiet-input cadence was applied above. Still admit meaningful
+            // changes while reading or watching a meeting without typing.
+            userIdle: false,
             frameStatusComplete: sample.frameStatusComplete,
             dirtyRects: effectiveDirtyRects,
             dhash: sample.dhash,
@@ -1560,9 +1561,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     // MARK: - SCStreamDelegate
 
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
-    public func stream(_ stream: SCStream, didStopWithError _: Error) {
+    public func stream(_ stream: SCStream, didStopWithError error: Error) {
         // UNVERIFIED — needs live macOS; do not claim working.
-        guard claimUnexpectedStreamTermination(stream) else { return }
+        guard claimUnexpectedStreamTermination(stream, error: error) else { return }
         handleClaimedRuntimeFailure()
     }
 
@@ -1580,7 +1581,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             await dispatcher.cancelAndDrain()
             await emitter?.stopAndDrain()
         }
-        runtimeFailureHandler(.streamStoppedUnexpectedly)
+        if let failure = currentRuntimeFailure() {
+            runtimeFailureHandler(failure)
+        }
     }
 
     /// Test seam for the shared state transition behind the framework-only
@@ -1597,19 +1600,25 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         currentRuntimeFailure() != nil
     }
 
-    /// Returns true only for the first unexpected stop. Expected stops are
-    /// consumed by identity, so TCC/share/privacy shutdown cannot accidentally
-    /// terminate the helper.
-    private func claimUnexpectedStreamTermination(_ stoppedStream: SCStream?) -> Bool {
+    /// Generic failures from retired streams cannot poison their replacements.
+    /// An explicit OS user stop still wins a race with a window replacement.
+    /// A nil stream is an explicit internal failure, such as failed teardown.
+    private func claimUnexpectedStreamTermination(
+        _ stoppedStream: SCStream?, error: Error? = nil
+    ) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if let stoppedStream,
-           let expectedIndex = expectedTerminatedStreams.firstIndex(where: { $0 === stoppedStream })
-        {
-            expectedTerminatedStreams.remove(at: expectedIndex)
-            return false
+        let failure: CaptureRuntimeFailure
+        if let stoppedStream {
+            guard let classified = CaptureRuntimeFailure.forStreamStop(
+                error ?? CaptureRuntimeFailure.streamStoppedUnexpectedly,
+                sourceIsLive: streamFocusGenerations[ObjectIdentifier(stoppedStream)] != nil
+            ) else { return false }
+            failure = classified
+        } else {
+            failure = .streamStoppedUnexpectedly
         }
         guard runtimeFailure == nil else { return false }
-        runtimeFailure = .streamStoppedUnexpectedly
+        runtimeFailure = failure
         captureEpoch &+= 1
         captureLifecycleActive = false
         installedFocusGeneration = 0
@@ -1638,7 +1647,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             "mci-capture-helper: helper_health capture_runtime_failed=\(failure)\n"
                 .data(using: .utf8) ?? Data()
         )
-        exit(81)
+        exit(failure.helperExitStatus)
     }
 
     // MARK: - In-callback OS extraction (UNVERIFIED)
@@ -1656,7 +1665,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// tested. On any extraction failure this returns `nil` and the
     /// frame is dropped — the safe direction (no capture beats a
     /// half-read capture).
-    static func extractSynchronously(from sampleBuffer: CMSampleBuffer) -> InCallbackSample? {
+    static func extractSynchronously(
+        from sampleBuffer: CMSampleBuffer,
+        activityReader: any UserActivityReading = SystemUserActivityReader()
+    ) -> InCallbackSample? {
         // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         let attachments = CMSampleBufferGetSampleAttachmentsArray(
             sampleBuffer, createIfNecessary: false
@@ -1711,7 +1723,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // can update its verdict in the callback before the cascade
         // runs (single read, no second pixel scan).
         return InCallbackSample(
-            userIdle: false,
+            // Unknown input activity must not be treated as active capture.
+            // This gates work only; it does not measure time or attention.
+            userIdle: UserActivityState.classify(
+                secondsSinceLastInput: activityReader.secondsSinceLastInput()
+            ) != .active,
             frameStatusComplete: frameStatusComplete,
             dirtyRects: dirtyRects,
             frameWidth: frameWidth,

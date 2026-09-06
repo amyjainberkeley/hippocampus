@@ -113,6 +113,7 @@ final class BuildAppScriptTests: XCTestCase {
             "apps/hippocampus/Package.swift",
             "apps/hippocampus/Package.resolved",
             "apps/hippocampus/Resources/Hippocampus.entitlements",
+            "apps/hippocampus/Resources/MCICaptureHelper.entitlements",
             "apps/hippocampus/Sources/HippocampusKit/Resources/keychain-sharing-contract.json",
             "extensions/safari/appex/HippocampusSafariExtension.entitlements",
         ]
@@ -125,6 +126,15 @@ final class BuildAppScriptTests: XCTestCase {
             )
             try fileManager.copyItem(at: source, to: destination)
         }
+
+        // This suite tests assembly with /usr/bin/true and synthetic models.
+        // Real verifier failure propagation is covered by test_release_safety.py.
+        for name in ["verify-models.sh", "verify-app-launches.sh"] {
+            let verifier = repoRoot.appendingPathComponent("scripts/\(name)")
+            try writeFile(verifier, contents: "#!/bin/bash\nexit 0\n")
+            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: verifier.path)
+        }
+        addTeardownBlock { try? FileManager.default.removeItem(at: repoRoot) }
 
         let executableFixture = URL(fileURLWithPath: "/usr/bin/true")
         let executablePaths = [

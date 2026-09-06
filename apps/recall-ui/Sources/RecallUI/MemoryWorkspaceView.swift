@@ -140,7 +140,8 @@ struct MemoryWorkspaceView: View {
                             viewModel: BriefViewModel(
                                 reader: reader,
                                 captureCoverage: .unknown
-                            )
+                            ),
+                            reader: reader
                         )
                     case .sources:
                         SourcesWorkspaceView(reader: reader)

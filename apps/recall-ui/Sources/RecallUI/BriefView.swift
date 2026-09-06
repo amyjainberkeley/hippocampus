@@ -11,6 +11,7 @@ import SwiftUI
 
 struct BriefView: View {
     @StateObject var viewModel: BriefViewModel
+    let reader: BrainReader
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -45,7 +46,7 @@ struct BriefView: View {
         case .loading:
             ShimmerLoadingView(isLoading: true)
         case .brief(let brief):
-            BriefBodyView(brief: brief) {
+            BriefBodyView(brief: brief, reader: reader) {
                 Task { await viewModel.reload(forceDate: brief.dateLocal) }
             }
         case .missingForDate(let dateLocal):
@@ -176,6 +177,7 @@ struct DateSelectorBar: View {
 
 struct BriefBodyView: View {
     let brief: Brief
+    let reader: BrainReader
     let onRefresh: () -> Void
 
     var body: some View {
@@ -183,7 +185,7 @@ struct BriefBodyView: View {
             VStack(alignment: .leading, spacing: 12) {
                 BriefHeaderView(brief: brief)
 
-                Text(brief.body)
+                BriefEvidenceView(brief: brief, reader: reader)
                     .font(.system(.body, design: .default))
                     .textSelection(.enabled)
                     .foregroundStyle(Color.brandFgPrimary)
@@ -209,6 +211,9 @@ struct BriefHeaderView: View {
             Text(brief.title)
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(Color.brandFgPrimary)
+            if brief.modelId == "hippocampus-extractive" {
+                Label("Draft", systemImage: "pencil").font(.caption).foregroundStyle(.secondary)
+            }
             HStack(spacing: 6) {
                 Text("Generated \(Formatters.relativeTime(usSinceEpoch: brief.generatedTsUs))")
                     .help(Formatters.tsString(usSinceEpoch: brief.generatedTsUs))

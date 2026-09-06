@@ -68,15 +68,17 @@ public enum MenuBarStatus: Equatable, Sendable {
         captureStartedAt: Date? = nil,
         now: Date = Date()
     ) -> MenuBarStatus {
+        // A failed shutdown is not proof of being off. Keep that failure visible
+        // even after the requested setting has correctly been latched false.
+        if case .crashed(let reason) = state {
+            return .error(reason: reason)
+        }
         guard captureEnabled else { return .idle }
         if state == .paused { return .paused }
         if let reason = tccRevokedSurface {
             return .needsPermission(reason)
         }
         if let reason = integrityError {
-            return .error(reason: reason)
-        }
-        if case .crashed(let reason) = state {
             return .error(reason: reason)
         }
         if state == .starting { return .starting }

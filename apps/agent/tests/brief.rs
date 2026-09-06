@@ -178,7 +178,100 @@ fn persisted_brief_records_the_author_that_actually_wrote_it() {
 
     let row = store.brief_for_date(DAY).unwrap().unwrap();
     assert_eq!(row.model_id, "hippocampus-extractive");
-    assert_eq!(row.model_version, "1");
+    assert_eq!(row.model_version, "2");
+}
+
+#[test]
+fn extractive_chrome_only_day_is_skipped_without_persisting_a_brief() {
+    let (_dir, store) = store_with(vec![event(
+        DAY_START_US + MIN,
+        "com.apple.finder",
+        "",
+        "Finder\nFile Edit View Go Window Help\nRecents\nDownloads\n2 items, 40 GB available",
+    )]);
+    let outcome = generate_brief_once(
+        &store,
+        &extractive_factory(),
+        "Daily brief",
+        &whole_day(),
+        1,
+    )
+    .unwrap();
+    assert!(matches!(outcome, BriefOutcome::SkippedEmpty), "{outcome:?}");
+    assert_eq!(store.brief_count().unwrap(), 0);
+    assert_eq!(store.events_since(0, 16).unwrap().len(), 1);
+}
+
+#[test]
+fn extractive_mixed_ocr_persists_useful_lines_with_exact_source_ids() {
+    let (_dir, store) = store_with(vec![
+        event(
+            DAY_START_US + MIN,
+            "com.apple.Notes",
+            "",
+            "Merged PR #412 after CI passed.\nWaiting for Maya's review.",
+        ),
+        event(
+            DAY_START_US + 2 * MIN,
+            "com.apple.Notes",
+            "",
+            "File Edit View Window Help\nMerged PR #412 after CI passed.\nDrafting release notes.",
+        ),
+        event(
+            DAY_START_US + 3 * MIN,
+            "com.apple.finder",
+            "",
+            "Finder\nFile Edit View Go Window Help\nDownloads",
+        ),
+    ]);
+    let records = store.events_since(0, 16).unwrap();
+    let merged_id = records
+        .iter()
+        .find(|r| r.text_snippet.contains("Drafting release"))
+        .unwrap()
+        .event_id
+        .0;
+    let waiting_id = records
+        .iter()
+        .find(|r| r.text_snippet.contains("Waiting for Maya"))
+        .unwrap()
+        .event_id
+        .0;
+    let outcome = generate_brief_once(
+        &store,
+        &extractive_factory(),
+        "Daily brief",
+        &whole_day(),
+        1,
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            outcome,
+            BriefOutcome::Stored {
+                citation_violations: 0,
+                ..
+            }
+        ),
+        "{outcome:?}"
+    );
+    let row = store.brief_for_date(DAY).unwrap().unwrap();
+    assert_eq!(
+        row.body.matches("Merged PR #412").count(),
+        1,
+        "{}",
+        row.body
+    );
+    assert!(row.body.contains(&format!(
+        "Merged PR #412 after CI passed. [event:{merged_id}]"
+    )));
+    assert!(row
+        .body
+        .contains(&format!("Waiting for Maya's review. [event:{waiting_id}]")));
+    assert!(!row.body.contains("File Edit"));
+    assert!(!row.body.contains("Downloads"));
+    assert_eq!(row.source_event_count, 3);
+    assert_eq!(store.events_since(0, 16).unwrap(), records);
 }
 
 #[test]

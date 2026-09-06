@@ -939,6 +939,7 @@ fi
 # Validate model bundling. Only the explicit development-lite profile may
 # authorize omissions; every other assembly treats verifier failures as fatal.
 VERIFY_SCRIPT="$REPO_ROOT/scripts/verify-models.sh"
+[[ -x "$VERIFY_SCRIPT" ]] || fatal "Required scripts/verify-models.sh is missing or not executable."
 if [[ -x "$VERIFY_SCRIPT" ]]; then
     echo ""
     echo "=== Model validation ==="
@@ -962,7 +963,7 @@ if [[ -x "$LAUNCH_VERIFY" ]]; then
     VERIFY_CLEAN_HOME=1 VERIFY_EXPECT_ONBOARDING=1 \
         "$LAUNCH_VERIFY" "$APP"
 else
-    echo "WARNING: scripts/verify-app-launches.sh not found — skipping launch gate."
+    fatal "Required scripts/verify-app-launches.sh is missing or not executable."
 fi
 
 # Ad-hoc development bundles use isolated file-key custody, so they can also
