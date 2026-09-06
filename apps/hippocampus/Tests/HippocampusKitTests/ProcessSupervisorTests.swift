@@ -858,6 +858,262 @@ final class ProcessSupervisorTests: XCTestCase {
         }
     }
 
+    func test_retry_continues_when_replacement_helper_cannot_start() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79)), .success(())]
+        topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 81)
+        let deadline = Date().addingTimeInterval(5)
+        while topology.launchPlans.count < 3 && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(topology.launchPlans.count, 3)
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [])
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_workspace_wake_recovers_failed_enabled_capture_without_changing_consent() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        do { try await supervisor.startAndWaitForReadiness(); XCTFail("fixture must fail startup") }
+        catch {}
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertEqual(config.captureWrites, [])
+        XCTAssertEqual(consent.enabledGenerationID, topology.generations.last?.id)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_workspace_wake_never_enables_disabled_capture() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        do { try await supervisor.startAndWaitForReadiness(); XCTFail("fixture must fail startup") }
+        catch {}
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertFalse(config.captureEnabled)
+        XCTAssertFalse(supervisor.captureEnabled)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_workspace_wake_never_overrides_explicit_stop_even_when_disk_write_failed() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        config.captureWriteError = TestError.writeFailed
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 82)
+        await waitForExplicitStop(supervisor)
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertTrue(config.captureEnabled, "the failed write leaves the old disk value")
+        XCTAssertFalse(supervisor.captureEnabled, "session intent must still win")
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertFalse(topology.isRunning)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_workspace_wake_does_not_override_pause_or_duplicate_a_running_session() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        try await supervisor.setPausedAndWait(true)
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(supervisor.state, .paused)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertFalse(topology.isRunning)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_workspace_wake_coalesces_while_readiness_is_pending() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        do { try await supervisor.startAndWaitForReadiness(); XCTFail("fixture must fail startup") }
+        catch {}
+        let suspension = TestSuspension()
+        topology.readinessSuspension = suspension
+        let first = Task { await supervisor.recoverAfterWorkspaceWake() }
+        await suspension.waitUntilEntered()
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        suspension.resume()
+        await first.value
+        XCTAssertEqual(supervisor.state, .running)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_workspace_wake_keeps_revoked_permission_visible_without_relaunch() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        do { try await supervisor.startAndWaitForReadiness(); XCTFail("fixture must fail startup") }
+        catch {}
+        supervisor.tccRevokedSurface = .screenRecording
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertEqual(supervisor.tccRevokedSurface, .screenRecording)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_pause_during_wake_cleanup_prevents_a_new_capture_launch() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        do { try await supervisor.startAndWaitForReadiness(); XCTFail("fixture must fail startup") }
+        catch {}
+        let suspension = TestSuspension()
+        topology.stopSuspensionOnCall = topology.stopCalls + 1
+        topology.stopSuspension = suspension
+        let recovery = Task { await supervisor.recoverAfterWorkspaceWake() }
+        await suspension.waitUntilEntered()
+        try await supervisor.setPausedAndWait(true)
+        suspension.resume()
+        await recovery.value
+        XCTAssertEqual(supervisor.state, .paused)
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertFalse(topology.isRunning)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_revocation_during_wake_cleanup_prevents_launch_and_consent() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+        let suspension = TestSuspension()
+        topology.stopSuspensionOnCall = topology.stopCalls + 1
+        topology.stopSuspension = suspension
+        let recovery = Task { await supervisor.recoverAfterWorkspaceWake() }
+        await suspension.waitUntilEntered()
+        supervisor.tccRevokedSurface = .screenRecording
+        suspension.resume()
+        await recovery.value
+        try await Task.sleep(for: .milliseconds(1150))
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertTrue(consent.enabledGenerations.isEmpty)
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertEqual(config.captureWrites, [])
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_revocation_during_replacement_readiness_prevents_consent_and_retries() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        let suspension = TestSuspension()
+        topology.readinessSuspension = suspension
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 81)
+        await suspension.waitUntilEntered()
+        supervisor.tccRevokedSurface = .accessibility
+        suspension.resume()
+        try await Task.sleep(for: .milliseconds(2150))
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertEqual(consent.enabledGenerations.count, 1)
+        XCTAssertNil(consent.enabledGenerationID)
+        XCTAssertFalse(topology.isRunning)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_revocation_during_retry_backoff_prevents_relaunch() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 81)
+        supervisor.tccRevokedSurface = .screenRecording
+        try await Task.sleep(for: .milliseconds(1150))
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_failed_quit_is_not_eligible_for_wake_recovery() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        topology.stopResults = [.failure(TestError.partialStop)]
+        await XCTAssertThrowsErrorAsync(try await supervisor.shutdownAndWait())
+        await supervisor.recoverAfterWorkspaceWake()
+        supervisor.start()
+        try await Task.sleep(for: .milliseconds(1150))
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        XCTAssertNil(consent.enabledGenerationID)
+        XCTAssertEqual(config.captureWrites, [])
+        guard case .crashed = supervisor.state else {
+            return XCTFail("failed Quit must stay visible until termination is retried")
+        }
+        try await supervisor.shutdownAndWait()
+        XCTAssertEqual(supervisor.state, .stopped)
+    }
+
+    func test_revoked_child_exit_stays_failed_until_restoration_and_wake() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.tccRevokedSurface = .screenRecording
+        topology.fireUnexpectedExit(forLaunchAt: 0, label: "agent", status: 9)
+        guard case .crashed = supervisor.state else {
+            return XCTFail("permission loss must not hide a dead child")
+        }
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        supervisor.tccRevokedSurface = nil
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(config.captureWrites, [])
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_pause_succeeds_while_permission_is_revoked() async throws {
+        let consent = FakeCaptureConsentAuthority()
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(
+            captureEnabled: true, captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.tccRevokedSurface = .accessibility
+        try await supervisor.setPausedAndWait(true)
+        XCTAssertEqual(supervisor.state, .paused)
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertNil(consent.enabledGenerationID)
+        await supervisor.recoverAfterWorkspaceWake()
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        supervisor.tccRevokedSurface = nil
+        try await supervisor.setPausedAndWait(false)
+        XCTAssertEqual(supervisor.state, .running)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_initial_start_cannot_launch_capture_with_known_revocation() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        supervisor.tccRevokedSurface = .screenRecording
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+        XCTAssertTrue(topology.launchPlans.isEmpty)
+        try await supervisor.shutdownAndWait()
+    }
+
+    func test_explicit_stop_during_replacement_start_cancels_all_further_retries() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(82))]
+        topology.fireUnexpectedExit(forLaunchAt: 0, status: 81)
+        let deadline = Date().addingTimeInterval(3)
+        while supervisor.captureEnabled && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await waitForExplicitStop(supervisor)
+        try await Task.sleep(for: .milliseconds(2150))
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertEqual(config.captureWrites, [false])
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertFalse(topology.isRunning)
+        try await supervisor.shutdownAndWait()
+    }
+
     func test_explicit_stop_from_retired_generation_cannot_stop_current_capture() async throws {
         let consent = FakeCaptureConsentAuthority()
         let (supervisor, _, _, config, topology, _) = makeSupervisor(

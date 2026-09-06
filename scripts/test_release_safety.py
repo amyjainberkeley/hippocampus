@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -115,6 +116,41 @@ class WorkflowTests(unittest.TestCase):
                  str(ROOT / f".github/workflows/{name}.yml")], text=True
             )
             cls.workflows[name] = json.loads(raw)
+
+    def test_safety_regressions_run_in_local_and_hosted_gates(self):
+        with tempfile.TemporaryDirectory(prefix="release-safety-lane-") as temp:
+            root = Path(temp)
+            (root / "scripts").mkdir()
+            (root / "bin").mkdir()
+            shutil.copyfile(ROOT / "scripts/check.sh", root / "scripts/check.sh")
+            python = root / "bin/python3"
+            python.write_text(
+                f"#!{sys.executable}\nimport sys\n"
+                "if 'scripts/test_release_safety.py' in sys.argv:\n"
+                "    print('release safety failure fixture executed')\n"
+                "    sys.exit(42)\n"
+            )
+            python.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(root / "scripts/check.sh"), "bash", "test"],
+                cwd=root, env={**os.environ, "PATH": f"{root / 'bin'}:/usr/bin:/bin",
+                               "CHECK_SH_QUIET": "0"},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertIn("release safety failure fixture executed", result.stdout)
+            self.assertRegex(result.stdout, r"release-safety-contract\s+FAIL")
+            self.assertNotEqual(result.returncode, 0)
+        raw = subprocess.check_output(
+            ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_file(ARGV[0]))",
+             str(ROOT / ".github/workflows/release-contract.yml")], text=True
+        )
+        workflow = json.loads(raw)
+        steps = workflow["jobs"]["contracts"]["steps"]
+        gate = next((step for step in steps if step.get("run") ==
+                     "python3 -B scripts/test_release_safety.py"), None)
+        self.assertIsNotNone(gate, "release safety regressions must run in hosted CI")
+        self.assertNotIn("if", gate)
+        self.assertFalse(gate.get("continue-on-error", False))
 
     def test_release_audits_checked_out_tag_before_build_or_publish(self):
         cases = (("release", "build-draft", "${{ github.sha }}", "${{ github.ref_name }}", "Build all binaries"),

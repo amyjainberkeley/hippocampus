@@ -37,9 +37,6 @@ struct SearchView: View {
             content
         }
         .background(Color.brandBgPrimary)
-        .task {
-            await viewModel.reloadObservedApps()
-        }
         .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
             _ in
             Task { await viewModel.refresh() }
@@ -47,6 +44,9 @@ struct SearchView: View {
         .task(id: focusRequest) {
             if let focusRequest {
                 await viewModel.focusEvent(id: focusRequest.eventId)
+                await viewModel.reloadObservedApps()
+            } else {
+                await viewModel.refresh()
             }
         }
         .onChange(of: focusTrigger) { _, _ in

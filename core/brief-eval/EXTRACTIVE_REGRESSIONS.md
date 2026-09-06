@@ -72,6 +72,17 @@ now bounds escaped body output to 16,384 bytes, omits source lines larger than
 truncate a sentence before a trailing qualification. Generated citations refer
 only to emitted bullets; the complete original event remains in the store.
 
+Live review of the September 6 installed app exposed another gap outside the
+ten-case corpus: Finder gallery metadata, OCR icon fragments and counters still
+filled daily-summary slots. Two new behavioral regressions in
+`core/brief/tests/extractive_regressions.rs` failed before the correction.
+Finder excerpts now require at least three words and a recognized work-activity
+signal. Useful file-preview work excerpts remain eligible, but unfamiliar
+Finder prose can be omitted. Other applications are not subjected to that
+Finder-specific rule. This improves source selection, not semantic truth, and
+does not remove original events or images. The ten-case and historical corpus
+inputs and scores are unchanged; the separate regression suite has 15 cases.
+
 ## Limits
 
 Filtering and ranking use finite, primarily English lexical rules. Unrecognized

@@ -146,7 +146,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         )
     }
     @Published public private(set) var captureEnabled: Bool
-    @Published public internal(set) var tccRevokedSurface: TCCRevokedReason?
+    @Published public internal(set) var tccRevokedSurface: TCCRevokedReason? {
+        didSet {
+            guard tccRevokedSurface != nil else { return }
+            cancelPendingRetry()
+            if state == .starting {
+                transitionGate.reset()
+                stopAncillaryServices()
+                state = .crashed(reason: "Capture permission was revoked.")
+            }
+        }
+    }
 
     private let locator: BinaryLocator
     private let keyStore: KeyStore
@@ -317,10 +327,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             }
         }
         shutdownTask = task
-        defer {
-            shutdownTask = nil
-            shutdownRequested = false
-        }
+        // Quit intent survives a failed teardown. Only a new application
+        // instance may start again; a wake event is not an explicit restart.
+        defer { shutdownTask = nil }
         do {
             try await task.value
         } catch {
@@ -538,6 +547,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         transitionID: UUID
     ) async throws -> String {
         try ensureTransitionIsActive(transitionID)
+        guard !requestedCapture || tccRevokedSurface == nil else {
+            throw SupervisorError.transitionInProgress
+        }
         state = .starting
         guard let helperURL = locator.helperPath() else {
             try failStart(SupervisorError.binaryNotFound("MCICaptureHelper"))
@@ -682,6 +694,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             try captureConsentAuthority.disable()
             return
         }
+        guard tccRevokedSurface == nil, !shutdownRequested else {
+            throw SupervisorError.transitionInProgress
+        }
         startSafariInboxReader(expectedGenerationID: generationID)
         do {
             try captureConsentAuthority.enable(generationID: generationID)
@@ -747,61 +762,107 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
         guard state != .stopped,
               !captureStopLatched,
+              !shutdownRequested,
               pendingRetryGenerationID == nil,
               transitionGate.acceptsUnexpectedExit(generationID: generationID)
         else { return }
         stopAncillaryServices()
         state = .crashed(reason: "\(label) exited (\(status))")
+        guard tccRevokedSurface == nil else { return }
         pendingRetryGenerationID = generationID
         scheduleRetry(expectedGenerationID: generationID)
     }
 
-    private func scheduleRetry(expectedGenerationID: String) {
-        guard retryCount < Self.maxRetries else {
-            pendingRetryGenerationID = nil
-            return
+    /// Workspace availability is not capture consent. Recover only a failed,
+    /// previously enabled session; an explicit stop or pause always wins.
+    public func recoverAfterWorkspaceWake() async {
+        guard case .crashed = state,
+              captureEnabled, runtimeConfig.captureEnabled,
+              !captureStopLatched, captureStopTask == nil,
+              !requestedPauseState, pauseTask == nil,
+              !shutdownRequested, shutdownTask == nil,
+              tccRevokedSurface == nil, inFlightTransitions.isEmpty
+        else { return }
+        cancelPendingRetry()
+        retryCount = 0
+        do {
+            try await restartTopology()
+        } catch {
+            logger.error("supervisor: wake recovery failed: \(error.localizedDescription)")
+            guard !Task.isCancelled, !captureStopLatched, !requestedPauseState,
+                  !shutdownRequested, tccRevokedSurface == nil,
+                  captureEnabled, runtimeConfig.captureEnabled,
+                  case .crashed = state else { return }
+            let recoveryID = UUID().uuidString
+            pendingRetryGenerationID = recoveryID
+            scheduleRetry(expectedGenerationID: recoveryID, requireCommittedGeneration: false)
         }
-        retryCount += 1
-        let delay = min(pow(2.0, Double(retryCount - 1)), Self.maxBackoff)
+    }
+
+    private func scheduleRetry(expectedGenerationID: String, requireCommittedGeneration: Bool = true) {
         retryTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled,
-                  let self,
-                  self.pendingRetryGenerationID == expectedGenerationID,
-                  self.transitionGate.canBeginRetry(
-                    expectedGenerationID: expectedGenerationID
-                  ),
-                  let transitionID = self.beginOwnedTransition()
-            else { return }
-            defer { self.inFlightTransitions.remove(transitionID) }
-            self.pendingRetryGenerationID = nil
-            do {
-                try await self.topology.stop(timeout: 2)
-                try self.ensureTransitionIsActive(transitionID)
-                let generationID = try await self.startTopology(
-                    captureEnabled: self.runtimeConfig.captureEnabled,
-                    transitionID: transitionID
-                )
-                try self.ensureTransitionIsActive(transitionID)
-                try self.prepareCaptureBoundary(
-                    captureEnabled: self.runtimeConfig.captureEnabled,
-                    generationID: generationID
-                )
-                guard self.transitionGate.commit(
-                    generationID: generationID,
-                    transitionID: transitionID
-                ) else {
-                    throw SupervisorError.transitionInProgress
-                }
-                self.activateTopology(captureEnabled: self.runtimeConfig.captureEnabled)
-            } catch {
-                if self.transitionGate.ownsTransition(transitionID) {
-                    self.transitionGate.fail(transitionID: transitionID)
-                    self.state = .crashed(reason: error.localizedDescription)
-                } else {
-                    await self.stopUncommittedTopologyIfNeeded()
+            guard let self else { return }
+            defer {
+                if self.pendingRetryGenerationID == expectedGenerationID {
+                    self.pendingRetryGenerationID = nil
                 }
             }
+            var needsCommittedGeneration = requireCommittedGeneration
+            while self.retryCount < Self.maxRetries {
+                self.retryCount += 1
+                let delay = min(pow(2.0, Double(self.retryCount - 1)), Self.maxBackoff)
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                guard !Task.isCancelled,
+                      self.pendingRetryGenerationID == expectedGenerationID,
+                      !self.captureStopLatched, !self.requestedPauseState,
+                      !self.shutdownRequested, self.tccRevokedSurface == nil,
+                      !needsCommittedGeneration || self.transitionGate.canBeginRetry(
+                        expectedGenerationID: expectedGenerationID
+                      )
+                else { return }
+                needsCommittedGeneration = false
+                do {
+                    try await self.restartTopology()
+                    return
+                } catch {
+                    self.logger.error("supervisor: retry failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func restartTopology() async throws {
+        guard !captureStopLatched, !requestedPauseState, !shutdownRequested,
+              tccRevokedSurface == nil,
+              let transitionID = beginOwnedTransition() else {
+            throw SupervisorError.transitionInProgress
+        }
+        defer { inFlightTransitions.remove(transitionID) }
+        state = .starting
+        do {
+            try await revokeConsentAndStopTopology(timeout: 2)
+            try ensureTransitionIsActive(transitionID)
+            let generationID = try await startTopology(
+                captureEnabled: runtimeConfig.captureEnabled,
+                transitionID: transitionID
+            )
+            try ensureTransitionIsActive(transitionID)
+            try prepareCaptureBoundary(
+                captureEnabled: runtimeConfig.captureEnabled,
+                generationID: generationID
+            )
+            guard transitionGate.commit(generationID: generationID, transitionID: transitionID) else {
+                throw SupervisorError.transitionInProgress
+            }
+            activateTopology(captureEnabled: runtimeConfig.captureEnabled)
+        } catch {
+            if transitionGate.ownsTransition(transitionID) {
+                transitionGate.fail(transitionID: transitionID)
+                state = .crashed(reason: error.localizedDescription)
+            } else {
+                await stopUncommittedTopologyIfNeeded()
+            }
+            throw error
         }
     }
 

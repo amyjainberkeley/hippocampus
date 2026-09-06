@@ -165,6 +165,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
+                     NSWorkspace.sessionDidBecomeActiveNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(
+                self, selector: #selector(workspaceBecameAvailable(_:)), name: name, object: nil
+            )
+        }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(workspaceWillPowerOff(_:)),
@@ -271,6 +277,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configurePreferencesController()
         PreferencesWindowController.shared.show(section: request.section)
         request.acknowledge(from: executable)
+    }
+
+    @objc private func workspaceBecameAvailable(_ notification: Notification) {
+        Task { @MainActor [weak self] in
+            await self?.supervisor.recoverAfterWorkspaceWake()
+        }
     }
 
     /// Arm the helper-stderr TCC tail (cycle 8.47 PR #80 follow-up).
