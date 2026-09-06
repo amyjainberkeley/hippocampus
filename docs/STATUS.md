@@ -1,14 +1,43 @@
 # Hippocampus Status
 
-_Audited on 2026-09-05._
+_Audited on 2026-09-06._
 
-Audited code baseline: `fe285ee`
+Audited code baseline: `493befe`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 6 Safety And Usefulness Integration
+
+Code baseline `493befe` adds explicit macOS user-stop handling with a parent
+capture-off latch, retired-stream failure isolation, visible stop failures,
+read-only quiet-input sampling, source-linked native brief rendering, bounded
+extractive drafts and mandatory release advisory/model/launch gates. Details
+and remaining work: `docs/audit/2026-09-06-owner-product-ledger.md`.
+
+Optimized native suites passed: capture 674 tests, parent 307, Recall 402 XCTest
+plus three handoff tests. Final focused Rust integration passed 17 agent brief,
+13 extractive regression, four historic evaluator and two new quality tests.
+Strict Clippy for brief/eval and Rust formatting passed. The ten-case synthetic
+relevance/source-containment rubric improved from 2/10 to 10/10; this is not
+semantic truth or universal prompt-injection qualification.
+
+The broad debug Rust run initially failed two tier2 footprint timing checks
+during concurrent native builds. Its result remains a failure pending a quiet
+and optimized check. The changed runtime and native UI still require installed
+proof from the newly assembled artifact. Until that succeeds, the current
+installed and notarized app remains the September 5 `fe285ee` artifact below.
+An additional ordinary-window check after about 20 hours of process uptime
+increased its committed screen and screenshot counters; this is continuity
+evidence for that old build only, not qualification of `493befe`.
+
+Neither measured work time, reviewable commitments, trusted answers, normal/
+private-browser and owner-controlled permission qualification, second-Mac
+continuity nor public release is newly claimed. The model release manifest
+remains UNPROVISIONED. No permissions, keys or user memory were reset.
 
 ## Installed Product Repair
 
