@@ -25,7 +25,7 @@ and the owner's follow-up approval to continue all gaps with safety first.
 - Test behavioral failures before fixes; retain failing qualification results.
 - macOS 14 remains the deployment floor. Do not introduce new dependencies
   without a justified source/integrity and compatibility review.
-- Keep the installed `fe285ee` artifact until an integrated successor passes
+- Keep the installed artifact until an integrated successor passes
   relevant tests, build provenance, signing and native downstream verification.
 - No public release or remote upload of memory without the separate release and
   consent gates. Public model inputs and second-Mac proof remain explicit gates.
@@ -130,7 +130,7 @@ Files: helper context/IPC, Rust IPC/ingestion/store, Recall bridge/day view.
 
 ## Integration Evidence, September 6
 
-Complete optimized suites: capture 674, parent 307, Recall 402 XCTest plus three
+Complete optimized suites: capture 674, parent 323, Recall 409 XCTest plus three
 Swift Testing handoff tests passed. Brief generation has 17 agent integration
 tests; the unchanged eight-day corpus and the new ten-case extractive corpus
 pass. The latter improved from 2/10 on the baseline to 10/10 on its finite
@@ -138,9 +138,13 @@ source-containment/noise/formatting checks. It does not establish semantic truth
 Oversized-input regressions also bound escaped brief bodies to 16 KB without
 truncating evidence sentences. Strict Clippy passed for brief/eval targets.
 
-The first broad debug Rust run stopped at two existing tier2 footprint timing
-checks while native compilers were running. It is retained as a failure, not
-counted as a complete passing workspace run; quiet/optimized recheck is pending.
+The final serial debug Rust workspace passed 1,972 tests, with nine ignored,
+across 130 groups (`/tmp/hippocampus-workspace-final-20260906.log`). The first
+concurrent-build run's two tier2 timing failures remain recorded. A release
+test attempt was refused by the intentional test-key-wrap compile guard; that
+guard was not disabled. Eight release-safety fixtures, 16 audit fixtures and
+224 release-contract checks pass. Routine local/CI checks now run the safety
+fixtures as blocking gates, with a behavioral failure-propagation test.
 
 The activity reader currently drives bounded quiet-input sampling only. It
 admits first/new-window samples and resumes ordinary cadence on input; it does
@@ -149,10 +153,26 @@ wire/store/UI contract is still unbuilt.
 
 The source-link native UI parses only the versioned extractive format, treats
 captured markup as inert text and opens the existing authenticated source
-viewer. Empty/overflow/malformed citations have regression coverage. Live
-installed proof is pending this integration's signed successor.
+viewer. Empty/overflow/malformed citations have regression coverage. Installed
+`11194ae` showed source-linked briefs, native screenshot search and authenticated
+TextEdit event 1755 pixels. The real Codex MCP connection returned its synthetic
+marker with observations-only truth status. Durable proof is in
+`/Users/amy/hippo-work/releases/2026-09-06-11194ae/`.
 
-Subagent review was unavailable due to account limits. Main-agent inspection
-and tests are not an independent security review. A capture-off persistence
+Subagent review was initially unavailable due to account limits, then became
+available for the recovery follow-up. It found four actionable race/state bugs;
+tests reproduced each before correction, and re-review found no remaining
+actionable issues in that scoped diff. This is not a whole-product independent
+security review. A capture-off persistence
 failure is visibly latched for the running parent, but cannot guarantee that
 intent survives a future relaunch if the disk write itself failed.
+
+The installed app later became disconnected after replacement startup failed
+with `noDisplay`. Follow-up `eff26a3` adds bounded retries across startup failures
+and eligible workspace-wake recovery while preserving Stop/pause/revocation/Quit.
+It also repairs restored-query loading, debounced typing and stale search races,
+and excludes Finder gallery noise exposed by native brief review. Parent race
+red/green logs are `/tmp/hippocampus-review-races-red-20260906.log`,
+`/tmp/hippocampus-review-integration-red-20260906.log` and
+`/tmp/hippocampus-parent-shipping-final-20260906.log`.
+The corrected successor still needs signing and its own installed proof.

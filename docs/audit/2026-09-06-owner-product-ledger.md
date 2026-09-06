@@ -30,25 +30,49 @@ by a local build, and no test result establishes zero bugs or malware immunity.
   Rust lockfiles, pinned the scanner, tied release auditing to the exact tag and
   made model/launch checks mandatory. The existing unmaintained `paste` waiver
   remains visible. No unrelated dependency upgrades were made.
+- **Recovery follow-up:** live testing found replacement startup could fail with
+  `noDisplay` and silently abandon recovery. Bounded retries now continue across
+  replacement startup failures; wake can recover an eligible failed session.
+  An independent code reviewer found permission/Quit races and two related
+  state regressions. Behavioral tests reproduced them before correction.
+  Revoked access blocks capture startup, not a successful pause; a dead child
+  remains visibly failed. Quit intent survives failed teardown until app restart.
+- **Search follow-up:** restored queries load on opening Search; typing starts a
+  bounded debounced query. Superseded successes and errors cannot replace newer
+  results, resurrect cleared results or override explicitly opened evidence.
+- **Summary follow-up:** Finder gallery counters, metadata and OCR icon fragments
+  no longer fill daily-brief slots. Finder preview excerpts require recognized
+  work-activity wording. This conservative filter can omit unfamiliar prose;
+  original events and images are retained.
 
 ## Verification
 
-Optimized native suites passed: capture 674; parent 307; Recall 402 XCTest plus
+Optimized native suites passed: capture 674; parent 323; Recall 409 XCTest plus
 three Swift Testing handoff cases. The ten-case synthetic brief corpus improved
 from 2/10 to 10/10 on its declared relevance/source-containment rubric, with
 18/18 labeled source excerpts retained. The unchanged eight-day corpus passes.
 These tests do not establish semantic truth or universal injection resistance.
 
-The initial full debug Rust run hit two tier2 timing limits while native builds
-were competing for CPU. Its failure is retained; quiet recheck and final signed
-installed proof are pending. The known-good installed app remains `fe285ee`
-until its successor is assembled and verified. See the continuation plan for
-test logs, precise scope and remaining acceptance gates.
+The final serial full debug Rust workspace passed 1,972 tests, with nine ignored.
+The initial concurrent-build run's two timing failures remain recorded; the
+release-mode test-key-wrap guard was not bypassed. Eight release-safety fixtures,
+16 audit fixtures and 224 release-contract checks passed. A separate reviewer
+reported no remaining actionable findings in the corrected recovery diff.
+This is not a whole-product independent security audit.
+
+Signed/notarized/stapled `11194ae` is installed. Synthetic TextEdit event 1755
+passed the real screen -> encrypted image -> native Search/viewer -> Codex MCP
+loop. Its durable screenshot proof and installer live in
+`/Users/amy/hippo-work/releases/2026-09-06-11194ae/`.
+The follow-up fixes above need their own installed proof. Capture later became
+disconnected after replacement startup failed, so the earlier positive proof is
+not a claim of uninterrupted capture. See `docs/STATUS.md` for current artifact
+identity and the continuation plan for remaining acceptance gates.
 
 ## Not Yet Finished
 
-1. Live new-build capture, image, search, brief and agent-context proof; then
-   safe replacement of the known-good installed app and signed installer.
+1. Package the recovery/search/summary follow-up, preserve the prior installed
+   artifact, and repeat live capture/image/search/brief/agent-context proof.
 2. Real normal/private-browser qualification and owner-controlled permission
    revoke/restore and macOS Stop tests. Never reset or grant these automatically.
 3. Measured active/idle/unknown activity persisted through a versioned contract.

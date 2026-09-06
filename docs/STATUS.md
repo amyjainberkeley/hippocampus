@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-06._
 
-Audited code baseline: `493befe`
+Audited code baseline: `eff26a3`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -18,21 +18,41 @@ read-only quiet-input sampling, source-linked native brief rendering, bounded
 extractive drafts and mandatory release advisory/model/launch gates. Details
 and remaining work: `docs/audit/2026-09-06-owner-product-ledger.md`.
 
-Optimized native suites passed: capture 674 tests, parent 307, Recall 402 XCTest
-plus three handoff tests. Final focused Rust integration passed 17 agent brief,
-13 extractive regression, four historic evaluator and two new quality tests.
-Strict Clippy for brief/eval and Rust formatting passed. The ten-case synthetic
-relevance/source-containment rubric improved from 2/10 to 10/10; this is not
-semantic truth or universal prompt-injection qualification.
+The integrated `11194ae` app was Developer ID signed, notarized, stapled and
+installed at `/Applications/Hippocampus.app`. Strict signature verification,
+Gatekeeper and signed build provenance passed. Its installer is
+`/Users/amy/hippo-work/releases/2026-09-06-11194ae/Hippocampus-0.1.0.dmg`, SHA-256
+`2404ee73a997ba796bb47a74107d707944dbf22ed57829d2e7bc3ef9dce3c42c`.
+Ordinary TextEdit synthetic event 1755 reached encrypted storage, native Search,
+the authenticated screenshot viewer and the real Codex MCP connection. Proof:
+`/Users/amy/hippo-work/releases/2026-09-06-11194ae/installed-textedit-screenshot-proof.jpeg`.
+Native version-2 brief source navigation also worked. MCP correctly returned
+observations-only/degraded evidence, not a verified answer.
 
-The broad debug Rust run initially failed two tier2 footprint timing checks
-during concurrent native builds. Its result remains a failure pending a quiet
-and optimized check. The changed runtime and native UI still require installed
-proof from the newly assembled artifact. Until that succeeds, the current
-installed and notarized app remains the September 5 `fe285ee` artifact below.
-An additional ordinary-window check after about 20 hours of process uptime
-increased its committed screen and screenshot counters; this is continuity
-evidence for that old build only, not qualification of `493befe`.
+Extended installed use exposed a further failure: after a generic stream stop,
+replacement startup reported `noDisplay`, and recovery ended with capture still
+enabled but the helper disconnected. Source revision `eff26a3` retries failed
+replacement startup with bounded backoff and recovers eligible failed sessions
+on workspace wake. It preserves explicit Stop, pause, Quit and revoked access.
+It also fixes restored-query loading, debounced typing and stale asynchronous
+search results. Finder gallery metadata is omitted from daily drafts without
+deleting original memory. This successor still needs its own signed installed
+proof; the historical positive proof does not certify these later fixes.
+
+The complete Rust workspace passed 1,972 tests, with nine explicitly ignored,
+across 130 test groups. Its earlier concurrent-build timing failures remain
+recorded; the completed serial recheck passed. The release-mode tier2 test
+attempt was refused by the intentional test-key-wrap guard, which was not
+disabled. Optimized capture has 674 passing tests, Recall 409 XCTest plus three
+handoff tests; the complete optimized parent suite passed 323 tests. A separate
+code reviewer found four recovery/state issues, reproduced before correction,
+and reported no remaining actionable findings in the corrected recovery diff.
+This is a scoped code review, not an independent whole-product security audit.
+Strict Clippy for brief/eval, Rust formatting, eight release-safety fixtures,
+16 audit fixtures and 224 release-contract checks passed. The ten-case synthetic
+brief rubric remains 10/10 versus its recorded 2/10 baseline; the separate
+extractive regression suite now has 15 cases. This is not semantic truth or
+universal prompt-injection qualification.
 
 Neither measured work time, reviewable commitments, trusted answers, normal/
 private-browser and owner-controlled permission qualification, second-Mac
@@ -140,7 +160,7 @@ Proof: `/tmp/hippocampus-focus-repair-image-proof-20260905.jpeg`.
 The browser-capability build `81e0cb6` was signed, notarized, stapled and installed.
 Its 79 MB DMG is `/tmp/hippocampus-release-20260905-browser-routing/Hippocampus-0.1.0.dmg`,
 SHA-256 `6ca2ddff5abf47c15c3d23c25cc13be8aac057925acc4c63ce65654c3ee11c78`.
-The installed app is now the final repair artifact `fe285ee`, Developer ID
+The September 5 installed app was repair artifact `fe285ee`, Developer ID
 signed, notarized and stapled. Installed provenance, deep/strict codesign,
 stapler validation and Gatekeeper assessment passed. The durable installer is
 `/Users/amy/hippo-work/releases/2026-09-05-fe285ee/Hippocampus-0.1.0.dmg`,
