@@ -61,14 +61,21 @@ pub enum LockAcquireOutcome {
 #[derive(Debug)]
 pub struct RunLock {
     sentinel_path: PathBuf,
-    _lease_file: File,
+    lease_file: File,
 }
 
 impl RunLock {
     /// Mark the current run clean and release the writer lease. The stable
     /// lease file remains on disk so future lockers always address one inode.
     pub fn release(self) -> Result<(), LockError> {
-        remove_crash_marker(&self.sentinel_path)
+        remove_crash_marker(&self.sentinel_path)?;
+        // Close alone may leave the lease on a briefly inherited descriptor.
+        // Only clean, completed writer scopes unlock; process-exit release
+        // deliberately retains the lease through all runtime teardown.
+        #[cfg(unix)]
+        flock(&self.lease_file, FlockOperation::Unlock)
+            .map_err(|error| LockError::Io(io::Error::from_raw_os_error(error.raw_os_error())))?;
+        Ok(())
     }
 
     /// Mark shutdown clean while retaining the advisory descriptor until the
@@ -157,7 +164,7 @@ pub fn acquire_lock(path: &Path) -> Result<(LockAcquireOutcome, RunLock), LockEr
         outcome,
         RunLock {
             sentinel_path: path.to_owned(),
-            _lease_file: lease_file,
+            lease_file,
         },
     ))
 }
@@ -511,6 +518,26 @@ mod tests {
         let (outcome, next) = acquire_lock(&path).expect("next clean boot");
         assert_eq!(outcome, LockAcquireOutcome::CleanBoot);
         next.release().expect("clean release");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn clean_release_unlocks_even_when_a_descriptor_copy_remains() {
+        let (_dir, path) = tmp_lock();
+        let (_, owner) = acquire_lock(&path).expect("first owner");
+        // Model the descriptor a concurrent process launch can briefly inherit
+        // before exec closes CLOEXEC descriptors, without a timing-dependent fork.
+        let inherited = owner.lease_file.try_clone().expect("duplicate descriptor");
+        owner.release().expect("clean release");
+
+        let (outcome, next) = acquire_lock(&path).expect("released lease is available");
+        assert_eq!(outcome, LockAcquireOutcome::CleanBoot);
+        drop(inherited);
+        assert!(
+            matches!(acquire_lock(&path), Err(LockError::WriterLeaseHeld { .. })),
+            "closing the old descriptor must not release the new owner's lock"
+        );
+        next.release().expect("release next owner");
     }
 
     #[test]

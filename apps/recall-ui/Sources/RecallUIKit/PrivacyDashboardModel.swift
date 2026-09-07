@@ -90,10 +90,7 @@ public enum DestructivePrivacyAction: String, Sendable {
     }
 }
 
-/// Pure formatter for the Privacy Dashboard's summary line.
-/// "MCI has captured N events across D days, using B of encrypted
-/// storage." — kept as a free function so the snapshot test can pin
-/// the exact string without instantiating SwiftUI.
+/// Pure presentation of counts, logical bytes, and measurement completeness.
 public enum PrivacyDashboardSummary {
     public static func line(
         summary: SummaryStats?,
@@ -104,13 +101,44 @@ public enum PrivacyDashboardSummary {
             // the new copy reads as normal English on a fresh install.
             return isLoading ? "Loading…" : "No captures yet."
         }
-        let bytes = ByteCountFormatter.string(
-            fromByteCount: Int64(s.diskBytes), countStyle: .file
-        )
         let days = s.daysCovered
         let dayLabel = days == 1 ? "1 day" : "\(days) days"
         return
             "Hippocampus has captured \(s.totalEvents) events across "
-            + "\(dayLabel), using \(bytes) of encrypted storage."
+            + "\(dayLabel)."
+    }
+
+    public static func storageTotal(summary: SummaryStats?) -> String {
+        guard let storage = summary?.storage else {
+            return "Storage breakdown unavailable."
+        }
+        guard let bytes = storage.reportedTotalBytes else {
+            return "Storage total unavailable; measurement incomplete."
+        }
+        if storage.complete {
+            return "Reported local storage: \(formatBytes(bytes))"
+        }
+        return "Partial storage measurement: \(formatBytes(bytes)) reported; total incomplete."
+    }
+
+    public static func storageValue(_ measurement: StorageMeasurement) -> String {
+        let value = measurement.logicalBytes.map(formatBytes) ?? "Unavailable"
+        switch measurement.status {
+        case .complete: return value
+        case .missing: return "\(value) (absent)"
+        case .unreadable: return "\(value) (unreadable)"
+        case .symlink: return "\(value) (symlink skipped)"
+        case .unsupported: return "\(value) (unsupported file type or path)"
+        case .partial: return "\(value) (partial; entries skipped)"
+        case .limitReached: return "\(value) (partial; scan limit reached)"
+        case .overflow: return "Unavailable (size overflow)"
+        }
+    }
+
+    private static func formatBytes(_ bytes: UInt64) -> String {
+        guard let signed = Int64(exactly: bytes) else {
+            return "\(bytes.formatted()) bytes"
+        }
+        return ByteCountFormatter.string(fromByteCount: signed, countStyle: .file)
     }
 }

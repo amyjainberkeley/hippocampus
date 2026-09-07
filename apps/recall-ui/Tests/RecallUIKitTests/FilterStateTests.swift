@@ -33,6 +33,67 @@ final class FilterStateTests: XCTestCase {
         XCTAssertTrue(state.requiresClientSideAppFilter)
     }
 
+    func testAppSelectionStopsAt32WithoutReplacingExistingSelections() {
+        var state = FilterState()
+        XCTAssertEqual(FilterState.maximumSelectedApps, 32)
+        for index in 0..<32 {
+            XCTAssertTrue(state.canToggleApp("mcp:source-\(index)"))
+            state.toggleApp("mcp:source-\(index)")
+        }
+        let selected = state.appBundleIds
+        XCTAssertTrue(state.hasReachedAppSelectionLimit)
+        XCTAssertNil(state.appSelectionValidationMessage)
+        XCTAssertFalse(state.canToggleApp("mcp:source-32"))
+        state.toggleApp("mcp:source-32")
+        XCTAssertEqual(state.appBundleIds, selected)
+        XCTAssertTrue(state.appSelectionHelp.contains("32"))
+        XCTAssertTrue(state.appSelectionHelp.contains("Deselect"))
+    }
+
+    func testAppSelectionAtCapAlwaysAllowsDeselectionAndThenReplacement() {
+        var state = FilterState(appBundleIds: Set((0..<32).map { "source-\($0)" }),
+                                dateRange: .none, hasUrl: false)
+        XCTAssertTrue(state.canToggleApp("source-0"))
+        state.toggleApp("source-0")
+        XCTAssertEqual(state.appBundleIds.count, 31)
+        XCTAssertFalse(state.hasReachedAppSelectionLimit)
+        XCTAssertTrue(state.canToggleApp("mcp:caf\u{e9}"))
+        state.toggleApp("mcp:caf\u{e9}")
+        XCTAssertEqual(state.appBundleIds.count, 32)
+        XCTAssertTrue(state.appBundleIds.contains("mcp:caf\u{e9}"))
+        XCTAssertFalse(state.appBundleIds.contains("source-0"))
+    }
+
+    func testOversizedRestorationKeepsEverySelectionAndReportsValidationUntilRepaired() throws {
+        let selected = Set((0..<35).map { "mcp:source-\($0)" })
+        let original = PersistedQueryState(query: "needle", filters: FilterState(
+            appBundleIds: selected, dateRange: .yesterday, hasUrl: true
+        ))
+        let restored = try JSONDecoder().decode(
+            PersistedQueryState.self, from: JSONEncoder().encode(original)
+        )
+        var state = restored.filters
+        XCTAssertEqual(state.appBundleIds, selected)
+        XCTAssertEqual(state.dateRange, .yesterday)
+        XCTAssertTrue(state.hasUrl)
+        XCTAssertTrue(state.appSelectionValidationMessage?.contains("35") == true)
+        XCTAssertTrue(state.appSelectionValidationMessage?.contains("32") == true)
+        XCTAssertTrue(state.appSelectionValidationMessage?.contains("Deselect 3") == true)
+        XCTAssertFalse(state.canToggleApp("new-source"))
+        state.toggleApp("new-source")
+        XCTAssertEqual(state.appBundleIds, selected)
+        for index in 0..<3 {
+            XCTAssertTrue(state.canToggleApp("mcp:source-\(index)"))
+            state.toggleApp("mcp:source-\(index)")
+        }
+        XCTAssertEqual(state.appBundleIds.count, 32)
+        XCTAssertNil(state.appSelectionValidationMessage)
+        XCTAssertTrue(state.hasReachedAppSelectionLimit)
+        XCTAssertFalse(state.canToggleApp("new-source"))
+        state.toggleApp("mcp:source-3")
+        XCTAssertTrue(state.canToggleApp("new-source"))
+    }
+
     func testAppFilterPassesThroughWhenSingle() {
         var state = FilterState()
         state.toggleApp("com.apple.Safari")
@@ -44,7 +105,7 @@ final class FilterStateTests: XCTestCase {
         var state = FilterState()
         state.toggleApp("com.apple.Safari")
         state.toggleApp("com.microsoft.VSCode")
-        XCTAssertNil(state.appFilter, "FFI can only filter on one app; multi-select uses client-side post-filter")
+        XCTAssertNil(state.appFilter, "The legacy projection stays nil; appFilters carries the complete selection")
         XCTAssertTrue(state.requiresClientSideAppFilter)
     }
 

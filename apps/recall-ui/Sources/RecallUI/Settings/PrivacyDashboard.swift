@@ -39,7 +39,8 @@ struct PrivacyDashboard: View {
     @State private var events: [Hit] = []
     @State private var observedApps: [ObservedApp] = []
     @State private var filter: PrivacyDashboardFilter = .empty
-    @State private var isLoading = true
+    @State private var isLoading = false
+    @State private var measuredAt: Date?
     @State private var isMutating = false
     @State private var errorMessage: String? = nil
     @State private var confirmation: DestructiveConfirmationBox? = nil
@@ -62,7 +63,10 @@ struct PrivacyDashboard: View {
         // padding — Stripe-tuned airiness for a trust-projecting surface.
         ScrollView {
             VStack(alignment: .leading, spacing: MCI.Spacing.xl) {
-                PrivacySummaryCard(summary: summary, isLoading: isLoading)
+                PrivacySummaryCard(
+                    summary: summary, isLoading: isLoading, measuredAt: measuredAt,
+                    onRefresh: { Task { await reloadAll(measureStorage: true) } }
+                )
                 FilterBar(filter: $filter, observedApps: observedApps)
                 EventList(
                     events: filter.apply(to: events),
@@ -119,10 +123,6 @@ struct PrivacyDashboard: View {
         }
         .background(Color.brandBgPrimary)
         .task { await reloadAll() }
-        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
-            _ in
-            Task { await reloadAll() }
-        }
         .sheet(item: $confirmation) { box in
             ConfirmDeleteSheet(kind: box.kind) { confirmed in
                 confirmation = nil
@@ -189,14 +189,26 @@ struct PrivacyDashboard: View {
     }
 
     @MainActor
-    private func reloadAll() async {
+    private func reloadAll(measureStorage: Bool = false) async {
+        guard !isLoading else { return }
         isLoading = true
+        defer { isLoading = false }
         errorMessage = nil
         do {
             async let s = reader.summaryStats()
             async let e = reader.recentEvents(limit: 200)
             async let a = reader.listObservedApps(limit: 32, timeFromUs: nil)
-            summary = try await s
+            let counts = try await s
+            var storage = summary?.storage
+            if measureStorage {
+                storage = try await reader.storageUsage()
+                measuredAt = Date()
+            }
+            summary = SummaryStats(
+                totalEvents: counts.totalEvents, oldestTsUs: counts.oldestTsUs,
+                newestTsUs: counts.newestTsUs, diskBytes: counts.diskBytes,
+                storage: storage
+            )
             events = try await e
             observedApps = try await a
         } catch {
@@ -206,7 +218,6 @@ struct PrivacyDashboard: View {
         // Refresh the audit slice too; every reload (initial + post-
         // destructive-action) should reflect the newest recorded lines.
         auditEntries = AuditLog.shared.readRecent(count: 20)
-        isLoading = false
     }
 
     /// Write the current audit log to `~/Downloads/…` and surface the
@@ -261,6 +272,8 @@ struct PrivacyDashboard: View {
 struct PrivacySummaryCard: View {
     let summary: SummaryStats?
     let isLoading: Bool
+    let measuredAt: Date?
+    let onRefresh: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -273,13 +286,44 @@ struct PrivacySummaryCard: View {
                     .font(.title2.bold())
                     .foregroundStyle(Color.brandFgPrimary)
                 Spacer()
+                Button(action: onRefresh) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isLoading)
+                .help("Refresh storage and captures")
+                .accessibilityLabel("Refresh storage and captures")
             }
             Text(PrivacyDashboardSummary.line(summary: summary, isLoading: isLoading))
                 .font(.body)
                 .foregroundStyle(Color.brandFgSecondary)
-            Text("All local. End-to-end encrypted. Nothing uploaded.")
-                .font(.callout)
-                .foregroundStyle(Color.brandMintDim)
+            if isLoading {
+                HStack(spacing: MCI.Spacing.s) {
+                    ProgressView().controlSize(.small)
+                    Text("Refreshing...").mciFont(.caption)
+                }
+            }
+            Text(measuredAt == nil ? "Storage not measured." : PrivacyDashboardSummary.storageTotal(summary: summary))
+                .mciFont(.body)
+                .foregroundStyle(Color.brandFgPrimary)
+            if let storage = summary?.storage {
+                VStack(spacing: MCI.Spacing.s) {
+                    LabeledContent("Database", value: PrivacyDashboardSummary.storageValue(storage.database))
+                    LabeledContent("Write-ahead log (WAL)", value: PrivacyDashboardSummary.storageValue(storage.wal))
+                    LabeledContent("Shared memory (SHM)", value: PrivacyDashboardSummary.storageValue(storage.shm))
+                    LabeledContent("Screenshot files", value: PrivacyDashboardSummary.storageValue(storage.managedBlobs))
+                }
+                .mciFont(.body)
+                .foregroundStyle(Color.brandFgSecondary)
+            }
+            Text("Logical file sizes, not allocated disk space. Includes managed screenshot files and temporary writes. Excludes the app, models, exports, and logs. Files may change during measurement.")
+                .mciFont(.caption)
+                .foregroundStyle(Color.brandFgMuted)
+            if let measuredAt {
+                Text("Measured \(measuredAt.formatted(date: .abbreviated, time: .standard))")
+                    .mciFont(.caption)
+                    .foregroundStyle(Color.brandFgMuted)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,11 +333,7 @@ struct PrivacySummaryCard: View {
                 .stroke(Color.brandCardBorder, lineWidth: 1)
         )
         .cornerRadius(8)
-        // Combine the lock icon + heading + summary + reassurance into
-        // one VoiceOver announcement so a screen-reader user hears the
-        // trust posture as a single statement rather than four
-        // fragmented Texts.
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 }
 

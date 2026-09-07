@@ -586,11 +586,15 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
         // Resolves a Vec<u64> of linked event ids into HitJson rows via
         // BrainStore::get_event, no mutating call path.
         "mci_brain_ffi_events_by_ids",
+        // Bounded selected-event stored text through the existing read-only handle.
+        "mci_brain_ffi_event_text",
         // Cycle 8.46 — Privacy Dashboard summary card (read-only).
         // Returns content-free aggregate: event count, oldest/newest ts,
         // on-disk byte size. Uses `BrainStore::stats` + `fs::metadata` —
         // no row content is exposed.
         "mci_brain_ffi_summary_stats",
+        // Explicit metadata-only storage accounting; no mutation or content reads.
+        "mci_brain_ffi_storage_usage",
         // V2-P13 (Phase D scaffold) — Rewind-style timeline strip surface
         // (read-only). Returns downsampled TimelineEventJson rows for a
         // time range; uses the same read-only handle as _recent_events
@@ -626,7 +630,9 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
         mci_brain_ffi::mci_brain_ffi_latest_brief as *const (),
         mci_brain_ffi::mci_brain_ffi_brief_dates as *const (),
         mci_brain_ffi_events_by_ids as *const (),
+        mci_brain_ffi::mci_brain_ffi_event_text as *const (),
         mci_brain_ffi::mci_brain_ffi_summary_stats as *const (),
+        mci_brain_ffi::mci_brain_ffi_storage_usage as *const (),
         // V2-P13 (Phase D scaffold) — timeline strip fetch surface.
         mci_brain_ffi::mci_brain_ffi_timeline_events as *const (),
         mci_brain_ffi_string_free as *const (),
@@ -639,9 +645,9 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     ];
     assert_eq!(
         allowed_reads.len(),
-        16,
-        "read-tier FFI surface size pinned at 16 \
-         (model-backed open adds semantic retrieval without adding mutation)"
+        18,
+        "read-tier FFI surface size pinned at 18 \
+         (explicit storage accounting adds no mutation)"
     );
     assert_eq!(
         allowed_mutations.len(),

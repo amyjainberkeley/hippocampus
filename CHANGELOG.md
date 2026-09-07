@@ -5,6 +5,27 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### Everyday recall
+
+- Start human search in Text mode. Related context is a separate choice; raw
+  retrieval ranks are no longer presented as confidence percentages.
+- Apply app, date and URL constraints before limiting Text results or filtered
+  history. Calendar date ranges no longer include the next day's midnight.
+  Unsupported Related filter combinations are explained rather than silently
+  returning a misleading empty result.
+- Read and copy the selected memory's stored text, not just its list preview.
+  Reads are bounded at 128 KiB and clearly label truncated or unavailable text.
+  The screenshot inspector preserves source citations in its full-text export.
+- Remove the repeated filmstrip from every destination. Evidence panes adapt
+  to a smaller window, with back navigation when there is not room for both.
+- Keep contextual command updates from redrawing the entire workspace. Show
+  readable text without its duplicated internal header; copy preserves the
+  stored content and the screenshot export preserves its citations.
+- Measure managed storage on request, including screenshot files and database
+  sidecars. Show partial and unavailable measurements without guessing a total.
+- Explicitly release a completed command's writer lock even when a duplicated
+  descriptor remains; retain the daemon's protection through process teardown.
+
 ### Memory quality
 
 - Recover more small text with bounded on-device OCR subregions inside the

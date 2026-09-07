@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import RecallUIKit
 import SwiftUI
 
@@ -35,7 +36,12 @@ struct ActionPanel: View {
                     .strokeBorder(Color.brandCardBorder, lineWidth: 1)
             )
         }
-        .onAppear { viewModel.reset(); isFieldFocused = true }
+        .task {
+            viewModel.reset()
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            isFieldFocused = true
+        }
         .onKeyPress(.escape, phases: .down) { _ in registry.hide(); return .handled }
         .onKeyPress(.upArrow, phases: .down) { _ in viewModel.selectPrev(); return .handled }
         .onKeyPress(.downArrow, phases: .down) { _ in
@@ -128,7 +134,13 @@ extension View {
 }
 
 struct ActionPanelHost: ViewModifier {
-    @ObservedObject var registry: ActionPanelRegistry
+    let registry: ActionPanelRegistry
+    @State private var isVisible: Bool
+
+    init(registry: ActionPanelRegistry) {
+        self.registry = registry
+        _isVisible = State(initialValue: registry.isVisible)
+    }
 
     func body(content: Content) -> some View {
         ZStack {
@@ -137,12 +149,15 @@ struct ActionPanelHost: ViewModifier {
                 registry.toggle()
                 return .handled
             }
-            if registry.isVisible {
+            if isVisible {
                 ActionPanel(registry: registry).transition(.opacity)
             }
         }
         // Cycle 8.48 MCIDesignSystem: opt into the shared `snap` motion
         // token so every quick reveal in the app times the same.
-        .animation(MCI.Motion.snap, value: registry.isVisible)
+        .onReceive(registry.$isVisible.removeDuplicates().receive(on: RunLoop.main)) {
+            isVisible = $0
+        }
+        .animation(MCI.Motion.snap, value: isVisible)
     }
 }

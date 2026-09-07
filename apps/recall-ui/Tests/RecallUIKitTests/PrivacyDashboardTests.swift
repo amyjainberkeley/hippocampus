@@ -50,7 +50,8 @@ final class PrivacyDashboardTests: XCTestCase {
         // has captured" (product name matches the landing page).
         XCTAssertTrue(line.contains("Hippocampus has captured 3 events"))
         XCTAssertTrue(line.contains("across 1 day"))
-        XCTAssertTrue(line.contains("of encrypted storage"))
+        XCTAssertFalse(line.contains("of encrypted storage"))
+        XCTAssertTrue(PrivacyDashboardSummary.storageTotal(summary: stats).contains("unavailable"))
     }
 
     func testSummaryLinePluralDays() {

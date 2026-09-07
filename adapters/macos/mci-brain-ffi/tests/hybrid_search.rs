@@ -148,5 +148,39 @@ fn model_backed_search_returns_semantic_related_context() {
     );
     assert_eq!(hits[0].event_id, relevant_id.0);
     assert_eq!(hits[0].source, "hybrid-related");
+    // A loaded model must not turn literal search into an unrelated feed.
+    for (text, aliases, expected) in [
+        ("payments", serde_json::json!({}), vec![relevant_id.0]),
+        ("unseen_cobalt_8731", serde_json::json!({}), vec![]),
+        (
+            "payments OR unseen_cobalt_8731",
+            serde_json::json!({}),
+            vec![],
+        ),
+        (
+            "launchchief",
+            serde_json::json!({"Priya": ["launchchief"]}),
+            vec![relevant_id.0],
+        ),
+    ] {
+        let query = CString::new(
+            serde_json::json!({
+                "text": text, "limit": 50, "mode": "text", "user_aliases": aliases,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let json = unsafe { mci_brain_ffi_search(handle, query.as_ptr()) };
+        assert!(!json.is_null(), "text search failed: {}", last_error());
+        let hits: Vec<HitJson> =
+            serde_json::from_slice(unsafe { CStr::from_ptr(json) }.to_bytes()).unwrap();
+        unsafe { mci_brain_ffi_string_free(json) };
+        assert_eq!(
+            hits.iter().map(|hit| hit.event_id).collect::<Vec<_>>(),
+            expected,
+            "{text}"
+        );
+        assert!(hits.iter().all(|hit| hit.source == "lexical"));
+    }
     unsafe { mci_brain_ffi_close(handle) };
 }

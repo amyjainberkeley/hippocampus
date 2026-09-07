@@ -16,12 +16,19 @@ struct DetailPaneView: View {
 
     @State private var flyoutScope: RelatedHitsScope? = nil
     @State private var showsScreenshot = false
+    @StateObject private var textModel = EventTextViewModel()
 
-    /// `text_snippet` with the FTS-only context header prefix
-    /// (`[app=… | title=… | url=… | ts=…]\n`) stripped for display.
-    /// The stored field is unchanged — see `Formatters.stripContextHeader`.
+    /// Copy preserves stored text; presentation omits the duplicated context header.
+    private var copiedBody: String {
+        textModel.copyText(for: hit)
+    }
+
     private var displayBody: String {
-        Formatters.stripContextHeader(hit.ocrTextSnippet)
+        Formatters.stripContextHeader(copiedBody)
+    }
+
+    private var storedText: EventText? {
+        textModel.text(for: hit)
     }
 
     var body: some View {
@@ -60,6 +67,10 @@ struct DetailPaneView: View {
             .padding(MCI.Spacing.l)
         }
         .background(.thinMaterial)
+        .task(id: hit) {
+            await textModel.load(hit: hit, reader: reader)
+        }
+        .onDisappear { textModel.clear() }
         .sheet(isPresented: $showsScreenshot) {
             if let reader {
                 ScreenshotViewer(selection: ScreenshotSelection(
@@ -69,7 +80,7 @@ struct DetailPaneView: View {
         }
         .focusable()
         .onCopyCommand {
-            [NSItemProvider(object: displayBody as NSString)]
+            [NSItemProvider(object: copiedBody as NSString)]
         }
         .onKeyPress(.init("o"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
@@ -79,15 +90,27 @@ struct DetailPaneView: View {
             }
             return .ignored
         }
-        .registerActionPanelCommands([
+        .registerActionPanelCommands(actionPanelCommands)
+        .onChange(of: hit) { _, _ in refreshActionPanelCommands() }
+        .onChange(of: textModel.state(for: hit)) { _, _ in refreshActionPanelCommands() }
+    }
+
+    private func refreshActionPanelCommands() {
+        for command in actionPanelCommands {
+            ActionPanelRegistry.shared.register(command)
+        }
+    }
+
+    private var actionPanelCommands: [ActionPanelCommand] {
+        [
             .init(
                 id: "hit.copySnippet",
-                title: "Copy Hit Snippet",
+                title: textModel.copyTitle(for: hit),
                 shortcut: "⌘C",
                 category: .hit
             ) {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(displayBody, forType: .string)
+                NSPasteboard.general.setString(copiedBody, forType: .string)
             },
             .init(
                 id: "hit.openInApp",
@@ -109,7 +132,7 @@ struct DetailPaneView: View {
             ) {
                 flyoutScope = .all(hitId: hit.id)
             },
-        ])
+        ]
     }
 
     private var header: some View {
@@ -144,16 +167,13 @@ struct DetailPaneView: View {
                     .font(.system(.caption, design: .default))
                     .foregroundStyle(Color.brandMint)
                     .help(Formatters.tsString(usSinceEpoch: hit.tsUs))
-                if let s = hit.score {
-                    Text(Formatters.scoreString(s))
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(Color.brandFgMuted)
-                }
             }
             HStack(spacing: 8) {
-                Button("Copy Text") {
+                Button {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(displayBody, forType: .string)
+                    NSPasteboard.general.setString(copiedBody, forType: .string)
+                } label: {
+                    Label(textModel.copyTitle(for: hit), systemImage: "doc.on.doc")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -288,10 +308,37 @@ struct DetailPaneView: View {
 
     private var ocrSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(hit.sourceKind == "screen_ocr" ? "OCR snippet" : "Stored text snippet")
+            Text(storedText == nil ? "Stored text snippet" : (hit.sourceKind == "screen_ocr" ? "OCR text" : "Stored text"))
                 .font(.system(.caption, design: .default).weight(.semibold))
                 .foregroundStyle(Color.brandFgMuted)
-            if SyntaxHighlighter.looksLikeCode(displayBody) {
+            switch textModel.state(for: hit) {
+            case .idle, .loading:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading stored text...").font(.caption).foregroundStyle(.secondary)
+                }
+            case .unavailable:
+                Text("Full text unavailable. Showing saved snippet.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .failed:
+                Text("Could not load full text. Showing saved snippet.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case let .loaded(text):
+                if text.isTruncated {
+                    Label("Truncated at the 128 KiB text limit.", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if displayBody.isEmpty, storedText != nil {
+                Text("No stored text.").font(.body).foregroundStyle(.secondary)
+            } else if displayBody.utf8.count > 8192 {
+                // Avoid regex/highlighter work over a large inspection payload.
+                Text(displayBody)
+                    .font(.body)
+                    .foregroundStyle(Color.brandFgPrimary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if SyntaxHighlighter.looksLikeCode(displayBody) {
                 highlightedCode
             } else {
                 linkedText

@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `13e7f7a`
+Audited code baseline: `4c79d98`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -17,10 +17,12 @@ a flat H, a compact product explanation, an actual synthetic-data example and
 four practical uses: finding captured text, revisiting work, reviewing a cited
 daily draft, and handing relevant context to an agent. Release and privacy
 qualifications remain on the linked pages. Production build, TypeScript and
-scoped lint pass. This source checkpoint is not yet the deployed website;
-deployment confirmation will be recorded separately. No browser visual QA was
-performed. The synthetic image predates the current workspace cleanup and is
-not evidence of that cleanup's installed state.
+scoped lint pass. Version 3 is deployed successfully at
+`https://hippocampus-memory.amyjain.chatgpt.site/`, still owner-private. Its
+website-rooted source is `d3db641`, exported from canonical commit `4c79d98`.
+All four pages and both current images returned HTTP 200 in authenticated
+checks. No browser visual QA was performed. The synthetic image predates the
+current workspace cleanup and is not evidence of that cleanup's installed state.
 
 The README now gives a newcomer reading path. `docs/guide/` explains the
 architecture, actual commit history, implemented storage policies, local compute,
@@ -41,6 +43,49 @@ not yet installed: filter-before-limit lexical search, explicit Text/Related
 search, selected-event full-text inspection, workspace simplification, and
 complete storage accounting. See the ordered plan in
 `docs/plans/2026-09-07-recall-and-product-clarity.md`.
+
+Additional native review found filtered-history starvation, next-midnight
+inclusion, misleading rank percentages, a snippet-only screenshot inspector,
+compact-window layout instability, valid MCP source IDs rejected by filters,
+and a picker that could exceed the 32-source wire limit. Source corrections and
+regressions are present; do not treat this source as an installed update.
+The review and proof boundaries are recorded in
+`docs/audits/2026-09-07-recall-usability.md`.
+
+Fresh local optimized tests pass 324 parent-app and 242 onboarding cases. The
+capture suite failed during concurrent builds, then passed all 691 cases on a
+separate rerun. This sensitivity remains a performance concern, not a waived
+deadline. Initial integrated Recall verification passed 448 XCTest and three
+Swift Testing cases before the final filtered-browse and compact-pane additions.
+The first full Rust run found an intermittent writer-lock reacquisition failure;
+a duplicate-descriptor regression reproduced it deterministically and now passes
+with all 19 crash-recovery tests after explicit clean unlock. The full rerun
+passes 2,031 tests with nine explicit ignores. After final source-ID and selected
+text identity changes, the brain/FFI suites pass 836 tests with one explicit
+ignore, including real model-backed retrieval. All-target workspace strict
+Clippy and formatting pass. The complete Recall debug suite passes 474 XCTest
+plus three Swift Testing cases. Presentation contracts pass 20 checks, and
+local release-contract and release-safety checks pass 224 and 13 respectively.
+Hosted capture and retention-contract checks remain red at
+`4c79d98`; local results do not supersede those failures.
+
+Synthetic native interaction checks verify Text/no-match/detail, smaller-window
+back navigation, distinct destinations, full-text screenshot inspection and
+storage breakdown. Later AttributeGraph warnings led to narrower root/overlay
+subscriptions: command-list changes no longer invalidate the whole workspace.
+The follow-up search/detail/no-match, resize and help/palette pass emitted no
+warnings; this is not overnight proof. A command-palette initial-focus issue
+was also reproduced and corrected with deferred, cancellable focus. The fresh
+optimized build passes all 474 XCTest and three Swift Testing cases. Its actual
+command-palette test focused the field on opening and dismissed with Escape
+without an extra click; no runtime warnings were emitted in that check. The
+Rust workspace release build also completes successfully.
+
+Selected-text responses now verify timestamp and app as well as numeric ID.
+This rejects common delete/reinsert races, but an identical tuple can still be
+reused; a durable event-generation identity is not implemented. The latest
+content-free installed receipt advanced to 632 stored frames and 279 screenshots
+with a write at 18:26:11 UTC. It establishes ingestion, not OCR completeness.
 
 Installed application remains **`bb02bb4`**. Public binary release remains gated.
 

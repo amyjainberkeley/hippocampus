@@ -16,11 +16,11 @@ struct EpisodesView: View {
     var body: some View {
         Group {
             if let err = viewModel.errorMessage {
-                errorView(err)
+                EvidenceStateViewport { errorView(err) }
             } else if viewModel.isLoading && viewModel.episodes.isEmpty {
-                ShimmerLoadingView(isLoading: true)
+                EvidenceStateViewport { ShimmerLoadingView(isLoading: true) }
             } else if viewModel.episodes.isEmpty {
-                emptyView
+                EvidenceStateViewport { emptyView }
             } else {
                 contentView
             }
@@ -62,12 +62,16 @@ struct EpisodesView: View {
     }
 
     private var contentView: some View {
-        HSplitView {
+        AdaptiveEvidencePanes(
+            showsDetail: viewModel.selectedEpisode != nil && reader != nil,
+            backLabel: "Back to episodes",
+            onDismissDetail: { viewModel.selectedEpisodeId = nil }
+        ) {
             episodeList
+        } detail: {
             if let episode = viewModel.selectedEpisode, let reader {
                 EpisodeEvidencePanel(episode: episode, reader: reader)
                     .id(episode.id)
-                    .frame(minWidth: 300, idealWidth: 380)
             }
         }
     }
@@ -84,7 +88,6 @@ struct EpisodesView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.brandBgPrimary)
-        .frame(minWidth: 280)
         .refreshable { await viewModel.reload() }
     }
 }
@@ -101,6 +104,8 @@ private struct EpisodeCard: View {
                 Text(displayApp)
                     .font(.system(.body, design: .default).weight(.semibold))
                     .foregroundStyle(Color.brandFgPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer(minLength: 8)
                 Text("\(episode.eventCount) event\(episode.eventCount == 1 ? "" : "s")")
                     .font(.system(.caption2, design: .monospaced))

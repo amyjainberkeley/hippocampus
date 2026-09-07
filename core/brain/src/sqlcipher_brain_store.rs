@@ -78,6 +78,19 @@ pub struct SqlCipherBrainStore {
     blob_dir: PathBuf,
 }
 
+/// One bounded text read and the source identity from the same row snapshot.
+#[derive(Debug)]
+pub struct StoredEventText {
+    /// Exact UTF-8 prefix of the stored text.
+    pub text: String,
+    /// Whether the byte cap omitted text.
+    pub truncated: bool,
+    /// Capture timestamp used to reject a reused event ID.
+    pub ts_us: u64,
+    /// Nullable source app identity, without normalization.
+    pub app_bundle_id: Option<String>,
+}
+
 /// A best-effort maintenance stage that runs only after deletion commits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeletionCleanupStage {
@@ -129,6 +142,53 @@ impl DeletionOutcome {
 }
 
 impl SqlCipherBrainStore {
+    /// Search literal keywords with inclusive time and exact app filters before top-k.
+    ///
+    /// # Errors
+    /// Returns an invalid-input error for an empty query, or a backend error if
+    /// the lexical index cannot be read.
+    pub fn fts5_search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        self.fts5_search_with_filters(query, limit, time_filter, app_filter, &[], false)
+    }
+
+    /// Literal search with an app union and a nonempty-URL requirement before top-k.
+    /// The legacy single app, when supplied, intersects the app union.
+    ///
+    /// # Errors
+    /// Rejects an empty query or invalid app list; reports index read failures.
+    pub fn fts5_search_with_filters(
+        &self,
+        query: &str,
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        Self::validate_search_app_filters(app_filters)?;
+        if query.is_empty() {
+            return Err(StoreError::InvalidInput("empty FTS5 query".into()));
+        }
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let sanitized = crate::fts_sanitizer::sanitize_fts5_query(query);
+        self.search_fts_expression(
+            &sanitized,
+            limit,
+            time_filter,
+            app_filter,
+            app_filters,
+            has_url,
+        )
+    }
+
     /// Search bounded, literal alternatives without treating their text as FTS syntax.
     ///
     /// # Errors
@@ -139,10 +199,50 @@ impl SqlCipherBrainStore {
         alternatives: &[crate::fts_sanitizer::LexicalAlternative<'_>],
         limit: usize,
     ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        self.fts5_search_alternatives_filtered(alternatives, limit, None, None)
+    }
+
+    /// Search bounded literal alternatives with filters applied before top-k.
+    /// Time bounds are inclusive; app IDs match exactly, including an empty ID.
+    ///
+    /// # Errors
+    /// Returns an invalid-input error above 1,024 branches or 128 KiB of input,
+    /// or a backend error if the lexical index cannot be read.
+    pub fn fts5_search_alternatives_filtered(
+        &self,
+        alternatives: &[crate::fts_sanitizer::LexicalAlternative<'_>],
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        self.fts5_search_alternatives_with_filters(
+            alternatives,
+            limit,
+            time_filter,
+            app_filter,
+            &[],
+            false,
+        )
+    }
+
+    /// Bounded literal alternatives with all metadata constraints before top-k.
+    ///
+    /// # Errors
+    /// Rejects invalid app lists or excessive alternatives; reports index read failures.
+    pub fn fts5_search_alternatives_with_filters(
+        &self,
+        alternatives: &[crate::fts_sanitizer::LexicalAlternative<'_>],
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
         use crate::fts_sanitizer::{
             sanitize_fts5_query, LexicalAlternative, MAX_LEXICAL_ALTERNATIVES,
             MAX_LEXICAL_ALTERNATIVE_BYTES,
         };
+        Self::validate_search_app_filters(app_filters)?;
         if alternatives.len() > MAX_LEXICAL_ALTERNATIVES {
             return Err(StoreError::InvalidInput(
                 "too many lexical alternatives".into(),
@@ -170,7 +270,14 @@ impl SqlCipherBrainStore {
             };
             branches.push(format!("({encoded})"));
         }
-        self.search_fts_expression(&branches.join(" OR "), limit)
+        self.search_fts_expression(
+            &branches.join(" OR "),
+            limit,
+            time_filter,
+            app_filter,
+            app_filters,
+            has_url,
+        )
     }
 
     // Only encoded literal text reaches this helper. Keep it private so callers
@@ -179,21 +286,48 @@ impl SqlCipherBrainStore {
         &self,
         expression: &str,
         limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
     ) -> Result<Vec<(EventId, f32)>, StoreError> {
         if expression.trim().is_empty() || limit == 0 {
             return Ok(Vec::new());
         }
+        if let Some(time) = time_filter {
+            // Stored timestamps are signed SQLite integers. Clamping an
+            // unrepresentable lower bound would incorrectly include i64::MAX.
+            if time.from_us > time.to_us || time.from_us > i64::MAX as u64 {
+                return Ok(Vec::new());
+            }
+        }
+        let mut sql = String::from("SELECT events_fts.rowid, events_fts.rank FROM events_fts");
+        if time_filter.is_some() || app_filter.is_some() || !app_filters.is_empty() || has_url {
+            sql.push_str(" INNER JOIN events e ON e.id = events_fts.rowid");
+        }
+        sql.push_str(" WHERE events_fts MATCH ?1");
+        let mut binds = vec![Value::Text(expression.to_owned())];
+        Self::append_search_filters(
+            &mut sql,
+            &mut binds,
+            time_filter,
+            app_filter,
+            app_filters,
+            has_url,
+        );
+        let _ = write!(
+            sql,
+            " ORDER BY events_fts.rank ASC, events_fts.rowid ASC LIMIT ?{}",
+            binds.len() + 1
+        );
+        binds.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
         let guard = self.db.lock().expect("brain store mutex poisoned");
         let mut stmt = guard
             .conn()
-            .prepare(
-                "SELECT rowid, rank FROM events_fts WHERE events_fts MATCH ?1
-             ORDER BY rank ASC, rowid ASC LIMIT ?2",
-            )
+            .prepare(&sql)
             .map_err(|e| StoreError::Backend(format!("prepare fts5: {e}")))?;
-        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = stmt
-            .query_map(params![expression, lim], |row| {
+            .query_map(params_from_iter(binds.iter()), |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
             })
             .map_err(|e| StoreError::Backend(format!("query fts5: {e}")))?;
@@ -206,6 +340,123 @@ impl SqlCipherBrainStore {
             out.push((EventId(u64::try_from(id).unwrap_or(0)), score));
         }
         Ok(out)
+    }
+
+    /// Chronological browse with all constraints applied before the row limit.
+    /// Returns IDs so the caller materializes only the bounded result set.
+    ///
+    /// # Errors
+    /// Rejects invalid app lists and reports database read failures.
+    pub fn browse_event_ids_filtered(
+        &self,
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) -> Result<Vec<EventId>, StoreError> {
+        Self::validate_search_app_filters(app_filters)?;
+        if limit == 0
+            || time_filter
+                .is_some_and(|time| time.from_us > time.to_us || time.from_us > i64::MAX as u64)
+        {
+            return Ok(Vec::new());
+        }
+        let mut sql = String::from("SELECT e.id FROM events e WHERE e.cascade_reason = 0");
+        let mut binds = Vec::new();
+        Self::append_search_filters(
+            &mut sql,
+            &mut binds,
+            time_filter,
+            app_filter,
+            app_filters,
+            has_url,
+        );
+        let _ = write!(
+            sql,
+            " ORDER BY e.ts_us DESC, e.id DESC LIMIT ?{}",
+            binds.len() + 1
+        );
+        binds.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare browse: {e}")))?;
+        let rows = stmt
+            .query_map(params_from_iter(binds.iter()), |row| row.get::<_, i64>(0))
+            .map_err(|e| StoreError::Backend(format!("query browse: {e}")))?;
+        rows.map(|row| {
+            let id = row.map_err(|e| StoreError::Backend(format!("row browse: {e}")))?;
+            u64::try_from(id)
+                .map(EventId)
+                .map_err(|e| StoreError::Backend(format!("browse ID: {e}")))
+        })
+        .collect()
+    }
+
+    /// Validate additive source IDs without normalizing identity. Legacy matching stays literal.
+    ///
+    /// # Errors
+    /// At most 32 nonempty UTF-8 IDs, each at most 255 bytes, without NUL or control characters.
+    pub fn validate_search_app_filters(app_filters: &[String]) -> Result<(), StoreError> {
+        if app_filters.len() > 32 {
+            return Err(StoreError::InvalidInput(
+                "app_filters exceeds 32 IDs".into(),
+            ));
+        }
+        if app_filters
+            .iter()
+            .any(|app| app.is_empty() || app.len() > 255 || app.chars().any(char::is_control))
+        {
+            return Err(StoreError::InvalidInput(
+                "app_filters contains an invalid ID".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    // All dynamic values are bound. Both browse and FTS use alias `e` for events.
+    fn append_search_filters(
+        sql: &mut String,
+        binds: &mut Vec<Value>,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) {
+        if let Some(time) = time_filter {
+            let _ = write!(
+                sql,
+                " AND e.ts_us >= ?{} AND e.ts_us <= ?{}",
+                binds.len() + 1,
+                binds.len() + 2
+            );
+            binds.push(Value::Integer(
+                i64::try_from(time.from_us).unwrap_or(i64::MAX),
+            ));
+            binds.push(Value::Integer(
+                i64::try_from(time.to_us).unwrap_or(i64::MAX),
+            ));
+        }
+        if let Some(app) = app_filter {
+            let _ = write!(sql, " AND e.app_bundle_id = ?{}", binds.len() + 1);
+            binds.push(Value::Text(app.to_owned()));
+        }
+        if !app_filters.is_empty() {
+            sql.push_str(" AND e.app_bundle_id IN (");
+            for (index, app) in app_filters.iter().enumerate() {
+                if index > 0 {
+                    sql.push(',');
+                }
+                let _ = write!(sql, "?{}", binds.len() + 1);
+                binds.push(Value::Text(app.clone()));
+            }
+            sql.push(')');
+        }
+        if has_url {
+            sql.push_str(" AND e.url IS NOT NULL AND e.url != ''");
+        }
     }
 
     /// Acquisition provenance. Old read-only stores and unattributed rows
@@ -411,6 +662,72 @@ impl SqlCipherBrainStore {
             db: Mutex::new(db),
             blob_dir: blob_dir_for_brain(path),
         })
+    }
+
+    /// Maximum UTF-8 bytes exposed by a single selected-event text read.
+    pub const EVENT_TEXT_BYTE_CAP: usize = 128 * 1024;
+
+    /// Maximum app-identity bytes accompanying a selected-event text read.
+    pub const EVENT_TEXT_APP_BYTE_CAP: usize = 1024;
+
+    /// Read the exact text prefix of one admitted event, without fetching
+    /// vectors or blobs. Timestamp and app identity are read atomically with text.
+    /// Missing, deleted, suppressed and out-of-range ids return `None`, as do
+    /// rows whose app identity exceeds the bound. Callers must match identity
+    /// against their selected snapshot: row IDs alone can be reused.
+    ///
+    /// # Errors
+    /// Returns a content-free backend error on a database or UTF-8 failure.
+    pub fn event_text(&self, id: EventId) -> Result<Option<StoredEventText>, StoreError> {
+        let Ok(row_id) = i64::try_from(id.0) else {
+            return Ok(None);
+        };
+        if row_id <= 0 {
+            return Ok(None);
+        }
+        let guard = self
+            .db
+            .lock()
+            .map_err(|_| StoreError::Backend("event text store unavailable".into()))?;
+        // Read one sentinel byte past the cap to distinguish an exact fit.
+        // BLOB substr counts bytes and preserves embedded NULs in stored text.
+        let read_bytes = i64::try_from(Self::EVENT_TEXT_BYTE_CAP + 1)
+            .map_err(|_| StoreError::Backend("invalid event text cap".into()))?;
+        let app_bytes = i64::try_from(Self::EVENT_TEXT_APP_BYTE_CAP)
+            .map_err(|_| StoreError::Backend("invalid event identity cap".into()))?;
+        let row: Option<(Vec<u8>, i64, Option<String>)> = guard
+            .conn()
+            .query_row(
+                "SELECT coalesce(substr(CAST(text AS BLOB), 1, ?2), X''), ts_us, app_bundle_id
+                 FROM events WHERE id = ?1 AND cascade_reason = 0
+                 AND (app_bundle_id IS NULL OR length(CAST(app_bundle_id AS BLOB)) <= ?3)",
+                params![row_id, read_bytes, app_bytes],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| StoreError::Backend("event text read failed".into()))?;
+        let Some((mut bytes, ts_us, app_bundle_id)) = row else {
+            return Ok(None);
+        };
+        let ts_us = u64::try_from(ts_us)
+            .map_err(|_| StoreError::Backend("invalid event identity".into()))?;
+        let truncated = bytes.len() > Self::EVENT_TEXT_BYTE_CAP;
+        bytes.truncate(Self::EVENT_TEXT_BYTE_CAP);
+        if let Err(error) = std::str::from_utf8(&bytes) {
+            if truncated && error.error_len().is_none() {
+                bytes.truncate(error.valid_up_to());
+            } else {
+                return Err(StoreError::Backend("event text is not valid UTF-8".into()));
+            }
+        }
+        let text = String::from_utf8(bytes)
+            .map_err(|_| StoreError::Backend("event text is not valid UTF-8".into()))?;
+        Ok(Some(StoredEventText {
+            text,
+            truncated,
+            ts_us,
+            app_bundle_id,
+        }))
     }
 
     /// Read the N most-recent events ordered by `ts_us` DESC.
@@ -3408,21 +3725,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
     }
 
     fn fts5_search(&self, query: &str, limit: usize) -> Result<Vec<(EventId, f32)>, StoreError> {
-        if query.is_empty() {
-            return Err(StoreError::InvalidInput("empty FTS5 query".into()));
-        }
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        // Pre-parse sanitization — see `fts_sanitizer` module docs.
-        // Without this, a raw user query containing `:` (URLs, emails,
-        // `key:value` shapes) triggers SQLite FTS5's `column:term`
-        // parser and bubbles a `row fts5: no such column: <token>`
-        // error up through the retriever (cycle 8.55 PR #111 panic).
-        // Clean keyword queries pass through byte-identical, so
-        // ranking / scoring for the common path is unaffected.
-        let sanitized = crate::fts_sanitizer::sanitize_fts5_query(query);
-        self.search_fts_expression(&sanitized, limit)
+        self.fts5_search_filtered(query, limit, None, None)
     }
 
     fn vec_search(

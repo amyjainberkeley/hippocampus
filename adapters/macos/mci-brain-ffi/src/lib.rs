@@ -81,6 +81,8 @@ use mci_embed_coreml::CoreMLBackend;
 use rustix::fs::{flock, FlockOperation, OFlags};
 use serde::{Deserialize, Serialize};
 
+pub mod storage_usage;
+
 // ---------------------------------------------------------------------------
 // JSON value types — what the Swift side decodes with `Codable`
 // ---------------------------------------------------------------------------
@@ -188,11 +190,35 @@ pub struct PrivacyMomentJson {
     pub reason_code: u8,
 }
 
+/// Text search never needs an embedder; related search preserves legacy routing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    /// Literal indexed words, without semantic neighbors.
+    Text,
+    /// Hybrid retrieval when available, otherwise lexical fallback.
+    #[default]
+    Related,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl SearchMode {
+    const fn uses_hybrid(self, embedder_available: bool) -> bool {
+        matches!(self, Self::Related) && embedder_available
+    }
+}
+
 /// JSON payload format for [`mci_brain_ffi_search`] input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryJson {
     /// Natural-language query.
     pub text: String,
+    /// Explicit literal text search, or legacy related-context retrieval.
+    #[serde(default)]
+    pub mode: SearchMode,
+    /// Explicit chronological browse. Requires empty text; legacy empty text stays empty.
+    #[serde(default)]
+    pub browse: bool,
     /// Maximum hits to return.
     pub limit: usize,
     /// Inclusive lower bound on `ts_us`, microseconds. `None` ⇒ no filter.
@@ -204,6 +230,14 @@ pub struct QueryJson {
     /// Restrict to one `appBundleId`. `None` ⇒ no filter.
     #[serde(default)]
     pub app_filter: Option<String>,
+    /// Union of at most 32 exact source IDs, intersected with `app_filter`.
+    /// Each ID is nonempty UTF-8, at most 255 bytes, without NUL or control characters.
+    /// Source IDs include MCP tags, not only application bundle identifiers.
+    #[serde(default)]
+    pub app_filters: Vec<String>,
+    /// Require a non-null, nonempty URL. Supported in Text and explicit browse.
+    #[serde(default)]
+    pub has_url: bool,
     /// **Additive (cycle 8.42).** User-defined entity aliases from the
     /// recall UI's `UserDictionary`. Keys are canonical names; values are
     /// the alias list. When the query text contains a token that appears
@@ -341,12 +375,8 @@ pub struct DeleteResultJson {
 }
 
 /// Content-free aggregate returned by [`mci_brain_ffi_summary_stats`].
-/// Mirrors [`mci_brain::BrainStats`] for the count + oldest/newest, plus
-/// the on-disk byte size of the brain `SQLite` file. Zero row content is
-/// exposed — this is the payload for the Privacy Dashboard's "MCI has
-/// captured X events across Y days, using Z MB of encrypted storage"
-/// summary card. Amy's directive (2026-07-13): "show the full control,
-/// no collection."
+/// Mirrors [`mci_brain::BrainStats`] for counts and timestamps. A storage
+/// breakdown can be attached by an explicit caller, never by summary polling.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SummaryStatsJson {
     /// Total rows in `events`. `0` on an empty store.
@@ -357,10 +387,12 @@ pub struct SummaryStatsJson {
     /// Largest `events.ts_us` in microseconds since epoch, or `None` on
     /// an empty store.
     pub newest_ts_us: Option<u64>,
-    /// On-disk byte count of the `SQLCipher` `.sqlite` file. `0` if the
-    /// file cannot be stat'd (should never happen since the FFI is
-    /// holding an open handle to it, but graceful fallback).
+    /// Legacy database-only logical bytes; zero when unavailable. This is
+    /// not total storage. New callers must use `storage` and its status.
     pub disk_bytes: u64,
+    /// Optional explicitly measured report. Summary polling leaves this absent.
+    #[serde(default)]
+    pub storage: Option<storage_usage::StorageUsage>,
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +415,7 @@ pub struct Handle {
     /// Swift caller is the one that stats + decodes the referenced blob.
     blob_dir: PathBuf,
     /// Absolute path to the brain `SQLite` file. Used by
-    /// [`mci_brain_ffi_summary_stats`] to `fs::metadata(...)` the file and
+    /// [`mci_brain_ffi_summary_stats`] to measure content-free storage and
     /// by the mutation entry points (delete / wipe) to briefly open a
     /// writer connection when the recall UI's Privacy Dashboard fires a
     /// destructive action.
@@ -630,26 +662,8 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
             return ptr::null_mut();
         }
     };
-    if query.text.is_empty() {
-        // Empty query is a malformed search request, not an empty result —
-        // FTS5 rejects it too. Surface as an empty list with no error.
-        let empty: Vec<HitJson> = Vec::new();
-        return json_to_c_string(&empty);
-    }
     let limit = query.limit.min(MAX_LIMIT as usize).max(1);
-
-    #[cfg(target_os = "macos")]
-    if handle.query_embedder.is_some() {
-        return match search_hybrid(handle, &query, limit) {
-            Ok(hits) => json_to_c_string(&hits),
-            Err(error) => {
-                set_last_error(&format!("mci_brain_ffi_search: {error}"));
-                ptr::null_mut()
-            }
-        };
-    }
-
-    match search_lexical(handle, &query, limit) {
+    match search_query(handle, query, limit) {
         Ok(hits) => json_to_c_string(&hits),
         Err(error) => {
             set_last_error(&format!("mci_brain_ffi_search: {error}"));
@@ -658,16 +672,129 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
     }
 }
 
+fn search_query(
+    handle: &Handle,
+    mut query: QueryJson,
+    limit: usize,
+) -> Result<Vec<HitJson>, String> {
+    SqlCipherBrainStore::validate_search_app_filters(&query.app_filters)
+        .map_err(|error| error.to_string())?;
+    query.app_filters.sort_unstable();
+    query.app_filters.dedup();
+    if query.browse {
+        if !query.text.is_empty() {
+            return Err("browse requires empty text".into());
+        }
+        return search_browse(handle, &query, limit);
+    }
+    if query.text.is_empty() {
+        // Preserve the pre-browse wire contract for existing callers.
+        return Ok(Vec::new());
+    }
+    if query.mode == SearchMode::Related {
+        if query.has_url || query.app_filters.len() > 1 {
+            return Err(
+                "Related search does not support multiple-app or URL filters; choose Text".into(),
+            );
+        }
+        if let Some(app) = query.app_filters.first() {
+            if query
+                .app_filter
+                .as_ref()
+                .is_some_and(|legacy| legacy != app)
+            {
+                return Ok(Vec::new());
+            }
+            query.app_filter = Some(app.clone());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if query.mode.uses_hybrid(handle.query_embedder.is_some()) {
+        return search_hybrid(handle, &query, limit);
+    }
+    search_lexical(handle, &query, limit)
+}
+
+fn search_browse(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec<HitJson>, String> {
+    let time_filter = match (query.time_from_us, query.time_to_us) {
+        (None, None) => None,
+        (from, to) => Some(TimeRange {
+            from_us: from.unwrap_or(0),
+            to_us: to.unwrap_or(u64::MAX),
+        }),
+    };
+    let ids = handle
+        .store
+        .browse_event_ids_filtered(
+            limit,
+            time_filter,
+            query.app_filter.as_deref(),
+            &query.app_filters,
+            query.has_url,
+        )
+        .map_err(|error| format!("browse: {error}"))?;
+    let mut hits = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(event) = handle
+            .store
+            .get_event(id)
+            .map_err(|error| format!("get_event: {error}"))?
+        else {
+            continue;
+        };
+        if query_matches_event(query, &event) {
+            hits.push(hit_json(handle, id, event, "recent", None));
+        }
+    }
+    Ok(hits)
+}
+
+fn query_matches_event(query: &QueryJson, event: &mci_brain::Event) -> bool {
+    passes_filters(
+        event.ts_us,
+        event.app_bundle_id.as_deref(),
+        query.time_from_us,
+        query.time_to_us,
+        query.app_filter.as_deref(),
+    ) && (query.app_filters.is_empty()
+        || event
+            .app_bundle_id
+            .as_ref()
+            .is_some_and(|app| query.app_filters.contains(app)))
+        && (!query.has_url || event.url.as_ref().is_some_and(|url| !url.is_empty()))
+}
+
 fn search_lexical(
     handle: &Handle,
     query: &QueryJson,
     limit: usize,
 ) -> Result<Vec<HitJson>, String> {
     let alternatives = expand_query_with_user_aliases(&query.text, &query.user_aliases);
+    let time_filter = match (query.time_from_us, query.time_to_us) {
+        (None, None) => None,
+        (from, to) => Some(TimeRange {
+            from_us: from.unwrap_or(0),
+            to_us: to.unwrap_or(u64::MAX),
+        }),
+    };
     let hits_raw = if alternatives.len() == 1 {
-        handle.store.fts5_search(&query.text, limit)
+        handle.store.fts5_search_with_filters(
+            &query.text,
+            limit,
+            time_filter,
+            query.app_filter.as_deref(),
+            &query.app_filters,
+            query.has_url,
+        )
     } else {
-        handle.store.fts5_search_alternatives(&alternatives, limit)
+        handle.store.fts5_search_alternatives_with_filters(
+            &alternatives,
+            limit,
+            time_filter,
+            query.app_filter.as_deref(),
+            &query.app_filters,
+            query.has_url,
+        )
     }
     .map_err(|error| format!("fts5_search: {error}"))?;
     let mut hits_json = Vec::with_capacity(hits_raw.len());
@@ -679,13 +806,7 @@ fn search_lexical(
         else {
             continue;
         };
-        if !passes_filters(
-            event.ts_us,
-            event.app_bundle_id.as_deref(),
-            query.time_from_us,
-            query.time_to_us,
-            query.app_filter.as_deref(),
-        ) {
+        if !query_matches_event(query, &event) {
             continue;
         }
         hits_json.push(hit_json(handle, event_id, event, "lexical", Some(score)));
@@ -961,6 +1082,56 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
         }
     }
     json_to_c_string(&out)
+}
+
+/// Bounded stored text for a single selected event, independent of list snippets.
+#[derive(Debug, Serialize)]
+pub struct EventTextJson {
+    /// The requested, still-present admitted event id.
+    pub event_id: u64,
+    /// Capture timestamp from the same row snapshot as the text.
+    pub ts_us: u64,
+    /// Exact nullable source app, bounded to 1 KiB of UTF-8.
+    pub app_bundle_id: Option<String>,
+    /// Exact UTF-8 prefix, at most 128 KiB, without replacement characters.
+    pub text: String,
+    /// True only when the byte cap omits part of the stored text.
+    pub truncated: bool,
+}
+
+/// Read one admitted event's stored text through the existing read-only handle.
+/// No paths are accepted and no vectors or blobs are fetched. Timestamp and
+/// app identity accompany text atomically; callers must compare both against
+/// the selected hit, because deleted numeric IDs can be reused.
+/// Returns JSON `null` for a missing, deleted, suppressed or invalid id;
+/// otherwise an [`EventTextJson`] capped at 128 KiB of UTF-8 text. JSON
+/// escaping can expand the wire payload to at most 6 * (128 KiB + 1 KiB) + 256
+/// bytes. An app identity larger than 1 KiB fails closed as JSON `null`.
+/// Returns a null pointer on error, with a content-free last-error message.
+/// Caller must release any non-null pointer with [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+/// `h` must be a live handle or null. Do not close it during the call.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_event_text(h: *mut Handle, event_id: u64) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_event_text: null handle");
+        return ptr::null_mut();
+    }
+    // Safety: the caller keeps this read-only handle alive for the call.
+    let handle = unsafe { &*h };
+    if let Ok(value) = handle.store.event_text(EventId(event_id)) {
+        json_to_c_string(&value.map(|value| EventTextJson {
+            event_id,
+            ts_us: value.ts_us,
+            app_bundle_id: value.app_bundle_id,
+            text: value.text,
+            truncated: value.truncated,
+        }))
+    } else {
+        set_last_error("mci_brain_ffi_event_text: stored text unavailable");
+        ptr::null_mut()
+    }
 }
 
 /// **V2-P13 (Phase D scaffold)** — Return lightweight event summaries for
@@ -1346,15 +1517,9 @@ pub unsafe extern "C" fn mci_brain_ffi_brief_dates(h: *mut Handle, limit: u32) -
 
 /// Content-free aggregate summary for the Privacy Dashboard's top card.
 /// Returns a JSON object of [`SummaryStatsJson`] on success — total event
-/// count, oldest/newest ts, and the on-disk byte size of the `SQLCipher`
-/// brain file. NO event content, no bundle-id list, no window titles.
-///
-/// The `disk_bytes` field is the `fs::metadata(brain_path).len()` of the
-/// file the handle was opened against — the FFI already holds the path
-/// (`Handle::brain_path`) and stat'ing it is content-free (no read of
-/// row bytes). A stat failure degrades to `0` rather than propagating an
-/// error, because a failure to size the file must not block the
-/// dashboard from rendering the counts.
+/// count, oldest/newest ts, and database-only logical bytes. This polling
+/// entrypoint never enumerates blobs and leaves `storage` absent. Use
+/// [`mci_brain_ffi_storage_usage`] only for an explicit storage measurement.
 ///
 /// Same allocator discipline as the other returners; caller MUST pass
 /// the returned pointer back to [`mci_brain_ffi_string_free`].
@@ -1365,30 +1530,60 @@ pub unsafe extern "C" fn mci_brain_ffi_brief_dates(h: *mut Handle, limit: u32) -
 /// [`mci_brain_ffi_open`] and not yet closed.
 #[no_mangle]
 pub unsafe extern "C" fn mci_brain_ffi_summary_stats(h: *mut Handle) -> *mut c_char {
-    if h.is_null() {
-        set_last_error("mci_brain_ffi_summary_stats: null handle");
-        return ptr::null_mut();
-    }
-    // Safety: caller guarantees a valid live handle.
-    let handle = unsafe { &*h };
-    let stats = match handle.store.stats() {
-        Ok(s) => s,
-        Err(e) => {
-            set_last_error(&format!("mci_brain_ffi_summary_stats: {e}"));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if h.is_null() {
+            set_last_error("mci_brain_ffi_summary_stats: null handle");
             return ptr::null_mut();
         }
-    };
-    // Best-effort disk size. A missing/unreadable brain file falls back to
-    // 0 — the dashboard's summary card shows "0 MB" which is honest under
-    // that (impossible) failure mode rather than a full-screen error.
-    let disk_bytes = std::fs::metadata(&handle.brain_path).map_or(0, |metadata| metadata.len());
-    let out = SummaryStatsJson {
-        total_events: stats.event_count,
-        oldest_ts_us: stats.oldest_ts_us,
-        newest_ts_us: stats.newest_ts_us,
-        disk_bytes,
-    };
-    json_to_c_string(&out)
+        // Safety: caller guarantees a valid live handle.
+        let handle = unsafe { &*h };
+        let stats = match handle.store.stats() {
+            Ok(s) => s,
+            Err(e) => {
+                set_last_error(&format!("mci_brain_ffi_summary_stats: {e}"));
+                return ptr::null_mut();
+            }
+        };
+        let disk_bytes = storage_usage::database_bytes(&handle.brain_path).unwrap_or(0);
+        let out = SummaryStatsJson {
+            total_events: stats.event_count,
+            oldest_ts_us: stats.oldest_ts_us,
+            newest_ts_us: stats.newest_ts_us,
+            disk_bytes,
+            storage: None,
+        };
+        json_to_c_string(&out)
+    }));
+    result.unwrap_or_else(|_| {
+        set_last_error("mci_brain_ffi_summary_stats: measurement failed");
+        ptr::null_mut()
+    })
+}
+
+/// Explicit content-free logical storage measurement for the Privacy Dashboard.
+/// Returns [`storage_usage::StorageUsage`] JSON without accessing keys or data.
+/// Walks at most 64 path components and 20,000 blob-directory entries without
+/// symlink traversal or recursion. The 200ms deadline is best-effort between
+/// local metadata calls, not a hard latency bound on individual OS calls.
+/// Call off the UI thread, on explicit refresh only; free via `string_free`.
+///
+/// # Safety
+/// `h` must be a live handle returned by [`mci_brain_ffi_open`], not yet closed.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_storage_usage(h: *mut Handle) -> *mut c_char {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if h.is_null() {
+            set_last_error("mci_brain_ffi_storage_usage: null handle");
+            return ptr::null_mut();
+        }
+        // Safety: the caller keeps this handle live for the entire call.
+        let handle = unsafe { &*h };
+        json_to_c_string(&storage_usage::measure(&handle.brain_path))
+    }));
+    result.unwrap_or_else(|_| {
+        set_last_error("mci_brain_ffi_storage_usage: measurement failed");
+        ptr::null_mut()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2580,6 +2775,23 @@ mod tests {
         assert_eq!(q2.time_from_us, Some(100));
         assert_eq!(q2.time_to_us, Some(200));
         assert_eq!(q2.app_filter.as_deref(), Some("com.apple.Safari"));
+    }
+
+    #[test]
+    fn query_json_preserves_explicit_text_search_and_legacy_default() {
+        let text: QueryJson =
+            serde_json::from_str(r#"{"text":"cache_key_123","limit":5,"mode":"text"}"#).unwrap();
+        assert_eq!(serde_json::to_value(text).unwrap()["mode"], "text");
+        let legacy: QueryJson = serde_json::from_str(r#"{"text":"notes","limit":5}"#).unwrap();
+        assert_eq!(serde_json::to_value(legacy).unwrap()["mode"], "related");
+        assert!(serde_json::from_str::<QueryJson>(
+            r#"{"text":"notes","limit":5,"mode":"unrecognized"}"#,
+        )
+        .is_err());
+        assert!(!SearchMode::Text.uses_hybrid(true));
+        assert!(!SearchMode::Text.uses_hybrid(false));
+        assert!(SearchMode::Related.uses_hybrid(true));
+        assert!(!SearchMode::Related.uses_hybrid(false));
     }
 
     #[test]
