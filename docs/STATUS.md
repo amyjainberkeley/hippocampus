@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `4c79d98`
+Audited code baseline: `f3a689c`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -17,12 +17,14 @@ a flat H, a compact product explanation, an actual synthetic-data example and
 four practical uses: finding captured text, revisiting work, reviewing a cited
 daily draft, and handing relevant context to an agent. Release and privacy
 qualifications remain on the linked pages. Production build, TypeScript and
-scoped lint pass. Version 3 is deployed successfully at
+scoped lint pass. Version 4 is deployed successfully at
 `https://hippocampus-memory.amyjain.chatgpt.site/`, still owner-private. Its
-website-rooted source is `d3db641`, exported from canonical commit `4c79d98`.
-All four pages and both current images returned HTTP 200 in authenticated
-checks. No browser visual QA was performed. The synthetic image predates the
-current workspace cleanup and is not evidence of that cleanup's installed state.
+website-rooted source is `43e3ad4`, exported from canonical commit `f3a689c`.
+All four pages and the current product image returned HTTP 200 in authenticated
+checks. The image is an unedited screenshot of the actual optimized Recall
+interface built from `c5a8774`, using a disposable synthetic store. It shows
+Text search and selected full-text evidence, not personal memory. Native UI
+interaction was checked; no website browser visual QA was performed.
 
 The README now gives a newcomer reading path. `docs/guide/` explains the
 architecture, actual commit history, implemented storage policies, local compute,
@@ -36,19 +38,21 @@ evidence, but its result cap prevents exhaustive negative qualification.
 Authenticated screenshot readback is still not established. Do not ask the
 owner to repeat the foreground exercise or claim the full gate passed.
 
-Hosted onboarding, parent, Recall and installer tests pass at `13e7f7a`.
-The older-hosted Vision performance failure and release-contract signal-9
-failure remain unresolved. The following native fixes are being tested locally,
-not yet installed: filter-before-limit lexical search, explicit Text/Related
-search, selected-event full-text inspection, workspace simplification, and
-complete storage accounting. See the ordered plan in
+The following native fixes are installed in `c5a8774`: filter-before-limit
+lexical search, explicit Text/Related search, selected-event full-text
+inspection, workspace simplification, and bounded managed-storage accounting.
+Hosted onboarding, parent, Recall, installer, Rust tests/format/Clippy, cargo
+audit, workflow checks and PR title pass at `f3a689c`. Capture still reports
+56 failures across 691 tests on the hosted Mac; the retention-contract run
+still exits 137 after compiling the parent fixture. These failures remain
+release blockers. See the ordered plan in
 `docs/plans/2026-09-07-recall-and-product-clarity.md`.
 
 Additional native review found filtered-history starvation, next-midnight
 inclusion, misleading rank percentages, a snippet-only screenshot inspector,
 compact-window layout instability, valid MCP source IDs rejected by filters,
 and a picker that could exceed the 32-source wire limit. Source corrections and
-regressions are present; do not treat this source as an installed update.
+regressions are included in the installed `c5a8774` update.
 The review and proof boundaries are recorded in
 `docs/audits/2026-09-07-recall-usability.md`.
 
@@ -67,7 +71,9 @@ Clippy and formatting pass. The complete Recall debug suite passes 474 XCTest
 plus three Swift Testing cases. Presentation contracts pass 20 checks, and
 local release-contract and release-safety checks pass 224 and 13 respectively.
 Hosted capture and retention-contract checks remain red at
-`4c79d98`; local results do not supersede those failures.
+`f3a689c`; local results do not supersede those failures. See
+[capture run](https://github.com/amyjainberkeley/hippocampus/actions/runs/34154561579)
+and [release contracts](https://github.com/amyjainberkeley/hippocampus/actions/runs/34154561586).
 
 Synthetic native interaction checks verify Text/no-match/detail, smaller-window
 back navigation, distinct destinations, full-text screenshot inspection and
@@ -84,14 +90,39 @@ Rust workspace release build also completes successfully.
 Selected-text responses now verify timestamp and app as well as numeric ID.
 This rejects common delete/reinsert races, but an identical tuple can still be
 reused; a durable event-generation identity is not implemented. The latest
-content-free installed receipt advanced to 632 stored frames and 279 screenshots
-with a write at 18:26:11 UTC. It establishes ingestion, not OCR completeness.
+content-free installed receipt advanced after replacement to 646 stored frames
+and 286 screenshots with a write at 19:17:29 UTC. It establishes new ingestion,
+not OCR completeness or correct screenshot attribution.
 
-Installed application remains **`bb02bb4`**. Public binary release remains gated.
+**Installed application: `c5a8774`**, at `/Applications/Hippocampus.app`.
+The optimized app and installer are Developer ID signed, notarized and stapled.
+Strict nested signature, Gatekeeper, disposable-home onboarding launch and
+post-copy source-provenance checks pass. Installer:
+`/Users/amy/hippo-work/releases/2026-09-07-c5a8774/Hippocampus-0.1.0.dmg`.
+SHA-256: `9bd1ffe3daf4a8238f25f9bd35c59ce579e048bd82b6f46158cf0013083e018c`.
+Product-source digest:
+`bc83104929ecae6aef0c74142eb975b9cb5b7d07e8cd5d7db34548fa7bf85764`.
+App notarization `e3c22796-6e09-438a-b1c5-94ab2d404acd`; DMG notarization
+`c89b9519-b344-4816-8c12-03a6022c1c4f`, both Accepted. The previous live app
+is preserved at
+`/Users/amy/hippo-work/releases/backups/Hippocampus-bb02bb4-live-before-c5a8774.app`.
+Memory, keys, permissions and capture policy were not reset.
+
+The installed read-only agent still finds the owner's earlier controlled
+foreground fixture across durable storage, recall and context with matching
+event identity. That is continuity evidence, not a new post-install capture
+fixture. A later automated TextEdit exercise did not establish a fresh matching
+event across these surfaces; background app control does not prove actual
+foreground capture. No fresh fixture success is claimed. The bounded proof
+also remains capped and cannot authenticate a screenshot readback.
+Production-window inspection through the GUI tool timed out; the interaction
+proof above belongs to the optimized synthetic preview, not that production
+window. Public binary release remains gated by these qualifications, hosted
+failures, second-Mac work and unprovisioned release-model assets.
 
 ## Earlier September 7 Website And Memory-Quality Work
 
-The website now leads with local-first personal memory for the Mac and AI tools,
+At this earlier checkpoint, the website led with local-first personal memory for the Mac and AI tools,
 using a paired hippocampal mark and a conceptual transparent-memory illustration.
 It explains capture, recognition, local storage and selected context sharing,
 with shared navigation, mobile menus and keyboard skip links. It explicitly
@@ -145,7 +176,7 @@ all-target strict Clippy and formatting pass. The optimized local onboarding
 suite passes 241 tests. The staged source secret scan returned zero alerts;
 no actual screenshots, memory, credentials or installer binaries are published.
 
-**Current installed artifact: `bb02bb4`**, at `/Applications/Hippocampus.app`.
+**Earlier installed artifact: `bb02bb4`**, superseded by `c5a8774` above.
 The fresh optimized binaries were assembled, Developer ID signed, notarized,
 stapled and installed. Strict nested signature, Gatekeeper and post-copy
 source-provenance verification pass. Installer:

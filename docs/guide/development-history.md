@@ -2,7 +2,7 @@
 
 This is a selected history of implementation and repair, audited from Git log,
 diffs, and current code through
-[13e7f7a](https://github.com/amyjainberkeley/hippocampus/commit/13e7f7a)
+[f3a689c](https://github.com/amyjainberkeley/hippocampus/commit/f3a689c)
 on September 7, 2026. Dates are commit dates. They do not establish continuous
 development time, hours worked, or independent verification.
 
@@ -23,6 +23,8 @@ corrections to claims that were ahead of actual behavior.
 | September 3-5 | [Two-fps ceiling](https://github.com/amyjainberkeley/hippocampus/commit/15570c1), [focused-window qualification work](https://github.com/amyjainberkeley/hippocampus/commit/e7be6f0), and [daily visual workspace](https://github.com/amyjainberkeley/hippocampus/commit/999e680) tightened capture and made evidence inspectable. | Qualification transferring automatically to a later installed build; later audits still found capture and lifecycle failures. |
 | September 6 | [Capture-stop, brief, and audit hardening](https://github.com/amyjainberkeley/hippocampus/commit/493befe) and [bounded recovery/search freshness](https://github.com/amyjainberkeley/hippocampus/commit/eff26a3) addressed failures observed in use. | Complete recovery coverage, second-Mac installation, or release readiness. |
 | September 7 | [Website import](https://github.com/amyjainberkeley/hippocampus/commit/86f7666) preserved its original history in this repository. [Small-text OCR and literal recall](https://github.com/amyjainberkeley/hippocampus/commit/bb02bb4) added bounded OCR passes and fixed boolean-word handling. [Onboarding isolation](https://github.com/amyjainberkeley/hippocampus/commit/13e7f7a) routed Safari tests through the injected launcher. | A source push publishing a website, installing the latest source, or proving fresh capture end to end. |
+| September 7 | [Recall usability](https://github.com/amyjainberkeley/hippocampus/commit/c5a8774) separates Text from Related search, filters before limiting, reads bounded selected-event text, simplifies native navigation, and measures managed storage. Regression tests cover stale selections, source IDs, date boundaries, storage traversal and writer-lock release. | Perfect OCR, semantic understanding, measured work time, a disk quota, or a passing public-release gate. |
+| September 7 | [Product guide](https://github.com/amyjainberkeley/hippocampus/commit/4c79d98) adds a newcomer path and this evidence trail. [Actual native product image](https://github.com/amyjainberkeley/hippocampus/commit/f3a689c) replaces conceptual artwork with a synthetic-data screenshot of the optimized recall update. | Public website access, real-user screenshot publication, or an independently audited product. |
 
 ## How To Read The Evidence
 
@@ -32,17 +34,20 @@ means a recorded test or fixture exercised a specified revision and environment.
 verification and successful ingestion are different checks. **Open** means
 missing implementation, unresolved failure, or insufficient qualification.
 
-At this audit checkpoint, STATUS records an installed `bb02bb4` artifact with
-signing/notarization checks, but incomplete fresh fixture-to-recall-to-context
-and screenshot-readback qualification. Later source includes onboarding changes
-absent from that artifact. The website's recorded version 2 was owner-private.
-These are historical checkpoint facts; use [STATUS](../STATUS.md) and
+At this checkpoint, `c5a8774` is installed with signing, notarization and
+post-copy provenance checks. Its optimized synthetic UI was exercised, and the
+installed agent can read the owner's earlier captured fixture across recall
+and context. New post-install fixture-to-context and screenshot-readback
+qualification remain incomplete. The deployed website is version 4 and remains
+owner-private. These are checkpoint facts; use [STATUS](../STATUS.md) and
 [PUBLISHING](../PUBLISHING.md) for the current installed, source, hosted-CI,
 deployment, and public-download states.
 
 The [September 7 quality report](../audits/2026-09-07-memory-quality.md) records
 small synthetic OCR examples, failed attempts, timing limits, and a privacy
-regression caught during development. The [evaluation index](../eval/README.md)
+regression caught during development. The [recall usability review](../audits/2026-09-07-recall-usability.md)
+connects observed search and UI failures to fixes and verification limits.
+The [evaluation index](../eval/README.md)
 links retrieval and handoff fixtures. Neither those fixtures nor a handful of
 owner-machine screenshots establish a general accuracy or storage forecast.
 

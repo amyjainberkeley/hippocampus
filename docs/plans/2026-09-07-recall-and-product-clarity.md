@@ -41,12 +41,24 @@
 - All screenshots used publicly must contain synthetic data. Tests run with
   an allowlisted environment; no keys or raw personal memory enter artifacts.
 
-## New evidence
+## Evidence At Plan Start
 
 - The owner's existing foreground fixture is present across store, recall and
   agent context. The bounded proof remains incomplete because a query reaches
   its result cap and its interface cannot authenticate a screenshot readback.
-- The FFI lexical path currently applies filters after limiting results.
-- Native list/detail records currently expose the same 280-character snippet.
+- The FFI lexical path applied filters after limiting results.
+- Native list/detail records exposed the same 280-character snippet.
 - Hosted onboarding tests pass at `13e7f7a`; older hosted Vision performance
   and release-contract failures still need diagnosis, not skipped assertions.
+
+## Executed Checkpoint
+
+Steps 2-6 are implemented and published in `c5a8774` and the adjacent website/
+guide commits. The native update is locally tested, signed, notarized and
+installed; website version 4 is deployed privately. Step 1 has positive evidence
+from the owner's original fixture but remains partial for fresh post-install
+capture and screenshot readback. Step 7 is complete for local installation and
+source/site publication, not public distribution: hosted capture and retention
+checks are still red, and the release-model and second-Mac gates remain open.
+See [STATUS](../STATUS.md) and the [review](../audits/2026-09-07-recall-usability.md)
+for test scope, failures and artifact identities.
