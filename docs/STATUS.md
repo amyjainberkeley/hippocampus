@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `d6f79e8`
+Audited code baseline: `13e7f7a`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -10,7 +10,41 @@ three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
 
-## September 7 Website And Memory-Quality Work
+## September 7 Product Clarity Checkpoint
+
+The website source replaces the conceptual glass artwork and curved mark with
+a flat H, a compact product explanation, an actual synthetic-data example and
+four practical uses: finding captured text, revisiting work, reviewing a cited
+daily draft, and handing relevant context to an agent. Release and privacy
+qualifications remain on the linked pages. Production build, TypeScript and
+scoped lint pass. This source checkpoint is not yet the deployed website;
+deployment confirmation will be recorded separately. No browser visual QA was
+performed. The synthetic image predates the current workspace cleanup and is
+not evidence of that cleanup's installed state.
+
+The README now gives a newcomer reading path. `docs/guide/` explains the
+architecture, actual commit history, implemented storage policies, local compute,
+and remaining distribution obligations. It distinguishes session linking from
+storage compaction and hypothetical growth arithmetic from measured usage.
+
+The owner's already-completed foreground fixture is now present across durable
+storage, recall and agent context. The bounded check identifies the same event
+across surfaces and reports no observed background marker in its returned
+evidence, but its result cap prevents exhaustive negative qualification.
+Authenticated screenshot readback is still not established. Do not ask the
+owner to repeat the foreground exercise or claim the full gate passed.
+
+Hosted onboarding, parent, Recall and installer tests pass at `13e7f7a`.
+The older-hosted Vision performance failure and release-contract signal-9
+failure remain unresolved. The following native fixes are being tested locally,
+not yet installed: filter-before-limit lexical search, explicit Text/Related
+search, selected-event full-text inspection, workspace simplification, and
+complete storage accounting. See the ordered plan in
+`docs/plans/2026-09-07-recall-and-product-clarity.md`.
+
+Installed application remains **`bb02bb4`**. Public binary release remains gated.
+
+## Earlier September 7 Website And Memory-Quality Work
 
 The website now leads with local-first personal memory for the Mac and AI tools,
 using a paired hippocampal mark and a conceptual transparent-memory illustration.
