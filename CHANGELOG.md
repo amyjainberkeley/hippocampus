@@ -48,6 +48,9 @@ commits are intentionally omitted from release notes.
 
 ### Capture reliability
 
+- Distinguish absent optional Accessibility labels from failed reads when
+  checking ordinary text views. Keep real keyword-probe errors and secure-field
+  detections blocking capture.
 - Bind captured frames to the focused-window stream generation so focus changes
   cannot attribute stale pixels to a newly focused app.
 - Resolve public AX focus to one unique WindowServer surface twice, failing
