@@ -25,6 +25,8 @@ on:
       - 'scripts/verify-toml-license-contract.py'
       - 'scripts/test-task-2-product-truth.sh'
       - 'scripts/test-retention-policy-contract.sh'
+      - 'scripts/test_retention_policy_runner.py'
+      - 'scripts/swift-package.sh'
       - 'scripts/e2e-clean-home.sh'
       - 'scripts/test-e2e-clean-home-contract.sh'
       - 'scripts/verify-app-launches.sh'
@@ -154,6 +156,8 @@ on:
       - 'scripts/verify-toml-license-contract.py'
       - 'scripts/test-task-2-product-truth.sh'
       - 'scripts/test-retention-policy-contract.sh'
+      - 'scripts/test_retention_policy_runner.py'
+      - 'scripts/swift-package.sh'
       - 'scripts/e2e-clean-home.sh'
       - 'scripts/test-e2e-clean-home-contract.sh'
       - 'scripts/verify-app-launches.sh'
@@ -285,7 +289,60 @@ jobs:
       - run: scripts/test-app-group-contract.sh
       - run: scripts/test-toml-license-contract.sh
       - run: scripts/test-task-2-product-truth.sh
-      - run: scripts/test-retention-policy-contract.sh
+      - run: python3 -B scripts/test_retention_policy_runner.py
+      - name: Retention policy contract
+        id: retention-contract
+        run: |
+          time -p env -i HOME="$HOME" \
+            PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:$HOME/.cargo/bin" \
+            DEVELOPER_DIR="$(xcode-select -p)" \
+            scripts/test-retention-policy-contract.sh
+      - name: Diagnose retention failure
+        if: failure() && steps.retention-contract.outcome == 'failure'
+        timeout-minutes: 2
+        run: |
+          env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin python3 -B - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+
+          products = {
+              "RetentionPersistenceBehavior": "apps/onboarding",
+              "RetentionPreferencesBehavior": "apps/hippocampus",
+          }
+          for product, package in products.items():
+              binary = Path(package) / ".build/debug" / product
+              if not binary.is_file():
+                  print(f"{product}: no built executable", flush=True)
+                  continue
+              for command in (["codesign", "--verify", "--strict", "--verbose=2", str(binary)],
+                              ["otool", "-L", str(binary)]):
+                  result = subprocess.run(command, timeout=20)
+                  print(f"{product}: {command[0]} exit={result.returncode}", flush=True)
+
+          reports = Path.home() / "Library/Logs/DiagnosticReports"
+          found = False
+          for product in (*products, "swift-run"):
+              for report in sorted(reports.glob(product + "*.ips"))[-3:]:
+                  found = True
+                  try:
+                      text = report.read_text().lstrip()
+                      payload, end = json.JSONDecoder().raw_decode(text)
+                      if text[end:].strip():
+                          payload = json.loads(text[end:])
+                      summary = {"report": report.name}
+                      for field, keys in (
+                          ("exception", ("type", "signal")),
+                          ("termination", ("namespace", "code", "indicator")),
+                      ):
+                          value = payload.get(field, {})
+                          summary[field] = {key: value[key] for key in keys if key in value}
+                      print(json.dumps(summary), flush=True)
+                  except (OSError, ValueError, AttributeError, TypeError) as error:
+                      print(f"{report.name}: unable to parse ({type(error).__name__})", flush=True)
+          if not found:
+              print("No matching crash report; termination reason remains unknown", flush=True)
+          PY
       - run: scripts/test-e2e-clean-home-contract.sh
       - run: scripts/e2e-clean-home.sh
       - run: scripts/test-development-app-contract.sh

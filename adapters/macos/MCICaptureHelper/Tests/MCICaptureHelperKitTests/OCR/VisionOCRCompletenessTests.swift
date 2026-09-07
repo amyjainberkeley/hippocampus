@@ -12,6 +12,12 @@ final class VisionOCRCompletenessTests: XCTestCase {
         "Search settings", "Pending changes", "cache_key_123", "GET /v1/events"
     ]
 
+    override func setUp() {
+        super.setUp()
+        let process = ProcessInfo.processInfo
+        print("OCR-ENV os=\(process.operatingSystemVersionString) active_cpus=\(process.activeProcessorCount) thermal_state=\(process.thermalState.rawValue) low_power=\(process.isLowPowerModeEnabled) vision_revision=\(VNRecognizeTextRequest.defaultRevision) budget_ms=\(VisionOCRWorker.defaultTimeoutMs)")
+    }
+
     func testSmallLabelsAreNotOmitted() async throws {
         for height in [1080, 1920] {
             let input = try Self.render(height: height, entries: Self.smallLabels(height: height))
@@ -19,7 +25,7 @@ final class VisionOCRCompletenessTests: XCTestCase {
             let runner = VisionOCRRunner(regionDidFinish: measurements.record)
             let result = await runner.recognize(input: input, timeoutMs: VisionOCRWorker.defaultTimeoutMs)
             let actual = result.recognizedLines.map(\.text)
-            print("OCR-COMPLETENESS height=\(height) exact=\(Self.labels.filter { actual.contains($0) }.count)/4 ms=\(result.durationMs) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
+            print("OCR-COMPLETENESS height=\(height) exact=\(Self.labels.filter { actual.contains($0) }.count)/4 ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
             XCTAssertFalse(result.timedOut)
             for label in Self.labels {
                 XCTAssertTrue(actual.contains(label), "Missing literal label: \(label); got \(actual)")
@@ -173,7 +179,7 @@ final class VisionOCRCompletenessTests: XCTestCase {
             let baselineMs = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
             let measurements = RegionMeasurements()
             let result = await VisionOCRRunner(regionDidFinish: measurements.record).recognize(input: input, timeoutMs: VisionOCRWorker.defaultTimeoutMs)
-            print("OCR-DENSE-BENCH sample=\(sample) baseline_lines=\(baseline.count) candidate_lines=\(result.recognizedLines.count) baseline_ms=\(baselineMs) candidate_ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
+            print("OCR-DENSE-BENCH sample=\(sample) baseline_lines=\(baseline.count) candidate_lines=\(result.recognizedLines.count) baseline_ms=\(baselineMs) baseline_over_budget=\(baselineMs >= UInt64(VisionOCRWorker.defaultTimeoutMs)) candidate_ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
             XCTAssertFalse(result.timedOut)
             guard !result.timedOut else { continue }
             XCTAssertEqual(Array(result.recognizedLines.prefix(baseline.count).map(\.text)), baseline,
@@ -195,7 +201,7 @@ final class VisionOCRCompletenessTests: XCTestCase {
                 let actual = result.recognizedLines.map(\.text)
                 let baselineExact = Self.labels.filter { baseline.contains($0) }.count
                 let actualExact = Self.labels.filter { actual.contains($0) }.count
-                print("OCR-COMPLETENESS-BENCH height=\(height) size=\(size) sample=\(sample) baseline_exact=\(baselineExact)/4 candidate_exact=\(actualExact)/4 baseline_ms=\(baselineMs) candidate_ms=\(result.durationMs) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
+                print("OCR-COMPLETENESS-BENCH height=\(height) size=\(size) sample=\(sample) baseline_exact=\(baselineExact)/4 candidate_exact=\(actualExact)/4 baseline_ms=\(baselineMs) baseline_over_budget=\(baselineMs >= UInt64(VisionOCRWorker.defaultTimeoutMs)) candidate_ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
                 XCTAssertFalse(result.timedOut)
                 XCTAssertEqual(actualExact, 4)
             }
@@ -243,7 +249,9 @@ final class VisionOCRCompletenessTests: XCTestCase {
         }
 
         func summary(planned: Int) -> String {
-            lock.withLock { "passes=\(durations.count)/\(planned) supplemental_skipped=\(planned - durations.count) perform_ms=\(durations)" }
+            // The callback observes only completed passes. At timeout the
+            // remainder can include the baseline or a still-running pass.
+            lock.withLock { "passes_completed=\(durations.count)/\(planned) passes_unobserved=\(planned - durations.count) perform_ms=\(durations)" }
         }
     }
 

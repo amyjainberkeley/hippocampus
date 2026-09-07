@@ -55,6 +55,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Record OCR test environment
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+          uname -m
+          sysctl hw.model hw.physicalcpu hw.logicalcpu hw.memsize kern.hv_vmm_present
+
       - name: Cache SwiftPM .build
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
