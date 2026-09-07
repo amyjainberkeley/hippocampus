@@ -126,11 +126,21 @@ class WorkflowTests(unittest.TestCase):
         contracts = self.workflows["release-contract"]["jobs"]["contracts"]
         onboarding = self.workflows["swift"]["jobs"]["onboarding"]
         self.assertEqual(contracts["runs-on"], onboarding["runs-on"])
-        runs = [step.get("run", "") for step in contracts["steps"]]
+        steps = contracts["steps"]
+        runs = [step.get("run", "") for step in steps]
         environment = next((i for i, run in enumerate(runs)
                             if "swift --version" in run and "xcodebuild -version" in run), None)
         self.assertIsNotNone(environment)
-        self.assertLess(environment, runs.index("scripts/test-retention-policy-contract.sh"))
+        gates = [(i, step) for i, step in enumerate(steps)
+                 if step.get("id") == "retention-contract"]
+        self.assertEqual(len(gates), 1, "the retention contract must have one identifiable gate")
+        index, gate = gates[0]
+        self.assertLess(environment, index)
+        command = shlex.split(gate["run"].replace("\\\n", " "))
+        self.assertEqual(command[:4], ["time", "-p", "env", "-i"])
+        self.assertEqual(command[-1], "scripts/test-retention-policy-contract.sh")
+        self.assertNotIn("if", gate)
+        self.assertFalse(gate.get("continue-on-error", False))
 
     def test_onboarding_diagnostic_does_not_stop_at_the_exec_event(self):
         steps = self.workflows["swift"]["jobs"]["onboarding"]["steps"]

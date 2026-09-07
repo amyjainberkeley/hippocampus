@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `6cf22ca`
+Audited code baseline: `c47fe73`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -29,6 +29,13 @@ timing, deadline status and unobserved passes. Production recognition, deadline,
 confidence and privacy policy are unchanged. These changes instrument the
 hosted failures; they do not establish that either failure is fixed. The
 standalone screen-only fixture is not part of the installed application.
+
+The first hosted diagnostic run stopped before retention: an existing safety
+test compared the entire launcher to its former one-line command. The test now
+locates the named gate and checks environment ordering, the clean launcher and
+mandatory failure behavior. All 13 release-safety and 11 runner regressions
+pass locally after this correction. Hosted fixture termination remains
+unresolved until the corrected workflow reaches that gate.
 
 The website source replaces the conceptual glass artwork and curved mark with
 a flat H, a compact product explanation, an actual synthetic-data example and
