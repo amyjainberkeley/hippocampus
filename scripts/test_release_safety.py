@@ -141,6 +141,10 @@ class WorkflowTests(unittest.TestCase):
                         command.index("-o run"))
         self.assertEqual(diagnostic["if"], "failure()")
         self.assertLessEqual(diagnostic["timeout-minutes"], 2)
+        self.assertIn('xcrun --find xctest', command)
+        self.assertIn('-k \'thread backtrace all\'', command)
+        self.assertIn('env -i', command)
+        self.assertIn('--no-lldbinit', command)
 
     def test_contract_runner_provisions_ripgrep_before_checks(self):
         steps = self.workflows["release-contract"]["jobs"]["contracts"]["steps"]
