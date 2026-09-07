@@ -756,42 +756,45 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
     /// container role, also checks descendants up to depth 3 (budget
     /// shared with signal 1's bound, conservatively).
     static func identifierRegexSignal(
-        of element: AXUIElement
+        of element: AXUIElement,
+        readString: (AXUIElement, CFString) -> (AXError, String?) = readStringObservation,
+        readChildren: (AXUIElement, CFString) -> ArrayReadResult = readElementArrayAttribute,
+        readFocusedChild: (AXUIElement, CFString) -> AXUIElement? = readElementAttribute
     ) -> AXBackstopOutcome {
         var anyError = false
-        var madeProgress = false
 
-        func checkOne(_ el: AXUIElement) -> Bool? {
-            // Return `true` on positive, `false` on negative-after-read,
-            // `nil` if every attribute read errored (so the caller can
-            // mark `anyError`).
-            var sawAny = false
+        func checkOne(_ el: AXUIElement) -> AXBackstopOutcome {
+            var outcome = AXBackstopOutcome.negative
             for attr in [
                 kAXIdentifierAttribute, kAXTitleAttribute,
                 kAXPlaceholderValueAttribute,
             ] as [String] {
-                if let s = readStringAttribute(el, attr as CFString) {
-                    sawAny = true
-                    if passwordIdentifierMatches(s) { return true }
+                switch identifierAttributesOutcome([readString(el, attr as CFString)]) {
+                case .positive: return .positive
+                case .negative: break
+                case .errored: outcome = .errored
                 }
             }
-            return sawAny ? false : nil
+            return outcome
         }
 
         // Check the focused element itself first.
         switch checkOne(element) {
-        case .some(true): return .positive
-        case .some(false): madeProgress = true
-        case .none: anyError = true
+        case .positive: return .positive
+        case .negative: break
+        case .errored: anyError = true
         }
 
         // If the focused element is a container, walk its descendants
         // up to depth 3. Bounded budget shared conceptually with
         // signal 1 — but the brief specifies the regex backstop also
         // bounds at depth 3, so we cap independently here.
-        let role = readStringAttribute(element, kAXRoleAttribute as CFString)
-        guard let role, containerRoles.contains(role) else {
-            return anyError && !madeProgress ? .errored : .negative
+        let (roleStatus, roleValue) = readString(element, kAXRoleAttribute as CFString)
+        guard roleStatus == .success, let role = roleValue, !role.isEmpty else {
+            return .errored
+        }
+        guard containerRoles.contains(role) else {
+            return anyError ? .errored : .negative
         }
 
         var budget = backstopMaxNodes
@@ -802,12 +805,12 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
             if depth >= backstopMaxDepth { return }
 
             var queued: [AXUIElement] = []
-            if let focusedChild = readElementAttribute(
+            if let focusedChild = readFocusedChild(
                 node, kAXFocusedUIElementAttribute as CFString)
             {
                 queued.append(focusedChild)
             }
-            switch readElementArrayAttribute(node, kAXChildrenAttribute as CFString) {
+            switch readChildren(node, kAXChildrenAttribute as CFString) {
             case .success(let arr):
                 queued.append(contentsOf: arr)
             case .empty:
@@ -818,11 +821,10 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
             for child in queued {
                 if found || budget <= 0 { return }
                 budget -= 1
-                madeProgress = true
                 switch checkOne(child) {
-                case .some(true): found = true; return
-                case .some(false): break
-                case .none: anyError = true
+                case .positive: found = true; return
+                case .negative: break
+                case .errored: anyError = true
                 }
                 recurse(child, depth: depth + 1)
             }
@@ -830,8 +832,37 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
 
         recurse(element, depth: 0)
         if found { return .positive }
-        if anyError && !madeProgress { return .errored }
+        if anyError { return .errored }
         return .negative
+    }
+
+    /// Optional metadata can be absent without an AX failure. Absence means
+    /// no keyword evidence, not a non-secure field; the other probes still run.
+    static func identifierAttributesOutcome(_ reads: [(AXError, String?)]) -> AXBackstopOutcome {
+        var anyError = reads.isEmpty
+        for (status, value) in reads {
+            switch status {
+            case .success:
+                guard let value else {
+                    anyError = true
+                    continue
+                }
+                if passwordIdentifierMatches(value) { return .positive }
+            case .noValue, .attributeUnsupported:
+                break
+            default:
+                anyError = true
+            }
+        }
+        return anyError ? .errored : .negative
+    }
+
+    private static func readStringObservation(
+        _ element: AXUIElement, _ attribute: CFString
+    ) -> (AXError, String?) {
+        var ref: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(element, attribute, &ref)
+        return (status, ref as? String)
     }
 
     // MARK: - AX read helpers used by the backstops

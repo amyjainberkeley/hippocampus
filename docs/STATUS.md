@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `347b1b9`
+Audited code baseline: `1c32747`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -18,6 +18,16 @@ established, but the new random screen-only phrase and linked-image/restart
 proof remain open. No later product gate is claimed from an earlier fixed-token
 test. The intended `usehippocampus.com` launch is deferred; no DNS or access
 change has been made.
+
+An [Accessibility classifier correction](audits/2026-09-07-ax-optional-labels.md)
+is prepared for signed-owner qualification. Optional absent labels no longer
+masquerade as messaging failures in the keyword probe, and actual attribute,
+required-role and visited-child errors cannot be hidden by readable siblings.
+Secure evidence still wins and stops further label reads. This does not resolve
+the separate traversal-helper risks or establish that the live fixture was
+captured. The final optimized capture suite passes 707 tests locally, including
+fourteen new classifier/path regressions. The installed app remains `c5a8774` until a verified installation is
+recorded below; the source correction is not an installed-product claim.
 
 The qualification checkpoint adds distinct build/locate/run/consumer gates to
 the retention test runner, eleven passing failure-propagation and diagnostic
