@@ -174,6 +174,8 @@ struct PreferencesRootView: View {
                 }
             ))
             .disabled(captureController.isApplying)
+            LabeledContent("Capture area", value: "Focused window")
+                .help("Only the active, permitted window is eligible. Background windows and unopened tabs are not captured.")
             Text(supervisor.captureEnabled
                  ? "Screen capture is enabled."
                  : "Screen capture is off.")

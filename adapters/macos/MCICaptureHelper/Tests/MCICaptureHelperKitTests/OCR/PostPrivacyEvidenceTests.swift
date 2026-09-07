@@ -6,6 +6,59 @@ import XCTest
 @testable import MCICaptureHelperKit
 
 final class PostPrivacyEvidenceTests: XCTestCase {
+    func testSupplementalMultilineSecretPreservesRepeatedLabelBeforeRetention() async {
+        let password = OCRLine(text: "password", boundingBox: CGRect(x: 0.02, y: 0.92, width: 0.08, height: 0.03), confidence: 1)
+        let valueBox = CGRect(x: 0.02, y: 0.88, width: 0.04, height: 0.02)
+        var accumulated = OCRLineAccumulator()
+        for line in [password, OCRLine(text: "\"deno", boundingBox: valueBox, confidence: 1),
+                     OCRLine(text: "Review notes", boundingBox: CGRect(x: 0.6, y: 0.4, width: 0.2, height: 0.03), confidence: 1)] {
+            accumulated.append(line)
+        }
+        accumulated.append(password)
+        accumulated.append(OCRLine(text: ": demo", boundingBox: valueBox, confidence: 1))
+        let result = OCRResult(recognizedLines: accumulated.lines, durationMs: 1, timedOut: false)
+        XCTAssertTrue(result.recognizedLines.map(\.text).joined(separator: "\n").contains("password\n: demo"))
+        await Self.assertSecretSuppressed(result: result)
+    }
+
+    func testOriginalMultilineSecretStaysContiguousBeforeRetention() async {
+        var accumulated = OCRLineAccumulator()
+        for text in ["password", ": demo"] {
+            accumulated.append(OCRLine(text: text, boundingBox: .zero, confidence: 1))
+        }
+        accumulated.append(OCRLine(text: "Review notes", boundingBox: .zero, confidence: 1))
+        await Self.assertSecretSuppressed(result: OCRResult(recognizedLines: accumulated.lines, durationMs: 1, timedOut: false))
+    }
+
+    func testCleanSupplementalTextIsEmitted() async {
+        var accumulated = OCRLineAccumulator()
+        accumulated.append(OCRLine(text: "Review notes", boundingBox: .zero, confidence: 1))
+        accumulated.append(OCRLine(text: "Search settings", boundingBox: .zero, confidence: 1))
+        let retainer = CountingRetainer()
+        let sink = RecordingSink()
+        await Self.drive(result: OCRResult(recognizedLines: accumulated.lines, durationMs: 1, timedOut: false), sink: sink, retainer: retainer)
+        let frames = await sink.frames()
+        let retainCount = await retainer.retainCount()
+        XCTAssertEqual(retainCount, 1)
+        XCTAssertEqual(frames.count, 1)
+        XCTAssertFalse(frames.first.map(isTombstone) ?? true)
+        XCTAssertNotNil(frames.first?.range(of: Data("Search settings".utf8)))
+    }
+
+    // Shared with the real-Vision synthetic fixture; all probes and pixels are
+    // synthetic, but suppression, wire emission, and retention gating are real.
+    static func assertSecretSuppressed(result: OCRResult, file: StaticString = #filePath, line: UInt = #line) async {
+        let retainer = CountingRetainer()
+        let sink = RecordingSink()
+        await Self.drive(result: result, sink: sink, retainer: retainer)
+        let retainCount = await retainer.retainCount()
+        let frames = await sink.frames()
+        XCTAssertEqual(retainCount, 0, file: file, line: line)
+        XCTAssertEqual(frames.count, 1, file: file, line: line)
+        XCTAssertEqual(frames.first.map { $0.count >= 4 && $0[2] == 0x11 && $0[3] == 0 }, true, file: file, line: line)
+        XCTAssertEqual(frames.first?.last, RedactionReason.ocrTimeSecret.rawValue, file: file, line: line)
+    }
+
     func testOCRSecretNeverInvokesRetention() async {
         let retainer = CountingRetainer()
         let sink = RecordingSink()

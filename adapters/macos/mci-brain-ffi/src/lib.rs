@@ -67,6 +67,9 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
 #[cfg(target_os = "macos")]
 use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
+use mci_brain::fts_sanitizer::{
+    LexicalAlternative, MAX_LEXICAL_ALTERNATIVES, MAX_LEXICAL_ALTERNATIVE_BYTES,
+};
 use mci_brain::{
     BrainStore, DeletionOutcome, Embedder, EventId, HybridRetriever, RetrievalDegradation,
     RetrievalMatch, RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, TimeRange,
@@ -635,13 +638,6 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
     }
     let limit = query.limit.min(MAX_LIMIT as usize).max(1);
 
-    // Cycle 8.42: expand the FTS5 query with the user's dictionary aliases
-    // BEFORE handing it to `fts5_search`. Empty alias map = identity
-    // (`expanded == query.text`), which preserves the pre-8.42 recall
-    // trace byte-for-byte on stores that don't send the field. See
-    // `expand_query_with_user_aliases` for the expansion rules.
-    let expanded = expand_query_with_user_aliases(&query.text, &query.user_aliases);
-
     #[cfg(target_os = "macos")]
     if handle.query_embedder.is_some() {
         return match search_hybrid(handle, &query, limit) {
@@ -653,7 +649,7 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
         };
     }
 
-    match search_lexical(handle, &query, &expanded, limit) {
+    match search_lexical(handle, &query, limit) {
         Ok(hits) => json_to_c_string(&hits),
         Err(error) => {
             set_last_error(&format!("mci_brain_ffi_search: {error}"));
@@ -665,13 +661,15 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
 fn search_lexical(
     handle: &Handle,
     query: &QueryJson,
-    expanded: &str,
     limit: usize,
 ) -> Result<Vec<HitJson>, String> {
-    let hits_raw = handle
-        .store
-        .fts5_search(expanded, limit)
-        .map_err(|error| format!("fts5_search: {error}"))?;
+    let alternatives = expand_query_with_user_aliases(&query.text, &query.user_aliases);
+    let hits_raw = if alternatives.len() == 1 {
+        handle.store.fts5_search(&query.text, limit)
+    } else {
+        handle.store.fts5_search_alternatives(&alternatives, limit)
+    }
+    .map_err(|error| format!("fts5_search: {error}"))?;
     let mut hits_json = Vec::with_capacity(hits_raw.len());
     for (event_id, score) in hits_raw {
         let Some(event) = handle
@@ -1948,44 +1946,30 @@ fn thumbnail_path_for(blob_dir: &std::path::Path, keyframe_blob: Option<&str>) -
     Some(blob_dir.join(file).to_string_lossy().into_owned())
 }
 
-/// Expand a raw user query with the caller's user-dictionary aliases
-/// (cycle 8.42). When the query text contains — as a case-insensitive
-/// substring — a canonical name or any of its aliases, the FTS5 query is
-/// rewritten as an OR-group over all the equivalent spellings so a
-/// search for `"AJ email"` also matches events that mention
-/// `"Amy Jain email"`. Multi-word spellings are quoted so FTS5 treats
-/// them as a single phrase.
+/// Keep the original keyword query and add literal phrase alternatives for
+/// dictionary groups touched by a case-insensitive substring match.
+/// The store owns encoding and joining these branches; no user text is syntax.
 ///
-/// **Match semantics.** Case-insensitive substring on the query text.
-/// This is intentionally loose so `"AJ"`, `"aj"`, `"aj@example.com"` all
-/// trigger the expansion for a canonical `"AJ"`. False positives are
-/// bounded: an expansion only *adds* an OR-branch to FTS5; it never
-/// removes candidate events, so worst-case a spurious expansion just
-/// widens the candidate pool.
-///
-/// **Bounds.** The map is capped at [`USER_ALIAS_GROUP_CAP`] groups; each
-/// group's aliases are capped at [`USER_ALIAS_PER_GROUP_CAP`] entries.
-/// A hostile caller cannot inflate the FTS5 query beyond
-/// `~cap * cap * avg_len` bytes.
-///
-/// **No-op paths.** Empty map, or a map whose keys/aliases don't appear
-/// in the query, returns the input unchanged — the recall trace is
-/// byte-identical to the pre-8.42 behavior. This is what preserves the
-/// "backward-compat by construction" contract.
-fn expand_query_with_user_aliases(
-    text: &str,
-    aliases: &std::collections::HashMap<String, Vec<String>>,
-) -> String {
+/// Canonical names are sorted before applying [`USER_ALIAS_GROUP_CAP`], and
+/// each alias list retains its order and [`USER_ALIAS_PER_GROUP_CAP`] limit.
+/// The original query reserves its budget first. Optional phrases that do not
+/// fit the store's remaining byte budget are skipped whole, and expansion
+/// stops at its alternative-count limit.
+/// No matching group leaves only the original keyword query, allowing the
+/// caller to preserve the ordinary lexical path and its ranking.
+fn expand_query_with_user_aliases<'a>(
+    text: &'a str,
+    aliases: &'a std::collections::HashMap<String, Vec<String>>,
+) -> Vec<LexicalAlternative<'a>> {
+    let mut alternatives = vec![LexicalAlternative::Keywords(text)];
     if aliases.is_empty() {
-        return text.to_string();
+        return alternatives;
     }
+    let mut remaining_bytes = MAX_LEXICAL_ALTERNATIVE_BYTES.saturating_sub(text.len());
     let text_lc = text.to_lowercase();
-    let mut expansions: Vec<String> = Vec::new();
-
-    // Iterate at most USER_ALIAS_GROUP_CAP groups. HashMap order is
-    // non-deterministic, but the resulting FTS5 query is order-independent
-    // (OR is commutative in FTS5's boolean layer).
-    for (canonical, alt_list) in aliases.iter().take(USER_ALIAS_GROUP_CAP) {
+    let mut groups: Vec<_> = aliases.iter().collect();
+    groups.sort_unstable_by_key(|(canonical, _)| *canonical);
+    for (canonical, alt_list) in groups.into_iter().take(USER_ALIAS_GROUP_CAP) {
         let all_terms: Vec<&str> = std::iter::once(canonical.as_str())
             .chain(
                 alt_list
@@ -2002,27 +1986,18 @@ fn expand_query_with_user_aliases(
         if !touched {
             continue;
         }
-        let quoted: Vec<String> = all_terms
-            .iter()
-            .filter(|t| !t.is_empty())
-            .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
-            .collect();
-        if quoted.is_empty() {
-            continue;
+        for term in all_terms.into_iter().filter(|term| !term.is_empty()) {
+            if alternatives.len() == MAX_LEXICAL_ALTERNATIVES {
+                return alternatives;
+            }
+            if term.len() > remaining_bytes {
+                continue;
+            }
+            remaining_bytes -= term.len();
+            alternatives.push(LexicalAlternative::Phrase(term));
         }
-        expansions.push(format!("({})", quoted.join(" OR ")));
     }
-    if expansions.is_empty() {
-        return text.to_string();
-    }
-    // Compose as `(<original>) OR <group1> OR <group2> ...`. Wrapping the
-    // original in parens preserves any user-authored FTS5 operators.
-    let mut out = format!("({text})");
-    for e in expansions {
-        out.push_str(" OR ");
-        out.push_str(&e);
-    }
-    out
+    alternatives
 }
 
 /// Post-fetch filter that matches the optional `time_filter` /
@@ -2721,7 +2696,10 @@ mod tests {
     #[test]
     fn expand_query_empty_map_is_identity() {
         let m = std::collections::HashMap::new();
-        assert_eq!(expand_query_with_user_aliases("hello", &m), "hello");
+        assert!(matches!(
+            expand_query_with_user_aliases("hello", &m).as_slice(),
+            [LexicalAlternative::Keywords("hello")]
+        ));
     }
 
     #[test]
@@ -2729,24 +2707,26 @@ mod tests {
         let mut m = std::collections::HashMap::new();
         m.insert("Amy Jain".to_string(), vec!["AJ".into()]);
         // Query has nothing to do with Amy — no expansion.
-        assert_eq!(
-            expand_query_with_user_aliases("vector database", &m),
-            "vector database"
-        );
+        assert!(matches!(
+            expand_query_with_user_aliases("vector database", &m).as_slice(),
+            [LexicalAlternative::Keywords("vector database")]
+        ));
     }
 
     #[test]
-    fn expand_query_touches_alias_and_ors_in_canonical_and_siblings() {
+    fn expand_query_touches_alias_and_adds_canonical_and_sibling_phrases() {
         let mut m = std::collections::HashMap::new();
         m.insert("Amy Jain".to_string(), vec!["AJ".into(), "Amy".into()]);
         let out = expand_query_with_user_aliases("AJ email", &m);
-        // Must preserve the original query in parens.
-        assert!(out.starts_with("(AJ email)"), "got: {out}");
-        // Must OR in the canonical + every alias, quoted.
-        assert!(out.contains("\"Amy Jain\""), "got: {out}");
-        assert!(out.contains("\"AJ\""), "got: {out}");
-        assert!(out.contains("\"Amy\""), "got: {out}");
-        assert!(out.contains(" OR "), "got: {out}");
+        assert!(matches!(
+            out.as_slice(),
+            [
+                LexicalAlternative::Keywords("AJ email"),
+                LexicalAlternative::Phrase("Amy Jain"),
+                LexicalAlternative::Phrase("AJ"),
+                LexicalAlternative::Phrase("Amy"),
+            ]
+        ));
     }
 
     #[test]
@@ -2756,8 +2736,14 @@ mod tests {
         // Lower-case in the query still triggers the group whose
         // canonical is capitalized.
         let out = expand_query_with_user_aliases("mci demo", &m);
-        assert!(out.contains("\"Hippocampus\""), "got: {out}");
-        assert!(out.contains("\"MCI\""), "got: {out}");
+        assert!(matches!(
+            out.as_slice(),
+            [
+                LexicalAlternative::Keywords("mci demo"),
+                LexicalAlternative::Phrase("Hippocampus"),
+                LexicalAlternative::Phrase("MCI"),
+            ]
+        ));
     }
 
     #[test]
@@ -2769,11 +2755,14 @@ mod tests {
         m.insert("Amy Jain".to_string(), vec!["AJ".into()]);
         m.insert("Hippocampus".to_string(), vec!["MCI".into()]);
         let out = expand_query_with_user_aliases("AJ email", &m);
-        assert!(out.contains("\"Amy Jain\""));
-        assert!(
-            !out.contains("Hippocampus"),
-            "leaked untouched group: {out}"
-        );
+        assert!(matches!(
+            out.as_slice(),
+            [
+                LexicalAlternative::Keywords("AJ email"),
+                LexicalAlternative::Phrase("Amy Jain"),
+                LexicalAlternative::Phrase("AJ"),
+            ]
+        ));
     }
 
     #[test]
@@ -2788,9 +2777,7 @@ mod tests {
             query.push(' ');
         }
         let out = expand_query_with_user_aliases(&query, &m);
-        // Count OR-group parens after the leading `(<query>)`.
-        let or_count = out.matches(" OR (").count();
-        assert!(or_count <= USER_ALIAS_GROUP_CAP, "got {or_count} OR-groups");
+        assert_eq!(out.len(), 1 + 2 * USER_ALIAS_GROUP_CAP);
     }
 
     // -----------------------------------------------------------------

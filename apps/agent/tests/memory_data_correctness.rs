@@ -301,12 +301,35 @@ fn legacy_retention_skips_all_deletion_until_review_and_v2_is_enforced() {
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "Keep the ordered OCR, suppression, heartbeat, and EOF assertions together so the receipt lifecycle remains visible."
+)]
 async fn runner_publishes_commit_and_suppression_receipts_before_eof() {
     use mci_agent::brain_ingest::BrainPump;
     use mci_agent::capture_status::{CaptureStatus, CaptureStatusWriter};
     use mci_agent::health_log::{HealthLog, HealthLogConfig};
     use mci_core::ipc::{Message, RedactionReason};
     use tokio::io::AsyncWriteExt;
+
+    async fn receipt(path: &std::path::Path, suppressed: bool) -> CaptureStatus {
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                if let Ok(bytes) = std::fs::read(path) {
+                    let value: CaptureStatus = serde_json::from_slice(&bytes).unwrap();
+                    if value.stored_frame_count == 1
+                        && value.suppression_reason.is_some() == suppressed
+                    {
+                        break value;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(
         SqlCipherBrainStore::new(
@@ -316,7 +339,7 @@ async fn runner_publishes_commit_and_suppression_receipts_before_eof() {
         .unwrap(),
     );
     let path = dir.path().join("capture-status.json");
-    let status = CaptureStatusWriter::new(Arc::clone(&store), path.clone(), true);
+    let capture_receipt = CaptureStatusWriter::new(Arc::clone(&store), path.clone(), true);
     let pump = BrainPump::new(store as Arc<dyn BrainStore>, None);
     let (device, _) = mci_agent::device_id::load_or_generate(dir.path().join("device-id"))
         .await
@@ -333,7 +356,7 @@ async fn runner_publishes_commit_and_suppression_receipts_before_eof() {
             &StepClock::default(),
             &device,
             Some(&pump),
-            Some(&status),
+            Some(&capture_receipt),
         )
         .await
         .unwrap()
@@ -352,23 +375,6 @@ async fn runner_publishes_commit_and_suppression_receipts_before_eof() {
     tx.write_all(&mci_core::ipc::wire::encode(1, &ocr))
         .await
         .unwrap();
-    async fn receipt(path: &std::path::Path, suppressed: bool) -> CaptureStatus {
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                if let Ok(bytes) = std::fs::read(path) {
-                    let value: CaptureStatus = serde_json::from_slice(&bytes).unwrap();
-                    if value.stored_frame_count == 1
-                        && value.suppression_reason.is_some() == suppressed
-                    {
-                        break value;
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap()
-    }
     assert_eq!(receipt(&path, false).await.stored_screenshot_count, 1);
     assert!(
         !task.is_finished(),

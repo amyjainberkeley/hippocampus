@@ -176,7 +176,7 @@ pub async fn drain_with_capture_status<R>(
     clock: &dyn WallClock,
     device_id: &DeviceId,
     brain: Option<&dyn BrainIngestor>,
-    status: Option<&crate::capture_status::CaptureStatusWriter>,
+    capture_receipt: Option<&crate::capture_status::CaptureStatusWriter>,
 ) -> Result<RunStats, RunError>
 where
     R: AsyncRead + Unpin,
@@ -188,8 +188,8 @@ where
         stats.frames_seen += 1;
         match &frame.message {
             Message::HelperHealth { .. } => {
-                if let Some(status) = status {
-                    status.refresh(clock);
+                if let Some(capture_receipt) = capture_receipt {
+                    capture_receipt.refresh(clock);
                 }
                 let routed = Routed::Health(frame);
                 match pump_one(&routed, clock, device_id) {
@@ -208,18 +208,17 @@ where
                     stats.frames_non_health += 1;
                     continue;
                 };
-                let outcome = brain.ingest_ocr_event(&frame.message).map_err(|error| {
-                    if let Some(status) = status {
-                        status.blocked("ingest_failed", clock);
+                let outcome = brain.ingest_ocr_event(&frame.message).inspect_err(|_| {
+                    if let Some(capture_receipt) = capture_receipt {
+                        capture_receipt.blocked("ingest_failed", clock);
                     }
-                    error
                 })?;
                 match outcome {
                     IngestOutcome::Stored { .. } => {
                         stats.frames_to_brain += 1;
                         if matches!(&frame.message, Message::OCREvent { .. }) {
-                            if let Some(status) = status {
-                                status.stored_frame(clock);
+                            if let Some(capture_receipt) = capture_receipt {
+                                capture_receipt.stored_frame(clock);
                             }
                         }
                     }
@@ -230,8 +229,8 @@ where
             }
             Message::PrivacyTombstone { reason, .. } => {
                 stats.frames_non_health += 1;
-                if let Some(status) = status {
-                    status.suppressed(*reason, clock);
+                if let Some(capture_receipt) = capture_receipt {
+                    capture_receipt.suppressed(*reason, clock);
                 }
             }
             Message::StateTransitionEvent { .. }

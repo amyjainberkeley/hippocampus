@@ -329,7 +329,7 @@ async fn run_today_brief_worker_with_clock(
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<BriefWorkerStats, BriefWorkerError> {
     let mut stats = BriefWorkerStats::default();
-    let mut state = TodayBriefState::default();
+    let mut draft_state = TodayBriefState::default();
     loop {
         if *shutdown.borrow() {
             break;
@@ -338,8 +338,9 @@ async fn run_today_brief_worker_with_clock(
         let clock = Arc::clone(&clock);
         let stopped = shutdown.clone();
         let mut task = tokio::task::spawn_blocking(move || {
-            let result = clock().and_then(|(now, day)| state.refresh(&store, now, &day, &stopped));
-            (state, result)
+            let result =
+                clock().and_then(|(now, day)| draft_state.refresh(&store, now, &day, &stopped));
+            (draft_state, result)
         });
         let result = tokio::select! {
             biased;
@@ -347,7 +348,7 @@ async fn run_today_brief_worker_with_clock(
             result = &mut task => result,
         }
         .map_err(|e| BriefWorkerError::Fatal(format!("Today cycle join: {e}")))?;
-        state = result.0;
+        draft_state = result.0;
         match result.1 {
             Ok(Some(BriefOutcome::Stored { .. })) => stats.briefs_generated += 1,
             Ok(Some(BriefOutcome::SkippedEmpty)) => stats.cycles_skipped_empty += 1,
@@ -564,6 +565,54 @@ pub fn generate_brief_once(
     )
 }
 
+fn prepare_brief_evidence(records: &[EventRecord]) -> Vec<EventRecord> {
+    records
+        .iter()
+        .map(|record| {
+            let mut text = record.text_snippet.as_str();
+            // Store snippets carry no truncation flag. A four-byte code point
+            // can put the cut up to three bytes below the limit. Omit the final
+            // line there unless it ends in a newline: a lost qualifier can
+            // turn a hypothetical or negated outcome into an apparent update.
+            if (EventRecord::SNIPPET_MAX_CHARS - 3..=EventRecord::SNIPPET_MAX_CHARS)
+                .contains(&text.len())
+                && !text.ends_with('\n')
+            {
+                text = text.rfind('\n').map_or("", |end| &text[..=end]);
+            }
+            let menu = match record.app_bundle_id.as_deref() {
+                Some("com.google.Chrome") => {
+                    Some("Chrome File Edit View History Bookmarks Profiles Tab Window Help")
+                }
+                Some("com.apple.Safari") => {
+                    Some("Safari File Edit View History Bookmarks Window Help")
+                }
+                _ => None,
+            };
+            let text_snippet = if let Some(menu) = menu {
+                // Match only whole menu lines in their browser context. Keep
+                // original text and line endings for everything else, including
+                // the capture header whose terminator the author recognizes.
+                text.split_inclusive('\n')
+                    .filter(|line| {
+                        !line
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            .eq_ignore_ascii_case(menu)
+                    })
+                    .collect()
+            } else {
+                text.to_owned()
+            };
+            EventRecord {
+                text_snippet,
+                ..record.clone()
+            }
+        })
+        .collect()
+}
+
 fn author_and_store_brief(
     store: &SqlCipherBrainStore,
     factory: &AuthorFactory,
@@ -584,7 +633,8 @@ fn author_and_store_brief(
     let author = (factory)()?;
     let model_id = author.model_id().to_owned();
     let model_version = author.model_version().to_owned();
-    let brief = match author.author(records, topic) {
+    let evidence = prepare_brief_evidence(records);
+    let brief = match author.author(&evidence, topic) {
         Ok(brief) => brief,
         Err(AuthorError::NoEvents) => return Ok(BriefOutcome::SkippedEmpty),
         Err(e) => return Err(BriefWorkerError::Author(e.to_string())),
@@ -917,13 +967,23 @@ mod today_tests {
     }
 
     fn record(store: &SqlCipherBrainStore, ts_us: u64, text: &str) -> EventId {
+        record_in_window(store, ts_us, "test.screen", None, text)
+    }
+
+    fn record_in_window(
+        store: &SqlCipherBrainStore,
+        ts_us: u64,
+        app: &str,
+        title: Option<&str>,
+        text: &str,
+    ) -> EventId {
         store
             .put_event_with_source(
                 &Event {
                     id: EventId(0),
                     ts_us,
-                    app_bundle_id: Some("test.screen".into()),
-                    window_title: None,
+                    app_bundle_id: Some(app.into()),
+                    window_title: title.map(str::to_owned),
                     url: None,
                     text: text.into(),
                     summary: None,
@@ -937,6 +997,199 @@ mod today_tests {
                 EventSource::ScreenOcr,
             )
             .unwrap()
+    }
+
+    #[test]
+    fn browser_menu_repeats_do_not_crowd_out_observed_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+        let work = [
+            "Release candidate: the import preview preserves all source columns.",
+            "Migration review: the duplicate-key case still fails on empty input.",
+        ];
+        let ids = work.map(|text| record(&store, day.since_us, text));
+        let menu = "Chrome File Edit View History Bookmarks Profiles Tab Window Help";
+        for tab in 1..=12 {
+            record_in_window(
+                &store,
+                day.since_us + tab,
+                "com.google.Chrome",
+                Some(&format!("Synthetic tab {tab}")),
+                &format!("[app=com.google.Chrome]\n{menu}"),
+            );
+        }
+        let outcome = generate_brief_once(
+            &store,
+            &extractive_author_factory(),
+            "Daily brief",
+            &day,
+            day.until_us,
+        )
+        .unwrap();
+        let row = store.brief_for_date(&day.date_local).unwrap().unwrap();
+        let retained = work.iter().filter(|text| row.body.contains(**text)).count();
+        let noise = row.body.matches(menu).count();
+        println!("browser menu corpus: retained={retained}/2 noise_bullets={noise}");
+        assert_eq!(retained, 2, "{}", row.body);
+        assert_eq!(noise, 0, "{}", row.body);
+        assert_eq!(
+            row.body
+                .lines()
+                .filter(|line| line.starts_with("- "))
+                .count(),
+            2
+        );
+        for id in ids {
+            assert!(row.body.contains(&format!("[event:{}]", id.0)));
+        }
+        assert!(matches!(
+            outcome,
+            BriefOutcome::Stored {
+                event_count: 14,
+                citation_violations: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn clipped_final_lines_do_not_turn_qualified_text_into_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+        let mut sources = Vec::new();
+        for gap in 0..=3 {
+            let complete = format!("Reading migration proposal {gap} with the review team.");
+            let prefix = format!("{complete}\nCompleted migration proposal {gap}: ");
+            let text = format!(
+                "{prefix}{}\u{1f9ea} but this is only a hypothetical outcome.",
+                "x".repeat(512 - gap - prefix.len()),
+            );
+            let id = record(&store, day.since_us + gap as u64, &text);
+            sources.push((id, complete, text));
+        }
+        let outcome = generate_brief_once(
+            &store,
+            &extractive_author_factory(),
+            "Daily brief",
+            &day,
+            day.until_us,
+        )
+        .unwrap();
+        let row = store.brief_for_date(&day.date_local).unwrap().unwrap();
+        let fragments = row.body.matches("Completed migration proposal").count();
+        let retained = sources
+            .iter()
+            .filter(|(_, line, _)| row.body.contains(line))
+            .count();
+        println!("clipped-line corpus: retained={retained}/4 partial_updates={fragments}");
+        assert_eq!(fragments, 0, "{}", row.body);
+        assert_eq!(retained, 4);
+        assert!(!row.body.contains("## What changed"), "{}", row.body);
+        for (id, line, original) in sources {
+            assert!(row.body.contains(&format!("{line} [event:{}]", id.0)));
+            assert_eq!(store.get_event(id).unwrap().unwrap().text, original);
+        }
+        assert!(matches!(
+            outcome,
+            BriefOutcome::Stored {
+                event_count: 4,
+                citation_violations: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn browser_menu_only_captures_do_not_create_a_today_draft() {
+        for (app, menu) in [
+            (
+                "com.google.Chrome",
+                "Chrome File Edit View History Bookmarks Profiles Tab Window Help",
+            ),
+            (
+                "com.apple.Safari",
+                "Safari File Edit View History Bookmarks Window Help",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = store(&dir);
+            let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+            record_in_window(&store, day.since_us, app, Some("Release completed"), menu);
+            let (_tx, rx) = watch::channel(false);
+            let outcome = TodayBriefState::default()
+                .refresh(&store, day.since_us + 1, &day, &rx)
+                .unwrap();
+            assert_eq!(outcome, Some(BriefOutcome::SkippedEmpty), "{app}");
+            assert_eq!(store.brief_count().unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn menu_words_in_content_and_other_apps_remain_source_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+        let menu = "Chrome File Edit View History Bookmarks Profiles Tab Window Help";
+        let content = format!("{menu} labels are under review.");
+        let browser = record_in_window(&store, day.since_us, "com.google.Chrome", None, &content);
+        let note = record_in_window(&store, day.since_us + 1, "com.apple.Notes", None, menu);
+        let outcome = generate_brief_once(
+            &store,
+            &extractive_author_factory(),
+            "Daily brief",
+            &day,
+            day.until_us,
+        )
+        .unwrap();
+        let row = store.brief_for_date(&day.date_local).unwrap().unwrap();
+        assert!(row
+            .body
+            .contains(&format!("{content} [event:{}]", browser.0)));
+        assert!(row.body.contains(&format!("{menu} [event:{}]", note.0)));
+        assert!(matches!(
+            outcome,
+            BriefOutcome::Stored {
+                citation_violations: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn complete_unicode_lines_at_the_snippet_boundary_remain_cited() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let day = BriefWindow::for_local_date("2026-09-05", 0).unwrap();
+        let complete = format!("Reading {}. \n", "\u{754c}".repeat(167));
+        assert_eq!(complete.len(), 512);
+        let id = record(&store, day.since_us, &complete);
+        let short = record(
+            &store,
+            day.since_us + 1,
+            "Waiting for the caf\u{e9} review.",
+        );
+        let (_tx, rx) = watch::channel(false);
+        let outcome = TodayBriefState::default()
+            .refresh(&store, day.since_us + 2, &day, &rx)
+            .unwrap();
+        let row = store.brief_for_date(&day.date_local).unwrap().unwrap();
+        assert!(row
+            .body
+            .contains(&format!("{} [event:{}]", complete.trim(), id.0)));
+        assert!(row.body.contains(&format!(
+            "Waiting for the caf\u{e9} review. [event:{}]",
+            short.0
+        )));
+        assert!(row.body.len() <= ExtractiveBriefAuthor::MAX_BODY_BYTES);
+        assert!(matches!(
+            outcome,
+            Some(BriefOutcome::Stored {
+                citation_violations: 0,
+                ..
+            })
+        ));
     }
 
     #[test]

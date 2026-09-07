@@ -496,6 +496,10 @@ impl McpAggregator {
 
     /// One server's reconcile: connect, handshake, catalog tools,
     /// discover + materialize resources within the per-tick budget.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Keep the async resource reads and final revision-state update together; extraction would split shared bookkeeping."
+    )]
     async fn reconcile_server(&self, registration: &ServerRegistration) -> Result<(), McpError> {
         let server_name = &registration.name;
         let client = self.registry.connect(server_name).await?;
