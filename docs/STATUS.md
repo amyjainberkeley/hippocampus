@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `31f6736`
+Audited code baseline: `4f5c75a`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -19,33 +19,34 @@ proof remain open. No later product gate is claimed from an earlier fixed-token
 test. The intended `usehippocampus.com` launch is deferred; no DNS or access
 change has been made.
 
-An [Accessibility classifier correction](audits/2026-09-07-ax-optional-labels.md)
-is installed in signed owner candidate `48251bd`. Optional absent labels no longer
+The initial [Accessibility classifier correction](audits/2026-09-07-ax-optional-labels.md)
+shipped in signed owner candidate `48251bd`. Optional absent labels no longer
 masquerade as messaging failures in the keyword probe, and actual attribute,
 required-role and visited-child errors cannot be hidden by readable siblings.
-Secure evidence still wins and stops further label reads. This does not resolve
-the separate traversal-helper risks or establish that the live fixture was
-captured. The final optimized capture suite passes 707 tests locally, including
+Secure evidence still wins and stops further label reads. That checkpoint did
+not resolve the separate traversal-helper risks or establish live fixture
+capture. Its optimized capture suite passed 707 tests locally, including
 fourteen new classifier/path regressions. Installation and signature verification
 do not establish that the screen-only capture gate passes.
 
-**Current installed application: `48251bd`**, at `/Applications/Hippocampus.app`.
+**Current installed application: `4f5c75a`**, at `/Applications/Hippocampus.app`.
 Its parent, helper, writer and Recall processes run from that bundle. The helper
 and writer share the capture pipe; writer and Recall open the same existing
 database. The new helper's generation matches its capture-enabled receipt.
-Post-copy strict nested signature, stapled ticket and source/digest verification
+Post-copy strict nested signature, Gatekeeper, stapled ticket and source/digest verification
 pass. The installer is private owner qualification only:
-`/Users/amy/hippo-work/releases/2026-09-07-48251bd/Hippocampus-0.1.0.dmg`.
-SHA-256: `40ace3c18fdfa9ada354f23cdc62d9f04e02b5ecae94d8485304b651bf2a45f2`.
+`/Users/amy/hippo-work/releases/2026-09-07-4f5c75a/Hippocampus-0.1.0.dmg`.
+SHA-256: `36fd2bec645a221ccfc007e170c7eb4895703dbfccab51abda1291891cf06fa3`.
 Product-source digest:
-`ee47ab36cda1bf2a015e0220e6bfa1dc930294bba116e222039fb4447ef74668`.
-Apple accepted app submission `12d14928-daa6-4e7f-bf28-8859c931b154` and DMG
-submission `cb42a4a6-b6e6-422e-9861-0e914d3e2efc`. The prior live bundle is
+`b1f9dd850260163743e6c6f7b3e257787faac3b041f5bafe361af9a0a372bb63`.
+Apple accepted app submission `9f7a2398-f868-4452-8c6e-b805a3a165a5` and DMG
+submission `e02f8da8-5447-491c-abc0-aa5b7967f409`. The prior live bundle is
 preserved at
-`/Users/amy/hippo-work/releases/backups/Hippocampus-c5a8774-live-before-48251bd.app`.
+`/Users/amy/hippo-work/releases/backups/Hippocampus-48251bd-live-before-4f5c75a.app`.
 No memory, keys, permissions or capture policy were reset. Repeated stream-stop
-errors observed before this installation remain unexplained recovery failures;
-the full live privacy/recovery gate is not passed.
+errors observed before this installation remain unexplained. The supervisor
+was observed replacing failed children and receiving new stream callbacks;
+that is restart evidence, not resumed-memory or full privacy/recovery proof.
 
 A follow-up source correction preserves failed/malformed child reads and
 incomplete bounded traversal through both AX backstops. It adds rate-limited,
@@ -54,7 +55,9 @@ health wiring test uses injected focus results, not the real focused app.
 Final optimized helper verification passes 737 tests locally (22 new traversal
 regressions and eight health tests). The existing suite still emits CoreData
 XPC diagnostics; passing tests do not qualify live capture or overnight health.
-The installed `48251bd` artifact does not yet include this follow-up.
+These changes are included in the installed `4f5c75a` artifact. Its content-free
+diagnostic emitted an unknown descendant-check outcome; that observation is
+not attributed to the test window and does not establish its missing-event cause.
 
 The qualification checkpoint adds distinct build/locate/run/consumer gates to
 the retention test runner, eleven passing failure-propagation and diagnostic
@@ -93,7 +96,9 @@ assembly and clean-home checks. The Recall lane still failed at that revision:
 its direct-call stale-search test raced the view model's initial empty-query
 debounce. The test now consumes initialization and explicitly releases the old
 read after the new result, with no production-search change. All twelve focused
-Recall tests pass in independent local verification; hosted rerun is pending.
+Recall tests pass in independent local verification. Hosted Recall, onboarding,
+parent, installer smoke, Rust and the complete release-contract workflow pass
+at `4f5c75a`. Hosted OCR remains the failing lane.
 
 The screen-only fixture now records sampled active/key/visible/text-focus
 exposure, resetting on focus loss or a gap over two seconds. Its calculation
@@ -101,7 +106,11 @@ has deterministic coverage and a hosted check. A fresh phrase reached twenty
 seconds in those native observations but still returned no event for the
 fixture app through MCP. The recorder reports fail-safe suppression. Capture,
 linked-image readback and restart qualification remain **open**; foreground
-observations cannot substitute for an actual stored event.
+observations cannot substitute for an actual stored event. That twenty-second
+exposure preceded the current installation. A post-update automated click/hold
+still reported zero foreground seconds, and the fixture's MCP query returned
+no event. The owner's manual foreground check is pending; the new build has
+not passed the exposure, capture, image or restart proof.
 
 Hosted OCR at `347b1b9` had 49 assertion failures across 692 tests, all in the
 completeness suite: deadline failures and empty consequences, supplemental-pass
@@ -110,7 +119,8 @@ can have lower confidence than incorrect text. A synthetic compute-device
 comparison and failure-only isolated diagnostic are added. At `1c32747`, 52
 assertions across 693 tests failed in completeness. Explicit CPU/GPU routing
 did not reliably meet the unchanged deadline. The capture lane remains red at
-`31f6736`; no production OCR fix or deadline waiver is established.
+`4f5c75a`: 53 assertions fail across 737 tests, all in OCR completeness. No
+production OCR fix or deadline waiver is established.
 
 The website source replaces the conceptual glass artwork and curved mark with
 a flat H, a compact product explanation, an actual synthetic-data example and

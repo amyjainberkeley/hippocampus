@@ -9,8 +9,8 @@ screen-memory evidence. [STATUS](../STATUS.md) remains the release authority.
 
 | Gate | Required observation | Current evidence |
 | --- | --- | --- |
-| 0. Establish the build | Identify source, installed binaries, running processes, effective policy, database and capture generation. | Runtime identity established for signed, notarized installed `48251bd`, including process mappings, shared writer/Recall database, helper/writer pipe and matching capture generation. Later CI source changes are not part of the installed artifact. |
-| 1. Screen to disk to Recall | A new phrase created only in a real window becomes a screen-origin event with its linked encrypted image; text and image reopen after restart; the approved client retrieves the same evidence. | **Open.** A fresh standalone window generated a random phrase without an import or plaintext export and recorded twenty seconds of sampled active/key/visible/text-focus observations. It has not been found in captured memory. The recorder reports fail-safe suppression. Prior fixed-token checks and foreground observations do not qualify this gate. |
+| 0. Establish the build | Identify source, installed binaries, running processes, effective policy, database and capture generation. | Runtime identity established for signed, notarized installed `4f5c75a`, including process mappings, shared writer/Recall database, helper/writer pipe and matching capture generation. Subsequent ledger-only commits are not a new installed artifact. |
+| 1. Screen to disk to Recall | A new phrase created only in a real window becomes a screen-origin event with its linked encrypted image; text and image reopen after restart; the approved client retrieves the same evidence. | **Open.** The standalone phrase has not been found through MCP. Its earlier twenty-second exposure preceded the current installation; post-update automation still reports zero foreground seconds. Owner foreground confirmation is pending. No imported phrase, counter, or timer qualifies the capture/image/restart gate. |
 | 2. Privacy and recovery | Exclusions, pause, lock, permission loss, crashes, deletion and storage failure behave correctly and visibly. | **Not qualified.** Existing unit/contract tests are supporting evidence only; the full installed lifecycle matrix is not passed. |
 | 3. Agent use | A supported real client obtains fresh scoped context and resolves its citations, then each additional claimed client is qualified. | **Not qualified.** This Codex session can query the installed MCP server. That alone does not establish fresh fixture recall, image identity, citation expansion or all client lifecycles. |
 | 4. Daily view | Real episodes, interval-based activity totals, valid images and honest coverage gaps. | **Not qualified.** Episode linking and extractive briefs exist; measured active intervals do not. No time chart is inferred from screenshot counts. |
@@ -19,8 +19,8 @@ screen-memory evidence. [STATUS](../STATUS.md) remains the release authority.
 ## Gate 0 Record
 
 The installed bundle's provenance verifies source
-`48251bdb8c13e7d708a7d8f7a5f22192fcbabe5e` and product digest
-`ee47ab36cda1bf2a015e0220e6bfa1dc930294bba116e222039fb4447ef74668`.
+`4f5c75aec290d58e302824f16355da9c73c35e67` and product digest
+`b1f9dd850260163743e6c6f7b3e257787faac3b041f5bafe361af9a0a372bb63`.
 Developer ID signature is `Amy Jain (BV6KGKFKP4)` with a stapled ticket.
 The checked parent, Recall, helper and writer executable mappings all belong to
 `/Applications/Hippocampus.app/Contents/MacOS/`.
@@ -86,7 +86,9 @@ fifteen local safety tests pass. The complete hosted release-contract workflow
 passed at `31f6736`, including assembly and clean-home checks. The separate
 Recall test race was reproduced as initialization debounce colliding with
 direct test calls; the test now controls ordering without a production change.
-Twelve focused local Recall tests pass; its hosted rerun remains pending.
+Twelve focused local Recall tests pass; the hosted Recall lane passes at
+`4f5c75a`. Hosted capture still has 53 OCR-completeness assertion failures across
+737 tests. The complete release-contract workflow also passes at `4f5c75a`.
 
 OCR diagnostics distinguish the original accurate pass from supplemental
 passes and report the production budget and test environment. Timed-out text
