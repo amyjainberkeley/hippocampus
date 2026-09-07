@@ -21,7 +21,7 @@ export default function Home() {
 
       <section id="memory" className="product-evidence" aria-label="Inside Hippocampus">
         <figure className="content-width">
-          <Image src="/product-memory.png" width={1280} height={800} alt="Hippocampus on a Mac, showing a local work history and a copy-agent-context action. This example uses synthetic work data." priority unoptimized />
+          <Image src="/product-recall.jpeg" width={1057} height={710} alt="Hippocampus Text search with three relevant memories, a full-text detail, and the copy-agent-context action. This native app example uses synthetic work data." priority unoptimized />
           <figcaption><span>A local record, with the sources attached.</span><span>Native Mac app · Synthetic example</span></figcaption>
         </figure>
       </section>
