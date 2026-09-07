@@ -59,6 +59,29 @@ removed those warnings in a fresh search/detail/no-match, resize and help pass.
 The optimized build's palette also received keyboard focus immediately and
 dismissed with Escape after deferred focus replaced its early on-appear write.
 
+## Installed Checkpoint
+
+Commit `c5a8774` was built, Developer ID signed, notarized, stapled and installed
+without replacing the memory store or resetting permissions. Post-copy source
+provenance and Gatekeeper acceptance pass. Its read-only agent can still read
+the owner's earlier foreground fixture across storage, recall and context.
+The capture receipt advanced after installation, including a new screenshot.
+An additional automated TextEdit fixture did not establish a fresh match across
+all surfaces; this is recorded as inconclusive, not a passed capture test.
+Actual foreground state was not independently established by background app
+control. Screenshot readback is still outside the current proof interface.
+
+The real production window could not be inspected through the GUI tool because
+the call timed out. Native interaction evidence in this report is from the
+optimized binary against a disposable synthetic store. The public product image
+uses that same synthetic interface, not the owner's data. No overnight or
+second-Mac claim follows from installation or screenshot inspection.
+
+Hosted CI at `f3a689c` passes parent, onboarding, Recall, installer, Rust tests,
+formatting, strict Clippy and cargo audit. Capture reports 56 failures across
+691 tests on the hosted Mac, while the retention-contract process exits 137.
+Both remain release blockers despite the passing local suites.
+
 ## Safety Boundaries
 
 - Full text is read for one selected admitted event through the existing
