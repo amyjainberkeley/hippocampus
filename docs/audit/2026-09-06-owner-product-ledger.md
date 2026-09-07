@@ -6,6 +6,41 @@ by a local build, and no test result establishes zero bugs or malware immunity.
 
 ## This Integration
 
+Latest installed update is **224466d**, signed, notarized and stapled. Its
+artifact hashes and open live-capture check are in `docs/STATUS.md`; older
+positive capture proofs below are historical, not proof of this installation.
+
+- **Literal OCR:** disabled language correction that altered code punctuation
+  spacing. The small rendered corpus improved from 14 to 7 character edits over
+  987 characters at three sizes. Candidate confidence is now the selected text
+  candidate's confidence. This does not establish perfect or multilingual OCR.
+- **Whole-day export:** Now combines the date-matched daily draft with bounded
+  sampled source excerpts, explicit observation/Draft status and local links.
+  Briefs share the same escaped export format. Stale day changes, unexpected
+  evidence IDs and out-of-day records cannot silently replace the packet.
+- **Self-service setup:** encryption readiness gates progression and completion;
+  failed key preparation and completion writes remain recoverable. Required
+  permission denials remain reachable and refresh after Settings changes.
+- **Updater preferences:** startup no longer overwrites the owner's saved
+  choices. Private automatic-check defaults live in the bundle configuration.
+- **Website:** source `/Users/amy/hippocampus-website`, privately deployed at
+  `https://hippocampus-memory.amyjain.chatgpt.site`. Product, setup, privacy and
+  download-status pages use synthetic media only. Build/type checks pass;
+  patched dependencies report zero npm advisories at this check. No public
+  installer or user memory was uploaded. Public audience approval is pending.
+
+Fresh optimized suites for this update pass: capture 676; parent 324;
+onboarding 241; Recall 418 XCTest plus three Swift Testing cases. The full
+onboarding run initially exposed five obsolete denial expectations; corrected
+recovery assertions and the final rerun pass. Coding workers reached their
+account limit, so final integration review was performed in the main task.
+This is not independent security certification. Native Now shows the new
+summary controls, but fresh installed capture and full export UI qualification
+remain pending. The production capture parent is running with capture enabled;
+the most recent checked source was withheld by privacy policy.
+
+### Earlier Integration
+
 - **Capture safety:** late errors from retired streams no longer kill their
   replacements. An explicit macOS capture stop is distinguished from a runtime
   failure and disables capture instead of triggering automatic restart.
@@ -60,14 +95,14 @@ release-mode test-key-wrap guard was not bypassed. Eight release-safety fixtures
 reported no remaining actionable findings in the corrected recovery diff.
 This is not a whole-product independent security audit.
 
-Signed/notarized/stapled `11194ae` is installed. Synthetic TextEdit event 1755
+Signed/notarized/stapled `11194ae` was installed. Synthetic TextEdit event 1755
 passed the real screen -> encrypted image -> native Search/viewer -> Codex MCP
 loop. Its durable screenshot proof and installer live in
 `/Users/amy/hippo-work/releases/2026-09-06-11194ae/`.
 Capture later became disconnected after replacement startup failed, so that
 earlier positive proof is not a claim of uninterrupted capture.
 
-The follow-up is now installed as signed/notarized/stapled **`2e5fc82`**. Fresh
+The follow-up was installed as signed/notarized/stapled **`2e5fc82`**. Fresh
 TextEdit event 1802 reached real Codex MCP. Terminating only the owned helper
 produced a disconnected receipt, then a replacement generation saved event 1803
 about three seconds later. Native screenshot display, restored-query loading,

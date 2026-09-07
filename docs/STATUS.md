@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-06._
 
-Audited code baseline: `ec7a318`
+Audited code baseline: `224466d`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -12,7 +12,7 @@ more than this page.
 
 ## September 6 OCR, Summary, And Setup Update
 
-Source-tested; installation qualification follows separately below. Apple
+Source-tested and installed; live capture qualification is recorded below. Apple
 Vision's prose correction inserted spaces into synthetic code. Accurate raw
 recognition reduced character edits from 14 to 7 across the same 987-character
 12/16/24-point corpus. It is not an all-language accuracy score. No remote OCR,
@@ -51,12 +51,40 @@ payment flow or installer upload was introduced. Public download is explicitly
 unavailable pending qualification and distribution packaging. Release review
 also found missing full model-license packaging, unresolved legal-owner review,
 UNPROVISIONED immutable model assets and second-Mac/update continuity checks.
-These gates were not disabled. The installed artifact remains `2e5fc82` until a
-later verified installation is recorded here.
+These gates were not disabled. The owner-only website is deployed at
+`https://hippocampus-memory.amyjain.chatgpt.site`, source `e50f448`. All four
+published pages returned HTTP 200 in authenticated owner checks. Public access
+has been requested but not approved; no installer was uploaded to the site.
+
+**Current installed artifact: `224466d`**, at `/Applications/Hippocampus.app`.
+Strict nested signatures, Gatekeeper, notarization, stapling and post-copy
+source-provenance verification pass. Installer:
+`/Users/amy/hippo-work/releases/2026-09-06-224466d/Hippocampus-0.1.0.dmg`.
+SHA-256: `5d2802d5619b9c227a64eaa627e277e1d09435037670d666fdc49fe03ba2265e`.
+Product-source digest:
+`be9a279e2c24b963e31e0a40b4d3f9ce2ce272d384d0a7f9c26ffe0395043936`.
+App notarization `065138b1-4df6-465f-b311-a6a778130b8a`; DMG notarization
+`51ed01bf-a59e-4aa7-9632-16c2d628ae07`, both Accepted. Prior app preserved at
+`/Users/amy/hippo-work/releases/backups/Hippocampus-2e5fc82-before-224466d.app`.
+
+Native Now displayed the new Copy day summary and Export day context controls,
+the saved daily draft and explicit capture-withheld/disconnected states.
+Fresh capture of the literal-code fixture has NOT yet been established on this
+artifact. At 03:44 UTC September 7, the receipt still showed 264 screen records
+and 108 screenshots, last written at 03:33:46 UTC before this installation.
+Initial suppression was failsafe-unknown; the relaunched generation reported
+denylist-source while the excluded Hippocampus preferences were open. A separate
+content-free diagnostic classified the test window non-secure, but ended with
+streamStoppedUnexpectedly; it was not a production storage proof. It is reaped.
+The production parent was deliberately stopped for native UI inspection, then
+restarted through Capture. Its enabled configuration and privacy gates remain
+unchanged. Owner foreground-fixture confirmation is pending; background UI
+inspection is not proof of what the capture pipeline actually saw. Do not reuse
+the prior artifact's successful event proof as verification of this one.
 
 ## September 6 Safety And Usefulness Integration
 
-**Current installed artifact: `2e5fc82`**, at `/Applications/Hippocampus.app`.
+**Previous installed artifact: `2e5fc82`**, since replaced by `224466d` above.
 The app and DMG are Developer ID signed, notarized and stapled; strict nested
 signature, Gatekeeper and post-copy build-provenance checks passed. Installer:
 `/Users/amy/hippo-work/releases/2026-09-06-2e5fc82/Hippocampus-0.1.0.dmg`, SHA-256
