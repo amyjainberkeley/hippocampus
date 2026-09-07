@@ -16,7 +16,7 @@ branch or create a public installer release. The previous remote main was
 | Exact change history | GitHub branch commits and the integration PR |
 | Built/proven/missing ledger | `docs/STATUS.md` and `docs/audit/2026-09-06-owner-product-ledger.md` |
 | Installed owner app at publication | `/Applications/Hippocampus.app`, source `224466d` |
-| Private website deployment | https://hippocampus-memory.amyjain.chatgpt.site, version 1, source `e50f448` |
+| Private website deployment | https://hippocampus-memory.amyjain.chatgpt.site, version 2, website-rooted source `9e8d3f2`, canonical source `912822f` |
 
 The local desktop checkout is
 `/Users/amy/hippo-work/hippocampus/.worktrees/hippocampus-v1`.

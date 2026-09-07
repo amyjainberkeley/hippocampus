@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `4d976bc`
+Audited code baseline: `912822f`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -19,8 +19,18 @@ with shared navigation, mobile menus and keyboard skip links. It explicitly
 discloses focused-window coverage, imperfect OCR, extractive drafts and current
 download gates. It does not advertise employee monitoring or completed activity/
 commitment features. Source lives in `website/`, not the old standalone checkout.
-Production build and TypeScript checks pass. Deployment status will be recorded
-after publication; the last deployed version is still 1 at this checkpoint.
+Production build, TypeScript and scoped lint checks pass. Version 2 is deployed
+at `https://hippocampus-memory.amyjain.chatgpt.site`, still owner-private, using
+website-rooted source `9e8d3f2` exported from canonical commit `912822f` with
+identical tree content. All four pages and both new images returned HTTP 200 in
+authenticated owner checks. No browser interaction/visual QA was performed;
+the in-app handoff was queued because this task was not foregrounded.
+
+The first hosted release-contract check failed because the macOS runner lacked
+ripgrep, producing 201 misleading assertion failures. CI now provisions it
+before checks, and the contract script exits before assertions if it is absent.
+Both new regressions failed before their fixes. All 10 safety tests and all 224
+release-contract assertions pass locally; the hosted rerun remains separate.
 
 The staged native OCR/search investigations are not installed by this website
 checkpoint. The owner app remains `224466d`; later results must distinguish

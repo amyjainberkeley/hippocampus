@@ -109,12 +109,39 @@ class WorkflowTests(unittest.TestCase):
     def setUpClass(cls):
         # Use the system Ruby YAML parser, with no downloaded test dependencies.
         cls.workflows = {}
-        for name in ("cargo-audit", "release", "publish-release"):
+        for name in ("cargo-audit", "release", "publish-release", "release-contract"):
             raw = subprocess.check_output(
                 ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_file(ARGV[0]))",
                  str(ROOT / f".github/workflows/{name}.yml")], text=True
             )
             cls.workflows[name] = json.loads(raw)
+
+    def test_contract_runner_provisions_ripgrep_before_checks(self):
+        steps = self.workflows["release-contract"]["jobs"]["contracts"]["steps"]
+        first_check = next(i for i, step in enumerate(steps)
+                           if step.get("run") == "scripts/test-release-contract.sh")
+        installs = [(i, step) for i, step in enumerate(steps)
+                    if "brew install ripgrep" in step.get("run", "")]
+        self.assertEqual(len(installs), 1, "the macOS runner must provision ripgrep")
+        index, install = installs[0]
+        self.assertLess(index, first_check)
+        self.assertNotIn("if", install)
+        self.assertFalse(install.get("continue-on-error", False))
+        self.assertIn("rg --version", install["run"])
+
+    def test_contract_script_stops_before_assertions_without_ripgrep(self):
+        with tempfile.TemporaryDirectory(prefix="contract-no-rg-") as temporary:
+            binaries = Path(temporary)
+            (binaries / "dirname").symlink_to(shutil.which("dirname"))
+            result = subprocess.run(
+                ["/bin/bash", str(ROOT / "scripts/test-release-contract.sh")],
+                cwd=ROOT, env={**os.environ, "PATH": str(binaries)},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires ripgrep", result.stderr)
+            self.assertNotIn("PASS:", result.stdout)
+            self.assertNotIn("FAIL:", result.stderr)
 
     def test_safety_regressions_run_in_local_and_hosted_gates(self):
         with tempfile.TemporaryDirectory(prefix="release-safety-lane-") as temp:
@@ -180,7 +207,8 @@ class WorkflowTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_all_scanner_installs_and_caches_use_exact_version(self):
-        for name, workflow in self.workflows.items():
+        for name in ("cargo-audit", "release", "publish-release"):
+            workflow = self.workflows[name]
             with self.subTest(workflow=name):
                 steps = next(iter(workflow["jobs"].values()))["steps"]
                 installs = [step for step in steps if "cargo install" in step.get("run", "")]
