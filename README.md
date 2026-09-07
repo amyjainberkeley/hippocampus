@@ -23,6 +23,9 @@ a connected AI client sends only the context it requests to its selected provide
 under that provider's terms; Hippocampus does not upload or mirror your brain.
 
 - Canonical shipped status lives in [docs/STATUS.md](docs/STATUS.md).
+- Desktop and website source now share this repository; the site is in
+  [website/](website/). See [source versions and publication](docs/PUBLISHING.md)
+  for the current development branch, installed build, and deployment status.
 - **Local by construction, not by policy.** Screen text is parsed on-device,
   embedded through Core ML with an explicit CPU+Neural Engine policy, and kept on
   your Mac. The local memory engine needs no API key.
