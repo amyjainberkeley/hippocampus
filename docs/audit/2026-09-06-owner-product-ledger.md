@@ -64,15 +64,34 @@ Signed/notarized/stapled `11194ae` is installed. Synthetic TextEdit event 1755
 passed the real screen -> encrypted image -> native Search/viewer -> Codex MCP
 loop. Its durable screenshot proof and installer live in
 `/Users/amy/hippo-work/releases/2026-09-06-11194ae/`.
-The follow-up fixes above need their own installed proof. Capture later became
-disconnected after replacement startup failed, so the earlier positive proof is
-not a claim of uninterrupted capture. See `docs/STATUS.md` for current artifact
-identity and the continuation plan for remaining acceptance gates.
+Capture later became disconnected after replacement startup failed, so that
+earlier positive proof is not a claim of uninterrupted capture.
+
+The follow-up is now installed as signed/notarized/stapled **`2e5fc82`**. Fresh
+TextEdit event 1802 reached real Codex MCP. Terminating only the owned helper
+produced a disconnected receipt, then a replacement generation saved event 1803
+about three seconds later. Native screenshot display, restored-query loading,
+typing without Enter and brief-to-source navigation passed on that artifact.
+The native draft no longer includes Finder gallery metadata, but still has
+clipped/repeated OCR excerpts. It is an evidence draft, not a finished intelligent
+work summary. Screenshots and installer are preserved in
+`/Users/amy/hippo-work/releases/2026-09-06-2e5fc82/`.
+
+After normal parent relaunch, TextEdit event 1806 also reached Codex. The final
+Now view showed 182 stored screen records / 72 screenshots, and one owned
+helper/agent generation was running. The app is left open; short-run proof is
+not a claim of uninterrupted overnight reliability.
+
+The build-only `8b8598b` follow-up makes installer launch verification use a
+disposable home and require first-run onboarding. The same clean-home test
+passed independently on the notarized binary. See `docs/STATUS.md` for artifact
+hashes and the continuation plan for the remaining acceptance gates.
 
 ## Not Yet Finished
 
-1. Package the recovery/search/summary follow-up, preserve the prior installed
-   artifact, and repeat live capture/image/search/brief/agent-context proof.
+1. Longer installed sleep/wake/ordinary-work qualification and clearer, less
+   repetitive briefs with complete source context. The positive installed loop
+   passes; this is not yet broad reliability or semantic-quality qualification.
 2. Real normal/private-browser qualification and owner-controlled permission
    revoke/restore and macOS Stop tests. Never reset or grant these automatically.
 3. Measured active/idle/unknown activity persisted through a versioned contract.

@@ -46,8 +46,9 @@ Files: `SCStreamCaptureSession.swift`, its lifetime tests, and parent
 - [x] A failed persistence/teardown while disabling capture must not roll back
   to capture-on. Failure remains visible and requires an explicit new enable.
 - [x] Run both focused suites, then complete optimized capture and parent suites.
-- [ ] Prove normal window switches/closure and restart using synthetic windows
-  on the signed app. Explicit OS stop/revoke tests require owner UI action.
+- [x] Prove ordinary Finder/TextEdit switching, fresh image capture and owned
+  helper process-failure recovery on the signed installed app.
+- [ ] Qualify real OS sleep/wake and owner-controlled explicit Stop/revocation.
 
 ## 2. Useful Evidence Briefs
 
@@ -60,7 +61,7 @@ Files: `core/brief/src/extractive_author.rs`, corresponding brief/eval tests,
   paraphrases, commitments, completion status or time worked.
 - [x] Keep citations resolvable, output bounded, and authoring entirely local.
 - [x] Run fixed historic and new quality checks separately, reporting both.
-- [ ] Inspect the resulting native brief using a synthetic workday.
+- [x] Inspect the resulting native brief and its authenticated source navigation.
 
 ## 3. Release And Dependency Hygiene
 
@@ -72,7 +73,7 @@ Files: audit workflow, scoped security scripts and a new supply-chain report.
   scanners must be reported as unavailable, not clean.
 - [x] Report dependency changes separately before applying upgrades. Preserve
   production lockfile compatibility and verify each selected upgrade.
-- [ ] Check downloaded-model integrity, package provenance, signed nested
+- [x] Check bundled-model integrity, package provenance, signed nested
   executables and no credentials in packaged/client configuration.
 
 ## 4. Measured Activity
@@ -110,8 +111,10 @@ Files: helper context/IPC, Rust IPC/ingestion/store, Recall bridge/day view.
 
 ## 7. Client Continuity And Sharing Boundary
 
-- [ ] Re-run bounded Claude startup delivery and actual Codex retrieval against
-  fresh retained evidence. Do not infer successful model use from hook delivery.
+- [x] Re-run actual Codex retrieval/context against fresh retained evidence,
+  preserving observations-only truth status.
+- [ ] Re-run bounded Claude startup delivery on the final artifact. Do not
+  infer successful model use from hook delivery.
 - [ ] Test malformed client config, missing binaries, timeouts and uninstall;
   preserve unrelated settings and never export raw keys.
 - [ ] Keep sharing explicitly initiated, source-previewed and bounded. A local
@@ -122,9 +125,9 @@ Files: helper context/IPC, Rust IPC/ingestion/store, Recall bridge/day view.
 - [ ] Independent correctness and security review of the complete diff.
 - [ ] Run affected suites, full compatibility gates, resource measurements and
   installed screen/search/image/context loop from the exact assembled source.
-- [ ] Sign/notarize/staple app and DMG, preserve prior installation, verify
+- [x] Sign/notarize/staple app and DMG, preserve prior installation, verify
   provenance after copying, and leave the usable native app open.
-- [ ] Refresh `docs/STATUS.md` and the owner-facing built/gaps ledger only with
+- [x] Refresh `docs/STATUS.md` and the owner-facing built/gaps ledger only with
   observed evidence. Second-Mac and public release gates remain unqualified
   until actually exercised.
 
@@ -175,4 +178,19 @@ and excludes Finder gallery noise exposed by native brief review. Parent race
 red/green logs are `/tmp/hippocampus-review-races-red-20260906.log`,
 `/tmp/hippocampus-review-integration-red-20260906.log` and
 `/tmp/hippocampus-parent-shipping-final-20260906.log`.
-The corrected successor still needs signing and its own installed proof.
+The corrected successor was signed, notarized, stapled and installed as
+`2e5fc82`. Synthetic event 1802 reached Codex; after an owned helper termination,
+event 1803 was stored roughly three seconds later and displayed in the native
+authenticated screenshot viewer. Restored-query loading, typing without Enter,
+brief generation and brief-to-event-1803 navigation passed. The three native
+proof screenshots are in `/Users/amy/hippo-work/releases/2026-09-06-2e5fc82/`.
+Clipped/repeated OCR remains visible in drafts and is an explicit quality gap.
+The parent was deliberately stopped for native inspection and resumed through
+the Capture control; owner permissions and capture settings were not changed.
+
+Build-only follow-up `8b8598b` closes a second launch-verifier isolation gap:
+both assembly and installer now require disposable HOME and first-run
+onboarding. The regression failed before correction, then all eight safety
+fixtures and 224 release-contract checks passed. The already notarized app
+independently passed the clean-home/onboarding launch check; its executable
+provenance remains `2e5fc82`, not the later packaging-only commit.

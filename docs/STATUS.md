@@ -2,7 +2,7 @@
 
 _Audited on 2026-09-06._
 
-Audited code baseline: `eff26a3`
+Audited code baseline: `8b8598b`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -11,6 +11,17 @@ release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
 
 ## September 6 Safety And Usefulness Integration
+
+**Current installed artifact: `2e5fc82`**, at `/Applications/Hippocampus.app`.
+The app and DMG are Developer ID signed, notarized and stapled; strict nested
+signature, Gatekeeper and post-copy build-provenance checks passed. Installer:
+`/Users/amy/hippo-work/releases/2026-09-06-2e5fc82/Hippocampus-0.1.0.dmg`, SHA-256
+`c56ef218b4ad30e234164528631dfcf38babb58f50b80fedaa2e91285091a21e`.
+Product-source digest:
+`eee039c36246b81dde814a9129961da59921c7a3741d8d24cb113ee101eef7b8`.
+App notarization: `0897e305-8e12-4fb8-953a-3a1160ee900a`; DMG notarization:
+`e29cb64d-c4c9-4a23-897d-c8e7130e26d9`, both Accepted. Prior installation retained
+at `/Users/amy/hippo-work/releases/backups/Hippocampus-11194ae-before-2e5fc82.app`.
 
 Code baseline `493befe` adds explicit macOS user-stop handling with a parent
 capture-off latch, retired-stream failure isolation, visible stop failures,
@@ -36,8 +47,35 @@ replacement startup with bounded backoff and recovers eligible failed sessions
 on workspace wake. It preserves explicit Stop, pause, Quit and revoked access.
 It also fixes restored-query loading, debounced typing and stale asynchronous
 search results. Finder gallery metadata is omitted from daily drafts without
-deleting original memory. This successor still needs its own signed installed
-proof; the historical positive proof does not certify these later fixes.
+deleting original memory. These changes are included in installed `2e5fc82`.
+
+Fresh synthetic TextEdit event 1802 reached Codex through the actual MCP
+connection. A controlled termination of the owned helper at 00:02:26 UTC on
+September 7 (September 6 locally) caused a visible disconnected receipt; a new
+helper/agent generation stored event 1803 at 00:02:29.735 UTC. The authenticated
+native viewer displayed that event's pixels, OCR, source and timestamp. Search
+loaded the restored query on opening and updated to the new fixture without
+Enter. A local model-free draft (id 79) excluded gallery metadata and its source
+button opened event 1803. Drafts still contain OCR variation, clipped snippets
+and repeated evidence; this is not polished generative understanding.
+Durable proofs are `installed-recovery-screenshot-proof.jpeg`,
+`installed-search-typing-proof.jpeg` and `installed-brief-proof.jpeg` in the
+current release directory. A deliberate parent stop for native inspection was
+followed by normal Capture-control relaunch; it is not an unexplained outage.
+That relaunch saved synthetic TextEdit event 1806 at 00:05:29.400 UTC; actual
+Codex retrieval returned it. The final Now view reported 182 stored screen
+records / 72 screenshot references, with capture connected. A point-in-time
+sample showed about 84 MiB parent RSS, 54 MiB helper, 27 MiB agent and 94 MiB
+Recall, with one owned helper/agent generation. These are short-run observations,
+not a resource/uptime guarantee.
+Real OS Stop, sleep/wake, permission revoke/restore and long-soak qualification
+remain separate from this process-failure proof.
+
+Build-only follow-up `8b8598b` isolates the installer's second launch check in
+a disposable home, matching assembly. Its regression failed before correction
+and the eight-fixture safety suite passes afterward. The already notarized
+`2e5fc82` binary was independently rerun with the same clean-home/onboarding
+requirements and passed. No shipped executable changed in this follow-up.
 
 The complete Rust workspace passed 1,972 tests, with nine explicitly ignored,
 across 130 test groups. Its earlier concurrent-build timing failures remain
