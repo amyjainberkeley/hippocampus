@@ -29,6 +29,7 @@ on:
       - 'scripts/swift-package.sh'
       - 'scripts/e2e-clean-home.sh'
       - 'scripts/test-e2e-clean-home-contract.sh'
+      - 'scripts/test_e2e_clean_home.py'
       - 'scripts/verify-app-launches.sh'
       - 'scripts/verify-parent-lifetime.sh'
       - 'scripts/verify-models.sh'
@@ -160,6 +161,7 @@ on:
       - 'scripts/swift-package.sh'
       - 'scripts/e2e-clean-home.sh'
       - 'scripts/test-e2e-clean-home-contract.sh'
+      - 'scripts/test_e2e_clean_home.py'
       - 'scripts/verify-app-launches.sh'
       - 'scripts/verify-parent-lifetime.sh'
       - 'scripts/verify-models.sh'
@@ -284,6 +286,13 @@ jobs:
           xcodebuild -version
           swift --version
           sw_vers
+      - name: Screen proof exposure model
+        run: |
+          fixture_root="$(mktemp -d "$RUNNER_TEMP/screen-proof-model.XXXXXX")"
+          trap 'rm -rf "$fixture_root"' EXIT
+          xcrun swiftc -swift-version 6 scripts/live-capture/ScreenProofExposure.swift \
+            scripts/live-capture/ScreenProofExposureTests.swift -o "$fixture_root/test-exposure"
+          "$fixture_root/test-exposure"
       - run: scripts/test-release-contract.sh
       - run: python3 -B scripts/test_release_safety.py
       - run: scripts/test-app-group-contract.sh

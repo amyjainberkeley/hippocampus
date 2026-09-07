@@ -72,6 +72,19 @@ jobs:
 
       - run: swift test --package-path adapters/macos/MCICaptureHelper
 
+      # Preserve the failed gate above. A fresh process excludes background
+      # framework work from other suites and late, quarantined OCR requests.
+      - name: Diagnose isolated accurate OCR compute devices
+        if: failure()
+        timeout-minutes: 3
+        run: |
+          diagnostic_home="$(mktemp -d "$RUNNER_TEMP/ocr-diagnostic-home.XXXXXX")"
+          trap 'rm -rf -- "$diagnostic_home"' EXIT
+          env -i HOME="$diagnostic_home" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            TMPDIR="$RUNNER_TEMP" DEVELOPER_DIR="$(xcode-select -p)" \
+            swift test --package-path adapters/macos/MCICaptureHelper --skip-build --jobs 2 \
+            --filter 'VisionOCRQualityTests/testSyntheticAccurateComputeDeviceComparison'
+
   recall-ui:
     name: recall-ui tests
     runs-on: macos-15

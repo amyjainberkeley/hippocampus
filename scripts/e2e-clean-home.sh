@@ -53,7 +53,7 @@ printf '{}\n' > "$CLEAN_HOME/.claude.json"
 : > "$CODEX_HOME/config.toml"
 
 step "Build the product engine and fixture tools"
-cargo build --quiet -p mci-agent --bins --manifest-path "$REPO_ROOT/Cargo.toml"
+cargo build --quiet --jobs 2 -p mci-agent --bins --manifest-path "$REPO_ROOT/Cargo.toml"
 for binary in mci-agent mci-brain mci-seed-brain mci-seed-brief mci-e2e-fixture; do
     source_path="$REPO_ROOT/target/debug/$binary"
     [[ -x "$source_path" ]] || fail "build did not produce $binary"
@@ -109,9 +109,10 @@ PY
 step "Derive episodes and seed the brief surface"
 "$AGENT" enrich --db-path "$DB_PATH" --batch-size 32 > "$CLEAN_ROOT/enrich.stdout" \
     2> "$CLEAN_ROOT/enrich.stderr"
-today="$(date +%F)"
-"$SEED_BRIEF" --date "$today" > "$CLEAN_ROOT/brief.stdout" 2> "$CLEAN_ROOT/brief.stderr"
-if "$SEED_BRIEF" --date "$today" > "$CLEAN_ROOT/brief-duplicate.stdout" \
+# Capture workers own today's and yesterday's briefs; reserve a separate fixture date.
+brief_fixture_date="2000-01-01"
+"$SEED_BRIEF" --date "$brief_fixture_date" > "$CLEAN_ROOT/brief.stdout" 2> "$CLEAN_ROOT/brief.stderr"
+if "$SEED_BRIEF" --date "$brief_fixture_date" > "$CLEAN_ROOT/brief-duplicate.stdout" \
     2> "$CLEAN_ROOT/brief-duplicate.stderr"; then
     fail "duplicate brief write unexpectedly succeeded"
 fi
