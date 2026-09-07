@@ -42,6 +42,15 @@ privacy coverage; deduplication must never precede complete-pass privacy checks.
 The full optimized capture suite passed 691 tests. These are synthetic/runtime
 component checks, not fresh installed capture proof.
 
+Hosted qualification did not reproduce the local performance. On macOS 15.7.9
+with Xcode 16.4 and a virtualized Apple M2 graphics stack, original dense
+single-pass recognition took approximately 3.6-5.8 seconds. Sparse baselines
+also sometimes exceeded one second. The capture suite failed 56 assertions,
+including completeness and timing assumptions. The supplemental secret fixture
+did block retention under its explicit ten-second test budget. Production keeps
+the one-second budget and fail-closed timeout; the failed hosted results are not
+skipped or relabeled as passing. Broader hardware/OS qualification is open.
+
 ## Retrieval
 
 Pasted uppercase boolean words were interpreted as FTS operators, producing

@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `2e95df8`
+Audited code baseline: `bb02bb4`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -66,9 +66,47 @@ all-target strict Clippy and formatting pass. The optimized local onboarding
 suite passes 241 tests. The staged source secret scan returned zero alerts;
 no actual screenshots, memory, credentials or installer binaries are published.
 
-Integration, signed installation and fresh installed capture proof are still
-pending for this native checkpoint; the owner app remains `224466d` until the
-installation record is updated. Plan:
+**Current installed artifact: `bb02bb4`**, at `/Applications/Hippocampus.app`.
+The fresh optimized binaries were assembled, Developer ID signed, notarized,
+stapled and installed. Strict nested signature, Gatekeeper and post-copy
+source-provenance verification pass. Installer:
+`/Users/amy/hippo-work/releases/2026-09-07-bb02bb4/Hippocampus-0.1.0.dmg`.
+SHA-256: `46c666aed7a70c72e38ae8d48f12b70fabcd5941b76028289ec8f3e0bc6df893`.
+Product-source digest:
+`05d49db1c9e2848dd712055d98132da7c5907ce6f5821bf0aeaa92dc05f23d9f`.
+App notarization `5bac4d1f-3709-4ebf-8d42-f6adb70f0c37`; DMG notarization
+`9c6cba79-d2bd-4854-9806-68d383dcd6a1`, both Accepted. The previous live app
+is preserved at
+`/Users/amy/hippo-work/releases/backups/Hippocampus-224466d-live-before-bb02bb4.app`.
+Memory, keys, permissions and capture policy were not reset.
+
+**Fresh end-to-end capture qualification remains incomplete.** The first
+installed generation received frames but initially suppressed every frame,
+mostly `failsafe-unknown`. The stored-frame receipt subsequently advanced from
+468 to 480 and screenshots from 198 to 205, with a new write at 08:40:27 UTC
+September 7. These counters establish new ingestion, not correct recognition
+or screenshot attribution. The bounded synthetic-fixture check did not find
+its fresh marker in timeline, recall and context together. No authenticated
+screenshot readback was established. Background TextEdit control is not proof
+of the real foreground window; owner foreground confirmation was requested.
+Do not represent this installation as fully live-qualified or expand capture
+admission to make the fixture pass.
+
+Hosted checks for `bb02bb4` pass Rust tests/format/Clippy, the parent app,
+Recall (including its fixed archive staging), installer smoke and cargo audit.
+The capture suite fails 56 assertions on the older virtual Mac: even original
+single-pass recognition takes several seconds against the one-second budget.
+The actual supplemental-secret privacy fixture passes there. Onboarding still
+traps on the older toolchain; its first LLDB diagnostic stopped at exec rather
+than the actual crash. The next diagnostic disables that initial exec stop.
+Neither failure is hidden, and neither is disproved by the passing local suites.
+
+The hosted release contract advanced past its prior missing-ripgrep failure,
+then found the macOS 14 runner's Swift 5.10 incompatible with Swift 6 packages.
+The contract job now uses the same macOS 15 runner as Swift CI and records its
+toolchain. Both new CI regression checks failed before correction; all 13
+isolated release-safety tests pass locally. The hosted rerun remains separate.
+Plan:
 `docs/plans/2026-09-07-memory-quality-and-website.md`.
 
 ## September 7 Source Publication
@@ -76,8 +114,9 @@ installation record is updated. Plan:
 The desktop history and exact website source now share the canonical
 `amyjainberkeley/hippocampus` GitHub repository on `codex/hippocampus-v1`.
 Website source lives in `website/`; its original `e50f448` commit is preserved
-as a merge parent. Desktop product sources are unchanged from `7b1fc0d`, and
-the installed binary remains `224466d`. Source publication does not promote
+as a merge parent. At that earlier publication checkpoint, desktop product
+sources were unchanged from `7b1fc0d` and the installed binary was `224466d`.
+The newer installation is recorded above. Source publication does not promote
 `main`, create a release tag, publish a DMG or change website access.
 `AGENTS.md` records the owner's instruction to push future versioned updates;
 `docs/PUBLISHING.md` documents locations, workflow and the history secret scan.
@@ -130,7 +169,7 @@ These gates were not disabled. The owner-only website is deployed at
 published pages returned HTTP 200 in authenticated owner checks. Public access
 has been requested but not approved; no installer was uploaded to the site.
 
-**Current installed artifact: `224466d`**, at `/Applications/Hippocampus.app`.
+**Previous installed artifact: `224466d`**, replaced by `bb02bb4` above.
 Strict nested signatures, Gatekeeper, notarization, stapling and post-copy
 source-provenance verification pass. Installer:
 `/Users/amy/hippo-work/releases/2026-09-06-224466d/Hippocampus-0.1.0.dmg`.
