@@ -2,13 +2,26 @@
 
 _Audited on 2026-09-06._
 
-Audited code baseline: `224466d`
+Audited code baseline: `3364b16`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 7 Source Publication
+
+The desktop history and exact website source now share the canonical
+`amyjainberkeley/hippocampus` GitHub repository on `codex/hippocampus-v1`.
+Website source lives in `website/`; its original `e50f448` commit is preserved
+as a merge parent. Desktop product sources are unchanged from `7b1fc0d`, and
+the installed binary remains `224466d`. Source publication does not promote
+`main`, create a release tag, publish a DMG or change website access.
+`AGENTS.md` records the owner's instruction to push future versioned updates;
+`docs/PUBLISHING.md` documents locations, workflow and the history secret scan.
+Live-capture results below remain the prior installed-check record, not a new
+capture claim in this source-publication task.
 
 ## September 6 OCR, Summary, And Setup Update
 

@@ -64,6 +64,11 @@ evaluation corpora declare synthetic provenance; the site's screenshot is the
 synthetic test document. This is a scoped publication check, not a guarantee
 that the whole application has no security defects.
 
+The combined-history rescan additionally flags the public Gitleaks archive
+checksum printed above as a generic API key. That fifth alert was checked
+against the upstream release digest; it is not a credential. Alerts are
+documented, not silently suppressed, and no zero-alert claim is made.
+
 The unrelated modified task report and untracked Python cache remain local and
 are not included in this publication.
 
