@@ -39,4 +39,6 @@ require_literal 'MCI_DB_KEY_HEX' 'E2E must scan client configs for reusable key 
 require_literal 'MCI_DEVELOPMENT_FILE_KEY' 'E2E must scan client configs for development custody'
 require_literal 'trap cleanup EXIT' 'E2E must clean up even when a gate fails'
 
+python3 -B "$SCRIPT_DIR/test_e2e_clean_home.py"
+
 printf 'PASS: clean-home E2E contract is complete\n'

@@ -10,7 +10,7 @@ screen-memory evidence. [STATUS](../STATUS.md) remains the release authority.
 | Gate | Required observation | Current evidence |
 | --- | --- | --- |
 | 0. Establish the build | Identify source, installed binaries, running processes, effective policy, database and capture generation. | Runtime identity established for installed `c5a8774`. Source through `6cf22ca` has no app/core/adapter/script changes relative to that binary's source. This pass adds uninstalled qualification fixtures and CI changes, explicitly separate from the installed runtime. |
-| 1. Screen to disk to Recall | A new phrase created only in a real window becomes a screen-origin event with its linked encrypted image; text and image reopen after restart; the approved client retrieves the same evidence. | **Open.** A new standalone window generated a random phrase while active and key, without an import or plaintext export. Only its hash receipt was printed. It has not yet been found in captured memory. Prior fixed-token checks do not qualify this gate. |
+| 1. Screen to disk to Recall | A new phrase created only in a real window becomes a screen-origin event with its linked encrypted image; text and image reopen after restart; the approved client retrieves the same evidence. | **Open.** A fresh standalone window generated a random phrase without an import or plaintext export and recorded twenty seconds of sampled active/key/visible/text-focus observations. It has not been found in captured memory. The recorder reports fail-safe suppression. Prior fixed-token checks and foreground observations do not qualify this gate. |
 | 2. Privacy and recovery | Exclusions, pause, lock, permission loss, crashes, deletion and storage failure behave correctly and visibly. | **Not qualified.** Existing unit/contract tests are supporting evidence only; the full installed lifecycle matrix is not passed. |
 | 3. Agent use | A supported real client obtains fresh scoped context and resolves its citations, then each additional claimed client is qualified. | **Not qualified.** This Codex session can query the installed MCP server. That alone does not establish fresh fixture recall, image identity, citation expansion or all client lifecycles. |
 | 4. Daily view | Real episodes, interval-based activity totals, valid images and honest coverage gaps. | **Not qualified.** Episode linking and extractive briefs exist; measured active intervals do not. No time chart is inferred from screenshot counts. |
@@ -60,8 +60,10 @@ caps, unavailable inspection or a screenshot of another app leave the gate open.
 The current GUI-control interface can inspect the separate test window but
 times out when addressing the installed shell, and cannot separately address
 its bare Recall child. Background inspection is not proof of sustained real
-foreground state. The owner was asked to foreground this new fixture; no old
-exercise was silently substituted. The current MCP surface cannot return an
+foreground state. The improved fixture records its own foreground observations;
+twenty observed seconds still produced no retrieved fixture event. This leaves
+the recorder's focus/privacy decision to diagnose; no old exercise was silently
+substituted. The current MCP surface cannot return an
 authenticated screenshot readback, so a text-only MCP check is insufficient.
 
 ## Hosted Failures
@@ -71,7 +73,11 @@ execution: SwiftPM replaces its process with the product. Exit 137 therefore
 does not establish an out-of-memory compiler failure. The revised runner
 separates build, executable lookup, fixture execution and the Rust consumer.
 Regression tests require errors and SIGKILL to remain failures with no retries
-or execution of later gates. Hosted termination evidence is still required.
+or execution of later gates. At `347b1b9`, the hosted retention fixtures and
+Rust consumer passed. This run does not identify the earlier SIGKILL cause.
+The subsequently exposed clean-home failure was reproduced as a collision with
+the worker's existing daily brief. Its synthetic seed now uses a separate date;
+local regression and end-to-end checks pass, with hosted verification pending.
 
 OCR diagnostics distinguish the original accurate pass from supplemental
 passes and report the production budget and test environment. Timed-out text

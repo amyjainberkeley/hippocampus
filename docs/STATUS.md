@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `c47fe73`
+Audited code baseline: `347b1b9`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -36,6 +36,30 @@ locates the named gate and checks environment ordering, the clean launcher and
 mandatory failure behavior. All 13 release-safety and 11 runner regressions
 pass locally after this correction. Hosted fixture termination remains
 unresolved until the corrected workflow reaches that gate.
+
+At `347b1b9`, the hosted retention contract passed both Swift fixtures and the
+Rust compatibility test (1 passed, 0 failed, 0 ignored). The original SIGKILL
+cause was not reproduced or explained. The later clean-home test failed at its
+synthetic brief seed: the production drain had already created today's brief.
+The fixture now uses a separate historical date without disabling overwrite
+protection. Six deterministic regressions and the complete isolated local
+clean-home flow pass; the corrected hosted flow is pending. Synthetic wire
+injection is not screen-capture qualification.
+
+The screen-only fixture now records sampled active/key/visible/text-focus
+exposure, resetting on focus loss or a gap over two seconds. Its calculation
+has deterministic coverage and a hosted check. A fresh phrase reached twenty
+seconds in those native observations but still returned no event for the
+fixture app through MCP. The recorder reports fail-safe suppression. Capture,
+linked-image readback and restart qualification remain **open**; foreground
+observations cannot substitute for an actual stored event.
+
+Hosted OCR at `347b1b9` has 49 assertion failures across 692 tests, all in the
+completeness suite: deadline failures and empty consequences, supplemental-pass
+assumptions, and nine non-timeout completeness/accuracy failures. Correct text
+can have lower confidence than incorrect text. A synthetic compute-device
+comparison and failure-only isolated diagnostic are added; local verification
+passes, but no consistent routing benefit or production OCR fix is established.
 
 The website source replaces the conceptual glass artwork and curved mark with
 a flat H, a compact product explanation, an actual synthetic-data example and
