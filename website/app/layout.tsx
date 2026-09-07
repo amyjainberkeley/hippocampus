@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://hippocampus-memory.amyjain.chatgpt.site'),
-  title: { default: 'Hippocampus | Private memory for your Mac', template: '%s | Hippocampus' },
+  title: { default: 'Hippocampus | Memory for your computer', template: '%s | Hippocampus' },
   description: 'A local, encrypted memory of your work. Revisit screenshots, search captured text, and bring source-linked context into your AI tools.',
   icons: { icon: '/icon.png', apple: '/icon.png' },
 };
