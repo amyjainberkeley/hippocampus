@@ -50,8 +50,8 @@ public struct VisionOCRRunner: OCREngine {
 
     private static let sharedExecutionLane = VisionOCRExecutionLane(
         label: "com.hippocampus.capture.vision-ocr"
-    ) { input, languages in
-        Self.runVisionPerform(input: input, languages: languages)
+    ) { input, languages, deadline in
+        Self.runVisionPerform(input: input, languages: languages, deadline: deadline)
     }
 
     public init(recognitionLanguages: [String] = ["en-US"]) {
@@ -68,8 +68,19 @@ public struct VisionOCRRunner: OCREngine {
         self.recognitionLanguages = recognitionLanguages
         self.executionLane = VisionOCRExecutionLane(
             label: "com.hippocampus.capture.vision-ocr.fixture",
-            synchronousPerform: synchronousPerform
+            synchronousPerform: { input, languages, _ in synchronousPerform(input, languages) }
         )
+    }
+
+    /// Real Vision on an isolated lane with content-free per-pass measurements
+    /// for synthetic benchmarks. The production initializer remains unchanged.
+    package init(regionDidFinish: @escaping @Sendable (CGRect, UInt64) -> Void) {
+        self.recognitionLanguages = ["en-US"]
+        self.executionLane = VisionOCRExecutionLane(
+            label: "com.hippocampus.capture.vision-ocr.benchmark"
+        ) { input, languages, deadline in
+            Self.runVisionPerform(input: input, languages: languages, deadline: deadline, regionDidFinish: regionDidFinish)
+        }
     }
 
     public func recognize(
@@ -84,7 +95,7 @@ public struct VisionOCRRunner: OCREngine {
         )
     }
 
-    /// One synchronous Vision call executed by the serial lane. Any
+    /// Bounded synchronous Vision calls executed by the serial lane. Any
     /// underlying error is mapped to the "engine error" arm of the
     /// `OCREngine` contract: `recognizedLines == []`, `timedOut ==
     /// false`).
@@ -92,9 +103,15 @@ public struct VisionOCRRunner: OCREngine {
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
     private static func runVisionPerform(
         input: OCREngineInput,
-        languages: [String]
+        languages: [String],
+        deadline: DispatchTime,
+        regionDidFinish: (@Sendable (CGRect, UInt64) -> Void)? = nil
     ) -> OCRResult {
         // UNVERIFIED — needs live macOS; do not claim working.
+        let regions = recognitionRegions(for: input)
+        guard !regions.isEmpty else {
+            return OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
+        }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         // Language correction inserts prose-style spaces into code and identifiers.
@@ -102,41 +119,107 @@ public struct VisionOCRRunner: OCREngine {
         request.usesLanguageCorrection = false
         request.recognitionLanguages = languages
         request.automaticallyDetectsLanguage = true
-        request.regionOfInterest = input.roi
 
         let handler = VNImageRequestHandler(
             cvPixelBuffer: input.pixelBuffer,
             orientation: .up,
             options: [:]
         )
-        do {
-            try handler.perform([request])
-        } catch {
-            // Map any Vision error to the "engine error" arm —
-            // recognizedLines == [], timedOut == false.
-            return OCRResult(
-                recognizedLines: [],
-                durationMs: 0,
-                timedOut: false
-            )
+        var accumulated = OCRLineAccumulator()
+        var longestPerformNs: UInt64 = 0
+        for (index, region) in regions.enumerated() {
+            // A timeout quarantines the current perform, but must not start
+            // more Vision requests or publish partially accumulated text.
+            let now = DispatchTime.now()
+            guard now < deadline else {
+                return OCRResult(recognizedLines: [], durationMs: 0, timedOut: true)
+            }
+            // Once there is text to preserve, reserve twice the slowest perform
+            // cost before optional supplements. An empty scan can keep trying
+            // within the deadline, even if cold model startup was expensive.
+            if index > 0 && !accumulated.lines.isEmpty
+                && (deadline.uptimeNanoseconds - now.uptimeNanoseconds) / 2 <= longestPerformNs {
+                break
+            }
+            request.regionOfInterest = region
+            do {
+                try handler.perform([request])
+            } catch {
+                return OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
+            }
+            let performNs = DispatchTime.now().uptimeNanoseconds - now.uptimeNanoseconds
+            longestPerformNs = max(longestPerformNs, performNs)
+            regionDidFinish?(region, performNs)
+            for observation in request.results ?? [] {
+                guard let top = observation.topCandidates(1).first else { continue }
+                // Vision reports ROI-relative boxes. Keep image coordinates
+                // without removing text needed by the post-OCR privacy check.
+                let box = observation.boundingBox
+                let imageBox = CGRect(
+                    x: region.minX + box.minX * region.width,
+                    y: region.minY + box.minY * region.height,
+                    width: box.width * region.width,
+                    height: box.height * region.height
+                ).intersection(region)
+                accumulated.append(
+                    OCRLine(
+                        text: top.string,
+                        boundingBox: imageBox.isNull ? CGRect(origin: region.origin, size: .zero) : imageBox,
+                        confidence: top.confidence
+                    )
+                )
+            }
         }
-
-        let observations = request.results ?? []
-        var lines: [OCRLine] = []
-        lines.reserveCapacity(observations.count)
-        for obs in observations {
-            guard let top = obs.topCandidates(1).first else { continue }
-            lines.append(OCRLine(
-                text: top.string,
-                boundingBox: obs.boundingBox,
-                confidence: top.confidence
-            ))
+        guard DispatchTime.now() < deadline else {
+            return OCRResult(recognizedLines: [], durationMs: 0, timedOut: true)
         }
+        // Every completed pass must remain contiguous and in Vision's order.
+        // Even a repeated label can begin a supplemental multiline secret.
         return OCRResult(
-            recognizedLines: lines,
+            recognizedLines: accumulated.lines,
             durationMs: 0,  // overridden by caller using the outer wall-clock
             timedOut: false
         )
+    }
+
+    /// Short 12-pixel labels disappear on a 1920-pixel canvas even with
+    /// minimumTextHeight == 0. Subregions recover them without resampling.
+    /// Keep the original pass for long lines; add at most four overlapping
+    /// subregions, all strictly within the already admitted ROI and buffer.
+    internal static func recognitionRegions(for input: OCREngineInput) -> [CGRect] {
+        let roi = input.roi
+        guard roi.origin.x.isFinite, roi.origin.y.isFinite,
+              roi.size.width.isFinite, roi.size.height.isFinite,
+              roi.size.width > 0, roi.size.height > 0,
+              CGRect(x: 0, y: 0, width: 1, height: 1).contains(roi)
+        else { return [] }
+
+        let columns = roi.width * CGFloat(CVPixelBufferGetWidth(input.pixelBuffer)) > 960 ? 2 : 1
+        let rows = roi.height * CGFloat(CVPixelBufferGetHeight(input.pixelBuffer)) > 960 ? 2 : 1
+        guard columns > 1 || rows > 1 else { return [roi] }
+
+        var regions = [roi]
+        for row in 0..<rows {
+            for column in 0..<columns {
+                regions.append(CGRect(
+                    x: roi.minX + CGFloat(column) * roi.width * 0.45,
+                    y: roi.minY + CGFloat(row) * roi.height * 0.45,
+                    width: roi.width * (columns == 1 ? 1 : 0.55),
+                    height: roi.height * (rows == 1 ? 1 : 0.55)
+                ).intersection(roi))
+            }
+        }
+        return regions
+    }
+}
+
+/// Append complete passes in order, including repeated lines. Deduplication
+/// can destroy a multiline secret found only by a supplemental pass.
+internal struct OCRLineAccumulator {
+    private(set) var lines: [OCRLine] = []
+
+    mutating func append(_ line: OCRLine) {
+        lines.append(line)
     }
 }
 
@@ -147,7 +230,7 @@ public struct VisionOCRRunner: OCREngine {
 /// or consuming another thread. The late result is discarded by
 /// `VisionOCRAttempt`, which resumes its continuation exactly once.
 private final class VisionOCRExecutionLane: @unchecked Sendable {
-    typealias SynchronousPerform = @Sendable (OCREngineInput, [String]) -> OCRResult
+    typealias SynchronousPerform = @Sendable (OCREngineInput, [String], DispatchTime) -> OCRResult
 
     private let queue: DispatchQueue
     private let deadlineQueue: DispatchQueue
@@ -172,6 +255,7 @@ private final class VisionOCRExecutionLane: @unchecked Sendable {
         }
 
         let boundedTimeoutMs = max(1, timeoutMs)
+        let deadline = started + .milliseconds(boundedTimeoutMs)
         return await withCheckedContinuation { continuation in
             let attempt = VisionOCRAttempt(continuation: continuation)
 
@@ -181,14 +265,14 @@ private final class VisionOCRExecutionLane: @unchecked Sendable {
                     return
                 }
 
-                let rawResult = synchronousPerform(input, languages)
+                let rawResult = synchronousPerform(input, languages, deadline)
                 let result = Self.result(rawResult, started: started)
                 attempt.resolve(with: result)
                 releaseClaim()
             }
 
             deadlineQueue.asyncAfter(
-                deadline: .now() + .milliseconds(boundedTimeoutMs)
+                deadline: deadline
             ) {
                 attempt.resolve(with: Self.timeoutResult(started: started))
             }

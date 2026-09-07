@@ -234,7 +234,7 @@ pub async fn run_retention_worker_with_status(
     retention_json_path: PathBuf,
     check_interval: std::time::Duration,
     mut shutdown: watch::Receiver<bool>,
-    status: Option<Arc<crate::capture_status::CaptureStatusWriter>>,
+    capture_receipt: Option<Arc<crate::capture_status::CaptureStatusWriter>>,
 ) -> Result<RetentionWorkerStats, RetentionWorkerError> {
     let mut stats = RetentionWorkerStats {
         cycles_run: 0,
@@ -264,8 +264,8 @@ pub async fn run_retention_worker_with_status(
             .await
             .map_err(|e| RetentionWorkerError::Fatal(e.to_string()))?;
 
-        if let Some(status) = &status {
-            status.refresh(&crate::wall_clock::SystemWallClock);
+        if let Some(capture_receipt) = &capture_receipt {
+            capture_receipt.refresh(&crate::wall_clock::SystemWallClock);
         }
         match result {
             Ok((ps, blobs)) => {

@@ -58,6 +58,15 @@ const REALISTIC_QUERIES: &[&str] = &[
     "star * search",
     "caret ^ token",
     "quote \" inside",
+    // Uppercase words from pasted text must not become boolean syntax.
+    "AND",
+    "OR",
+    "NOT",
+    "AND screen",
+    "screen OR",
+    "screen AND NOT capture",
+    "\"screen NOT capture\"",
+    "\"src/cache.rs NOT failed\"",
     // Structural edge cases.
     "",
     "   ",
@@ -132,6 +141,52 @@ fn sanitizing_preserves_the_ability_to_match() {
             .unwrap_or_else(|e| panic!("{raw:?} -> {sanitized:?}: {e}"));
         assert!(n > 0, "{why}: {raw:?} -> {sanitized:?} matched nothing");
     }
+}
+
+#[test]
+fn boolean_words_in_pasted_text_are_literal_search_terms() {
+    let conn = corpus();
+    for body in [
+        "screen AND capture",
+        "screen OR capture",
+        "screen NOT capture",
+        "src/cache.rs NOT failed",
+        "src/cache.rs failed",
+        "src/cache.rs",
+    ] {
+        conn.execute("INSERT INTO t(body) VALUES (?1)", [body])
+            .expect("insert synthetic text");
+    }
+
+    let cases = [
+        ("AND", "screen AND capture"),
+        ("OR", "screen OR capture"),
+        ("screen NOT capture", "screen NOT capture"),
+        ("screen AND capture", "screen AND capture"),
+        ("screen OR capture", "screen OR capture"),
+        ("\"screen NOT capture\"", "screen NOT capture"),
+        ("\"screen AND capture\"", "screen AND capture"),
+        ("\"screen OR capture\"", "screen OR capture"),
+        ("src/cache.rs NOT failed", "src/cache.rs NOT failed"),
+        ("\"src/cache.rs NOT failed\"", "src/cache.rs NOT failed"),
+    ];
+    let mut failures = Vec::new();
+    for (raw, expected) in cases {
+        let sanitized = sanitize_fts5_query(raw);
+        let result = conn
+            .prepare("SELECT body FROM t WHERE t MATCH ?1 ORDER BY rowid")
+            .expect("prepare")
+            .query_map([&sanitized], |row| row.get::<_, String>(0))
+            .expect("bind query")
+            .collect::<Result<Vec<_>, _>>();
+        match result {
+            Ok(bodies) if bodies == [expected] => {}
+            result => failures.push(format!(
+                "{raw:?}: expected only {expected:?}, got {result:?}"
+            )),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Pin the exact failure that shipped, so it cannot come back quietly.

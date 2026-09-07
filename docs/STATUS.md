@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `912822f`
+Audited code baseline: `2e95df8`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -32,10 +32,44 @@ before checks, and the contract script exits before assertions if it is absent.
 Both new regressions failed before their fixes. All 10 safety tests and all 224
 release-contract assertions pass locally; the hosted rerun remains separate.
 
-The staged native OCR/search investigations are not installed by this website
-checkpoint. The owner app remains `224466d`; later results must distinguish
-synthetic regression tests from signed-runtime and real capture qualification.
-Plan: `docs/plans/2026-09-07-memory-quality-and-website.md`.
+Native OCR now preserves the original pass and adds bounded admitted-region
+passes inside the existing one-second budget. Synthetic 12-pixel label recall
+improved from 0/4 to 4/4 at both 1920 x 1080 and 1920 x 1920. Full optimized
+capture tests pass 691 cases; parent tests pass 324. Review caught and fixed a
+privacy regression in an initial deduplication attempt: all completed pass text
+now remains contiguous, and the real-Vision secret fixture blocks retention.
+OCR can still fail or time out, and duplicated observations are preserved for
+privacy. Recognition does not expand the focused-window capture boundary.
+
+Pasted boolean words are literal search text. Generated fallback alternatives
+use a separate typed, bounded API, preserving the agent's degraded recall and
+answer-relation abstention. Daily drafts remove exact browser-menu noise and
+potentially clipped final lines without rewriting original source memory.
+These are source-tested improvements, not completed semantic understanding,
+commitment tracking, or measured activity. The quality report records the
+corpora, timings, failed attempts, and limitations:
+`docs/audits/2026-09-07-memory-quality.md`.
+
+Hosted checks also exposed stale product-truth assertions, two Swift test-only
+Sendable compatibility errors, strict Rust lints, and an unstaged Recall FFI
+archive. Corrections preserve runtime behavior and use the supported Recall
+build/staging wrapper. The isolated release-safety suite passes 11 tests and
+product-truth checks pass. Hosted reruns and the older-runner onboarding
+signal-5 failure remain separate from the passing local onboarding suite.
+CI now records the actual onboarding toolchain and attempts a bounded LLDB
+diagnostic on failure; the cause is not yet established. Local debugger attach
+was denied, and no system permissions were changed to obtain it.
+
+Fresh all-feature Rust workspace verification passes 1,992 tests with nine
+explicitly ignored model/performance/fixture-dependent cases. Workspace-wide
+all-target strict Clippy and formatting pass. The optimized local onboarding
+suite passes 241 tests. The staged source secret scan returned zero alerts;
+no actual screenshots, memory, credentials or installer binaries are published.
+
+Integration, signed installation and fresh installed capture proof are still
+pending for this native checkpoint; the owner app remains `224466d` until the
+installation record is updated. Plan:
+`docs/plans/2026-09-07-memory-quality-and-website.md`.
 
 ## September 7 Source Publication
 

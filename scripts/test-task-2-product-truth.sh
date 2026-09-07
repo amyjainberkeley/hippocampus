@@ -14,6 +14,7 @@ PROCESS_SUPERVISOR="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/ProcessSu
 RETENTION_WORKER="$REPO_ROOT/apps/agent/src/retention_worker.rs"
 AGENT_MAIN="$REPO_ROOT/apps/agent/src/bin/mci_agent.rs"
 STATUS_MENU="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"
+CAPTURE_HEALTH="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/CaptureHealthView.swift"
 APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift"
 README="$REPO_ROOT/README.md"
 STATUS="$REPO_ROOT/docs/STATUS.md"
@@ -59,13 +60,13 @@ rg -Fq '.appendingPathComponent("MCI")' "$PREFERENCES_STORE"
 rg -Fq '.appendingPathComponent("retention.json")' "$PREFERENCES_STORE"
 rg -Fq 'replaceItemAt(' "$PREFERENCES_STORE"
 rg -Fq '[.posixPermissions: 0o600]' "$PREFERENCES_STORE"
-rg -Fq 'home.join("Library/Application Support/MCI/retention.json")' "$AGENT_MAIN"
+rg -Fq 'db_path.with_file_name("retention.json")' "$AGENT_MAIN"
 rg -Fq 'setRetentionPolicy(' "$PREFERENCES_WINDOW"
 rg -Fq '"thirtyDays" => Ok(RetentionConfig::Days(30))' "$RETENTION_WORKER"
 rg -Fq '"sevenDays" => Ok(RetentionConfig::Days(7))' "$RETENTION_WORKER"
 rg -Fq 'Some(days) if (1..=365).contains(&days)' "$RETENTION_WORKER"
 rg -Fq 'try writer.write(data, to: fileURL)' "$ONBOARDING_RETENTION_STORE"
-rg -Fq 'cached = (policy, validatedDays)' "$ONBOARDING_RETENTION_STORE"
+rg -Fq 'cached = (policy, validatedDays, false)' "$ONBOARDING_RETENTION_STORE"
 rg -Fq 'public func saveThen(' "$ONBOARDING_RETENTION_MODEL"
 rg -Fq 'await retentionVM.saveThen { flowVM.advance() }' "$ONBOARDING_FLOW"
 rg -Fq 'parsed[key] = value' "$RUNTIME_CONFIG"
@@ -80,7 +81,9 @@ if rg -q 'deepHookPlugins|defaultDeepHookPlugins|deepHookPluginOrder' \
     exit 1
 fi
 rg -Fq 'RecordingControl.derive(' "$STATUS_MENU"
-rg -Fq 'Text(menuBarStatus.displayText)' "$STATUS_MENU"
+rg -Fq 'CaptureHealthView(supervisor: supervisor)' "$STATUS_MENU"
+rg -Fq 'let status = supervisor.menuBarStatus' "$CAPTURE_HEALTH"
+rg -Fq 'Text(status.displayText)' "$CAPTURE_HEALTH"
 if rg -Fq 'defaults.set(retentionPolicy.rawValue' "$PREFERENCES_STORE"; then
     echo "FAIL: UserDefaults remains a competing retention authority" >&2
     exit 1

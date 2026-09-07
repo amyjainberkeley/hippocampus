@@ -26,7 +26,6 @@ final class PreferencesStoreTests: XCTestCase {
     private var retentionURL: URL!
 
     override func setUp() async throws {
-        try await super.setUp()
         suiteName = "prefs-test-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         retentionURL = FileManager.default.temporaryDirectory
@@ -40,7 +39,6 @@ final class PreferencesStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: retentionURL.deletingLastPathComponent())
         retentionURL = nil
         suiteName = nil
-        try await super.tearDown()
     }
 
     // MARK: - Defaults

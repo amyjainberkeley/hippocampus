@@ -493,6 +493,184 @@ fn fts5_search_whitespace_only_query_returns_empty_not_error() {
     );
 }
 
+#[test]
+fn pasted_code_search_preserves_rank_limits_filters_and_deletion() {
+    use mci_brain::stubs::FixedDimEmbedder;
+    use mci_brain::{HybridRetriever, RetrievalDegradation, RetrievalOutcome, RetrievalQuery};
+    use std::sync::Arc;
+
+    let (_dir, path) = tmp("pasted_code_search.sqlite");
+    let store = Arc::new(SqlCipherBrainStore::new(&path, &test_key()).expect("open"));
+    let mut ids = Vec::new();
+    for (ts, app) in [
+        (100, "test.editor"),
+        (100, "test.editor"),
+        (100, "test.other"),
+        (99, "test.editor"),
+        (201, "test.editor"),
+        (100, "test.editor"),
+    ] {
+        let mut event = blank_event(ts, "src/cache.rs NOT failed");
+        event.app_bundle_id = Some(app.into());
+        ids.push(store.put_event(&event).expect("insert synthetic text"));
+    }
+    assert_eq!(store.delete_event(ids[5]).expect("delete event"), 1);
+    let mut suppressed = blank_event(100, "src/cache.rs NOT failed");
+    suppressed.cascade_reason = 7;
+    assert!(matches!(
+        store.put_event(&suppressed),
+        Err(StoreError::InvalidInput(_))
+    ));
+
+    let raw = "\"src/cache.rs NOT failed\"";
+    // No stored vectors: only the real lexical arm can supply these hits.
+    let retriever = HybridRetriever::new(store.clone(), Arc::new(FixedDimEmbedder::default()), 200)
+        .with_pools(8, 1);
+    for limit in [1, 10] {
+        let query = RetrievalQuery {
+            text: raw.into(),
+            limit,
+            time_filter: Some(TimeRange {
+                from_us: 100,
+                to_us: 200,
+            }),
+            app_filter: Some("test.editor".into()),
+        };
+        let outcome = retriever.retrieve_outcome(&query).expect("retrieve");
+        let RetrievalOutcome::Degraded {
+            degradation,
+            fallback_matches,
+        } = outcome
+        else {
+            panic!("expected ranked context without a production verifier, got {outcome:?}");
+        };
+        assert_eq!(
+            degradation,
+            RetrievalDegradation::EvidenceVerifierUnavailable
+        );
+        assert_eq!(
+            fallback_matches
+                .iter()
+                .map(|value| value.hit.event_id)
+                .collect::<Vec<_>>(),
+            ids[..limit.min(2)],
+            "only live events inside the app/time filters may surface"
+        );
+        assert!(fallback_matches
+            .windows(2)
+            .all(|pair| { pair[0].hit.score_combined >= pair[1].hit.score_combined }));
+    }
+
+    let lexical = store.fts5_search(raw, 2).expect("literal FTS query");
+    assert_eq!(
+        lexical.iter().map(|hit| hit.0).collect::<Vec<_>>(),
+        ids[..2],
+        "the literal code must retain its bounded BM25 tie order"
+    );
+    assert!(lexical[0].1 >= lexical[1].1);
+    assert!(store.fts5_search(raw, 0).expect("zero limit").is_empty());
+    assert_eq!(store.fts5_search(raw, 10).unwrap().len(), 5);
+}
+
+#[test]
+fn fts5_sql_looking_text_matches_literally_without_mutating_events() {
+    let (_dir, path) = tmp("sql_looking_search.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let raw = "src/cache.rs\" OR 1=1; DROP TABLE events; --";
+    let target = store.put_event(&blank_event(100, raw)).unwrap();
+    let unrelated = store.put_event(&blank_event(100, "src/cache.rs")).unwrap();
+
+    let hits = store.fts5_search(raw, 10).expect("bound literal query");
+    assert_eq!(
+        hits.iter().map(|hit| hit.0).collect::<Vec<_>>(),
+        [target],
+        "SQL-looking text must neither broaden the query nor execute as SQL"
+    );
+    assert_eq!(store.get_event(target).unwrap().unwrap().text, raw);
+    assert_eq!(
+        store.get_event(unrelated).unwrap().unwrap().text,
+        "src/cache.rs"
+    );
+}
+
+#[test]
+fn lexical_alternatives_preserve_phrases_literals_limits_and_deletion() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::{Keywords, Phrase};
+    let (_dir, path) = tmp("lexical_alternatives.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let first = store.put_event(&blank_event(100, "release notes")).unwrap();
+    let second = store.put_event(&blank_event(101, "Morgan Vale")).unwrap();
+    let literal = store
+        .put_event(&blank_event(102, "label OR secret"))
+        .unwrap();
+    let unrelated = store
+        .put_event(&blank_event(103, "Morgan and Vale secret"))
+        .unwrap();
+    let alternatives = [
+        Keywords("release notes"),
+        Phrase("Morgan Vale"),
+        Phrase("label OR secret"),
+    ];
+    let hits = store.fts5_search_alternatives(&alternatives, 10).unwrap();
+    let ids = hits
+        .iter()
+        .map(|hit| hit.0)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(ids, [first, second, literal].into_iter().collect());
+    assert!(!ids.contains(&unrelated));
+    assert!(hits.windows(2).all(|pair| pair[0].1 >= pair[1].1));
+    assert_eq!(
+        store.fts5_search_alternatives(&alternatives, 1).unwrap(),
+        hits[..1]
+    );
+    assert!(store
+        .fts5_search_alternatives(&alternatives, 0)
+        .unwrap()
+        .is_empty());
+    store.delete_event(second).unwrap();
+    assert_eq!(
+        store
+            .fts5_search_alternatives(&alternatives, 10)
+            .unwrap()
+            .len(),
+        2
+    );
+    let hostile = [Phrase("\" OR secret"), Keywords("label NOT secret")];
+    // The tokenizer ignores punctuation, so the literal phrase "OR secret"
+    // may match, but the input cannot become an OR branch matching "secret".
+    assert_eq!(
+        store
+            .fts5_search_alternatives(&hostile, 10)
+            .unwrap()
+            .iter()
+            .map(|hit| hit.0)
+            .collect::<Vec<_>>(),
+        [literal]
+    );
+    assert!(store.get_event(unrelated).unwrap().is_some());
+}
+
+#[test]
+fn lexical_alternatives_reject_excess_work_and_accept_empty_input() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+    let (_dir, path) = tmp("lexical_alternatives_limits.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    assert!(store.fts5_search_alternatives(&[], 10).unwrap().is_empty());
+    assert!(store
+        .fts5_search_alternatives(&[Keywords(" \t")], 10)
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        store.fts5_search_alternatives(&vec![Keywords("x"); 1025], 10),
+        Err(StoreError::InvalidInput(_))
+    ));
+    let excessive = "x".repeat(128 * 1024 + 1);
+    assert!(matches!(
+        store.fts5_search_alternatives(&[Keywords(&excessive)], 10),
+        Err(StoreError::InvalidInput(_))
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // 8. vec_search — cosine ranking holds; zero-limit empty
 // ---------------------------------------------------------------------------

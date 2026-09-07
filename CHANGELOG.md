@@ -5,6 +5,20 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### Memory quality
+
+- Recover more small text with bounded on-device OCR subregions inside the
+  permitted focused window. Preserve complete OCR passes for secret detection;
+  timeouts still discard all text, and capture coverage does not expand.
+- Treat pasted `AND`, `OR`, and `NOT` as literal search terms. Keep internally
+  generated fallback alternatives separate from user query syntax.
+- Restore dictionary alias matches when semantic search is unavailable, without
+  letting oversized optional aliases break the original search.
+- Remove repeated browser menu lines from daily drafts and omit potentially
+  clipped final lines whose missing qualifier could change their meaning.
+  Original memory and source citations remain available.
+- Show the focused-window capture area explicitly in Preferences.
+
 ### Capture reliability
 
 - Bind captured frames to the focused-window stream generation so focus changes

@@ -129,6 +129,85 @@ impl DeletionOutcome {
 }
 
 impl SqlCipherBrainStore {
+    /// Search bounded, literal alternatives without treating their text as FTS syntax.
+    ///
+    /// # Errors
+    /// Returns an invalid-input error above 1,024 branches or 128 KiB of input,
+    /// or a backend error if the lexical index cannot be read.
+    pub fn fts5_search_alternatives(
+        &self,
+        alternatives: &[crate::fts_sanitizer::LexicalAlternative<'_>],
+        limit: usize,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        use crate::fts_sanitizer::{
+            sanitize_fts5_query, LexicalAlternative, MAX_LEXICAL_ALTERNATIVES,
+            MAX_LEXICAL_ALTERNATIVE_BYTES,
+        };
+        if alternatives.len() > MAX_LEXICAL_ALTERNATIVES {
+            return Err(StoreError::InvalidInput(
+                "too many lexical alternatives".into(),
+            ));
+        }
+        let mut bytes = 0usize;
+        let mut branches = Vec::new();
+        for alternative in alternatives {
+            let (LexicalAlternative::Keywords(text) | LexicalAlternative::Phrase(text)) =
+                alternative;
+            bytes = bytes.checked_add(text.len()).ok_or_else(|| {
+                StoreError::InvalidInput("lexical alternatives size overflow".into())
+            })?;
+            if bytes > MAX_LEXICAL_ALTERNATIVE_BYTES {
+                return Err(StoreError::InvalidInput(
+                    "lexical alternatives exceed byte budget".into(),
+                ));
+            }
+            if text.trim().is_empty() {
+                continue;
+            }
+            let encoded = match alternative {
+                LexicalAlternative::Keywords(text) => sanitize_fts5_query(text),
+                LexicalAlternative::Phrase(text) => format!("\"{}\"", text.replace('"', "\"\"")),
+            };
+            branches.push(format!("({encoded})"));
+        }
+        self.search_fts_expression(&branches.join(" OR "), limit)
+    }
+
+    // Only encoded literal text reaches this helper. Keep it private so callers
+    // cannot accidentally send raw user text or a partially escaped expression.
+    fn search_fts_expression(
+        &self,
+        expression: &str,
+        limit: usize,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        if expression.trim().is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT rowid, rank FROM events_fts WHERE events_fts MATCH ?1
+             ORDER BY rank ASC, rowid ASC LIMIT ?2",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare fts5: {e}")))?;
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![expression, lim], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+            })
+            .map_err(|e| StoreError::Backend(format!("query fts5: {e}")))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, rank) = row.map_err(|e| StoreError::Backend(format!("row fts5: {e}")))?;
+            // SQLite BM25 is lower-is-better; the store contract is higher-is-better.
+            #[allow(clippy::cast_possible_truncation)]
+            let score = (-rank) as f32;
+            out.push((EventId(u64::try_from(id).unwrap_or(0)), score));
+        }
+        Ok(out)
+    }
+
     /// Acquisition provenance. Old read-only stores and unattributed rows
     /// return unknown; neither application names nor content prove origin.
     pub fn event_source(&self, id: EventId) -> Result<EventSource, StoreError> {
@@ -3343,50 +3422,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
         // Clean keyword queries pass through byte-identical, so
         // ranking / scoring for the common path is unaffected.
         let sanitized = crate::fts_sanitizer::sanitize_fts5_query(query);
-        if sanitized.trim().is_empty() {
-            // All-whitespace or purely stripped input — nothing left
-            // to match. Treat as an empty pool (not an error) so a
-            // benign whitespace-only paste degrades to "zero hits"
-            // instead of the harsher `InvalidInput` panic on the
-            // raw-empty branch above.
-            return Ok(Vec::new());
-        }
-        let guard = self.db.lock().expect("brain store mutex poisoned");
-
-        // FTS5's `rank` virtual column is the auto-computed BM25 cost —
-        // *lower* (more-negative) is a better match; `ORDER BY rank ASC`
-        // sorts best-first. We negate at the boundary so the trait's
-        // "higher is better" contract holds (the retriever min-max-
-        // normalizes anyway, but flipping here keeps the per-hit f32
-        // monotone with relevance so test assertions read naturally).
-        let mut stmt = guard
-            .conn()
-            .prepare(
-                "SELECT rowid, rank
-                 FROM events_fts
-                 WHERE events_fts MATCH ?1
-                 ORDER BY rank ASC, rowid ASC
-                 LIMIT ?2",
-            )
-            .map_err(|e| StoreError::Backend(format!("prepare fts5: {e}")))?;
-        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
-        let rows = stmt
-            .query_map(params![sanitized, lim], |r| {
-                let row_id: i64 = r.get(0)?;
-                let rank: f64 = r.get(1)?;
-                Ok((row_id, rank))
-            })
-            .map_err(|e| StoreError::Backend(format!("query fts5: {e}")))?;
-
-        let mut out: Vec<(EventId, f32)> = Vec::new();
-        for r in rows {
-            let (row_id, rank) = r.map_err(|e| StoreError::Backend(format!("row fts5: {e}")))?;
-            // Negate so larger-positive = better (monotone with relevance).
-            #[allow(clippy::cast_possible_truncation)]
-            let score = (-rank) as f32;
-            out.push((EventId(u64::try_from(row_id).unwrap_or(0)), score));
-        }
-        Ok(out)
+        self.search_fts_expression(&sanitized, limit)
     }
 
     fn vec_search(

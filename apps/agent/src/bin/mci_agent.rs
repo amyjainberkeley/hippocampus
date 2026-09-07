@@ -830,14 +830,14 @@ async fn run_agent(args: Args) -> ExitCode {
                                         return ExitCode::from(22);
                                     }
                                 }
-                                let status =
+                                let capture_receipt =
                                     Arc::new(mci_agent::capture_status::CaptureStatusWriter::new(
                                         Arc::clone(&store),
                                         db_path.with_file_name("capture-status.json"),
                                         capture_ingestion_enabled,
                                     ));
-                                status.refresh(&clock);
-                                capture_status = Some(status);
+                                capture_receipt.refresh(&clock);
+                                capture_status = Some(capture_receipt);
                                 let embedder = load_embedder_backend();
                                 // V2-P5+ construction-graph wire: build
                                 // the sync BERT NER backend and inject it

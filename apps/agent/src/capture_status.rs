@@ -111,30 +111,27 @@ impl CaptureStatusWriter {
         if refresh_counts || !self.has_counts.load(Ordering::Relaxed) {
             #[cfg(test)]
             self.stats_reads.fetch_add(1, Ordering::Relaxed);
-            match self.store.capture_storage_stats() {
-                Ok(counts) => {
-                    self.has_counts.store(true, Ordering::Relaxed);
-                    if state.blocked_reason.as_deref() == Some("store_unavailable") {
-                        state.blocked_reason =
-                            (!self.capture_enabled).then(|| "capture_disabled".into());
-                    }
-                    state.stored_frame_count = counts.stored_frame_count;
-                    state.stored_screenshot_count = counts.stored_screenshot_count;
-                    state.last_stored_frame_at = counts
-                        .last_stored_frame_ts_us
-                        // RFC3339 permits four-digit years, through 9999.
-                        .filter(|ts| *ts / 1_000 <= 253_402_300_799_999)
-                        .map(|ts| format_unix_ms(u128::from(ts) / 1_000));
+            if let Ok(counts) = self.store.capture_storage_stats() {
+                self.has_counts.store(true, Ordering::Relaxed);
+                if state.blocked_reason.as_deref() == Some("store_unavailable") {
+                    state.blocked_reason =
+                        (!self.capture_enabled).then(|| "capture_disabled".into());
                 }
-                Err(_) => {
-                    if !self.has_counts.load(Ordering::Relaxed) {
-                        eprintln!(
+                state.stored_frame_count = counts.stored_frame_count;
+                state.stored_screenshot_count = counts.stored_screenshot_count;
+                state.last_stored_frame_at = counts
+                    .last_stored_frame_ts_us
+                    // RFC3339 permits four-digit years, through 9999.
+                    .filter(|ts| *ts / 1_000 <= 253_402_300_799_999)
+                    .map(|ts| format_unix_ms(u128::from(ts) / 1_000));
+            } else {
+                if !self.has_counts.load(Ordering::Relaxed) {
+                    eprintln!(
                         "mci-agent: capture status unavailable; retained counts could not be read"
                     );
-                        return;
-                    }
-                    state.blocked_reason = Some("store_unavailable".into());
+                    return;
                 }
+                state.blocked_reason = Some("store_unavailable".into());
             }
         }
         state.updated_at = clock.now_rfc3339();
@@ -144,9 +141,9 @@ impl CaptureStatusWriter {
     }
 
     fn write_atomic(&self, state: &CaptureStatus) -> std::io::Result<()> {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         #[cfg(test)]
         self.receipt_writes.fetch_add(1, Ordering::Relaxed);
-        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let bytes = serde_json::to_vec(state)?;
         let temporary = self.path.with_extension(format!(
             "json.{}.{}.tmp",

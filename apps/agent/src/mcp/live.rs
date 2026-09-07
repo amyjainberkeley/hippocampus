@@ -323,9 +323,14 @@ impl LiveBrainReader {
             });
         };
         if raw.is_empty() {
-            let relaxed = relaxed_fts5_query(query);
-            if !relaxed.is_empty() && relaxed != sanitized {
-                let Ok(relaxed_hits) = self.store.fts5_search(&relaxed, limit) else {
+            let relaxed = relaxed_fts5_terms(query);
+            if !relaxed.is_empty() {
+                let alternatives = relaxed
+                    .iter()
+                    .map(|text| mci_brain::fts_sanitizer::LexicalAlternative::Keywords(text))
+                    .collect::<Vec<_>>();
+                let Ok(relaxed_hits) = self.store.fts5_search_alternatives(&alternatives, limit)
+                else {
                     return Ok(McpRecallOutcome::Degraded {
                         degradation:
                             mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
@@ -619,7 +624,7 @@ impl BrainReader for LiveBrainReader {
     }
 }
 
-fn relaxed_fts5_query(query: &str) -> String {
+fn relaxed_fts5_terms(query: &str) -> Vec<String> {
     const STOPWORDS: &[&str] = &[
         "a", "about", "an", "and", "are", "as", "at", "be", "before", "did", "do", "does", "for",
         "from", "how", "i", "in", "is", "it", "made", "of", "on", "only", "or", "should", "source",
@@ -637,12 +642,10 @@ fn relaxed_fts5_query(query: &str) -> String {
             {
                 return None;
             }
-            let sanitized = sanitize_fts5_query(token);
-            (!sanitized.is_empty()).then_some(sanitized)
+            Some(token.to_owned())
         })
         .take(12)
-        .collect::<Vec<_>>()
-        .join(" OR ")
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -864,8 +867,8 @@ mod tests {
     #[test]
     fn relaxed_query_splits_hyphenated_prose_and_drops_source_boilerplate() {
         assert_eq!(
-            relaxed_fts5_query("Which source describes the local-only storage promise?"),
-            "describes OR local OR storage OR promise"
+            relaxed_fts5_terms("Which source describes the local-only storage promise?"),
+            ["describes", "local", "storage", "promise"]
         );
     }
 }

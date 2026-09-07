@@ -109,12 +109,18 @@ class WorkflowTests(unittest.TestCase):
     def setUpClass(cls):
         # Use the system Ruby YAML parser, with no downloaded test dependencies.
         cls.workflows = {}
-        for name in ("cargo-audit", "release", "publish-release", "release-contract"):
+        for name in ("cargo-audit", "release", "publish-release", "release-contract", "swift"):
             raw = subprocess.check_output(
                 ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_file(ARGV[0]))",
                  str(ROOT / f".github/workflows/{name}.yml")], text=True
             )
             cls.workflows[name] = json.loads(raw)
+
+    def test_recall_ci_stages_the_archive_through_the_supported_wrapper(self):
+        steps = self.workflows["swift"]["jobs"]["recall-ui"]["steps"]
+        runs = [step.get("run", "") for step in steps]
+        self.assertIn("scripts/swift-package.sh test --package-path apps/recall-ui", runs)
+        self.assertNotIn("swift test --package-path apps/recall-ui", runs)
 
     def test_contract_runner_provisions_ripgrep_before_checks(self):
         steps = self.workflows["release-contract"]["jobs"]["contracts"]["steps"]
