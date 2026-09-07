@@ -125,13 +125,14 @@ jobs:
         if: failure()
         timeout-minutes: 2
         run: |
-          test_binary="$(swift build --package-path apps/onboarding --show-bin-path)/onboardingPackageTests.xctest/Contents/MacOS/onboardingPackageTests"
-          if [[ -x "$test_binary" ]]; then
-            xcrun lldb --batch \
+          test_bundle="$(swift build --package-path apps/onboarding --show-bin-path)/onboardingPackageTests.xctest"
+          if [[ -d "$test_bundle" ]]; then
+            env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+              TMPDIR="$RUNNER_TEMP" DEVELOPER_DIR="$(xcode-select -p)" \
+              xcrun lldb --no-lldbinit --batch \
               -o 'settings set target.process.stop-on-exec false' \
-              -o run -o 'thread backtrace all' -- \
-              "$test_binary" \
-              'OnboardingKitTests.PreparationGateTests/testFailedKeyPreparationCannotContinueButRetryCanRecover'
+              -o run -k 'process status' -k 'thread backtrace all' -- \
+              "$(xcrun --find xctest)" "$test_bundle"
           fi
 
   installer-smoke:

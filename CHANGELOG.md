@@ -19,6 +19,12 @@ commits are intentionally omitted from release notes.
   Original memory and source citations remain available.
 - Show the focused-window capture area explicitly in Preferences.
 
+### Onboarding
+
+- Route Safari setup through the browser launcher and keep its concurrent
+  completion outside the main-actor view model. Unit tests no longer open a
+  real Safari window or schedule its Settings action.
+
 ### Capture reliability
 
 - Bind captured frames to the focused-window stream generation so focus changes

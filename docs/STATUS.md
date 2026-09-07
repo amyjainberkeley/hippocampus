@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `bb02bb4`
+Audited code baseline: `d6f79e8`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -105,7 +105,25 @@ The hosted release contract advanced past its prior missing-ripgrep failure,
 then found the macOS 14 runner's Swift 5.10 incompatible with Swift 6 packages.
 The contract job now uses the same macOS 15 runner as Swift CI and records its
 toolchain. Both new CI regression checks failed before correction; all 13
-isolated release-safety tests pass locally. The hosted rerun remains separate.
+isolated release-safety tests pass locally. The hosted rerun passed that
+toolchain boundary but was killed with signal 9 after compiling the parent
+retention fixture. Its cause remains unproved; the complete local retention
+contract passes and the hosted release gate remains red.
+
+Further onboarding review found a real test-isolation defect: the Safari branch
+bypassed its injected browser launcher and opened the real application during
+unit tests. It now uses that launcher, and the production completion is
+explicitly Sendable outside the main-actor view model. A source-boundary
+regression failed before the fix; fake-launcher routing and all 242 onboarding
+tests pass in both debug and optimized builds. The older-hosted crash mechanism
+is still a hypothesis until its actual stopped frame or new suite run supports
+it. This follow-up is not yet in the installed `bb02bb4` artifact.
+
+The revised crash diagnostic also revealed that a test bundle is not a directly
+executable program. CI now launches the actual `xctest` host with the whole
+bundle, uses crash backtraces, disables debugger init files, and passes only an
+explicit non-secret environment. The same host invocation successfully ran the
+isolated preparation regression locally. No debugger permissions were changed.
 Plan:
 `docs/plans/2026-09-07-memory-quality-and-website.md`.
 
