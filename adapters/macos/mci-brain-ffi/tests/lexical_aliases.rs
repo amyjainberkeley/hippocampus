@@ -171,6 +171,83 @@ fn alias_hits_obey_inclusive_time_bounds_and_exact_app_filter() {
 }
 
 #[test]
+fn plain_lexical_filters_before_limit_despite_earlier_distractors() {
+    assert_filters_before_limit(
+        "src/cache.rs NOT failed",
+        "src/cache.rs NOT failed",
+        &json!({}),
+    );
+}
+
+#[test]
+fn alias_lexical_filters_before_limit_despite_earlier_distractors() {
+    let canonical = r#"Alpha" OR "Secret"#;
+    assert_filters_before_limit("tag", canonical, &json!({canonical: ["tag"]}));
+}
+
+fn assert_filters_before_limit(query_text: &str, matching_text: &str, aliases: &Value) {
+    let brain = TestBrain::new();
+    // Every exclusion has more than the requested limit of earlier, tied hits.
+    for _ in 0..6 {
+        for (ts, app) in [
+            (99, Some("test.allowed")),
+            (201, Some("test.allowed")),
+            (150, Some("test.allowed.other")),
+            (150, None),
+        ] {
+            brain.seed(matching_text, ts, app, EventSource::ScreenOcr);
+        }
+    }
+    let expected: Vec<_> = [100, 200, 150]
+        .into_iter()
+        .map(|ts| {
+            brain
+                .seed(
+                    matching_text,
+                    ts,
+                    Some("test.allowed"),
+                    EventSource::ScreenOcr,
+                )
+                .0
+        })
+        .collect();
+    for text in ["Secret", "Alpha", "failed", "src/cache.rs"] {
+        brain.seed(text, 150, Some("test.allowed"), EventSource::ScreenOcr);
+    }
+    let mut suppressed = event(matching_text, 150, Some("test.allowed"));
+    suppressed.cascade_reason = 1;
+    assert!(brain.store.put_event(&suppressed).is_err());
+
+    let unfiltered = json!({"text": query_text, "limit": 2, "user_aliases": aliases});
+    let baseline = brain.search(&unfiltered);
+    assert_eq!(baseline.len(), 2);
+    assert!(baseline.iter().all(|hit| !expected.contains(&hit.event_id)));
+    let mut query = unfiltered;
+    query["time_from_us"] = json!(100);
+    query["time_to_us"] = json!(200);
+    query["app_filter"] = json!("test.allowed");
+    let hits = brain.search(&query);
+    assert_eq!(
+        hits.iter().map(|hit| hit.event_id).collect::<Vec<_>>(),
+        expected[..2]
+    );
+    assert!(hits
+        .iter()
+        .all(|hit| hit.source == "lexical" && hit.score.is_some()));
+    assert!(hits[0].score.unwrap() >= hits[1].score.unwrap());
+
+    brain.store.delete_event(EventId(expected[0])).unwrap();
+    assert_eq!(
+        brain
+            .search(&query)
+            .iter()
+            .map(|hit| hit.event_id)
+            .collect::<Vec<_>>(),
+        expected[1..]
+    );
+}
+
+#[test]
 fn no_alias_match_preserves_original_ranking_scores_and_empty_search() {
     let brain = TestBrain::new();
     brain.seed("vector database", 100, None, EventSource::ScreenOcr);

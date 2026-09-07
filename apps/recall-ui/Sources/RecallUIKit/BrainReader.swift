@@ -174,11 +174,25 @@ public struct PrivacyMoment: Sendable, Equatable, Identifiable, Codable {
 }
 
 /// Search query options.
+public enum SearchMode: String, Sendable, Codable, CaseIterable {
+    case text
+    case related
+}
+
 public struct SearchOptions: Sendable, Equatable {
     public let text: String
+    public let mode: SearchMode
+    /// Explicit chronological browse with empty text. Unflagged empty text returns no hits.
+    public let browse: Bool
     public let limit: Int
     public let appFilter: String?
+    /// Exact source-ID union applied before the result limit; intersects the legacy single app.
+    /// At most 32 nonempty UTF-8 IDs, each at most 255 bytes, without NUL or control characters.
+    /// Source IDs include MCP tags, not only application bundle identifiers.
+    public let appFilters: [String]
+    public let hasUrl: Bool
     public let timeFromUs: UInt64?
+    /// Inclusive FFI upper endpoint. SearchViewModel converts exclusive calendar windows.
     public let timeToUs: UInt64?
     /// Cycle 8.42 — user-defined entity aliases (`UserDictionary`). Keys
     /// are canonical names, values are the alias list. The recall pipeline
@@ -194,11 +208,19 @@ public struct SearchOptions: Sendable, Equatable {
         appFilter: String? = nil,
         timeFromUs: UInt64? = nil,
         timeToUs: UInt64? = nil,
-        userAliases: [String: [String]]? = nil
+        userAliases: [String: [String]]? = nil,
+        mode: SearchMode = .related,
+        browse: Bool = false,
+        appFilters: [String] = [],
+        hasUrl: Bool = false
     ) {
         self.text = text
+        self.mode = mode
+        self.browse = browse
         self.limit = limit
         self.appFilter = appFilter
+        self.appFilters = appFilters
+        self.hasUrl = hasUrl
         self.timeFromUs = timeFromUs
         self.timeToUs = timeToUs
         self.userAliases = userAliases
@@ -446,6 +468,11 @@ public protocol BrainReader: Sendable {
     /// is truncated silently.
     func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit]
 
+    /// Fetch only the selected event's stored text (at most 128 KiB UTF-8).
+    /// The response's timestamp/app identity must match the selected Hit before use.
+    /// Nil means the event is absent or this reader does not support inspection.
+    func eventText(eventId: UInt64) async throws -> EventText?
+
     // Daily Brief read surface — backs the Brief tab
     // (`docs/design/brief-viewer-spec.md`).
 
@@ -459,11 +486,12 @@ public protocol BrainReader: Sendable {
     /// Powers the date selector's `<` / `>` arrows.
     func briefDates(limit: Int) async throws -> [String]
 
-    /// Content-free aggregate — event count, oldest/newest ts,
-    /// on-disk byte size. Powers the Privacy Dashboard's top summary
-    /// card ("MCI has captured X events across Y days, using Z MB of
-    /// encrypted storage"). No row content is exposed.
+    /// Content-free counts and cheap database-only metadata; no blob enumeration.
     func summaryStats() async throws -> SummaryStats
+
+    /// Explicit logical-storage measurement; never call from a polling loop.
+    /// Filesystem enumeration must run off the main actor. Nil means unsupported.
+    func storageUsage() async throws -> StorageUsage?
 
     /// **V2-P13 (Phase D scaffold).** Fetch lightweight event summaries
     /// for the Rewind-style timeline strip. Returns rows in ASCENDING
@@ -485,6 +513,10 @@ public protocol BrainReader: Sendable {
 /// modification; production `FFIBrainReader` overrides to route through
 /// the dedicated FFI entry point (with proper downsampling + hard cap).
 public extension BrainReader {
+    func eventText(eventId: UInt64) async throws -> EventText? { nil }
+
+    func storageUsage() async throws -> StorageUsage? { nil }
+
     func timelineEvents(
         startTsUs: UInt64,
         endTsUs: UInt64,
@@ -510,10 +542,7 @@ public extension BrainReader {
     }
 }
 
-/// Content-free brain aggregate — mirrors the FFI's `SummaryStatsJson`.
-/// The Privacy Dashboard top card renders `"MCI has captured
-/// {totalEvents} events across {daysCovered} days, using
-/// {formattedDiskBytes} of encrypted storage."`
+/// Content-free counts and logical storage, mirroring `SummaryStatsJson`.
 public struct SummaryStats: Sendable, Equatable, Codable {
     /// Total rows in `events`. `0` on an empty store.
     public let totalEvents: UInt64
@@ -521,19 +550,23 @@ public struct SummaryStats: Sendable, Equatable, Codable {
     public let oldestTsUs: UInt64?
     /// Largest `events.ts_us`. `nil` on an empty store.
     public let newestTsUs: UInt64?
-    /// On-disk byte count of the SQLCipher brain file.
+    /// Legacy database-only bytes, zero when unavailable. Not total storage.
     public let diskBytes: UInt64
+    /// Nil for a legacy reader that cannot report a storage breakdown.
+    public let storage: StorageUsage?
 
     public init(
         totalEvents: UInt64,
         oldestTsUs: UInt64?,
         newestTsUs: UInt64?,
-        diskBytes: UInt64
+        diskBytes: UInt64,
+        storage: StorageUsage? = nil
     ) {
         self.totalEvents = totalEvents
         self.oldestTsUs = oldestTsUs
         self.newestTsUs = newestTsUs
         self.diskBytes = diskBytes
+        self.storage = storage
     }
 
     /// Days spanned by the capture window (`ceil((newest - oldest) /
@@ -725,9 +758,15 @@ public struct StubBrainReader: BrainReader {
     public func search(_ opts: SearchOptions) async throws -> [Hit] {
         let needle = opts.text.lowercased()
         let isWildcard = opts.text == "*"
-        guard !opts.text.isEmpty else { return [] }
+        if opts.browse && !opts.text.isEmpty {
+            throw BrainReaderError.queryFailed("browse requires empty text")
+        }
+        guard opts.browse || !opts.text.isEmpty else { return [] }
+        if !opts.browse && opts.mode == .related && (Set(opts.appFilters).count > 1 || opts.hasUrl) {
+            throw BrainReaderError.queryFailed("Related search does not support multiple-app or URL filters; choose Text")
+        }
         var matches = Self.demoHits
-        if !isWildcard {
+        if !opts.browse && !isWildcard {
             matches = matches.filter { h in
                 h.ocrTextSnippet.lowercased().contains(needle)
                     || (h.windowTitle?.lowercased().contains(needle) ?? false)
@@ -737,13 +776,22 @@ public struct StubBrainReader: BrainReader {
         if let app = opts.appFilter {
             matches = matches.filter { $0.appBundleId == app }
         }
+        if !opts.appFilters.isEmpty {
+            matches = matches.filter { hit in hit.appBundleId.map { opts.appFilters.contains($0) } ?? false }
+        }
+        if opts.hasUrl {
+            matches = matches.filter { $0.url?.isEmpty == false }
+        }
         if let from = opts.timeFromUs {
             matches = matches.filter { $0.tsUs >= from }
         }
         if let to = opts.timeToUs {
             matches = matches.filter { $0.tsUs <= to }
         }
-        return Array(matches.prefix(opts.limit))
+        if opts.browse {
+            matches.sort { $0.tsUs == $1.tsUs ? $0.id > $1.id : $0.tsUs > $1.tsUs }
+        }
+        return Array(matches.prefix(max(0, min(opts.limit, 10_000))))
     }
 
     public func recentEvents(limit: Int) async throws -> [Hit] {

@@ -671,6 +671,280 @@ fn lexical_alternatives_reject_excess_work_and_accept_empty_input() {
     ));
 }
 
+#[test]
+fn fts5_filtered_preserves_optional_bounds_literal_apps_and_scores() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+
+    let (_dir, path) = tmp("filtered_lexical.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let literal_app = "test.allowed' OR 1=1 --";
+    let max_ts = i64::MAX as u64;
+    let ids: Vec<_> = [
+        (99, Some("test.allowed")),
+        (100, Some("test.allowed")),
+        (200, Some("test.allowed")),
+        (201, Some("test.allowed.other")),
+        (150, None),
+        (150, Some("")),
+        (150, Some(literal_app)),
+        (max_ts, Some("test.allowed")),
+    ]
+    .into_iter()
+    .map(|(ts, app)| {
+        let mut event = blank_event(ts, "ranked marker");
+        event.app_bundle_id = app.map(str::to_owned);
+        store.put_event(&event).unwrap()
+    })
+    .collect();
+    let range = |from_us, to_us| Some(TimeRange { from_us, to_us });
+    let baseline = store.fts5_search("ranked marker", 20).unwrap();
+    let cases = [
+        (None, None, vec![ids[0], ids[1]]),
+        (None, Some("test.allowed"), vec![ids[0], ids[1]]),
+        (range(100, u64::MAX), None, vec![ids[1], ids[2]]),
+        (range(0, 100), None, vec![ids[0], ids[1]]),
+        (range(100, 200), Some("test.allowed"), vec![ids[1], ids[2]]),
+        (range(200, 200), Some("test.allowed"), vec![ids[2]]),
+        (range(200, 199), None, vec![]),
+        (None, Some(""), vec![ids[5]]),
+        (None, Some(literal_app), vec![ids[6]]),
+        (range(max_ts, u64::MAX), None, vec![ids[7]]),
+        (range(max_ts + 1, u64::MAX), None, vec![]),
+    ];
+    for (time_filter, app_filter, expected) in cases {
+        for hits in [
+            store.fts5_search_filtered("ranked marker", 2, time_filter, app_filter),
+            store.fts5_search_alternatives_filtered(
+                &[Keywords("ranked marker")],
+                2,
+                time_filter,
+                app_filter,
+            ),
+        ] {
+            let hits = hits.unwrap();
+            assert_eq!(
+                hits.iter().map(|hit| hit.0).collect::<Vec<_>>(),
+                expected,
+                "time={time_filter:?}, app={app_filter:?}"
+            );
+            assert!(
+                hits.iter().all(|hit| baseline.contains(hit)),
+                "Filtering must preserve the original BM25 scores"
+            );
+        }
+    }
+    assert!(store
+        .fts5_search_filtered("ranked marker", 0, None, None)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .fts5_search_alternatives_filtered(
+            &[Keywords("ranked marker")],
+            0,
+            range(100, 200),
+            Some("test.allowed"),
+        )
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn fts5_filtered_ranks_eligible_hits_before_applying_limit() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Phrase;
+
+    let (_dir, path) = tmp("filtered_lexical_rank.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let mut weak = blank_event(
+        100,
+        "ranked marker followed by many unrelated descriptive words",
+    );
+    weak.app_bundle_id = Some("test.allowed".into());
+    let weak_id = store.put_event(&weak).unwrap();
+    let mut strong = blank_event(200, "ranked marker");
+    strong.app_bundle_id = Some("test.allowed".into());
+    let strong_id = store.put_event(&strong).unwrap();
+    let time = Some(TimeRange {
+        from_us: 100,
+        to_us: 200,
+    });
+    for hits in [
+        store.fts5_search_filtered("ranked marker", 1, time, Some("test.allowed")),
+        store.fts5_search_alternatives_filtered(
+            &[Phrase("ranked marker")],
+            1,
+            time,
+            Some("test.allowed"),
+        ),
+    ] {
+        assert_eq!(
+            hits.unwrap().iter().map(|hit| hit.0).collect::<Vec<_>>(),
+            [strong_id]
+        );
+    }
+    assert_ne!(weak_id, strong_id);
+}
+
+#[test]
+fn filtered_metadata_search_preserves_bm25_and_handles_extreme_bounds() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+
+    let (_dir, path) = tmp("filtered_metadata.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let apps = vec!["test.a".into(), "test.b".into()];
+    let mut event = blank_event(i64::MAX as u64, "ranked marker");
+    event.app_bundle_id = Some("test.a".into());
+    event.url = Some("https://example.test".into());
+    let id = store.put_event(&event).unwrap();
+    let baseline = store.fts5_search("ranked marker", 1).unwrap();
+    let at_max = Some(TimeRange {
+        from_us: i64::MAX as u64,
+        to_us: u64::MAX,
+    });
+    for time in [None, at_max] {
+        assert_eq!(
+            store
+                .fts5_search_with_filters("ranked marker", 1, time, None, &apps, true)
+                .unwrap(),
+            baseline
+        );
+        assert_eq!(
+            store
+                .fts5_search_alternatives_with_filters(
+                    &[Keywords("ranked marker")],
+                    1,
+                    time,
+                    None,
+                    &apps,
+                    true,
+                )
+                .unwrap(),
+            baseline
+        );
+        assert_eq!(
+            store
+                .browse_event_ids_filtered(1, time, None, &apps, true)
+                .unwrap(),
+            [id]
+        );
+    }
+    let above_max = Some(TimeRange {
+        from_us: i64::MAX as u64 + 1,
+        to_us: u64::MAX,
+    });
+    for (limit, time) in [(0, None), (1, above_max)] {
+        assert!(store
+            .fts5_search_with_filters("ranked marker", limit, time, None, &apps, true)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .fts5_search_alternatives_with_filters(
+                &[Keywords("ranked marker")],
+                limit,
+                time,
+                None,
+                &apps,
+                true,
+            )
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .browse_event_ids_filtered(limit, time, None, &apps, true)
+            .unwrap()
+            .is_empty());
+    }
+}
+
+#[test]
+fn filtered_metadata_search_rejects_invalid_apps_even_with_zero_limit() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+
+    let (_dir, path) = tmp("filtered_metadata_invalid.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    for apps in [
+        vec![String::new()],
+        vec!["test.a".into(); 33],
+        vec!["x".repeat(256)],
+        vec!["\u{e9}".repeat(128)],
+        vec!["mcp:a\0b".into()],
+        vec!["mcp:a\nb".into()],
+        vec!["mcp:a\u{7f}b".into()],
+        vec!["mcp:a\u{85}b".into()],
+    ] {
+        assert!(matches!(
+            store.fts5_search_with_filters("marker", 0, None, None, &apps, false),
+            Err(StoreError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            store.fts5_search_alternatives_with_filters(
+                &[Keywords("marker")],
+                0,
+                None,
+                None,
+                &apps,
+                false,
+            ),
+            Err(StoreError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            store.browse_event_ids_filtered(0, None, None, &apps, false),
+            Err(StoreError::InvalidInput(_))
+        ));
+    }
+    assert!(SqlCipherBrainStore::validate_search_app_filters(&["x".repeat(255)]).is_ok());
+}
+
+#[test]
+fn filtered_metadata_source_ids_preserve_exact_utf8_identity() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+
+    let (_dir, path) = tmp("filtered_source_ids.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let sources = [
+        "mcp:slack-personal".to_owned(),
+        "mcp:\u{65e5}\u{672c}_notes".to_owned(),
+        "mcp:caf\u{e9}".to_owned(),
+        "mcp:cafe\u{301}".to_owned(),
+        "mcp:O'Brien".to_owned(),
+        "mcp:x') OR 1=1 --".to_owned(),
+        "mcp:x'); DROP TABLE events; --".to_owned(),
+        format!("{}x", "\u{e9}".repeat(127)),
+    ];
+    let ids: Vec<_> = sources
+        .iter()
+        .map(|source| {
+            let mut event = blank_event(100, "needle");
+            event.app_bundle_id = Some(source.clone());
+            store.put_event(&event).unwrap()
+        })
+        .collect();
+    for (source, id) in sources.iter().zip(&ids) {
+        let filters = std::slice::from_ref(source);
+        assert_eq!(
+            store
+                .browse_event_ids_filtered(50, None, None, filters, false)
+                .unwrap(),
+            [*id]
+        );
+        for hits in [
+            store.fts5_search_with_filters("needle", 50, None, None, filters, false),
+            store.fts5_search_alternatives_with_filters(
+                &[Keywords("needle")],
+                50,
+                None,
+                None,
+                filters,
+                false,
+            ),
+        ] {
+            assert_eq!(
+                hits.unwrap().iter().map(|hit| hit.0).collect::<Vec<_>>(),
+                [*id]
+            );
+        }
+    }
+    assert_eq!(store.recent_events(50).unwrap().len(), ids.len());
+}
+
 // ---------------------------------------------------------------------------
 // 8. vec_search — cosine ranking holds; zero-limit empty
 // ---------------------------------------------------------------------------

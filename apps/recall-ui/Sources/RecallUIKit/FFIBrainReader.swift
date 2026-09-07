@@ -88,14 +88,7 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
         }
-        let payload = QueryPayload(
-            text: opts.text,
-            limit: opts.limit,
-            timeFromUs: opts.timeFromUs,
-            timeToUs: opts.timeToUs,
-            appFilter: opts.appFilter,
-            userAliases: opts.userAliases
-        )
+        let payload = QueryPayload(options: opts)
         let queryJsonData = try JSONEncoder().encode(payload)
         guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
             throw BrainReaderError.decodeFailed("FFIBrainReader: non-UTF8 query payload")
@@ -184,6 +177,39 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         return try Self.decodeHits(rawJson)
     }
 
+    public func eventText(eventId: UInt64) async throws -> EventText? {
+        try Task.checkCancellation()
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let raw = mci_brain_ffi_event_text(h, eventId) else {
+            throw BrainReaderError.queryFailed("Stored text unavailable")
+        }
+        defer { mci_brain_ffi_string_free(raw) }
+        try Task.checkCancellation()
+        let count = strnlen(raw, EventText.maxJSONBytes + 1)
+        guard count <= EventText.maxJSONBytes else {
+            throw BrainReaderError.decodeFailed("Invalid bounded event text response")
+        }
+        return try Self.decodeEventText(Data(bytes: raw, count: count), eventId: eventId)
+    }
+
+    static func decodeEventText(_ data: Data, eventId: UInt64) throws -> EventText? {
+        do {
+            guard data.count <= EventText.maxJSONBytes else {
+                throw BrainReaderError.decodeFailed("Invalid bounded event text response")
+            }
+            let value = try JSONDecoder().decode(EventText?.self, from: data)
+            guard value == nil || value?.eventId == eventId else {
+                throw BrainReaderError.decodeFailed("Invalid bounded event text response")
+            }
+            return value
+        } catch {
+            // Decoder diagnostics must never echo stored content to callers or logs.
+            throw BrainReaderError.decodeFailed("Invalid bounded event text response")
+        }
+    }
+
     public func listEpisodes(limit: Int) async throws -> [Episode] {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
@@ -224,6 +250,35 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
     }
 
     public func summaryStats() async throws -> SummaryStats {
+        try await Task.detached(priority: .utility) {
+            try self.readSummaryStats()
+        }.value
+    }
+
+    public func storageUsage() async throws -> StorageUsage? {
+        // Explicit directory enumeration must never execute on the UI actor.
+        try await Task.detached(priority: .utility) {
+            try self.readStorageUsage()
+        }.value
+    }
+
+    private func readStorageUsage() throws -> StorageUsage {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let rawJson = mci_brain_ffi_storage_usage(h) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        let data = Data(String(cString: rawJson).utf8)
+        do {
+            return try JSONDecoder().decode(StorageUsage.self, from: data)
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader.storageUsage: invalid aggregate")
+        }
+    }
+
+    private func readSummaryStats() throws -> SummaryStats {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
         }
@@ -237,12 +292,7 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         }
         do {
             let wire = try JSONDecoder().decode(SummaryStatsWire.self, from: data)
-            return SummaryStats(
-                totalEvents: wire.total_events,
-                oldestTsUs: wire.oldest_ts_us,
-                newestTsUs: wire.newest_ts_us,
-                diskBytes: wire.disk_bytes
-            )
+            return wire.value
         } catch {
             throw BrainReaderError.decodeFailed("FFIBrainReader.summaryStats: \(error)")
         }
@@ -502,23 +552,44 @@ private struct BriefWire: Decodable {
     }
 }
 
-private struct QueryPayload: Encodable {
+struct QueryPayload: Encodable {
     let text: String
+    let mode: SearchMode
+    let browse: Bool
     let limit: Int
     let timeFromUs: UInt64?
     let timeToUs: UInt64?
     let appFilter: String?
+    let appFilters: [String]
+    let hasUrl: Bool
     /// Cycle 8.42 — user-defined alias map. `nil` (default) is encoded as
     /// missing key so the FFI's `#[serde(default)]` yields an empty map,
     /// preserving pre-8.42 behavior.
     let userAliases: [String: [String]]?
 
+    init(options: SearchOptions) {
+        text = options.text
+        mode = options.mode
+        browse = options.browse
+        limit = options.limit
+        timeFromUs = options.timeFromUs
+        timeToUs = options.timeToUs
+        appFilter = options.appFilter
+        appFilters = options.appFilters
+        hasUrl = options.hasUrl
+        userAliases = options.userAliases
+    }
+
     enum CodingKeys: String, CodingKey {
         case text
+        case mode
+        case browse
         case limit
         case timeFromUs = "time_from_us"
         case timeToUs = "time_to_us"
         case appFilter = "app_filter"
+        case appFilters = "app_filters"
+        case hasUrl = "has_url"
         case userAliases = "user_aliases"
     }
 }
@@ -606,11 +677,19 @@ struct TimelineEventWire: Decodable {
     }
 }
 
-private struct SummaryStatsWire: Decodable {
+struct SummaryStatsWire: Decodable {
     let total_events: UInt64
     let oldest_ts_us: UInt64?
     let newest_ts_us: UInt64?
     let disk_bytes: UInt64
+    let storage: StorageUsage?
+
+    var value: SummaryStats {
+        SummaryStats(
+            totalEvents: total_events, oldestTsUs: oldest_ts_us,
+            newestTsUs: newest_ts_us, diskBytes: disk_bytes, storage: storage
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------

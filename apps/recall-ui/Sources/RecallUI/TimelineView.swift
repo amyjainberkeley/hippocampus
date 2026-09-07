@@ -12,11 +12,11 @@ struct TimelineView: View {
     var body: some View {
         Group {
             if let err = viewModel.errorMessage {
-                errorView(err)
+                EvidenceStateViewport { errorView(err) }
             } else if viewModel.isLoading && viewModel.hits.isEmpty {
-                ShimmerLoadingView(isLoading: true)
+                EvidenceStateViewport { ShimmerLoadingView(isLoading: true) }
             } else if viewModel.hits.isEmpty {
-                emptyView
+                EvidenceStateViewport { emptyView }
             } else {
                 contentView
             }
@@ -60,7 +60,11 @@ struct TimelineView: View {
     }
 
     private var contentView: some View {
-        HStack(spacing: 0) {
+        AdaptiveEvidencePanes(
+            showsDetail: viewModel.isDetailFocused && viewModel.selectedHit != nil,
+            backLabel: "Back to timeline",
+            onDismissDetail: { viewModel.dismissDetail() }
+        ) {
             List(selection: $viewModel.selectedHitId) {
                 ForEach(viewModel.hits) { hit in
                     HitRow(hit: hit)
@@ -74,7 +78,6 @@ struct TimelineView: View {
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
             .background(Color.brandBgPrimary)
-            .frame(minWidth: 300)
             .refreshable { await viewModel.reload() }
             .onKeyPress(.return, phases: .down) { _ in
                 viewModel.focusDetail()
@@ -89,10 +92,9 @@ struct TimelineView: View {
                 return .handled
             }
 
-            if viewModel.isDetailFocused, let hit = viewModel.selectedHit {
-                Divider().background(Color.brandCardBorder)
+        } detail: {
+            if let hit = viewModel.selectedHit {
                 DetailPaneView(hit: hit, reader: reader, screenshotEventIDs: MCI.Workspace.recentKeyframes(from: viewModel.hits).map(\.id))
-                    .frame(minWidth: 300, idealWidth: 400)
             }
         }
         .onChange(of: viewModel.selectedHitId) { _, newValue in

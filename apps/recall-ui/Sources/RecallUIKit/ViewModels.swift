@@ -10,6 +10,9 @@ public final class SearchViewModel: ObservableObject {
     @Published public var query: String = "" {
         didSet { if query != oldValue { searchInputChanged() } }
     }
+    @Published public var mode: SearchMode = .text {
+        didSet { if mode != oldValue { searchInputChanged() } }
+    }
     @Published public private(set) var hits: [Hit] = []
     @Published public private(set) var isSearching: Bool = false
     @Published public private(set) var errorMessage: String?
@@ -95,10 +98,26 @@ public final class SearchViewModel: ObservableObject {
         return hits.first { $0.id == id }
     }
 
+    /// Filter capability independent of selected mode. Empty-text browse supports all filters.
+    public var hasUnsupportedRelatedFilters: Bool {
+        filters.appBundleIds.count > 1 || filters.hasUrl
+    }
+
+    public var filterLimitationMessage: String? {
+        guard mode == .related,
+              !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              filters.anyActive else { return nil }
+        if hasUnsupportedRelatedFilters {
+            return "Related search does not support multiple-app or URL filters. Choose Text to apply these filters."
+        }
+        return "Related search filters a limited candidate set and may omit matching memories. Use Text to filter before the result limit."
+    }
+
     public func runSearch() async {
         let generation = beginSearchRequest()
         focusedEventID = nil
         let requestedFilters = filters
+        let requestedMode = mode
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty || filters.anyActive else {
             hits = []
@@ -109,40 +128,39 @@ public final class SearchViewModel: ObservableObject {
         isSearching = true
         errorMessage = nil
         defer { if generation == searchGeneration { isSearching = false } }
+        if !q.isEmpty && requestedMode == .related && hasUnsupportedRelatedFilters {
+            hits = []
+            selectedHitId = nil
+            isDetailFocused = false
+            return
+        }
         do {
             let window = requestedFilters.timeWindowUs()
-            let results: [Hit]
-            if q.isEmpty {
-                // Filter-only path. FTS5 rejects empty / `*` queries
-                // (core/brain `fts5_search_empty_query_rejected`), so we
-                // pull a recent-events pool and apply window + app + URL
-                // filters client-side. Pool of 500 is plenty for the
-                // dogfood window (Last 7 days at active capture rates).
-                results = try await applyClientFilters(
-                    to: reader.recentEvents(limit: 500),
-                    filters: requestedFilters,
-                    window: window
-                )
-            } else {
-                // Cycle 8.42 — pass the user dictionary through so the FFI
-                // OR-expands aliases at query time (see
-                // `expand_query_with_user_aliases` in `mci-brain-ffi`).
-                let dict = userDictionaryLoader()
-                let aliasMap = dict.entries.isEmpty ? nil : dict.toAliasMap()
-                let opts = SearchOptions(
-                    text: q,
-                    limit: 50,
-                    appFilter: requestedFilters.appFilter,
-                    timeFromUs: window.fromUs,
-                    timeToUs: window.toUs,
-                    userAliases: aliasMap
-                )
-                results = try await applyClientFilters(
-                    to: reader.search(opts),
-                    filters: requestedFilters,
-                    window: window
-                )
+            // Calendar windows are half-open; the legacy FFI remains inclusive.
+            if let upper = window.toUs, upper == 0 || (window.fromUs ?? 0) >= upper {
+                hits = []
+                selectedHitId = nil
+                isDetailFocused = false
+                return
             }
+            let dict = q.isEmpty ? UserDictionary.empty : userDictionaryLoader()
+            let opts = SearchOptions(
+                text: q,
+                limit: 50,
+                appFilter: requestedFilters.appFilter,
+                timeFromUs: window.fromUs,
+                timeToUs: window.toUs.map { $0 - 1 },
+                userAliases: dict.entries.isEmpty ? nil : dict.toAliasMap(),
+                mode: requestedMode,
+                browse: q.isEmpty,
+                appFilters: requestedFilters.appBundleIds.sorted(),
+                hasUrl: requestedFilters.hasUrl
+            )
+            let results = try await applyClientFilters(
+                to: reader.search(opts),
+                filters: requestedFilters,
+                window: window
+            )
             guard generation == searchGeneration, !Task.isCancelled else { return }
             hits = results
             if let selectedHitId, !results.contains(where: { $0.id == selectedHitId }) {
@@ -180,9 +198,8 @@ public final class SearchViewModel: ObservableObject {
         }
     }
 
-    /// Apply window + app + URL filters that the FFI does not enforce
-    /// on its own. Centralized so the filter-only path and the
-    /// text+filter path stay in sync.
+    /// Defensive validation for alternate readers. Browse and Text apply these
+    /// predicates in SQL before LIMIT; this is not a candidate-pool search.
     private func applyClientFilters(
         to results: [Hit],
         filters: FilterState,
@@ -193,9 +210,9 @@ public final class SearchViewModel: ObservableObject {
             out = out.filter { $0.tsUs >= from }
         }
         if let to = window.toUs {
-            out = out.filter { $0.tsUs <= to }
+            out = out.filter { $0.tsUs < to }
         }
-        if filters.requiresClientSideAppFilter || filters.appFilter != nil {
+        if !filters.appBundleIds.isEmpty {
             out = out.filter { filters.matchesApp($0.appBundleId) }
         }
         if filters.hasUrl {

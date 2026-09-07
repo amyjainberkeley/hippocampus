@@ -87,14 +87,14 @@ struct MemoryWorkspaceView: View {
         List(selection: $selection) {
             Section("Memory") {
                 ForEach(MemoryWorkspaceSelection.primary) { item in
-                    MemorySidebarRow(item: item, isSelected: selection == item)
+                    MemorySidebarRow(item: item)
                         .tag(item)
                 }
             }
 
             Section("Workspace") {
                 ForEach(MemoryWorkspaceSelection.secondary) { item in
-                    MemorySidebarRow(item: item, isSelected: selection == item)
+                    MemorySidebarRow(item: item)
                         .tag(item)
                 }
             }
@@ -104,57 +104,42 @@ struct MemoryWorkspaceView: View {
         .background(.regularMaterial)
     }
 
+    // Now: overview; Search: query-only; Timeline: chronological evidence;
+    // Episodes: grouped evidence; Briefs: daily overview. Each owns its content.
     @ViewBuilder
     private var workspaceDetail: some View {
-        GeometryReader { geometry in
-            let filmstripHeight = MCI.Workspace.evidenceFilmstripHeight(
-                availableHeight: geometry.size.height
-            )
-            VStack(spacing: 0) {
-                if selection.descriptor.requiresSourceAccess && selection != .sources {
-                    WorkspaceFilmstrip(
+        Group {
+            switch selection {
+            case .now:
+                DailyMemoryView(reader: reader, onOpenPrivacy: { selection = .privacy })
+            case .search:
+                SearchView(
+                    viewModel: SearchViewModel(reader: reader),
+                    focusTrigger: searchFocusTrigger,
+                    focusRequest: focusRequest,
+                    reader: reader
+                )
+            case .timeline:
+                TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
+            case .episodes:
+                EpisodesView(viewModel: EpisodesViewModel(reader: reader), reader: reader)
+            case .briefs:
+                BriefView(
+                    viewModel: BriefViewModel(
                         reader: reader,
-                        isCompact: filmstripHeight < 200
-                    )
-                    .frame(height: filmstripHeight)
-                    Divider().overlay(Color.brandCardBorder)
-                }
-
-                Group {
-                    switch selection {
-                    case .now:
-                        DailyMemoryView(reader: reader, onOpenPrivacy: { selection = .privacy })
-                    case .search:
-                        SearchView(
-                            viewModel: SearchViewModel(reader: reader),
-                            focusTrigger: searchFocusTrigger,
-                            focusRequest: focusRequest,
-                            reader: reader
-                        )
-                    case .timeline:
-                        TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
-                    case .episodes:
-                        EpisodesView(viewModel: EpisodesViewModel(reader: reader), reader: reader)
-                    case .briefs:
-                        BriefView(
-                            viewModel: BriefViewModel(
-                                reader: reader,
-                                captureCoverage: .unknown
-                            ),
-                            reader: reader
-                        )
-                    case .sources:
-                        SourcesWorkspaceView(reader: reader)
-                    case .privacy:
-                        PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
-                    case .settings:
-                        WorkspaceSettingsView()
-                    }
-                }
-                .frame(minHeight: 0, maxHeight: .infinity)
+                        captureCoverage: .unknown
+                    ),
+                    reader: reader
+                )
+            case .sources:
+                SourcesWorkspaceView(reader: reader)
+            case .privacy:
+                PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
+            case .settings:
+                WorkspaceSettingsView()
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.brandBgPrimary)
         .navigationTitle(selection.descriptor.title)
     }
@@ -167,202 +152,13 @@ private extension MemoryWorkspaceSelection {
 
 private struct MemorySidebarRow: View {
     let item: MemoryWorkspaceSelection
-    let isSelected: Bool
-    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: MCI.Spacing.s) {
-            Image(systemName: item.descriptor.systemImage)
-                .symbolVariant(isSelected ? .fill : .none)
-                .frame(width: 18)
-                .foregroundStyle(isSelected ? Color.brandMint : Color.brandFgSecondary)
-            Text(item.descriptor.title)
-                .mciFont(.bodyStrong)
-            Spacer(minLength: MCI.Spacing.s)
-        }
-        .padding(.horizontal, MCI.Spacing.s)
-        .padding(.vertical, MCI.Spacing.s - 2)
-        .foregroundStyle(isSelected ? Color.brandFgPrimary : Color.brandFgSecondary)
-        .background(rowBackground)
-        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.s, style: .continuous))
-        .contentShape(Rectangle())
-        .focusable()
-        .onHover { isHovered = $0 }
-        .animation(MCI.Motion.snap, value: isHovered)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(item.descriptor.title)
-    }
-
-    private var rowBackground: some ShapeStyle {
-        if isSelected {
-            return AnyShapeStyle(Color.brandMintSubtle)
-        }
-        if isHovered {
-            return AnyShapeStyle(Color.brandBgElevated.opacity(0.7))
-        }
-        return AnyShapeStyle(Color.clear)
-    }
-}
-
-private struct WorkspaceFilmstrip: View {
-    let reader: BrainReader
-    let isCompact: Bool
-    @State private var hits: [Hit] = []
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var selectedHit: Hit?
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    var body: some View {
-        HStack(alignment: .center, spacing: MCI.Spacing.l) {
-            VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-                Label("Recent evidence", systemImage: "photo.on.rectangle.angled")
-                    .mciFont(.bodyStrong)
-                    .foregroundStyle(Color.brandFgPrimary)
-                    .lineLimit(1)
-                Text(countLabel)
-                    .mciFont(.caption)
-                    .foregroundStyle(Color.brandFgMuted)
-            }
-            .frame(width: isCompact ? 164 : 176, alignment: .leading)
-
-            if isLoading && hits.isEmpty {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .mciFont(.caption)
-                    .foregroundStyle(Color.brandError)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if hits.isEmpty {
-                Label("No recent keyframes", systemImage: "photo.on.rectangle.angled")
-                    .mciFont(.caption)
-                    .foregroundStyle(Color.brandFgMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: MCI.Spacing.s) {
-                        ForEach(hits) { hit in
-                            Button {
-                                selectedHit = hit
-                            } label: {
-                                FilmstripCard(hit: hit, isCompact: isCompact)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Inspect source evidence")
-                        }
-                    }
-                    .padding(.vertical, MCI.Spacing.s)
-                }
-            }
-        }
-        .padding(.horizontal, MCI.Spacing.xl)
-        .background(
-            reduceTransparency
-                ? AnyShapeStyle(Color.brandBgSecondary)
-                : AnyShapeStyle(.ultraThinMaterial)
-        )
-        .sheet(item: $selectedHit) { hit in
-            ScreenshotViewer(selection: ScreenshotSelection(eventIDs: hits.map(\.id), initialID: hit.id), reader: reader)
-        }
-        .task {
-            await load()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
-            _ in
-            Task { await load() }
-        }
-    }
-
-    private var countLabel: String {
-        if isLoading { return "Loading" }
-        if errorMessage != nil { return "Unavailable" }
-        return MCI.Workspace.keyframeCountLabel(hits.count)
-    }
-
-    @MainActor
-    private func load() async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            errorMessage = nil
-            let events = try await reader.recentEvents(limit: 500)
-            hits = Array(MCI.Workspace.recentKeyframes(from: events).prefix(12))
-        } catch {
-            hits = []
-            errorMessage = "Memory unavailable"
-        }
-    }
-}
-
-private struct FilmstripCard: View {
-    let hit: Hit
-    let isCompact: Bool
-    @State private var isHovered = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-            EvidenceThumbnail(
-                url: hit.thumbnailURL,
-                size: thumbnailSize,
-                maxPixelSize: isCompact ? 300 : 384
-            )
-            HStack(spacing: MCI.Spacing.xs) {
-                Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
-                    .font(MCI.Font.mono)
-                    .foregroundStyle(Color.brandMint)
-                Spacer(minLength: 0)
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.brandFgMuted)
-            }
-            if !isCompact {
-                Text(Formatters.contextLine(hit))
-                    .font(MCI.Font.footnote)
-                    .foregroundStyle(Color.brandFgPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Text(Formatters.evidenceSummary(hit))
-                .mciFont(.caption)
-                .foregroundStyle(Color.brandFgSecondary)
-                .lineLimit(isCompact ? 1 : 2)
-        }
-        .frame(
-            width: isCompact ? 120 : 152,
-            height: isCompact ? 104 : 154,
-            alignment: .topLeading
-        )
-        .padding(MCI.Spacing.s)
-        .background(
-            isHovered
-                ? Color.brandBgElevated.opacity(0.96)
-                : Color.brandCardBg.opacity(0.54)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous)
-                .stroke(
-                    isHovered ? Color.brandMintDim.opacity(0.55) : Color.brandCardBorder,
-                    lineWidth: 0.5
-                )
-        }
-        .shadow(color: Color.black.opacity(isHovered ? 0.08 : 0.03), radius: 8, y: 3)
-        .scaleEffect(isHovered ? 1.01 : 1)
-        .onHover { isHovered = $0 }
-        .animation(MCI.Motion.snap, value: isHovered)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Formatters.contextLine(hit))
-        .accessibilityHint("Opens the source evidence")
-    }
-
-    private var thumbnailSize: CGSize {
-        if isCompact {
-            return CGSize(width: 120, height: 68)
-        }
-        return CGSize(width: 152, height: 86)
+        // The selectable List row owns keyboard focus and selection appearance.
+        Label(item.descriptor.title, systemImage: item.descriptor.systemImage)
+            .mciFont(.body)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(item.descriptor.title)
     }
 }
 
@@ -401,8 +197,9 @@ private struct SourcesWorkspaceView: View {
             } else {
                 List(observedApps) { app in
                     HStack(spacing: MCI.Spacing.m) {
-                        Image(systemName: "app.dashed")
-                            .foregroundStyle(Color.brandMintDim)
+                        Image(systemName: "app")
+                            .foregroundStyle(Color.brandFgSecondary)
+                            .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
                             Text(Formatters.appDisplayName(app.appBundleId))
                                 .mciFont(.bodyStrong)
@@ -420,6 +217,7 @@ private struct SourcesWorkspaceView: View {
                     }
                     .padding(.vertical, MCI.Spacing.s)
                     .listRowBackground(Color.clear)
+                    .accessibilityElement(children: .combine)
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)

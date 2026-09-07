@@ -6,6 +6,15 @@ memory, installed data, or model weights. It ran no capture or application tests
 The reported **708 events / 6.1 MB** is an unverified user observation with an
 unknown measurement boundary, not an independently measured benchmark.
 
+**September 7 implementation follow-up:** Privacy now offers explicit measurement
+of the components below. The scan is content-free, bounded, and reports partial
+or unavailable results rather than estimating a missing total. A disposable
+20-event fixture measured 807 KB in managed files versus 365 KB for the main
+database alone; this is not representative growth data. See the
+[usability review](../audits/2026-09-07-recall-usability.md) and [STATUS](../STATUS.md)
+for test and installed-artifact qualification. The earlier audit below remains
+the basis for the growth and compute discussion.
+
 ## What Takes Space
 
 | Component | Implemented storage and cost |

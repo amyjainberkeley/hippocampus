@@ -129,6 +129,7 @@ struct FilterPillsView: View {
 
     private var appAndPredicateRow: some View {
         HStack(spacing: 6) {
+            appSelectionStatus
             ForEach(inlineApps) { app in
                 appPill(app)
             }
@@ -164,6 +165,23 @@ struct FilterPillsView: View {
         return filters.appBundleIds.subtracting(known).sorted()
     }
 
+    @ViewBuilder
+    private var appSelectionStatus: some View {
+        if filters.hasReachedAppSelectionLimit {
+            let count = filters.appBundleIds.count
+            let limit = FilterState.maximumSelectedApps
+            let validation = filters.appSelectionValidationMessage
+            Text(validation == nil ? "\(count)/\(limit) apps" : "\(count)/\(limit) apps; deselect \(count - limit)")
+                .font(.caption)
+                .foregroundStyle(validation == nil ? Color.brandFgMuted : Color.brandError)
+                .lineLimit(1)
+                .accessibilityLabel(validation ?? "App selection limit reached: \(count) of \(limit) apps selected.")
+                .accessibilityHint(filters.appSelectionHelp)
+                .help(filters.appSelectionHelp)
+                .accessibilityIdentifier("filter.app.selectionStatus")
+        }
+    }
+
     private func appPill(_ app: ObservedApp) -> some View {
         let active = filters.appBundleIds.contains(app.appBundleId)
         return Button {
@@ -195,6 +213,10 @@ struct FilterPillsView: View {
             .foregroundStyle(active ? Color.brandMint : Color.brandFgSecondary)
         }
         .buttonStyle(.plain)
+        .disabled(!filters.canToggleApp(app.appBundleId))
+        .opacity(filters.canToggleApp(app.appBundleId) ? 1 : 0.45)
+        .help(filters.appSelectionHelp)
+        .accessibilityHint(filters.appSelectionHelp)
         .accessibilityIdentifier("filter.app.\(app.appBundleId)")
     }
 
@@ -214,6 +236,9 @@ struct FilterPillsView: View {
                         Text("\(app.count)").foregroundStyle(Color.brandFgMuted)
                     }
                 }
+                .disabled(!filters.canToggleApp(app.appBundleId))
+                .help(filters.appSelectionHelp)
+                .accessibilityHint(filters.appSelectionHelp)
             }
         } label: {
             pillLabel("More apps… (\(overflowApps.count))", active: false)
@@ -221,6 +246,8 @@ struct FilterPillsView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .help(filters.appSelectionHelp)
+        .accessibilityHint(filters.appSelectionHelp)
         .accessibilityIdentifier("filter.app.overflow")
     }
 

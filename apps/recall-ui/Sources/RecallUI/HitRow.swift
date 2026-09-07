@@ -28,27 +28,23 @@ struct HitRow: View {
                 maxPixelSize: 160
             )
             VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
+                Text(Formatters.contextLine(hit))
+                    .mciFont(.bodyStrong)
+                    .foregroundStyle(Color.brandFgPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 HStack(alignment: .firstTextBaseline, spacing: MCI.Spacing.s) {
                     Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
                         .font(MCI.Font.mono)
                         .foregroundStyle(Color.brandMint)
                         .help(Formatters.tsString(usSinceEpoch: hit.tsUs))
-                    Text(Formatters.contextLine(hit))
-                        .mciFont(.bodyStrong)
-                        .foregroundStyle(Color.brandFgPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: MCI.Spacing.s)
+                    Spacer(minLength: 0)
                     if let reason = Formatters.matchReason(hit.source) {
                         Text(reason)
                             .font(MCI.Font.footnote)
                             .foregroundStyle(Color.brandMintDim)
+                            .lineLimit(1)
                             .accessibilityLabel(reason)
-                    }
-                    if !Formatters.scoreString(hit.score).isEmpty {
-                        Text(Formatters.scoreString(hit.score))
-                            .font(MCI.Font.mono)
-                            .foregroundStyle(Color.brandFgMuted)
                     }
                 }
                 Text(Formatters.snippet(Formatters.stripContextHeader(hit.ocrTextSnippet)))
@@ -72,6 +68,7 @@ struct HitRow: View {
                     .padding(.top, MCI.Spacing.xxs)
                 }
             }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, MCI.Spacing.s - 2)
     }
@@ -114,6 +111,8 @@ struct EntityChip: View {
     var body: some View {
         Text(label)
             .font(.system(.caption2, design: .default))
+            .lineLimit(1)
+            .truncationMode(.tail)
             .foregroundStyle(
                 isOverflow ? Color.brandFgMuted : Color.brandMint
             )

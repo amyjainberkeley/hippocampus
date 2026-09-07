@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import RecallUIKit
 import SwiftUI
 
@@ -92,7 +93,7 @@ struct MCIRecallApp: App {
                 initialFocusEventId: launchRequest.focusEventId
             )
             .preferredColorScheme(.light)
-            .frame(minWidth: 720, minHeight: 480)
+            .frame(minWidth: 720, minHeight: 440)
             .background(Color.brandBgPrimary)
             .task {
                 // Per `docs/design/brief-viewer-spec.md` §"When the user
@@ -111,7 +112,7 @@ struct MCIRecallApp: App {
             }
         }
         .defaultPosition(.center)
-        .defaultSize(width: 1024, height: 700)
+        .defaultSize(width: 920, height: 620)
     }
 
     @MainActor
@@ -173,7 +174,8 @@ struct RootView: View {
     @State private var searchFocusTrigger = false
     @State private var focusRequest: RecallFocusRequest?
     @State private var nextFocusSequence: UInt64
-    @ObservedObject private var actionPanelRegistry = ActionPanelRegistry.shared
+    private let actionPanelRegistry = ActionPanelRegistry.shared
+    @State private var isHelpVisible = ActionPanelRegistry.shared.isHelpVisible
     // Cycle 8.54 — "What's new" release-notes modal. Coordinator owns
     // the last-shown-version bookkeeping (UserDefaults) + the parsed
     // release loaded from Contents/Resources/CHANGELOG.md.
@@ -395,7 +397,13 @@ struct RootView: View {
         }
         .registerActionPanelCommands(globalCommands, registry: actionPanelRegistry)
         .actionPanelHost(registry: actionPanelRegistry)
-        .sheet(isPresented: $actionPanelRegistry.isHelpVisible) {
+        .onReceive(actionPanelRegistry.$isHelpVisible.removeDuplicates().receive(on: RunLoop.main)) {
+            isHelpVisible = $0
+        }
+        .sheet(isPresented: Binding(
+            get: { isHelpVisible },
+            set: { isHelpVisible = $0; actionPanelRegistry.isHelpVisible = $0 }
+        )) {
             KeyboardShortcutsSheet(registry: actionPanelRegistry)
         }
         .sheet(isPresented: $whatsNewCoord.isVisible) {
