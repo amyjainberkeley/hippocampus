@@ -271,6 +271,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - name: Install contract dependencies
+        run: |
+          brew install ripgrep
+          rg --version
       - run: scripts/test-release-contract.sh
       - run: python3 -B scripts/test_release_safety.py
       - run: scripts/test-app-group-contract.sh
