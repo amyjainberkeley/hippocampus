@@ -1,14 +1,31 @@
 # Hippocampus Status
 
-_Audited on 2026-09-06._
+_Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `3364b16`
+Audited code baseline: `4d976bc`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 7 Website And Memory-Quality Work
+
+The website now leads with local-first personal memory for the Mac and AI tools,
+using a paired hippocampal mark and a conceptual transparent-memory illustration.
+It explains capture, recognition, local storage and selected context sharing,
+with shared navigation, mobile menus and keyboard skip links. It explicitly
+discloses focused-window coverage, imperfect OCR, extractive drafts and current
+download gates. It does not advertise employee monitoring or completed activity/
+commitment features. Source lives in `website/`, not the old standalone checkout.
+Production build and TypeScript checks pass. Deployment status will be recorded
+after publication; the last deployed version is still 1 at this checkpoint.
+
+The staged native OCR/search investigations are not installed by this website
+checkpoint. The owner app remains `224466d`; later results must distinguish
+synthetic regression tests from signed-runtime and real capture qualification.
+Plan: `docs/plans/2026-09-07-memory-quality-and-website.md`.
 
 ## September 7 Source Publication
 
