@@ -42,12 +42,47 @@ AppKit state does not prove that the helper successfully read its AX attributes.
 The signed installed candidate still needs the complete screen, encrypted-image,
 search, restart and approved-client test in the [gate ledger](2026-09-07-observable-gates.md).
 
+## Follow-Up Read And Traversal Corrections
+
+The initial correction left three independently reproducible risks: failed or
+malformed focused-child reads became nil, malformed successful child arrays
+became empty, and descendant errors could disappear after benign progress.
+The follow-up preserves those errors through both backstops. Valid children
+from a mixed array can still establish secure evidence, but cannot erase its
+incomplete status. Arrays are inspected only up to the existing 32-node bound.
+Uninspected queued work beyond the node/depth limit remains unknown; a proven
+leaf exactly at the bound can still be negative. Secure detections still win.
+
+Twenty-two injected-reader regressions cover malformed shapes, actual error
+codes, mixed arrays, secure-positive precedence, cycles and exact/over-budget
+trees. They query no live app. The final optimized helper suite passes 737 tests
+locally; installed live qualification is separate and remains open.
+
+## Content-Free Health Diagnostics
+
+The helper now has a separate health sink reusing the probe's existing results.
+It accepts only numeric AX statuses, booleans and outcome enums. It cannot
+receive a window title, identifier, value, OCR text, URL or screenshot. Skipped
+backstops are explicitly unobserved, not mislabeled negative. Unknown results
+produce at most one local stderr line per thirty seconds of monotonic uptime,
+even if the error changes on every frame. The limiter is lock-protected;
+healthy/secure classifications do not consume its budget.
+
+Eight tests cover exact output, skipped checks, repeated/changing failures,
+invalid/regressing clocks, concurrent calls and production probe wiring. The
+initial reporter tests produced ten failures; the wiring test separately failed
+when its callback was absent. Review replaced that test's real system focus
+query with injected error, absent-focus and malformed-focus outcomes. Its
+initializer regression produced six failures when the injected reader was not
+used. All eight pass after implementation, without querying a real app. These
+are diagnostic contracts, not evidence that any owner's screen was read.
+
 ## Residual Risks
 
-The unchanged focused-child reader collapses some errors/type failures to nil.
-The unchanged array reader treats some malformed successful responses as empty.
-The separate descendant-subrole signal still has error masking after traversal
-progress. This patch does not establish that all AX failures are fail-closed or
-qualify the broader privacy/recovery gate. These paths need their own scoped
-regressions and review before public release. Hosted OCR deadline and accuracy
-failures remain separate blockers.
+Bounded traversal does not guarantee bounded wall-clock latency for every AX
+server. No live protected-field, lock, permission-revocation or recovery matrix
+is passed by these synthetic tests. More conservative error and exhaustion
+handling may suppress complex or malformed app trees; do not replace unknown
+with safe to improve apparent capture yield. Hosted OCR deadline and accuracy
+failures remain separate blockers. Installation identity and the latest actual
+screen proof are recorded in the gate ledger, not inferred from this source.

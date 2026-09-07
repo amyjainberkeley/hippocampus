@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `48251bd`
+Audited code baseline: `31f6736`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -47,6 +47,15 @@ No memory, keys, permissions or capture policy were reset. Repeated stream-stop
 errors observed before this installation remain unexplained recovery failures;
 the full live privacy/recovery gate is not passed.
 
+A follow-up source correction preserves failed/malformed child reads and
+incomplete bounded traversal through both AX backstops. It adds rate-limited,
+content-free health diagnostics without extra AX attribute reads. The new
+health wiring test uses injected focus results, not the real focused app.
+Final optimized helper verification passes 737 tests locally (22 new traversal
+regressions and eight health tests). The existing suite still emits CoreData
+XPC diagnostics; passing tests do not qualify live capture or overnight health.
+The installed `48251bd` artifact does not yet include this follow-up.
+
 The qualification checkpoint adds distinct build/locate/run/consumer gates to
 the retention test runner, eleven passing failure-propagation and diagnostic
 regressions, and bounded hosted termination diagnostics. The real local
@@ -79,9 +88,12 @@ not all required app executables. It now builds the four Swift products and
 Rust executables before the unchanged mandatory assembly gate, with two build
 jobs. Fifteen local release-safety tests pass, including seven inert execution
 scenarios proving that any build or assembly failure stops later work. The
-corrected hosted assembly remains pending. The `48251bd` hosted Recall lane
-also failed and needs separate diagnosis; it is not counted as passing from
-an earlier revision.
+complete hosted release-contract workflow passed at `31f6736`, including app
+assembly and clean-home checks. The Recall lane still failed at that revision:
+its direct-call stale-search test raced the view model's initial empty-query
+debounce. The test now consumes initialization and explicitly releases the old
+read after the new result, with no production-search change. All twelve focused
+Recall tests pass in independent local verification; hosted rerun is pending.
 
 The screen-only fixture now records sampled active/key/visible/text-focus
 exposure, resetting on focus loss or a gap over two seconds. Its calculation
@@ -98,7 +110,7 @@ can have lower confidence than incorrect text. A synthetic compute-device
 comparison and failure-only isolated diagnostic are added. At `1c32747`, 52
 assertions across 693 tests failed in completeness. Explicit CPU/GPU routing
 did not reliably meet the unchanged deadline. The capture lane remains red at
-`48251bd`; no production OCR fix or deadline waiver is established.
+`31f6736`; no production OCR fix or deadline waiver is established.
 
 The website source replaces the conceptual glass artwork and curved mark with
 a flat H, a compact product explanation, an actual synthetic-data example and

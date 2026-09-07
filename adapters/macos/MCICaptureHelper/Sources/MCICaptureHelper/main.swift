@@ -283,6 +283,7 @@ let blackedRegionProbe = PixelGridBlackedRegionProbe()
 // presence and classification signals only. Raw AX values never reach stderr,
 // the wire, disk, or the encoded-frame path.
 let axProbeDebugSink: AXSubroleProbe.DebugSink?
+let axProbeHealthReporter = AXProbeHealthReporter()
 if args.probeDebug {
     if !captureOptions.captureEnabled {
         FileHandle.standardError.write(
@@ -313,7 +314,16 @@ let cascadeEligibleBundles = allowlist.bundleIdSet
     .union(userAllowlist.captureEnabledBundleIds)
 let cascade = SuppressionCascade(
     secureEventInput: CarbonSecureEventInputProbe(),
-    axSecureSubrole: AXSubroleProbe(debugLog: axProbeDebugSink),
+    axSecureSubrole: AXSubroleProbe(
+        debugLog: axProbeDebugSink,
+        healthLog: { snapshot in
+            if let line = axProbeHealthReporter.line(
+                for: snapshot, at: ProcessInfo.processInfo.systemUptime
+            ) {
+                FileHandle.standardError.write(Data(line.utf8))
+            }
+        }
+    ),
     denylist: SensitiveCaptureDenylist(entries: denylistEntries),
     blackedRegion: blackedRegionProbe,
     knownSafeAppBundles: cascadeEligibleBundles,

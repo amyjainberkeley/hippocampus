@@ -51,6 +51,10 @@ commits are intentionally omitted from release notes.
 - Distinguish absent optional Accessibility labels from failed reads when
   checking ordinary text views. Keep real keyword-probe errors and secure-field
   detections blocking capture.
+- Preserve failed and malformed Accessibility child reads through privacy
+  checks. Incomplete bounded traversal remains unknown, never proof of safety.
+- Diagnose unclassified Accessibility checks with rate-limited local error
+  codes and outcomes, without logging screen text or fetching extra attributes.
 - Bind captured frames to the focused-window stream generation so focus changes
   cannot attribute stale pixels to a newly focused app.
 - Resolve public AX focus to one unique WindowServer surface twice, failing
