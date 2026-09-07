@@ -19,12 +19,14 @@ final class PrepareBrainViewModelTests: XCTestCase {
         XCTAssertEqual(vm.keyState, .checking)
         XCTAssertEqual(vm.downloadState, .notStarted)
         XCTAssertFalse(vm.modelDownloaded)
+        XCTAssertFalse(vm.canContinue)
     }
 
     func testGenerateKeyWhenNoneExists() async {
         let vm = makeVM(keyExists: false)
         await vm.generateKey()
         XCTAssertEqual(vm.keyState, .ready)
+        XCTAssertTrue(vm.canContinue)
     }
 
     func testGenerateKeyWhenAlreadyExists() async {

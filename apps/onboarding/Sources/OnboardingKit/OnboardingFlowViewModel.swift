@@ -63,8 +63,7 @@ public final class OnboardingFlowViewModel: ObservableObject {
     /// The canonical order the Permissions slide asks the four surfaces
     /// in. Public so tests and slide code share ground truth (fewer
     /// hard-coded arrays, one source of drift). Screen Recording is
-    /// first because it's the only *required* surface; Accessibility is
-    /// second because it's recommended and universally applicable;
+    /// first; Accessibility is second. Both are required for safe screen capture.
     /// Automation and Full Disk Access come last because their
     /// preconditions (Safari extension desired, deep-hook desired) may
     /// not hold — in which case they resolve to `.notApplicable` and
@@ -147,8 +146,7 @@ public final class OnboardingFlowViewModel: ObservableObject {
         // that hands us already-granted permissions) doesn't re-ask
         // for surfaces the user already granted. `.notRequested` stays
         // `.pending` so the sub-step still renders; `.granted` /
-        // `.denied` transition to their terminal outcomes and the
-        // sequence auto-advances past them below.
+        // `.denied` stays visible for recovery. Only grants resolve required surfaces.
         seedChoreographyFromInitialStatus()
     }
 
@@ -159,14 +157,7 @@ public final class OnboardingFlowViewModel: ObservableObject {
         if srStatus == .denied  { permissionResults[.screenRecording] = .denied  }
         if axStatus == .granted { permissionResults[.accessibility]  = .granted }
         if axStatus == .denied  { permissionResults[.accessibility]  = .denied  }
-        // Advance the sequence index past any terminal outcomes at head.
-        // Repeat while the head surface is non-pending; caps at end.
-        while permissionSequenceIndex < Self.permissionSequence.count {
-            let surface = Self.permissionSequence[permissionSequenceIndex]
-            let outcome = permissionResults[surface] ?? .pending
-            if outcome == .pending { break }
-            permissionSequenceIndex += 1
-        }
+        advancePermissionSequence()
     }
 
     /// Parse a launch URL like `onboarding://start?migration=rewind` and
@@ -224,16 +215,18 @@ public final class OnboardingFlowViewModel: ObservableObject {
         return Self.permissionSequence[permissionSequenceIndex]
     }
 
-    /// True iff every surface in `permissionSequence` has an outcome
-    /// that is NOT `.pending`. Slide binds its "All set — Continue"
-    /// affordance to this; `canAdvance` at `.permissions` still enforces
-    /// that Screen Recording specifically is `.granted` (SR is the only
-    /// hard-required surface — AX, Automation, FDA are all soft-fails).
+    /// Required permissions must be granted; optional ones may be deferred.
+    /// `canAdvance` separately checks the current probes before continuing.
     public var permissionChoreographyComplete: Bool {
-        for surface in Self.permissionSequence {
-            if permissionResults[surface] == .pending { return false }
+        !Self.permissionSequence.contains(where: needsPermissionAction)
+    }
+
+    private func needsPermissionAction(_ surface: PermissionSurface) -> Bool {
+        let outcome = permissionResults[surface] ?? .pending
+        if surface == .screenRecording || surface == .accessibility {
+            return outcome != .granted
         }
-        return true
+        return outcome == .pending
     }
 
     /// Called by `PermissionsSlide` after the user acts on the current
@@ -252,22 +245,11 @@ public final class OnboardingFlowViewModel: ObservableObject {
         advancePermissionSequence()
     }
 
-    /// Move to the next surface in `permissionSequence`, skipping past
-    /// anything already resolved (`.granted`, `.denied`, `.skipped`, or
-    /// `.notApplicable`). Called by `recordPermissionOutcome` and can
-    /// also be called directly by tests / slide back-buttons to re-sync
-    /// after out-of-band status changes (e.g. user granted SR from
-    /// System Settings while parked on the AX sub-step, then hits Back
-    /// then Next).
+    /// Select the first unresolved surface after an action or Settings change.
     public func advancePermissionSequence() {
-        var idx = permissionSequenceIndex + 1
-        while idx < Self.permissionSequence.count {
-            let surface = Self.permissionSequence[idx]
-            let outcome = permissionResults[surface] ?? .pending
-            if outcome == .pending { break }
-            idx += 1
-        }
-        permissionSequenceIndex = min(idx, Self.permissionSequence.count)
+        // Required denials stay reachable, including after relaunch or revocation.
+        permissionSequenceIndex = Self.permissionSequence.firstIndex(where: needsPermissionAction)
+            ?? Self.permissionSequence.count
     }
 
     /// Mark Automation and/or FDA as *applicable* — flips the surface's
@@ -281,6 +263,7 @@ public final class OnboardingFlowViewModel: ObservableObject {
     public func markPermissionApplicable(_ surface: PermissionSurface) {
         if permissionResults[surface] == .notApplicable {
             permissionResults[surface] = .pending
+            advancePermissionSequence()
         }
     }
 
@@ -296,34 +279,22 @@ public final class OnboardingFlowViewModel: ObservableObject {
         // Extension slide will do the real probe when the user clicks
         // the Safari install button.
         _ = automationPermission.status
-        // Cotypist P0 #2 — auto-sync the choreography outcomes for any
-        // surface that landed a grant while the slide's poll timer was
-        // ticking (user went to Settings and toggled ON). Only overwrite
-        // `.pending` — never clobber an explicit `.skipped` or `.denied`
-        // that the user has already acknowledged; that would replay the
-        // deny-recovery banner surprise.
+        // Required outcomes track the OS, including recovery from a denial.
         syncChoreographyFromTCC(surface: .screenRecording,
                                  status: screenRecordingPermission.status)
         syncChoreographyFromTCC(surface: .accessibility,
                                  status: accessibilityPermission.status)
+        advancePermissionSequence()
         permissionRefreshCount += 1
     }
 
-    /// Overlay a fresh TCC status onto the choreography outcome for a
-    /// surface, but only when it advances the state — never regress a
-    /// user-acknowledged terminal outcome. Called from `refreshPermissions()`.
+    /// Synchronize required permission presentation without requesting a grant.
     private func syncChoreographyFromTCC(surface: PermissionSurface,
                                           status: TCCStatus) {
-        let existing = permissionResults[surface] ?? .pending
-        switch (existing, status) {
-        case (.pending, .granted):
-            permissionResults[surface] = .granted
-            if let idx = Self.permissionSequence.firstIndex(of: surface),
-               idx == permissionSequenceIndex {
-                advancePermissionSequence()
-            }
-        default:
-            break
+        switch status {
+        case .granted: permissionResults[surface] = .granted
+        case .denied: permissionResults[surface] = .denied
+        case .notRequested: permissionResults[surface] = .pending
         }
     }
 

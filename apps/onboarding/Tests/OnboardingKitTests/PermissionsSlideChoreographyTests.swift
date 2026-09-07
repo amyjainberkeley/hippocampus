@@ -63,12 +63,11 @@ final class PermissionsSlideChoreographyTests: XCTestCase {
         XCTAssertTrue(vm.permissionChoreographyComplete)
     }
 
-    func testInitWithDeniedSurfaceStillAdvancesPast() {
-        // Denied is a terminal outcome — the slide will render its
-        // recovery banner (SwiftUI-side), the sequence itself moves on.
+    func testInitWithDeniedSurfaceKeepsRecoveryVisible() {
         let vm = makeVM(srStatus: .denied, axStatus: .granted)
         XCTAssertEqual(vm.permissionResults[.screenRecording], .denied)
-        XCTAssertTrue(vm.permissionChoreographyComplete)
+        XCTAssertEqual(vm.currentPermissionSurface, .screenRecording)
+        XCTAssertFalse(vm.permissionChoreographyComplete)
     }
 
     // MARK: - Grant / deny / skip transitions
@@ -81,20 +80,18 @@ final class PermissionsSlideChoreographyTests: XCTestCase {
         XCTAssertEqual(vm.permissionResults[.screenRecording], .granted)
     }
 
-    func testSkipAdvancesSequence() {
+    func testRequiredSkipKeepsRecoveryReachable() {
         let vm = makeVM()
         vm.recordPermissionOutcome(.screenRecording, .skipped)
         XCTAssertEqual(vm.permissionResults[.screenRecording], .skipped)
-        XCTAssertEqual(vm.currentPermissionSurface, .accessibility,
-            "Skip is a valid terminal outcome — sequence must not stall on it.")
+        XCTAssertEqual(vm.currentPermissionSurface, .screenRecording)
     }
 
-    func testDenyAdvancesSequence() {
+    func testRequiredDenialKeepsRecoveryReachable() {
         let vm = makeVM()
         vm.recordPermissionOutcome(.screenRecording, .denied)
         XCTAssertEqual(vm.permissionResults[.screenRecording], .denied)
-        XCTAssertEqual(vm.currentPermissionSurface, .accessibility,
-            "Denial is a terminal outcome from the choreography's POV — user has already seen the recovery banner and clicked Continue.")
+        XCTAssertEqual(vm.currentPermissionSurface, .screenRecording)
     }
 
     func testFullChoreographyWalkAllGrants() {
@@ -119,8 +116,8 @@ final class PermissionsSlideChoreographyTests: XCTestCase {
         let vm = makeVM()
         vm.recordPermissionOutcome(.screenRecording, .granted)
         vm.recordPermissionOutcome(.accessibility, .skipped)
-        XCTAssertTrue(vm.permissionChoreographyComplete,
-            "Skipping soft-fail surfaces must complete the choreography.")
+        XCTAssertFalse(vm.permissionChoreographyComplete)
+        XCTAssertEqual(vm.currentPermissionSurface, .accessibility)
     }
 
     func testMixedGrantAndDeny() {
@@ -128,8 +125,8 @@ final class PermissionsSlideChoreographyTests: XCTestCase {
         vm.recordPermissionOutcome(.screenRecording, .granted)
         vm.recordPermissionOutcome(.accessibility, .denied)
         XCTAssertEqual(vm.permissionResults[.accessibility], .denied)
-        XCTAssertTrue(vm.permissionChoreographyComplete,
-            "Denied AX is a soft-fail — user saw recovery banner + clicked Continue.")
+        XCTAssertFalse(vm.permissionChoreographyComplete)
+        XCTAssertEqual(vm.currentPermissionSurface, .accessibility)
     }
 
     // MARK: - Applicability toggle
@@ -175,26 +172,22 @@ final class PermissionsSlideChoreographyTests: XCTestCase {
             "Auto-sync must also advance the sequence pointer.")
     }
 
-    func testRefreshDoesNotClobberSkippedOutcome() {
+    func testRefreshUpdatesSkippedRequiredPermissionAfterSettingsGrant() {
         let vm = makeVM()
         vm.recordPermissionOutcome(.accessibility, .skipped)
-        // User then grants AX via Settings — but the choreography has
-        // already moved on; don't retroactively replay the sub-step.
         let ax = vm.accessibilityPermission as! StubTCCPermission
         ax.simulateGrant()
         vm.refreshPermissions()
-        XCTAssertEqual(vm.permissionResults[.accessibility], .skipped,
-            "refreshPermissions() must NOT overwrite an explicit .skipped outcome — the user already moved past this sub-step.")
+        XCTAssertEqual(vm.permissionResults[.accessibility], .granted)
     }
 
-    func testRefreshDoesNotClobberDeniedOutcome() {
+    func testRefreshUpdatesDeniedRequiredPermissionAfterSettingsGrant() {
         let vm = makeVM()
         vm.recordPermissionOutcome(.accessibility, .denied)
         let ax = vm.accessibilityPermission as! StubTCCPermission
         ax.simulateGrant()
         vm.refreshPermissions()
-        XCTAssertEqual(vm.permissionResults[.accessibility], .denied,
-            "refreshPermissions() must NOT overwrite an explicit .denied outcome — the user already saw the banner and clicked Continue.")
+        XCTAssertEqual(vm.permissionResults[.accessibility], .granted)
     }
 
     // MARK: - Sequence order invariant

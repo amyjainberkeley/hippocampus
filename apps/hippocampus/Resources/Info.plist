@@ -60,7 +60,7 @@
     <key>SUEnableSystemProfiling</key>
     <false/>
     <key>SUEnableAutomaticChecks</key>
-    <true/>
+    <false/>
     <key>SUAutomaticallyUpdate</key>
     <false/>
     <key>SUScheduledCheckInterval</key>
