@@ -122,6 +122,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("scripts/swift-package.sh test --package-path apps/recall-ui", runs)
         self.assertNotIn("swift test --package-path apps/recall-ui", runs)
 
+    def test_contract_fixtures_use_the_same_swift_capable_runner_as_onboarding(self):
+        contracts = self.workflows["release-contract"]["jobs"]["contracts"]
+        onboarding = self.workflows["swift"]["jobs"]["onboarding"]
+        self.assertEqual(contracts["runs-on"], onboarding["runs-on"])
+        runs = [step.get("run", "") for step in contracts["steps"]]
+        environment = next((i for i, run in enumerate(runs)
+                            if "swift --version" in run and "xcodebuild -version" in run), None)
+        self.assertIsNotNone(environment)
+        self.assertLess(environment, runs.index("scripts/test-retention-policy-contract.sh"))
+
+    def test_onboarding_diagnostic_does_not_stop_at_the_exec_event(self):
+        steps = self.workflows["swift"]["jobs"]["onboarding"]["steps"]
+        diagnostic = next(step for step in steps
+                          if step.get("name") == "Diagnose onboarding test failure")
+        command = diagnostic["run"]
+        self.assertLess(command.index("settings set target.process.stop-on-exec false"),
+                        command.index("-o run"))
+        self.assertEqual(diagnostic["if"], "failure()")
+        self.assertLessEqual(diagnostic["timeout-minutes"], 2)
+
     def test_contract_runner_provisions_ripgrep_before_checks(self):
         steps = self.workflows["release-contract"]["jobs"]["contracts"]["steps"]
         first_check = next(i for i, step in enumerate(steps)

@@ -127,7 +127,9 @@ jobs:
         run: |
           test_binary="$(swift build --package-path apps/onboarding --show-bin-path)/onboardingPackageTests.xctest/Contents/MacOS/onboardingPackageTests"
           if [[ -x "$test_binary" ]]; then
-            xcrun lldb --batch -o run -o 'thread backtrace all' -- \
+            xcrun lldb --batch \
+              -o 'settings set target.process.stop-on-exec false' \
+              -o run -o 'thread backtrace all' -- \
               "$test_binary" \
               'OnboardingKitTests.PreparationGateTests/testFailedKeyPreparationCannotContinueButRetryCanRecover'
           fi

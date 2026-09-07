@@ -47,3 +47,21 @@ The website is deployed to its existing audience; source is pushed to the
 existing draft PR. OCR/search changes have observed failing regressions and
 passing targeted checks. The results name remaining gaps and do not conflate
 new source with the installed app or a public downloadable release.
+
+## September 7 Execution Record
+
+- Website version 2 is live at the existing owner-private URL. Its source
+  checkpoint is `912822f`; the website-rooted deployment commit is `9e8d3f2`.
+- Native checkpoint `bb02bb4` is pushed to the existing draft PR, signed,
+  notarized and installed. Local Rust and all four optimized Swift suites pass.
+  Exact corpus results and failed attempts are recorded in the quality audit.
+- New ingestion counters advanced after installation, but the synthetic marker
+  has not been proved across timeline, recall, context and screenshot readback.
+  Foreground-fixture confirmation is pending; capture privacy is unchanged.
+- Hosted Rust, parent and Recall checks pass. Older-VM OCR timing/accuracy and
+  onboarding runtime failures remain unresolved. The release-contract Swift
+  toolchain mismatch and the ineffective initial crash diagnostic are corrected
+  with failing-before/passing-after workflow regressions, pending hosted rerun.
+- Next gate is actual installed capture usefulness, then a held-out OCR corpus
+  and full-evidence draft evaluation. Activity and reviewable task records remain
+  separate product work, not features this checkpoint claims to have delivered.
