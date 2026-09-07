@@ -9,7 +9,7 @@ screen-memory evidence. [STATUS](../STATUS.md) remains the release authority.
 
 | Gate | Required observation | Current evidence |
 | --- | --- | --- |
-| 0. Establish the build | Identify source, installed binaries, running processes, effective policy, database and capture generation. | Runtime identity established for installed `c5a8774`. Source through `6cf22ca` has no app/core/adapter/script changes relative to that binary's source. This pass adds uninstalled qualification fixtures and CI changes, explicitly separate from the installed runtime. |
+| 0. Establish the build | Identify source, installed binaries, running processes, effective policy, database and capture generation. | Runtime identity established for signed, notarized installed `48251bd`, including process mappings, shared writer/Recall database, helper/writer pipe and matching capture generation. Later CI source changes are not part of the installed artifact. |
 | 1. Screen to disk to Recall | A new phrase created only in a real window becomes a screen-origin event with its linked encrypted image; text and image reopen after restart; the approved client retrieves the same evidence. | **Open.** A fresh standalone window generated a random phrase without an import or plaintext export and recorded twenty seconds of sampled active/key/visible/text-focus observations. It has not been found in captured memory. The recorder reports fail-safe suppression. Prior fixed-token checks and foreground observations do not qualify this gate. |
 | 2. Privacy and recovery | Exclusions, pause, lock, permission loss, crashes, deletion and storage failure behave correctly and visibly. | **Not qualified.** Existing unit/contract tests are supporting evidence only; the full installed lifecycle matrix is not passed. |
 | 3. Agent use | A supported real client obtains fresh scoped context and resolves its citations, then each additional claimed client is qualified. | **Not qualified.** This Codex session can query the installed MCP server. That alone does not establish fresh fixture recall, image identity, citation expansion or all client lifecycles. |
@@ -19,14 +19,16 @@ screen-memory evidence. [STATUS](../STATUS.md) remains the release authority.
 ## Gate 0 Record
 
 The installed bundle's provenance verifies source
-`c5a8774a5c396c50c0aa83fdea65b2fb9ddab15f` and product digest
-`bc83104929ecae6aef0c74142eb975b9cb5b7d07e8cd5d7db34548fa7bf85764`.
+`48251bdb8c13e7d708a7d8f7a5f22192fcbabe5e` and product digest
+`ee47ab36cda1bf2a015e0220e6bfa1dc930294bba116e222039fb4447ef74668`.
 Developer ID signature is `Amy Jain (BV6KGKFKP4)` with a stapled ticket.
 The checked parent, Recall, helper and writer executable mappings all belong to
 `/Applications/Hippocampus.app/Contents/MacOS/`.
 Recall and the writer have the same database inode open, and the helper's output
 pipe is the writer's input pipe. These are topology observations, not successful
-memory ingestion assertions.
+memory ingestion assertions. The previous live bundle is preserved as an owner
+rollback copy; its location and notarization records are in STATUS. The new
+installation did not reset capture consent, permissions, policy, keys or data.
 
 The writer uses the existing `~/Library/Application Support/MCI/mci.sqlite`.
 Capture is enabled in `~/.config/hippocampus/runtime.toml`. The helper's current
@@ -77,7 +79,11 @@ or execution of later gates. At `347b1b9`, the hosted retention fixtures and
 Rust consumer passed. This run does not identify the earlier SIGKILL cause.
 The subsequently exposed clean-home failure was reproduced as a collision with
 the worker's existing daily brief. Its synthetic seed now uses a separate date;
-local regression and end-to-end checks pass, with hosted verification pending.
+local regression and end-to-end checks pass. Hosted clean-home verification
+passed at `1c32747` and `48251bd`. The next assembly step failed because required
+executables had not been built. The workflow now explicitly builds those inputs;
+fifteen local safety tests pass, but hosted assembly still requires verification.
+The `48251bd` hosted Recall failure is a separate open investigation.
 
 OCR diagnostics distinguish the original accurate pass from supplemental
 passes and report the production budget and test environment. Timed-out text

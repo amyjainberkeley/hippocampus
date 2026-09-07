@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `1c32747`
+Audited code baseline: `48251bd`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -20,14 +20,32 @@ test. The intended `usehippocampus.com` launch is deferred; no DNS or access
 change has been made.
 
 An [Accessibility classifier correction](audits/2026-09-07-ax-optional-labels.md)
-is prepared for signed-owner qualification. Optional absent labels no longer
+is installed in signed owner candidate `48251bd`. Optional absent labels no longer
 masquerade as messaging failures in the keyword probe, and actual attribute,
 required-role and visited-child errors cannot be hidden by readable siblings.
 Secure evidence still wins and stops further label reads. This does not resolve
 the separate traversal-helper risks or establish that the live fixture was
 captured. The final optimized capture suite passes 707 tests locally, including
-fourteen new classifier/path regressions. The installed app remains `c5a8774` until a verified installation is
-recorded below; the source correction is not an installed-product claim.
+fourteen new classifier/path regressions. Installation and signature verification
+do not establish that the screen-only capture gate passes.
+
+**Current installed application: `48251bd`**, at `/Applications/Hippocampus.app`.
+Its parent, helper, writer and Recall processes run from that bundle. The helper
+and writer share the capture pipe; writer and Recall open the same existing
+database. The new helper's generation matches its capture-enabled receipt.
+Post-copy strict nested signature, stapled ticket and source/digest verification
+pass. The installer is private owner qualification only:
+`/Users/amy/hippo-work/releases/2026-09-07-48251bd/Hippocampus-0.1.0.dmg`.
+SHA-256: `40ace3c18fdfa9ada354f23cdc62d9f04e02b5ecae94d8485304b651bf2a45f2`.
+Product-source digest:
+`ee47ab36cda1bf2a015e0220e6bfa1dc930294bba116e222039fb4447ef74668`.
+Apple accepted app submission `12d14928-daa6-4e7f-bf28-8859c931b154` and DMG
+submission `cb42a4a6-b6e6-422e-9861-0e914d3e2efc`. The prior live bundle is
+preserved at
+`/Users/amy/hippo-work/releases/backups/Hippocampus-c5a8774-live-before-48251bd.app`.
+No memory, keys, permissions or capture policy were reset. Repeated stream-stop
+errors observed before this installation remain unexplained recovery failures;
+the full live privacy/recovery gate is not passed.
 
 The qualification checkpoint adds distinct build/locate/run/consumer gates to
 the retention test runner, eleven passing failure-propagation and diagnostic
@@ -53,8 +71,17 @@ cause was not reproduced or explained. The later clean-home test failed at its
 synthetic brief seed: the production drain had already created today's brief.
 The fixture now uses a separate historical date without disabling overwrite
 protection. Six deterministic regressions and the complete isolated local
-clean-home flow pass; the corrected hosted flow is pending. Synthetic wire
-injection is not screen-capture qualification.
+clean-home flow pass. Hosted clean-home verification then passed at `1c32747`
+and `48251bd`. Synthetic wire injection is not screen-capture qualification.
+
+The next hosted failure was app assembly: the workflow had built fixtures but
+not all required app executables. It now builds the four Swift products and
+Rust executables before the unchanged mandatory assembly gate, with two build
+jobs. Fifteen local release-safety tests pass, including seven inert execution
+scenarios proving that any build or assembly failure stops later work. The
+corrected hosted assembly remains pending. The `48251bd` hosted Recall lane
+also failed and needs separate diagnosis; it is not counted as passing from
+an earlier revision.
 
 The screen-only fixture now records sampled active/key/visible/text-focus
 exposure, resetting on focus loss or a gap over two seconds. Its calculation
@@ -64,12 +91,14 @@ fixture app through MCP. The recorder reports fail-safe suppression. Capture,
 linked-image readback and restart qualification remain **open**; foreground
 observations cannot substitute for an actual stored event.
 
-Hosted OCR at `347b1b9` has 49 assertion failures across 692 tests, all in the
+Hosted OCR at `347b1b9` had 49 assertion failures across 692 tests, all in the
 completeness suite: deadline failures and empty consequences, supplemental-pass
 assumptions, and nine non-timeout completeness/accuracy failures. Correct text
 can have lower confidence than incorrect text. A synthetic compute-device
-comparison and failure-only isolated diagnostic are added; local verification
-passes, but no consistent routing benefit or production OCR fix is established.
+comparison and failure-only isolated diagnostic are added. At `1c32747`, 52
+assertions across 693 tests failed in completeness. Explicit CPU/GPU routing
+did not reliably meet the unchanged deadline. The capture lane remains red at
+`48251bd`; no production OCR fix or deadline waiver is established.
 
 The website source replaces the conceptual glass artwork and curved mark with
 a flat H, a compact product explanation, an actual synthetic-data example and
@@ -97,7 +126,9 @@ evidence, but its result cap prevents exhaustive negative qualification.
 Authenticated screenshot readback is still not established. Do not ask the
 owner to repeat the foreground exercise or claim the full gate passed.
 
-The following native fixes are installed in `c5a8774`: filter-before-limit
+### Earlier Native Qualification (Superseded Installation)
+
+The following native fixes were installed in `c5a8774`: filter-before-limit
 lexical search, explicit Text/Related search, selected-event full-text
 inspection, workspace simplification, and bounded managed-storage accounting.
 Hosted onboarding, parent, Recall, installer, Rust tests/format/Clippy, cargo
@@ -153,7 +184,7 @@ content-free installed receipt advanced after replacement to 646 stored frames
 and 286 screenshots with a write at 19:17:29 UTC. It establishes new ingestion,
 not OCR completeness or correct screenshot attribution.
 
-**Installed application: `c5a8774`**, at `/Applications/Hippocampus.app`.
+**Earlier installed application: `c5a8774`**, superseded by `48251bd` above.
 The optimized app and installer are Developer ID signed, notarized and stapled.
 Strict nested signature, Gatekeeper, disposable-home onboarding launch and
 post-copy source-provenance checks pass. Installer:
