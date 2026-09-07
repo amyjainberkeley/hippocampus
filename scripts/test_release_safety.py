@@ -105,6 +105,21 @@ class VerifierTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    ASSEMBLY_COMMAND = (
+        "apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite"
+    )
+    ASSEMBLY_BUILDS = [
+        ["scripts/swift-package.sh", "build", "--jobs", "2", "--configuration", "debug",
+         "--package-path", package, "--product", product]
+        for package, product in (
+            ("apps/hippocampus", "Hippocampus"),
+            ("adapters/macos/MCICaptureHelper", "mci-capture-helper"),
+            ("apps/recall-ui", "recall-ui"),
+            ("apps/onboarding", "onboarding"),
+        )
+    ] + [["cargo", "build", "--locked", "--jobs", "2", "-p", "mci-agent", "--bins",
+          "-p", "hippocampus-native-host"]]
+
     @classmethod
     def setUpClass(cls):
         # Use the system Ruby YAML parser, with no downloaded test dependencies.
@@ -115,6 +130,72 @@ class WorkflowTests(unittest.TestCase):
                  str(ROOT / f".github/workflows/{name}.yml")], text=True
             )
             cls.workflows[name] = json.loads(raw)
+
+    def assembly_steps(self):
+        job = self.workflows["release-contract"]["jobs"]["contracts"]
+        steps = job["steps"]
+        builds = [(i, step) for i, step in enumerate(steps)
+                  if step.get("name") == "Build app assembly prerequisites"]
+        assemblies = [(i, step) for i, step in enumerate(steps)
+                      if step.get("run") == self.ASSEMBLY_COMMAND]
+        self.assertEqual(len(builds), 1, "assembly requires an explicit prerequisite build step")
+        self.assertEqual(len(assemblies), 1, "assembly must remain a mandatory gate")
+        return job, builds[0], assemblies[0]
+
+    def test_contract_assembly_builds_exact_products_before_packaging(self):
+        job, (build_index, build), (assembly_index, assembly) = self.assembly_steps()
+        self.assertEqual(build_index + 1, assembly_index)
+        for gate in (job, build, assembly):
+            self.assertNotIn("if", gate)
+            self.assertFalse(gate.get("continue-on-error", False))
+        self.assertEqual(build.get("shell"), "bash")
+        self.assertEqual(build.get("env", {}).get("CARGO_BUILD_JOBS"), "2",
+                         "the Recall wrapper's nested FFI build must also use two jobs")
+        commands = [shlex.split(line) for line in build["run"].splitlines() if line.strip()]
+        self.assertEqual(commands, self.ASSEMBLY_BUILDS)
+
+    def test_contract_assembly_build_failures_stop_before_later_commands(self):
+        _, (_, build), (_, assembly) = self.assembly_steps()
+        commands = self.ASSEMBLY_BUILDS + [shlex.split(self.ASSEMBLY_COMMAND)]
+        # Exercise the actual mandatory shell commands with inert executables.
+        for fail_call in range(-1, len(commands)):
+            with self.subTest(fail_call=fail_call), tempfile.TemporaryDirectory(
+                prefix="assembly-prerequisites-"
+            ) as temporary:
+                root = Path(temporary)
+                log = root / "calls.jsonl"
+                fixture = f"#!{sys.executable}\n" + (
+                    "import json, os, sys\n"
+                    "from pathlib import Path\n"
+                    "log = Path(os.environ['BUILD_CALLS'])\n"
+                    "calls = log.read_text().splitlines() if log.exists() else []\n"
+                    "with log.open('a') as handle:\n"
+                    "    handle.write(json.dumps({'name': Path(sys.argv[0]).name, "
+                    "'args': sys.argv[1:], 'jobs': os.getenv('CARGO_BUILD_JOBS')}) + '\\n')\n"
+                    "sys.exit(42 if len(calls) == int(os.environ['FAIL_CALL']) else 0)\n"
+                )
+                for relative in ("scripts/swift-package.sh", "bin/cargo",
+                                 "apps/hippocampus/Resources/build-app.sh"):
+                    path = root / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(fixture, encoding="utf-8")
+                    path.chmod(0o755)
+                result = subprocess.run(
+                    ["/bin/bash", "--noprofile", "--norc", "-eo", "pipefail", "-c",
+                     build["run"] + "\n" + assembly["run"]],
+                    cwd=root, capture_output=True, text=True, timeout=10,
+                    env={"HOME": temporary, "PATH": f"{root / 'bin'}:/usr/bin:/bin",
+                         **build.get("env", {}), "BUILD_CALLS": str(log),
+                         "FAIL_CALL": str(fail_call)},
+                )
+                self.assertEqual(result.returncode, 0 if fail_call == -1 else 42,
+                                 result.stdout + result.stderr)
+                calls = [json.loads(line) for line in log.read_text().splitlines()]
+                expected = commands if fail_call == -1 else commands[:fail_call + 1]
+                self.assertEqual(calls, [
+                    {"name": Path(command[0]).name, "args": command[1:], "jobs": "2"}
+                    for command in expected
+                ])
 
     def test_recall_ci_stages_the_archive_through_the_supported_wrapper(self):
         steps = self.workflows["swift"]["jobs"]["recall-ui"]["steps"]

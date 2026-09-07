@@ -371,6 +371,16 @@ jobs:
       - run: scripts/test-live-capture-overlap-contract.sh
       - run: scripts/test-product-source-provenance.sh
       - run: scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior
+      - name: Build app assembly prerequisites
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          scripts/swift-package.sh build --jobs 2 --configuration debug --package-path apps/hippocampus --product Hippocampus
+          scripts/swift-package.sh build --jobs 2 --configuration debug --package-path adapters/macos/MCICaptureHelper --product mci-capture-helper
+          scripts/swift-package.sh build --jobs 2 --configuration debug --package-path apps/recall-ui --product recall-ui
+          scripts/swift-package.sh build --jobs 2 --configuration debug --package-path apps/onboarding --product onboarding
+          cargo build --locked --jobs 2 -p mci-agent --bins -p hippocampus-native-host
       - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
       - run: scripts/test-release-identity.sh
       - run: scripts/test-prepare-release-models.sh
