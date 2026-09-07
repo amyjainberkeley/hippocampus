@@ -95,8 +95,7 @@ class VerifierTests(unittest.TestCase):
                 self.assertEqual([call["name"] for call in calls], ["verify-models.sh", "verify-app-launches.sh"])
                 self.assertEqual(calls[0]["args"][0], "--app")
                 self.assertNotIn("--allow-missing-bundled", calls[0]["args"])
-                if target == "app":
-                    self.assertEqual((calls[1]["clean_home"], calls[1]["onboarding"]), ("1", "1"))
+                self.assertEqual((calls[1]["clean_home"], calls[1]["onboarding"]), ("1", "1"))
 
     def test_development_lite_retains_explicit_model_omission(self):
         result, calls = self.run_gate("app", lite=True)
