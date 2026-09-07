@@ -22,11 +22,13 @@
 - [x] Add bounded day/brief exports preserving date, Draft status, author, observations warning, and parsed local event links. Escape captured Markdown and cap payload size.
 - [x] Guard day exports by selected day, loaded generation, explicit event IDs, cancellation, and available evidence. Support a saved brief with no screenshot.
 - [x] Keep required permission denials reachable; synchronize Settings grant/revoke outcomes; gate preparation and completion on actual key readiness.
-- [ ] Correct updater defaults without resetting the user's stored opt-in. Run contract regression and parent suite.
+- [x] Correct updater defaults without resetting the user's stored opt-in. Run contract regression and parent suite.
 - [x] Create a light product website, setup guide, privacy overview, and honest release-status page. Use only synthetic screenshot evidence. No signups, analytics, payment claims, or memory API.
-- [ ] Validate and publish the website privately for owner review. Public audience change requires approval; a public installer remains blocked by independent-Mac qualification and distribution/legal packaging.
-- [ ] Run affected native suites, inspect source diff, then build/sign/notarize an owner candidate. Preserve the currently installed notarized build until replacement is verified.
-- [ ] Update STATUS and the owner ledger with actual evidence, separate source-tested from installed proof, and keep remaining vision visible.
+- [x] Validate and publish the website privately for owner review. Public audience change requires approval; a public installer remains blocked by independent-Mac qualification and distribution/legal packaging.
+- [x] Run affected native suites, inspect source diff, then build/sign/notarize an owner candidate. Preserve the currently installed notarized build until replacement is verified.
+- [x] Update STATUS and the owner ledger with actual evidence, separate source-tested from installed proof, and keep remaining vision visible.
+- [ ] Obtain fresh installed capture -> encrypted screenshot -> actual MCP proof on 224466d. Owner foreground-fixture confirmation is pending; no privacy bypass.
+- [ ] Qualify the installed whole-day export beyond source tests and visible native controls. Do not expose private day content in website proof.
 
 ## Reproduction
 Native test commands run from each Swift package:
