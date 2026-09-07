@@ -350,7 +350,8 @@ LAUNCH_VERIFY="$REPO_ROOT/scripts/verify-app-launches.sh"
 if [[ -x "$LAUNCH_VERIFY" ]]; then
     echo ""
     echo "--- Launch-verify gate (pre-notarize) ---"
-    "$LAUNCH_VERIFY" "$APP_PATH"
+    VERIFY_CLEAN_HOME=1 VERIFY_EXPECT_ONBOARDING=1 \
+        "$LAUNCH_VERIFY" "$APP_PATH"
 else
     echo "FATAL: Required scripts/verify-app-launches.sh is missing or not executable." >&2
     exit 1
