@@ -98,10 +98,10 @@ struct DailyMemoryView: View {
             if model.isLoading || isExporting { ProgressView().controlSize(.small) }
             Button { Task { await model.reload() } } label: { Image(systemName: "arrow.clockwise") }
                 .disabled(model.isLoading).help("Refresh memory").accessibilityLabel("Refresh memory")
-            Button("Copy day context", systemImage: "doc.on.clipboard") { exportDay(save: false) }
-                .disabled(isExporting || model.isLoading || model.screenshots.isEmpty)
+            Button("Copy day summary", systemImage: "doc.on.clipboard") { exportDay(save: false) }
+                .disabled(isExporting || !model.canExportSummary)
             Button { exportDay(save: true) } label: { Image(systemName: "square.and.arrow.up") }
-                .disabled(isExporting || model.isLoading || model.screenshots.isEmpty)
+                .disabled(isExporting || !model.canExportSummary)
                 .help("Export day context").accessibilityLabel("Export day context")
         }
         .buttonStyle(.borderless)
@@ -309,20 +309,14 @@ struct DailyMemoryView: View {
         guard !isExporting else { return }
         isExporting = true
         let day = model.day
-        let screenshots = model.screenshots
-        // Evenly select evidence across the day, within the canonical 24-event handoff bound.
-        let ids = screenshots.count <= 24 ? screenshots.map(\.id)
-            : (0..<24).map { screenshots[$0 * (screenshots.count - 1) / 23].id }
         Task {
             defer { isExporting = false }
             do {
-                let hits = try await reader.fetchEventsByIds(ids).filter { day.contains($0.tsUs) }
-                guard !hits.isEmpty else { exportError = "The selected evidence is no longer available."; return }
-                let packet = VisualMemoryExport.markdown(title: "Visual memory: \(day.dateLocal)", hits: hits)
-                    + "\nSelected \(hits.count) evidence excerpts from \(screenshots.count) available screenshot samples. Observed spans are not active-time measurements.\n"
+                let packet = try await model.exportSummary()
+                guard model.day == day else { return }
                 if save {
                     let panel = NSSavePanel()
-                    panel.nameFieldStringValue = "visual-memory-\(day.dateLocal).md"
+                    panel.nameFieldStringValue = "day-summary-\(day.dateLocal).md"
                     panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .text]
                     if panel.runModal() == .OK, let url = panel.url {
                         try packet.write(to: url, atomically: true, encoding: .utf8)
@@ -333,7 +327,7 @@ struct DailyMemoryView: View {
                         exportError = "The clipboard is unavailable. Try again."
                         return
                     }
-                    ToastNotifier.shared.notify("Day context copied")
+                    ToastNotifier.shared.notify("Day summary copied")
                 }
             } catch { exportError = "The day context could not be exported. Try again." }
         }

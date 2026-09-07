@@ -27,7 +27,7 @@ import Vision
 ///
 /// Configuration follows ADR-0016 §1.1:
 ///   - `recognitionLevel = .accurate`
-///   - `usesLanguageCorrection = true`
+///   - `usesLanguageCorrection = false` preserves code and identifier spelling
 ///   - `recognitionLanguages = ["en-US"]` (configurable)
 ///   - `automaticallyDetectsLanguage = true`
 ///
@@ -97,7 +97,9 @@ public struct VisionOCRRunner: OCREngine {
         // UNVERIFIED — needs live macOS; do not claim working.
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
+        // Language correction inserts prose-style spaces into code and identifiers.
+        // Preserve recognition output; the original screenshot remains the evidence.
+        request.usesLanguageCorrection = false
         request.recognitionLanguages = languages
         request.automaticallyDetectsLanguage = true
         request.regionOfInterest = input.roi
@@ -127,7 +129,7 @@ public struct VisionOCRRunner: OCREngine {
             lines.append(OCRLine(
                 text: top.string,
                 boundingBox: obs.boundingBox,
-                confidence: obs.confidence
+                confidence: top.confidence
             ))
         }
         return OCRResult(

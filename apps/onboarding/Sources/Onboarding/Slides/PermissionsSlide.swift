@@ -1,21 +1,8 @@
 import SwiftUI
 import OnboardingKit
 
-/// Cotypist peer-study P0 pattern #2 — deferred-permission choreography.
-///
-/// The slide preserves the PR #44 pre-flight overview at the top ("here's
-/// the four TCC / FDA surfaces you'll be asked for") and then walks the
-/// user through the sequence ONE surface at a time. Each sub-step renders:
-///   1. A permission-specific title + plain-English "why" copy.
-///   2. A prominent "Grant" button → fires the TCC probe.
-///   3. A "Skip for now" button (always available — accessibility requirement).
-///   4. An inline denial-recovery banner if the user denied, with a
-///      "Continue" button that advances the sequence without blocking.
-///
-/// After every surface has an outcome the slide shows a compact summary
-/// and the standard `OnboardingFlowView` "Next" affordance advances to
-/// `.primaryHotkey`. `canAdvance` on the flow VM still gates on Screen
-/// both Screen Recording and Accessibility being `.granted`.
+/// Ask for each permission in context. Required denials keep recovery controls
+/// visible; only optional Automation and Full Disk Access can be deferred.
 struct PermissionsSlide: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @State private var isResetting = false
@@ -247,7 +234,7 @@ struct PermissionsSlide: View {
                     // only "MCICaptureHelper" bundle-name leak; users
                     // still get the concrete fix path (Settings pane +
                     // relaunch) without the internal bundle jargon.
-                    Text("Open System Settings → Privacy & Security → Screen Recording. Remove any duplicate Hippocampus entries whose path is not in /Applications, then quit Hippocampus and reopen it.")
+                    Text("Open System Settings → Privacy & Security → \(copy.shortName). Enable Hippocampus, then return here to continue setup.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -369,7 +356,7 @@ struct PermissionsSlide: View {
     private func labelFor(outcome: PermissionOutcome) -> String {
         switch outcome {
         case .granted: "Granted"
-        case .denied: "Denied · will retry later"
+        case .denied: "Denied"
         case .skipped: "Skipped"
         case .pending: "Pending"
         case .notApplicable: "N/A"

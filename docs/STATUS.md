@@ -2,13 +2,57 @@
 
 _Audited on 2026-09-06._
 
-Audited code baseline: `8b8598b`
+Audited code baseline: `ec7a318`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 6 OCR, Summary, And Setup Update
+
+Source-tested; installation qualification follows separately below. Apple
+Vision's prose correction inserted spaces into synthetic code. Accurate raw
+recognition reduced character edits from 14 to 7 across the same 987-character
+12/16/24-point corpus. It is not an all-language accuracy score. No remote OCR,
+generated correction, screenshot replacement, or privacy-path bypass was added.
+Candidate confidence now comes from the selected recognized text.
+
+Now exports combine the matching saved daily draft with up to 24 sampled source
+excerpts, including dates, provenance, Draft/observation warnings, and local
+event links. Brief copy/export uses the same bounded format. Captured Markdown
+is escaped; unknown author formats remain literal. Day changes, stale reads,
+unexpected event IDs and out-of-day evidence cannot silently change the packet.
+Brief-only days can be exported. This is not semantic reconciliation or measured
+activity, and dense days remain sampled.
+
+Required permission denials stay visible during onboarding and recover after
+Settings grants. Encryption preparation gates Continue/Get Started, a resumed
+Done step checks the key, failures have retry, and failed completion-file writes
+do not mark setup complete. Updater startup preserves saved preferences; private
+defaults now live in Info.plist. Live second-Mac and locked-Keychain denial
+qualification remains open.
+
+Fresh optimized suites: capture 676; Recall 418 XCTest plus 3 Swift Testing;
+parent 324; onboarding 241, all passing. The onboarding full-suite initially
+failed five obsolete expectations that denied permissions disappear from the
+sequence; corrected recovery expectations and the final full rerun pass. The
+initial preparation compile also overlapped a source edit; only the completed
+final source build is accepted. Separate coding workers reached their account
+limit; integration and review were performed in the main task, not independently
+security-certified.
+
+Website source: `/Users/amy/hippocampus-website`. It is an owner-only product,
+setup, privacy and release-status preview. Build and TypeScript checks pass;
+the updated lockfile has zero reported npm advisories at this check. Its only
+product screenshot is synthetic. No user memory endpoint, signup, analytics,
+payment flow or installer upload was introduced. Public download is explicitly
+unavailable pending qualification and distribution packaging. Release review
+also found missing full model-license packaging, unresolved legal-owner review,
+UNPROVISIONED immutable model assets and second-Mac/update continuity checks.
+These gates were not disabled. The installed artifact remains `2e5fc82` until a
+later verified installation is recorded here.
 
 ## September 6 Safety And Usefulness Integration
 

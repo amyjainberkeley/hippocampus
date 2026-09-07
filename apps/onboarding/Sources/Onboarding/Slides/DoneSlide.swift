@@ -9,11 +9,11 @@ struct DoneSlide: View {
         SlideContainer {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 HeroHeader(
-                    title: "You're all set",
-                    subtitle: "Capture begins when you click Get Started. You can pause it any time from the menu bar.",
+                    title: readyForCapture ? "You're all set" : "Finish preparing your memory",
+                    subtitle: readyForCapture ? "Capture begins when you click Get Started. You can pause it any time from the menu bar." : "Go back to finish the unchecked setup steps before starting capture.",
                     titleStyle: .display
                 ) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: readyForCapture ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 60))
                         .foregroundStyle(OnboardingDesign.Palette.success)
                 }
@@ -23,6 +23,13 @@ struct DoneSlide: View {
                 menuBarHint
             }
         }
+        .task { await prepareBrainVM.generateKey(); flowVM.refreshPermissions() }
+    }
+
+    private var readyForCapture: Bool {
+        prepareBrainVM.canContinue
+            && flowVM.screenRecordingPermission.status == .granted
+            && flowVM.accessibilityPermission.status == .granted
     }
 
     private var summaryChecklist: some View {
@@ -35,7 +42,7 @@ struct DoneSlide: View {
                 granted: flowVM.accessibilityPermission.status == .granted,
                 label: "Accessibility privacy checks"
             )
-            checkRow(granted: true, label: "Encrypted")
+            checkRow(granted: prepareBrainVM.canContinue, label: "Encryption key ready")
             checkRow(granted: true, label: "Retention policy set")
             modelCheckRow
         }

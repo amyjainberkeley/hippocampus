@@ -303,8 +303,7 @@ final class OnboardingE2ETests: XCTestCase {
     // MARK: - Test 8: Accessibility denial path
 
     /// User denies Accessibility. The choreography records the outcome
-    /// as `.denied` and advances the explanatory choreography, but screen
-    /// capture remains blocked because secure-field detection is unavailable.
+    /// as `.denied` and retains its recovery controls while capture is blocked.
     func testDeferredPermissionChoreographyDenyAccessibilityBlocksCapture() {
         let vm = OnboardingFlowViewModel(
             screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
@@ -322,8 +321,8 @@ final class OnboardingE2ETests: XCTestCase {
 
         XCTAssertEqual(vm.permissionResults[.accessibility], .denied,
             "Denial-with-Continue must record .denied — not .pending.")
-        XCTAssertNil(vm.currentPermissionSurface,
-            "Denial resolves the sub-step; sequence must complete.")
+        XCTAssertEqual(vm.currentPermissionSurface, .accessibility,
+            "Denied required access must leave recovery controls reachable.")
         XCTAssertFalse(vm.canAdvance,
             "Accessibility denial must block screen capture until the privacy boundary is available.")
     }
@@ -348,8 +347,9 @@ final class OnboardingE2ETests: XCTestCase {
 
         // User skips AX too.
         vm.recordPermissionOutcome(.accessibility, .skipped)
-        XCTAssertTrue(vm.permissionChoreographyComplete,
-            "Skipping everything completes the choreography (per Cotypist pattern — always let user skip).")
+        XCTAssertFalse(vm.permissionChoreographyComplete,
+            "Required permission skips cannot hide the unfinished setup.")
+        XCTAssertEqual(vm.currentPermissionSurface, .screenRecording)
         XCTAssertFalse(vm.canAdvance,
             "Choreography complete but SR still not granted — flow VM invariant holds.")
     }
@@ -379,12 +379,12 @@ final class OnboardingE2ETests: XCTestCase {
         // User skips AX.
         vm.recordPermissionOutcome(.accessibility, .skipped)
 
-        XCTAssertEqual(vm.currentPermissionSurface, .automation)
+        XCTAssertEqual(vm.currentPermissionSurface, .accessibility)
         vm.recordPermissionOutcome(.automation, .denied)
 
         // FDA stays notApplicable — no deep-hooks toggled.
-        XCTAssertNil(vm.currentPermissionSurface)
-        XCTAssertTrue(vm.permissionChoreographyComplete)
+        XCTAssertEqual(vm.currentPermissionSurface, .accessibility)
+        XCTAssertFalse(vm.permissionChoreographyComplete)
         XCTAssertFalse(vm.canAdvance,
             "Skipping capture-critical Accessibility must keep capture blocked.")
 
@@ -393,6 +393,11 @@ final class OnboardingE2ETests: XCTestCase {
         XCTAssertEqual(vm.permissionResults[.accessibility], .skipped)
         XCTAssertEqual(vm.permissionResults[.automation], .denied)
         XCTAssertEqual(vm.permissionResults[.fullDiskAccess], .notApplicable)
+        (vm.accessibilityPermission as! StubTCCPermission).simulateGrant()
+        vm.refreshPermissions()
+        XCTAssertNil(vm.currentPermissionSurface)
+        XCTAssertTrue(vm.permissionChoreographyComplete)
+        XCTAssertTrue(vm.canAdvance, "A later Settings grant must recover without restarting setup.")
     }
 
     // MARK: - Invariant guard

@@ -238,18 +238,23 @@ struct BriefHeaderView: View {
 struct BriefFooterActions: View {
     let brief: Brief
     let onRefresh: () -> Void
+    @State private var exportError: String?
 
     var body: some View {
         HStack(spacing: 8) {
             Button {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(brief.body, forType: .string)
+                if NSPasteboard.general.setString(VisualMemoryExport.markdown(brief: brief), forType: .string) {
+                    ToastNotifier.shared.notify("Summary copied")
+                } else {
+                    exportError = "The clipboard is unavailable. Try again."
+                }
             } label: {
-                Label("Copy", systemImage: "doc.on.doc")
+                Label("Copy summary", systemImage: "doc.on.doc")
             }
             .buttonStyle(.bordered)
             .keyboardShortcut("c", modifiers: [.command, .shift])
-            .help("Copy brief body to clipboard")
+            .help("Copy the draft with its date, provenance, and source links")
 
             Button {
                 exportMarkdown(brief)
@@ -272,6 +277,9 @@ struct BriefFooterActions: View {
             .help("Refresh the saved brief for this date")
         }
         .font(.callout)
+        .alert("Summary export failed", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(exportError ?? "") }
     }
 
     private func exportMarkdown(_ brief: Brief) {
@@ -280,9 +288,11 @@ struct BriefFooterActions: View {
         panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .text]
         panel.title = "Export Brief"
         if panel.runModal() == .OK, let url = panel.url {
-            let header = "# \(brief.title)\n\n_\(brief.modelId), generated \(Formatters.tsString(usSinceEpoch: brief.generatedTsUs))_\n\n"
-            let data = (header + brief.body).data(using: .utf8) ?? Data()
-            try? data.write(to: url)
+            do {
+                try VisualMemoryExport.markdown(brief: brief).write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                exportError = "The summary could not be saved. Choose a writable location and try again."
+            }
         }
     }
 }

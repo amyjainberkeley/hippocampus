@@ -55,7 +55,7 @@ final class DailyMemoryTests: XCTestCase {
                       source: "timeline", score: nil, thumbnailPath: "/private/blob.bin")
         let packet = VisualMemoryExport.markdown(title: "Selected screenshot", hits: [hit])
         XCTAssertTrue(packet.contains("hippocampus://recall?tab=search&focus=42"))
-        XCTAssertTrue(packet.contains("https://example.com"))
+        XCTAssertTrue(packet.contains("https&#58;//example.com"))
         XCTAssertTrue(packet.contains("Stored text"))
         XCTAssertTrue(packet.contains("snippet"))
         XCTAssertFalse(packet.contains("/private/blob.bin"))
@@ -76,6 +76,22 @@ final class DailyMemoryTests: XCTestCase {
         XCTAssertThrowsError(try CaptureHealthReceipt.decode(Data(json.replacingOccurrences(of: "\"stored_frame_count\":8", with: "\"stored_frame_count\":-1").utf8)))
     }
 
+    func testExportTreatsCapturedMarkdownAndMetadataAsLiteralBoundedData() {
+        let hit = Hit(eventId: 42, tsUs: 100, appBundleId: "unknown\n## Forged app",
+                      windowTitle: "Title\n## Forged heading", url: "javascript:alert(1)",
+                      ocrTextSnippet: "![image](https://example.invalid/tracker)\n<script>run()</script>\n"
+                        + String(repeating: "x", count: 200_000), source: "timeline", score: nil)
+        let packet = VisualMemoryExport.markdown(title: "Day\n## Forged title", hits: [hit])
+        XCTAssertFalse(packet.contains("\n## Forged"))
+        XCTAssertFalse(packet.contains("![image]("))
+        XCTAssertFalse(packet.contains("<script>"))
+        XCTAssertFalse(packet.contains("javascript:"))
+        XCTAssertLessThan(packet.utf8.count, 131_072)
+        XCTAssertTrue(packet.contains("shortened"))
+        XCTAssertTrue(packet.contains("Review before sharing"))
+        XCTAssertTrue(packet.contains("focus=42"))
+    }
+
     private func event(_ id: UInt64, seconds: UInt64, app: String = "com.apple.Safari", screenshot: Bool = true) -> TimelineEvent {
         TimelineEvent(eventId: id, tsUs: seconds * 1_000_000, appBundleId: app,
                       snippet: "Stored text", thumbnailPath: screenshot ? "/tmp/\(id).bin" : nil)
@@ -84,6 +100,36 @@ final class DailyMemoryTests: XCTestCase {
 
 @MainActor
 final class DailyMemoryViewModelTests: XCTestCase {
+    func testBriefOnlyDayCanExportAndChangingDateImmediatelyDisablesExport() async throws {
+        let reader = DailyTestReader()
+        await reader.configureBriefOnly()
+        let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+        XCTAssertFalse(model.canExportSummary)
+        await model.reload()
+        XCTAssertTrue(model.screenshots.isEmpty)
+        XCTAssertTrue(model.canExportSummary)
+        let packet = try await model.exportSummary()
+        XCTAssertTrue(packet.contains("Synthetic saved draft"))
+        XCTAssertTrue(packet.contains(model.day.dateLocal))
+        model.moveDay(-1)
+        XCTAssertFalse(model.canExportSummary)
+        do {
+            _ = try await model.exportSummary()
+            XCTFail("Stale data must not be exported under the newly selected date.")
+        } catch {}
+    }
+
+    func testDayExportDoesNotIncludeUnselectedOrOutOfDayFetchedEvidence() async throws {
+        let reader = DailyTestReader()
+        let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+        await model.reload()
+        await reader.configureExport(day: model.day)
+        let packet = try await model.exportSummary()
+        XCTAssertTrue(packet.contains("focus=1"))
+        XCTAssertFalse(packet.contains("focus=999"))
+        XCTAssertFalse(packet.contains("Other day"))
+    }
+
     func testRefreshReadsNewScreenshotsAndBriefFailureDoesNotHideThem() async {
         let reader = DailyTestReader()
         let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
@@ -142,6 +188,17 @@ private actor DailyTestReader: BrainReader {
     var pending: CheckedContinuation<Void, Never>?
     var started: CheckedContinuation<Void, Never>?
     var hasStarted = false
+    var briefOnly = false
+    var exportHits: [Hit] = []
+
+    func configureBriefOnly() { briefOnly = true }
+    func configureExport(day: MemoryDay) {
+        exportHits = [(UInt64(1), day.startUs, "Selected"), (999, day.startUs, "Unselected"),
+                      (1, day.endUs + 1, "Other day")].map { id, timestamp, text in
+            Hit(eventId: id, tsUs: timestamp, appBundleId: nil, windowTitle: nil, url: nil,
+                ocrTextSnippet: text, source: "timeline", score: nil)
+        }
+    }
 
     func set(eventID: UInt64, briefFails: Bool = false) {
         self.eventID = eventID
@@ -155,6 +212,7 @@ private actor DailyTestReader: BrainReader {
     func finishDelayedRead() { pending?.resume(); pending = nil }
 
     func timelineEvents(startTsUs: UInt64, endTsUs: UInt64, resolution: TimelineResolution) async throws -> [TimelineEvent] {
+        if briefOnly { return [] }
         let id = eventID
         if delayedStart == startTsUs {
             hasStarted = true
@@ -179,13 +237,18 @@ private actor DailyTestReader: BrainReader {
     }
     func briefForDate(_ dateLocal: String) async throws -> Brief? {
         if briefFails { throw BrainReaderError.queryFailed("fixture") }
+        if briefOnly {
+            return Brief(rowId: 1, dateLocal: dateLocal, generatedTsUs: 1_700_000_000_000_000,
+                         modelId: "hippocampus-extractive", modelVersion: "2", title: "Today",
+                         body: "## Recent activity\n- Synthetic saved draft [event:7]", wordCount: 6, sourceEventCount: 1)
+        }
         return nil
     }
     func recentEvents(limit: Int) async throws -> [Hit] { [] }
     func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
     func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
     func listEpisodes(limit: Int) async throws -> [Episode] { [] }
-    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { [] }
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { exportHits }
     func latestBrief() async throws -> Brief? { nil }
     func briefDates(limit: Int) async throws -> [String] { [] }
     func summaryStats() async throws -> SummaryStats {

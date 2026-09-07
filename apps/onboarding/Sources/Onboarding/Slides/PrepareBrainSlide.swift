@@ -38,6 +38,12 @@ struct PrepareBrainSlide: View {
             }
             .glassCard(padding: OnboardingDesign.Space.md)
             .frame(maxWidth: 460)
+            if case .failed = prepareBrainVM.keyState {
+                Button("Retry encryption setup", systemImage: "arrow.clockwise") {
+                    Task { await prepareBrainVM.generateKey() }
+                }
+                .onboardingSecondary()
+            }
         }
     }
 

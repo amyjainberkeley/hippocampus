@@ -1,0 +1,119 @@
+import CoreGraphics
+import CoreText
+import CoreVideo
+import Foundation
+import Vision
+import XCTest
+
+@testable import MCICaptureHelperKit
+
+final class VisionOCRQualityTests: XCTestCase {
+    // Synthetic source text only. Rendering never reads the screen or opens a window.
+    private static let corpus = [
+        "let cacheKey = \"hippo_v1\";",
+        "if (retryCount <= 2) { return nil; }",
+        "result.map { $0.id }.joined(separator: \",\")",
+        "GET /v1/events?limit=12&cursor=abc_123",
+        "OCR punctuation: [a-z_]+ != nil; count += 1",
+        "Hippocampus MCICaptureHelper cacheKey user_id",
+        "Build succeeded. 12 tests passed (0 failures).",
+        "Review changes before publishing the release."
+    ]
+
+    func testSmallCodeDoesNotAcquireLanguageCorrectionSpaces() async throws {
+        let input = try Self.render(lines: Self.corpus, fontSize: 12)
+        let result = await VisionOCRRunner().recognize(input: input, timeoutMs: 10_000)
+        XCTAssertFalse(result.timedOut)
+        XCTAssertTrue(
+            result.recognizedLines.contains { $0.text == "result.map { $0.id }.joined(separator: \",\")" },
+            "OCR changed the rendered code: \(result.recognizedLines.map(\.text))"
+        )
+    }
+
+    func testSyntheticRecognitionBenchmark() throws {
+        let modes: [(String, VNRequestTextRecognitionLevel, Bool)] = [
+            ("accurate-corrected", .accurate, true),
+            ("accurate-raw", .accurate, false),
+            ("fast-corrected", .fast, true)
+        ]
+        for size: CGFloat in [12, 16, 24] {
+            let input = try Self.render(lines: Self.corpus, fontSize: size)
+            for (name, level, correction) in modes {
+                let start = ContinuousClock.now
+                let observations = try Self.recognize(input, level: level, correction: correction)
+                let actual = observations.compactMap { $0.topCandidates(1).first?.string }
+                let expected = Self.corpus.joined(separator: "\n")
+                let errors = Self.editDistance(expected, actual.joined(separator: "\n"))
+                print("OCR-BENCH size=\(size) mode=\(name) errors=\(errors)/\(expected.count) elapsed=\(start.duration(to: .now))")
+                for observation in observations {
+                    if let candidate = observation.topCandidates(1).first {
+                        print("OCR-LINE \(candidate.string) candidate=\(candidate.confidence) observation=\(observation.confidence)")
+                    }
+                }
+                XCTAssertFalse(actual.isEmpty)
+            }
+        }
+    }
+
+    private static func recognize(
+        _ input: OCREngineInput,
+        level: VNRequestTextRecognitionLevel = .accurate,
+        correction: Bool = true
+    ) throws -> [VNRecognizedTextObservation] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = level
+        request.usesLanguageCorrection = correction
+        request.recognitionLanguages = ["en-US"]
+        request.automaticallyDetectsLanguage = true
+        request.regionOfInterest = input.roi
+        try VNImageRequestHandler(cvPixelBuffer: input.pixelBuffer, orientation: .up)
+            .perform([request])
+        return request.results ?? []
+    }
+
+    private static func render(lines: [String], fontSize: CGFloat) throws -> OCREngineInput {
+        let width = 1920
+        let height = 1080
+        var buffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
+            [kCVPixelBufferCGImageCompatibilityKey: true,
+             kCVPixelBufferCGBitmapContextCompatibilityKey: true] as CFDictionary,
+            &buffer
+        )
+        XCTAssertEqual(status, kCVReturnSuccess)
+        let pixels = try XCTUnwrap(buffer)
+        XCTAssertEqual(CVPixelBufferLockBaseAddress(pixels, []), kCVReturnSuccess)
+        defer { CVPixelBufferUnlockBaseAddress(pixels, []) }
+        let context = try XCTUnwrap(CGContext(
+            data: CVPixelBufferGetBaseAddress(pixels), width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(pixels),
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ))
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let attributes: [NSAttributedString.Key: Any] = [
+            NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("Menlo" as CFString, fontSize, nil),
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1)
+        ]
+        for (index, text) in lines.enumerated() {
+            context.textPosition = CGPoint(x: 40, y: CGFloat(height) - 60 - CGFloat(index) * (fontSize + 16))
+            CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes)), context)
+        }
+        return OCREngineInput(pixelBuffer: pixels, roi: CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    private static func editDistance(_ expected: String, _ actual: String) -> Int {
+        let rhs = Array(actual)
+        var previous = Array(0...rhs.count)
+        for (i, lhs) in expected.enumerated() {
+            var row = [i + 1] + Array(repeating: 0, count: rhs.count)
+            for (j, char) in rhs.enumerated() {
+                row[j + 1] = min(row[j] + 1, previous[j + 1] + 1, previous[j] + (lhs == char ? 0 : 1))
+            }
+            previous = row
+        }
+        return previous[rhs.count]
+    }
+}
