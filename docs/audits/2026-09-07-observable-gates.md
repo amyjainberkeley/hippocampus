@@ -82,8 +82,11 @@ the worker's existing daily brief. Its synthetic seed now uses a separate date;
 local regression and end-to-end checks pass. Hosted clean-home verification
 passed at `1c32747` and `48251bd`. The next assembly step failed because required
 executables had not been built. The workflow now explicitly builds those inputs;
-fifteen local safety tests pass, but hosted assembly still requires verification.
-The `48251bd` hosted Recall failure is a separate open investigation.
+fifteen local safety tests pass. The complete hosted release-contract workflow
+passed at `31f6736`, including assembly and clean-home checks. The separate
+Recall test race was reproduced as initialization debounce colliding with
+direct test calls; the test now controls ordering without a production change.
+Twelve focused local Recall tests pass; its hosted rerun remains pending.
 
 OCR diagnostics distinguish the original accurate pass from supplemental
 passes and report the production budget and test environment. Timed-out text

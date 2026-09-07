@@ -2,6 +2,7 @@
 // results wiring + selection state machine for the Spotlight-like
 // recall popup view model.
 
+import Combine
 import XCTest
 @testable import RecallUIKit
 
@@ -35,22 +36,34 @@ private struct ScriptedReader: BrainReader {
     }
 }
 
-/// Simulates a backend that notices cancellation but still completes its
-/// current read. The popup must reject that stale completion rather than let
-/// an older query overwrite the latest one.
-private struct RacingReader: BrainReader {
+/// Holds the older read until explicitly released, even after cancellation.
+private actor RacingReader: BrainReader {
+    let started: XCTestExpectation
+    private var pending: CheckedContinuation<[Hit], Never>?
+    private var released = false
+
+    init(started: XCTestExpectation) { self.started = started }
+
     func search(_ opts: SearchOptions) async throws -> [Hit] {
         if opts.text == "slow" {
-            do {
-                try await Task.sleep(for: .milliseconds(150))
-            } catch {
-                // Database and FFI calls are not guaranteed to stop merely
-                // because their surrounding Task was cancelled.
+            return await withCheckedContinuation { continuation in
+                if released {
+                    continuation.resume(returning: [makeHit(id: 1)])
+                } else {
+                    pending = continuation
+                }
+                started.fulfill()
             }
-            return [makeHit(id: 1)]
         }
         return [makeHit(id: 2)]
     }
+
+    func finishSlow() {
+        released = true
+        pending?.resume(returning: [makeHit(id: 1)])
+        pending = nil
+    }
+
     func recentEvents(limit: Int) async throws -> [Hit] { [] }
     func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
     func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
@@ -152,12 +165,24 @@ final class GlobalRecallPopupViewModelTests: XCTestCase {
         XCTAssertEqual(vm.selectedIndex, 1)
     }
 
-    func testOlderSearchCannotOverwriteNewerResults() async throws {
-        let vm = GlobalRecallPopupViewModel(reader: RacingReader())
+    func testOlderSearchCannotOverwriteNewerResults() async {
+        let started = expectation(description: "older read started")
+        let reader = RacingReader(started: started)
+        let vm = GlobalRecallPopupViewModel(reader: reader)
+        let initialEmptyQuery = expectation(description: "initial empty query delivered")
+        let subscription = vm.$results.dropFirst().first(where: { $0.isEmpty }).sink { _ in
+            initialEmptyQuery.fulfill()
+        }
+        defer { subscription.cancel() }
+        // Direct perform() calls bypass the bound query. Consume its initial
+        // empty debounce before testing only the two explicit search requests.
+        await fulfillment(of: [initialEmptyQuery], timeout: 2)
         let slow = Task { await vm.perform(query: "slow") }
-        try await Task.sleep(for: .milliseconds(20))
+        await fulfillment(of: [started], timeout: 2)
 
         await vm.perform(query: "fast")
+        XCTAssertEqual(vm.results.map(\.eventId), [2])
+        await reader.finishSlow()
         await slow.value
 
         XCTAssertEqual(vm.results.map(\.eventId), [2])
