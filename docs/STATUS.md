@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `f3a689c`
+Audited code baseline: `6cf22ca`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -11,6 +11,24 @@ release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
 
 ## September 7 Product Clarity Checkpoint
+
+The next qualification pass uses the owner's ordered
+[observable gates](audits/2026-09-07-observable-gates.md). Runtime identity is
+established, but the new random screen-only phrase and linked-image/restart
+proof remain open. No later product gate is claimed from an earlier fixed-token
+test. The intended `usehippocampus.com` launch is deferred; no DNS or access
+change has been made.
+
+The qualification checkpoint adds distinct build/locate/run/consumer gates to
+the retention test runner, eleven passing failure-propagation and diagnostic
+regressions, and bounded hosted termination diagnostics. The real local
+retention contract and all 224 release-contract assertions pass. Forty-one
+focused optimized OCR tests pass locally, including timeout quarantine and
+recovery. Added OCR diagnostics record the hardware/toolchain, original-pass
+timing, deadline status and unobserved passes. Production recognition, deadline,
+confidence and privacy policy are unchanged. These changes instrument the
+hosted failures; they do not establish that either failure is fixed. The
+standalone screen-only fixture is not part of the installed application.
 
 The website source replaces the conceptual glass artwork and curved mark with
 a flat H, a compact product explanation, an actual synthetic-data example and
