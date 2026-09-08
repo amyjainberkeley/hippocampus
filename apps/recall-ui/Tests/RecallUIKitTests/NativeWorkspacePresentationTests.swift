@@ -9,7 +9,7 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         for (destination, view) in [
             ("now", "DailyMemoryView"), ("search", "SearchView"),
             ("timeline", "TimelineView"), ("episodes", "EpisodesView"),
-            ("briefs", "BriefView"), ("sources", "SourcesWorkspaceView"),
+            ("sources", "SourcesWorkspaceView"),
             ("privacy", "PrivacyDashboard"), ("settings", "WorkspaceSettingsView"),
         ] {
             XCTAssertNotNil(source.range(

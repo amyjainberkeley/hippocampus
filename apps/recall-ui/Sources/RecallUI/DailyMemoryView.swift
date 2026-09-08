@@ -5,16 +5,16 @@ import SwiftUI
 struct DailyMemoryView: View {
     let reader: BrainReader
     let onOpenPrivacy: () -> Void
+    let latestBriefRequest: UUID?
     @StateObject private var model: DailyMemoryViewModel
-    @State private var selectedScreenshot: ScreenshotSelection?
-    @State private var showsEpisodes = false
-    @State private var isExporting = false
-    @State private var exportError: String?
+    @State private var selectedEvidence: ScreenshotSelection?
+    @State private var showsHandoff = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    init(reader: BrainReader, onOpenPrivacy: @escaping () -> Void) {
+    init(reader: BrainReader, onOpenPrivacy: @escaping () -> Void, latestBriefRequest: UUID? = nil) {
         self.reader = reader
         self.onOpenPrivacy = onOpenPrivacy
+        self.latestBriefRequest = latestBriefRequest
         _model = StateObject(wrappedValue: DailyMemoryViewModel(reader: reader))
     }
 
@@ -22,57 +22,62 @@ struct DailyMemoryView: View {
         VStack(spacing: 0) {
             dayToolbar
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    captureStatus
-                    if model.isLoading && model.refreshedAt == nil {
-                        ProgressView("Reading this day").frame(maxWidth: .infinity).padding(40)
-                    } else if let error = model.errorMessage {
-                        ContentUnavailableView("Memory unavailable", systemImage: "exclamationmark.triangle",
-                                               description: Text(error))
-                        Button("Retry", systemImage: "arrow.clockwise") { Task { await model.reload() } }
-                    } else {
-                        summary
-                        visualMemory
-                        if !model.screenshots.isEmpty { appBreakdown }
-                        dayBrief
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        if model.isLoading && model.refreshedAt == nil {
+                            ProgressView("Reading this day").frame(maxWidth: .infinity).padding(40)
+                        } else if let error = model.errorMessage {
+                            ContentUnavailableView("Memory unavailable", systemImage: "exclamationmark.triangle",
+                                                   description: Text(error))
+                            Button("Retry", systemImage: "arrow.clockwise") { Task { await model.reload() } }
+                        } else {
+                            dailyReview
+                            if !model.review.visualEvidence.isEmpty { visualEvidence }
+                            savedDraft.id("saved-draft")
+                        }
+                        Divider()
+                        captureStatus
                     }
+                    .padding(24)
+                    .frame(maxWidth: 960, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: model.showsSavedDraft) { _, expanded in
+                    if expanded { proxy.scrollTo("saved-draft", anchor: .top) }
+                }
             }
         }
         .background(Color.brandBgPrimary)
         .task(id: model.day) { await model.reload() }
-        .task(id: model.query) {
-            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-            await model.search()
-        }
-        .onChange(of: showsEpisodes) { _, episodes in
-            if episodes { model.query = "" }
-        }
-        .onChange(of: model.query) { _, query in
-            if !query.isEmpty { showsEpisodes = false }
+        .task(id: latestBriefRequest) {
+            if latestBriefRequest != nil { await model.openLatestBrief() }
         }
         .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) { _ in
+            guard !showsHandoff else { return }
             Task { await model.reload() }
         }
-        .sheet(item: $selectedScreenshot) { selection in
+        .sheet(item: $selectedEvidence) { selection in
             ScreenshotViewer(selection: selection, reader: reader)
         }
-        .alert("Context export failed", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: { Text(exportError ?? "") }
+        .sheet(isPresented: $showsHandoff, onDismiss: { Task { await model.reload() } }) {
+            DailyHandoffView(model: model)
+        }
     }
 
     private var dayToolbar: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 16) { dateControls; Spacer(minLength: 8); exportControls }
-            VStack(alignment: .leading, spacing: 12) {
-                dateControls
-                HStack { Spacer(); exportControls }
+        VStack(alignment: .leading, spacing: 10) {
+            dateControls
+            HStack(alignment: .top, spacing: 16) {
+                currentCaptureState
+                Spacer(minLength: 8)
+                Button("Handoff", systemImage: "doc.text.magnifyingglass") { showsHandoff = true }
+                    .disabled(!model.canExportSummary)
+                    .help("Review daily context before copying or exporting")
+                    .accessibilityLabel("Preview daily handoff")
             }
         }
+        .buttonStyle(.borderless)
         .padding(.horizontal, 24).padding(.vertical, 12)
         .background(reduceTransparency ? AnyShapeStyle(Color.brandBgSecondary) : AnyShapeStyle(.regularMaterial))
     }
@@ -89,211 +94,161 @@ struct DailyMemoryView: View {
                 .help("Next day").accessibilityLabel("Next day")
             Button("Today") { model.selectedDate = Date() }
                 .disabled(Calendar.current.isDateInToday(model.selectedDate))
-        }
-        .buttonStyle(.borderless)
-    }
-
-    private var exportControls: some View {
-        HStack(spacing: 12) {
-            if model.isLoading || isExporting { ProgressView().controlSize(.small) }
+            Spacer(minLength: 8)
+            if model.isLoading { ProgressView().controlSize(.small) }
             Button { Task { await model.reload() } } label: { Image(systemName: "arrow.clockwise") }
                 .disabled(model.isLoading).help("Refresh memory").accessibilityLabel("Refresh memory")
-            Button("Copy day summary", systemImage: "doc.on.clipboard") { exportDay(save: false) }
-                .disabled(isExporting || !model.canExportSummary)
-            Button { exportDay(save: true) } label: { Image(systemName: "square.and.arrow.up") }
-                .disabled(isExporting || !model.canExportSummary)
-                .help("Export day context").accessibilityLabel("Export day context")
         }
-        .buttonStyle(.borderless)
     }
 
-    private var captureStatus: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let receipt = model.captureHealth {
-                Label(receipt.isStale() ? "Capture status is out of date" : receipt.stateLabel,
-                      systemImage: receipt.isStale() || receipt.blockedReason != nil ? "exclamationmark.circle" : "display")
-                    .font(.callout)
-                    .foregroundStyle(receipt.isStale() || receipt.blockedReason != nil ? Color.brandWarning : Color.brandFgSecondary)
-                if let detail = receipt.detailText() {
-                    Text(detail)
-                        .font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(receipt.storedFrameCount) screen records / \(receipt.storedScreenshotCount) screenshots stored")
-                    if let last = receipt.lastStoredFrameAt {
-                        Text("Last screen write \(last.formatted(date: .abbreviated, time: .shortened))")
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary)
+    @ViewBuilder
+    private var currentCaptureState: some View {
+        if let receipt = model.captureHealth {
+            Label((receipt.isStale() ? "Status out of date / " : "Now / ") + receipt.stateLabel,
+                  systemImage: receipt.isStale() || receipt.blockedReason != nil ? "exclamationmark.circle" : "display")
+                .font(.caption)
+                .foregroundStyle(receipt.isStale() || receipt.blockedReason != nil ? Color.brandWarning : Color.brandFgSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Label("Capture status unavailable", systemImage: "display")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            if let date = model.refreshedAt {
-                Text("Memory refreshed \(date.formatted(date: .omitted, time: .standard))")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            HStack(spacing: 16) {
-                WorkspacePreferencesButton(title: "Capture", systemImage: "display", destination: .capture)
-                Button("Privacy", systemImage: "hand.raised", action: onOpenPrivacy)
-                    .help("Open Privacy")
-            }
-            .buttonStyle(.borderless)
+                .help(receipt.detailText() ?? "Current capture status, independent of the selected day")
+        } else {
+            Label("Capture status unavailable", systemImage: "exclamationmark.circle")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private var summary: some View {
+    private var dailyReview: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(Calendar.current.isDateInToday(model.selectedDate) ? "Today" : model.selectedDate.formatted(.dateTime.weekday(.wide).month(.wide).day()))
                 .font(.title2.weight(.semibold))
-            if model.screenshots.isEmpty {
-                Text(model.events.isEmpty ? "No visual memory is available for this day."
-                     : "\(model.events.count) memory records are available, with no saved screenshots.")
-                    .foregroundStyle(.secondary)
+            if model.review.events.isEmpty {
+                ContentUnavailableView("No saved evidence", systemImage: "calendar",
+                    description: Text("No samples are available for this day."))
             } else {
-                let apps = Set(model.screenshots.map { Formatters.appDisplayName($0.appBundleId) })
-                Text("\(model.screenshots.count) screenshots across \(apps.count) apps in \(model.episodes.count) visual episodes.")
-                    .font(.body)
-                if let first = model.screenshots.first, let last = model.screenshots.last {
-                    Text("First saved \(time(first.tsUs)) / Last saved \(time(last.tsUs))")
-                        .font(.callout).foregroundStyle(.secondary)
+                ForEach(model.review.observations) { observation in
+                    observationRow(observation)
+                    Divider()
                 }
+                Text(model.review.countLabel).font(.callout)
+                Text(DailyReview.coverageNote).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    private var appBreakdown: some View {
-        let groups = Dictionary(grouping: model.episodes, by: { $0.appBundleId ?? "" })
-        let apps = groups.keys.sorted {
-            let lhs = groups[$0, default: []].reduce(0) { $0 + $1.observedSeconds }
-            let rhs = groups[$1, default: []].reduce(0) { $0 + $1.observedSeconds }
-            return lhs == rhs ? $0 < $1 : lhs > rhs
-        }
-        return VStack(alignment: .leading, spacing: 8) {
-            Divider()
-            Text("Observed spans by app").font(.subheadline.weight(.medium))
-                .help("Observed spans join screenshots in the same app up to 10 minutes apart and include unmeasured idle time. They are not active-time measurements. Dense days may be sampled.")
-            ForEach(apps, id: \.self) { app in
-                let episodes = groups[app, default: []]
-                HStack {
-                    Text(Formatters.appDisplayName(app))
-                    Spacer()
-                    Text("\(episodes.reduce(0) { $0 + $1.events.count }) screenshots")
-                        .foregroundStyle(.secondary)
-                    Text(VisualMemoryEpisode.durationLabel(episodes.reduce(0) { $0 + $1.observedSeconds }))
-                        .monospacedDigit().frame(minWidth: 130, alignment: .trailing)
-                }
-                .font(.callout)
-            }
-        }
-        .padding(.vertical, 8)
-    }
-
-    private var visualMemory: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Divider()
-            ViewThatFits(in: .horizontal) {
-                HStack { visualMode; Spacer(); screenshotSearch }
-                VStack(alignment: .leading, spacing: 12) { visualMode; screenshotSearch }
-            }
-            if let error = model.searchError {
-                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Color.brandError)
-            } else if model.isSearching {
-                ProgressView("Searching screenshots").frame(maxWidth: .infinity).padding()
-            } else if showsEpisodes && model.query.isEmpty {
-                if model.episodes.isEmpty {
-                    emptyScreenshots
-                } else {
-                    ForEach(model.episodes.reversed()) { episode in
-                        Button {
-                            open(episode.events[0], among: episode.events)
-                        } label: {
-                            HStack(spacing: 16) {
-                                EvidenceThumbnail(url: episode.events[0].thumbnailURL,
-                                                  size: CGSize(width: 160, height: 90), maxPixelSize: 320)
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(Formatters.appDisplayName(episode.appBundleId)).font(.headline)
-                                    Text("\(time(episode.events[0].tsUs)) - \(time(episode.events[episode.events.count - 1].tsUs))")
-                                    Text("\(episode.events.count) screenshots / \(VisualMemoryEpisode.durationLabel(episode.observedSeconds))")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .font(.callout)
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        Divider()
+    private func observationRow(_ observation: DailyReview.Observation) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            if observation.kind == .lastContext, let image = model.review.visualEvidence.last {
+                Button { open(image, among: model.screenshots) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        EvidenceThumbnail(url: image.thumbnailURL, size: CGSize(width: 132, height: 82), maxPixelSize: 264)
+                            .frame(width: 132, height: 82)
+                        Text("Last image / \(time(image.tsUs))").font(.caption).foregroundStyle(.secondary)
                     }
+                    .frame(width: 132, alignment: .leading)
                 }
-            } else if model.visibleScreenshots.isEmpty {
-                if model.query.isEmpty { emptyScreenshots }
-                else { ContentUnavailableView.search(text: model.query) }
-            } else {
-                if !model.query.isEmpty {
-                    Text("Screenshots in the top 200 memory matches for this day.")
+                .buttonStyle(.plain)
+                .help("Open last saved image")
+                .accessibilityLabel("Last saved image, \(Formatters.appDisplayName(image.appBundleId)), \(time(image.tsUs))")
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(verbatim: observation.title).font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !observation.detail.isEmpty {
+                    Text(verbatim: observation.detail).font(.callout).lineLimit(2)
+                        .textSelection(.enabled)
+                }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { observationSources(observation) }
+                    VStack(alignment: .leading, spacing: 6) { observationSources(observation) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func observationSources(_ observation: DailyReview.Observation) -> some View {
+        ForEach(observation.evidence) { event in
+            Button { open(event, among: observation.evidence) } label: {
+                Label {
+                    Text("\(time(event.tsUs)) / \(Formatters.appDisplayName(event.appBundleId)) / \(MemorySourceKind.label(event.sourceKind))")
+                        .lineLimit(2)
+                } icon: { Image(systemName: "doc.text.magnifyingglass") }
+            }
+            .buttonStyle(.borderless).font(.caption)
+            .help("Open saved evidence \(event.id)")
+            .accessibilityHint("Opens the saved source with its timestamp and text")
+        }
+    }
+
+    private var visualEvidence: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Visual evidence").font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 280), spacing: 16)], spacing: 16) {
+                ForEach(model.review.visualEvidence) { event in
+                    Button { open(event, among: model.screenshots) } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            GeometryReader { geometry in
+                                EvidenceThumbnail(url: event.thumbnailURL, size: geometry.size, maxPixelSize: 560)
+                            }
+                            .aspectRatio(16 / 10, contentMode: .fit)
+                            Text(Formatters.appDisplayName(event.appBundleId)).font(.callout.weight(.medium)).lineLimit(1)
+                            Text("\(time(event.tsUs)) / \(MemorySourceKind.label(event.sourceKind))")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                        .contentShape(Rectangle())
+                        .accessibilityElement(children: .combine)
+                    }
+                    .buttonStyle(.plain).help("Open saved screenshot")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var savedDraft: some View {
+        if let brief = model.brief {
+            DisclosureGroup("Saved draft", isExpanded: $model.showsSavedDraft) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Generated \(Formatters.tsString(usSinceEpoch: brief.generatedTsUs)). This stored draft may be out of date.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    BriefEvidenceView(brief: brief, reader: reader)
+                }
+                .padding(.top, 12)
+            }
+        } else if let error = model.briefError {
+            Label(error, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var captureStatus: some View {
+        DisclosureGroup("Capture now") {
+            VStack(alignment: .leading, spacing: 8) {
+                if let receipt = model.captureHealth {
+                    Text(receipt.isStale() ? "Capture status is out of date" : receipt.stateLabel)
+                        .font(.callout)
+                    if let detail = receipt.detailText() {
+                        Text(detail).font(.callout).foregroundStyle(.secondary)
+                    }
+                    if let last = receipt.lastStoredFrameAt {
+                        Text("Last screen write \(last.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Capture status unavailable").font(.callout).foregroundStyle(.secondary)
+                }
+                if let refreshed = model.refreshedAt {
+                    Text("Review refreshed \(refreshed.formatted(date: .omitted, time: .standard))")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 360), spacing: 16)], spacing: 20) {
-                    ForEach(model.visibleScreenshots.reversed()) { event in
-                        Button { open(event, among: model.visibleScreenshots) } label: {
-                            DailyScreenshotCard(event: event)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open saved screenshot")
-                    }
+                HStack(spacing: 16) {
+                    WorkspacePreferencesButton(title: "Capture", systemImage: "display", destination: .capture)
+                    Button("Privacy", systemImage: "hand.raised", action: onOpenPrivacy)
                 }
+                .buttonStyle(.borderless)
             }
-        }
-    }
-
-    private var visualMode: some View {
-        Picker("Visual memory", selection: $showsEpisodes) {
-            Text("Screenshots").tag(false)
-            Text("Episodes").tag(true)
-        }
-        .pickerStyle(.segmented).frame(width: 220)
-    }
-
-    private var screenshotSearch: some View {
-        HStack {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search this day's screenshots", text: $model.query)
-                .textFieldStyle(.plain)
-            if !model.query.isEmpty {
-                Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).help("Clear screenshot search").accessibilityLabel("Clear screenshot search")
-            }
-        }
-        .padding(8).background(Color.brandBgSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .frame(minWidth: 240, maxWidth: 340)
-    }
-
-    private var emptyScreenshots: some View {
-        ContentUnavailableView("No saved screenshots", systemImage: "photo.on.rectangle",
-                               description: Text("No screenshot files are available for this day. Text-only records remain in Search and Timeline."))
-    }
-
-    private var dayBrief: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Divider()
-            Text("Saved daily brief").font(.headline)
-            if let brief = model.brief {
-                Text(brief.title).font(.subheadline.weight(.medium))
-                if brief.modelId == "hippocampus-extractive" {
-                    Label("Draft", systemImage: "pencil").font(.caption).foregroundStyle(.secondary)
-                }
-                BriefEvidenceView(brief: brief, reader: reader)
-                Text("Generated \(Formatters.tsString(usSinceEpoch: brief.generatedTsUs)) from \(brief.sourceEventCount) memory records. May include non-screen sources.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text(model.briefError ?? "No generated brief is saved for this day.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 12)
         }
     }
 
@@ -302,60 +257,112 @@ struct DailyMemoryView: View {
     }
 
     private func open(_ event: TimelineEvent, among events: [TimelineEvent]) {
-        selectedScreenshot = ScreenshotSelection(eventIDs: events.map(\.id), initialID: event.id)
-    }
-
-    private func exportDay(save: Bool) {
-        guard !isExporting else { return }
-        isExporting = true
-        let day = model.day
-        Task {
-            defer { isExporting = false }
-            do {
-                let packet = try await model.exportSummary()
-                guard model.day == day else { return }
-                if save {
-                    let panel = NSSavePanel()
-                    panel.nameFieldStringValue = "day-summary-\(day.dateLocal).md"
-                    panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .text]
-                    if panel.runModal() == .OK, let url = panel.url {
-                        try packet.write(to: url, atomically: true, encoding: .utf8)
-                    }
-                } else {
-                    NSPasteboard.general.clearContents()
-                    guard NSPasteboard.general.setString(packet, forType: .string) else {
-                        exportError = "The clipboard is unavailable. Try again."
-                        return
-                    }
-                    ToastNotifier.shared.notify("Day summary copied")
-                }
-            } catch { exportError = "The day context could not be exported. Try again." }
-        }
+        selectedEvidence = ScreenshotSelection(eventIDs: events.map(\.id), initialID: event.id, expectedEvents: events)
     }
 }
 
-private struct DailyScreenshotCard: View {
-    let event: TimelineEvent
+private struct DailyHandoffView: View {
+    @ObservedObject var model: DailyMemoryViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var isWorking = false
+    @State private var errorMessage: String?
+    @State private var handoffTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            GeometryReader { geometry in
-                EvidenceThumbnail(url: event.thumbnailURL, size: geometry.size, maxPixelSize: 640)
-            }
-            .aspectRatio(16 / 10, contentMode: .fit)
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text(Formatters.appDisplayName(event.appBundleId)).fontWeight(.medium).lineLimit(1)
-                Spacer(minLength: 8)
-                Text(Date(timeIntervalSince1970: Double(event.tsUs) / 1_000_000), format: .dateTime.hour().minute())
-                    .monospacedDigit()
+                Text("Daily handoff / \(model.day.dateLocal)").font(.headline)
+                Spacer()
+                Button { dismiss() } label: { Image(systemName: "xmark") }
+                    .help("Close handoff").accessibilityLabel("Close handoff")
+                    .keyboardShortcut(.cancelAction)
             }
-            .font(.callout)
-            Text(MemorySourceKind.label(event.sourceKind)).font(.caption).foregroundStyle(.secondary)
-            Text(event.snippet)
-                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                .frame(height: 32, alignment: .topLeading)
+            Text("Review before sharing. Source observations are not verified facts.")
+                .font(.callout).foregroundStyle(.secondary)
+            Divider()
+            ScrollView {
+                if let preview = model.handoffPreview {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(HandoffPreview.blocks(preview)) { block in
+                            Text(block.text)
+                                .font(block.isHeading ? .headline : .callout)
+                                .textSelection(.enabled)
+                                .accessibilityAddTraits(block.isHeading ? .isHeader : [])
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .environment(\.openURL, OpenURLAction { _ in .discarded })
+                } else if isWorking {
+                    ProgressView("Rechecking saved evidence").frame(maxWidth: .infinity).padding(40)
+                } else {
+                    ContentUnavailableView("No current handoff", systemImage: "doc.text")
+                }
+            }
+            if let errorMessage {
+                Text(errorMessage).font(.callout).foregroundStyle(Color.brandWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
+            HStack(spacing: 16) {
+                Button("Refresh preview", systemImage: "arrow.clockwise") { prepare() }
+                    .disabled(isWorking)
+                if isWorking { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Copy", systemImage: "doc.on.clipboard") { export(save: false) }
+                    .disabled(isWorking || model.handoffPreview == nil)
+                Button("Export", systemImage: "square.and.arrow.up") { export(save: true) }
+                    .disabled(isWorking || model.handoffPreview == nil)
+            }
         }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        .padding(24)
+        .frame(minWidth: 560, idealWidth: 700, minHeight: 400, idealHeight: 600)
+        .task { prepare() }
+        .onDisappear { handoffTask?.cancel() }
+    }
+
+    private func prepare() {
+        guard !isWorking else { return }
+        isWorking = true
+        errorMessage = nil
+        handoffTask = Task {
+            defer { isWorking = false }
+            do { try await model.prepareHandoff() }
+            catch { errorMessage = "The saved evidence could not be read. Refresh to try again." }
+        }
+    }
+
+    private func export(save: Bool) {
+        guard !isWorking else { return }
+        isWorking = true
+        errorMessage = nil
+        handoffTask = Task {
+            defer { isWorking = false }
+            do {
+                var destination: URL?
+                if save {
+                    let panel = NSSavePanel()
+                    panel.nameFieldStringValue = "daily-handoff-\(model.day.dateLocal).md"
+                    panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .text]
+                    guard await panel.begin() == .OK, let url = panel.url else { return }
+                    destination = url
+                }
+                let packet = try await model.validatedHandoff()
+                if let destination {
+                    try packet.write(to: destination, atomically: true, encoding: .utf8)
+                    ToastNotifier.shared.notify("Daily handoff exported")
+                } else {
+                    NSPasteboard.general.clearContents()
+                    guard NSPasteboard.general.setString(packet, forType: .string) else {
+                        errorMessage = "The clipboard is unavailable. Try again."
+                        return
+                    }
+                    ToastNotifier.shared.notify("Daily handoff copied")
+                }
+            } catch let error as DailyHandoffError {
+                errorMessage = error.localizedDescription
+            } catch {
+                errorMessage = "The handoff could not be exported. Refresh the preview and try again."
+            }
+        }
     }
 }

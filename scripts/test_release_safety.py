@@ -203,6 +203,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("scripts/swift-package.sh test --package-path apps/recall-ui", runs)
         self.assertNotIn("swift test --package-path apps/recall-ui", runs)
 
+    def test_screen_proof_contract_is_complete_and_mandatory(self):
+        steps = self.workflows["release-contract"]["jobs"]["contracts"]["steps"]
+        gates = [step for step in steps if step.get("id") == "screen-proof-contract"]
+        self.assertEqual(len(gates), 1)
+        gate = gates[0]
+        self.assertEqual(shlex.split(gate["run"]), ["bash", "scripts/live-capture/test-screen-proof.sh"])
+        self.assertNotIn("if", gate)
+        self.assertFalse(gate.get("continue-on-error", False))
+
     def test_contract_fixtures_use_the_same_swift_capable_runner_as_onboarding(self):
         contracts = self.workflows["release-contract"]["jobs"]["contracts"]
         onboarding = self.workflows["swift"]["jobs"]["onboarding"]

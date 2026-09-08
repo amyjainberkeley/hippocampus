@@ -166,12 +166,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private let keyCustodyPreparer: any KeyCustodyPreparing
     private let captureConsentAuthority: any CaptureConsentControlling
     private let readinessTimeout: TimeInterval
+    private let recoveryNow: @MainActor @Sendable () -> ContinuousClock.Instant
+    private let retrySleep: @MainActor @Sendable (TimeInterval) async throws -> Void
+    private let captureStatusReader: @MainActor @Sendable () -> (HealthSnapshot?, CaptureStatusReceipt?)
     private let logger = Logger(subsystem: "ai.hippocampus", category: "supervisor")
     private var retryTask: Task<Void, Never>?
     private var healthTimer: Timer?
     private var safariInboxReader: SafariInboxReader?
     private var currentKeyReference: KeychainKeyReference = .defaultDatabaseKey
     private var retryCount = 0
+    private var readyRun: (generationID: String, since: ContinuousClock.Instant)?
     private var transitionGate = SupervisorTransitionGate()
     private var pendingRetryGenerationID: String?
     private var currentGenerationID: String?
@@ -191,6 +195,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
+    private static let stableRunDuration: Duration = .seconds(5 * 60)
 
     public convenience init(
         locator: BinaryLocator,
@@ -218,7 +223,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         keyCustodyPreparer: any KeyCustodyPreparing,
         captureConsentAuthority: any CaptureConsentControlling = NoopCaptureConsentAuthority(),
         readinessTimeout: TimeInterval,
-        developmentKeyMode: DevelopmentFileKeyMode? = nil
+        developmentKeyMode: DevelopmentFileKeyMode? = nil,
+        recoveryNow: @escaping @MainActor @Sendable () -> ContinuousClock.Instant = { ContinuousClock().now },
+        retrySleep: @escaping @MainActor @Sendable (TimeInterval) async throws -> Void = {
+            try await Task.sleep(for: .seconds($0))
+        },
+        captureStatusReader: @escaping @MainActor @Sendable () -> (HealthSnapshot?, CaptureStatusReceipt?) = {
+            (HealthSnapshot.readFromLog(), CaptureStatusReceipt.read())
+        }
     ) {
         self.locator = locator
         self.keyStore = developmentKeyMode.map { FileKeyStore(path: $0.keyURL) } ?? keyStore
@@ -228,6 +240,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.keyCustodyPreparer = keyCustodyPreparer
         self.captureConsentAuthority = captureConsentAuthority
         self.readinessTimeout = readinessTimeout
+        self.recoveryNow = recoveryNow
+        self.retrySleep = retrySleep
+        self.captureStatusReader = captureStatusReader
         self.captureEnabled = runtimeConfig.captureEnabled
     }
 
@@ -280,7 +295,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             ) else {
                 throw SupervisorError.transitionInProgress
             }
-            activateTopology(captureEnabled: runtimeConfig.captureEnabled)
+            activateTopology(captureEnabled: runtimeConfig.captureEnabled, generationID: generationID)
         } catch {
             stopAncillaryServices()
             if topology.isRunning && !captureStopLatched {
@@ -438,7 +453,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             ) else {
                 throw SupervisorError.transitionInProgress
             }
-            activateTopology(captureEnabled: captureEnabled)
+            activateTopology(captureEnabled: captureEnabled, generationID: generationID)
         } catch {
             if transitionGate.ownsTransition(transitionID) {
                 transitionGate.fail(transitionID: transitionID)
@@ -497,7 +512,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             }
             captureEnabled = enabled
             captureStopLatched = false
-            activateTopology(captureEnabled: enabled)
+            activateTopology(captureEnabled: enabled, generationID: generationID)
         } catch {
             let requestedError = error
             guard transitionGate.ownsTransition(transitionID) else {
@@ -526,7 +541,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     throw SupervisorError.transitionInProgress
                 }
                 captureEnabled = prior
-                activateTopology(captureEnabled: prior)
+                activateTopology(captureEnabled: prior, generationID: rollbackGenerationID)
             } catch {
                 if transitionGate.ownsTransition(transitionID) {
                     transitionGate.fail(transitionID: transitionID)
@@ -677,7 +692,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         return task
     }
 
-    private func activateTopology(captureEnabled: Bool) {
+    private func activateTopology(captureEnabled: Bool, generationID: String) {
+        // All callers have verified child readiness and committed this generation.
+        readyRun = (generationID, recoveryNow())
         self.captureEnabled = captureEnabled
         state = .running
         startHealthPolling()
@@ -766,9 +783,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
               pendingRetryGenerationID == nil,
               transitionGate.acceptsUnexpectedExit(generationID: generationID)
         else { return }
+        let exitedRun = readyRun
+        let exitedAt = recoveryNow()
         stopAncillaryServices()
         state = .crashed(reason: "\(label) exited (\(status))")
         guard tccRevokedSurface == nil else { return }
+        // Replenish only for the exiting ready generation. Backoff, startup,
+        // pauses and retired-child callbacks cannot earn a fresh budget.
+        if let exitedRun, exitedRun.generationID == generationID,
+           exitedRun.since.duration(to: exitedAt) >= Self.stableRunDuration {
+            retryCount = 0
+        }
         pendingRetryGenerationID = generationID
         scheduleRetry(expectedGenerationID: generationID)
     }
@@ -811,7 +836,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             while self.retryCount < Self.maxRetries {
                 self.retryCount += 1
                 let delay = min(pow(2.0, Double(self.retryCount - 1)), Self.maxBackoff)
-                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                do { try await self.retrySleep(delay) } catch { return }
                 guard !Task.isCancelled,
                       self.pendingRetryGenerationID == expectedGenerationID,
                       !self.captureStopLatched, !self.requestedPauseState,
@@ -828,6 +853,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     self.logger.error("supervisor: retry failed: \(error.localizedDescription)")
                 }
             }
+            guard !Task.isCancelled,
+                  self.pendingRetryGenerationID == expectedGenerationID,
+                  !self.captureStopLatched, !self.requestedPauseState,
+                  !self.shutdownRequested, self.tccRevokedSurface == nil,
+                  case .crashed(let reason) = self.state else { return }
+            self.state = .crashed(reason:
+                "Automatic recovery stopped after \(Self.maxRetries) restart attempts without a stable run. "
+                + "Restart Hippocampus to try again. Last error: \(reason)"
+            )
         }
     }
 
@@ -854,7 +888,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             guard transitionGate.commit(generationID: generationID, transitionID: transitionID) else {
                 throw SupervisorError.transitionInProgress
             }
-            activateTopology(captureEnabled: runtimeConfig.captureEnabled)
+            activateTopology(captureEnabled: runtimeConfig.captureEnabled, generationID: generationID)
         } catch {
             if transitionGate.ownsTransition(transitionID) {
                 transitionGate.fail(transitionID: transitionID)
@@ -889,11 +923,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func refreshCaptureStatus() {
-        health = HealthSnapshot.readFromLog()
-        captureReceipt = CaptureStatusReceipt.read()
+        (health, captureReceipt) = captureStatusReader()
     }
 
     private func stopAncillaryServices(revokeCaptureConsent: Bool = true) {
+        readyRun = nil
         if revokeCaptureConsent {
             do {
                 try captureConsentAuthority.disable()

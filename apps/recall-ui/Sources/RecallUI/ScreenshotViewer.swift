@@ -5,7 +5,14 @@ import SwiftUI
 struct ScreenshotSelection: Identifiable {
     let eventIDs: [UInt64]
     let initialID: UInt64
+    let expectedEvents: [TimelineEvent]
     var id: UInt64 { initialID }
+
+    init(eventIDs: [UInt64], initialID: UInt64, expectedEvents: [TimelineEvent] = []) {
+        self.eventIDs = eventIDs
+        self.initialID = initialID
+        self.expectedEvents = expectedEvents
+    }
 }
 
 struct ScreenshotViewer: View {
@@ -123,10 +130,14 @@ struct ScreenshotViewer: View {
             defer { if loadGeneration == request { isLoading = false } }
             guard let eventID else { errorMessage = "No screenshot selected."; return }
             do {
-                let current = try await reader.fetchEventsByIds([eventID]).first
+                let current = try await reader.fetchEventsByIds([eventID]).first { $0.id == eventID }
                 guard !Task.isCancelled, loadGeneration == request, eventID == self.eventID else { return }
                 guard let current, current.id == eventID else {
                     errorMessage = "This event is no longer in memory."
+                    return
+                }
+                if let expected = selection.expectedEvents.first(where: { $0.id == eventID }), !expected.matches(current) {
+                    errorMessage = "The selected evidence is no longer available. Refresh the daily review."
                     return
                 }
                 hit = current

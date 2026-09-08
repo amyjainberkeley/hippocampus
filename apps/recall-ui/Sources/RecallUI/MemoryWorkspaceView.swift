@@ -7,7 +7,6 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
     case search
     case timeline
     case episodes
-    case briefs
     case sources
     case privacy
     case settings
@@ -15,8 +14,8 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     init(initialTab: RecallTab) {
-        switch initialTab {
-        case .now:
+        switch initialTab.workspaceTab {
+        case .now, .brief:
             self = .now
         case .search:
             self = .search
@@ -24,8 +23,6 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
             self = .timeline
         case .episodes:
             self = .episodes
-        case .brief:
-            self = .briefs
         case .privacy, .privacyDashboard:
             self = .privacy
         case .settings:
@@ -60,6 +57,7 @@ struct MemoryWorkspaceView: View {
     @Binding var selection: MemoryWorkspaceSelection
     var searchFocusTrigger: Bool
     var focusRequest: RecallFocusRequest? = nil
+    var latestBriefRequest: UUID? = nil
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @Environment(\.scenePhase) private var scenePhase
@@ -104,14 +102,13 @@ struct MemoryWorkspaceView: View {
         .background(.regularMaterial)
     }
 
-    // Now: overview; Search: query-only; Timeline: chronological evidence;
-    // Episodes: grouped evidence; Briefs: daily overview. Each owns its content.
+    // Daily review, query results, chronological history, and grouped sessions.
     @ViewBuilder
     private var workspaceDetail: some View {
         Group {
             switch selection {
             case .now:
-                DailyMemoryView(reader: reader, onOpenPrivacy: { selection = .privacy })
+                DailyMemoryView(reader: reader, onOpenPrivacy: { selection = .privacy }, latestBriefRequest: latestBriefRequest)
             case .search:
                 SearchView(
                     viewModel: SearchViewModel(reader: reader),
@@ -123,14 +120,6 @@ struct MemoryWorkspaceView: View {
                 TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
             case .episodes:
                 EpisodesView(viewModel: EpisodesViewModel(reader: reader), reader: reader)
-            case .briefs:
-                BriefView(
-                    viewModel: BriefViewModel(
-                        reader: reader,
-                        captureCoverage: .unknown
-                    ),
-                    reader: reader
-                )
             case .sources:
                 SourcesWorkspaceView(reader: reader)
             case .privacy:
@@ -146,7 +135,7 @@ struct MemoryWorkspaceView: View {
 }
 
 private extension MemoryWorkspaceSelection {
-    static let primary: [MemoryWorkspaceSelection] = [.now, .search, .timeline, .episodes, .briefs]
+    static let primary: [MemoryWorkspaceSelection] = [.now, .search, .timeline, .episodes]
     static let secondary: [MemoryWorkspaceSelection] = [.sources, .privacy, .settings]
 }
 

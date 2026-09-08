@@ -2,13 +2,41 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `4f5c75a`
+Audited code baseline: `c8e5d61`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 7 Daily Review Delivery
+
+The [daily review checkpoint](audits/2026-09-07-daily-review-delivery.md)
+adds distinct Daily Review, Search, History and Sessions destinations; cited
+observations of last context, app returns and available-sample gaps; and a
+readable, revalidated daily handoff. These are observations, not semantic
+truth, measured activity or task completion. Optimized Recall verification
+passes 497 XCTest and three Swift Testing cases. Native synthetic UI checks
+exercise navigation, text search, image inspection and file export. Intermittent
+AttributeGraph warnings remain a recorded UI reliability limitation.
+
+Website source now presents the literal purpose, an actual synthetic-data
+Daily Review image and short practical links. Production build, TypeScript,
+scoped lint and six rendered-page contracts pass. Installation and website
+publication are recorded separately below; source tests alone do not update
+the owner's running app or the deployed site.
+
+Live triage found a stopped helper/writer despite the surviving parent: ten
+retries were consumed across the app's entire lifetime, including long recovered
+runs. The recovery correction replenishes the bounded retry budget after five
+minutes of a ready, committed generation and makes exhaustion explicit. The
+optimized parent suite passes 334 tests, including the new recovery scenarios.
+The release contract passes 224 assertions and sixteen release-safety tests.
+The underlying repeated stream-stop cause is not identified. The new
+screen-proof receipt distinguishes actual system foreground identity from
+background UI control; the automated attempt did not generate a phrase and
+cannot close Gate 1. All privacy, recovery and fresh-agent gates remain open.
 
 ## September 7 Product Clarity Checkpoint
 
