@@ -78,8 +78,18 @@ The writer and Recall retain the existing encrypted database. Eight newer
 screen-origin events reached this session's MCP reader after installation.
 Their content and images are not published. They are not the random screen-only
 challenge and therefore do not close Gate 1. The UI-control tool could not
-inspect the installed window. No newly classified stream failure was observed
-in this short interval; that does not identify or resolve the prior cause.
+inspect the installed window.
+
+A later final runtime check observed `stream_delegate`, `SCStreamErrorDomain`,
+code `-3815`. The installed SDK maps this to `SCStreamErrorNoCaptureSource`;
+[Apple documents it](https://developer.apple.com/documentation/screencapturekit/scstreamerror/code/nocapturesource)
+as a stream without a capture source. The supervisor replaced the helper and
+writer at 23:14:58 local time. The replacement had matching capture-enabled
+readiness and received a first stream callback. The stored-frame timestamp at
+the subsequent receipt read was still 23:14:34, before replacement; current
+suppression was `failsafe-unknown`. This proves neither resumed storage nor
+the reason the source disappeared. No capture policy was relaxed. The error
+classification narrows the investigation without closing the recovery gate.
 
 Final review identified a test-only temporary-file permission gap. Stderr
 capture now uses atomic exclusive creation, rejects symlinks, explicitly sets
