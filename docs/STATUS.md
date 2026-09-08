@@ -42,6 +42,14 @@ screenshots to 921/452. These are ingestion observations, not phrase/image
 identity or restart-readback proof. The UI-control tool still times out on the
 installed window; no visual qualification or permission reset was inferred.
 
+A later check captured a real `stream_delegate` failure with
+`SCStreamErrorDomain` code `-3815`, mapped by the installed SDK to no capture
+source. The supervisor replaced the helper and writer and the new stream
+received a callback. The latest stored-frame timestamp still preceded that
+replacement, with `failsafe-unknown` suppression at the final receipt read.
+Process recovery is observed; resumed storage and why the source disappeared
+remain unproven. See the capture/readability audit for the exact distinction.
+
 The final review also corrected test-only stderr temporary files: atomic,
 exclusive, no-follow creation with mode 0600, including descriptor cleanup.
 A permissive-umask regression failed before the fix; all thirteen diagnostic
