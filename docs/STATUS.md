@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `1c2af8f`
+Audited code baseline: `fe90a3d`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -15,14 +15,44 @@ more than this page.
 The [capture/readability checkpoint](audits/2026-09-07-capture-readability.md)
 adds post-privacy OCR duplicate removal, a bounded hydrated latest-context
 preview, and content-free stream-failure diagnostics. Local optimized tests
-pass 758 capture cases and 510 Recall XCTest plus three Swift Testing cases.
+pass 759 capture cases and 510 Recall XCTest plus three Swift Testing cases.
 The release contract passes 224 assertions and sixteen release-safety tests.
 No OCR deadline, recognition level, source exclusion or permission is relaxed.
 
-At this source checkpoint the installed app remains `0bb07eb`; replacement
-assembly, notarization and live qualification are not implied by those tests.
+**Current installed app: `fe90a3d`**, at `/Applications/Hippocampus.app`.
+The signed app and private installer are notarized and stapled. Strict signing,
+Gatekeeper, post-copy provenance and the disposable-home launch check pass.
+The prior `0bb07eb` installation is preserved at
+`/Users/amy/hippo-work/releases/backups/Hippocampus-0bb07eb-live-before-fe90a3d.app`.
+No memory, key, capture policy or macOS permission was reset.
+
+Private installer: `/Users/amy/hippo-work/releases/2026-09-07-fe90a3d/Hippocampus-0.1.0.dmg`.
+SHA-256: `ea6323a5d7843adc7ff32f7db544e8e7b6bc0f11f55ed8d3ec4386c2c878b9a4`.
+Product-source digest:
+`ae87a41bc552b754db2d57a11ae8c107fe9c7b564fa4dcadcbf174ed4d484521`.
+Apple accepted app `ec84f22e-9ff1-418b-b761-d02702e3f4b6` and installer
+`85315571-956f-4aed-b356-e23203b03707`.
+
+The new parent, helper, writer and Recall use installed executable mappings.
+The helper's capture-enabled readiness generation matches its arguments;
+helper output and writer input are connected, and writer/Recall use the same
+existing database inode. Eight newer screen-origin events are visible to this
+Codex MCP client after installation. The receipt advanced from 913 frames/450
+screenshots to 921/452. These are ingestion observations, not phrase/image
+identity or restart-readback proof. The UI-control tool still times out on the
+installed window; no visual qualification or permission reset was inferred.
+
+The final review also corrected test-only stderr temporary files: atomic,
+exclusive, no-follow creation with mode 0600, including descriptor cleanup.
+A permissive-umask regression failed before the fix; all thirteen diagnostic
+tests and the full 759-case capture suite then passed. This test-only follow-up
+is not a new installed executable revision.
+
 The previous hosted release-contract run has now completed successfully at
-`0bb07eb`. Its capture job remains failing. The full runner log identifies an
+`0bb07eb`. At `fe90a3d`, hosted Recall, parent, onboarding, installer smoke,
+Rust tests/format/Clippy and advisory checks pass; capture has 62 assertion
+failures across 758 tests, all in OCR completeness. The new release-contract
+run remains in progress at this checkpoint. The full runner log identifies an
 arm64 `VirtualMac2,1` with CPU/GPU but no advertised Neural Engine, not an Intel
 Mac. Accurate recognition alone exceeds the one-second budget on that runner.
 Changing compute-device selection did not reliably resolve it. Local passing
@@ -36,7 +66,7 @@ release, domain launch and the remaining product gates remain separate.
 
 ## September 7 Daily Review Delivery
 
-**Current installed application: `0bb07eb`**, at `/Applications/Hippocampus.app`.
+**Installed at this earlier checkpoint: `0bb07eb`**, at `/Applications/Hippocampus.app`.
 The source checkpoint is published on `codex/hippocampus-v1` in the canonical
 GitHub repository; PR25 remains draft. Strict nested signing, notarization,
 stapled ticket, Gatekeeper and post-copy source/digest checks pass. The previous

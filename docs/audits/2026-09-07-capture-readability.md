@@ -70,6 +70,30 @@ minimal build/test environments and prohibit credential-bearing diagnostics.
 - Fresh screen/image/restart/client proof, complete privacy recovery,
   overnight reliability and second-Mac qualification remain open.
 
+## Installed Checkpoint And Test Hygiene
+
+Source `fe90a3d` is installed as the signed, notarized app. The private DMG is
+also notarized; exact identities and the rollback location are in STATUS.
+The writer and Recall retain the existing encrypted database. Eight newer
+screen-origin events reached this session's MCP reader after installation.
+Their content and images are not published. They are not the random screen-only
+challenge and therefore do not close Gate 1. The UI-control tool could not
+inspect the installed window. No newly classified stream failure was observed
+in this short interval; that does not identify or resolve the prior cause.
+
+Final review identified a test-only temporary-file permission gap. Stderr
+capture now uses atomic exclusive creation, rejects symlinks, explicitly sets
+0600 and cleans up descriptors on failure. The umask-zero regression failed
+before the correction; thirteen focused tests and the full 759-test local
+capture suite pass afterward. These test-only edits do not change the packaged
+`fe90a3d` executables. An outgoing-source secret scan found no credentials.
+
+Hosted `fe90a3d` passes Recall, parent, onboarding, installer smoke, Rust and
+advisory checks. The OCR-completeness suite still produces 62 assertion
+failures across 758 capture tests. The newly added real-Vision compaction
+fixture also requires completion within the unchanged production deadline.
+The release-contract run remains in progress at this checkpoint.
+
 Use [STATUS](../STATUS.md) for installed source and distribution state. This
 checkpoint changes neither website deployment nor its audience. No user data,
 private diagnostic log, credential, permission reset or public DMG is included
