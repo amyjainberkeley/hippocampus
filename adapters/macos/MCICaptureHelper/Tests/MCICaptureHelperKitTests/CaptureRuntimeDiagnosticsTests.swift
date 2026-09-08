@@ -4,6 +4,17 @@ import XCTest
 @testable import MCICaptureHelperKit
 
 final class CaptureRuntimeDiagnosticsTests: XCTestCase {
+    func testDiagnosticCaptureIsPrivateEvenWithPermissiveUmask() throws {
+        let priorMask = umask(0)
+        defer { umask(priorMask) }
+        let permissions = try {
+            let capture = try StandardErrorCapture()
+            defer { capture.close() }
+            return try capture.permissions()
+        }()
+        XCTAssertEqual(permissions, 0o600)
+    }
+
     func testUserStopEmitsOnlyBoundedDiagnosticsOnce() throws {
         let recorder = FailureRecorder()
         let session = makeSession(recorder: recorder)
@@ -296,16 +307,28 @@ private final class StandardErrorCapture {
 
     init() throws {
         url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        file = try FileHandle(forWritingTo: url)
-        saved = dup(STDERR_FILENO)
-        guard saved >= 0, dup2(file.fileDescriptor, STDERR_FILENO) >= 0 else {
-            throw POSIXError(.EBADF)
+        let descriptor = Darwin.open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let original = dup(STDERR_FILENO)
+        guard original >= 0, dup2(descriptor, STDERR_FILENO) >= 0 else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+            if original >= 0 { Darwin.close(original) }
+            Darwin.close(descriptor)
+            try? FileManager.default.removeItem(at: url)
+            throw POSIXError(code)
         }
+        file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        saved = original
     }
 
     func read() throws -> String {
         String(decoding: try Data(contentsOf: url), as: UTF8.self)
+    }
+
+    func permissions() throws -> mode_t {
+        var metadata = stat()
+        guard fstat(file.fileDescriptor, &metadata) == 0 else { throw POSIXError(.EBADF) }
+        return metadata.st_mode & 0o777
     }
 
     func close() {
