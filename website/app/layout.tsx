@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowDownToLine, ChevronDown } from 'lucide-react';
+import { ArrowDownToLine } from 'lucide-react';
+import { MobileNavigation } from '@/components/mobile-navigation';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 
@@ -36,7 +37,7 @@ export default function RootLayout({
         <header className="site-header">
           <Link className="wordmark" href="/" aria-label="Hippocampus home"><Image src="/icon.png" alt="" width={34} height={34} unoptimized />Hippocampus</Link>
           <nav className="desktop-nav" aria-label="Main navigation"><Link href="/setup">Setup</Link><Link href="/privacy">Privacy</Link><Link className="nav-download" href="/download">Mac early access <ArrowDownToLine size={15} /></Link></nav>
-          <details className="mobile-nav"><summary>Menu <ChevronDown size={16} /></summary><nav aria-label="Mobile navigation"><Link href="/setup">Setup</Link><Link href="/privacy">Privacy</Link><Link href="/download">Mac early access</Link></nav></details>
+          <MobileNavigation />
         </header>
         {children}
         <footer className="site-footer content-width"><Link href="/">Hippocampus</Link><div><Link href="/download">Release status</Link><Link href="/privacy">Privacy</Link><a href="https://github.com/amyjainberkeley/hippocampus/tree/codex/hippocampus-v1">GitHub</a></div><span className="fine">Local-first personal memory.</span></footer>

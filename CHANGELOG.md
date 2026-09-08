@@ -5,6 +5,19 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### Daily review and handoff
+
+- Open to a day-scoped review instead of another history feed. Search, History,
+  and Sessions retain distinct destinations; existing Brief links remain usable.
+- Inspect the last saved context, observed returns to an app, and gaps between
+  available screen samples. Every observation links to its evidence. These are
+  saved observations, not measured work time or claims that a task is complete.
+- Keep current capture health and the daily handoff within reach at the top.
+  Preview bounded source excerpts before copying or exporting, and recheck the
+  source text and identity before anything is shared.
+- Simplify the website around the actual Mac app, local memory, and selected
+  context sharing. Keep installation, privacy and source details one click away.
+
 ### Everyday recall
 
 - Start human search in Text mode. Related context is a separate choice; raw
@@ -48,6 +61,10 @@ commits are intentionally omitted from release notes.
 
 ### Capture reliability
 
+- Replenish automatic recovery after five minutes of a ready, committed capture
+  run instead of exhausting ten retries across an entire day. Keep rapid-crash
+  backoff bounded, preserve stop/pause/revocation guards, and report exhaustion
+  explicitly in the menu-bar error state.
 - Distinguish absent optional Accessibility labels from failed reads when
   checking ordinary text views. Keep real keyword-probe errors and secure-field
   detections blocking capture.

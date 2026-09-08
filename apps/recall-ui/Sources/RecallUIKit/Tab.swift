@@ -11,6 +11,7 @@
 import Foundation
 
 public enum RecallTab: Int, Hashable, Sendable {
+    public static let defaultTab: RecallTab = .now
     case now = 0
     case search = 1
     case timeline = 2
@@ -38,12 +39,12 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// Pinned by `BriefDeepLinkRoutingTests`.
     public static func from(deepLinkValue: String) -> RecallTab? {
         switch deepLinkValue.lowercased() {
-        case "now":      return .now
+        case "now", "daily": return .now
         case "search":   return .search
-        case "timeline": return .timeline
-        case "episodes": return .episodes
+        case "timeline", "history": return .timeline
+        case "episodes", "sessions": return .episodes
         case "privacy":  return .privacy
-        case "brief":    return .brief
+        case "brief", "briefs": return .brief
         case "settings": return .settings
         case "dashboard", "privacy-dashboard": return .privacyDashboard
         case "timeline-strip", "strip": return .timelineStrip
@@ -55,6 +56,15 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// its initial tab. Hippocampus.app sets this when it handles a
     /// `hippocampus://recall?tab=…` URL.
     public static let initialTabEnvVar = "MCI_INITIAL_TAB"
+
+    public var workspaceTab: RecallTab {
+        switch self {
+        case .brief: return .now
+        case .timelineStrip: return .timeline
+        case .privacyDashboard: return .privacy
+        default: return self
+        }
+    }
 }
 
 /// One launch/deep-link request for the Recall process. Keeping the parsing in
@@ -73,6 +83,16 @@ public struct RecallLaunchRequest: Equatable, Sendable {
     public let tab: RecallTab?
     public let focusEventId: UInt64?
     public let openPopup: Bool
+
+    /// Running workspaces change only for an explicit destination or focused event.
+    public var navigationTab: RecallTab? {
+        focusEventId == nil ? tab : .search
+    }
+
+    public var initialTab: RecallTab {
+        if focusEventId != nil { return .search }
+        return tab ?? (openPopup ? .search : RecallTab.defaultTab)
+    }
 
     public init(tab: RecallTab?, focusEventId: UInt64?, openPopup: Bool) {
         self.tab = tab

@@ -355,8 +355,8 @@ public extension MCI {
         public static let primaryDestinations: [Destination] = [
             .init(
                 id: "now",
-                title: "Now",
-                systemImage: "sparkle.magnifyingglass",
+                title: "Daily Review",
+                systemImage: "calendar",
                 requiresSourceAccess: false,
                 keyboardShortcut: "1"
             ),
@@ -369,24 +369,17 @@ public extension MCI {
             ),
             .init(
                 id: "timeline",
-                title: "Timeline",
+                title: "History",
                 systemImage: "clock",
                 requiresSourceAccess: true,
                 keyboardShortcut: "3"
             ),
             .init(
                 id: "episodes",
-                title: "Episodes",
+                title: "Sessions",
                 systemImage: "rectangle.stack",
                 requiresSourceAccess: true,
                 keyboardShortcut: "4"
-            ),
-            .init(
-                id: "briefs",
-                title: "Briefs",
-                systemImage: "doc.text",
-                requiresSourceAccess: true,
-                keyboardShortcut: "5"
             ),
         ]
 
@@ -417,7 +410,8 @@ public extension MCI {
         public static let allDestinations = primaryDestinations + secondaryDestinations
 
         public static func destination(forKeyboardShortcut shortcut: String) -> Destination? {
-            allDestinations.first { $0.keyboardShortcut == shortcut }
+            if shortcut == "5" { return primaryDestinations.first }
+            return allDestinations.first { $0.keyboardShortcut == shortcut }
         }
 
         public static func historicalEventMetric(for summary: SummaryStats) -> HistoricalMetric {

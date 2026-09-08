@@ -2,19 +2,46 @@ import AppKit
 import CryptoKit
 import Security
 
+@MainActor
+final class ScreenProofTextView: NSTextView {
+    // Retain native editable-text focus/AX behavior without letting input
+    // alter the visible phrase after its hash has been committed.
+    override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        false
+    }
+
+    override func shouldChangeText(inRanges affectedRanges: [NSValue], replacementStrings: [String]?) -> Bool {
+        false
+    }
+}
+
+@MainActor
+final class ScreenProofControls {
+    let textView = ScreenProofTextView(frame: NSRect(x: 24, y: 104, width: 732, height: 190))
+    let generateButton = NSButton(title: "Generate once", target: nil, action: nil)
+    let exposureLabel = NSTextField(labelWithString: "")
+
+    init() {
+        textView.setAccessibilityIdentifier("screen-proof.phrase")
+        generateButton.setAccessibilityIdentifier("screen-proof.generate")
+        exposureLabel.setAccessibilityIdentifier("screen-proof.exposure")
+    }
+}
+
 // Standalone qualification fixture. It never opens the brain, reads keys,
 // writes a document, or prints the phrase. Its only output is a hash receipt.
 @MainActor
 final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
-    private var textView: NSTextView!
+    private let controls = ScreenProofControls()
+    private var textView: NSTextView { controls.textView }
     private var generated = false
     private var exposure = ScreenProofExposure()
-    private var exposureLabel: NSTextField!
+    private var exposureLabel: NSTextField { controls.exposureLabel }
     private var exposureTimer: Timer?
-    private var phraseHash = ""
-    private var lastExposureBucket = -1
-    private var lastExposureEligible: Bool?
+    private var phraseHash: String?
+    private var observationBudget: ScreenProofObservationBudget!
+    private var didEmitReady = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -24,6 +51,7 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
             backing: .buffered, defer: false
         )
         window.title = "Hippocampus Screen Proof"
+        window.setAccessibilityIdentifier("screen-proof.window")
         window.delegate = self
         window.isRestorable = false
         window.isReleasedWhenClosed = false
@@ -38,7 +66,6 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
         heading.frame = NSRect(x: 28, y: 318, width: 720, height: 32)
         root.addSubview(heading)
 
-        textView = NSTextView(frame: NSRect(x: 24, y: 104, width: 732, height: 190))
         textView.font = .monospacedSystemFont(ofSize: 24, weight: .regular)
         textView.textColor = .black
         textView.backgroundColor = .white
@@ -49,11 +76,12 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
         textView.string = "Generate a phrase when this window is visible."
         root.addSubview(textView)
 
-        let button = NSButton(title: "Generate once", target: self, action: #selector(generate(_:)))
+        let button = controls.generateButton
+        button.target = self
+        button.action = #selector(generate(_:))
         button.bezelStyle = .rounded
         button.frame = NSRect(x: 28, y: 40, width: 150, height: 36)
         root.addSubview(button)
-        exposureLabel = NSTextField(labelWithString: "")
         exposureLabel.font = .systemFont(ofSize: 13)
         exposureLabel.textColor = .darkGray
         exposureLabel.frame = NSRect(x: 205, y: 44, width: 535, height: 26)
@@ -61,6 +89,8 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        observationBudget = ScreenProofObservationBudget(startedAt: ProcessInfo.processInfo.systemUptime)
+        sampleExposure()
         exposureTimer = Timer.scheduledTimer(
             timeInterval: 1, target: self, selector: #selector(sampleExposure),
             userInfo: nil, repeats: true
@@ -68,7 +98,10 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     @objc private func generate(_ sender: NSButton) {
-        guard !generated, window.isKeyWindow, NSApp.isActive else { return }
+        guard !generated, window.isKeyWindow, NSApp.isActive,
+              observationBudget.permitsGeneration(at: ProcessInfo.processInfo.systemUptime),
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        else { return }
         let vocabulary = [
             "amber", "birch", "cedar", "coral", "delta", "ember", "fern", "fjord",
             "garden", "harbor", "indigo", "jade", "kettle", "lantern", "maple", "meadow",
@@ -91,47 +124,62 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
         generated = true
         sender.isEnabled = false
         phraseHash = SHA256.hash(data: Data(phrase.utf8)).map { String(format: "%02x", $0) }.joined()
-        let receipt: [String: Any] = [
-            "schema_version": 1,
-            "record_type": "phrase_generated",
-            "phrase_sha256": phraseHash,
-            "generated_at_us": UInt64(Date().timeIntervalSince1970 * 1_000_000),
-            "window_was_key": window.isKeyWindow,
-            "app_was_active": NSApp.isActive,
-        ]
-        writeReceipt(receipt)
-        sampleExposure()
+        let foreground = observeForeground()
+        exposure.sample(at: ProcessInfo.processInfo.systemUptime, eligible: foreground.eligible)
+        writeReceipt(kind: .phraseGenerated, foreground: foreground)
     }
 
     @objc private func sampleExposure() {
-        guard generated else { return }
-        let visible = window.isVisible && !window.isMiniaturized
-            && window.occlusionState.contains(.visible)
-        let textFocused = window.firstResponder === textView
-        let eligible = NSApp.isActive && window.isKeyWindow && visible && textFocused
-        exposure.sample(at: ProcessInfo.processInfo.systemUptime, eligible: eligible)
+        switch observationBudget.next(at: ProcessInfo.processInfo.systemUptime) {
+        case .wait: return
+        case .finish:
+            exposureTimer?.invalidate()
+            exposure.sample(at: ProcessInfo.processInfo.systemUptime, eligible: false)
+            controls.generateButton.isEnabled = false
+            exposureLabel.stringValue = "Observation ended. Capture is checked separately."
+            writeReceipt(kind: .observationFinished, foreground: nil)
+            return
+        case .sample: break
+        }
+        let foreground = observeForeground()
+        exposure.sample(at: ProcessInfo.processInfo.systemUptime, eligible: generated && foreground.eligible)
         let seconds = Int(min(20, exposure.seconds))
         exposureLabel.stringValue = "Foreground observed: \(seconds) / 20 seconds. Capture is checked separately."
-        let bucket = seconds / 5
-        guard bucket != lastExposureBucket || eligible != lastExposureEligible else { return }
-        lastExposureBucket = bucket
-        lastExposureEligible = eligible
-        writeReceipt([
-            "schema_version": 1,
-            "record_type": "exposure_observation",
-            "phrase_sha256": phraseHash,
-            "observed_at_us": UInt64(Date().timeIntervalSince1970 * 1_000_000),
-            "continuous_seconds": seconds,
-            "app_was_active": NSApp.isActive,
-            "window_was_key": window.isKeyWindow,
-            "window_was_visible": visible,
-            "text_was_focused": textFocused,
-        ])
+        let kind: ScreenProofReceipt.Kind = !didEmitReady ? .fixtureReady
+            : (generated ? .exposureObservation : .foregroundObservation)
+        didEmitReady = true
+        writeReceipt(kind: kind, foreground: foreground)
     }
 
-    private func writeReceipt(_ receipt: [String: Any]) {
-        if let data = try? JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]) {
-            FileHandle.standardOutput.write(data + Data([10]))
+    private func observeForeground() -> ScreenProofForeground {
+        let before = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]]
+        // Only numeric metadata is selected. Never read names, titles, AX text or pixels.
+        let windows = raw?.compactMap { entry -> ScreenProofSystemWindow? in
+            guard let number = entry[kCGWindowNumber as String] as? Int,
+                  let pid = entry[kCGWindowOwnerPID as String] as? Int,
+                  let layer = entry[kCGWindowLayer as String] as? Int else { return nil }
+            return ScreenProofSystemWindow(number: number, ownerPid: pid, layer: layer)
+        }
+        let after = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let visible = window.isVisible && !window.isMiniaturized
+            && window.occlusionState.contains(.visible)
+        return ScreenProofForeground(
+            fixturePid: Int(ProcessInfo.processInfo.processIdentifier), fixtureWindowNumber: window.windowNumber,
+            systemPidBefore: before.map(Int.init), systemPidAfter: after.map(Int.init), windows: windows,
+            appActive: NSApp.isActive, windowKey: window.isKeyWindow, windowVisible: visible,
+            textFocused: window.firstResponder === textView
+        )
+    }
+
+    private func writeReceipt(kind: ScreenProofReceipt.Kind, foreground: ScreenProofForeground?) {
+        let receipt = ScreenProofReceipt(kind: kind,
+                                        atUs: UInt64(Date().timeIntervalSince1970 * 1_000_000),
+                                        phraseHash: phraseHash, foreground: foreground,
+                                        seconds: Int(min(20, exposure.seconds)))
+        if let line = try? receipt.encodedLine() {
+            FileHandle.standardOutput.write(line)
         }
     }
 
@@ -150,6 +198,7 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
+#if !SCREEN_PROOF_TESTING
 @main
 @MainActor
 enum ScreenProofApplication {
@@ -160,3 +209,4 @@ enum ScreenProofApplication {
         app.run()
     }
 }
+#endif

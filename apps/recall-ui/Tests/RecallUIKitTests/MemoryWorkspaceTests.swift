@@ -5,19 +5,18 @@ import XCTest
 final class MemoryWorkspaceTests: XCTestCase {
     func testPrimaryNavigationDestinationsMatchNativeMemoryWorkspace() {
         let destinations = MCI.Workspace.primaryDestinations
-        XCTAssertEqual(destinations.map(\.title), ["Now", "Search", "Timeline", "Episodes", "Briefs"])
+        XCTAssertEqual(destinations.map(\.title), ["Daily Review", "Search", "History", "Sessions"])
         XCTAssertEqual(destinations.map(\.systemImage), [
-            "sparkle.magnifyingglass",
+            "calendar",
             "magnifyingglass",
             "clock",
             "rectangle.stack",
-            "doc.text",
         ])
     }
 
     func testPrimaryEvidenceDestinationsExposeSourceAccess() {
         let sourceBacked = MCI.Workspace.primaryDestinations.filter(\.requiresSourceAccess)
-        XCTAssertEqual(sourceBacked.map(\.title), ["Search", "Timeline", "Episodes", "Briefs"])
+        XCTAssertEqual(sourceBacked.map(\.title), ["Search", "History", "Sessions"])
     }
 
     func testNowMetricDescribesHistoricalRowsWithoutClaimingLiveCaptureState() {
@@ -85,10 +84,11 @@ final class MemoryWorkspaceTests: XCTestCase {
 
     func testWorkspaceShortcutMapIsUniqueAndResolvesSourcesToCommandSix() {
         let destinations = MCI.Workspace.primaryDestinations + MCI.Workspace.secondaryDestinations
-        XCTAssertEqual(destinations.map(\.keyboardShortcut), ["1", "2", "3", "4", "5", "6", "7", "8"])
+        XCTAssertEqual(destinations.map(\.keyboardShortcut), ["1", "2", "3", "4", "6", "7", "8"])
         XCTAssertEqual(Set(destinations.map(\.keyboardShortcut)).count, destinations.count)
         XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "6")?.id, "sources")
         XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "8")?.id, "settings")
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "5")?.id, "now")
     }
 
     func testUtilityAndPlaceholderSurfacesAreNotPrimaryDestinations() {

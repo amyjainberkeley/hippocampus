@@ -57,15 +57,15 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         guard let request = RecallLaunchRequest(userInfo: notification.userInfo) else { return }
         Task { @MainActor in
             NSApp.activate(ignoringOtherApps: true)
-            let navigationRequest = RecallLaunchRequest(
-                tab: request.tab,
-                focusEventId: request.focusEventId,
-                openPopup: false
-            )
-            NotificationCenter.default.post(
-                name: RecallLaunchRequest.localCommandName,
-                object: navigationRequest
-            )
+            if let tab = request.navigationTab {
+                let navigationRequest = RecallLaunchRequest(
+                    tab: tab, focusEventId: request.focusEventId, openPopup: false
+                )
+                NotificationCenter.default.post(
+                    name: RecallLaunchRequest.localCommandName,
+                    object: navigationRequest
+                )
+            }
             if request.openPopup {
                 GlobalRecallPopupController.shared.show()
             }
@@ -89,7 +89,7 @@ struct MCIRecallApp: App {
             )
             RootView(
                 reader: MCIRecallApp.reader,
-                initialTab: launchRequest.tab ?? .search,
+                initialTab: launchRequest.initialTab,
                 initialFocusEventId: launchRequest.focusEventId
             )
             .preferredColorScheme(.light)
@@ -174,6 +174,7 @@ struct RootView: View {
     @State private var searchFocusTrigger = false
     @State private var focusRequest: RecallFocusRequest?
     @State private var nextFocusSequence: UInt64
+    @State private var latestBriefRequest: UUID?
     private let actionPanelRegistry = ActionPanelRegistry.shared
     @State private var isHelpVisible = ActionPanelRegistry.shared.isHelpVisible
     // Cycle 8.54 — "What's new" release-notes modal. Coordinator owns
@@ -183,17 +184,18 @@ struct RootView: View {
 
     init(
         reader: BrainReader,
-        initialTab: RecallTab = .search,
+        initialTab: RecallTab = RecallTab.defaultTab,
         initialFocusEventId: UInt64? = nil
     ) {
         self.reader = reader
-        self._selection = State(initialValue: MemoryWorkspaceSelection(initialTab: initialTab))
+        self._selection = State(initialValue: MemoryWorkspaceSelection(initialTab: initialFocusEventId == nil ? initialTab : .search))
         self._focusRequest = State(
             initialValue: initialFocusEventId.map {
                 RecallFocusRequest(eventId: $0, sequence: 1)
             }
         )
         self._nextFocusSequence = State(initialValue: initialFocusEventId == nil ? 1 : 2)
+        self._latestBriefRequest = State(initialValue: initialTab == .brief && initialFocusEventId == nil ? UUID() : nil)
     }
 
     /// Global (non-contextual) commands. Registered once for the
@@ -214,7 +216,7 @@ struct RootView: View {
             },
             .init(
                 id: "app.showTimeline",
-                title: "Show Timeline",
+                title: "Show History",
                 shortcut: "⌘T",
                 category: .app,
                 description: "Switch to the timeline of recent events."
@@ -337,9 +339,13 @@ struct RootView: View {
             reader: reader,
             selection: $selection,
             searchFocusTrigger: searchFocusTrigger,
-            focusRequest: focusRequest
+            focusRequest: focusRequest,
+            latestBriefRequest: latestBriefRequest
         )
         .background(Color.brandBgPrimary)
+        .onChange(of: selection) { _, destination in
+            if destination != .now { latestBriefRequest = nil }
+        }
         .onOpenURL { url in
             guard let request = RecallLaunchRequest(url: url) else { return }
             apply(request)
@@ -356,7 +362,7 @@ struct RootView: View {
                 MCI.Workspace.allDestinations.compactMap { destination in
                     destination.keyboardShortcut.first.map { KeyEquivalent($0) }
                 }
-            ),
+            ).union([KeyEquivalent("5")]),
             phases: .down
         ) { press in
             guard
@@ -367,7 +373,11 @@ struct RootView: View {
             else {
                 return .ignored
             }
-            selection = destination
+            if press.key.character == "5" {
+                apply(RecallLaunchRequest(tab: .brief, focusEventId: nil, openPopup: false))
+            } else {
+                selection = destination
+            }
             return .handled
         }
         .onKeyPress(.init("f"), phases: .down) { press in
@@ -378,7 +388,7 @@ struct RootView: View {
         }
         .onKeyPress(.init("b"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
-            selection = .briefs
+            apply(RecallLaunchRequest(tab: .brief, focusEventId: nil, openPopup: false))
             return .handled
         }
         .onKeyPress(.init("/"), phases: .down) { press in
@@ -422,8 +432,9 @@ struct RootView: View {
         if request.openPopup {
             GlobalRecallPopupController.shared.show()
         }
-        if let tab = request.tab {
+        if let tab = request.navigationTab {
             selection = MemoryWorkspaceSelection(initialTab: tab)
+            latestBriefRequest = tab == .brief ? UUID() : nil
         }
         if let eventId = request.focusEventId {
             selection = .search
