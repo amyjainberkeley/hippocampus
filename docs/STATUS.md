@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `c8e5d61`
+Audited code baseline: `0bb07eb`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -11,6 +11,33 @@ release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
 
 ## September 7 Daily Review Delivery
+
+**Current installed application: `0bb07eb`**, at `/Applications/Hippocampus.app`.
+The source checkpoint is published on `codex/hippocampus-v1` in the canonical
+GitHub repository; PR25 remains draft. Strict nested signing, notarization,
+stapled ticket, Gatekeeper and post-copy source/digest checks pass. The previous
+`4f5c75a` app is preserved at
+`/Users/amy/hippo-work/releases/backups/Hippocampus-4f5c75a-live-before-0bb07eb.app`.
+No memory, key, permission or capture-policy reset was performed.
+
+Private owner installer:
+`/Users/amy/hippo-work/releases/2026-09-07-0bb07eb/Hippocampus-0.1.0.dmg`.
+SHA-256: `caec470b70faaf016f5c5c47db192013d37e57e04bdf51b9ee457a0b84c3620a`.
+Product-source digest:
+`963b2242d36cceaf5f16dc3bf745023aa0f1200354481584c5462abedecc607f`.
+Apple accepted app submission `ab682c77-de82-4566-807c-223dfd685bf4` and DMG
+submission `c7050bad-5bec-405f-86bd-e7a564c247de`. This private image uses the
+standard Applications drag target and license, without Finder layout scripting.
+It is not a public release or second-Mac distribution qualification.
+
+The new app launched its parent, Recall, helper and writer from the installed
+bundle. A controlled SIGTERM of that helper produced one automatic replacement
+helper/writer generation; its capture-enabled readiness receipt matches the
+helper argument. The writer's input pipe matches helper output, and writer and
+Recall open the same existing database inode. Post-install ingestion advanced
+to 790 frames and 365 screenshots before the interruption. No new stored frame
+was established after that restart at the checkpoint read. These observations
+do not qualify fresh phrase/image identity, privacy recovery or overnight uptime.
 
 The [daily review checkpoint](audits/2026-09-07-daily-review-delivery.md)
 adds distinct Daily Review, Search, History and Sessions destinations; cited
@@ -24,8 +51,12 @@ AttributeGraph warnings remain a recorded UI reliability limitation.
 Website source now presents the literal purpose, an actual synthetic-data
 Daily Review image and short practical links. Production build, TypeScript,
 scoped lint and six rendered-page contracts pass. Installation and website
-publication are recorded separately below; source tests alone do not update
-the owner's running app or the deployed site.
+publication are separate: website version 5 is successfully deployed at
+`https://hippocampus-memory.amyjain.chatgpt.site/`, still owner-private.
+Its website-rooted source is `fa160610c2400cec58d1723c39959e803ba351c0`, with
+the same tree as `0bb07eb:website`. The deployed page and real product image
+were checked in the authenticated browser. No domain, audience, public DMG,
+main-branch or release-tag change was made.
 
 Live triage found a stopped helper/writer despite the surviving parent: ten
 retries were consumed across the app's entire lifetime, including long recovered
@@ -37,6 +68,14 @@ The underlying repeated stream-stop cause is not identified. The new
 screen-proof receipt distinguishes actual system foreground identity from
 background UI control; the automated attempt did not generate a phrase and
 cannot close Gate 1. All privacy, recovery and fresh-agent gates remain open.
+
+Hosted tests at `0bb07eb` pass Recall, parent, onboarding, installer smoke,
+Rust tests/format/Clippy, advisory scan and workflow validation. The capture
+lane still fails: 57 assertions across 737 tests, all in OCR completeness.
+The release-contract job is still running at this ledger checkpoint. No
+production OCR change or waiver is included. The local website dev server
+also emitted multiple-renderer warnings during hot reload; the published
+production routes render, but this is not a zero-diagnostic claim.
 
 ## September 7 Product Clarity Checkpoint
 
@@ -57,7 +96,7 @@ capture. Its optimized capture suite passed 707 tests locally, including
 fourteen new classifier/path regressions. Installation and signature verification
 do not establish that the screen-only capture gate passes.
 
-**Current installed application: `4f5c75a`**, at `/Applications/Hippocampus.app`.
+**Earlier installed application: `4f5c75a`**, superseded by `0bb07eb` above.
 Its parent, helper, writer and Recall processes run from that bundle. The helper
 and writer share the capture pipe; writer and Recall open the same existing
 database. The new helper's generation matches its capture-enabled receipt.

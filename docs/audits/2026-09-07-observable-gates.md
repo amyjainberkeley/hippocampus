@@ -9,18 +9,18 @@ screen-memory evidence. [STATUS](../STATUS.md) remains the release authority.
 
 | Gate | Required observation | Current evidence |
 | --- | --- | --- |
-| 0. Establish the build | Identify source, installed binaries, running processes, effective policy, database and capture generation. | Runtime identity established for signed, notarized installed `4f5c75a`, including process mappings, shared writer/Recall database, helper/writer pipe and matching capture generation. Subsequent ledger-only commits are not a new installed artifact. |
+| 0. Establish the build | Identify source, installed binaries, running processes, effective policy, database and capture generation. | Runtime identity established for signed, notarized installed `0bb07eb`, including process mappings, shared writer/Recall database, helper/writer pipe and matching capture generation. One controlled helper exit produced a replacement topology. Subsequent ledger-only commits are not a new installed artifact. |
 | 1. Screen to disk to Recall | A new phrase created only in a real window becomes a screen-origin event with its linked encrypted image; text and image reopen after restart; the approved client retrieves the same evidence. | **Open.** The standalone phrase has not been found through MCP. Its earlier twenty-second exposure preceded the current installation; post-update automation still reports zero foreground seconds. Owner foreground confirmation is pending. No imported phrase, counter, or timer qualifies the capture/image/restart gate. |
 | 2. Privacy and recovery | Exclusions, pause, lock, permission loss, crashes, deletion and storage failure behave correctly and visibly. | **Not qualified.** Existing unit/contract tests are supporting evidence only; the full installed lifecycle matrix is not passed. |
 | 3. Agent use | A supported real client obtains fresh scoped context and resolves its citations, then each additional claimed client is qualified. | **Not qualified.** This Codex session can query the installed MCP server. That alone does not establish fresh fixture recall, image identity, citation expansion or all client lifecycles. |
-| 4. Daily view | Real episodes, interval-based activity totals, valid images and honest coverage gaps. | **Not qualified.** Episode linking and extractive briefs exist; measured active intervals do not. No time chart is inferred from screenshot counts. |
+| 4. Daily view | Real episodes, interval-based activity totals, valid images and honest coverage gaps. | **Partially implemented, not qualified.** Installed `0bb07eb` adds a distinct daily review, cited last context/app returns/sample gaps, image inspection and revalidated handoff. Measured active intervals do not exist. No time chart is inferred from screenshot counts. |
 | 5. Commitments and distribution | Attribution-preserving confirmed intentions and final signed installation/update/live qualification. | **Not qualified.** Commitment work, second-Mac qualification, public release-model provisioning and hosted failures remain. |
 
 ## Gate 0 Record
 
 The installed bundle's provenance verifies source
-`4f5c75aec290d58e302824f16355da9c73c35e67` and product digest
-`b1f9dd850260163743e6c6f7b3e257787faac3b041f5bafe361af9a0a372bb63`.
+`0bb07ebdc319c4eaba056ec40c3149f6893f947c` and product digest
+`963b2242d36cceaf5f16dc3bf745023aa0f1200354481584c5462abedecc607f`.
 Developer ID signature is `Amy Jain (BV6KGKFKP4)` with a stapled ticket.
 The checked parent, Recall, helper and writer executable mappings all belong to
 `/Applications/Hippocampus.app/Contents/MacOS/`.

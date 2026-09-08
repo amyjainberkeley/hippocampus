@@ -55,7 +55,7 @@ app returns and a known gap without manufacturing screenshot files.
 
 ## Reliability Findings
 
-The installed supervisor exhausted a lifetime allowance of ten retries. The
+The pre-update supervisor exhausted a lifetime allowance of ten retries. The
 observed sequence contains eleven stream-stop exits and ten replacements,
 including runs of about 95 minutes and two hours. Parent liveness alone hid
 the absence of its helper and writer. Recovery now replenishes the retry budget
@@ -84,11 +84,27 @@ that attempt's lack of exposure, not the older missing-event problem.
 - The full installed privacy/recovery matrix, overnight reliability, and
   second-Mac installation/update continuity remain unqualified.
 - Hosted OCR completeness remains failing; no accuracy threshold, timeout,
-  capture exclusion or privacy check was relaxed here.
+  capture exclusion or privacy check was relaxed here. At `0bb07eb`, 57
+  assertions fail across 737 hosted capture tests, all in completeness.
 - Native interaction still emits intermittent AttributeGraph cycle warnings.
   The checked actions completed, but this is not a zero-warning claim.
+- Local website hot reload emitted multiple-renderer warnings. Published
+  production pages render; dev-server diagnostics are not fully resolved.
 - Semantic daily synthesis, measured active intervals, confirmed commitments,
   a total storage byte cap and public model distribution remain separate work.
 
 Use [STATUS](../STATUS.md) for the exact source, installed artifact, website
 deployment and public-release states. No DNS or audience changes are included.
+
+## Delivered Artifact
+
+Source `0bb07eb` is published on the canonical working branch and installed as
+the signed, notarized app. Post-copy provenance and Gatekeeper checks pass.
+A controlled helper termination produced a replacement helper/writer with a
+new capture-enabled generation and the same encrypted database. That is a
+single installed topology-recovery check; it does not reproduce the five-minute
+budget-reset scenario or establish post-restart image retrieval. Those limits
+remain distinct from the deterministic recovery tests.
+
+Website version 5 is deployed with its prior owner-private audience. Its
+website-rooted source `fa16061` exactly matches the canonical website subtree.
