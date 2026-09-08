@@ -75,6 +75,9 @@ public final class DailyMemoryViewModel: ObservableObject {
     @Published public var selectedDate: Date {
         didSet {
             if day != MemoryDay(date: oldValue, calendar: calendar) {
+                generation += 1
+                isLoading = false
+                latestContextText = nil
                 briefNavigationGeneration += 1
                 showsSavedDraft = false
                 handoffPreview = nil
@@ -99,6 +102,7 @@ public final class DailyMemoryViewModel: ObservableObject {
     @Published public private(set) var refreshedAt: Date?
     @Published public private(set) var captureHealth: CaptureHealthReceipt?
     @Published public private(set) var handoffPreview: String?
+    @Published private var latestContextText: EventText?
     @Published public var showsSavedDraft = false
     private let reader: BrainReader
     private let calendar: Calendar
@@ -117,7 +121,7 @@ public final class DailyMemoryViewModel: ObservableObject {
     }
 
     public var day: MemoryDay { MemoryDay(date: selectedDate, calendar: calendar) }
-    public var review: DailyReview { DailyReview(day: day, events: events) }
+    public var review: DailyReview { DailyReview(day: day, events: events, latestContextText: latestContextText) }
     public var screenshots: [TimelineEvent] { events.filter(\.hasScreenshot) }
     public var episodes: [VisualMemoryEpisode] { VisualMemoryEpisode.group(events) }
     public var canExportSummary: Bool {
@@ -232,11 +236,13 @@ public final class DailyMemoryViewModel: ObservableObject {
     }
 
     public func reload(force: Bool = false) async {
+        guard !Task.isCancelled else { return }
         let requestedDay = day
         // Coalesce timer/manual requests for the same day while allowing navigation to supersede them.
         guard force || !isLoading || loadedDay != requestedDay else { return }
         generation += 1
         let request = generation
+        latestContextText = nil
         if loadedDay != requestedDay {
             events = []
             searchHits = []
@@ -264,6 +270,12 @@ public final class DailyMemoryViewModel: ObservableObject {
             handoffPreview = nil
             errorMessage = "This day's memory could not be read. Try refreshing."
         }
+        if let latest = events.last {
+            // Preview hydration is optional; its failure must not discard the day's samples or brief.
+            let text = try? await loadLatestContext(latest, day: requestedDay, request: request)
+            guard request == generation, day == requestedDay, !Task.isCancelled else { return }
+            latestContextText = text
+        }
         do {
             let savedBrief = try await reader.briefForDate(requestedDay.dateLocal)
             guard request == generation, day == requestedDay, !Task.isCancelled else { return }
@@ -277,6 +289,23 @@ public final class DailyMemoryViewModel: ObservableObject {
         guard request == generation, day == requestedDay, !Task.isCancelled else { return }
         captureHealth = health
         await search()
+    }
+
+    private func loadLatestContext(_ event: TimelineEvent, day requestedDay: MemoryDay,
+                                   request: Int) async throws -> EventText? {
+        let fetched = try await reader.fetchEventsByIds([event.id])
+        guard request == generation, day == requestedDay, !Task.isCancelled else { return nil }
+        guard let hit = fetched.first(where: { event.matches($0) && requestedDay.contains($0.tsUs) }) else {
+            return nil
+        }
+        let text = try await reader.eventText(eventId: event.id)
+        guard request == generation, day == requestedDay, !Task.isCancelled else { return nil }
+        guard let text, text.matches(hit) else { return nil }
+        // Text and authority reads are separate; reject deletion or replacement during hydration.
+        let rechecked = try await reader.fetchEventsByIds([event.id])
+        guard request == generation, day == requestedDay, !Task.isCancelled,
+              rechecked.contains(hit) else { return nil }
+        return text
     }
 
     public func search() async {

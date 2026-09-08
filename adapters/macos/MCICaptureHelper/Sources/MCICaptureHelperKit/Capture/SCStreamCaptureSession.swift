@@ -444,7 +444,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             try await scStream.startCapture()
         } catch {
             discardCandidateStream(scStream)
-            _ = await stopExpectedStream(scStream)
+            _ = await stopExpectedStream(scStream, failureSite: .startupTeardown)
             throw error
         }
         let installed = commitCandidateStream(
@@ -454,7 +454,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         )
         guard installed.installed else {
             discardCandidateStream(scStream)
-            _ = await stopExpectedStream(scStream)
+            _ = await stopExpectedStream(scStream, failureSite: .startupTeardown)
             return
         }
         storeIncludeListSize(initialIncludeListSize)
@@ -497,7 +497,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     // Locked critical sections live in non-async helpers: `NSLock` is
     // unavailable from async contexts under Swift 6 strict concurrency,
     // and these are the only mutable state.
-    private func beginCaptureLifecycle() -> UInt64? {
+    internal func beginCaptureLifecycle() -> UInt64? {
         lock.lock(); defer { lock.unlock() }
         guard !pausedForTCC,
               !shutdownRequested,
@@ -535,7 +535,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         return captureEpoch
     }
 
-    private func registerCandidateStream(
+    internal func registerCandidateStream(
         _ candidate: SCStream,
         generation: UInt64,
         epoch: UInt64
@@ -572,7 +572,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         retryOCRGeneration = nil
     }
 
-    private func commitCandidateStream(
+    internal func commitCandidateStream(
         _ candidate: SCStream,
         generation: UInt64,
         epoch: UInt64
@@ -630,19 +630,21 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// Stop a stream already registered as an intentional teardown. A failed
     /// stop can leave pixels flowing after the session claims capture is off,
     /// so it is a terminal owner failure rather than ignorable cleanup noise.
-    private func stopExpectedStream(_ stream: SCStream) async -> Bool {
+    internal func stopExpectedStream(
+        _ stream: SCStream, failureSite: CaptureRuntimeFailureSite
+    ) async -> Bool {
         do {
             try await stream.stopCapture()
             return true
         } catch {
-            reportTerminalCaptureFailure()
+            reportTerminalCaptureFailure(error: error, site: failureSite)
             return false
         }
     }
 
-    private func reportTerminalCaptureFailure() {
-        guard claimUnexpectedStreamTermination(nil) else { return }
-        handleClaimedRuntimeFailure()
+    private func reportTerminalCaptureFailure(error: Error, site: CaptureRuntimeFailureSite) {
+        guard let diagnostic = claimUnexpectedStreamTermination(nil, error: error, site: site) else { return }
+        handleClaimedRuntimeFailure(diagnostic)
     }
 
     private func currentRuntimeFailure() -> CaptureRuntimeFailure? {
@@ -847,12 +849,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             try await replacement.startCapture()
         } catch {
             discardCandidateStream(replacement)
-            _ = await stopExpectedStream(replacement)
+            _ = await stopExpectedStream(replacement, failureSite: .rebindTeardown)
             throw error
         }
         guard focusedWindowStore?.currentSync().generation == snapshotGeneration else {
             discardCandidateStream(replacement)
-            _ = await stopExpectedStream(replacement)
+            _ = await stopExpectedStream(replacement, failureSite: .rebindTeardown)
             return
         }
         let installed = commitCandidateStream(
@@ -862,14 +864,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         )
         guard installed.installed else {
             discardCandidateStream(replacement)
-            _ = await stopExpectedStream(replacement)
+            _ = await stopExpectedStream(replacement, failureSite: .rebindTeardown)
             return
         }
         // Seed-only include-set (redesign-memo §6.1 alt A) ⇒ size 1.
         // Future co-view-heuristic wiring lifts this above 1.
         storeIncludeListSize(1)
         if let replaced = installed.replaced,
-           !(await stopExpectedStream(replaced))
+           !(await stopExpectedStream(replaced, failureSite: .rebindTeardown))
         {
             throw CaptureRuntimeFailure.streamStoppedUnexpectedly
         }
@@ -1036,7 +1038,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             try await scStream.startCapture()
         } catch {
             discardCandidateStream(scStream)
-            _ = await stopExpectedStream(scStream)
+            _ = await stopExpectedStream(scStream, failureSite: .tccResumeTeardown)
             throw error
         }
         let installed = commitCandidateStream(
@@ -1046,11 +1048,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         )
         guard installed.installed else {
             discardCandidateStream(scStream)
-            _ = await stopExpectedStream(scStream)
+            _ = await stopExpectedStream(scStream, failureSite: .tccResumeTeardown)
             throw CancellationError()
         }
         if let replaced = installed.replaced,
-           !(await stopExpectedStream(replaced))
+           !(await stopExpectedStream(replaced, failureSite: .tccResumeTeardown))
         {
             throw CaptureRuntimeFailure.streamStoppedUnexpectedly
         }
@@ -1120,7 +1122,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // UNVERIFIED — needs live macOS; do not claim working.
         let streams = takeAllStreamsExpectingTermination()
         for stream in streams {
-            _ = await stopExpectedStream(stream)
+            _ = await stopExpectedStream(stream, failureSite: .tccPauseTeardown)
         }
     }
 
@@ -1563,11 +1565,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
     public func stream(_ stream: SCStream, didStopWithError error: Error) {
         // UNVERIFIED — needs live macOS; do not claim working.
-        guard claimUnexpectedStreamTermination(stream, error: error) else { return }
-        handleClaimedRuntimeFailure()
+        guard let diagnostic = claimUnexpectedStreamTermination(
+            stream, error: error, site: .streamDelegate
+        ) else { return }
+        handleClaimedRuntimeFailure(diagnostic)
     }
 
-    private func handleClaimedRuntimeFailure() {
+    private func handleClaimedRuntimeFailure(_ diagnostic: CaptureRuntimeDiagnostic) {
         // Stop every in-process source of post-failure work before the owner
         // action. The handler's production default exits immediately; the
         // detached drain remains useful for an embedding owner that replaces
@@ -1581,17 +1585,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             await dispatcher.cancelAndDrain()
             await emitter?.stopAndDrain()
         }
-        if let failure = currentRuntimeFailure() {
-            runtimeFailureHandler(failure)
-        }
+        FileHandle.standardError.write(Data(diagnostic.healthLogLine.utf8))
+        runtimeFailureHandler(diagnostic.failure)
     }
 
     /// Test seam for the shared state transition behind the framework-only
     /// delegate callback. Live ScreenCaptureKit cannot be instantiated in a
     /// headless XCTest process; this executes the exact one-shot owner signal.
     internal func recordUnexpectedStreamTerminationForTest() {
-        guard claimUnexpectedStreamTermination(nil) else { return }
-        runtimeFailureHandler(.streamStoppedUnexpectedly)
+        guard let diagnostic = claimUnexpectedStreamTermination(nil, site: .streamDelegate) else { return }
+        handleClaimedRuntimeFailure(diagnostic)
     }
 
     /// Test-only read of the terminal runtime state. The production behavior
@@ -1604,20 +1607,20 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// An explicit OS user stop still wins a race with a window replacement.
     /// A nil stream is an explicit internal failure, such as failed teardown.
     private func claimUnexpectedStreamTermination(
-        _ stoppedStream: SCStream?, error: Error? = nil
-    ) -> Bool {
+        _ stoppedStream: SCStream?, error: Error? = nil, site: CaptureRuntimeFailureSite
+    ) -> CaptureRuntimeDiagnostic? {
         lock.lock(); defer { lock.unlock() }
         let failure: CaptureRuntimeFailure
         if let stoppedStream {
             guard let classified = CaptureRuntimeFailure.forStreamStop(
                 error ?? CaptureRuntimeFailure.streamStoppedUnexpectedly,
                 sourceIsLive: streamFocusGenerations[ObjectIdentifier(stoppedStream)] != nil
-            ) else { return false }
+            ) else { return nil }
             failure = classified
         } else {
             failure = .streamStoppedUnexpectedly
         }
-        guard runtimeFailure == nil else { return false }
+        guard runtimeFailure == nil else { return nil }
         runtimeFailure = failure
         captureEpoch &+= 1
         captureLifecycleActive = false
@@ -1634,19 +1637,15 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 stream = nil
             }
         }
-        return true
+        return CaptureRuntimeDiagnostic(failure: failure, site: site, error: error)
     }
 
     /// Terminate immediately on a capture loss after readiness. Continuing
     /// would leave the supervisor with a live helper that cannot capture, so
-    /// process death is the fail-closed truth signal. The line is deliberately
-    /// content-free; it exposes no ScreenCaptureKit error detail.
+    /// process death is the fail-closed truth signal. The claiming session
+    /// already emitted its bounded diagnostic before invoking this handler.
     @usableFromInline
     static func terminateHelper(for failure: CaptureRuntimeFailure) -> Never {
-        FileHandle.standardError.write(
-            "mci-capture-helper: helper_health capture_runtime_failed=\(failure)\n"
-                .data(using: .utf8) ?? Data()
-        )
         exit(failure.helperExitStatus)
     }
 

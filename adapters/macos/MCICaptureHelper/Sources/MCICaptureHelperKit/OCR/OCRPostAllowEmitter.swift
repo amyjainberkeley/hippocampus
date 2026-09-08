@@ -656,6 +656,26 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
             )
 
         case .allow:
+            // Keep the original byte limit before compaction. All complete
+            // passes above remain available to the privacy decision, in order.
+            guard text.utf8.count <= maxOCRTextBytes else {
+                await emitTombstone(
+                    tsUs: tsUs, context: context, reason: .failsafeUnknown,
+                    sink: sink, sequence: sequence, counters: counters
+                )
+                return
+            }
+            let memoryText = OCRMemoryText.make(from: result.recognizedLines)
+            // Removing repeated lines can create new multiline adjacency. The
+            // exact text that leaves the helper must independently clear privacy.
+            if memoryText != text,
+               case .suppress(let reason) = cascade.decideOcr(text: memoryText, context: context) {
+                await emitTombstone(
+                    tsUs: tsUs, context: context, reason: reason,
+                    sink: sink, sequence: sequence, counters: counters
+                )
+                return
+            }
             // Validate the complete event with the zero-hash sentinel before
             // screenshot policy, encoding, or disk I/O becomes reachable.
             let seq = await sequence.allocate()
@@ -666,7 +686,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 appBundleId: context.appBundleId ?? "",
                 windowTitle: context.windowTitle ?? "",
                 url: context.url ?? "",
-                ocrText: text,
+                ocrText: memoryText,
                 keyframeHash: zeroHash
             )
             let zeroBytes: Data

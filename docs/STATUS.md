@@ -2,13 +2,37 @@
 
 _Updated on 2026-09-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `0bb07eb`
+Audited code baseline: `1c2af8f`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 7 Capture And Recall Corrections
+
+The [capture/readability checkpoint](audits/2026-09-07-capture-readability.md)
+adds post-privacy OCR duplicate removal, a bounded hydrated latest-context
+preview, and content-free stream-failure diagnostics. Local optimized tests
+pass 758 capture cases and 510 Recall XCTest plus three Swift Testing cases.
+The release contract passes 224 assertions and sixteen release-safety tests.
+No OCR deadline, recognition level, source exclusion or permission is relaxed.
+
+At this source checkpoint the installed app remains `0bb07eb`; replacement
+assembly, notarization and live qualification are not implied by those tests.
+The previous hosted release-contract run has now completed successfully at
+`0bb07eb`. Its capture job remains failing. The full runner log identifies an
+arm64 `VirtualMac2,1` with CPU/GPU but no advertised Neural Engine, not an Intel
+Mac. Accurate recognition alone exceeds the one-second budget on that runner.
+Changing compute-device selection did not reliably resolve it. Local passing
+tests do not waive that failure or qualify every supported Mac.
+
+Gate 1 still needs a fresh screen-only phrase, matching authenticated image,
+restart readback and real client retrieval. Additional stored frames since the
+prior install and continued helper replacements are observations, not that
+proof. Website version 5 and its private audience are unchanged. Public binary
+release, domain launch and the remaining product gates remain separate.
 
 ## September 7 Daily Review Delivery
 

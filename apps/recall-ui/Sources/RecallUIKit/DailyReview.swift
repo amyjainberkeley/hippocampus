@@ -23,7 +23,7 @@ public struct DailyReview: Equatable, Sendable {
         Self.sample(events.filter(\.hasScreenshot), limit: 6)
     }
 
-    public init(day: MemoryDay, events: some Sequence<TimelineEvent>) {
+    public init(day: MemoryDay, events: some Sequence<TimelineEvent>, latestContextText: EventText? = nil) {
         var seen = Set<UInt64>()
         let sorted = events.filter { day.contains($0.tsUs) }.sorted {
             $0.tsUs == $1.tsUs ? $0.id < $1.id : $0.tsUs < $1.tsUs
@@ -31,8 +31,17 @@ public struct DailyReview: Equatable, Sendable {
         self.events = sorted
         var observations: [Observation] = []
         if let last = sorted.last {
+            var detail = Formatters.stripContextHeader(last.snippet)
+            if let text = latestContextText, text.eventId == last.id,
+               text.tsUs == last.tsUs, text.appBundleId == last.appBundleId {
+                let body = Formatters.stripContextHeader(text.text)
+                // A bounded read ending inside an internal header has no usable body.
+                if !text.text.hasPrefix("[app=") || body != text.text {
+                    detail = Formatters.snippet(body, maxLen: 400)
+                }
+            }
             observations.append(Observation(kind: .lastContext, title: "Last saved context",
-                detail: Formatters.stripContextHeader(last.snippet), evidence: [last]))
+                detail: detail, evidence: [last]))
         }
 
         // Imports and unknown acquisition sources cannot establish screen activity.

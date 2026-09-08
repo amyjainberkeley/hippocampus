@@ -93,25 +93,9 @@ final class AXSubroleProbeTests: XCTestCase {
 }
 
 final class ConcreteProbeIntegrationWithCascadeTests: XCTestCase {
-    /// End-to-end: the concrete probes drive the production cascade
-    /// orchestrator. With AX disabled (nil) + secure-event-input
-    /// false + no denylist match + no blacked region, the cascade
-    /// must redact via the fail-safe path. This is the binding
-    /// ADR-0013 §7 invariant: unknown ⇒ redact.
-    func testFailsafePathFiresWhenConcreteProbesAreUnclassified() throws {
-        // Same host-env guard as the secure-input pin: if the login
-        // session has secure event input active, the cascade fires §3
-        // (`.secureEventInput`) *before* it can reach the §7 fail-safe
-        // path this test asserts. That is correct cascade behavior —
-        // the test premise (probes unclassified, no earlier rule
-        // fires) simply does not hold on a secure-input host. Skip in
-        // the fail-safe direction rather than report a false failure.
-        try XCTSkipIf(
-            CarbonSecureEventInputProbe().isSecureEventInputEnabled(),
-            "host secure-event-input active ⇒ cascade fires §3 before "
-                + "§7; the §7-fail-safe premise does not hold here"
-        )
-
+    /// Live probes can detect a secure surface before the unknown-app rule.
+    /// The invariant is suppression, not which correct rule wins on this Mac.
+    func testConcreteProbesNeverAdmitAnUnknownApplication() {
         struct EmptyDenylist: DenylistProbe {
             func appIsDenied(bundleId _: String) -> Bool { false }
             func urlIsDenied(_: String) -> Bool { false }
@@ -135,10 +119,12 @@ final class ConcreteProbeIntegrationWithCascadeTests: XCTestCase {
             url: nil
         )
 
-        XCTAssertEqual(
-            cascade.decide(context: ctx),
-            .suppress(reason: .failsafeUnknown),
-            "concrete probes + unknown app must hit cascade fail-safe"
-        )
+        switch cascade.decide(context: ctx) {
+        case .suppress(reason: .secureEventInput), .suppress(reason: .axSecureSubrole),
+             .suppress(reason: .failsafeUnknown):
+            break
+        default:
+            XCTFail("Unknown applications must remain suppressed, including when a live probe fires first")
+        }
     }
 }

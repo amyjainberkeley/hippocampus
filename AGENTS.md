@@ -30,3 +30,11 @@ Do not publish new work to the archived landing/demo repositories.
 `docs/STATUS.md` is canonical product/release truth. Keep its baseline current
 when product code changes. Read `docs/PUBLISHING.md` for source locations,
 publication boundaries and the initial history audit.
+
+## Test Environment Hygiene
+
+Run builds and tests with a minimal, explicitly constructed environment. Do not
+pass provider API keys or unrelated service credentials into test processes.
+Subprocess fixtures must set their own allowlisted environment rather than
+inherit the agent's environment. Diagnostic output must never print environment
+values. Keep local diagnostic files private and outside the product source tree.
