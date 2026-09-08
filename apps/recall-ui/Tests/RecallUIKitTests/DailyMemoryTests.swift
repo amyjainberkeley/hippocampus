@@ -100,6 +100,221 @@ final class DailyMemoryTests: XCTestCase {
 
 @MainActor
 final class DailyMemoryViewModelTests: XCTestCase {
+    func testLatestContextReloadReadsBodyBeyondExcerptHeaderAsLiteralText() async {
+        let reader = DailyTestReader()
+        let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+        let header = "[app=Safari | title=" + String(repeating: "Metadata", count: 1500)
+            + " | url=https://example.test | ts=now]\n"
+        let body = "Actual work **still literal**\n![image](https://example.invalid/tracker)"
+        await reader.configureReview(day: model.day, text: header + body)
+
+        await model.reload()
+
+        XCTAssertEqual(model.review.observations.first?.detail, body)
+        XCTAssertEqual(model.review.observations.first?.evidence.map(\.id), [2])
+        XCTAssertEqual(model.events.map(\.id), [1, 2])
+        XCTAssertEqual(model.events.last?.snippet, String((header + body).prefix(280)))
+        XCTAssertNotNil(model.brief)
+        XCTAssertNil(model.errorMessage)
+    }
+
+    func testLatestContextHydratesOnlyLatestInDayOncePerReload() async {
+        let reader = DailyTestReader()
+        let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+        await reader.configureDenseDay(day: model.day)
+        await reader.setFullText("Full latest context")
+        await model.reload()
+
+        for _ in 0..<3 {
+            XCTAssertEqual(model.review.observations.first?.detail, "Full latest context")
+        }
+        let textReads = await reader.textReads
+        let metadataReads = await reader.metadataReads
+        XCTAssertEqual(textReads, [480])
+        XCTAssertEqual(metadataReads, [[480], [480]])
+        XCTAssertEqual(model.events.count, 480)
+    }
+
+    func testLatestContextReadFailuresKeepDayDataAndDiscardPreviousHydration() async {
+        for failure in ["metadata", "text", "missingText", "recheck"] {
+            let reader = DailyTestReader()
+            let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+            await reader.configureReview(day: model.day, text: "Available snippet")
+            await reader.setFullText("Previously hydrated body")
+            await model.reload()
+            XCTAssertEqual(model.review.observations.first?.detail, "Previously hydrated body")
+            await reader.failReviewRead(failure)
+
+            await model.reload()
+
+            XCTAssertEqual(model.review.observations.first?.detail, "Available snippet", failure)
+            XCTAssertEqual(model.events.map(\.id), [1, 2], failure)
+            XCTAssertEqual(model.screenshots.map(\.id), [1], failure)
+            XCTAssertEqual(model.brief?.dateLocal, model.day.dateLocal, failure)
+            XCTAssertNotNil(model.refreshedAt, failure)
+            XCTAssertNil(model.errorMessage, failure)
+            XCTAssertFalse(model.isLoading, failure)
+        }
+    }
+
+    func testLatestContextRejectsMismatchedTextIdentity() async {
+        for field in ["id", "timestamp", "app"] {
+            let reader = DailyTestReader()
+            let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+            await reader.configureReview(day: model.day, text: "Available snippet")
+            await reader.setFullText("Wrong identity body")
+            await reader.mismatchReviewText(field)
+            await model.reload()
+            XCTAssertEqual(model.review.observations.first?.detail, "Available snippet", field)
+            XCTAssertEqual(model.events.map(\.id), [1, 2])
+        }
+    }
+
+    func testLatestContextRechecksAuthorityBeforeAndAfterTextRead() async {
+        for stage in ["before", "during"] {
+            for field in ["deleted", "id", "timestamp", "app", "source"] {
+                let reader = DailyTestReader()
+                let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+                await reader.configureReview(day: model.day, text: "Available snippet")
+                await reader.setFullText("No longer authoritative body")
+                if stage == "before" {
+                    await reader.replaceReviewIdentity(field)
+                    await model.reload()
+                    let reads = await reader.textReads
+                    XCTAssertTrue(reads.isEmpty, field)
+                } else {
+                    await reader.delayText()
+                    let reload = Task { await model.reload() }
+                    await reader.waitForDelayedRead()
+                    await reader.replaceReviewIdentity(field)
+                    await reader.finishDelayedRead()
+                    await reload.value
+                }
+                XCTAssertEqual(model.review.observations.first?.detail, "Available snippet", "\(stage): \(field)")
+                XCTAssertEqual(model.events.map(\.id), [1, 2])
+                XCTAssertNotNil(model.brief)
+            }
+        }
+    }
+
+    func testLatestContextPendingTextCannotPublishAfterCancellationNavigationOrForcedReload() async {
+        for change in ["cancel", "navigate", "navigateBack", "newDayReload", "force"] {
+            let reader = DailyTestReader()
+            let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+            let originalDate = model.selectedDate
+            await reader.configureReview(day: model.day, text: "Available snippet")
+            await reader.setFullText("Old pending body")
+            await reader.delayText()
+            let oldReload = Task { await model.reload() }
+            await reader.waitForDelayedRead()
+            XCTAssertEqual(model.events.map(\.id), [1, 2])
+            XCTAssertEqual(model.review.observations.first?.detail, "Available snippet")
+
+            if change == "cancel" { oldReload.cancel() }
+            if change == "navigate" || change == "navigateBack" || change == "newDayReload" {
+                model.moveDay(-1)
+                XCTAssertTrue(model.review.observations.isEmpty)
+                if change == "navigateBack" { model.selectedDate = originalDate }
+            }
+            if change == "force" || change == "newDayReload" {
+                await reader.configureReview(day: model.day, text: "New snippet")
+                await reader.setFullText("New selected body")
+                await model.reload(force: true)
+            }
+            await reader.finishDelayedRead()
+            await oldReload.value
+
+            let detail = model.review.observations.first?.detail
+            if change == "force" || change == "newDayReload" {
+                XCTAssertEqual(detail, "New selected body", change)
+                XCTAssertTrue(model.events.allSatisfy { model.day.contains($0.tsUs) })
+            } else if change == "cancel" {
+                XCTAssertEqual(detail, "Available snippet")
+            } else {
+                XCTAssertNil(detail, change)
+            }
+            XCTAssertFalse(model.isLoading, change)
+        }
+    }
+
+    func testLatestContextNavigationDiscardsAlreadyHydratedPreviousDayOnReadFailure() async {
+        let reader = DailyTestReader()
+        let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+        await reader.configureReview(day: model.day, text: "Old day body")
+        await model.reload()
+        XCTAssertEqual(model.review.observations.first?.detail, "Old day body")
+        XCTAssertNotNil(model.brief)
+        model.moveDay(-1)
+        XCTAssertTrue(model.review.observations.isEmpty)
+        XCTAssertNil(model.brief)
+        XCTAssertFalse(model.isLoading)
+        await reader.configureReview(day: model.day, text: "Selected day snippet")
+        await reader.failReviewRead("text")
+        await model.reload()
+        XCTAssertEqual(model.review.observations.first?.detail, "Selected day snippet")
+        XCTAssertEqual(model.brief?.dateLocal, model.day.dateLocal)
+    }
+
+    func testLatestContextMetadataReadsRespectCancellationAndReloadGeneration() async {
+        for read in [1, 2] {
+            for change in ["cancel", "navigate", "force"] {
+                let reader = DailyTestReader()
+                let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+                await reader.configureReview(day: model.day, text: "Available snippet")
+                await reader.setFullText("Old pending body")
+                await reader.delayReviewMetadata(read)
+                let oldReload = Task { await model.reload() }
+                await reader.waitForDelayedRead()
+                if change == "cancel" { oldReload.cancel() }
+                if change == "navigate" { model.moveDay(-1) }
+                if change == "force" {
+                    await reader.setFullText("New selected body")
+                    await model.reload(force: true)
+                }
+                let readsBeforeResume = await reader.textReads
+                await reader.finishDelayedRead()
+                await oldReload.value
+
+                let readsAfterResume = await reader.textReads
+                XCTAssertEqual(readsAfterResume, readsBeforeResume, "Superseded metadata must not start a text read.")
+                let expected: String? = change == "force" ? "New selected body"
+                    : change == "cancel" ? "Available snippet" : nil
+                XCTAssertEqual(model.review.observations.first?.detail, expected, "\(read): \(change)")
+                XCTAssertFalse(model.isLoading)
+            }
+        }
+    }
+
+    func testLatestContextAcceptsBoundedTextButDoesNotPromoteAnUnfinishedInternalHeader() async {
+        let reader = DailyTestReader()
+        let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+        await reader.configureReview(day: model.day, text: "Available snippet")
+        let header = "[app=Safari | title=" + String(repeating: "metadata", count: 1500)
+            + " | url=? | ts=now]\n"
+        let body = "Actual work: " + String(repeating: "x", count: 131_072 - header.utf8.count - 13)
+        await reader.setFullText(header + body)
+        await model.reload()
+        XCTAssertEqual(model.review.observations.first?.detail.count, 400)
+        XCTAssertTrue(model.review.observations.first?.detail.hasPrefix("Actual work: ") == true)
+        XCTAssertTrue(model.review.observations.first?.detail.hasSuffix("\u{2026}") == true)
+        await reader.setFullText("[app=" + String(repeating: "x", count: 131_072 - 5))
+        await model.reload()
+        XCTAssertEqual(model.review.observations.first?.detail, "Available snippet")
+    }
+
+    func testLatestContextEmptyDayDoesNotReadFullTextOrAuthority() async {
+        let reader = DailyTestReader()
+        await reader.configureBriefOnly()
+        let model = DailyMemoryViewModel(reader: reader, healthLoader: { nil })
+        await model.reload()
+        XCTAssertTrue(model.review.observations.isEmpty)
+        XCTAssertNotNil(model.brief)
+        let textReads = await reader.textReads
+        let metadataReads = await reader.metadataReads
+        XCTAssertTrue(textReads.isEmpty)
+        XCTAssertTrue(metadataReads.isEmpty)
+    }
+
     func testLegacyBriefOpensYesterdaysDateAndExpandsItsSavedDraft() async throws {
         let reader = DailyTestReader()
         var calendar = Calendar(identifier: .gregorian)
@@ -393,6 +608,57 @@ private actor DailyTestReader: BrainReader {
     var textIdentityMismatch = false
     var savedLatestBrief: Brief?
     var shouldDelayLatestBrief = false
+    var textReads: [UInt64] = []
+    var metadataReads: [[UInt64]] = []
+    var metadataFailureAt: Int?
+    var metadataDelayAt: Int?
+    var textFails = false
+    var textUnavailable = false
+    var reviewTextMismatch: String?
+
+    func failReviewRead(_ stage: String) {
+        metadataFailureAt = stage == "metadata" ? metadataReads.count + 1
+            : stage == "recheck" ? metadataReads.count + 2 : nil
+        textFails = stage == "text"
+        textUnavailable = stage == "missingText"
+    }
+
+    func mismatchReviewText(_ field: String) { reviewTextMismatch = field }
+
+    func delayReviewMetadata(_ read: Int) {
+        metadataDelayAt = metadataReads.count + read
+        hasStarted = false
+    }
+
+    func replaceReviewIdentity(_ field: String) {
+        if field == "deleted" { exportHits = []; return }
+        exportHits = exportHits.map {
+            Hit(eventId: $0.id + (field == "id" ? 100 : 0),
+                tsUs: $0.tsUs + (field == "timestamp" ? 1 : 0),
+                appBundleId: field == "app" ? "com.apple.Terminal" : $0.appBundleId,
+                windowTitle: nil, url: nil, ocrTextSnippet: $0.ocrTextSnippet, source: $0.source,
+                score: nil, sourceKind: field == "source" ? "transcript_import" : $0.sourceKind)
+        }
+    }
+
+    func setFullText(_ text: String) { fullTextOverride = text }
+
+    func configureReview(day: MemoryDay, text: String) {
+        partialDay = day
+        fullTextOverride = text
+        denseRows = [
+            TimelineEvent(eventId: 1, tsUs: day.startUs, appBundleId: "com.apple.Safari",
+                snippet: "Earlier sample", thumbnailPath: "/tmp/synthetic-1", sourceKind: "screen_ocr"),
+            TimelineEvent(eventId: 2, tsUs: day.endUs, appBundleId: "com.apple.Safari",
+                snippet: String(text.prefix(280)), sourceKind: "screen_ocr"),
+            TimelineEvent(eventId: 3, tsUs: day.endUs + 1, appBundleId: "com.apple.Safari",
+                snippet: "Next day", sourceKind: "screen_ocr"),
+        ]
+        exportHits = denseRows!.map {
+            Hit(eventId: $0.id, tsUs: $0.tsUs, appBundleId: $0.appBundleId, windowTitle: nil, url: nil,
+                ocrTextSnippet: $0.snippet, source: "timeline", score: nil, sourceKind: $0.sourceKind)
+        }
+    }
 
     func setLatestBrief(date: String) {
         savedLatestBrief = Brief(rowId: 9, dateLocal: date, generatedTsUs: 1_788_739_200_000_000,
@@ -426,8 +692,13 @@ private actor DailyTestReader: BrainReader {
     }
 
     func eventText(eventId: UInt64) async throws -> EventText? {
+        textReads.append(eventId)
+        if textFails { throw BrainReaderError.queryFailed("fixture") }
+        if textUnavailable { return nil }
         guard let hit = exportHits.first(where: { $0.id == eventId }) else { return nil }
-        let result = try EventText(eventId: hit.id, tsUs: hit.tsUs + (textIdentityMismatch ? 1 : 0), appBundleId: hit.appBundleId,
+        let result = try EventText(eventId: hit.id + (reviewTextMismatch == "id" ? 100 : 0),
+            tsUs: hit.tsUs + (textIdentityMismatch || reviewTextMismatch == "timestamp" ? 1 : 0),
+            appBundleId: reviewTextMismatch == "app" ? "com.apple.Terminal" : hit.appBundleId,
             text: fullTextOverride ?? hit.ocrTextSnippet, isTruncated: false)
         if shouldDelayText {
             shouldDelayText = false
@@ -524,8 +795,10 @@ private actor DailyTestReader: BrainReader {
     func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
     func listEpisodes(limit: Int) async throws -> [Episode] { [] }
     func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] {
+        metadataReads.append(ids)
+        if metadataFailureAt == metadataReads.count { throw BrainReaderError.queryFailed("fixture") }
         let result = exportHits
-        if shouldDelayExport {
+        if shouldDelayExport || metadataDelayAt == metadataReads.count {
             shouldDelayExport = false
             hasStarted = true
             started?.resume()

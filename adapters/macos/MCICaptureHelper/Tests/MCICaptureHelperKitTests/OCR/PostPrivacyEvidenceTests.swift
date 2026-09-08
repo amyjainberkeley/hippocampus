@@ -6,6 +6,102 @@ import XCTest
 @testable import MCICaptureHelperKit
 
 final class PostPrivacyEvidenceTests: XCTestCase {
+    func testOverlappingPassesPublishOneCopyOfTheSamePhysicalLine() async throws {
+        let box = CGRect(x: 0.1, y: 0.8, width: 0.4, height: 0.04)
+        let lines = [
+            OCRLine(text: "Review notes", boundingBox: box, confidence: 1),
+            OCRLine(text: "Next action", boundingBox: CGRect(x: 0.1, y: 0.7, width: 0.3, height: 0.04), confidence: 1),
+            OCRLine(text: "Review notes", boundingBox: box.offsetBy(dx: 0.001, dy: -0.001), confidence: 1)
+        ]
+        try await assertPublishedText("Review notes\nNext action", lines: lines)
+    }
+
+    func testRepeatedLabelsInDifferentPositionsAndAlternativeReadingsSurvive() async throws {
+        let top = CGRect(x: 0.1, y: 0.8, width: 0.4, height: 0.04)
+        let bottom = CGRect(x: 0.1, y: 0.3, width: 0.4, height: 0.04)
+        let lines = [
+            OCRLine(text: "cache_key", boundingBox: top, confidence: 1),
+            OCRLine(text: "cache_key", boundingBox: bottom, confidence: 1),
+            OCRLine(text: "cache key", boundingBox: top, confidence: 1),
+            OCRLine(text: "cache_key", boundingBox: top, confidence: 1)
+        ]
+        try await assertPublishedText("cache_key\ncache_key\ncache key", lines: lines)
+    }
+
+    func testUncertainGeometryCannotRemoveText() async throws {
+        for box in [CGRect.zero, .null, .infinite,
+                    CGRect(x: -0.2, y: 0.3, width: 0.4, height: 0.04)] {
+            let line = OCRLine(text: "Review notes", boundingBox: box, confidence: 1)
+            try await assertPublishedText("Review notes\nReview notes", lines: [line, line])
+        }
+    }
+
+    func testNearbyIdenticalLinesWithDifferentBaselinesRemain() async throws {
+        let top = CGRect(x: 0.1, y: 0.8, width: 0.4, height: 0.04)
+        let lines = [top, top.offsetBy(dx: 0, dy: -0.012)].map {
+            OCRLine(text: "Review notes", boundingBox: $0, confidence: 1)
+        }
+        try await assertPublishedText("Review notes\nReview notes", lines: lines)
+    }
+
+    func testCanonicalUnicodeEqualityDoesNotEraseDifferentLiteralReadings() async throws {
+        let box = CGRect(x: 0.1, y: 0.8, width: 0.4, height: 0.04)
+        let lines = ["caf\u{00e9}", "cafe\u{0301}"].map {
+            OCRLine(text: $0, boundingBox: box, confidence: 1)
+        }
+        try await assertPublishedText("caf\u{00e9}\ncafe\u{0301}", lines: lines)
+    }
+
+    func testManyIdenticalLabelsKeepDistinctPhysicalPositions() async throws {
+        let lines = (0..<1000).map {
+            OCRLine(text: "Label", boundingBox: CGRect(x: 0.1, y: Double($0) / 1000,
+                                                       width: 0.1, height: 0.0005), confidence: 1)
+        }
+        try await assertPublishedText(Array(repeating: "Label", count: 1000).joined(separator: "\n"), lines: lines)
+    }
+
+    func testCompactedTextIsCheckedAgainBeforePublicationAndRetention() async {
+        let note = OCRLine(text: "Review notes", boundingBox: CGRect(x: 0.1, y: 0.9, width: 0.4, height: 0.04), confidence: 1)
+        let lines = [note,
+                     OCRLine(text: "password", boundingBox: CGRect(x: 0.1, y: 0.7, width: 0.3, height: 0.04), confidence: 1),
+                     note,
+                     OCRLine(text: ": demo", boundingBox: CGRect(x: 0.1, y: 0.6, width: 0.2, height: 0.04), confidence: 1)]
+        XCTAssertEqual(Self.allowCascade().decideOcr(
+            text: "Review notes\npassword\nReview notes\n: demo", context: WorkflowContext(appBundleId: "com.example.app")
+        ), .allow, "The fixture must exercise the new adjacency, not the original privacy check")
+        await Self.assertSecretSuppressed(result: OCRResult(recognizedLines: lines, durationMs: 1, timedOut: false))
+    }
+
+    func testCompactionCannotBypassOriginalTextByteLimit() async {
+        let line = OCRLine(text: String(repeating: "a", count: maxOCRTextBytes / 2),
+                           boundingBox: CGRect(x: 0.1, y: 0.8, width: 0.4, height: 0.04), confidence: 1)
+        let sink = RecordingSink()
+        let retainer = CountingRetainer()
+        await Self.drive(result: OCRResult(recognizedLines: [line, line], durationMs: 1, timedOut: false),
+                         sink: sink, retainer: retainer)
+        let frames = await sink.frames()
+        let attempts = await retainer.retainCount()
+        XCTAssertEqual(attempts, 0)
+        XCTAssertEqual(frames.count, 1)
+        XCTAssertEqual(frames.first.map(isTombstone), true)
+        XCTAssertEqual(frames.first?.last, RedactionReason.failsafeUnknown.rawValue)
+    }
+
+    private func assertPublishedText(_ expected: String, lines: [OCRLine],
+                                     file: StaticString = #filePath, line: UInt = #line) async throws {
+        let sink = RecordingSink()
+        let retainer = CountingRetainer()
+        await Self.drive(result: OCRResult(recognizedLines: lines, durationMs: 1, timedOut: false),
+                         sink: sink, retainer: retainer)
+        let frames = await sink.frames()
+        let expectedFrame = try encodeOCREvent(seq: 0, event: OCREvent(
+            seq: 0, tsUs: 1, appBundleId: "com.example.app", windowTitle: "", url: "", ocrText: expected
+        )).get()
+        XCTAssertEqual(frames, [expectedFrame], file: file, line: line)
+        let attempts = await retainer.retainCount()
+        XCTAssertEqual(attempts, 1, file: file, line: line)
+    }
+
     func testSupplementalMultilineSecretPreservesRepeatedLabelBeforeRetention() async {
         let password = OCRLine(text: "password", boundingBox: CGRect(x: 0.02, y: 0.92, width: 0.08, height: 0.03), confidence: 1)
         let valueBox = CGRect(x: 0.02, y: 0.88, width: 0.04, height: 0.02)

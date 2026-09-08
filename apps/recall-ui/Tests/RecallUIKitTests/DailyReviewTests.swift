@@ -55,6 +55,58 @@ final class DailyReviewTests: XCTestCase {
         XCTAssertEqual(Set(review.visualEvidence.map(\.id)).count, 6)
     }
 
+    func testHydrationChangesOnlyLatestDetailAndPreservesEvidenceCountsAndOtherObservations() throws {
+        let rows = [event(1, minute: 1), event(2, minute: 2, app: "com.apple.Terminal"),
+                    event(3, minute: 3), event(4, minute: 30)]
+        let original = DailyReview(day: day, events: rows)
+        let text = try EventText(eventId: 4, tsUs: day.startUs + 1_800_000_000,
+            appBundleId: "com.apple.Safari",
+            text: "[app=Safari | title=" + String(repeating: "metadata", count: 100)
+                + " | url=? | ts=now]\nActual work **literal markdown**", isTruncated: false)
+        let review = DailyReview(day: day, events: rows, latestContextText: text)
+
+        XCTAssertEqual(review.observations.first?.detail, "Actual work **literal markdown**")
+        XCTAssertEqual(review.observations.first?.evidence, [rows[3]])
+        XCTAssertEqual(review.events, original.events)
+        XCTAssertEqual(review.countLabel, original.countLabel)
+        XCTAssertEqual(review.visualEvidence, original.visualEvidence)
+        XCTAssertEqual(review.observations.dropFirst(), original.observations.dropFirst())
+    }
+
+    func testHydrationMustMatchLatestInDayIDTimestampAndApp() throws {
+        let rows = [event(1, minute: 1), event(2, minute: 2)]
+        let identities: [(UInt64, UInt64, String?)] = [
+            (1, day.startUs + 60_000_000, "com.apple.Safari"),
+            (99, day.startUs + 120_000_000, "com.apple.Safari"),
+            (2, day.startUs + 120_000_001, "com.apple.Safari"),
+            (2, day.startUs + 120_000_000, "com.apple.Terminal"),
+            (2, day.startUs + 120_000_000, nil),
+            (2, day.endUs + 1, "com.apple.Safari"),
+        ]
+        for (id, timestamp, app) in identities {
+            let text = try EventText(eventId: id, tsUs: timestamp, appBundleId: app,
+                text: "Unrelated full text", isTruncated: false)
+            XCTAssertEqual(DailyReview(day: day, events: rows, latestContextText: text),
+                           DailyReview(day: day, events: rows))
+            XCTAssertTrue(DailyReview(day: day, events: [], latestContextText: text).observations.isEmpty)
+        }
+    }
+
+    func testHydratedTextUsesOnlyLeadingRecognizedHeaderStripping() throws {
+        let row = event(1, minute: 1)
+        let bodies = [
+            "# Captured heading\n![image](https://example.invalid/tracker)",
+            "Ordinary text\n[app=Safari | title=Title | url=? | ts=now]\nMore text",
+            "",
+        ]
+        for body in bodies {
+            let text = try EventText(eventId: row.id, tsUs: row.tsUs, appBundleId: row.appBundleId,
+                text: "[app=Safari | title=Title | url=? | ts=now]\n" + body, isTruncated: false)
+            XCTAssertEqual(DailyReview(day: day, events: [row], latestContextText: text)
+                .observations.first?.detail, body)
+        }
+    }
+
     private func event(_ id: UInt64, minute: Int, app: String = "com.apple.Safari",
                        text: String = "Saved text", image: Bool = true,
                        kind: String? = "screen_ocr") -> TimelineEvent {

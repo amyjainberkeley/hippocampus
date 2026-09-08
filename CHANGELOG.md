@@ -41,6 +41,12 @@ commits are intentionally omitted from release notes.
 
 ### Memory quality
 
+- Save fewer duplicated OCR lines from overlapping recognition passes. Keep
+  different positions and literal readings, check every original pass for
+  secrets, then check the cleaned transcript before any text or image is saved.
+- Read the latest source body for Daily Review before shortening its preview.
+  Long internal headers no longer crowd out the useful text; day changes and
+  unavailable or replaced evidence cannot reuse stale hydrated context.
 - Recover more small text with bounded on-device OCR subregions inside the
   permitted focused window. Preserve complete OCR passes for secret detection;
   timeouts still discard all text, and capture coverage does not expand.
@@ -61,6 +67,9 @@ commits are intentionally omitted from release notes.
 
 ### Capture reliability
 
+- Record which stream operation failed and its bounded framework error code
+  in the local diagnostic log, without screen text, URLs or error descriptions.
+  Preserve terminal shutdown, automatic recovery, and explicit user-stop rules.
 - Replenish automatic recovery after five minutes of a ready, committed capture
   run instead of exhausting ten retries across an entire day. Keep rapid-crash
   backoff bounded, preserve stop/pause/revocation guards, and report exhaustion

@@ -54,6 +54,9 @@ final class VisionOCRCompletenessTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(matches.count, 1, "Expected the label at its image position: \(entry.text); got \(result.recognizedLines)")
         }
         XCTAssertGreaterThanOrEqual(result.recognizedLines.filter { $0.text == "Search settings" }.count, 2)
+        let storedLines = OCRMemoryText.make(from: result.recognizedLines).components(separatedBy: "\n")
+        XCTAssertEqual(storedLines.filter { $0 == "Search settings" }.count, 2,
+                       "Overlapping real Vision passes should not multiply the two physical labels")
     }
 
     func testPartialROIExcludesOutsideTextAndKeepsImageCoordinates() async throws {
@@ -72,6 +75,22 @@ final class VisionOCRCompletenessTests: XCTestCase {
             XCTAssertFalse(line.text.contains("OUTSIDE"))
             XCTAssertTrue(roi.contains(line.boundingBox), "Result must stay in original image coordinates: \(line)")
         }
+    }
+
+    func testRealVisionCompactsObservedDuplicateReadings() async throws {
+        let input = try Self.render(entries: [
+            Text("Review notes", x: 40, y: 920, size: 24),
+            Text("Build complete", x: 1250, y: 120, size: 24)
+        ])
+        let result = await VisionOCRRunner().recognize(input: input, timeoutMs: VisionOCRWorker.defaultTimeoutMs)
+        XCTAssertFalse(result.timedOut)
+        let original = result.recognizedLines.map(\.text)
+        let memory = OCRMemoryText.make(from: result.recognizedLines).components(separatedBy: "\n")
+        XCTAssertGreaterThan(original.filter { $0 == "Build complete" }.count, 1,
+                             "The real Vision fixture must actually produce duplicate readings")
+        XCTAssertEqual(memory.filter { $0 == "Build complete" }.count, 1)
+        XCTAssertTrue(memory.contains("Review notes"))
+        print("OCR-COMPACTION raw_lines=\(original.count) stored_lines=\(memory.count) raw_bytes=\(original.joined(separator: "\n").utf8.count) stored_bytes=\(memory.joined(separator: "\n").utf8.count)")
     }
 
     func testBlankImageDoesNotInventText() async throws {
