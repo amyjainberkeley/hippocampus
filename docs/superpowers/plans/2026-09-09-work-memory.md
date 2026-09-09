@@ -131,10 +131,13 @@ deleted evidence => no dependent claim or packet remains admissible
 
 - [x] Review each worker's diff for specification compliance and quality; resolve findings with focused regressions.
 - [x] Run affected full suites, regression contracts, formatting, static checks, and the synthetic evaluation with sanitized environments. Final local results pass; historical OCR failures and unmet live/distribution gates remain explicit.
-- [ ] Test native screens using synthetic data and inspect actual source images, keyboard operation, empty/error states, and responsiveness.
-- [ ] Build a signed owner candidate with preserved rollback, verify nested identities and notarization, and install only a verified artifact.
+- [x] Exercise native synthetic navigation, interval drill-down and the handoff sheet; inspect the compact layout. This preview does not establish active keyboard focus or live screenshot readback.
+- [ ] Complete actual source-image, keyboard, empty/error-state and responsiveness qualification on the installed candidate.
+- [x] Build the exact `fb73f77` release-profile owner candidate. Verify nested identities, notarization, stapled tickets, Gatekeeper, startup/onboarding and mounted-DMG provenance.
+- [ ] Obtain verified shutdown, preserve a consistent encrypted pre-upgrade recovery copy, then install the verified candidate. The old app alone is not a schema-safe rollback.
 - [ ] Repeat live gates on the installed revision. External second-Mac evidence remains unqualified until actually observed.
-- [ ] Update STATUS with exact code, installed, website, and public-release states. Publish only coherent reviewed source checkpoints to the existing draft PR.
+- [x] Publish reviewed source `fb73f77` to the canonical branch and existing draft PR25; update the PR with features, tests and remaining gates.
+- [x] Record exact candidate, installed, website and public-release states. The new hosted OCR failure remains explicit and unwaived.
 
 ## Integration Review
 
