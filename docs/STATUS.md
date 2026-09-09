@@ -69,7 +69,7 @@ onboarding and installer-smoke checks. Capture has **59 OCR-completeness
 assertion failures across 817 tests**; the dense single-pass baseline takes
 3,620-3,773 ms and cannot fit the unchanged one-second budget. All five controlled
 static-screen quarantine-recovery cases pass on that runner. The hosted
-release-contract job is still in progress at this checkpoint. These failures
+release-contract and workflow-validation jobs subsequently passed. The OCR failures
 remain release blockers; local passes and notarization do not waive them.
 
 The fresh screen-only proof is still open: automated attempts did not generate

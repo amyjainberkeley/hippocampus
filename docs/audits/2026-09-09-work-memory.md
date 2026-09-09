@@ -212,6 +212,10 @@ the runner's real-recognition throughput. The local optimized passes and hosted
 failure are separate evidence. The source checkpoint is not universally
 OCR-qualified or ready for a public release.
 
+The hosted release-contract and workflow-validation jobs for `fb73f77`
+subsequently [passed](https://github.com/amyjainberkeley/hippocampus/actions/runs/34332650730).
+This does not waive the separate OCR failures.
+
 ### Unmet Acceptance
 
 1. Generate a fresh phrase in the real foreground, then prove screen-origin
