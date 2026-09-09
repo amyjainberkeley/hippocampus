@@ -687,6 +687,16 @@ public struct SCStreamPipeline: Sendable {
     /// call. Not on the wire; not load-bearing for production.
     public var cascadeFloor: CascadeFloorState { floorState }
 
+    func emitActivityInterval(_ interval: MeasuredActivityInterval,
+                              admitted: @escaping @Sendable () -> Bool) async throws {
+        let seq = await sequence.allocate()
+        guard !Task.isCancelled, admitted() else { return }
+        guard let sink = sink as? any AdmissionControlledFrameSink else {
+            throw CaptureRuntimeFailure.activityDeliveryFailed
+        }
+        _ = try await sink.writeIfCurrent(encodeActivityInterval(seq: seq, interval: interval), admitted: admitted)
+    }
+
     /// Freeze the pixel-time privacy gate before a raw surface is retained or
     /// queued. The returned value is the only gate consulted by the live
     /// asynchronous path for that frame.

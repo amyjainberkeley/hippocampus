@@ -171,13 +171,16 @@ pub struct MemoryClaim {
     pub asserted_at_us: u64,
     /// First valid-time instant for the asserted fact.
     pub valid_from_us: u64,
-    /// Optional last valid-time instant for the asserted fact.
+    /// Optional inclusive last valid-time instant for the asserted fact.
+    /// Expiry does not reactivate a claim that this assertion superseded.
     pub valid_to_us: Option<u64>,
     /// Projector implementation version that produced the row.
     pub projector_version: String,
     /// Initial status supplied by the projector.
     pub status: ClaimStatus,
-    /// Specific prior claim corrected by this assertion.
+    /// Specific prior claim corrected by this assertion in the exact same scope.
+    /// Supersession retires the whole prior claim, so a narrower scoped assertion
+    /// must be recorded separately instead of retiring a broader rule.
     pub supersedes_claim_id: Option<MemoryClaimId>,
     /// Extant evidence references supporting this claim.
     pub evidence: Vec<EvidenceRef>,

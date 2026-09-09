@@ -24,6 +24,7 @@ mkdir -p "$proof_app/Contents/MacOS"
 xcrun swiftc -swift-version 6 -warnings-as-errors -O \
   scripts/live-capture/ScreenProofExposure.swift \
   scripts/live-capture/ScreenProofReceipt.swift \
+  scripts/live-capture/ScreenProofReceiptSink.swift \
   scripts/live-capture/ScreenProofWindow.swift \
   -o "$proof_app/Contents/MacOS/ScreenProofWindow"
 cp scripts/live-capture/ScreenProofWindow-Info.plist "$proof_app/Contents/Info.plist"
@@ -32,8 +33,12 @@ codesign --force --sign - "$proof_app"
 
 Launch only when ready to interact. The observation deadline is 120 seconds
 after fixture startup, including time before generation. LaunchServices keeps
-normal app activation semantics; stdout goes directly to a content-free local
-receipt file, separate from AppKit's stderr diagnostics:
+normal app activation semantics. The fixture also writes content-free receipts
+to a unique `hippocampus-screen-proof-receipt-UUID.jsonl` in the user's temporary
+directory. It creates the file exclusively with mode 0600; existing files and
+symlinks are refused. Receipt creation failure aborts the check. An approved UI
+controller can launch the bundle directly. For an owner-operated shell launch,
+stdout can also be redirected separately from AppKit's stderr diagnostics:
 
 ```sh
 open -n --stdout "$proof_dir/receipts.jsonl" --stderr "$proof_dir/stderr.log" "$proof_app"

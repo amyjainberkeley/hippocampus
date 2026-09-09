@@ -1095,9 +1095,12 @@ version = "0.0.1"
 dependencies = [
  "mci-brain",
  "mci-brief",
+ "mci-core",
  "mci-coreml-bridge",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 

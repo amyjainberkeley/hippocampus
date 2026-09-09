@@ -618,15 +618,14 @@ impl SqlCipherBrainStore {
     ///
     /// Wraps `mci_core::store::open` for the encryption + WAL +
     /// `foreign_keys` set-up; on a fresh DB also runs the Phase 3 brain
-    /// migration (ADR-0016 §1.4). On a previously-initialized DB the
-    /// migration is a no-op — every `CREATE TABLE` / `CREATE INDEX` /
-    /// `CREATE TRIGGER` carries `IF NOT EXISTS` so re-running is safe;
-    /// the `INSERT OR REPLACE INTO meta` stamps are idempotent by key.
+    /// migration (ADR-0016 §1.4). Existing activity privacy schema and
+    /// deletion barriers are validated before migration: missing or invalid
+    /// current-schema objects are rejected, never silently recreated.
     ///
     /// # Errors
     /// - [`StoreError::Backend`] for any `mci_core::store::open` failure
     ///   (wrapped to preserve the brain trait's error surface).
-    /// - [`StoreError::Backend`] if the migration DDL fails.
+    /// - [`StoreError::Backend`] if migration or activity validation fails.
     pub fn new(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
         let mut db = mci_core_open(path, key).map_err(|e| map_core_err(&e))?;
         run_brain_migration(&mut db)?;
@@ -656,8 +655,24 @@ impl SqlCipherBrainStore {
     ///   file, EPERM, etc.) — wraps `mci_core::store::open_readonly`.
     /// - [`StoreError::Backend`] for wrong-key / not-an-MCI-database
     ///   (the inner error is intentionally indistinguishable per ADR-0008).
+    /// - [`StoreError::Backend`] for invalid existing activity privacy storage.
     pub fn open_readonly(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
-        let db = mci_core_open_readonly(path, key).map_err(|e| map_core_err(&e))?;
+        let mut db = mci_core_open_readonly(path, key).map_err(|e| map_core_err(&e))?;
+        {
+            let tx = db
+                .conn_mut()
+                .transaction()
+                .map_err(|_| StoreError::Backend("begin activity open validation".into()))?;
+            let version: Option<String> = tx
+                .query_row(
+                    "SELECT value FROM meta WHERE key='brain_schema_version'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| StoreError::Backend("read activity schema version".into()))?;
+            crate::activity::validate_activity_schema(&tx, version.as_deref())?;
+        }
         Ok(Self {
             db: Mutex::new(db),
             blob_dir: blob_dir_for_brain(path),
@@ -1944,6 +1959,8 @@ impl SqlCipherBrainStore {
     }
 
     /// Delete an inclusive event range and report post-commit maintenance.
+    /// Measured activity in the same inclusive range is removed; crossing
+    /// intervals are clipped or split in this transaction. Counts remain events.
     ///
     /// # Errors
     /// [`StoreError::Backend`] on invalid bounds or failure before commit.
@@ -1985,6 +2002,7 @@ impl SqlCipherBrainStore {
                 params![s_i, e_i],
             )
             .map_err(|e| StoreError::Backend(format!("DELETE events range: {e}")))?;
+        crate::activity::delete_activity_in_range(&tx, s_i, e_i.saturating_add(1))?;
         tx.commit()
             .map_err(|e| StoreError::Backend(format!("commit delete_range tx: {e}")))?;
         Ok(run_post_delete_cleanup(
@@ -1999,9 +2017,10 @@ impl SqlCipherBrainStore {
     /// `events` rows deleted (the primary user-visible count).
     ///
     /// Drops all rows from: `events`, `episodes`, `briefs`, `entities`,
-    /// `entity_mentions`, `entity_identities`, `episode_edges`.
+    /// `entity_mentions`, `entity_identities`, `episode_edges`, `measured_activity`.
+    /// Preserves content-free activity deletion barriers to reject delayed samples.
     /// Leaves the `meta` schema-version stamps intact so the DB remains
-    /// a valid MCI store, just empty. `VACUUM`s after commit.
+    /// a valid MCI store without captured content. `VACUUM`s after commit.
     ///
     /// # Errors
     /// [`StoreError::Backend`] on any driver failure. The DELETEs are
@@ -2021,8 +2040,9 @@ impl SqlCipherBrainStore {
         let mut guard = self.db.lock().expect("brain store mutex poisoned");
         let tx = guard
             .conn_mut()
-            .transaction()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| StoreError::Backend(format!("begin wipe_all tx: {e}")))?;
+        crate::activity::wipe_activity(&tx)?;
         // Order: children with FK NOT ON DELETE CASCADE-safe first
         // (briefs is FK-free; entity_* is a parent-child chain). Then
         // events, then episodes. CASCADE covers event_vectors + chunks
@@ -2584,8 +2604,8 @@ pub enum IntegrityError {
     Corrupted(Vec<String>),
 }
 
-/// Schema migration — ADR-0016 §1.4. Idempotent: every `CREATE` is
-/// `IF NOT EXISTS`, every meta stamp is `INSERT OR REPLACE`. Runs inside
+/// Schema migration — ADR-0016 §1.4. Activity privacy schema must pass
+/// validation before any idempotent DDL or meta stamps are applied. Runs inside
 /// one transaction so a partial migration cannot leave the store in a
 /// torn state (`SQLCipher` rolls back DDL on commit failure).
 fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
@@ -2621,6 +2641,7 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     } else {
         None
     };
+    let has_activity = crate::activity::validate_activity_schema(&tx, starting_version.as_deref())?;
     tx.execute_batch(sql_0001)
         .map_err(|e| StoreError::Backend(format!("apply migration 0001: {e}")))?;
     tx.execute_batch(sql_0002)
@@ -2663,11 +2684,15 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
         .map_err(|error| StoreError::Backend(format!("validate migration 0008: {error}")))?;
     tx.execute_batch(include_str!("../migrations/0009_event_sources.sql"))
         .map_err(|error| StoreError::Backend(format!("apply migration 0009: {error}")))?;
+    if !has_activity {
+        tx.execute_batch(include_str!("../migrations/0010_measured_activity.sql"))
+            .map_err(|_| StoreError::Backend("apply migration 0010".into()))?;
+    }
     tx.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '9')",
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '10')",
         [],
     )
-    .map_err(|error| StoreError::Backend(format!("stamp migration 0009: {error}")))?;
+    .map_err(|error| StoreError::Backend(format!("stamp migration 0010: {error}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
     Ok(())

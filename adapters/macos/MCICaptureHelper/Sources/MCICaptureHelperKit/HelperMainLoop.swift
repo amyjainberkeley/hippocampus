@@ -32,6 +32,11 @@ public protocol FrameSink: Sendable {
     func write(_ data: Data) async throws
 }
 
+/// Rechecks admission inside the transport's write serialization boundary.
+public protocol AdmissionControlledFrameSink: FrameSink {
+    func writeIfCurrent(_ data: Data, admitted: @escaping @Sendable () -> Bool) async throws -> Bool
+}
+
 /// Mutable counters the helper reports periodically via `HelperHealth`.
 ///
 /// `actor` because every `decide()` + `tick()` call mutates it from

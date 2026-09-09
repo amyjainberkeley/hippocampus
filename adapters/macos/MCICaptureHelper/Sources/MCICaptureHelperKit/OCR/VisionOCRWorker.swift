@@ -199,6 +199,11 @@ public actor VisionOCRWorker {
                 // because the completion is @Sendable and we want a
                 // strict order-of-delivery guarantee (test #1).
                 job.completion(result)
+                if result.timedOut, !Task.isCancelled, !stopped {
+                    // Let a bounded queued retry survive quarantine without
+                    // extending recognition or admitting concurrent Vision work.
+                    _ = await engine.waitUntilAvailable(timeoutMs: timeoutMs)
+                }
             } else {
                 await waitForJob()
             }

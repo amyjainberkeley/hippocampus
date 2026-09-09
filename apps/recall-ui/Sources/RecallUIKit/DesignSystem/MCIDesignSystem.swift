@@ -355,7 +355,7 @@ public extension MCI {
         public static let primaryDestinations: [Destination] = [
             .init(
                 id: "now",
-                title: "Daily Review",
+                title: "Today",
                 systemImage: "calendar",
                 requiresSourceAccess: false,
                 keyboardShortcut: "1"
@@ -374,6 +374,9 @@ public extension MCI {
                 requiresSourceAccess: true,
                 keyboardShortcut: "3"
             ),
+        ]
+
+        public static let historyDestinations: [Destination] = [
             .init(
                 id: "episodes",
                 title: "Sessions",
@@ -386,7 +389,7 @@ public extension MCI {
         public static let secondaryDestinations: [Destination] = [
             .init(
                 id: "sources",
-                title: "Sources",
+                title: "Connections",
                 systemImage: "link.badge.plus",
                 requiresSourceAccess: true,
                 keyboardShortcut: "6"
@@ -407,7 +410,7 @@ public extension MCI {
             ),
         ]
 
-        public static let allDestinations = primaryDestinations + secondaryDestinations
+        public static let allDestinations = primaryDestinations + historyDestinations + secondaryDestinations
 
         public static func destination(forKeyboardShortcut shortcut: String) -> Destination? {
             if shortcut == "5" { return primaryDestinations.first }

@@ -1,14 +1,58 @@
 # Hippocampus Status
 
-_Updated on 2026-09-07; qualification scope is recorded per checkpoint._
+_Updated on 2026-09-09; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `fe90a3d`
+Audited code baseline: `560199a`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 9 Work Memory
+
+The [work-memory checkpoint](audits/2026-09-09-work-memory.md) separates Today,
+Search and History, nests Sessions, adds query-centered lexical excerpts and
+wires independent measured activity through the helper, encrypted store, FFI
+and Today. App totals and the longest measured stretch link to their intervals.
+Missing time remains unknown; these are not productivity or completion scores.
+
+Additional work hardens scoped memory corrections, activity deletion against
+late writes and bounded helper transport. A versioned sequential evaluation is
+a deterministic policy comparison, not demonstrated real-agent learning.
+
+A controlled regression reproduced an unchanged-screen loss: the sole retained
+pixel retry ran while Vision's timed-out attempt still occupied its lane. The
+worker now waits boundedly for availability before consuming that queued retry.
+The recognition deadline and privacy path are unchanged. Focused recovery tests
+verify an encrypted image linked to the emitted event, with negative stop,
+secret and hung-work cases. This is not a substitute for the live capture gate.
+
+Optimized Recall verification passes 526 XCTest and three Swift Testing cases. The earlier debug run
+passed 527 before two further stretch regressions; preview-only tests are
+excluded from optimized builds. Parent tests pass 334 cases; release-contract
+and release-safety checks pass 230 and 16 respectively. The final full Rust
+workspace passes 2,130 tests (nine ignored); strict Clippy and formatting pass.
+The final optimized helper suite passes all 817 tests twice in separate
+processes, including real Apple Vision fixtures, after concurrent builds end.
+Earlier runs failed 30 OCR assertions across 804 tests and one across 13 in an
+isolated rerun. Baseline recognition itself can exceed the one-second budget
+under observed conditions; the failures and cold-start measurements remain in
+the audit. Test-lane cleanup and the separate static-screen recovery correction
+do not change the recognition deadline, quality assertions or privacy rules.
+No universal OCR/hardware or live-capture qualification is claimed.
+
+**Installed app remains `fe90a3d`**, not this source update. Website version 5
+remains owner-private and unchanged. The source branch and draft PR25 are the
+publication target; no main merge, public installer or domain launch is implied.
+
+The fresh screen-only proof is still open: automated attempts did not generate
+the phrase. A system notification held the actual foreground during the latest
+attempt, and the fixture reported itself inactive. No permission bypass or
+capture-policy change was used. Authenticated-image readback, restart, actual
+client retrieval, live privacy/recovery and second-Mac qualification remain
+separate unmet gates.
 
 ## September 7 Capture And Recall Corrections
 

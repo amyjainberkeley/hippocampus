@@ -36,6 +36,15 @@ public extension TimelineEvent {
     }
 }
 
+public extension Episode {
+    func evidence(from events: [TimelineEvent]) -> [TimelineEvent] {
+        var seen = Set<UInt64>()
+        return events.filter { $0.appBundleId == appBundleId && $0.tsUs >= tsStartUs && $0.tsUs <= tsEndUs }
+            .sorted { $0.tsUs == $1.tsUs ? $0.id < $1.id : $0.tsUs < $1.tsUs }
+            .filter { seen.insert($0.id).inserted }
+    }
+}
+
 /// Groups available screenshot observations, without inferring activity between long gaps.
 public struct VisualMemoryEpisode: Identifiable, Equatable, Sendable {
     public var id: UInt64 { events[0].id }
@@ -78,6 +87,8 @@ public final class DailyMemoryViewModel: ObservableObject {
                 generation += 1
                 isLoading = false
                 latestContextText = nil
+                activitySummary = nil
+                activityStatus = nil
                 briefNavigationGeneration += 1
                 showsSavedDraft = false
                 handoffPreview = nil
@@ -101,23 +112,28 @@ public final class DailyMemoryViewModel: ObservableObject {
     @Published public private(set) var searchError: String?
     @Published public private(set) var refreshedAt: Date?
     @Published public private(set) var captureHealth: CaptureHealthReceipt?
+    @Published public private(set) var activitySummary: ActivitySummary?
+    @Published public private(set) var activityStatus: String?
     @Published public private(set) var handoffPreview: String?
     @Published private var latestContextText: EventText?
     @Published public var showsSavedDraft = false
     private let reader: BrainReader
     private let calendar: Calendar
     private let healthLoader: @Sendable () async -> CaptureHealthReceipt?
+    private let now: @Sendable () -> Date
     private var generation = 0
     private var searchGeneration = 0
     private var loadedDay: MemoryDay?
     private var briefNavigationGeneration = 0
 
     public init(reader: BrainReader, selectedDate: Date = Date(), calendar: Calendar = .current,
-                healthLoader: @escaping @Sendable () async -> CaptureHealthReceipt? = { await CaptureHealthReceipt.load() }) {
+                healthLoader: @escaping @Sendable () async -> CaptureHealthReceipt? = { await CaptureHealthReceipt.load() },
+                now: @escaping @Sendable () -> Date = { Date() }) {
         self.reader = reader
         self.selectedDate = selectedDate
         self.calendar = calendar
         self.healthLoader = healthLoader
+        self.now = now
     }
 
     public var day: MemoryDay { MemoryDay(date: selectedDate, calendar: calendar) }
@@ -244,6 +260,8 @@ public final class DailyMemoryViewModel: ObservableObject {
         let request = generation
         latestContextText = nil
         if loadedDay != requestedDay {
+            activitySummary = nil
+            activityStatus = nil
             events = []
             searchHits = []
             brief = nil
@@ -288,7 +306,35 @@ public final class DailyMemoryViewModel: ObservableObject {
         let health = await receipt
         guard request == generation, day == requestedDay, !Task.isCancelled else { return }
         captureHealth = health
+        await reloadActivity(day: requestedDay, request: request)
+        guard request == generation, day == requestedDay, !Task.isCancelled else { return }
         await search()
+    }
+
+    private func reloadActivity(day requestedDay: MemoryDay, request: Int) async {
+        let endUs = min(requestedDay.endUs + 1, UInt64(max(0, now().timeIntervalSince1970 * 1_000_000)))
+        guard endUs > requestedDay.startUs else {
+            activitySummary = nil
+            activityStatus = "No measured input for this window"
+            return
+        }
+        do {
+            let page = try await reader.activityIntervals(startUs: requestedDay.startUs, endUs: endUs, limit: 50_000)
+            guard request == generation, day == requestedDay, !Task.isCancelled else { return }
+            activitySummary = ActivitySummary(page: page, startUs: requestedDay.startUs, endUs: endUs)
+            activityStatus = nil
+            if page.truncated {
+                activityStatus = "Measured input is incomplete"
+            } else if page.intervals.isEmpty {
+                activityStatus = "No measured input for this window"
+            } else if activitySummary == nil {
+                activityStatus = "Measured input could not be reconciled"
+            }
+        } catch {
+            guard request == generation, day == requestedDay, !Task.isCancelled else { return }
+            activitySummary = nil
+            activityStatus = "Measured input unavailable"
+        }
     }
 
     private func loadLatestContext(_ event: TimelineEvent, day requestedDay: MemoryDay,

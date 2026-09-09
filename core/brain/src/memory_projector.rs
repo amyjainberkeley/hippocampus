@@ -184,8 +184,8 @@ fn validate_claim(
         if previous.subject != claim.subject || previous.predicate != claim.predicate {
             return invalid("a correction must preserve subject and predicate");
         }
-        if !scope_is_same_or_narrower(&previous.scope, &claim.scope) {
-            return invalid("a correction cannot broaden claim scope");
+        if previous.scope != claim.scope {
+            return invalid("a correction must preserve the replaced claim's exact scope");
         }
         if previous
             .attribution
@@ -198,8 +198,11 @@ fn validate_claim(
         if claim.status != ClaimStatus::Active {
             return invalid("a superseding correction must be source-backed and active");
         }
-        if claim_status_as_of(tx, previous_id, claim.valid_from_us, delta.asserted_at_us)?
-            != Some(ClaimStatus::Active)
+        // A committed correction already retired its target. Replays still pass
+        // immutable-payload validation and insert_claim's persisted-payload check.
+        if read_claim(tx, &claim.id)?.is_none()
+            && claim_status_as_of(tx, previous_id, claim.valid_from_us, delta.asserted_at_us)?
+                != Some(ClaimStatus::Active)
         {
             return invalid(
                 "a correction may supersede only a claim active at its bitemporal coordinates",

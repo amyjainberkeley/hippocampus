@@ -72,6 +72,21 @@ use std::time::Duration;
 /// Each variant maps to a `[MessageType]` discriminant on the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
+    /// Helper -> core. Dedicated measured-input sample, independent of OCR
+    /// and screenshots. Only permitted app identity may cross this boundary.
+    ActivityInterval {
+        /// Inclusive positive UNIX timestamp in microseconds.
+        start_us: u64,
+        /// Exclusive UNIX timestamp, at most five seconds after `start_us`.
+        end_us: u64,
+        /// One of `input_active`, `input_idle`, or `unknown`.
+        state: String,
+        /// Required for active/idle; absent for unknown or excluded activity.
+        app_bundle_id: Option<String>,
+        /// Bounded opaque sampler generation, never a title, URL, or path.
+        capture_generation: String,
+    },
+
     /// Core → helper. Start the underlying `SCStream` with these parameters.
     CaptureStart {
         /// Target capture interval in milliseconds. The helper translates
@@ -349,6 +364,7 @@ impl Message {
     #[must_use]
     pub const fn message_type(&self) -> MessageType {
         match self {
+            Self::ActivityInterval { .. } => MessageType::ActivityInterval,
             Self::CaptureStart { .. } => MessageType::CaptureStart,
             Self::CaptureStop => MessageType::CaptureStop,
             Self::StateTransitionEvent { .. } => MessageType::StateTransitionEvent,

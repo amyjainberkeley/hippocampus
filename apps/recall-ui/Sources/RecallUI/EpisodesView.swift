@@ -64,7 +64,7 @@ struct EpisodesView: View {
     private var contentView: some View {
         AdaptiveEvidencePanes(
             showsDetail: viewModel.selectedEpisode != nil && reader != nil,
-            backLabel: "Back to episodes",
+            backLabel: "Back to sessions",
             onDismissDetail: { viewModel.selectedEpisodeId = nil }
         ) {
             episodeList
@@ -123,7 +123,7 @@ private struct EpisodeCard: View {
                     .foregroundStyle(Color.brandMint)
                     .help(Formatters.tsString(usSinceEpoch: episode.tsStartUs))
                 Text("·").foregroundStyle(Color.brandFgMuted)
-                Text("\(durationLabel) observed span")
+                Text("\(durationLabel) event span")
                     .font(.system(.caption, design: .default))
                     .foregroundStyle(Color.brandFgSecondary)
             }
@@ -185,25 +185,29 @@ private struct EpisodeEvidencePanel: View {
                     Text("Episode evidence is unavailable. Try refreshing memory.")
                         .foregroundStyle(Color.brandError)
                 } else if screenshots.isEmpty {
-                    ContentUnavailableView("No saved screenshots", systemImage: "doc.text",
-                                           description: Text("This episode has no available screenshot samples."))
+                    ContentUnavailableView("No saved evidence", systemImage: "doc.text",
+                                           description: Text("This session has no available samples."))
                 } else {
                     ForEach(screenshots) { event in
                         Button {
-                            selection = ScreenshotSelection(eventIDs: screenshots.map(\.id), initialID: event.id)
+                            selection = ScreenshotSelection(eventIDs: screenshots.map(\.id), initialID: event.id, expectedEvents: screenshots)
                         } label: {
                             VStack(alignment: .leading, spacing: 8) {
-                                GeometryReader { geometry in
-                                    EvidenceThumbnail(url: event.thumbnailURL, size: geometry.size, maxPixelSize: 640)
+                                if event.hasScreenshot {
+                                    GeometryReader { geometry in
+                                        EvidenceThumbnail(url: event.thumbnailURL, size: geometry.size, maxPixelSize: 640)
+                                    }
+                                    .aspectRatio(16 / 10, contentMode: .fit)
                                 }
-                                .aspectRatio(16 / 10, contentMode: .fit)
+                                Text(verbatim: Formatters.stripContextHeader(event.snippet))
+                                    .font(.callout).lineLimit(4)
                                 Text(Date(timeIntervalSince1970: Double(event.tsUs) / 1_000_000), format: .dateTime.hour().minute().second())
                                 Text(MemorySourceKind.label(event.sourceKind)).foregroundStyle(.secondary)
                             }
                             .font(.caption)
                         }
                         .buttonStyle(.plain)
-                        .help("Open episode screenshot")
+                        .help("Open saved session evidence")
                     }
                 }
             }
@@ -224,7 +228,7 @@ private struct EpisodeEvidencePanel: View {
         do {
             let events = try await reader.timelineEvents(startTsUs: episode.tsStartUs, endTsUs: episode.tsEndUs, resolution: .minute)
             guard !Task.isCancelled, request == loadGeneration else { return }
-            screenshots = events.filter { $0.hasScreenshot && $0.appBundleId == episode.appBundleId }
+            screenshots = episode.evidence(from: events)
         } catch {
             guard !Task.isCancelled, request == loadGeneration else { return }
             screenshots = []

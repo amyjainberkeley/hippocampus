@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - 'core/brain/**'
+      - 'core/src/ipc/**'
+      - 'adapters/macos/mci-brain-ffi/**'
+      - 'adapters/macos/MCICaptureHelper/**'
+      - 'apps/agent/src/brain_ingest.rs'
+      - 'apps/agent/src/runner.rs'
       - '.github/workflows/release*.yml'
       - '.github/workflows/publish-release.yml'
       - 'apps/hippocampus/Resources/Info.plist'
@@ -136,6 +142,12 @@ on:
       - 'release-models.json'
   pull_request:
     paths:
+      - 'core/brain/**'
+      - 'core/src/ipc/**'
+      - 'adapters/macos/mci-brain-ffi/**'
+      - 'adapters/macos/MCICaptureHelper/**'
+      - 'apps/agent/src/brain_ingest.rs'
+      - 'apps/agent/src/runner.rs'
       - '.github/workflows/release*.yml'
       - '.github/workflows/publish-release.yml'
       - 'apps/hippocampus/Resources/Info.plist'

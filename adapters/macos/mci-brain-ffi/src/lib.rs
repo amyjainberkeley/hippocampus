@@ -83,6 +83,12 @@ use serde::{Deserialize, Serialize};
 
 pub mod storage_usage;
 
+mod search_snippet;
+use search_snippet::SearchSnippet;
+
+#[cfg(test)]
+mod search_snippet_tests;
+
 // ---------------------------------------------------------------------------
 // JSON value types — what the Swift side decodes with `Codable`
 // ---------------------------------------------------------------------------
@@ -105,7 +111,7 @@ pub struct HitJson {
     pub window_title: Option<String>,
     /// `events.url` (nullable).
     pub url: Option<String>,
-    /// First N characters of `events.text` for snippet display. The
+    /// Query-centered body excerpt for search, or the stored text prefix for history. The
     /// FFI caps this at [`SNIPPET_CHAR_CAP`] characters at the Rust
     /// boundary so the Swift list cells never receive megabytes of OCR
     /// text per row.
@@ -743,7 +749,7 @@ fn search_browse(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec
             continue;
         };
         if query_matches_event(query, &event) {
-            hits.push(hit_json(handle, id, event, "recent", None));
+            hits.push(hit_json(handle, id, event, "recent", None, None));
         }
     }
     Ok(hits)
@@ -797,6 +803,7 @@ fn search_lexical(
         )
     }
     .map_err(|error| format!("fts5_search: {error}"))?;
+    let snippet_query = SearchSnippet::new(&alternatives);
     let mut hits_json = Vec::with_capacity(hits_raw.len());
     for (event_id, score) in hits_raw {
         let Some(event) = handle
@@ -809,7 +816,14 @@ fn search_lexical(
         if !query_matches_event(query, &event) {
             continue;
         }
-        hits_json.push(hit_json(handle, event_id, event, "lexical", Some(score)));
+        hits_json.push(hit_json(
+            handle,
+            event_id,
+            event,
+            "lexical",
+            Some(score),
+            Some(&snippet_query),
+        ));
     }
     Ok(hits_json)
 }
@@ -860,7 +874,8 @@ fn search_hybrid(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec
             (fallback_matches, source)
         }
     };
-    materialize_retrieval_matches(handle, matches, source, limit)
+    let snippet_query = SearchSnippet::new(&[LexicalAlternative::Keywords(&query.text)]);
+    materialize_retrieval_matches(handle, matches, source, limit, &snippet_query)
 }
 
 #[cfg(target_os = "macos")]
@@ -869,6 +884,7 @@ fn materialize_retrieval_matches(
     matches: Vec<RetrievalMatch>,
     source: &str,
     limit: usize,
+    snippet_query: &SearchSnippet,
 ) -> Result<Vec<HitJson>, String> {
     let mut hits = Vec::with_capacity(matches.len().min(limit));
     for value in matches.into_iter().take(limit) {
@@ -886,6 +902,7 @@ fn materialize_retrieval_matches(
             event,
             source,
             Some(value.hit.score_combined),
+            Some(snippet_query),
         ));
     }
     Ok(hits)
@@ -910,6 +927,7 @@ fn hit_json(
     event: mci_brain::Event,
     source: &str,
     score: Option<f32>,
+    snippet_query: Option<&SearchSnippet>,
 ) -> HitJson {
     let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
     let thumbnail_path = thumbnail_path_for(&handle.blob_dir, event.keyframe_blob.as_deref());
@@ -920,7 +938,8 @@ fn hit_json(
         app_bundle_id: event.app_bundle_id,
         window_title: event.window_title,
         url: event.url,
-        ocr_text_snippet: snippet(&event.text),
+        ocr_text_snippet: snippet_query
+            .map_or_else(|| snippet(&event.text), |query| query.excerpt(&event.text)),
         source: source.into(),
         score,
         entities,
@@ -977,6 +996,49 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
         })
         .collect();
     json_to_c_string(&hits)
+}
+
+/// Read a bounded half-open activity window. No event content or capture-run
+/// identity is exposed. At most two days (including DST) and 50,000 rows.
+///
+/// # Safety
+/// `h` must remain a live handle for the duration of this call.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_activity_intervals(
+    h: *mut Handle,
+    start_us: u64,
+    end_us: u64,
+    limit: u32,
+) -> *mut c_char {
+    if h.is_null()
+        || start_us >= end_us
+        || end_us > i64::MAX as u64
+        || end_us - start_us > 172_800_000_000
+    {
+        set_last_error("mci_brain_activity_intervals: invalid handle or range");
+        return ptr::null_mut();
+    }
+    let handle = unsafe { &*h };
+    let limit = limit.min(50_000) as usize;
+    let Ok(rows) = handle
+        .store
+        .activity_intervals_page(start_us, end_us, limit + 1)
+    else {
+        set_last_error("mci_brain_activity_intervals: activity unavailable");
+        return ptr::null_mut();
+    };
+    let truncated = rows.len() > limit;
+    let intervals: Vec<_> = rows
+        .into_iter()
+        .take(limit)
+        .map(|row| {
+            serde_json::json!({
+                "start_us": row.start_us, "end_us": row.end_us,
+                "state": row.state, "app_bundle_id": row.app_bundle_id,
+            })
+        })
+        .collect();
+    json_to_c_string(&serde_json::json!({"intervals": intervals, "truncated": truncated}))
 }
 
 /// Resolve a batch of event ids into full [`HitJson`] rows. Powers the

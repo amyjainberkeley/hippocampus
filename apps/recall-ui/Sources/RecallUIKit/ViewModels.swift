@@ -86,8 +86,7 @@ public final class SearchViewModel: ObservableObject {
         guard !Task.isCancelled else { return }
         if let focusedEventID {
             await focusEvent(id: focusedEventID)
-        } else if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || filters.anyActive {
+        } else {
             await runSearch()
         }
         await reloadObservedApps()
@@ -98,7 +97,7 @@ public final class SearchViewModel: ObservableObject {
         return hits.first { $0.id == id }
     }
 
-    /// Filter capability independent of selected mode. Empty-text browse supports all filters.
+    /// Filter capability independent of selected mode.
     public var hasUnsupportedRelatedFilters: Bool {
         filters.appBundleIds.count > 1 || filters.hasUrl
     }
@@ -119,8 +118,10 @@ public final class SearchViewModel: ObservableObject {
         let requestedFilters = filters
         let requestedMode = mode
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty || filters.anyActive else {
+        guard !q.isEmpty else {
             hits = []
+            selectedHitId = nil
+            isDetailFocused = false
             errorMessage = nil
             isSearching = false
             return
@@ -152,7 +153,7 @@ public final class SearchViewModel: ObservableObject {
                 timeToUs: window.toUs.map { $0 - 1 },
                 userAliases: dict.entries.isEmpty ? nil : dict.toAliasMap(),
                 mode: requestedMode,
-                browse: q.isEmpty,
+                browse: false,
                 appFilters: requestedFilters.appBundleIds.sorted(),
                 hasUrl: requestedFilters.hasUrl
             )
@@ -252,7 +253,6 @@ public final class SearchViewModel: ObservableObject {
         isDetailFocused = false
         errorMessage = nil
         isSearching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || filters.anyActive
         guard isSearching else { return }
         pendingSearch = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }

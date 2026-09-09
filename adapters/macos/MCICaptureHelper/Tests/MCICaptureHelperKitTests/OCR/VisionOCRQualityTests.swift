@@ -23,7 +23,11 @@ final class VisionOCRQualityTests: XCTestCase {
 
     func testSmallCodeDoesNotAcquireLanguageCorrectionSpaces() async throws {
         let input = try Self.render(lines: Self.corpus, fontSize: 12)
-        let result = await VisionOCRRunner().recognize(input: input, timeoutMs: 10_000)
+        let runner = VisionOCRRunner(regionDidFinish: { _, _ in })
+        let result = await runner.recognize(input: input, timeoutMs: 10_000)
+        // Drain timed-out work without changing the recognition result or budget.
+        let drained = await runner.waitUntilIdle(timeoutMs: 5_000)
+        XCTAssertTrue(drained, "The Vision perform must finish before the next fixture")
         XCTAssertFalse(result.timedOut)
         XCTAssertTrue(
             result.recognizedLines.contains { $0.text == "result.map { $0.id }.joined(separator: \",\")" },

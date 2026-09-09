@@ -1,0 +1,16 @@
+{
+  "initial":["cargo","test","--lib","alpha"],
+  "corrected":["cargo","test","--test","beta"],
+  "cross-project":["cargo","check","--all-targets"],
+  "stale-replay":["cargo","test","--test","delta"],
+  "process-change":["cargo","test","--lib","epsilon"],
+  "historical":["cargo","test","--test","historical"],
+  "expiry-boundary":["cargo","test","--lib","boundary"],
+  "expired":["cargo","check","--all-targets"],
+  "malicious-source":["cargo","check","--all-targets"],
+  "b-learned":["cargo","test","--test","theta"],
+  "deleted-source":["cargo","check","--all-targets"],
+  "relearned":["cargo","test","--test","kappa"],
+  "deleted-ancestor":["cargo","check","--all-targets"],
+  "independent-survives":["cargo","test","--test","mu"]
+}

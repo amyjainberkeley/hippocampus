@@ -169,6 +169,11 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// helper, and (b) the asynchronous-update window for the browser
 /// extension. Persisted / in-flight `0x01` / `0x02` / `0x03` / `0x04`
 /// / `0x05` frames are still hard-rejected.
+///
+/// Additive v9 activity payload (`0x0060`): `start_us:u64`, `end_us:u64`,
+/// `state:u8` (0 unknown, 1 input-active, 2 input-idle), then app and generation
+/// as `u16`-length UTF-8 strings. Empty app means absent. Legacy versions do
+/// not admit this type; all their existing payload layouts remain unchanged.
 pub const FRAME_VERSION: u8 = 0x09;
 
 /// The set of wire versions the decoder accepts. The encoder always
@@ -253,6 +258,8 @@ pub const OCR_EVENT_FIXED_HEADER_BYTES: usize =
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum MessageType {
+    /// Helper -> core measured-input interval; additive v9 payload.
+    ActivityInterval = 0x0060,
     /// Core → helper start signal (see [`super::Message::CaptureStart`]).
     CaptureStart = 0x0001,
     /// Core → helper stop signal (see [`super::Message::CaptureStop`]).
@@ -292,6 +299,7 @@ impl MessageType {
             0x0030 => Self::HelperHealth,
             0x0040 => Self::OCREvent,
             0x0050 => Self::PageContentEvent,
+            0x0060 => Self::ActivityInterval,
             other => {
                 return Err(DecodeError::InvalidEnum {
                     field: "MessageType",
@@ -314,6 +322,9 @@ pub struct Frame {
 /// Errors returned by [`decode`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
+    /// Activity timestamps, state, generation, or app identity are inadmissible.
+    /// This diagnostic never includes capture-derived strings.
+    InvalidActivityInterval,
     /// Buffer is shorter than the minimum frame header (16 bytes).
     ShortBuffer,
     /// Buffer is shorter than `MIN_FRAME_HEADER_BYTES + len`.
@@ -363,6 +374,7 @@ pub enum DecodeError {
 impl std::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidActivityInterval => write!(f, "invalid activity interval"),
             Self::ShortBuffer => write!(f, "buffer shorter than frame header"),
             Self::Truncated { needed, have } => {
                 write!(f, "truncated frame: needed {needed} bytes, have {have}")
@@ -421,6 +433,28 @@ pub fn encode(seq: u64, msg: &Message) -> Vec<u8> {
 #[allow(clippy::too_many_lines)]
 fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
     match msg {
+        Message::ActivityInterval {
+            start_us,
+            end_us,
+            state,
+            app_bundle_id,
+            capture_generation,
+        } => {
+            out.extend_from_slice(&start_us.to_le_bytes());
+            out.extend_from_slice(&end_us.to_le_bytes());
+            out.push(match state.as_str() {
+                "unknown" => 0,
+                "input_active" => 1,
+                "input_idle" => 2,
+                _ => 255,
+            });
+            // Unattributed samples must not send excluded app identity.
+            let app = app_bundle_id
+                .as_deref()
+                .filter(|_| matches!(state.as_str(), "input_active" | "input_idle"));
+            encode_string(app.unwrap_or_default(), out);
+            encode_string(capture_generation, out);
+        }
         Message::CaptureStart {
             interval_ms,
             queue_depth,
@@ -709,6 +743,38 @@ fn decode_payload(
 ) -> Result<(Message, usize), DecodeError> {
     let mut p = Parser::new(payload);
     let msg = match msg_type {
+        MessageType::ActivityInterval => {
+            // This new payload does not reinterpret any legacy message layout.
+            if version != 0x09 {
+                return Err(DecodeError::UnsupportedVersion { got: version });
+            }
+            let start_us = p.u64_le()?;
+            let end_us = p.u64_le()?;
+            let state = match p.u8_le()? {
+                0 => "unknown",
+                1 => "input_active",
+                2 => "input_idle",
+                _ => return Err(DecodeError::InvalidActivityInterval),
+            }
+            .to_owned();
+            let app = p.string()?;
+            let app_bundle_id = (!app.is_empty()).then_some(app);
+            let capture_generation = p.string()?;
+            validate_activity_interval(
+                start_us,
+                end_us,
+                &state,
+                app_bundle_id.as_deref(),
+                &capture_generation,
+            )?;
+            Message::ActivityInterval {
+                start_us,
+                end_us,
+                state,
+                app_bundle_id,
+                capture_generation,
+            }
+        }
         MessageType::CaptureStart => {
             let interval_ms = p.u32_le()?;
             let queue_depth = p.u8_le()?;
@@ -899,6 +965,49 @@ fn decode_payload(
     Ok((msg, p.cursor()))
 }
 
+// Keep shape admission aligned with the brain's ActivityInterval::validate.
+// The core cannot depend on the brain; persistence validates again after mapping.
+fn validate_activity_interval(
+    start_us: u64,
+    end_us: u64,
+    state: &str,
+    app: Option<&str>,
+    generation: &str,
+) -> Result<(), DecodeError> {
+    if start_us == 0
+        || start_us >= end_us
+        || end_us > i64::MAX as u64
+        || end_us - start_us > 5_000_000
+        || generation.is_empty()
+        || generation.len() > 128
+        || !generation
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(DecodeError::InvalidActivityInterval);
+    }
+    let valid_identity = match state {
+        "unknown" => app.is_none(),
+        "input_active" | "input_idle" => app.is_some_and(|app| {
+            app.len() <= 255
+                && app.contains('.')
+                && app.split('.').all(|part| {
+                    let bytes = part.as_bytes();
+                    bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+                        && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+                        && bytes
+                            .iter()
+                            .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+                })
+        }),
+        _ => false,
+    };
+    if !valid_identity {
+        return Err(DecodeError::InvalidActivityInterval);
+    }
+    Ok(())
+}
+
 struct Parser<'a> {
     buf: &'a [u8],
     pos: usize,
@@ -971,6 +1080,127 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn activity_wire_fixture(state: &str, app: Option<&str>, generation: &str) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1_000_000_u64.to_le_bytes());
+        payload.extend_from_slice(&2_000_000_u64.to_le_bytes());
+        payload.push(match state {
+            "unknown" => 0,
+            "input_active" => 1,
+            "input_idle" => 2,
+            _ => 255,
+        });
+        encode_string(app.unwrap_or_default(), &mut payload);
+        encode_string(generation, &mut payload);
+        let mut bytes = vec![0x4d, 0x09, 0x60, 0x00];
+        bytes.extend_from_slice(&42_u64.to_le_bytes());
+        bytes.extend_from_slice(&u32::try_from(payload.len()).unwrap().to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        bytes
+    }
+
+    #[test]
+    fn activity_interval_v9_wire_fixture_roundtrips() {
+        for (state, app) in [
+            ("input_active", Some("test.activity")),
+            ("input_idle", Some("test.activity")),
+            ("unknown", None),
+        ] {
+            let bytes = activity_wire_fixture(state, app, "generation-1");
+            let (frame, used) = decode(&bytes).expect("v9 activity interval must decode");
+            assert_eq!(used, bytes.len());
+            assert_eq!(frame.seq, 42);
+            assert_eq!(frame.message.message_type() as u16, 0x0060);
+            assert_eq!(encode(frame.seq, &frame.message), bytes);
+        }
+    }
+
+    #[test]
+    fn activity_interval_unknown_encoder_omits_private_identity() {
+        let bytes = encode(
+            42,
+            &Message::ActivityInterval {
+                start_us: 1_000_000,
+                end_us: 2_000_000,
+                state: "unknown".into(),
+                app_bundle_id: Some("test.private".into()),
+                capture_generation: "generation-1".into(),
+            },
+        );
+        assert_eq!(
+            bytes,
+            activity_wire_fixture("unknown", None, "generation-1")
+        );
+        assert!(!bytes
+            .windows(b"test.private".len())
+            .any(|window| window == b"test.private"));
+    }
+
+    #[test]
+    fn activity_interval_wire_caps_and_bad_state_fail_without_content_in_error() {
+        for (app, generation) in [
+            (format!("test.{}", "a".repeat(251)), "generation-1".into()),
+            ("test.activity".into(), "g".repeat(129)),
+        ] {
+            let bytes = activity_wire_fixture("input_active", Some(&app), &generation);
+            assert_eq!(
+                decode(&bytes).unwrap_err().to_string(),
+                "invalid activity interval"
+            );
+        }
+        let mut bytes = activity_wire_fixture("unknown", None, "generation-1");
+        bytes[32] = 3;
+        assert_eq!(
+            decode(&bytes).unwrap_err().to_string(),
+            "invalid activity interval"
+        );
+        bytes[32] = 0;
+        bytes[16..24].copy_from_slice(&0_u64.to_le_bytes());
+        assert!(decode(&bytes).is_err());
+        let app = format!("test.{}", "a".repeat(250));
+        let mut boundary = activity_wire_fixture("input_active", Some(&app), &"g".repeat(128));
+        boundary[24..32].copy_from_slice(&6_000_000_u64.to_le_bytes());
+        assert!(decode(&boundary).is_ok());
+    }
+
+    #[test]
+    fn activity_interval_wire_rejects_malformed_or_identifying_unknown_samples() {
+        for (state, app, generation) in [
+            ("active", Some("test.activity"), "generation-1"),
+            ("input_active", None, "generation-1"),
+            ("input_idle", Some(""), "generation-1"),
+            ("unknown", Some("test.private"), "generation-1"),
+            ("unknown", None, ""),
+            ("unknown", None, "private title\n"),
+            ("input_active", Some("private title\n"), "generation-1"),
+        ] {
+            let bytes = activity_wire_fixture(state, app, generation);
+            assert!(decode(&bytes).is_err());
+        }
+        let valid = activity_wire_fixture("input_active", Some("test.activity"), "generation-1");
+        for end_us in [0, 1_000_000, 6_000_001, u64::MAX] {
+            let mut invalid = valid.clone();
+            invalid[24..32].copy_from_slice(&end_us.to_le_bytes());
+            assert!(decode(&invalid).is_err());
+        }
+        for version in [6, 7, 8] {
+            let mut legacy = valid.clone();
+            legacy[1] = version;
+            assert!(decode(&legacy).is_err());
+        }
+        for length in 0..valid.len() {
+            assert!(decode(&valid[..length]).is_err());
+        }
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        let length = u32::try_from(trailing.len() - 16).unwrap();
+        trailing[12..16].copy_from_slice(&length.to_le_bytes());
+        assert!(decode(&trailing).is_err());
+        let mut invalid_utf8 = valid;
+        invalid_utf8[35] = 0xff;
+        assert!(decode(&invalid_utf8).is_err());
+    }
 
     fn roundtrip(msg: &Message) {
         let buf = encode(42, msg);

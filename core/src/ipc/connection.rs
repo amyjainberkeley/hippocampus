@@ -31,6 +31,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 /// trust-boundary logic at this layer auditable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Routed {
+    /// Dedicated measured-input interval. Never an OCR event or health record.
+    ActivityInterval(Frame),
     /// Helper emitted a privacy tombstone. The caller writes the
     /// materialized [`EventRow`] to the store layer.
     Tombstone(EventRow),
@@ -172,6 +174,7 @@ where
     /// Classify an inbound frame into a [`Routed`] outcome.
     fn route(&self, frame: Frame) -> Routed {
         match &frame.message {
+            Message::ActivityInterval { .. } => Routed::ActivityInterval(frame),
             Message::PrivacyTombstone { .. } => {
                 // The materializer cannot return None here because we
                 // just matched on PrivacyTombstone. The assert
@@ -196,6 +199,24 @@ mod tests {
     use crate::ipc::wire::encode;
     use crate::ipc::RedactionReason;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn routes_activity_interval_separately_from_content_and_health() {
+        let (core_rx, core_tx, mut helper_tx, _helper_rx) = make_pair();
+        let message = Message::ActivityInterval {
+            start_us: 1_000_000,
+            end_us: 2_000_000,
+            state: "unknown".into(),
+            app_bundle_id: None,
+            capture_generation: "generation-1".into(),
+        };
+        helper_tx.write_all(&encode(9, &message)).await.unwrap();
+        let mut connection = HelperConnection::new(core_rx, core_tx, "device-A");
+        assert_eq!(
+            connection.recv_one().await.unwrap(),
+            Some(Routed::ActivityInterval(Frame { seq: 9, message }))
+        );
+    }
 
     fn make_pair() -> (
         tokio::io::DuplexStream,

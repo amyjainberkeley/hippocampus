@@ -118,6 +118,8 @@ pub use consolidator::{ConsolidatorConfig, DerivedEdge, EpisodeConsolidator, Ide
 
 pub mod fts_sanitizer;
 
+pub mod activity;
+pub use activity::{ActivityInterval, ActivityState};
 pub mod memory_delta;
 pub mod memory_projector;
 pub mod retention_purger;
@@ -1298,12 +1300,16 @@ pub enum EmbedError {
 
 /// Errors a [`BrainStore`] may return.
 ///
-/// Same shape as [`ChunkerError`]. Distinct from `mci_core::store::StoreError`
+/// Distinct from `mci_core::store::StoreError`
 /// (the encrypted `SQLite` open path) — that one is protected-set and lives
 /// behind `AGENT_PROTOCOL` §5. The brain's `StoreError` is the OS-free
 /// trait-surface error a future `SQLCipher` impl collapses into.
 #[derive(Debug, Error)]
 pub enum StoreError {
+    /// A valid measured-activity sample conflicts with a surviving stored row.
+    /// No row was inserted. Callers may recover only on the activity ingest path.
+    #[error("store: activity interval overlaps stored activity")]
+    ActivityOverlap,
     /// Caller violated a precondition (e.g. embedding dimension mismatch,
     /// embedding not L2-normalized, FTS5 query syntax error).
     #[error("store: invalid input: {0}")]

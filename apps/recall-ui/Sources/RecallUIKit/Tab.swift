@@ -39,7 +39,7 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// Pinned by `BriefDeepLinkRoutingTests`.
     public static func from(deepLinkValue: String) -> RecallTab? {
         switch deepLinkValue.lowercased() {
-        case "now", "daily": return .now
+        case "today", "now", "daily": return .now
         case "search":   return .search
         case "timeline", "history": return .timeline
         case "episodes", "sessions": return .episodes

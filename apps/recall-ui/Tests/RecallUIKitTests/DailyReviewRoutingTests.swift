@@ -26,7 +26,7 @@ final class DailyReviewRoutingTests: XCTestCase {
     }
 
     func testOldAndNewRoutesResolveToTheSameVisibleDestinations() {
-        for route in ["now", "brief", "briefs", "daily"] {
+        for route in ["today", "now", "brief", "briefs", "daily"] {
             XCTAssertEqual(RecallTab.from(deepLinkValue: route)?.workspaceTab, .now)
         }
         for route in ["timeline", "history", "strip"] {

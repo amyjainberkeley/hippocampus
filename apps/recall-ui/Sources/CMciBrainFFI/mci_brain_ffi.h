@@ -64,6 +64,13 @@ char *mci_brain_ffi_search(McibrainHandle *h, const char *query_json);
 /* Fetch the `limit` most-recent events as a JSON array of HitJson. */
 char *mci_brain_ffi_recent_events(McibrainHandle *h, uint32_t limit);
 
+/* Half-open measured-activity window, max two days and 50,000 rows.
+ * JSON {intervals:[{start_us,end_us,state,app_bundle_id}],truncated:bool}.
+ * No run identity/content. NULL on invalid range or unavailable storage.
+ * Free with mci_brain_ffi_string_free. */
+char *mci_brain_activity_intervals(McibrainHandle *h, uint64_t start_us,
+                                  uint64_t end_us, uint32_t limit);
+
 /* Resolve a batch of event ids into full HitJson rows. Powers the recall
  * UI's related-hits flyout (cycle 8.37 PR-3): given a hit whose
  * `linked_event_ids` names its cross-app siblings, the Swift side calls

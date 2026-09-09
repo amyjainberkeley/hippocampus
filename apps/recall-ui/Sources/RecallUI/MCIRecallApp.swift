@@ -14,6 +14,10 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        #if DEBUG
+        if NativePreviewConfiguration(arguments: CommandLine.arguments) != nil { return }
+        #endif
+
         // Cycle 8.51 — enterprise audit trail. Record every launch to
         // the plaintext audit log so the "who touched user data when"
         // trail is complete for a security-review buyer. Fire-and-forget:
@@ -84,6 +88,22 @@ struct MCIRecallApp: App {
 
     var body: some Scene {
         WindowGroup("Hippocampus") {
+            #if DEBUG
+            if let preview = NativePreviewConfiguration(arguments: CommandLine.arguments) {
+                NativeRecallPreview(configuration: preview)
+            } else {
+                liveWorkspace
+            }
+            #else
+            liveWorkspace
+            #endif
+        }
+        .defaultPosition(.center)
+        .defaultSize(width: 920, height: 620)
+    }
+
+    @ViewBuilder
+    private var liveWorkspace: some View {
             let launchRequest = RecallLaunchRequest(
                 environment: ProcessInfo.processInfo.environment
             )
@@ -110,9 +130,6 @@ struct MCIRecallApp: App {
                     latestBriefDate: latestDate
                 )
             }
-        }
-        .defaultPosition(.center)
-        .defaultSize(width: 920, height: 620)
     }
 
     @MainActor

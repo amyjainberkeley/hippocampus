@@ -109,11 +109,13 @@ public struct InCallbackSample: Sendable, Equatable {
 public enum CaptureRuntimeFailure: Error, Sendable, Equatable {
     case streamStoppedUnexpectedly
     case userStoppedCapture
+    case activityDeliveryFailed
 
     var helperExitStatus: Int32 {
         switch self {
         case .streamStoppedUnexpectedly: 81
         case .userStoppedCapture: 82
+        case .activityDeliveryFailed: 83
         }
     }
 
@@ -133,6 +135,25 @@ public enum CaptureRuntimeFailure: Error, Sendable, Equatable {
 /// fail-loud default, which terminates the helper nonzero so its supervisor
 /// cannot continue reporting a healthy capture child. Tests inject a recorder.
 public typealias CaptureRuntimeFailureHandler = @Sendable (CaptureRuntimeFailure) -> Void
+
+/// OS reads and timing only. Session admission and the capture privacy cascade
+/// remain in the sampler task; headless tests do not replace their decisions.
+internal struct MeasuredActivityDependencies: Sendable {
+    let now: @Sendable () -> (tsUs: UInt64, uptimeNs: UInt64)
+    let sleep: @Sendable (UInt64) async throws -> Void
+    let sessionEligible: @Sendable () -> Bool
+    let secondsSinceLastInput: @Sendable () -> TimeInterval?
+
+    static let live = MeasuredActivityDependencies(
+        now: {
+            (UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000)),
+             DispatchTime.now().uptimeNanoseconds)
+        },
+        sleep: { try await Task.sleep(nanoseconds: $0) },
+        sessionEligible: { ActivitySessionReader().permitsMeasurement() },
+        secondsSinceLastInput: { SystemUserActivityReader().secondsSinceLastInput() }
+    )
+}
 
 /// The live SCStream session. `@unchecked Sendable`: lifecycle, stream
 /// identity, focus generation, and visual-baseline state are guarded by the
@@ -272,6 +293,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// SCStream filter follows focus changes promptly. Guarded by
     /// `lock`; cancelled on `stop()`.
     private var rebindTask: Task<Void, Never>?
+    private var measuredActivityTask: Task<Void, Never>?
+    private let measuresActivity: Bool
 
     /// V2-P1 third-lift (Phase 7 PR 13 wiring): per-session count of
     /// race-gate drops observed so far. Used to throttle the stderr
@@ -315,6 +338,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         focusedWindowStore: FocusedWindowStore? = nil,
         focusTracker: FocusTracker? = nil,
         tccStatusMonitor: TCCStatusMonitor? = nil,
+        measuresActivity: Bool = false,
         runtimeFailureHandler: @escaping CaptureRuntimeFailureHandler = { failure in
             SCStreamCaptureSession.terminateHelper(for: failure)
         }
@@ -329,6 +353,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         self.focusedWindowStore = focusedWindowStore
         self.focusTracker = focusTracker
         self.tccStatusMonitor = tccStatusMonitor
+        self.measuresActivity = measuresActivity
         self.runtimeFailureHandler = runtimeFailureHandler
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
@@ -365,13 +390,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// pre-V2-P1 display-filter behaviour byte-for-byte (legacy /
     /// headless test path).
     public func start() async throws {
-        if let failure = currentRuntimeFailure() {
-            // A terminal callback means the session is no longer a valid
-            // capture owner. Requiring a fresh session prevents a caller from
-            // silently turning a failed capture back into a healthy status.
-            throw failure
-        }
-        lock.withLock { shutdownRequested = false }
+        try prepareCaptureStart()
         // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         // Force the §2 probe back to its fail-safe initial state so a
         // stale flag from a prior session cannot bleed into this one.
@@ -459,6 +478,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         }
         storeIncludeListSize(initialIncludeListSize)
         startRebindTaskIfNeeded()
+        startMeasuredActivityIfNeeded()
     }
 
     /// Stop the live capture stream (idempotent).
@@ -468,6 +488,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // UNVERIFIED — needs live macOS; do not claim working.
         invalidateCaptureLifecycle(shutdown: true)
         let rebind = cancelRebindTask()
+        let activity = cancelMeasuredActivity()
         focusTracker?.stop()
         let streams = takeAllStreamsExpectingTermination()
         var firstStopError: Error?
@@ -479,6 +500,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             }
         }
         await rebind?.value
+        await activity?.value
         await tccStatusMonitor?.stopAndDrain()
         await captureDispatcher.finishAndDrain()
         await ocrPostAllowEmitter?.stopAndDrain()
@@ -497,6 +519,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     // Locked critical sections live in non-async helpers: `NSLock` is
     // unavailable from async contexts under Swift 6 strict concurrency,
     // and these are the only mutable state.
+    internal func prepareCaptureStart() throws {
+        if let failure = currentRuntimeFailure() {
+            // A terminal callback requires a fresh owner, never a silent restart.
+            throw failure
+        }
+        lock.withLock { shutdownRequested = false }
+    }
+
     internal func beginCaptureLifecycle() -> UInt64? {
         lock.lock(); defer { lock.unlock() }
         guard !pausedForTCC,
@@ -796,6 +826,69 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         lock.unlock()
         t?.cancel()
         return t
+    }
+
+    internal func startMeasuredActivityIfNeeded(dependencies: MeasuredActivityDependencies = .live) {
+        guard measuresActivity, let store = focusedWindowStore,
+              let epoch = currentActiveCaptureEpoch() else { return }
+        lock.withLock {
+            guard measuredActivityTask == nil else { return }
+            measuredActivityTask = Task { [weak self] in
+                var sampler = ActivityIntervalSampler(captureGeneration: UUID().uuidString)
+                while !Task.isCancelled {
+                    guard let self, self.currentActiveCaptureEpoch() == epoch else { break }
+                    let sessionEligible = dependencies.sessionEligible()
+                    self.focusTracker?.refreshBindingOnceSync()
+                    let before = store.currentSync()
+                    let context = Self.buildWorkflowContext(
+                        snapshot: self.contextSnapshot, urlProvider: self.urlProvider,
+                        fallbackAppBundleId: "", focusedSnapshot: before
+                    )
+                    // Reuse every capture privacy gate. No text, title, URL or pixels
+                    // cross the activity wire; an uncertain gate loses attribution.
+                    let privacy = self.pipeline.snapshotPixelPrivacy(context: context, capturedWindow: before.focused)
+                    self.focusTracker?.refreshBindingOnceSync()
+                    let after = store.currentSync()
+                    guard !Task.isCancelled, self.currentActiveCaptureEpoch() == epoch else { break }
+                    let now = dependencies.now()
+                    let observation = ActivityObservation(
+                        tsUs: now.tsUs,
+                        uptimeNs: now.uptimeNs,
+                        focusGeneration: after.generation,
+                        appBundleId: after.focused?.bundleId,
+                        state: UserActivityState.classify(secondsSinceLastInput: dependencies.secondsSinceLastInput()),
+                        admitted: sessionEligible && dependencies.sessionEligible()
+                            && privacy.permitsRawPixels && before == after && after.focused != nil
+                    )
+                    if let interval = sampler.sample(observation) {
+                        do {
+                            try await self.pipeline.emitActivityInterval(interval) { [weak self] in
+                                self?.currentActiveCaptureEpoch() == epoch
+                            }
+                        } catch {
+                            self.invalidateCaptureLifecycle(shutdown: true)
+                            self.lock.withLock { self.runtimeFailure = .activityDeliveryFailed }
+                            self.handleClaimedRuntimeFailure(CaptureRuntimeDiagnostic(
+                                failure: .activityDeliveryFailed, site: .activityDelivery, error: error
+                            ))
+                            break
+                        }
+                    }
+                    try? await dependencies.sleep(4_000_000_000)
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func cancelMeasuredActivity() -> Task<Void, Never>? {
+        let task = lock.withLock {
+            let task = measuredActivityTask
+            measuredActivityTask = nil
+            return task
+        }
+        task?.cancel()
+        return task
     }
 
     /// Replace the live stream for a new focused-window generation. A stream's
@@ -1119,6 +1212,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
         guard !wasPaused else { return }
 
+        let activity = cancelMeasuredActivity()
+        await activity?.value
+
         // UNVERIFIED — needs live macOS; do not claim working.
         let streams = takeAllStreamsExpectingTermination()
         for stream in streams {
@@ -1167,6 +1263,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             }
             try await bringUpSCStreamOnly(lifecycleEpoch: lifecycleEpoch)
             startRebindTaskIfNeeded()
+            startMeasuredActivityIfNeeded()
         } catch {
             if isShutdownRequested() { return }
             // The OS hasn't caught up on the grant yet — go back to
@@ -1577,6 +1674,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // detached drain remains useful for an embedding owner that replaces
         // it with a notification during integration.
         cancelRebindTask()
+        cancelMeasuredActivity()
         focusTracker?.stop()
         tccStatusMonitor?.stop()
         let dispatcher = captureDispatcher
