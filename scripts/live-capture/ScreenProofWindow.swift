@@ -42,8 +42,16 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
     private var phraseHash: String?
     private var observationBudget: ScreenProofObservationBudget!
     private var didEmitReady = false
+    private var receiptSink: ScreenProofReceiptSink?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        do {
+            receiptSink = try ScreenProofReceiptSink()
+        } catch {
+            FileHandle.standardError.write(Data("Proof receipt creation failed.\n".utf8))
+            NSApp.terminate(nil)
+            return
+        }
         NSApp.setActivationPolicy(.regular)
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 780, height: 380),
@@ -179,6 +187,14 @@ final class ScreenProofWindow: NSObject, NSApplicationDelegate, NSWindowDelegate
                                         phraseHash: phraseHash, foreground: foreground,
                                         seconds: Int(min(20, exposure.seconds)))
         if let line = try? receipt.encodedLine() {
+            do {
+                try receiptSink?.append(line)
+            } catch {
+                exposureTimer?.invalidate()
+                controls.generateButton.isEnabled = false
+                exposureLabel.stringValue = "Receipt unavailable. Restart the check."
+                return
+            }
             FileHandle.standardOutput.write(line)
         }
     }

@@ -11,21 +11,21 @@ final class FilteredSearchTests: XCTestCase {
         )
     }
 
-    func testFilterOnlyUsesExplicitBoundedBrowseNotRecentPool() async throws {
+    func testBlankQueryWithFiltersRemainsSearchEntryWithoutReadingEvidence() async throws {
         let reader = FilterRecordingReader()
         let model = model(reader)
         defer { model.clear() }
         model.mode = .related
         model.filters = FilterState(appBundleIds: ["test.b", "test.a"], dateRange: .none, hasUrl: true)
+        model.query = " \n "
         await model.runSearch()
+        await model.refresh()
         let recorded = await reader.options
-        let options = try XCTUnwrap(recorded.last)
-        XCTAssertTrue(options.browse)
-        XCTAssertEqual(options.text, "")
-        XCTAssertEqual(options.limit, 50)
-        XCTAssertEqual(options.appFilters, ["test.a", "test.b"])
-        XCTAssertTrue(options.hasUrl)
-        XCTAssertNil(options.appFilter)
+        XCTAssertTrue(recorded.isEmpty)
+        XCTAssertTrue(model.hits.isEmpty)
+        XCTAssertNil(model.selectedHitId)
+        XCTAssertFalse(model.isSearching)
+        XCTAssertTrue(model.filters.anyActive)
         XCTAssertNil(model.filterLimitationMessage)
         let recentCalls = await reader.recentCalls
         XCTAssertEqual(recentCalls, 0)
@@ -79,7 +79,7 @@ final class FilteredSearchTests: XCTestCase {
         let model = model(reader)
         defer { model.clear() }
         model.filters = filters
-        for query in ["", "needle"] {
+        for query in ["needle", "needle again"] {
             model.query = query
             await model.runSearch()
             let recorded = await reader.options

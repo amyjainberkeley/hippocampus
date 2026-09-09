@@ -11,11 +11,12 @@ struct DailyMemoryView: View {
     @State private var showsHandoff = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    init(reader: BrainReader, onOpenPrivacy: @escaping () -> Void, latestBriefRequest: UUID? = nil) {
+    init(reader: BrainReader, onOpenPrivacy: @escaping () -> Void, latestBriefRequest: UUID? = nil,
+         model: DailyMemoryViewModel? = nil) {
         self.reader = reader
         self.onOpenPrivacy = onOpenPrivacy
         self.latestBriefRequest = latestBriefRequest
-        _model = StateObject(wrappedValue: DailyMemoryViewModel(reader: reader))
+        _model = StateObject(wrappedValue: model ?? DailyMemoryViewModel(reader: reader))
     }
 
     var body: some View {
@@ -32,8 +33,13 @@ struct DailyMemoryView: View {
                                                    description: Text(error))
                             Button("Retry", systemImage: "arrow.clockwise") { Task { await model.reload() } }
                         } else {
+                            if let summary = model.activitySummary {
+                                MeasuredInputView(summary: summary)
+                            } else if let status = model.activityStatus {
+                                Label(status, systemImage: "chart.bar.xaxis")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             dailyReview
-                            if !model.review.visualEvidence.isEmpty { visualEvidence }
                             savedDraft.id("saved-draft")
                         }
                         Divider()
@@ -118,38 +124,65 @@ struct DailyMemoryView: View {
 
     private var dailyReview: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(Calendar.current.isDateInToday(model.selectedDate) ? "Today" : model.selectedDate.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                .font(.title2.weight(.semibold))
             if model.review.events.isEmpty {
                 ContentUnavailableView("No saved evidence", systemImage: "calendar",
                     description: Text("No samples are available for this day."))
             } else {
-                ForEach(model.review.observations) { observation in
-                    observationRow(observation)
+                Text("Pick up where you left off").font(.headline)
+                ForEach(model.review.resumePoints) { point in
+                    resumeRow(point)
                     Divider()
                 }
-                Text(model.review.countLabel).font(.callout)
-                Text(DailyReview.coverageNote).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private func resumeRow(_ point: DailyReview.ResumePoint) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            if let image = point.evidence.first, image.hasScreenshot {
+                Button { open(image, among: point.evidence) } label: {
+                    EvidenceThumbnail(url: image.thumbnailURL, size: CGSize(width: 108, height: 68), maxPixelSize: 216)
+                        .frame(width: 108, height: 68)
+                }
+                .buttonStyle(.plain)
+                .help("Open saved source image")
+                .accessibilityLabel("Saved image from \(point.title), \(time(image.tsUs))")
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    if let event = point.evidence.first { open(event, among: point.evidence) }
+                } label: {
+                    Label(point.title, systemImage: "doc.text.magnifyingglass")
+                        .font(.headline)
+                }
+                .buttonStyle(.borderless)
+                .help("Review the latest saved source")
+                Text(verbatim: point.detail).font(.callout).lineLimit(3).textSelection(.enabled)
+                Text("\(point.sourceLabel) / \(point.sampleLabel)")
+                    .font(.caption).foregroundStyle(.secondary)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { resumeSources(point) }
+                    VStack(alignment: .leading, spacing: 6) { resumeSources(point) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func resumeSources(_ point: DailyReview.ResumePoint) -> some View {
+        ForEach(point.evidence) { event in
+            Button { open(event, among: point.evidence) } label: {
+                Text(time(event.tsUs)).font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help("Open saved evidence \(event.id)")
+            .accessibilityLabel("\(point.title), \(point.sourceLabel), \(time(event.tsUs))")
         }
     }
 
     private func observationRow(_ observation: DailyReview.Observation) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            if observation.kind == .lastContext, let image = model.review.visualEvidence.last {
-                Button { open(image, among: model.screenshots) } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        EvidenceThumbnail(url: image.thumbnailURL, size: CGSize(width: 132, height: 82), maxPixelSize: 264)
-                            .frame(width: 132, height: 82)
-                        Text("Last image / \(time(image.tsUs))").font(.caption).foregroundStyle(.secondary)
-                    }
-                    .frame(width: 132, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .help("Open last saved image")
-                .accessibilityLabel("Last saved image, \(Formatters.appDisplayName(image.appBundleId)), \(time(image.tsUs))")
-            }
             VStack(alignment: .leading, spacing: 6) {
                 Text(verbatim: observation.title).font(.headline)
                     .fixedSize(horizontal: false, vertical: true)
@@ -181,30 +214,6 @@ struct DailyMemoryView: View {
         }
     }
 
-    private var visualEvidence: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Visual evidence").font(.headline)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 280), spacing: 16)], spacing: 16) {
-                ForEach(model.review.visualEvidence) { event in
-                    Button { open(event, among: model.screenshots) } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            GeometryReader { geometry in
-                                EvidenceThumbnail(url: event.thumbnailURL, size: geometry.size, maxPixelSize: 560)
-                            }
-                            .aspectRatio(16 / 10, contentMode: .fit)
-                            Text(Formatters.appDisplayName(event.appBundleId)).font(.callout.weight(.medium)).lineLimit(1)
-                            Text("\(time(event.tsUs)) / \(MemorySourceKind.label(event.sourceKind))")
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        }
-                        .contentShape(Rectangle())
-                        .accessibilityElement(children: .combine)
-                    }
-                    .buttonStyle(.plain).help("Open saved screenshot")
-                }
-            }
-        }
-    }
-
     @ViewBuilder
     private var savedDraft: some View {
         if let brief = model.brief {
@@ -224,6 +233,11 @@ struct DailyMemoryView: View {
     private var captureStatus: some View {
         DisclosureGroup("Capture now") {
             VStack(alignment: .leading, spacing: 8) {
+                Text(model.review.countLabel).font(.callout)
+                Text(DailyReview.coverageNote).font(.caption).foregroundStyle(.secondary)
+                ForEach(model.review.observations.filter { $0.kind == .captureGap }) { observation in
+                    observationRow(observation)
+                }
                 if let receipt = model.captureHealth {
                     Text(receipt.isStale() ? "Capture status is out of date" : receipt.stateLabel)
                         .font(.callout)

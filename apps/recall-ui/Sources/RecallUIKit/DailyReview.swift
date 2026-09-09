@@ -2,6 +2,18 @@ import Foundation
 
 /// A deterministic reading of available samples, never a measure of activity or completion.
 public struct DailyReview: Equatable, Sendable {
+    public struct ResumePoint: Equatable, Sendable, Identifiable {
+        public var id: UInt64 { evidence[0].id }
+        public let title: String
+        public let detail: String
+        public let sourceLabel: String
+        public let sampleCount: Int
+        public let evidence: [TimelineEvent]
+        public var sampleLabel: String {
+            "\(sampleCount) saved \(sampleCount == 1 ? "sample" : "samples")"
+        }
+    }
+
     public struct Observation: Equatable, Sendable, Identifiable {
         public enum Kind: String, Sendable { case lastContext, returnedToApp, captureGap }
         public var id: Kind { kind }
@@ -13,6 +25,28 @@ public struct DailyReview: Equatable, Sendable {
 
     public let events: [TimelineEvent]
     public let observations: [Observation]
+    public var resumePoints: [ResumePoint] {
+        struct Source: Hashable {
+            let app: String?
+            let kind: String?
+            let unattributedID: UInt64?
+        }
+        let grouped = Dictionary(grouping: events) { event in
+            Source(app: event.appBundleId, kind: event.sourceKind,
+                   unattributedID: event.appBundleId?.isEmpty != false || event.sourceKind == nil ? event.id : nil)
+        }
+        return grouped.values.compactMap { rows -> ResumePoint? in
+            guard let latest = rows.last else { return nil }
+            let hydrated = observations.first { $0.kind == .lastContext && $0.evidence.first?.id == latest.id }
+            return ResumePoint(title: Formatters.appDisplayName(latest.appBundleId),
+                detail: hydrated?.detail ?? Formatters.snippet(Formatters.stripContextHeader(latest.snippet), maxLen: 280),
+                sourceLabel: MemorySourceKind.label(latest.sourceKind), sampleCount: rows.count,
+                evidence: Array(rows.reversed().prefix(3)))
+        }.sorted {
+            let left = $0.evidence[0], right = $1.evidence[0]
+            return left.tsUs == right.tsUs ? left.id > right.id : left.tsUs > right.tsUs
+        }.prefix(4).map { $0 }
+    }
     public var textCount: Int {
         events.filter { !Formatters.stripContextHeader($0.snippet).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
     }

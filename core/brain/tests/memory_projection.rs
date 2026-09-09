@@ -1180,6 +1180,204 @@ fn correction_cannot_remove_attribution_or_broaden_scope() {
 }
 
 #[test]
+fn scoped_learning_correction_replay_survives_restart_and_later_retraction() {
+    let (_dir, path, key, store) = store();
+    let source = store.put_event(&event("original owner", 10)).unwrap();
+    let correction_source = store.put_event(&event("confirmed correction", 20)).unwrap();
+    let original = claim(
+        vec![canonical_evidence(&store, source)],
+        "Alice",
+        ClaimStatus::Active,
+        None,
+        "project/A",
+        Some("owner"),
+        10,
+    );
+    project_event(&store, &delta(source, 10, vec![original.clone()])).unwrap();
+    let corrected = claim(
+        vec![canonical_evidence(&store, correction_source)],
+        "Priya",
+        ClaimStatus::Active,
+        Some(&original),
+        "project/A",
+        Some("owner"),
+        20,
+    );
+    let mut correction_delta = delta(correction_source, 20, vec![corrected.clone()]);
+    project_event(&store, &correction_delta).unwrap();
+    drop(store);
+    let store = SqlCipherBrainStore::new(&path, &key).unwrap();
+    correction_delta.projector_version = "projector-v2".into();
+    correction_delta.claims[0].projector_version = "projector-v2".into();
+    project_event(&store, &correction_delta).expect("an accepted correction must replay");
+    assert_eq!(
+        store.memory_claims_as_of(20, 20, 10).unwrap(),
+        vec![corrected.clone()]
+    );
+    assert_eq!(store.memory_claim_history(&original.id).unwrap().len(), 2);
+
+    let withdrawal = store.put_event(&event("withdraw correction", 30)).unwrap();
+    retract_event(
+        &store,
+        &MemoryRetraction::new(
+            correction_source,
+            withdrawal,
+            30,
+            30,
+            "withdrawn",
+            "projector-v2",
+        ),
+    )
+    .unwrap();
+    project_event(&store, &correction_delta).expect("replay must not resurrect withdrawn learning");
+    assert!(store.memory_claims_as_of(30, 30, 10).unwrap().is_empty());
+    assert_eq!(
+        store.memory_claims_as_of(20, 20, 10).unwrap(),
+        vec![corrected]
+    );
+}
+
+#[test]
+fn scoped_learning_project_correction_cannot_retire_a_broader_rule() {
+    let (_dir, _path, _key, store) = store();
+    let source = store.put_event(&event("shared owner", 10)).unwrap();
+    let original = claim(
+        vec![canonical_evidence(&store, source)],
+        "Alice",
+        ClaimStatus::Active,
+        None,
+        "project",
+        Some("owner"),
+        10,
+    );
+    project_event(&store, &delta(source, 10, vec![original.clone()])).unwrap();
+    let correction_source = store.put_event(&event("project A owner", 20)).unwrap();
+    let correction = claim(
+        vec![canonical_evidence(&store, correction_source)],
+        "Priya",
+        ClaimStatus::Active,
+        Some(&original),
+        "project/A",
+        Some("owner"),
+        20,
+    );
+    assert!(
+        matches!(
+            project_event(
+                &store,
+                &delta(correction_source, 20, vec![correction.clone()])
+            ),
+            Err(StoreError::InvalidInput(_))
+        ),
+        "a project A correction must not retire the shared rule for project B"
+    );
+    assert_eq!(
+        store.memory_claims_as_of(20, 20, 10).unwrap(),
+        vec![original.clone()]
+    );
+    assert_eq!(store.memory_claim_history(&original.id).unwrap().len(), 1);
+    assert!(store
+        .memory_claim_history(&correction.id)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn scoped_learning_correction_cannot_cross_sibling_projects() {
+    let (_dir, _path, _key, store) = store();
+    let source = store.put_event(&event("project A owner", 10)).unwrap();
+    let original = claim(
+        vec![canonical_evidence(&store, source)],
+        "Alice",
+        ClaimStatus::Active,
+        None,
+        "project/A",
+        Some("owner"),
+        10,
+    );
+    project_event(&store, &delta(source, 10, vec![original.clone()])).unwrap();
+    let correction_source = store.put_event(&event("project B owner", 20)).unwrap();
+    let correction = claim(
+        vec![canonical_evidence(&store, correction_source)],
+        "Priya",
+        ClaimStatus::Active,
+        Some(&original),
+        "project/B",
+        Some("owner"),
+        20,
+    );
+    assert!(matches!(
+        project_event(&store, &delta(correction_source, 20, vec![correction])),
+        Err(StoreError::InvalidInput(_))
+    ));
+    assert_eq!(
+        store.memory_claims_as_of(20, 20, 10).unwrap(),
+        vec![original]
+    );
+}
+
+#[test]
+fn scoped_learning_expired_correction_does_not_restore_superseded_state() {
+    let (_dir, _path, _key, store) = store();
+    let source = store.put_event(&event("old procedure", 10)).unwrap();
+    let original = claim(
+        vec![canonical_evidence(&store, source)],
+        "Alice",
+        ClaimStatus::Active,
+        None,
+        "project/A",
+        Some("owner"),
+        10,
+    );
+    project_event(&store, &delta(source, 10, vec![original.clone()])).unwrap();
+    let correction_source = store.put_event(&event("temporary procedure", 20)).unwrap();
+    let corrected = MemoryClaim::new(
+        correction_source,
+        &original.subject,
+        &original.predicate,
+        "Priya",
+        &original.scope,
+        Some("owner".into()),
+        0.95,
+        20,
+        20,
+        Some(29),
+        "projector-v1",
+        ClaimStatus::Active,
+        Some(original.id.clone()),
+        vec![canonical_evidence(&store, correction_source)],
+    );
+    project_event(
+        &store,
+        &delta(correction_source, 20, vec![corrected.clone()]),
+    )
+    .unwrap();
+    assert_eq!(
+        store.memory_claims_as_of(29, 30, 10).unwrap(),
+        vec![corrected.clone()]
+    );
+    assert!(store.memory_claims_as_of(30, 30, 10).unwrap().is_empty());
+    assert_eq!(
+        store.memory_claims_as_of(19, 30, 10).unwrap(),
+        vec![original]
+    );
+    let late_source = store.put_event(&event("late correction", 30)).unwrap();
+    let late = claim(
+        vec![canonical_evidence(&store, late_source)],
+        "Morgan",
+        ClaimStatus::Active,
+        Some(&corrected),
+        "project/A",
+        Some("owner"),
+        30,
+    );
+    assert!(matches!(
+        project_event(&store, &delta(late_source, 30, vec![late])),
+        Err(StoreError::InvalidInput(_))
+    ));
+}
+
+#[test]
 fn replay_is_idempotent_across_projector_versions() {
     let (_dir, _path, _key, store) = store();
     let source = store.put_event(&event("Priya owns HIPP-201", 10)).unwrap();
@@ -1302,7 +1500,7 @@ fn migration_upgrades_and_reopens_every_prior_brain_schema() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(schema, "9", "upgrade from schema {version}");
+        assert_eq!(schema, "10", "upgrade from schema {version}");
         for table in [
             "memory_deltas",
             "memory_evidence",
@@ -1390,7 +1588,7 @@ fn assert_populated_historical_memory_migration(version: u8, expected_retraction
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "9");
+    assert_eq!(version, "10");
     for (table, expected) in [
         ("memory_deltas", 2_i64),
         ("memory_evidence", 2),

@@ -128,6 +128,17 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         return try Self.decodePrivacyMoments(rawJson)
     }
 
+    public func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let rawJson = mci_brain_activity_intervals(h, startUs, endUs, limit) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try JSONDecoder().decode(ActivityPage.self, from: Data(String(cString: rawJson).utf8))
+    }
+
     public func listObservedApps(
         limit: Int,
         timeFromUs: UInt64?

@@ -12,6 +12,7 @@ struct SearchView: View {
     /// that stub the VM can omit it — the flyout button hides in that
     /// case.
     var reader: BrainReader? = nil
+    var contextExporter: @Sendable (String) async throws -> String = { try await ContextHandoffExporter.export(focus: $0) }
     @FocusState private var isSearchFieldFocused: Bool
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var isRegistryRefreshing = false
@@ -59,6 +60,7 @@ struct SearchView: View {
                 await viewModel.focusEvent(id: focusRequest.eventId)
                 await viewModel.reloadObservedApps()
             } else {
+                isSearchFieldFocused = true
                 await viewModel.refresh()
             }
         }
@@ -219,8 +221,7 @@ struct SearchView: View {
             )
             .foregroundStyle(Color.brandFgSecondary)
         } else if viewModel.hits.isEmpty
-            && viewModel.query.isEmpty
-            && !viewModel.filters.anyActive {
+            && viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             ContentUnavailableView(
                 "Search your memory",
                 systemImage: "magnifyingglass"
@@ -228,7 +229,7 @@ struct SearchView: View {
             .foregroundStyle(Color.brandFgSecondary)
         } else if viewModel.hits.isEmpty && !viewModel.isSearching {
             // Keep the query in the search field so long input cannot size the heading.
-            if viewModel.query.isEmpty && viewModel.filters.anyActive {
+            if viewModel.filters.anyActive {
                 MCIEmptyState.filterTooNarrow {
                     viewModel.clear()
                 }
@@ -295,7 +296,7 @@ struct SearchView: View {
         Task {
             defer { isExportingContext = false }
             do {
-                let packet = try await ContextHandoffExporter.export(focus: focus)
+                let packet = try await contextExporter(focus)
                 NSPasteboard.general.clearContents()
                 guard NSPasteboard.general.setString(packet, forType: .string) else {
                     showsContextHandoffError = true

@@ -324,6 +324,9 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     scripts/product-source-digest.py scripts/build-provenance.py \
     scripts/test-product-source-provenance.sh \
     'scripts/live-capture/**' \
+    'core/brain/**' 'core/src/ipc/**' 'adapters/macos/mci-brain-ffi/**' \
+    'adapters/macos/MCICaptureHelper/**' \
+    apps/agent/src/brain_ingest.rs apps/agent/src/runner.rs \
     apps/onboarding/Package.swift \
     apps/onboarding/Sources/OnboardingKit/RetentionStore.swift \
     apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift \

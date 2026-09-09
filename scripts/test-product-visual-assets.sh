@@ -10,6 +10,8 @@ ONBOARDING_APP="$ONBOARDING/OnboardingApp.swift"
 PREFERENCES_APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
 MEMORY_WORKSPACE="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/MemoryWorkspaceView.swift"
 EVIDENCE_THUMBNAIL="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/EvidenceThumbnail.swift"
+DAILY_MEMORY="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/DailyMemoryView.swift"
+MEASURED_INPUT="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/MeasuredInputView.swift"
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -42,16 +44,20 @@ rg -q 'panel\.appearance = NSAppearance\(named: \.aqua\)' "$PREFERENCES_APP" \
 if rg -q '\.blur\(' "$EVIDENCE_THUMBNAIL"; then
     fail "evidence pixels must remain inspectable; blur belongs on the surrounding material"
 fi
-rg -q 'CGSize\(width: 152, height: 86\)' "$MEMORY_WORKSPACE" \
-    || fail "recent-evidence previews do not use the inspectable 16:9 card size"
-rg -q 'Text\(Formatters\.evidenceSummary\(hit\)\)' "$MEMORY_WORKSPACE" \
-    || fail "recent-evidence cards do not render a cleaned evidence summary"
-rg -q '\.popover\(item: \$selectedHit' "$MEMORY_WORKSPACE" \
-    || fail "recent-evidence cards are not inspectable"
-rg -q 'evidenceFilmstripHeight\(' "$MEMORY_WORKSPACE" \
-    || fail "memory workspace does not compact the filmstrip in short windows"
-rg -q '\.defaultSize\(width: 1024, height: 700\)' "$RECALL_APP" \
-    || fail "Recall default window is too small for the evidence workspace"
+rg -q 'CGSize\(width: 108, height: 68\)' "$DAILY_MEMORY" \
+    || fail "resume evidence does not use its stable compact thumbnail size"
+rg -q 'Text\(verbatim: point.detail\)' "$DAILY_MEMORY" \
+    || fail "resume rows do not render their source-derived detail"
+rg -q '\.sheet\(item: \$selectedEvidence' "$DAILY_MEMORY" \
+    || fail "resume evidence is not inspectable"
+rg -q 'static let primary:.*\[\.now, \.search, \.timeline\]' "$MEMORY_WORKSPACE" \
+    || fail "primary navigation must separate Today, Search and History"
+rg -q 'MeasuredInputView\(summary: summary\)' "$DAILY_MEMORY" \
+    || fail "Today does not connect its measured interval summary"
+rg -q 'SectorMark\(angle:' "$MEASURED_INPUT" \
+    || fail "measured activity distribution is missing"
+rg -q '\.defaultSize\(width: 920, height: 620\)' "$RECALL_APP" \
+    || fail "Recall default window lost its compact native size"
 
 if rg -q 'Use System Appearance|follows the current macOS light or dark appearance' "$RECALL_APP"; then
     fail "Recall still advertises the retired adaptive appearance control"

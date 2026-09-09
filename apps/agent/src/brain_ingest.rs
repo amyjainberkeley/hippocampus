@@ -22,6 +22,8 @@
 //!   events still ingest with `embedding = None` so the demo path works
 //!   without Core ML). Includes the content-free
 //!   `brain_events_ingested_count` counter.
+//! - Dedicated measured intervals use `ingest_activity_interval` and the
+//!   concrete activity store. They never enter OCR, embedding, or event counts.
 //!
 //! # Privacy invariants (CSO sign-off block on the PR body)
 //!
@@ -88,6 +90,12 @@ pub enum IngestOutcome {
 /// Errors the ingest pump surfaces.
 #[derive(Debug, thiserror::Error)]
 pub enum IngestError {
+    /// A measured sample arrived without an attached writable activity store.
+    #[error("brain ingest: activity persistence unavailable")]
+    ActivityUnavailable,
+    /// Wrong message or unknown state on the activity-only path.
+    #[error("brain ingest: invalid activity message")]
+    InvalidActivity,
     /// The embedder rejected the OCR'd text (e.g. empty input rejected
     /// by [`mci_brain::EmbedError::InvalidInput`]; or a backend / Core ML
     /// failure on the runtime side).
@@ -107,7 +115,7 @@ pub enum IngestError {
     Chunk(#[from] ChunkerError),
 }
 
-/// Single-method trait the runner dispatches `OCREvent` frames through.
+/// Separate content and measured-activity dispatch paths used by the runner.
 ///
 /// Trait-object friendly (`Send + Sync + ?Sized`-callable) so the runner
 /// can hold `&dyn BrainIngestor`. Two production-shape impls live in this
@@ -118,6 +126,18 @@ pub enum IngestError {
 ///   without the brain spun up (e.g. on a host where the on-disk
 ///   `mci.sqlite` would be created in the wrong location).
 pub trait BrainIngestor: Send + Sync {
+    /// Persist a dedicated measured interval. True means a new committed row;
+    /// false means an exact replay or a drop at a durable deletion barrier.
+    /// This never increments event/screenshot counts.
+    ///
+    /// # Errors
+    /// Missing persistence must fail visibly, including on no-op ingestors.
+    /// A valid conflict preserves [`StoreError::ActivityOverlap`] inside
+    /// [`IngestError::Store`]; only the runner's activity branch may recover.
+    fn ingest_activity_interval(&self, _msg: &Message) -> Result<bool, IngestError> {
+        Err(IngestError::ActivityUnavailable)
+    }
+
     /// Dispatch one frame. Returns [`IngestOutcome::Stored`] for an
     /// `OCREvent` that successfully reached the store, or
     /// [`IngestOutcome::NotOcrEvent`] for any other variant (no store
@@ -238,6 +258,7 @@ impl BrainIngestor for NoopBrainIngestor {
 /// invariant from the producer side and now the consumer side too.
 pub struct BrainPump {
     store: Arc<dyn BrainStore>,
+    activity_store: Option<Arc<mci_brain::SqlCipherBrainStore>>,
     embedder: Option<Arc<dyn Embedder>>,
     chunker: Arc<dyn Chunker>,
     page_cache: Option<PageContentCache>,
@@ -286,6 +307,7 @@ impl BrainPump {
     pub fn new(store: Arc<dyn BrainStore>, embedder: Option<Arc<dyn Embedder>>) -> Self {
         Self {
             store,
+            activity_store: None,
             embedder,
             chunker: Arc::new(EventChunker::default()),
             page_cache: None,
@@ -306,6 +328,7 @@ impl BrainPump {
     ) -> Self {
         Self {
             store,
+            activity_store: None,
             embedder,
             chunker: Arc::new(EventChunker::default()),
             page_cache: Some(page_cache),
@@ -328,6 +351,7 @@ impl BrainPump {
     ) -> Self {
         Self {
             store,
+            activity_store: None,
             embedder,
             chunker,
             page_cache: None,
@@ -337,6 +361,14 @@ impl BrainPump {
             ner_sync: None,
             ner_sync_mentions_persisted: AtomicU64::new(0),
         }
+    }
+
+    /// Attach the concrete encrypted store for the separate measured-activity API.
+    /// Production construction must pass the same store used for ordinary ingest.
+    #[must_use]
+    pub fn with_activity_store(mut self, store: Arc<mci_brain::SqlCipherBrainStore>) -> Self {
+        self.activity_store = Some(store);
+        self
     }
 
     /// Cumulative number of `entity_mentions` writes the V2-P4 Tier 1
@@ -415,6 +447,41 @@ impl BrainPump {
 }
 
 impl BrainIngestor for BrainPump {
+    fn ingest_activity_interval(&self, msg: &Message) -> Result<bool, IngestError> {
+        let Message::ActivityInterval {
+            start_us,
+            end_us,
+            state,
+            app_bundle_id,
+            capture_generation,
+        } = msg
+        else {
+            return Err(IngestError::InvalidActivity);
+        };
+        let state = match state.as_str() {
+            "input_active" => mci_brain::ActivityState::InputActive,
+            "input_idle" => mci_brain::ActivityState::InputIdle,
+            "unknown" => mci_brain::ActivityState::Unknown,
+            _ => return Err(IngestError::InvalidActivity),
+        };
+        let interval = mci_brain::ActivityInterval {
+            start_us: *start_us,
+            end_us: *end_us,
+            state,
+            app_bundle_id: if state == mci_brain::ActivityState::Unknown {
+                None
+            } else {
+                app_bundle_id.clone()
+            },
+            capture_generation: capture_generation.clone(),
+        };
+        let store = self
+            .activity_store
+            .as_ref()
+            .ok_or(IngestError::ActivityUnavailable)?;
+        Ok(store.append_activity_interval(&interval)?)
+    }
+
     #[allow(clippy::too_many_lines)]
     fn ingest_ocr_event(&self, msg: &Message) -> Result<IngestOutcome, IngestError> {
         let (ts_us, app, title, u, text, keyframe_blob, tab_id, source) = match msg {
@@ -751,6 +818,161 @@ mod tests {
     use super::*;
     use mci_brain::stubs::{FixedDimEmbedder, InMemoryBrainStore};
     use mci_core::ipc::RedactionReason;
+
+    fn activity_message(start_us: u64, state: &str, app: Option<&str>) -> Message {
+        Message::ActivityInterval {
+            start_us,
+            end_us: start_us + 1_000_000,
+            state: state.into(),
+            app_bundle_id: app.map(str::to_owned),
+            capture_generation: "generation-1".into(),
+        }
+    }
+
+    #[test]
+    fn activity_interval_ingest_persists_without_events_and_clears_unknown_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            mci_brain::SqlCipherBrainStore::new(
+                &dir.path().join("brain.sqlite"),
+                &mci_core::crypto::DbKey::from_bytes([42; 32]),
+            )
+            .unwrap(),
+        );
+        let pump = BrainPump::new(store.clone(), None).with_activity_store(store.clone());
+        for (index, state) in ["input_active", "input_idle", "unknown"]
+            .into_iter()
+            .enumerate()
+        {
+            let message =
+                activity_message((index as u64 + 1) * 1_000_000, state, Some("test.activity"));
+            assert!(pump
+                .ingest_activity_interval(&message)
+                .expect("activity persisted"));
+            assert!(
+                !pump.ingest_activity_interval(&message).unwrap(),
+                "replay is not a new sample"
+            );
+            assert_eq!(
+                pump.ingest_ocr_event(&message).unwrap(),
+                IngestOutcome::NotOcrEvent
+            );
+        }
+        let rows = store.activity_intervals_in_range(0, 5_000_000).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].state, mci_brain::ActivityState::InputActive);
+        assert_eq!(rows[1].state, mci_brain::ActivityState::InputIdle);
+        assert_eq!(rows[2].state, mci_brain::ActivityState::Unknown);
+        assert_eq!(rows[0].app_bundle_id.as_deref(), Some("test.activity"));
+        assert_eq!(rows[2].app_bundle_id, None);
+        assert_eq!(pump.events_ingested_count(), 0);
+        assert!(store.recent_events(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn activity_interval_ingest_rejects_wrong_messages_and_invalid_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            mci_brain::SqlCipherBrainStore::new(
+                &dir.path().join("brain.sqlite"),
+                &mci_core::crypto::DbKey::from_bytes([42; 32]),
+            )
+            .unwrap(),
+        );
+        let pump = BrainPump::new(store.clone(), None).with_activity_store(store.clone());
+        for message in [
+            activity_message(1_000_000, "private-state-marker", Some("test.activity")),
+            Message::PrivacyTombstone {
+                ts_us: 1_000_000,
+                app_bundle: "test.private".into(),
+                reason: RedactionReason::DenylistSource,
+            },
+            make_ocr_event(1_000_000, "synthetic body"),
+        ] {
+            assert!(matches!(
+                pump.ingest_activity_interval(&message),
+                Err(IngestError::InvalidActivity)
+            ));
+        }
+        for message in [
+            activity_message(0, "input_active", Some("test.activity")),
+            activity_message(1, "input_idle", None),
+        ] {
+            assert!(matches!(
+                pump.ingest_activity_interval(&message),
+                Err(IngestError::Store(_))
+            ));
+        }
+        assert!(store
+            .activity_intervals_in_range(0, 5_000_000)
+            .unwrap()
+            .is_empty());
+        assert!(store.recent_events(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn activity_overlap_preserves_typed_store_error_without_counting_an_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brain.sqlite");
+        let key = mci_core::crypto::DbKey::from_bytes([42; 32]);
+        let store = Arc::new(mci_brain::SqlCipherBrainStore::new(&path, &key).unwrap());
+        let pump = BrainPump::new(store.clone(), None).with_activity_store(store.clone());
+        pump.ingest_activity_interval(&activity_message(
+            1_000_000,
+            "input_active",
+            Some("test.activity"),
+        ))
+        .unwrap();
+        let error = pump
+            .ingest_activity_interval(&Message::ActivityInterval {
+                start_us: 1_500_000,
+                end_us: 2_500_000,
+                state: "input_active".into(),
+                app_bundle_id: Some("test.activity".into()),
+                capture_generation: "generation-2".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            IngestError::Store(StoreError::ActivityOverlap)
+        ));
+        assert!(!error.to_string().contains("test.activity"));
+        assert!(!error.to_string().contains("generation-2"));
+        assert_eq!(pump.events_ingested_count(), 0);
+        assert!(store.recent_events(10).unwrap().is_empty());
+        assert_eq!(
+            store
+                .activity_intervals_in_range(0, 3_000_000)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn activity_interval_ingest_persistence_errors_are_visible() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brain.sqlite");
+        let key = mci_core::crypto::DbKey::from_bytes([42; 32]);
+        let writer = mci_brain::SqlCipherBrainStore::new(&path, &key).unwrap();
+        let store = Arc::new(mci_brain::SqlCipherBrainStore::open_readonly(&path, &key).unwrap());
+        let message = activity_message(1_000_000, "input_active", Some("test.activity"));
+        let pump = BrainPump::new(store.clone(), None);
+        assert!(matches!(
+            pump.ingest_activity_interval(&message),
+            Err(IngestError::ActivityUnavailable)
+        ));
+        let pump = pump.with_activity_store(store);
+        assert!(matches!(
+            pump.ingest_activity_interval(&message),
+            Err(IngestError::Store(_))
+        ));
+        assert!(writer
+            .activity_intervals_in_range(0, 5_000_000)
+            .unwrap()
+            .is_empty());
+        assert_eq!(pump.events_ingested_count(), 0);
+    }
 
     fn make_ocr_event(ts_us: u64, text: &str) -> Message {
         let mut bundle = [0u8; 64];

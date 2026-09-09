@@ -473,6 +473,9 @@ public protocol BrainReader: Sendable {
     /// Nil means the event is absent or this reader does not support inspection.
     func eventText(eventId: UInt64) async throws -> EventText?
 
+    /// Measured input/foreground records for [startUs, endUs), never screenshot durations.
+    func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage
+
     // Daily Brief read surface — backs the Brief tab
     // (`docs/design/brief-viewer-spec.md`).
 
@@ -514,6 +517,10 @@ public protocol BrainReader: Sendable {
 /// the dedicated FFI entry point (with proper downsampling + hard cap).
 public extension BrainReader {
     func eventText(eventId: UInt64) async throws -> EventText? { nil }
+
+    func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage {
+        throw ActivityReadError.unavailable
+    }
 
     func storageUsage() async throws -> StorageUsage? { nil }
 

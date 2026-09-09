@@ -7,6 +7,7 @@ enum CaptureRuntimeFailureSite: String, Sendable {
     case rebindTeardown = "rebind_teardown"
     case tccPauseTeardown = "tcc_pause_teardown"
     case tccResumeTeardown = "tcc_resume_teardown"
+    case activityDelivery = "activity_delivery"
 }
 
 /// A bounded value snapshot. Never retain an Error or inspect its userInfo,
@@ -41,6 +42,7 @@ struct CaptureRuntimeDiagnostic: Sendable {
         switch failure {
         case .streamStoppedUnexpectedly: failureToken = "streamStoppedUnexpectedly"
         case .userStoppedCapture: failureToken = "userStoppedCapture"
+        case .activityDeliveryFailed: failureToken = "activityDeliveryFailed"
         }
         return "mci-capture-helper: helper_health capture_runtime_failed=\(failureToken) "
             + "failure_site=\(site.rawValue) error_domain=\(errorDomain) "

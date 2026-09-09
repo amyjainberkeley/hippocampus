@@ -8,6 +8,7 @@ trap 'rm -rf "$test_dir"' EXIT
 sources=(
     "$SCRIPT_DIR/ScreenProofExposure.swift"
     "$SCRIPT_DIR/ScreenProofReceipt.swift"
+    "$SCRIPT_DIR/ScreenProofReceiptSink.swift"
     "$SCRIPT_DIR/ScreenProofWindow.swift"
 )
 xcrun swiftc -swift-version 6 -warnings-as-errors -typecheck "${sources[@]}"
@@ -16,7 +17,7 @@ xcrun swiftc -swift-version 6 -warnings-as-errors \
     -o "$test_dir/exposure-tests"
 "$test_dir/exposure-tests"
 
-for suite in TextView Receipt; do
+for suite in TextView Receipt ReceiptSink; do
     xcrun swiftc -swift-version 6 -warnings-as-errors -D SCREEN_PROOF_TESTING \
         "${sources[@]}" "$SCRIPT_DIR/ScreenProof${suite}Tests.swift" \
         -o "$test_dir/$suite-tests"

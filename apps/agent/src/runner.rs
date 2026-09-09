@@ -28,6 +28,10 @@ use crate::wall_clock::WallClock;
 /// Per-run outcome counters. Caller (the binary's main) prints these.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct RunStats {
+    /// New measured intervals committed, separate from content events/screenshots.
+    pub activity_intervals_stored: u64,
+    /// Valid samples rejected for overlap, excluding replays and privacy drops.
+    pub activity_intervals_rejected: u64,
     /// Frames decoded off the input transport.
     pub frames_seen: u64,
     /// Frames that routed to `Routed::Health` and pumped into the
@@ -43,6 +47,15 @@ pub struct RunStats {
     /// `OCREvent` frames under `frames_non_health` (the variant it
     /// does not route).
     pub frames_to_brain: u64,
+}
+
+impl RunStats {
+    /// Count a rejection and report whether this drain needs its first notice.
+    fn record_activity_overlap(&mut self) -> bool {
+        let first = self.activity_intervals_rejected == 0;
+        self.activity_intervals_rejected = self.activity_intervals_rejected.saturating_add(1);
+        first
+    }
 }
 
 /// Errors the runner surfaces. Distinguishes transport / decode /
@@ -86,7 +99,8 @@ impl From<PumpError> for RunError {
 /// 3. Else: increment counter, continue (NEVER log).
 ///
 /// **Decode errors close the connection** per ADR-0007 trust-boundary
-/// rules (caller may surface to a higher-level shutdown path).
+/// rules (caller may surface to a higher-level shutdown path). Measured
+/// activity also fails visibly because this drain has no persistence sink.
 pub async fn drain_to_log<R>(
     rx: &mut R,
     log: &HealthLog,
@@ -101,6 +115,9 @@ where
 
     while let Some(frame) = reader.read_frame(rx).await? {
         stats.frames_seen += 1;
+        if matches!(frame.message, Message::ActivityInterval { .. }) {
+            return Err(IngestError::ActivityUnavailable.into());
+        }
         if matches!(frame.message, Message::HelperHealth { .. }) {
             let routed = Routed::Health(frame);
             match pump_one(&routed, clock, device_id) {
@@ -136,7 +153,11 @@ where
 /// 2. `OCREvent` → `brain.ingest_ocr_event(&frame.message)`; on
 ///    `IngestOutcome::Stored` increments `frames_to_brain`. The
 ///    `BrainIngestor` handles the store + embedder + counter internally.
-/// 3. Every other variant (`PrivacyTombstone`, `StateTransitionEvent`,
+/// 3. `ActivityInterval` -> dedicated activity persistence and its own counter;
+///    a replay is not a new row. No screenshot receipt is produced.
+///    Valid overlaps are counted and rejected without interrupting content;
+///    every other activity error remains fatal.
+/// 4. Every other variant (`PrivacyTombstone`, `StateTransitionEvent`,
 ///    `SurfaceReleased`, `CaptureStart`, `CaptureStop`) → counted as
 ///    `frames_non_health`, NEVER routed to the brain. The dispatch
 ///    is `match`-exhaustive on `&Message`; **adding a new variant
@@ -187,6 +208,25 @@ where
     while let Some(frame) = reader.read_frame(rx).await? {
         stats.frames_seen += 1;
         match &frame.message {
+            Message::ActivityInterval { .. } => {
+                let result = brain
+                    .ok_or(IngestError::ActivityUnavailable)
+                    .and_then(|brain| brain.ingest_activity_interval(&frame.message));
+                match result {
+                    Ok(inserted) => stats.activity_intervals_stored += u64::from(inserted),
+                    Err(IngestError::Store(mci_brain::StoreError::ActivityOverlap)) => {
+                        if stats.record_activity_overlap() {
+                            eprintln!("mci-agent: activity interval rejected (overlap); capture continuing");
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(receipt) = capture_receipt {
+                            receipt.blocked("activity_ingest_failed", clock);
+                        }
+                        return Err(error.into());
+                    }
+                }
+            }
             Message::HelperHealth { .. } => {
                 if let Some(capture_receipt) = capture_receipt {
                     capture_receipt.refresh(clock);
@@ -525,6 +565,393 @@ mod tests {
             path: tmp_path.join("h.jsonl"),
             max_bytes: 10 * 1024 * 1024,
         })
+    }
+
+    fn activity_frame(seq: u64, start_us: u64, state: &str, app: Option<&str>) -> Vec<u8> {
+        encode(
+            seq,
+            &Message::ActivityInterval {
+                start_us,
+                end_us: start_us + 1_000_000,
+                state: state.into(),
+                app_bundle_id: app.map(str::to_owned),
+                capture_generation: "generation-1".into(),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn activity_interval_wire_to_store_does_not_claim_screenshots_or_log_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            mci_brain::SqlCipherBrainStore::new(
+                &dir.path().join("brain.sqlite"),
+                &mci_core::crypto::DbKey::from_bytes([42; 32]),
+            )
+            .unwrap(),
+        );
+        let pump = BrainPump::new(store.clone(), None).with_activity_store(store.clone());
+        let log = fresh_log(dir.path());
+        let clock = FixedClock::at_unix_ms(5000);
+        let receipt_path = dir.path().join("capture-status.json");
+        let receipt = crate::capture_status::CaptureStatusWriter::new(
+            store.clone(),
+            receipt_path.clone(),
+            true,
+        );
+        receipt.refresh(&clock);
+        let mut bytes = activity_frame(0, 1_000_000, "input_active", Some("test.activity"));
+        bytes.extend(activity_frame(
+            1,
+            1_000_000,
+            "input_active",
+            Some("test.activity"),
+        ));
+        bytes.extend(activity_frame(
+            2,
+            2_000_000,
+            "unknown",
+            Some("test.private"),
+        ));
+        let stats = drain_with_capture_status(
+            &mut Cursor::new(bytes),
+            &log,
+            &clock,
+            &id(),
+            Some(&pump),
+            Some(&receipt),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stats.frames_seen, 3);
+        assert_eq!(stats.activity_intervals_stored, 2);
+        assert_eq!(stats.activity_intervals_rejected, 0);
+        assert_eq!(stats.frames_to_brain, 0);
+        assert_eq!(stats.frames_logged, 0);
+        assert_eq!(pump.events_ingested_count(), 0);
+        assert!(store.recent_events(10).unwrap().is_empty());
+        let rows = store.activity_intervals_in_range(0, 5_000_000).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].app_bundle_id, None);
+        let capture_snapshot: crate::capture_status::CaptureStatus =
+            serde_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
+        assert_eq!(capture_snapshot.stored_frame_count, 0);
+        assert_eq!(capture_snapshot.stored_screenshot_count, 0);
+        assert_eq!(capture_snapshot.last_stored_frame_at, None);
+        assert!(!dir.path().join("h.jsonl").exists());
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn activity_overlap_after_reopen_keeps_ocr_and_health_flowing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brain.sqlite");
+        let key = mci_core::crypto::DbKey::from_bytes([42; 32]);
+        let original = mci_brain::ActivityInterval {
+            start_us: 100_000_000,
+            end_us: 104_000_000,
+            state: mci_brain::ActivityState::InputActive,
+            app_bundle_id: Some("test.activity".into()),
+            capture_generation: "generation-1".into(),
+        };
+        let store = mci_brain::SqlCipherBrainStore::new(&path, &key).unwrap();
+        store.append_activity_interval(&original).unwrap();
+        drop(store);
+        let store = Arc::new(mci_brain::SqlCipherBrainStore::new(&path, &key).unwrap());
+        let pump = BrainPump::new(store.clone(), None).with_activity_store(store.clone());
+        let clock = FixedClock::at_unix_ms(110_000);
+        let receipt_path = dir.path().join("capture-status.json");
+        let receipt = crate::capture_status::CaptureStatusWriter::new(
+            store.clone(),
+            receipt_path.clone(),
+            true,
+        );
+        receipt.refresh(&clock);
+        let activity = |start_us, end_us| Message::ActivityInterval {
+            start_us,
+            end_us,
+            state: "input_active".into(),
+            app_bundle_id: Some("test.activity".into()),
+            capture_generation: "generation-2".into(),
+        };
+        let mut bytes = encode(0, &activity(102_000_000, 106_000_000));
+        bytes.extend(make_ocr_frame_bytes(
+            1,
+            107_000_000,
+            "synthetic OCR after clock overlap",
+        ));
+        bytes.extend(encode(
+            2,
+            &Message::HelperHealth {
+                uptime_ms: 1000,
+                frames_delivered: 1,
+                frames_suppressed: 0,
+                frames_redacted_by_failsafe: 0,
+                cascade_forced_count: 0,
+                frames_dropped_backpressure: 0,
+                frames_dropped_late_ack: 0,
+                frames_encode_failed: 0,
+                frames_focus_race_dropped: 0,
+                failsafe_by_app: vec![],
+                cpu_pct_micro: 0,
+                rss_bytes: 0,
+                tracker_alive_at_us: 0,
+            },
+        ));
+        bytes.extend(encode(3, &activity(106_000_000, 110_000_000)));
+        bytes.extend(encode(4, &activity(102_000_000, 106_000_000)));
+        bytes.extend(encode(5, &activity(106_000_000, 110_000_000)));
+        let stats = drain_with_capture_status(
+            &mut Cursor::new(bytes),
+            &fresh_log(dir.path()),
+            &clock,
+            &id(),
+            Some(&pump),
+            Some(&receipt),
+        )
+        .await
+        .expect("valid overlap must not abort independent OCR or health");
+        assert_eq!(stats.frames_seen, 6);
+        assert_eq!(stats.frames_to_brain, 1);
+        assert_eq!(stats.frames_logged, 1);
+        assert_eq!(stats.frames_non_health, 0);
+        assert_eq!(stats.activity_intervals_stored, 1);
+        assert_eq!(stats.activity_intervals_rejected, 2);
+        assert_eq!(pump.events_ingested_count(), 1);
+        assert_eq!(store.recent_events(10).unwrap().len(), 1);
+        assert_eq!(
+            store.activity_intervals_in_range(0, 111_000_000).unwrap(),
+            vec![
+                original.clone(),
+                mci_brain::ActivityInterval {
+                    start_us: 106_000_000,
+                    end_us: 110_000_000,
+                    capture_generation: "generation-2".into(),
+                    ..original
+                },
+            ]
+        );
+        let receipt_snapshot: crate::capture_status::CaptureStatus =
+            serde_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
+        assert_eq!(receipt_snapshot.blocked_reason, None);
+        assert_eq!(receipt_snapshot.stored_frame_count, 1);
+        assert_eq!(receipt_snapshot.stored_screenshot_count, 0);
+        let body = std::fs::read_to_string(dir.path().join("h.jsonl")).unwrap();
+        assert_eq!(body.lines().count(), 1);
+        for private in ["test.activity", "generation-2", "synthetic OCR", "MyTitle"] {
+            assert!(!body.contains(private));
+        }
+    }
+
+    #[test]
+    fn activity_overlap_notice_is_once_per_drain_and_content_free() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "runner::tests::activity_overlap_after_reopen_keeps_ocr_and_health_flowing",
+                "--nocapture",
+            ])
+            .env_clear()
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(
+            stderr.trim(),
+            "mci-agent: activity interval rejected (overlap); capture continuing"
+        );
+    }
+
+    #[test]
+    fn activity_overlap_counter_saturates_without_repeating_the_notice() {
+        let mut stats = RunStats::default();
+        assert!(stats.record_activity_overlap());
+        assert!(!stats.record_activity_overlap());
+        assert_eq!(stats.activity_intervals_rejected, 2);
+        stats.activity_intervals_rejected = u64::MAX - 1;
+        assert!(!stats.record_activity_overlap());
+        assert!(!stats.record_activity_overlap());
+        assert_eq!(stats.activity_intervals_rejected, u64::MAX);
+    }
+
+    #[tokio::test]
+    async fn activity_overlap_only_keeps_capture_receipt_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            mci_brain::SqlCipherBrainStore::new(
+                &dir.path().join("brain.sqlite"),
+                &mci_core::crypto::DbKey::from_bytes([42; 32]),
+            )
+            .unwrap(),
+        );
+        let pump = BrainPump::new(store.clone(), None).with_activity_store(store.clone());
+        pump.ingest_activity_interval(&Message::ActivityInterval {
+            start_us: 1_000_000,
+            end_us: 2_000_000,
+            state: "unknown".into(),
+            app_bundle_id: None,
+            capture_generation: "generation-1".into(),
+        })
+        .unwrap();
+        let clock = FixedClock::at_unix_ms(5000);
+        let receipt_path = dir.path().join("capture-status.json");
+        let receipt = crate::capture_status::CaptureStatusWriter::new(
+            store.clone(),
+            receipt_path.clone(),
+            true,
+        );
+        receipt.refresh(&clock);
+        let before = std::fs::read(&receipt_path).unwrap();
+        let stats = drain_with_capture_status(
+            &mut Cursor::new(activity_frame(0, 1_500_000, "unknown", None)),
+            &fresh_log(dir.path()),
+            &clock,
+            &id(),
+            Some(&pump),
+            Some(&receipt),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stats.activity_intervals_rejected, 1);
+        assert_eq!(stats.activity_intervals_stored, 0);
+        assert_eq!(stats.frames_to_brain, 0);
+        assert_eq!(std::fs::read(&receipt_path).unwrap(), before);
+        assert!(!dir.path().join("h.jsonl").exists());
+    }
+
+    #[tokio::test]
+    async fn activity_corrupt_barrier_read_remains_fatal_before_ocr() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brain.sqlite");
+        let key = mci_core::crypto::DbKey::from_bytes([42; 32]);
+        let store = Arc::new(mci_brain::SqlCipherBrainStore::new(&path, &key).unwrap());
+        store.delete_events_in_range(100, 199).unwrap();
+        let db = mci_core::store::open(&path, &key).unwrap();
+        db.conn()
+            .execute_batch(
+                "PRAGMA ignore_check_constraints=ON;
+             UPDATE activity_deletion_barriers SET end_us=99;",
+            )
+            .unwrap();
+        let pump = BrainPump::new(store.clone(), None).with_activity_store(store.clone());
+        let mut bytes = activity_frame(0, 120, "unknown", None);
+        bytes.extend(make_ocr_frame_bytes(
+            1,
+            2_000_000,
+            "must not ingest after read failure",
+        ));
+        let error = drain_to_log_with_brain(
+            &mut Cursor::new(bytes),
+            &fresh_log(dir.path()),
+            &FixedClock::at_unix_ms(5000),
+            &id(),
+            &pump,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            RunError::Brain(IngestError::Store(StoreError::Backend(_)))
+        ));
+        assert!(store.recent_events(10).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn activity_overlap_error_on_ocr_path_remains_fatal() {
+        struct OverlapOnOcr;
+        impl BrainIngestor for OverlapOnOcr {
+            fn ingest_ocr_event(&self, _: &Message) -> Result<IngestOutcome, IngestError> {
+                Err(StoreError::ActivityOverlap.into())
+            }
+            fn events_ingested_count(&self) -> u64 {
+                0
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let error = drain_to_log_with_brain(
+            &mut Cursor::new(make_ocr_frame_bytes(0, 1, "synthetic OCR")),
+            &fresh_log(dir.path()),
+            &FixedClock::at_unix_ms(0),
+            &id(),
+            &OverlapOnOcr,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            RunError::Brain(IngestError::Store(StoreError::ActivityOverlap))
+        ));
+    }
+
+    #[tokio::test]
+    async fn activity_interval_persistence_failure_aborts_and_sets_content_free_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brain.sqlite");
+        let key = mci_core::crypto::DbKey::from_bytes([42; 32]);
+        let writer = Arc::new(mci_brain::SqlCipherBrainStore::new(&path, &key).unwrap());
+        let readonly =
+            Arc::new(mci_brain::SqlCipherBrainStore::open_readonly(&path, &key).unwrap());
+        let pump = BrainPump::new(readonly.clone(), None).with_activity_store(readonly);
+        let log = fresh_log(dir.path());
+        let clock = FixedClock::at_unix_ms(5000);
+        let receipt_path = dir.path().join("capture-status.json");
+        let receipt = crate::capture_status::CaptureStatusWriter::new(
+            writer.clone(),
+            receipt_path.clone(),
+            true,
+        );
+        let mut bytes = activity_frame(0, 1_000_000, "input_active", Some("test.activity"));
+        bytes.extend(make_ocr_frame_bytes(
+            1,
+            2_000_000,
+            "must not ingest after failure",
+        ));
+        let error = drain_with_capture_status(
+            &mut Cursor::new(bytes),
+            &log,
+            &clock,
+            &id(),
+            Some(&pump),
+            Some(&receipt),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, RunError::Brain(IngestError::Store(_))));
+        assert!(!error.to_string().contains("test.activity"));
+        let status: crate::capture_status::CaptureStatus =
+            serde_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
+        assert_eq!(
+            status.blocked_reason.as_deref(),
+            Some("activity_ingest_failed")
+        );
+        assert_eq!(status.stored_screenshot_count, 0);
+        assert!(writer.recent_events(10).unwrap().is_empty());
+        assert!(writer
+            .activity_intervals_in_range(0, 5_000_000)
+            .unwrap()
+            .is_empty());
+        assert!(!dir.path().join("h.jsonl").exists());
+    }
+
+    #[tokio::test]
+    async fn activity_interval_without_a_brain_is_not_silently_discarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = fresh_log(dir.path());
+        let clock = FixedClock::at_unix_ms(5000);
+        let bytes = activity_frame(0, 1_000_000, "unknown", None);
+        assert!(matches!(
+            drain_with_capture_status(&mut Cursor::new(&bytes), &log, &clock, &id(), None, None)
+                .await,
+            Err(RunError::Brain(IngestError::ActivityUnavailable))
+        ));
+        assert!(matches!(
+            drain_to_log(&mut Cursor::new(&bytes), &log, &clock, &id()).await,
+            Err(RunError::Brain(IngestError::ActivityUnavailable))
+        ));
     }
 
     #[tokio::test]

@@ -851,7 +851,8 @@ async fn run_agent(args: Args) -> ExitCode {
                                 let base_pump = BrainPump::new(
                                     Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
                                     None,
-                                );
+                                )
+                                .with_activity_store(Arc::clone(&store));
                                 let pump = match &ner_sync_backend {
                                     Some(b) => base_pump.with_ner_sync(Arc::clone(b)),
                                     None => base_pump,
@@ -1259,11 +1260,13 @@ async fn run_agent(args: Args) -> ExitCode {
             match drain_result {
                 Ok(stats) => {
                     eprintln!(
-                        "mci-agent: drained {} frame(s); {} logged, {} non-health, {} to brain",
+                        "mci-agent: drained {} frame(s); {} logged, {} non-health, {} to brain; {} activity stored, {} activity rejected",
                         stats.frames_seen,
                         stats.frames_logged,
                         stats.frames_non_health,
-                        stats.frames_to_brain
+                        stats.frames_to_brain,
+                        stats.activity_intervals_stored,
+                        stats.activity_intervals_rejected
                     );
                     eprintln!("mci-agent: log = {}", args.log_path.display());
                     ExitCode::SUCCESS

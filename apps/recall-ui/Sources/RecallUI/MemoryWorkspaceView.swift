@@ -58,8 +58,13 @@ struct MemoryWorkspaceView: View {
     var searchFocusTrigger: Bool
     var focusRequest: RecallFocusRequest? = nil
     var latestBriefRequest: UUID? = nil
+    var dailyModel: DailyMemoryViewModel? = nil
+    var searchModel: SearchViewModel? = nil
+    var isSyntheticPreview = false
+    var contextExporter: @Sendable (String) async throws -> String = { try await ContextHandoffExporter.export(focus: $0) }
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var historyExpanded = true
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -70,6 +75,9 @@ struct MemoryWorkspaceView: View {
             workspaceDetail
         }
         .background(Color.brandBgPrimary)
+        .onChange(of: selection) { _, destination in
+            if destination == .episodes { historyExpanded = true }
+        }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             MemoryRefreshSignal.post()
@@ -85,8 +93,18 @@ struct MemoryWorkspaceView: View {
         List(selection: $selection) {
             Section("Memory") {
                 ForEach(MemoryWorkspaceSelection.primary) { item in
-                    MemorySidebarRow(item: item)
+                    if item == .timeline {
+                        DisclosureGroup(isExpanded: $historyExpanded) {
+                            MemorySidebarRow(item: .episodes)
+                                .tag(MemoryWorkspaceSelection.episodes)
+                        } label: {
+                            MemorySidebarRow(item: item)
+                        }
                         .tag(item)
+                    } else {
+                        MemorySidebarRow(item: item)
+                            .tag(item)
+                    }
                 }
             }
 
@@ -94,6 +112,7 @@ struct MemoryWorkspaceView: View {
                 ForEach(MemoryWorkspaceSelection.secondary) { item in
                     MemorySidebarRow(item: item)
                         .tag(item)
+                        .disabled(isSyntheticPreview)
                 }
             }
         }
@@ -106,20 +125,22 @@ struct MemoryWorkspaceView: View {
     @ViewBuilder
     private var workspaceDetail: some View {
         Group {
+            if isSyntheticPreview && MemoryWorkspaceSelection.secondary.contains(selection) {
+                ContentUnavailableView("Synthetic preview", systemImage: "eye")
+            } else {
             switch selection {
             case .now:
-                DailyMemoryView(reader: reader, onOpenPrivacy: { selection = .privacy }, latestBriefRequest: latestBriefRequest)
+                DailyMemoryView(reader: reader, onOpenPrivacy: { selection = .privacy }, latestBriefRequest: latestBriefRequest, model: dailyModel)
             case .search:
                 SearchView(
-                    viewModel: SearchViewModel(reader: reader),
+                    viewModel: searchModel ?? SearchViewModel(reader: reader),
                     focusTrigger: searchFocusTrigger,
                     focusRequest: focusRequest,
-                    reader: reader
+                    reader: reader,
+                    contextExporter: contextExporter
                 )
-            case .timeline:
-                TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
-            case .episodes:
-                EpisodesView(viewModel: EpisodesViewModel(reader: reader), reader: reader)
+            case .timeline, .episodes:
+                HistoryWorkspaceView(reader: reader, selection: $selection)
             case .sources:
                 SourcesWorkspaceView(reader: reader)
             case .privacy:
@@ -127,15 +148,16 @@ struct MemoryWorkspaceView: View {
             case .settings:
                 WorkspaceSettingsView()
             }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.brandBgPrimary)
-        .navigationTitle(selection.descriptor.title)
+        .navigationTitle(selection == .episodes ? "History" : selection.descriptor.title)
     }
 }
 
 private extension MemoryWorkspaceSelection {
-    static let primary: [MemoryWorkspaceSelection] = [.now, .search, .timeline, .episodes]
+    static let primary: [MemoryWorkspaceSelection] = [.now, .search, .timeline]
     static let secondary: [MemoryWorkspaceSelection] = [.sources, .privacy, .settings]
 }
 
@@ -148,6 +170,32 @@ private struct MemorySidebarRow: View {
             .mciFont(.body)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(item.descriptor.title)
+    }
+}
+
+private struct HistoryWorkspaceView: View {
+    let reader: BrainReader
+    @Binding var selection: MemoryWorkspaceSelection
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("History view", selection: $selection) {
+                    Text("Evidence").tag(MemoryWorkspaceSelection.timeline)
+                    Text("Sessions").tag(MemoryWorkspaceSelection.episodes)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 240)
+                Spacer()
+            }
+            .padding(.horizontal, 20).padding(.vertical, 12)
+            Divider()
+            if selection == .episodes {
+                EpisodesView(viewModel: EpisodesViewModel(reader: reader), reader: reader)
+            } else {
+                TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
+            }
+        }
     }
 }
 

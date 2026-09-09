@@ -5,6 +5,28 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### Work memory
+
+- Separate Today, Search and History. Search starts with an empty search field;
+  Sessions are grouped under History, and daily handoff remains an action.
+- Put a measured-day distribution and foreground-app totals above resume points.
+  Inspect the longest measured stretch and its intervals. Unknown time remains
+  unknown; input and foreground state do not establish attention or task completion.
+- Record short, privacy-gated activity intervals independently of screenshots in
+  the encrypted store. Deletion and retention also govern these intervals.
+- Center lexical search excerpts on matching words instead of always showing
+  the beginning of the captured text. Retrieval order and source identities stay
+  unchanged; stemming-only matches can still use the ordinary excerpt.
+- Bound helper transport queues and stalled writes. A partial interrupted frame
+  retires its transport instead of corrupting the following frame.
+- Preserve the cached-screen retry across a bounded Vision quarantine wait.
+  Keep recognition deadlines, cancellation and privacy checks unchanged.
+- Reject backward-clock activity overlaps without interrupting unrelated screen
+  ingestion. Keep storage failures fatal and rejected-activity counts separate.
+- Reject corrections that would silently retire a broader-scope memory claim.
+  Add a reproducible sequential policy evaluation with stale-state, deletion,
+  project-isolation and malicious-content cases. This is not a real-agent benchmark.
+
 ### Daily review and handoff
 
 - Open to a day-scoped review instead of another history feed. Search, History,

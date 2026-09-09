@@ -61,6 +61,10 @@ public protocol ContactsAttributionSource: Sendable {
     func resolve(participant: String) -> ContactRef?
 }
 
+protocol ContactsAttributionStore: ContactsAttributionSource {
+    func requestAccess(completion: @escaping @Sendable (Bool) -> Void)
+}
+
 /// Authorization state of `CNContactStore` for the helper process.
 public enum ContactsAuthorizationState: Sendable, Equatable {
     /// Not yet requested OR request returned `false` with no error.
@@ -98,30 +102,37 @@ public final class ContactsAttribution: ContactsAttributionSource, @unchecked Se
     private var cacheOrder: [String]
     private var loggedDenialOnce: Bool = false
 
-    #if canImport(Contacts)
-    private let store: CNContactStore
-    #endif
+    private let storeLock = NSLock()
+    private let storeFactory: @Sendable () -> any ContactsAttributionStore
+    private var store: (any ContactsAttributionStore)?
 
-    public init(cacheCapacity: Int = 256) {
+    public convenience init(cacheCapacity: Int = 256) {
+        self.init(cacheCapacity: cacheCapacity, storeFactory: { SystemContactsAttributionStore() })
+    }
+
+    init(cacheCapacity: Int = 256, storeFactory: @escaping @Sendable () -> any ContactsAttributionStore) {
         self.cacheCapacity = cacheCapacity
+        self.storeFactory = storeFactory
         self.authState = .notDetermined
         self.cache = [:]
         self.cacheOrder = []
-        #if canImport(Contacts)
-        self.store = CNContactStore()
-        #endif
     }
 
-    /// Kick off the TCC prompt + permission settle. Idempotent;
-    /// second call is a no-op. Until access resolves,
-    /// `resolve(participant:)` returns `nil`.
+    /// Explicitly request access, reusing the lazily-created store. Until
+    /// access resolves, `resolve(participant:)` returns `nil`.
     public func start() {
-        #if canImport(Contacts)
-        store.requestAccess(for: .contacts) { [weak self] granted, _ in
+        // OS store construction can initialize services even without requesting
+        // permission. Keep it off construction and unauthorized read paths.
+        let store = storeLock.withLock {
+            if let existing = self.store { return existing }
+            let created = storeFactory()
+            self.store = created
+            return created
+        }
+        store.requestAccess { [weak self] granted in
             guard let self else { return }
             self.recordAuth(granted: granted)
         }
-        #endif
     }
 
     private func recordAuth(granted: Bool) {
@@ -167,7 +178,8 @@ public final class ContactsAttribution: ContactsAttributionSource, @unchecked Se
 
         guard auth == .granted else { return nil }
 
-        let observed = readContact(matching: key)
+        let backing = storeLock.withLock { store }
+        let observed = backing?.resolve(participant: key)
 
         stateLock.lock()
         cache[key] = observed
@@ -212,13 +224,25 @@ public final class ContactsAttribution: ContactsAttributionSource, @unchecked Se
         }
         return ""
     }
+}
+
+private final class SystemContactsAttributionStore: ContactsAttributionStore, @unchecked Sendable {
+    #if canImport(Contacts)
+    private let store = CNContactStore()
+    #endif
+
+    func requestAccess(completion: @escaping @Sendable (Bool) -> Void) {
+        #if canImport(Contacts)
+        store.requestAccess(for: .contacts) { granted, _ in completion(granted) }
+        #endif
+    }
 
     /// Query `CNContactStore` for a contact matching the
     /// normalized participant. Returns the first match's
     /// identifier (deterministic ordering across multiple matches
     /// is out of scope for this PR — Phase 7 deep-hook plugin
     /// owns multi-match semantics).
-    private func readContact(matching normalized: String) -> ContactRef? {
+    func resolve(participant normalized: String) -> ContactRef? {
         #if canImport(Contacts)
         // Build the predicate. CNContact has two relevant
         // predicates — emailAddress vs phoneNumber — choose by

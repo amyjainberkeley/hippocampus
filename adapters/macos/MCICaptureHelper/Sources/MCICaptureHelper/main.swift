@@ -10,6 +10,7 @@
 // frames to stdout or a CLI-supplied output file.
 
 import Foundation
+import Darwin
 import MCICaptureHelperKit
 
 // ---------------------------------------------------------------------------
@@ -123,7 +124,8 @@ func printUsage() {
 
     Usage: mci-capture-helper [OPTIONS]
 
-      --output <path>           Write IPC frames here. Default: stdout.
+      --output <path>           Write IPC to a pipe, or a regular file with --once.
+                                Default: stdout (regular redirection also needs --once).
       --denylist <path>         Read denylist TOML here. Default:
                                 ~/Library/Application Support/MCI/denylist.toml
       --heartbeat-seconds <n>   Emit HelperHealth every n seconds. Default 30.
@@ -139,6 +141,10 @@ func printUsage() {
                                 OFF is zero. Pair with --capture.
       --version                 Print version and exit.
       -h, --help                Print this and exit.
+
+    Regular files are health fixtures only: --once with capture disabled.
+    Filesystem writes have no latency guarantee. The 1-second delivery deadline
+    applies only to bounded pipe/AF_UNIX IPC, including one-shot pipe output.
     """)
 }
 
@@ -199,6 +205,26 @@ if let path = args.outputPath {
     outputHandle = h
 } else {
     outputHandle = FileHandle.standardOutput
+}
+
+var outputInfo = stat()
+guard fstat(outputHandle.fileDescriptor, &outputInfo) == 0 else {
+    FileHandle.standardError.write(Data("mci-capture-helper: cannot inspect output descriptor\n".utf8))
+    exit(2)
+}
+let regularOutput = outputInfo.st_mode & S_IFMT == S_IFREG
+guard !regularOutput || (args.oneShot && !captureOptions.captureEnabled) else {
+    FileHandle.standardError.write(Data(
+        "mci-capture-helper: regular output requires --once with capture disabled; use a pipe or AF_UNIX stream for streaming output\n".utf8
+    ))
+    exit(64)
+}
+let oneShotHealthSink = regularOutput ? OneShotHealthSink() : nil
+let healthSink: any FrameSink
+if let oneShotHealthSink {
+    healthSink = oneShotHealthSink
+} else {
+    healthSink = FileHandleFrameSink(handle: outputHandle)
 }
 
 // Denylist load (missing-or-empty is OK — fail-safe still fires).
@@ -334,7 +360,7 @@ let cascade = SuppressionCascade(
 
 let loop = HelperMainLoop(
     cascade: cascade,
-    sink: FileHandleFrameSink(handle: outputHandle),
+    sink: healthSink,
     heartbeatInterval: .seconds(args.heartbeatSeconds)
 )
 
@@ -361,7 +387,17 @@ if args.oneShot {
     // CI smoke: emit one frame, exit clean.
     do {
         try await loop.tickHealth()
-        try? outputHandle.close()
+        if let oneShotHealthSink {
+            let frame = try await oneShotHealthSink.takeFrame()
+            // This is explicit one-shot filesystem I/O, not bounded IPC.
+            // For stdout redirection, preserve the shell's offset/append policy.
+            if args.outputPath != nil {
+                try outputHandle.truncate(atOffset: 0)
+                try outputHandle.seek(toOffset: 0)
+            }
+            try outputHandle.write(contentsOf: frame)
+        }
+        try outputHandle.close()
         exit(0)
     } catch {
         FileHandle.standardError.write("mci-capture-helper: tick error: \(error)\n".data(using: .utf8)!)
@@ -548,7 +584,8 @@ if captureOptions.captureEnabled {
         // covers residual buffer-delivery races.
         focusedWindowStore: focusedWindowStore,
         focusTracker: focusTracker,
-        tccStatusMonitor: tccStatusMonitor
+        tccStatusMonitor: tccStatusMonitor,
+        measuresActivity: true
     )
     captureRuntime = CaptureRuntime(
         session: captureSession,

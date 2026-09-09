@@ -83,6 +83,32 @@ public struct VisionOCRRunner: OCREngine {
         }
     }
 
+    /// Exercises the production region loop without changing the lane's real deadline.
+    package init(
+        regionNow: @escaping @Sendable () -> DispatchTime = { .now() },
+        synchronousRegionPerform: @escaping @Sendable (OCREngineInput, [String], CGRect) throws -> [OCRLine]
+    ) {
+        self.recognitionLanguages = ["en-US"]
+        self.executionLane = VisionOCRExecutionLane(
+            label: "com.hippocampus.capture.vision-ocr.fixture-regions"
+        ) { input, languages, deadline in
+            Self.runRegionLoop(
+                regions: Self.recognitionRegions(for: input), deadline: deadline, now: regionNow,
+                perform: { try synchronousRegionPerform(input, languages, $0) },
+                makeLine: { line, _ in line }
+            )
+        }
+    }
+
+    /// Fixture cleanup only; waiting never submits another recognition request.
+    package func waitUntilIdle(timeoutMs: Int) async -> Bool {
+        await executionLane.waitUntilIdle(timeoutMs: timeoutMs)
+    }
+
+    public func waitUntilAvailable(timeoutMs: Int) async -> Bool {
+        await executionLane.waitUntilIdle(timeoutMs: timeoutMs)
+    }
+
     public func recognize(
         input: OCREngineInput,
         timeoutMs: Int
@@ -125,33 +151,15 @@ public struct VisionOCRRunner: OCREngine {
             orientation: .up,
             options: [:]
         )
-        var accumulated = OCRLineAccumulator()
-        var longestPerformNs: UInt64 = 0
-        for (index, region) in regions.enumerated() {
-            // A timeout quarantines the current perform, but must not start
-            // more Vision requests or publish partially accumulated text.
-            let now = DispatchTime.now()
-            guard now < deadline else {
-                return OCRResult(recognizedLines: [], durationMs: 0, timedOut: true)
-            }
-            // Once there is text to preserve, reserve twice the slowest perform
-            // cost before optional supplements. An empty scan can keep trying
-            // within the deadline, even if cold model startup was expensive.
-            if index > 0 && !accumulated.lines.isEmpty
-                && (deadline.uptimeNanoseconds - now.uptimeNanoseconds) / 2 <= longestPerformNs {
-                break
-            }
-            request.regionOfInterest = region
-            do {
+        return runRegionLoop(
+            regions: regions, deadline: deadline, regionDidFinish: regionDidFinish,
+            perform: { region in
+                request.regionOfInterest = region
                 try handler.perform([request])
-            } catch {
-                return OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
-            }
-            let performNs = DispatchTime.now().uptimeNanoseconds - now.uptimeNanoseconds
-            longestPerformNs = max(longestPerformNs, performNs)
-            regionDidFinish?(region, performNs)
-            for observation in request.results ?? [] {
-                guard let top = observation.topCandidates(1).first else { continue }
+                return request.results ?? []
+            },
+            makeLine: { observation, region in
+                guard let top = observation.topCandidates(1).first else { return nil }
                 // Vision reports ROI-relative boxes. Keep image coordinates
                 // without removing text needed by the post-OCR privacy check.
                 let box = observation.boundingBox
@@ -161,16 +169,56 @@ public struct VisionOCRRunner: OCREngine {
                     width: box.width * region.width,
                     height: box.height * region.height
                 ).intersection(region)
-                accumulated.append(
-                    OCRLine(
-                        text: top.string,
-                        boundingBox: imageBox.isNull ? CGRect(origin: region.origin, size: .zero) : imageBox,
-                        confidence: top.confidence
-                    )
+                return OCRLine(
+                    text: top.string,
+                    boundingBox: imageBox.isNull ? CGRect(origin: region.origin, size: .zero) : imageBox,
+                    confidence: top.confidence
                 )
             }
+        )
+    }
+
+    private static func runRegionLoop<Observation>(
+        regions: [CGRect],
+        deadline: DispatchTime,
+        now: () -> DispatchTime = { .now() },
+        regionDidFinish: (@Sendable (CGRect, UInt64) -> Void)? = nil,
+        perform: (CGRect) throws -> [Observation],
+        makeLine: (Observation, CGRect) -> OCRLine?
+    ) -> OCRResult {
+        guard !regions.isEmpty else {
+            return OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
         }
-        guard DispatchTime.now() < deadline else {
+        var accumulated = OCRLineAccumulator()
+        var longestPerformNs: UInt64 = 0
+        for (index, region) in regions.enumerated() {
+            // A timeout quarantines the current perform, but must not start
+            // more Vision requests or publish partially accumulated text.
+            let started = now()
+            guard started < deadline else {
+                return OCRResult(recognizedLines: [], durationMs: 0, timedOut: true)
+            }
+            // Once there is text to preserve, reserve twice the slowest perform
+            // cost before optional supplements. An empty scan can keep trying
+            // within the deadline, even if cold model startup was expensive.
+            if index > 0 && !accumulated.lines.isEmpty
+                && (deadline.uptimeNanoseconds - started.uptimeNanoseconds) / 2 <= longestPerformNs {
+                break
+            }
+            let observations: [Observation]
+            do {
+                observations = try perform(region)
+            } catch {
+                return OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
+            }
+            let performNs = now().uptimeNanoseconds - started.uptimeNanoseconds
+            longestPerformNs = max(longestPerformNs, performNs)
+            regionDidFinish?(region, performNs)
+            for observation in observations {
+                if let line = makeLine(observation, region) { accumulated.append(line) }
+            }
+        }
+        guard now() < deadline else {
             return OCRResult(recognizedLines: [], durationMs: 0, timedOut: true)
         }
         // Every completed pass must remain contiguous and in Vision's order.
@@ -285,6 +333,20 @@ private final class VisionOCRExecutionLane: @unchecked Sendable {
             occupied = true
             return true
         }
+    }
+
+    func waitUntilIdle(timeoutMs: Int) async -> Bool {
+        let deadline = DispatchTime.now() + .milliseconds(max(0, timeoutMs))
+        while stateLock.withLock({ occupied }) {
+            let now = DispatchTime.now()
+            guard now < deadline, !Task.isCancelled else { return false }
+            do {
+                try await Task.sleep(nanoseconds: min(5_000_000, deadline.uptimeNanoseconds - now.uptimeNanoseconds))
+            } catch {
+                return false
+            }
+        }
+        return true
     }
 
     private func releaseClaim() {

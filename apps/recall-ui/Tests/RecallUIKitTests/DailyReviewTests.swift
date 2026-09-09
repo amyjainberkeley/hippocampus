@@ -13,6 +13,32 @@ final class DailyReviewTests: XCTestCase {
         XCTAssertTrue(review.observations.isEmpty)
         XCTAssertEqual(review.textCount, 0)
         XCTAssertEqual(review.imageCount, 0)
+        XCTAssertTrue(review.resumePoints.isEmpty)
+    }
+
+    func testResumeGroupsKeepSourceKindsSeparateAndUseLatestLiteralEvidence() {
+        let rows = [event(1, minute: 1), event(2, minute: 2, app: "com.apple.Terminal"),
+                    event(3, minute: 3, text: "Question: ship the draft?"),
+                    event(4, minute: 4, text: "Imported claim: complete", kind: "transcript_import")]
+        let review = DailyReview(day: day, events: rows + [rows[0]])
+        XCTAssertEqual(review.resumePoints.map(\.id), [4, 3, 2])
+        XCTAssertEqual(review.resumePoints.map(\.sampleCount), [1, 2, 1])
+        XCTAssertEqual(review.resumePoints.map(\.sampleLabel), ["1 saved sample", "2 saved samples", "1 saved sample"])
+        XCTAssertEqual(review.resumePoints.map { $0.evidence.map(\.id) }, [[4], [3, 1], [2]])
+        XCTAssertEqual(review.resumePoints.map(\.detail),
+                       ["Imported claim: complete", "Question: ship the draft?", "Saved text"])
+        XCTAssertEqual(review.resumePoints.first?.sourceLabel, "Imported transcript")
+        XCTAssertTrue(review.resumePoints.allSatisfy { !$0.title.contains("complete") })
+    }
+
+    func testResumeIsBoundedAndDoesNotCombineUnattributedSources() {
+        let rows = (1...12).map { id in
+            TimelineEvent(eventId: UInt64(id), tsUs: day.startUs + UInt64(id),
+                          appBundleId: nil, snippet: "Source \(id)")
+        }
+        let review = DailyReview(day: day, events: rows)
+        XCTAssertEqual(review.resumePoints.map(\.id), [12, 11, 10, 9])
+        XCTAssertTrue(review.resumePoints.allSatisfy { $0.sampleCount == 1 && $0.sourceLabel == "Unknown source" })
     }
 
     func testCountsDeduplicateAndExcludeOtherDatesWithoutTreatingImagesAsText() {

@@ -61,4 +61,16 @@ public protocol OCREngine: Sendable {
     /// MUST NOT throw. The worker treats a thrown error as a programmer
     /// bug, not a runtime failure.
     func recognize(input: OCREngineInput, timeoutMs: Int) async -> OCRResult
+
+    /// Wait at most `timeoutMs` for lingering work to finish, returning promptly
+    /// on cancellation. Must not start recognition or publish a late result.
+    /// Availability does not extend a recognition deadline or bypass privacy.
+    func waitUntilAvailable(timeoutMs: Int) async -> Bool
+}
+
+public extension OCREngine {
+    /// Engines without lingering synchronous work are immediately available.
+    func waitUntilAvailable(timeoutMs: Int) async -> Bool {
+        !Task.isCancelled
+    }
 }

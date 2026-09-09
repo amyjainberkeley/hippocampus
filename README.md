@@ -10,6 +10,13 @@ semantic search uses a local Core ML embedder. Current daily briefs select
 source excerpts with citations. They do not establish that a task was completed,
 a commitment was made, or a captured statement is true.
 
+The work-memory source update separates three jobs: **Today** shows measured
+intervals and places to resume, **Search** finds matching evidence, and
+**History** preserves chronological sources and sessions. Measurement is a
+separate data path from screenshots: missing samples are not counted as work.
+See the [work-memory checkpoint](docs/audits/2026-09-09-work-memory.md) for
+verification and remaining live gates.
+
 **Start with [current status](docs/STATUS.md).** It separates implemented code,
 source-test results, installed-build evidence, and open release gates. A public
 repository, a local installation, a website deployment, and a qualified public

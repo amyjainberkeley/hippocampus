@@ -128,11 +128,7 @@ final class SearchViewModelTests: XCTestCase {
         XCTAssertNil(vm.errorMessage)
     }
 
-    // Regression: pre-fix, empty query + active filter sent `text: "*"`
-    // to FTS5, which the store rejects with
-    // `unknown special query`. With the fix, the view model takes a
-    // recentEvents path and applies the filter client-side.
-    // (CEO-reported dogfood crash, 2026-05-23.)
+    // Blank Search retains filters without issuing a wildcard or loading a feed.
     func testEmptyQueryWithActiveFilterDoesNotSendWildcard() async {
         let vm = SearchViewModel(reader: StubBrainReader())
         vm.query = ""
@@ -143,37 +139,29 @@ final class SearchViewModelTests: XCTestCase {
             "Empty query + active app filter must not surface an FTS5 wildcard error"
         )
         XCTAssertFalse(vm.isSearching)
-        XCTAssertFalse(vm.hits.isEmpty, "stub has Safari demo hits")
-        XCTAssertTrue(
-            vm.hits.allSatisfy { $0.appBundleId == "com.apple.Safari" },
-            "client-side app filter should narrow to Safari only"
-        )
+        XCTAssertTrue(vm.hits.isEmpty)
+        XCTAssertEqual(vm.filters.appBundleIds, ["com.apple.Safari"])
     }
 
-    func testEmptyQueryWithMultipleAppsAppliesClientSideFilter() async {
+    func testEmptyQueryWithMultipleAppsRetainsFiltersWithoutEvidence() async {
         let vm = SearchViewModel(reader: StubBrainReader())
         vm.query = ""
         vm.filters.toggleApp("com.apple.Safari")
         vm.filters.toggleApp("com.microsoft.VSCode")
         await vm.runSearch()
         XCTAssertNil(vm.errorMessage)
-        let bundles = Set(vm.hits.compactMap { $0.appBundleId })
-        XCTAssertTrue(
-            bundles.isSubset(of: ["com.apple.Safari", "com.microsoft.VSCode"]),
-            "Multi-app filter should only return hits from selected apps; got \(bundles)"
-        )
+        XCTAssertTrue(vm.hits.isEmpty)
+        XCTAssertEqual(vm.filters.appBundleIds, ["com.apple.Safari", "com.microsoft.VSCode"])
     }
 
-    func testEmptyQueryWithHasUrlFilterReturnsUrlOnly() async {
+    func testEmptyQueryWithHasUrlFilterRetainsFilterWithoutEvidence() async {
         let vm = SearchViewModel(reader: StubBrainReader())
         vm.query = ""
         vm.filters.toggleHasUrl()
         await vm.runSearch()
         XCTAssertNil(vm.errorMessage)
-        XCTAssertTrue(
-            vm.hits.allSatisfy { $0.url != nil && !$0.url!.isEmpty },
-            "Has-URL filter should drop hits with nil/empty URLs"
-        )
+        XCTAssertTrue(vm.hits.isEmpty)
+        XCTAssertTrue(vm.filters.hasUrl)
     }
 }
 

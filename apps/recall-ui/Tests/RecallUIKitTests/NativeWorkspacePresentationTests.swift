@@ -4,11 +4,39 @@ import XCTest
 // Source contracts cover the executable's composition without launching the app
 // or opening a brain. Native focus and layout still require the UI proof pass.
 final class NativeWorkspacePresentationTests: XCTestCase {
+    func testSessionsKeepTextOnlyEvidenceAndRevalidateTheSelectedIdentity() throws {
+        let source = try source("EpisodesView.swift")
+        XCTAssertTrue(source.contains("episode.evidence(from: events)"))
+        XCTAssertTrue(source.contains("expectedEvents: screenshots"))
+        XCTAssertFalse(source.contains("$0.hasScreenshot &&"))
+        XCTAssertTrue(source.contains("Text(verbatim: Formatters.stripContextHeader(event.snippet))"))
+    }
+
+    func testNativePreviewBypassesProductionStartupAndUsesIsolatedModels() throws {
+        let app = try source("MCIRecallApp.swift")
+        XCTAssertTrue(app.contains("NativePreviewConfiguration(arguments: CommandLine.arguments)"))
+        let preview = try source("NativeRecallPreview.swift")
+        XCTAssertTrue(preview.contains("healthLoader: { nil }"))
+        XCTAssertTrue(preview.contains("userDictionaryLoader: { .empty }"))
+        XCTAssertTrue(preview.contains("MemoryWorkspaceView("))
+        XCTAssertTrue(preview.contains("isSyntheticPreview: true"))
+        XCTAssertFalse(preview.contains("ProcessInfo.processInfo.environment"))
+        XCTAssertFalse(preview.contains("ContextHandoffExporter"))
+    }
+
+    func testTodayUsesResumeSourcesAndOnlyChartsAvailableMeasurements() throws {
+        let today = try source("DailyMemoryView.swift")
+        XCTAssertTrue(today.contains("model.review.resumePoints"))
+        XCTAssertTrue(today.contains("if let summary = model.activitySummary"))
+        XCTAssertFalse(today.contains("if !model.review.visualEvidence.isEmpty { visualEvidence }"))
+        XCTAssertTrue(today.contains("expectedEvents: events"))
+        XCTAssertTrue(today.contains("Text(verbatim: point.detail)"))
+    }
+
     func testSelectedDestinationOwnsItsEvidenceWithoutASharedRecentFeed() throws {
         let source = try source("MemoryWorkspaceView.swift")
         for (destination, view) in [
             ("now", "DailyMemoryView"), ("search", "SearchView"),
-            ("timeline", "TimelineView"), ("episodes", "EpisodesView"),
             ("sources", "SourcesWorkspaceView"),
             ("privacy", "PrivacyDashboard"), ("settings", "WorkspaceSettingsView"),
         ] {
@@ -21,6 +49,14 @@ final class NativeWorkspacePresentationTests: XCTestCase {
                        "A shared feed duplicates each destination's own evidence")
         XCTAssertFalse(source.contains("reader.recentEvents("),
                        "The navigation shell must not fetch unrelated recent evidence")
+        XCTAssertTrue(source.contains("case .timeline, .episodes:"))
+        XCTAssertTrue(source.contains("HistoryWorkspaceView(reader: reader, selection: $selection)"))
+        XCTAssertTrue(source.contains("DisclosureGroup(isExpanded: $historyExpanded)"))
+        XCTAssertTrue(source.contains("MemorySidebarRow(item: .episodes)"))
+        XCTAssertTrue(source.contains("Picker(\"History view\""))
+        XCTAssertTrue(source.contains(".pickerStyle(.segmented)"))
+        XCTAssertTrue(source.contains("TimelineView(viewModel:"))
+        XCTAssertTrue(source.contains("EpisodesView(viewModel:"))
     }
 
     func testSidebarLabelsKeepNativeListSelectionWithoutExtraFocusTargets() throws {
