@@ -175,6 +175,55 @@ Answer generation should happen after evidence collection. Some queries need exa
 
 These works support experiments, not an announcement that memory is solved. Conversational benchmarks omit many of the hard desktop problems: permission loss, small fonts, duplicate windows, screen-only private content, partial observation, and unavailable evidence.
 
+### Learning From Experience
+
+Continual Learning Bench adds a relevant evaluation lens. Its May 4, 2026 release evaluates related task sequences rather than isolated questions.[^37] The June paper compares systems with their own stateless versions, reporting reward, learning gain, and cost. Preserving context was a strong baseline against more elaborate memory systems in its experiments. Its six domains and relatively short sequences do not qualify desktop capture, months of personal use, or local-model performance; the initial study does not evaluate weight-training approaches.[^38]
+
+The proposed product test is therefore not only "can it find an old fact?" but "does the next piece of work improve because earlier experience is available?" That is an additional usefulness test, not a replacement for capture and privacy qualification. No continual-learning benchmark has been run on Hippocampus at this checkpoint.
+
+Four forms of memory should have different update rules:
+
+| Memory | Example, synthetic | Rule |
+| --- | --- | --- |
+| An observed episode | A design was reviewed and a concern appeared in the discussion | Preserve its source and time; do not turn every sentence into a standing instruction |
+| Current project state | A deadline was explicitly revised | Retain the earlier record but mark which state supersedes it and why |
+| A confirmed preference | For this project's updates, lead with decisions and omit background already known to the recipient | Store the scope, confirmation, and a way to change or remove it |
+| A useful procedure | A particular validation sequence worked for this repository and version | Keep the prerequisites and outcome evidence; treat reuse as a proposal, never as permission to execute |
+
+These can be explicit local records supplied to an agent; the first implementation does not need to retrain Claude or Codex. The point is observable adaptation of the combined system, not a claim that a provider model's weights changed. More aggressive learned representations can remain experiments until their benefits, deletion behavior, and resource costs are demonstrated.
+
+A correction should become a durable, inspectable change, not merely another sentence buried in history. Record what changed, the affected scope, whether it came from an explicit user correction or an inference, and which older interpretation it replaces. Recheck dependent summaries and future context packets. An inferred pattern should remain tentative until supported or confirmed; a webpage, quoted instruction, or an agent's self-congratulation cannot establish the owner's preference or a successful outcome.
+
+For example, a person corrects the classification of a work conversation once. Later relevant reviews should apply that scoped correction, but it should not label all communication as work. A project changes its deployment process; future handoffs should use the new process while retaining the historical reason for the change. These are testable proposed improvements, not automatic consequences of saving more screenshots.
+
+### Experience-Gain Evaluation
+
+Add an isolated test harness for the following proposed comparison. These are Hippocampus-specific evaluation arms, not claimed CL-Bench results or an unmodified reproduction of its protocol.
+
+| Arm | Available history | Question it answers |
+| --- | --- | --- |
+| Stateless | Current task only, with all persistent agent state reset | How much can the base system already do? |
+| Simple context | An explicitly specified recent-history policy; also full history where it fits | Does a straightforward context baseline suffice? |
+| Hippocampus | The proposed scoped evidence, corrections, and retrieval path | Does the extra memory machinery improve outcomes enough to justify its cost? |
+
+Borrow the basic gain comparison: task reward with state minus task reward without it.[^38] Also compare Hippocampus directly with the simple-context arm. Report absolute task success, repeated mistakes, unnecessary questions, time, total tokens, and privacy failures separately. Include ingestion, summarization, retrieval, and retries in the cost rather than counting only the final answer.
+
+Use the same declared model version, tool permissions, generation settings, and resource ceilings, with a documented context-selection policy per arm. Reset writable files, client memory, caches that contain task knowledge, and conversations between independent runs so a supposedly stateless agent cannot recover an earlier answer indirectly. Reveal only evidence available before each task, never future events or hidden answer keys. Repeat sequences and report uncertainty, including negative gain.
+
+Use disposable fixtures, never the person's actual working directory. Each arm must receive an equivalent task-world snapshot at each comparison point; removing agent knowledge must not also remove required task inputs or make one arm's environment easier.
+
+The fixture should include both positive transfer and traps: a correction that should generalize within one project, an unrelated project where it must not apply, a process that changes, a formerly useful rule that expires, a deleted source, and a malicious screen instruction. Later tasks should require applying the lesson in a new situation, not merely reciting the earlier correction. Use objective task checks where possible and blinded human review for judgment-heavy outcomes.
+
+Prefer explicit, editable memory until this comparison shows a reason to add complexity. Trial new ranking or consolidation policies on synthetic fixtures or in a separately consented shadow evaluation, with versioned outputs and rollback. Do not let a self-improvement loop rewrite capture exclusions, expand agent permissions, or delete evidence in pursuit of a better score.
+
+### Later Companion Interface
+
+A small optional companion in the app's lower-right corner is a later presentation idea, not an immediate build item. It should expose the same qualified memory and actions already available through Today, Search, and History, not introduce a separate untraceable memory store or become necessary for using the app.
+
+Its useful interactions could be "where did I stop?", "what changed?", "why do you think that?", and "give this context to my agent." A response should lead to the relevant evidence, accept a correction, and explain external sharing when applicable. Begin with invocation by the user; unsolicited nudges require a separate preference. Avoid idle animation, sound, content-obscuring placement, or pretending to know the user's attention or mood.
+
+Hiding the companion must not be confused with pausing capture, and neither should silently alter sharing permissions. Provide distinct, accessible controls. Its release condition is that an existing useful task becomes quicker or clearer through this interface, not merely that an appealing character can be rendered.
+
 ## Agent Delivery And Compute
 
 The default local path should perform capture, text indexing, search, retention, and time accounting without a cloud model. Optional local synthesis should be qualified on named hardware. More capable external reasoning can operate in a chosen agent or through an explicitly configured API, with a preview of what leaves the Mac and a spending limit.
@@ -259,6 +308,8 @@ The immediate commercial differentiator should not be "more sophisticated than O
 
 The recommended starting decisions are three primary destinations, work continuity as the core job, visible source evidence, local core processing, opt-in external delivery, and quiet contextual assistance. The major remaining choice is how proactive the product should feel outside its own window.
 
+The continual-learning extension adds a further acceptance question: does remembered experience improve later task outcomes compared with both a stateless system and a simple context baseline? The optional corner companion remains deferred until the underlying actions are useful and qualified.
+
 Three questions deserve focused discussion in order. First, should early surprises appear only when someone opens the app or invokes an agent, or may Hippocampus occasionally interrupt with an evidence-backed suggestion? Second, should Today lead with where to resume or with the account of the day, while still providing both? Third, what source and project boundaries would make automatic agent delivery feel comfortable rather than invasive?
 
 The answer should be tested through a small set of complete experiences, not another expanding list of sidebar labels. A successful product lets someone recover, understand, and continue their work with less effort while remaining in control of their memory.
@@ -303,3 +354,5 @@ Live product pages were consulted on September 8, 2026. Undated vendor pages est
 [^34]: Hippocampus. [SessionContextHook.swift](https://github.com/amyjainberkeley/hippocampus/blob/5bcb382afe7518962b9a4174c3a55dc3c0c6e433/apps/hippocampus/Sources/HippocampusKit/SessionContextHook.swift). Source at the audited baseline; bounded client context hook.
 [^35]: Martin Kleppmann, Adam Wiggins, Peter van Hardenberg, and Mark McGranaghan / Ink & Switch. [Local-first software](https://www.inkandswitch.com/essay/local-first/). 2019; ownership, offline operation, and durable access principles.
 [^36]: Hippocampus. [LICENSE](https://github.com/amyjainberkeley/hippocampus/blob/5bcb382afe7518962b9a4174c3a55dc3c0c6e433/LICENSE). Apache License 2.0 at the audited baseline; not a dependency or model-license audit.
+[^37]: The Continual Learning Bench Team. [Continual Learning Bench 1.0](https://continual-learning-bench.com/news/cl-bench-1-0/). May 4, 2026; official release announcement.
+[^38]: Parth Asawa et al. [Continual Learning Bench: Evaluating Frontier AI Systems in Real-World Stateful Environments](https://arxiv.org/html/2606.05661v1). arXiv:2606.05661v1, June 4, 2026; sections 4-6 cover metrics, results, and limitations. The proposed Hippocampus evaluation is an adaptation, not a reproduced result.
