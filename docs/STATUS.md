@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-09; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `560199a`
+Audited code baseline: `fb73f77`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -43,9 +43,34 @@ the audit. Test-lane cleanup and the separate static-screen recovery correction
 do not change the recognition deadline, quality assertions or privacy rules.
 No universal OCR/hardware or live-capture qualification is claimed.
 
-**Installed app remains `fe90a3d`**, not this source update. Website version 5
-remains owner-private and unchanged. The source branch and draft PR25 are the
-publication target; no main merge, public installer or domain launch is implied.
+**Source `fb73f77` is published** on `codex/hippocampus-v1` in
+`amyjainberkeley/hippocampus`; PR25 remains draft. Its private release-profile
+candidate is signed with Developer ID `BV6KGKFKP4`, notarized and stapled.
+The app inside the installer passes strict nested-signature, Gatekeeper and
+source/payload provenance checks; disposable-home startup and onboarding pass.
+
+Owner installer: `/Users/amy/hippo-work/releases/2026-09-09-fb73f77/Hippocampus-0.1.0.dmg`.
+SHA-256: `736f68d54c99014c221ebaa9b593579c7c76d8ca688de0a824768344057e41b1`.
+Product-source digest: `9625269a42430bf232f65685b7a491e917fe025eda0ded6f9db9569e9de7150f`.
+Apple accepted app submission `7a5b7feb-59f8-4ac0-857d-72f2bbb9a23e` and
+installer submission `621994f5-85d7-408d-9d0c-adb98ce5e838`.
+
+**Installed app remains `fe90a3d`**, not this candidate. Its manifest and running
+parent/helper/writer/Recall mappings were checked again. The native UI-control
+attempt timed out; the owner was asked to choose Quit before the controlled
+upgrade. No private database backup or migration has been performed. Follow the
+[owner upgrade procedure](release/OWNER_UPGRADE_2026-09-09.md); an archived old
+app alone does not make schema downgrade safe. Website version 5 remains
+owner-private and unchanged. No main merge, public installer or domain launch
+is implied.
+
+Hosted `fb73f77` passes Rust tests/format/Clippy, advisory, parent, Recall,
+onboarding and installer-smoke checks. Capture has **59 OCR-completeness
+assertion failures across 817 tests**; the dense single-pass baseline takes
+3,620-3,773 ms and cannot fit the unchanged one-second budget. All five controlled
+static-screen quarantine-recovery cases pass on that runner. The hosted
+release-contract job is still in progress at this checkpoint. These failures
+remain release blockers; local passes and notarization do not waive them.
 
 The fresh screen-only proof is still open: automated attempts did not generate
 the phrase. A system notification held the actual foreground during the latest

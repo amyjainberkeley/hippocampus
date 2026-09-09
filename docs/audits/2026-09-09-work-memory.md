@@ -185,6 +185,35 @@ must never silently resurrect memory the owner deleted after that backup.
 
 ## Remaining Gates
 
+### Candidate Delivery
+
+Source checkpoint `fb73f77` is published on the canonical branch and draft
+PR25. All Rust release targets and the four Swift release packages built with
+an allowlisted environment. The assembled app passed the disposable-home
+20-second startup and onboarding check. The app and 79 MiB private DMG are
+Developer-ID signed, notarized and stapled. A read-only mount of the completed
+DMG passed nested signing, Gatekeeper, ticket and complete source/payload
+provenance verification. A separate candidate app copy also passed provenance.
+The verification mount was detached afterward.
+
+The exact artifact and Apple receipts are recorded in [STATUS](../STATUS.md).
+No public release, website change or installation is implied. The installed
+manifest still names `fe90a3d`; the owner must quit it before the quiescent
+encrypted backup and controlled upgrade in the
+[owner procedure](../release/OWNER_UPGRADE_2026-09-09.md). Native UI control
+timed out, so no quit or migration was forced.
+
+The new hosted capture run also retains failures:
+[GitHub job](https://github.com/amyjainberkeley/hippocampus/actions/runs/34332650723/job/102404628853).
+All 59 assertion failures across 817 tests are in OCR completeness. Dense
+baseline scans take 3,620-3,773 ms; candidate deadlines expire at 1,009-1,093 ms.
+The five controlled static-screen recovery tests pass, but that does not repair
+the runner's real-recognition throughput. The local optimized passes and hosted
+failure are separate evidence. The source checkpoint is not universally
+OCR-qualified or ready for a public release.
+
+### Unmet Acceptance
+
 1. Generate a fresh phrase in the real foreground, then prove screen-origin
    text, authenticated linked image, restart readback and actual client retrieval.
 2. Qualify exclusion, lock, pause, permission loss, crash, deletion and storage
