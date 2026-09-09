@@ -196,6 +196,15 @@ DMG passed nested signing, Gatekeeper, ticket and complete source/payload
 provenance verification. A separate candidate app copy also passed provenance.
 The verification mount was detached afterward.
 
+The candidate's actual bundled Arctic model subsequently passed all seven
+runtime-quality tests with `MCI_REQUIRE_COREML_QUALITY=1` and
+`MCI_ARCTIC_MODEL_PATH` pointing inside that candidate app. Both CPU-only and
+CPU/Neural-Engine paths match the 50-sentence FP32 reference within the existing
+cosine threshold of 0.999. The run also checks dimensions, normalization, empty
+input and truncation. Observed means were 22.44 ms and 10.05 ms per embedding
+respectively; these are one local fixture run, not user-query latency claims.
+No missing-model or missing-reference early return can pass this strict run.
+
 The exact artifact and Apple receipts are recorded in [STATUS](../STATUS.md).
 No public release, website change or installation is implied. The installed
 manifest still names `fe90a3d`; the owner must quit it before the quiescent

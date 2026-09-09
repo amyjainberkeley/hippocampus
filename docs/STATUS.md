@@ -48,6 +48,10 @@ No universal OCR/hardware or live-capture qualification is claimed.
 candidate is signed with Developer ID `BV6KGKFKP4`, notarized and stapled.
 The app inside the installer passes strict nested-signature, Gatekeeper and
 source/payload provenance checks; disposable-home startup and onboarding pass.
+The actual candidate's bundled Arctic model also passes all seven strict
+runtime-quality checks, including the 50-sentence reference on CPU and Neural
+Engine. Missing-model skips are disabled for that run. This verifies the model
+artifact, not end-to-end retrieval accuracy.
 
 Owner installer: `/Users/amy/hippo-work/releases/2026-09-09-fb73f77/Hippocampus-0.1.0.dmg`.
 SHA-256: `736f68d54c99014c221ebaa9b593579c7c76d8ca688de0a824768344057e41b1`.
