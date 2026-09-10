@@ -29,10 +29,17 @@ the schema as version 9. Do not run the old build against an upgraded database.
    a mode-0700 enclosing directory, enough free space, and verify completeness
    locally. Do not expose contents or keys. A live sequential file copy is not
    a consistent backup; a text export is not an encrypted recovery backup.
-4. Preserve the old application for provenance, then replace the entire
-   `/Applications/Hippocampus.app` with the verified candidate. Check its nested
-   signature and provenance again after copying. Leave Keychain, permissions,
-   capture policy and existing memory intact.
+4. Stage the complete verified candidate in a unique, private directory on the
+   same filesystem as `/Applications/Hippocampus.app`. Verify both source heads,
+   nested signatures and provenance before replacing anything. Read-only MCP
+   workers can retain open executable mappings, so Finder's recursive overwrite
+   may refuse the update even after the recorder quits. A controlled atomic
+   whole-directory swap preserves the old bundle and those mappings; it must
+   fail without changes if path, identity or filesystem checks fail. Do not
+   overwrite individual binaries, delete the retired bundle while readers use
+   it, or launch its old writer/Recall against schema 10. Recheck the canonical
+   installed path after swapping. Leave Keychain, permissions, capture policy
+   and existing memory intact.
 5. Launch the exact installed path. Let the owner respond to any ordinary
    macOS prompt after reviewing it. Verify the new parent, helper, writer and
    Recall mappings; confirm visible startup/capture state. Do not infer working

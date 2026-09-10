@@ -6,20 +6,20 @@ External product name: **Hippocampus**. Engineering codename: **MCI**.
 
 | File | Purpose |
 |---|---|
-| `AppIcon.svg` | Canonical full-color app icon: the symmetric memory-aperture mark on a quiet light surface. |
-| `AppIcon-template.svg` | Canonical monochrome menu-bar version of the same memory-aperture mark. |
+| `AppIcon.svg` | Canonical app icon: a simple brain mark on one light surface. |
+| `AppIcon-template.svg` | Monochrome, transparent menu-bar version of the same brain mark. |
 | `AppIcon.iconset/` | macOS app-icon PNGs from 16 through 1024 px. |
 | `AppIcon.icns` | Compiled Finder, Dock, Launchpad, Cmd-Tab, DMG, and Gatekeeper icon. |
-| `hippocampus-icon.svg` | Compact secondary layered-memory mark for web and installer use. |
+| `hippocampus-icon.svg` | The same brain mark without an app-icon background. |
 | `hippocampus-wordmark.svg` | Text-only product wordmark using the Apple system sans stack. |
 | `statusbar-icon*.png` | 22/44/66 px menu-bar template images generated from `AppIcon-template.svg`. |
 | `colors.json` | Canonical adaptive product and semantic color tokens. |
 
-The app icon, compact mark, menu-bar template, UI, and installer all use one
-identity: a bounded aperture through which memory becomes useful. The two
-graphite pillars form an H; the cobalt bridge is the context selected for the
-current task. The retired black-and-mint head/brain and rotated-paper artwork
-are not part of the current product system.
+The Dock, menu bar, browser extensions and installer share one mark. Two solid
+lobes and four short openings suggest a brain without an anatomical drawing.
+The compact and menu-bar versions have transparent openings; macOS tints the
+menu-bar template. The nested H tiles, black-and-mint artwork and oversized
+installer watermark are retired.
 
 ## Palette
 
@@ -39,17 +39,9 @@ default product surface.
 
 ## Design Intent
 
-The memory aperture represents the product contract:
-
-1. observed evidence remains bounded on the device;
-2. only useful context crosses the cobalt bridge into the current task;
-3. the current memory view stays traceable to its sources.
-
-The mark is deliberately symmetric and geometric so it remains legible at
-16 px. It avoids anatomical imagery, rotated decoration, third-party icon
-assets, and SF Symbols in trademark-bearing artwork. The source paths in this
-directory are original project assets and are not traced from Apple's symbol
-library.
+Recognizable at Dock and menu-bar sizes, with no nested frames, lettering or
+decorative wallpaper. All three SVGs use identical geometry. The paths are
+original project assets, not traced from Apple's symbols or another product.
 
 ## Regenerating Assets
 
@@ -80,6 +72,12 @@ rsvg-convert -w 22 -h 22 "$SVG" -o assets/branding/statusbar-icon.png
 rsvg-convert -w 44 -h 44 "$SVG" -o assets/branding/statusbar-icon@2x.png
 rsvg-convert -w 66 -h 66 "$SVG" -o assets/branding/statusbar-icon@3x.png
 ```
+
+After generating the iconset, copy `AppIcon.icns` to
+`assets/installer/volume-icon.icns` and run
+`python3 scripts/generate-extension-toolbar-icons.py` (requires Pillow).
+For environments with the bundled Node runtime, Sharp can render the same SVG
+sources to these exact pixel sizes instead of `rsvg-convert`.
 
 The menu-bar image is loaded as an `NSImage` template so macOS supplies the
 correct foreground tint in light and dark menu bars. `CFBundleIconFile` points

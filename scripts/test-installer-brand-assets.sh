@@ -21,8 +21,12 @@ fail() {
 
 make_fixture() {
     local fixture="$1"
-    mkdir -p "$fixture/scripts" "$fixture/assets/branding" "$fixture/assets/installer"
+    mkdir -p "$fixture/scripts/lib" "$fixture/assets/branding" "$fixture/assets/installer" "$fixture/docs/legal"
     cp "$REPO_ROOT/scripts/build-installer.sh" "$fixture/scripts/build-installer.sh"
+    cp "$REPO_ROOT/scripts/lib/app-group-contract.sh" "$REPO_ROOT/scripts/lib/installer-runtime.sh" "$fixture/scripts/lib/"
+    cp "$REPO_ROOT/scripts/build-provenance.py" "$REPO_ROOT/scripts/product-source-digest.py" "$fixture/scripts/"
+    cp "$REPO_ROOT/assets/installer/generate-eula.py" "$REPO_ROOT/assets/installer/EULA.rtf" "$fixture/assets/installer/"
+    cp "$REPO_ROOT/docs/legal/terms-of-service.md" "$fixture/docs/legal/"
     cp "$REPO_ROOT/assets/branding/AppIcon.icns" "$fixture/assets/branding/AppIcon.icns"
     cp "$REPO_ROOT/assets/installer/volume-icon.icns" "$fixture/assets/installer/volume-icon.icns"
 }

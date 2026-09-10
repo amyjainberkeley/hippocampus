@@ -21,6 +21,23 @@ authority for current builds and release gates; this guide explains the workflow
 
 ## User Path
 
+### Installing Or Updating
+
+Opening a downloaded `.dmg` mounts the installer; it does not install the app.
+Drag **Hippocampus** onto **Applications**, then open the copy in Applications.
+Use the exact candidate linked in [status](../STATUS.md), not an older installer
+with the same filename. Private candidates are not qualified public releases.
+
+For an update, choose **Quit Hippocampus** from its menu-bar icon first. Closing
+the Recall window leaves the recorder running. If Finder still reports that the
+app is in use, a connected AI tool may still be using its local connector. Do
+not force-quit all your coding tools or delete your memory to get past it.
+The [controlled owner upgrade](../release/OWNER_UPGRADE_2026-09-09.md) preserves
+existing connector processes and requires a consistent recovery copy before
+this candidate's database upgrade.
+
+### Capture And Recall
+
 The native app targets Apple Silicon macOS. Capture requires explicit enablement
 and macOS permissions. Its boundary is the permitted focused window; it does
 not promise background-window, all-app, or private-browser coverage. Uncertain

@@ -26,6 +26,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Provision isolated installer build dependencies
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 10), "Installer requires Python >=3.10"'
+          python3 -m venv "$RUNNER_TEMP/installer-python"
+          env -i HOME="$HOME" PATH="$PATH" \
+            "$RUNNER_TEMP/installer-python/bin/python" -m pip --isolated install \
+            --disable-pip-version-check --index-url https://pypi.org/simple \
+            --require-hashes --only-binary=:all: -r scripts/installer-requirements.txt
+          echo "INSTALLER_PYTHON=$RUNNER_TEMP/installer-python/bin/python" >>"$GITHUB_ENV"
+
       - name: Require release secrets and variables
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}

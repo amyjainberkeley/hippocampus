@@ -123,11 +123,14 @@ export HDIUTIL_LOG
 cat > "$FAKE_BIN/hdiutil" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$HDIUTIL_LOG"
+if [[ "${FAKE_DETACH_FAILURE:-}" == all && "$1" == detach ]]; then exit 1; fi
+if [[ "${FAKE_DETACH_FAILURE:-}" == normal && "$1" == detach && "$*" != *-force* ]]; then exit 1; fi
 SH
 chmod +x "$FAKE_BIN/hdiutil"
 PATH="$FAKE_BIN:$PATH"
 
-MOUNT_DIR="$TEST_ROOT/Volumes/Hippocampus"
+HIPP_INSTALLER_MOUNT_ROOT="$TEST_ROOT/owned build mount"
+MOUNT_DIR="$HIPP_INSTALLER_MOUNT_ROOT/volume"
 EXPECTED_MOUNT_DIR="$MOUNT_DIR"
 SIGNING_SCRATCH="$TEST_ROOT/signing"
 DMG_STAGING="$TEST_ROOT/staging"
@@ -142,8 +145,9 @@ touch "$TEMP_DMG" "$FINAL_DMG_PENDING" "${FINAL_DMG_PENDING}.sha256"
 
 hippocampus_installer_cleanup 73
 
-if ! grep -Fq "detach $EXPECTED_MOUNT_DIR -force -quiet" "$HDIUTIL_LOG"; then
-    echo "FAIL: cleanup did not detach the active mounted image" >&2
+if ! grep -Fxq "detach $EXPECTED_MOUNT_DIR -quiet" "$HDIUTIL_LOG" ||
+    grep -q -- '-force' "$HDIUTIL_LOG"; then
+    echo "FAIL: cleanup must first detach only its own image without force" >&2
     exit 1
 fi
 for path in \
@@ -168,3 +172,47 @@ if [[ ! -f "$EXPECTED_COMPLETED_DMG" || ! -f "${EXPECTED_COMPLETED_DMG}.sha256" 
     exit 1
 fi
 echo "PASS: successful cleanup preserves completed final artifacts"
+
+USER_VOLUME="$TEST_ROOT/Volumes/Hippocampus 1"
+mkdir -p "$USER_VOLUME"
+touch "$USER_VOLUME/user-marker"
+MOUNT_DIR="$USER_VOLUME"
+HIPP_INSTALLER_MOUNT_ROOT=""
+: >"$HDIUTIL_LOG"
+hippocampus_installer_cleanup 1
+[[ ! -s "$HDIUTIL_LOG" && -f "$USER_VOLUME/user-marker" ]] || {
+    echo "FAIL: cleanup touched an unowned mounted image" >&2; exit 1;
+}
+MOUNT_DIR=""
+echo "PASS: unowned mounted images are never detached"
+
+TEMP_DMG="$TEST_ROOT/own image.dmg"
+touch "$TEMP_DMG"
+: >"$HDIUTIL_LOG"
+hippocampus_installer_mount "$TEMP_DMG"
+EXPECTED_MOUNT_DIR="$MOUNT_DIR"
+[[ "$MOUNT_DIR" == "$HIPP_INSTALLER_MOUNT_ROOT/volume" && -d "$MOUNT_DIR" ]] || exit 1
+grep -Fxq "attach -readwrite -noverify -noautoopen -nobrowse -mountpoint $MOUNT_DIR $TEMP_DMG" "$HDIUTIL_LOG" || {
+    echo "FAIL: attach did not use a private headless mountpoint" >&2; exit 1;
+}
+FAKE_DETACH_FAILURE=normal
+export FAKE_DETACH_FAILURE
+hippocampus_installer_cleanup 1
+grep -Fxq "detach $EXPECTED_MOUNT_DIR -force -quiet" "$HDIUTIL_LOG" || exit 1
+[[ -f "$USER_VOLUME/user-marker" && ! -d "$EXPECTED_MOUNT_DIR" ]] || exit 1
+echo "PASS: busy fallback is limited to the private build attachment"
+
+TEMP_DMG="$TEST_ROOT/keep mounted image.dmg"
+touch "$TEMP_DMG"
+hippocampus_installer_mount "$TEMP_DMG"
+EXPECTED_TEMP_DMG="$TEMP_DMG"
+EXPECTED_MOUNT_DIR="$MOUNT_DIR"
+FAKE_DETACH_FAILURE=all
+hippocampus_installer_cleanup 1
+[[ -f "$EXPECTED_TEMP_DMG" && -d "$EXPECTED_MOUNT_DIR" ]] || {
+    echo "FAIL: failed detach must preserve its mounted backing image" >&2; exit 1;
+}
+FAKE_DETACH_FAILURE=""
+hippocampus_installer_cleanup 1
+[[ ! -f "$EXPECTED_TEMP_DMG" && ! -d "$EXPECTED_MOUNT_DIR" ]] || exit 1
+echo "PASS: failed detach preserves the backing image for retry"

@@ -2,13 +2,38 @@
 
 _Updated on 2026-09-09; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `fb73f77`
+Audited code baseline: `c9b323d`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 9 Installer Repair
+
+The [installer checkpoint](audits/2026-09-09-installer-experience.md) replaces
+the nested H artwork with a simple brain mark and repairs the oversized DMG.
+The 640x420 layout is generated and read back headlessly, with clear update
+instructions and accessible legal terms. Builds no longer detach similarly
+named user volumes or silently ship a missing layout. Two hash-pinned Python
+packages are build-only; neither is bundled into the app.
+
+The parent now accepts genuine macOS core/quit Apple events through the existing
+verified supervisor shutdown. Its full optimized suite passes 342 tests, with
+eight new request-gate regressions. Generic unrequested termination remains
+blocked. This source correction does not change the already-running old app.
+
+Local checks pass 11 layout tests, nine runtime/cleanup checks, two installer
+brand checks, 11 Recall design tests, 230 release-contract assertions and 16
+release-safety tests. The layout test includes remounting a synthetic disk image;
+final candidate Finder inspection and notarization are not yet recorded here.
+
+The installed build still reports `fe90a3d`. Its background parent/helper/writer
+remain active even with no Recall window. Finder's refusal and surviving MCP
+readers require the [controlled upgrade](release/OWNER_UPGRADE_2026-09-09.md),
+not a forced overwrite or blanket client shutdown. No private database backup,
+migration, installation, key or permission change has occurred at this checkpoint.
 
 ## September 9 Work Memory
 

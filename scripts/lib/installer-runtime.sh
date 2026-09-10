@@ -5,6 +5,35 @@
 
 HIPP_INSTALLER_ACTIVE_PID=""
 HIPP_INSTALLER_ACTIVE_PGID=""
+HIPP_INSTALLER_MOUNT_ROOT=""
+
+hippocampus_installer_mount() {
+    [[ -z "${MOUNT_DIR:-}" && -z "$HIPP_INSTALLER_MOUNT_ROOT" ]] || return 1
+    HIPP_INSTALLER_MOUNT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-installer-mount.XXXXXX")" || return 1
+    MOUNT_DIR="$HIPP_INSTALLER_MOUNT_ROOT/volume"
+    mkdir "$MOUNT_DIR" || return 1
+    # Never discover or detach similarly named user volumes. Mark the private
+    # mount before attach so even a partially failed attach has scoped cleanup.
+    hdiutil attach -readwrite -noverify -noautoopen -nobrowse \
+        -mountpoint "$MOUNT_DIR" "$1"
+}
+
+hippocampus_installer_unmount() {
+    [[ -n "${MOUNT_DIR:-}" ]] || return 0
+    if [[ -z "$HIPP_INSTALLER_MOUNT_ROOT" || "$MOUNT_DIR" != "$HIPP_INSTALLER_MOUNT_ROOT/volume" ]]; then
+        echo "WARNING: Refusing to detach an unowned installer mount: $MOUNT_DIR" >&2
+        return 1
+    fi
+    if ! hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null &&
+        ! hdiutil detach "$MOUNT_DIR" -force -quiet 2>/dev/null; then
+        echo "WARNING: Could not detach private build mount; preserving $MOUNT_DIR and ${TEMP_DMG:-its backing image}" >&2
+        return 1
+    fi
+    rmdir "$MOUNT_DIR" 2>/dev/null || true
+    rmdir "$HIPP_INSTALLER_MOUNT_ROOT" 2>/dev/null || true
+    MOUNT_DIR=""
+    HIPP_INSTALLER_MOUNT_ROOT=""
+}
 
 hippocampus_process_tree() {
     local parent_pid="$1"
@@ -180,12 +209,8 @@ hippocampus_installer_cleanup() {
     HIPP_INSTALLER_ACTIVE_PID=""
     HIPP_INSTALLER_ACTIVE_PGID=""
 
-    if [[ -n "${MOUNT_DIR:-}" ]] && command -v hdiutil >/dev/null 2>&1; then
-        hdiutil detach "$MOUNT_DIR" -force -quiet 2>/dev/null ||
-            hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null ||
-            true
-    fi
-    MOUNT_DIR=""
+    local mount_released=1
+    hippocampus_installer_unmount || mount_released=0
 
     if [[ -n "${SIGNING_SCRATCH:-}" ]]; then
         rm -rf "$SIGNING_SCRATCH"
@@ -197,10 +222,14 @@ hippocampus_installer_cleanup() {
     fi
     DMG_STAGING=""
 
-    if [[ -n "${TEMP_DMG:-}" ]]; then
+    if [[ "$mount_released" -eq 1 && -n "${TEMP_DMG:-}" ]]; then
         rm -f "$TEMP_DMG"
+        TEMP_DMG=""
     fi
-    TEMP_DMG=""
+    if [[ "$mount_released" -eq 1 && -n "${TEMP_DMG_ROOT:-}" ]]; then
+        rmdir "$TEMP_DMG_ROOT" 2>/dev/null || true
+        TEMP_DMG_ROOT=""
+    fi
 
     if [[ -n "${APP_ZIP:-}" ]]; then
         rm -f "$APP_ZIP"

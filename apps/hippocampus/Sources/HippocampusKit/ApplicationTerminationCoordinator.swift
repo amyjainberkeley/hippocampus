@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: TBD-private
+import CoreServices
 import Foundation
 
 package enum ApplicationTerminationIntent: Equatable {
@@ -17,6 +18,15 @@ package final class ApplicationTerminationRequestGate {
 
     package func request(_ intent: ApplicationTerminationIntent) {
         requestedIntent = intent
+    }
+
+    package func requestQuitIfAppleEvent(_ event: NSAppleEventDescriptor?) {
+        guard requestedIntent == nil,
+              let event,
+              event.eventClass == AEEventClass(kCoreEventClass),
+              event.eventID == AEEventID(kAEQuitApplication)
+        else { return }
+        requestedIntent = .quit
     }
 
     package func takeRequestedIntent() -> ApplicationTerminationIntent? {

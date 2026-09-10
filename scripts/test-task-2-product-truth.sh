@@ -51,7 +51,7 @@ rg -Uq 'Sparkle private/public key pair matches' "$STATUS"
 rg -Fq 'Deleted memories are removed as database rows and local storage is compacted.' \
     "$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift"
 rg -Fq 'python3 "$GENERATE_EULA" --check' "$INSTALLER"
-rg -Fq 'cp "$EULA_RTF" "$DMG_STAGING/License.rtf"' "$INSTALLER"
+rg -Fq 'cp "$EULA_RTF" "$DMG_STAGING/Legal/License.rtf"' "$INSTALLER"
 if rg -q 'hdiutil (unflatten|flatten)|Rez -append' "$INSTALLER"; then
     echo "FAIL: installer still uses the removed legacy DMG SLA resource flow" >&2
     exit 1
