@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-09; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `7960cc1`
+Audited code baseline: `b88d0a0`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -38,6 +38,27 @@ names remove that ambiguity; the next candidate must pass with the old installer
 still mounted. Neither visually rejected candidate is the recommended download.
 
 Hosted `7960cc1` installer smoke passes after the portability correction.
+
+**Private installer `b88d0a0` passes the final Finder check**, opened from the
+Downloads copy while the old user installer and both rejected candidates remained
+mounted. The correct brain icon, background, icon positions, instructions and
+matching build footer are visible. Mounted-app source/payload provenance,
+strict nested signatures and stapled ticket validation pass. Both disposable-home
+startup/onboarding checks pass; Apple accepted and stapled the app and DMG.
+
+Owner copy: `/Users/amy/Downloads/Hippocampus-2026-09-09-b88d0a0.dmg`.
+SHA-256: `b8d8bd71b502cbcf6354de068631c7a65f68f72d944ba09c10c290db5da51ea9`.
+Product-source digest: `868ce24dc4ddae68990aae032e0ceec8b672d83d0adacdee16e34d2e4242416e`.
+App receipt: `52214e26-6a09-4bcc-8716-6100e32739de`.
+DMG receipt: `47a7e617-8c39-4084-9e85-1461b6181302`.
+The two rejected Downloads copies were moved into their corresponding private
+release directories, and only their task-owned review mounts were detached after
+the successful comparison. The user's old mounted installer was left alone.
+
+Hosted `b88d0a0` passes installer smoke, parent, Recall, onboarding, Rust,
+advisory and workflow checks. Capture still fails; release contracts are pending
+at this checkpoint. This is an owner testing candidate, not a public release.
+The installed parent is still `fe90a3d`, and the owner Quit step is outstanding.
 
 Hosted `4a8637b` passes Rust, parent, Recall, onboarding and release contracts.
 Installer smoke failed because its diagnostic test assumed `rg` was installed;
