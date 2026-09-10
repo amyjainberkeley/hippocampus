@@ -44,6 +44,9 @@ def write_layout(mount):
     }
     icons = {
         "viewOptionsVersion": 1, "backgroundType": 2,
+        "backgroundColorRed": 1.0,
+        "backgroundColorGreen": 1.0,
+        "backgroundColorBlue": 1.0,
         "backgroundImageAlias": Alias.for_file(str(background)).to_bytes(),
         "gridOffsetX": 0.0, "gridOffsetY": 0.0, "gridSpacing": 100.0,
         "arrangeBy": "none", "showIconPreview": False, "showItemInfo": False,

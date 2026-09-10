@@ -193,7 +193,7 @@ jobs:
         run: |
           env -i HOME="$HOME" PATH="$PATH" "$INSTALLER_PYTHON" -B scripts/test-installer-layout.py
           env -i HOME="$HOME" PATH="$PATH" bash scripts/test-installer-runtime.sh
-          env -i HOME="$HOME" PATH="$PATH" bash scripts/test-installer-brand-assets.sh
+          env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/bash scripts/test-installer-brand-assets.sh
           env -i HOME="$HOME" PATH="$PATH" scripts/build-installer.sh --verify-assets
 
       - name: Test guarded bundle replacement with synthetic files
