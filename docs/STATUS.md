@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-09; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `c9b323d`
+Audited code baseline: `4a8637b`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -24,10 +24,23 @@ verified supervisor shutdown. Its full optimized suite passes 342 tests, with
 eight new request-gate regressions. Generic unrequested termination remains
 blocked. This source correction does not change the already-running old app.
 
-Local checks pass 11 layout tests, nine runtime/cleanup checks, two installer
+Local checks pass 12 layout tests, nine runtime/cleanup checks, two installer
 brand checks, 11 Recall design tests, 230 release-contract assertions and 16
 release-safety tests. The layout test includes remounting a synthetic disk image;
-final candidate Finder inspection and notarization are not yet recorded here.
+parser checks alone did not establish Finder rendering. Candidate `4a8637b`
+was signed, notarized and stapled, but actual Finder inspection rejected its
+mint fallback background and ignored icon positions. A fresh read-only synthetic
+installer with the three standard RGB fields restored the intended layout in
+Finder. The correction adds a regression; a replacement signed candidate still
+requires its own visual inspection.
+
+Hosted `4a8637b` passes Rust, parent, Recall, onboarding and release contracts.
+Installer smoke failed because its diagnostic test assumed `rg` was installed;
+the test now uses system `grep` and runs with a minimal macOS PATH (two checks
+pass locally). Capture fails six of 817 tests, with 45 assertions in the Vision
+completeness suite. The dense baseline takes 2,739-2,790 ms against the unchanged
+one-second production budget. This remains a release blocker, not a branding
+issue. All five quarantine-recovery tests pass on that runner.
 
 The installed build still reports `fe90a3d`. Its background parent/helper/writer
 remain active even with no Recall window. Finder's refusal and surviving MCP

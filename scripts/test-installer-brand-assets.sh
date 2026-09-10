@@ -46,7 +46,7 @@ printf 'brand drift' >>"$mismatched_fixture/assets/installer/volume-icon.icns"
 if "$mismatched_fixture/scripts/build-installer.sh" --verify-assets \
     >"$mismatched_fixture/stdout" 2>"$mismatched_fixture/stderr"; then
     fail "mismatched installer icon should be rejected"
-elif rg -q 'differs from canonical AppIcon.icns' "$mismatched_fixture/stderr"; then
+elif grep -Fq 'differs from canonical AppIcon.icns' "$mismatched_fixture/stderr"; then
     pass "mismatched installer icon is rejected with a repair instruction"
 else
     fail "mismatched installer icon failed without the expected diagnostic"

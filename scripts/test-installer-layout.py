@@ -71,6 +71,14 @@ class InstallerLayoutTests(unittest.TestCase):
             self.assertTrue(alias.target.posix_path.endswith("/.background/background.png"))
         self.assertEqual((self.root / "Legal/License.rtf").read_bytes(), b"synthetic legal fixture")
 
+    def test_image_view_includes_complete_neutral_rgb_fields(self):
+        self.layout.write_layout(self.root)
+        with DSStore.open(str(self.root / ".DS_Store"), "r") as store:
+            icons = store["."]["icvp"]
+            self.assertEqual(icons["backgroundType"], 2)
+            for channel in ("Red", "Green", "Blue"):
+                self.assertEqual(icons.get("backgroundColor" + channel), 1.0)
+
     def test_repeated_generation_has_identical_layout_bytes(self):
         self.layout.write_layout(self.root)
         first = (self.root / ".DS_Store").read_bytes()

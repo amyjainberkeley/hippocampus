@@ -53,6 +53,28 @@ source handling; a live Finder/Sparkle upgrade is a separate test.
 
 ## Installation Boundary
 
+### Finder Verification Caught A Real Defect
+
+The signed and notarized `4a8637b` installer passed metadata round-trip tests
+but opened with a mint background and alphabetically arranged small icons.
+Opening the actual DMG in a standalone Finder window reproduced the problem;
+it was not merely inherited settings from Go to Folder navigation.
+
+A controlled HFS+ / UDZO fixture changed only `backgroundColorRed`,
+`backgroundColorGreen` and `backgroundColorBlue` to the standard `1.0` values
+used by upstream dmgbuild. Finder then rendered the intended image, 80-point
+icons and saved positions. No bookmark addition or user Finder preference reset
+was needed. The production writer and regression now require those fields.
+The disposable fixture contained no executable and no private memory. Its
+visual pass does not replace inspection of the final signed artifact. The new
+RGB regression failed before the correction; all twelve layout tests pass after
+it, including compression and remount checks.
+
+The hosted brand test also assumed optional ripgrep was available. Its literal
+diagnostic check now uses system `grep`; the same two-case test failed under a
+minimal macOS PATH before the change and passed afterward. CI retains that PATH
+constraint. This was a test portability defect, not an icon validation bypass.
+
 Use the [owner upgrade procedure](../release/OWNER_UPGRADE_2026-09-09.md).
 The old parent only supports verified shutdown through its explicit Quit action.
 Automated inspection of that menu timed out, so the owner was asked to choose
