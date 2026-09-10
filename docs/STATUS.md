@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-09; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `4a8637b`
+Audited code baseline: `7960cc1`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -24,15 +24,20 @@ verified supervisor shutdown. Its full optimized suite passes 342 tests, with
 eight new request-gate regressions. Generic unrequested termination remains
 blocked. This source correction does not change the already-running old app.
 
-Local checks pass 12 layout tests, nine runtime/cleanup checks, two installer
+Local checks pass 13 layout tests, nine runtime/cleanup checks, two installer
 brand checks, 11 Recall design tests, 230 release-contract assertions and 16
 release-safety tests. The layout test includes remounting a synthetic disk image;
 parser checks alone did not establish Finder rendering. Candidate `4a8637b`
 was signed, notarized and stapled, but actual Finder inspection rejected its
 mint fallback background and ignored icon positions. A fresh read-only synthetic
 installer with the three standard RGB fields restored the intended layout in
-Finder. The correction adds a regression; a replacement signed candidate still
-requires its own visual inspection.
+Finder. Signed candidate `7960cc1` then exposed a separate collision: while the
+old same-named volume remained mounted, Finder displayed its old background
+despite the new image containing the correct bitmap. Revision-specific volume
+names remove that ambiguity; the next candidate must pass with the old installer
+still mounted. Neither visually rejected candidate is the recommended download.
+
+Hosted `7960cc1` installer smoke passes after the portability correction.
 
 Hosted `4a8637b` passes Rust, parent, Recall, onboarding and release contracts.
 Installer smoke failed because its diagnostic test assumed `rg` was installed;

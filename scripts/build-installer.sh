@@ -668,7 +668,7 @@ echo "Staged content: ${STAGING_MB} MB → RW image size: ${DMG_RW_SIZE_MB} MB"
 # Create read-write DMG (oversized, will be compacted)
 hdiutil create \
     -srcfolder "$DMG_STAGING" \
-    -volname "Hippocampus" \
+    -volname "Hippocampus ${SOURCE_HEAD:0:12}" \
     -fs HFS+ \
     -fsargs "-c c=64,a=16,e=16" \
     -format UDRW \

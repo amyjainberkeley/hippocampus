@@ -22,6 +22,25 @@ def disk(*args):
     subprocess.run(["/usr/bin/hdiutil", *map(str, args)], check=True, stdout=subprocess.DEVNULL, env=ENV)
 
 
+class InstallerVolumeNameTests(unittest.TestCase):
+    def test_volume_label_distinguishes_source_revisions_without_renaming_public_dmg(self):
+        script = (ROOT / "scripts/build-installer.sh").read_text()
+        start = script.index("hdiutil create \\\n")
+        create = script[start:script.index("# --- Step 5:", start)]
+        for revision in ("abcdef1234567890", "7654321fedcba098"):
+            result = subprocess.run(
+                ["/bin/bash", "-eu", "-c", 'hdiutil() { printf "%s\\n" "$@"; };\n' + create],
+                check=True, capture_output=True, text=True,
+                env={**ENV, "VERSION": "0.1.0", "SOURCE_HEAD": revision,
+                     "DMG_STAGING": "/synthetic/staging", "DMG_RW_SIZE_MB": "32",
+                     "TEMP_DMG": "/synthetic/image.dmg"},
+            )
+            arguments = result.stdout.splitlines()
+            self.assertEqual(arguments[arguments.index("-volname") + 1], f"Hippocampus {revision[:12]}")
+        self.assertIn('DMG_NAME="Hippocampus-${VERSION}"', script)
+        self.assertIn('FINAL_DMG="$DIST_DIR/${DMG_NAME}.dmg"', script)
+
+
 class InstallerLayoutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
