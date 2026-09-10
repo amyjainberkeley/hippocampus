@@ -75,6 +75,19 @@ diagnostic check now uses system `grep`; the same two-case test failed under a
 minimal macOS PATH before the change and passed afterward. CI retains that PATH
 constraint. This was a test portability defect, not an icon validation bypass.
 
+The next signed candidate, `7960cc1`, showed the corrected icon positions but
+resolved the old installer wallpaper while several volumes were all named
+Hippocampus. Direct inspection confirmed the new mounted bitmap and app
+provenance were correct. The controlled fixtures had unique volume names and
+did not exhibit that collision. The disk label now includes the source revision;
+the final verification must keep the user's old installer mounted. No user
+volume or Finder preference is reset to make the test pass.
+
+Read-only CoreFoundation alias resolution, with UI and mounting disabled,
+confirmed that the new stored alias resolved to the old volume's background
+with a stale result. A regression executes the actual Bash creation arguments
+against a stub for two revisions and preserves the public DMG filename contract.
+
 Use the [owner upgrade procedure](../release/OWNER_UPGRADE_2026-09-09.md).
 The old parent only supports verified shutdown through its explicit Quit action.
 Automated inspection of that menu timed out, so the owner was asked to choose
