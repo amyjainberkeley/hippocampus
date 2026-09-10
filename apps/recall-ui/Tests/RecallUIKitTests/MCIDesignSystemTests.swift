@@ -111,7 +111,7 @@ final class MCIDesignSystemTests: XCTestCase {
 
     // MARK: - Icon source
 
-    func testIconSourceIsNeutralAndNonMint() throws {
+    func testBrainIconUsesLightSurfaceWithoutRetiredDecoration() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -124,13 +124,15 @@ final class MCIDesignSystemTests: XCTestCase {
         let template = try String(contentsOf: templateURL, encoding: .utf8)
         for forbidden in [
             "#7AFFC1", "#3AFDC8", "#18212B", "#10151B", "rotate(",
-            "face", "brain", "squiggle",
+            "face", "squiggle", "memory aperture mark",
         ] {
             XCTAssertFalse(icon.localizedCaseInsensitiveContains(forbidden))
             XCTAssertFalse(template.localizedCaseInsensitiveContains(forbidden))
         }
-        XCTAssertTrue(icon.localizedCaseInsensitiveContains("memory aperture mark"))
-        XCTAssertTrue(template.localizedCaseInsensitiveContains("memory aperture mark"))
+        XCTAssertTrue(icon.localizedCaseInsensitiveContains("Hippocampus brain mark"))
+        XCTAssertTrue(template.localizedCaseInsensitiveContains("Hippocampus brain mark"))
+        XCTAssertEqual(icon.components(separatedBy: "<rect ").count - 1, 1)
+        XCTAssertFalse(template.contains("<rect "))
     }
 
     // MARK: - Shadow presets

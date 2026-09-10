@@ -13,6 +13,13 @@ on:
       - 'apps/hippocampus-native-host/**'
       - 'apps/onboarding/**'
       - 'scripts/build-installer.sh'
+      - 'scripts/installer-requirements.txt'
+      - 'scripts/test-installer*'
+      - 'scripts/lib/installer-runtime.sh'
+      - 'scripts/lib/atomic-bundle-swap.swift'
+      - 'scripts/lib/test_atomic_bundle_swap.py'
+      - 'assets/installer/**'
+      - 'assets/branding/**'
       - 'scripts/build-app.sh'
       - 'scripts/swift-package.sh'
       - 'scripts/stage-recall-ffi.sh'
@@ -32,6 +39,13 @@ on:
       - 'apps/hippocampus-native-host/**'
       - 'apps/onboarding/**'
       - 'scripts/build-installer.sh'
+      - 'scripts/installer-requirements.txt'
+      - 'scripts/test-installer*'
+      - 'scripts/lib/installer-runtime.sh'
+      - 'scripts/lib/atomic-bundle-swap.swift'
+      - 'scripts/lib/test_atomic_bundle_swap.py'
+      - 'assets/installer/**'
+      - 'assets/branding/**'
       - 'scripts/build-app.sh'
       - 'scripts/swift-package.sh'
       - 'scripts/stage-recall-ffi.sh'
@@ -162,8 +176,28 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Provision isolated installer build dependencies
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 10), "Installer requires Python >=3.10"'
+          python3 -m venv "$RUNNER_TEMP/installer-python"
+          env -i HOME="$HOME" PATH="$PATH" \
+            "$RUNNER_TEMP/installer-python/bin/python" -m pip --isolated install \
+            --disable-pip-version-check --index-url https://pypi.org/simple \
+            --require-hashes --only-binary=:all: -r scripts/installer-requirements.txt
+          echo "INSTALLER_PYTHON=$RUNNER_TEMP/installer-python/bin/python" >>"$GITHUB_ENV"
+
       - name: Syntax check build-installer.sh
         run: bash -n scripts/build-installer.sh
+
+      - name: Test headless installer layout and mount ownership
+        run: |
+          env -i HOME="$HOME" PATH="$PATH" "$INSTALLER_PYTHON" -B scripts/test-installer-layout.py
+          env -i HOME="$HOME" PATH="$PATH" bash scripts/test-installer-runtime.sh
+          env -i HOME="$HOME" PATH="$PATH" bash scripts/test-installer-brand-assets.sh
+          env -i HOME="$HOME" PATH="$PATH" scripts/build-installer.sh --verify-assets
+
+      - name: Test guarded bundle replacement with synthetic files
+        run: env -i HOME="$RUNNER_TEMP" PATH="$PATH" TMPDIR="$RUNNER_TEMP" python3 scripts/lib/test_atomic_bundle_swap.py
 
       - name: Verify prereq-missing exits non-zero
         run: |

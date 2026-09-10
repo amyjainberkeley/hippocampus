@@ -369,6 +369,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> NSApplication.TerminateReply {
         if terminationCoordinator.hasVerifiedShutdown { return .terminateNow }
         if terminationTask != nil { return .terminateLater }
+        // Apple scopes the current event to its synchronous handler.
+        terminationRequests.requestQuitIfAppleEvent(
+            NSAppleEventManager.shared().currentAppleEvent
+        )
         guard let intent = terminationRequests.takeRequestedIntent() else {
             return .terminateCancel
         }

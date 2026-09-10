@@ -5,6 +5,22 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### Installation And Updates
+
+- Replace the nested H icon with a simple brain mark across the Dock, menu bar,
+  browser extensions and installer. Keep the light native presentation.
+- Use a compact installer with fixed icon positions, clear installation and
+  update instructions, and a separate Legal folder. Generate and verify its
+  layout without driving Finder; do not silently ship a missing layout.
+- Limit installer cleanup to the disk image mounted by that build. Leave other
+  Hippocampus volumes alone, including installers already open on the Mac.
+- Accept genuine macOS Quit requests through the existing verified recorder
+  shutdown path. Keep accidental, unrequested termination blocked.
+- Add a guarded whole-bundle swap utility for controlled owner upgrades. It
+  preserves open read-only executable mappings and refuses a repeated or
+  mismatched revision swap. Backup, writer shutdown and signature verification
+  remain explicit prerequisites; this is not an automatic consumer updater.
+
 ### Work memory
 
 - Separate Today, Search and History. Search starts with an empty search field;

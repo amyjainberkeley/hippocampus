@@ -25,6 +25,8 @@ INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
 CANONICAL_APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
 GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
+DMG_LAYOUT="$INSTALLER_ASSETS/dmg-layout.py"
+INSTALLER_PYTHON="${INSTALLER_PYTHON:-python3}"
 
 if [[ ! -f "$APP_GROUP_CONTRACT" ]]; then
     echo "FATAL: App Group contract helper missing at $APP_GROUP_CONTRACT" >&2
@@ -51,6 +53,7 @@ MOUNT_DIR=""
 SIGNING_SCRATCH=""
 DMG_STAGING=""
 TEMP_DMG=""
+TEMP_DMG_ROOT=""
 APP_ZIP=""
 FINAL_DMG_PENDING=""
 
@@ -89,6 +92,7 @@ Prerequisites:
   - macOS with hdiutil (ships with Xcode CLT)
   - Pre-built binaries (scripts/swift-package.sh + cargo build) unless --skip-build
   - codesign (Xcode CLT)
+  - INSTALLER_PYTHON: isolated Python >=3.10 with hashed scripts/installer-requirements.txt
 
 Output:
   dist/Hippocampus-<version>.dmg
@@ -153,6 +157,9 @@ require_cmd() {
 
 require_cmd hdiutil
 require_cmd codesign
+require_cmd xcrun
+require_cmd SetFile
+"$INSTALLER_PYTHON" "$DMG_LAYOUT" --check-dependencies
 
 # --- Detect Developer ID signing identity ---
 
@@ -609,17 +616,11 @@ ln -s /Applications "$DMG_STAGING/Applications"
 # accidental brand drift visible in source control and CI.
 cp "$CANONICAL_APP_ICON" "$DMG_STAGING/.VolumeIcon.icns"
 
-# Regenerate background image if missing
-BACKGROUND_PNG="$INSTALLER_ASSETS/background.png"
-if [[ ! -f "$BACKGROUND_PNG" ]]; then
-    echo "Generating DMG background image..."
-    GENERATE_BG="$INSTALLER_ASSETS/generate-background.py"
-    if [[ -f "$GENERATE_BG" ]]; then
-        python3 "$GENERATE_BG" "$BACKGROUND_PNG"
-    else
-        echo "WARNING: No background generator found, DMG will use default Finder background"
-    fi
-fi
+# Render from current source into staging, never reuse a stale source bitmap.
+mkdir -p "$DMG_STAGING/.background"
+BACKGROUND_PNG="$DMG_STAGING/.background/background.png"
+python3 "$INSTALLER_ASSETS/generate-background.py" "$BACKGROUND_PNG" \
+    --build-note "Build ${SOURCE_HEAD:0:12} / source ${SOURCE_DIGEST:0:12}"
 
 # The legal artifact was verified against its source before any release work.
 # Modern macOS no longer supports the old unflatten/Rez/flatten mount-time SLA
@@ -629,17 +630,12 @@ if [[ ! -f "$EULA_RTF" ]]; then
     echo "ERROR: Generated license is missing: $EULA_RTF" >&2
     exit 1
 fi
-cp "$EULA_RTF" "$DMG_STAGING/License.rtf"
-
-# Create .background directory (hidden in DMG)
-if [[ -f "$BACKGROUND_PNG" ]]; then
-    mkdir -p "$DMG_STAGING/.background"
-    cp "$BACKGROUND_PNG" "$DMG_STAGING/.background/background.png"
-fi
+mkdir -p "$DMG_STAGING/Legal"
+cp "$EULA_RTF" "$DMG_STAGING/Legal/License.rtf"
 
 echo "  Hippocampus.app -> staging/"
 echo "  Applications symlink -> staging/"
-echo "  License.rtf -> staging/"
+echo "  Legal/License.rtf -> staging/"
 
 # --- Step 4: Create temporary read-write DMG ---
 
@@ -648,7 +644,9 @@ echo "--- Creating DMG ---"
 
 mkdir -p "$DIST_DIR"
 
-TEMP_DMG="$DIST_DIR/${DMG_NAME}-temp.dmg"
+# A failed detach must not let a later build overwrite its still-mounted image.
+TEMP_DMG_ROOT="$(mktemp -d "$DIST_DIR/.hippocampus-rw.XXXXXX")"
+TEMP_DMG="$TEMP_DMG_ROOT/image.dmg"
 FINAL_DMG="$DIST_DIR/${DMG_NAME}.dmg"
 FINAL_DMG_PENDING="$FINAL_DMG"
 
@@ -677,87 +675,16 @@ hdiutil create \
     -size "${DMG_RW_SIZE_MB}m" \
     "$TEMP_DMG"
 
-# --- Step 5: Apply window layout via AppleScript ---
-#
-# The goal here is to persist a `.DS_Store` inside the DMG that pins the
-# Finder window bounds, view style, icon positions, and background image
-# — mirroring what Raycast / Granola / Linear all ship. The pattern that
-# survives the UDRW → UDZO convert step:
-#   1. Mount UDRW.
-#   2. Run AppleScript that sets layout + forces Finder to flush.
-#   3. Stamp .VolumeIcon flag via SetFile.
-#   4. `sync` + a short settle delay so .DS_Store hits the journal.
-#   5. `hdiutil detach -force` so a still-open Finder handle can't block.
-#
-# Empirical evidence (PR #213 §6 P1): prior versions ran osascript then
-# detached immediately, leaving no .DS_Store in the final DMG. Inspecting
-# Raycast's 10244-byte .DS_Store confirmed the layout-persistence target.
+# --- Step 5: Persist deterministic Finder layout without opening Finder ---
 
-APPLESCRIPT="$INSTALLER_ASSETS/dmg-layout.applescript"
-if [[ -f "$APPLESCRIPT" ]] && [[ -f "$BACKGROUND_PNG" ]]; then
-    echo ""
-    echo "--- Applying DMG window layout ---"
-
-    # Detach any stale Hippocampus volume from a prior failed run. Without
-    # this, the new mount lands on /Volumes/Hippocampus 1 and our
-    # AppleScript (which derives the disk name from the mount path's
-    # basename) would still find it, but a leftover /Volumes/Hippocampus
-    # can leave dangling Finder windows or mask its background lookup.
-    for stale in /Volumes/Hippocampus /Volumes/Hippocampus\ *; do
-        if [[ -d "$stale" ]]; then
-            echo "  Detaching stale volume: $stale"
-            hdiutil detach "$stale" -force -quiet 2>/dev/null || true
-        fi
-    done
-
-    MOUNT_DIR=$(hdiutil attach -readwrite -noverify -noautoopen "$TEMP_DMG" | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
-    MOUNT_DIR=$(echo "$MOUNT_DIR" | xargs)
-
-    if [[ -d "$MOUNT_DIR" ]]; then
-        # Give Finder a moment to notice the new volume before scripting it.
-        sleep 2
-
-        DMG_LAYOUT_TIMEOUT_SECONDS="${DMG_LAYOUT_TIMEOUT_SECONDS:-20}"
-        DMG_LAYOUT_KILL_GRACE_SECONDS="${DMG_LAYOUT_KILL_GRACE_SECONDS:-2}"
-        layout_status=0
-        hippocampus_run_with_deadline \
-            "$DMG_LAYOUT_TIMEOUT_SECONDS" \
-            "$DMG_LAYOUT_KILL_GRACE_SECONDS" \
-            osascript "$APPLESCRIPT" "$MOUNT_DIR" || layout_status=$?
-        if [[ "$layout_status" -eq 124 ]]; then
-            echo "WARNING: AppleScript layout exceeded ${DMG_LAYOUT_TIMEOUT_SECONDS}s and was terminated"
-            echo "         Finder layout is cosmetic; continuing with a default-layout DMG."
-        elif [[ "$layout_status" -ne 0 ]]; then
-            echo "WARNING: AppleScript layout failed with status $layout_status"
-            echo "         Finder layout is cosmetic; continuing with a default-layout DMG."
-        fi
-
-        # Set volume icon flag
-        if [[ -f "$MOUNT_DIR/.VolumeIcon.icns" ]]; then
-            SetFile -c icnC "$MOUNT_DIR/.VolumeIcon.icns" 2>/dev/null || true
-            SetFile -a C "$MOUNT_DIR" 2>/dev/null || true
-        fi
-
-        # Make sure .DS_Store has actually been written before we detach.
-        sync
-        sleep 2
-
-        if [[ -f "$MOUNT_DIR/.DS_Store" ]]; then
-            DS_SIZE=$(stat -f%z "$MOUNT_DIR/.DS_Store" 2>/dev/null || echo 0)
-            echo "  .DS_Store persisted: ${DS_SIZE} bytes"
-        else
-            echo "WARNING: .DS_Store missing after AppleScript (DMG will open with default layout)"
-        fi
-
-        # -force so a lingering Finder reference can't keep the volume busy.
-        hdiutil detach "$MOUNT_DIR" -force -quiet || hdiutil detach "$MOUNT_DIR" -quiet
-        MOUNT_DIR=""
-    else
-        echo "WARNING: Could not mount temp DMG for layout (non-fatal)"
-    fi
-else
-    echo "Skipping DMG window layout (no AppleScript or background image)"
-fi
+echo ""
+echo "--- Applying headless DMG window layout ---"
+hippocampus_installer_mount "$TEMP_DMG"
+"$INSTALLER_PYTHON" "$DMG_LAYOUT" "$MOUNT_DIR"
+SetFile -c icnC "$MOUNT_DIR/.VolumeIcon.icns"
+SetFile -a C "$MOUNT_DIR"
+sync
+hippocampus_installer_unmount
 
 # --- Step 6: Convert to compressed read-only DMG ---
 
@@ -772,6 +699,8 @@ hdiutil convert \
 
 rm -f "$TEMP_DMG"
 TEMP_DMG=""
+rmdir "$TEMP_DMG_ROOT"
+TEMP_DMG_ROOT=""
 
 # --- Step 7: Sign the outer disk image ---
 
