@@ -88,6 +88,21 @@ confirmed that the new stored alias resolved to the old volume's background
 with a stale result. A regression executes the actual Bash creation arguments
 against a stub for two revisions and preserves the public DMG filename contract.
 
+### Final Artifact Check
+
+The private `b88d0a0` Downloads copy passed the actual Finder comparison with all
+three older installer volumes still mounted. Its 640x420 window shows the new
+brain icon, correct background, drag instruction, update hint and matching build
+footer. The screenshot is preserved beside the private release as
+`installer-visual-proof.jpeg`; no private memory is in that image.
+
+The completed disk image and app are Developer ID signed, notarized and stapled.
+The mounted app passes full source/payload provenance, strict nested signatures
+and ticket validation. Hashes and Apple receipt IDs are in `docs/STATUS.md`.
+Both disposable-home launch checks passed. GitHub installer smoke is green;
+capture qualification remains red. This proves the installer repair, not the
+owner upgrade, full capture path, OCR quality or second-Mac reliability.
+
 Use the [owner upgrade procedure](../release/OWNER_UPGRADE_2026-09-09.md).
 The old parent only supports verified shutdown through its explicit Quit action.
 Automated inspection of that menu timed out, so the owner was asked to choose
