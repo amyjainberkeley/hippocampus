@@ -397,6 +397,15 @@ cp "$RECALL_UI_BIN" "$MACOS/recall-ui"
 cp "$ONBOARDING_BIN" "$MACOS/onboarding"
 cp "$NATIVE_HOST_BIN" "$MACOS/hippocampus-native-host"
 
+# Embed verified offline OCR before sealing app provenance. Release and debug
+# app bundles must be self-contained; only an unbundled helper uses Vision.
+OCR_SIGNING_IDENTITY="$DEVELOPER_ID"
+if [[ "$SIGNING_MODE" == "ad-hoc" ]]; then OCR_SIGNING_IDENTITY="-"; fi
+python3 "$REPO_ROOT/tools/ocr/bundle.py" \
+    --destination "$CONTENTS/Helpers/HippocampusOCR" \
+    --identity "$OCR_SIGNING_IDENTITY" \
+    || fatal "Offline OCR worker is missing, stale, or could not be signed. See tools/ocr/README.md."
+
 # Copy resources
 cp "$INFO_PLIST" "$CONTENTS/Info.plist"
 hippocampus_write_bundle_app_group_id "$CONTENTS/Info.plist" "$APP_GROUP_ID"

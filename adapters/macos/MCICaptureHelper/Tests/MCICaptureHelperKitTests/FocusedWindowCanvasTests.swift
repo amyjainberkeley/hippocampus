@@ -30,7 +30,7 @@ final class FocusedWindowCanvasTests: XCTestCase {
         XCTAssertTrue(configuration.preservesAspectRatio, file: file, line: line)
         XCTAssertGreaterThan(configuration.width, 0, file: file, line: line)
         XCTAssertGreaterThan(configuration.height, 0, file: file, line: line)
-        XCTAssertLessThanOrEqual(max(configuration.width, configuration.height), 1920,
+        XCTAssertLessThanOrEqual(max(configuration.width, configuration.height), 3840,
                                  file: file, line: line)
     }
 
@@ -42,20 +42,20 @@ final class FocusedWindowCanvasTests: XCTestCase {
         assertCanvas(try configuration(width: 800, height: 600, scale: 2), width: 1600, height: 1200)
     }
 
-    func testOversizedRetinaWindowIsCappedWithItsAspectRatio() throws {
-        assertCanvas(try configuration(width: 1280, height: 800, scale: 2), width: 1920, height: 1200)
+    func testRetinaWindowPreservesNativeTextPixels() throws {
+        assertCanvas(try configuration(width: 1280, height: 800, scale: 2), width: 2560, height: 1600)
     }
 
     func testWideWindowIsNotForcedIntoSixteenByNine() throws {
-        assertCanvas(try configuration(width: 3840, height: 960, scale: 2), width: 1920, height: 480)
+        assertCanvas(try configuration(width: 3840, height: 960, scale: 2), width: 3840, height: 960)
     }
 
     func testTallWindowUsesHeightAsTheLongEdge() throws {
-        assertCanvas(try configuration(width: 720, height: 2880, scale: 2), width: 480, height: 1920)
+        assertCanvas(try configuration(width: 720, height: 2880, scale: 2), width: 960, height: 3840)
     }
 
     func testSquareWindowBoundsBothAllocationDimensions() throws {
-        assertCanvas(try configuration(width: 5000, height: 5000, scale: 2), width: 1920, height: 1920)
+        assertCanvas(try configuration(width: 5000, height: 5000, scale: 2), width: 3840, height: 3840)
     }
 
     func testSmallWindowIsNotUpscaledAtBindTime() throws {
@@ -71,7 +71,7 @@ final class FocusedWindowCanvasTests: XCTestCase {
         let largest = CGFloat.greatestFiniteMagnitude
         assertCanvas(try configuration(width: largest, height: largest / 2,
                                        scale: Float.greatestFiniteMagnitude),
-                     width: 1920, height: 960)
+                     width: 3840, height: 1920)
     }
 
     func testInvalidDimensionsAreRejectedInsteadOfProducingAFallbackCanvas() {

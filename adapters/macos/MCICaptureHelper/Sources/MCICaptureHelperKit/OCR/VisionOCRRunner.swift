@@ -277,7 +277,7 @@ internal struct OCRLineAccumulator {
 /// returns. Later calls fail fast instead of enqueueing another pixel buffer
 /// or consuming another thread. The late result is discarded by
 /// `VisionOCRAttempt`, which resumes its continuation exactly once.
-private final class VisionOCRExecutionLane: @unchecked Sendable {
+final class VisionOCRExecutionLane: @unchecked Sendable {
     typealias SynchronousPerform = @Sendable (OCREngineInput, [String], DispatchTime) -> OCRResult
 
     private let queue: DispatchQueue

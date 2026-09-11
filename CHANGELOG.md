@@ -5,6 +5,14 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### Screenshot text
+
+- Improve small screenshot text with a bundled, offline open-source OCR model
+  and preserve more Retina detail before recognition. No Python setup or API
+  key is needed. Recognition remains fallible; original images remain evidence.
+- Stop OCR subprocesses promptly when capture stops, and verify every bundled
+  model and runtime dependency before assembling the app.
+
 ### Installation And Updates
 
 - Replace the nested H icon with a simple brain mark across the Dock, menu bar,

@@ -26,6 +26,13 @@ SOURCE_PATHS = (
     "scripts",
     "server",
     "tools/capture-overlap-corpus",
+    "tools/ocr/worker.py",
+    "tools/ocr/prepare.py",
+    "tools/ocr/bundle.py",
+    "tools/ocr/requirements.in",
+    "tools/ocr/requirements.txt",
+    "tools/ocr/NOTICE.md",
+
 )
 
 GENERATED_DIRECTORY_NAMES = {

@@ -475,8 +475,18 @@ if captureOptions.captureEnabled {
     // consumer loop is ready to drain submissions on the first
     // `.allow` frame. The emitter is the ONLY call site that emits
     // `OCREvent` in the helper (ADR-0016 §4.2 invariant).
-    let ocrEngine: OCREngine = VisionOCRRunner()
-    let ocrWorker = VisionOCRWorker(engine: ocrEngine)
+    let ocrEngine: OCREngine
+    let ocrTimeoutMs: Int
+    if let executable = PaddleOCRRunner.bundledExecutableURL {
+        ocrEngine = PaddleOCRRunner(executableURL: executable)
+        ocrTimeoutMs = PaddleOCRRunner.timeoutMs
+    } else {
+        // Unbundled development helpers retain the native engine. Release
+        // assembly requires the offline worker and its verified model weights.
+        ocrEngine = VisionOCRRunner()
+        ocrTimeoutMs = VisionOCRWorker.defaultTimeoutMs
+    }
+    let ocrWorker = VisionOCRWorker(engine: ocrEngine, timeoutMs: ocrTimeoutMs)
 
     // Resolve the shared database key once, then keep screenshot policy,
     // encryption, and durable publication behind one serialized coordinator.
