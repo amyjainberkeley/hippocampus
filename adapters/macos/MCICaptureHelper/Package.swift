@@ -63,6 +63,11 @@ let package = Package(
             path: "Tests/MCICaptureHelperKitTests"
         ),
         .executableTarget(
+            name: "OCRQualityProbe",
+            dependencies: ["MCICaptureHelperKit"],
+            path: "Tests/Fixtures/OCRQualityProbe"
+        ),
+        .executableTarget(
             name: "Task4CaptureBehavior",
             dependencies: ["MCICaptureHelperKit"],
             path: "Tests/Fixtures/Task4CaptureBehavior"

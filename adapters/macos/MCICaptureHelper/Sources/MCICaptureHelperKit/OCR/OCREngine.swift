@@ -62,6 +62,10 @@ public protocol OCREngine: Sendable {
     /// bug, not a runtime failure.
     func recognize(input: OCREngineInput, timeoutMs: Int) async -> OCRResult
 
+    /// Permanently stop owned external work during capture shutdown. Engines
+    /// without a cancellable child may keep their existing bounded deadline.
+    func stop()
+
     /// Wait at most `timeoutMs` for lingering work to finish, returning promptly
     /// on cancellation. Must not start recognition or publish a late result.
     /// Availability does not extend a recognition deadline or bypass privacy.
@@ -69,6 +73,8 @@ public protocol OCREngine: Sendable {
 }
 
 public extension OCREngine {
+    func stop() {}
+
     /// Engines without lingering synchronous work are immediately available.
     func waitUntilAvailable(timeoutMs: Int) async -> Bool {
         !Task.isCancelled

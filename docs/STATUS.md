@@ -1,14 +1,30 @@
 # Hippocampus Status
 
-_Updated on 2026-09-09; qualification scope is recorded per checkpoint._
+_Updated on 2026-09-11; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `b88d0a0`
+Audited code baseline: `c911bbd`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 11 OCR Quality
+
+The [OCR checkpoint](audits/2026-09-11-ocr-quality.md) replaces bundled-app
+recognition with offline PaddleOCR and preserves Retina detail up to 3840 pixels.
+A synthetic chat benchmark improves from 19/30 exact lines with the previous
+1920-pixel Vision pipeline to 30/30 with native-resolution PaddleOCR. Small code
+and degraded real images still have errors; there is no universal accuracy claim.
+
+The helper suite passes 824 tests and Python worker/build checks pass 11 tests.
+Independent review's low-confidence privacy and frozen-runtime integrity
+findings are addressed. Shipping requires model/runtime hash verification and
+nested signing. Cold startup has a bounded 30-second deadline; capture shutdown
+kills the child promptly. Signed candidate verification and installation remain
+pending at this source checkpoint. The installed owner app remains `fe90a3d`;
+existing stored OCR has not been rewritten and no private database was modified.
 
 ## September 9 Installer Repair
 

@@ -90,6 +90,7 @@ public actor VisionOCRWorker {
     public func stop() {
         guard !stopped else { return }
         stopped = true
+        engine.stop()
         consumer?.cancel()
         let abandoned = queue
         queue.removeAll()

@@ -99,7 +99,8 @@ public enum SCStreamConfigFactory {
 
         // Bound the multiplier before multiplying or converting to Int, even
         // for enormous finite geometry. Keep native resolution below the cap.
-        let maximumLongEdge: CGFloat = 1920
+        // Preserve Retina glyph detail for OCR; bound worst-case buffer allocation.
+        let maximumLongEdge: CGFloat = 3840
         let scale = min(CGFloat(pointPixelScale), maximumLongEdge / max(width, height))
         let pixelWidth = width * scale
         let pixelHeight = height * scale
