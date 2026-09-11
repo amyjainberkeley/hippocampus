@@ -83,3 +83,18 @@ by these source edits.
 Upstream: [RapidOCR](https://github.com/RapidAI/RapidOCR),
 [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR),
 [ONNX Runtime](https://github.com/microsoft/onnxruntime).
+
+## Packaged runtime follow-up
+
+The first parent signature failed because `Contents/Helpers` made codesign
+interpret a dependency's `.dylibs` directory as a malformed nested bundle.
+The runtime now lives under `Contents/Resources/HippocampusOCR`; every native
+library remains individually signed and the entire tree is sealed by the
+parent signature. The corrected layout passes deep, strict signature validation.
+The seven Swift adapter tests pass after updating executable discovery.
+
+An unnotarized signed standalone runtime took 43.8 seconds on its first launch,
+with sampling showing dyld code-signature validation. Subsequent runs took
+8.7–10.9 seconds during concurrent release compilation. These measurements do
+not qualify first-run performance: the final notarized embedded runtime must
+still be tested against the 30-second capture deadline before installation.

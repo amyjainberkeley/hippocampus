@@ -402,7 +402,7 @@ cp "$NATIVE_HOST_BIN" "$MACOS/hippocampus-native-host"
 OCR_SIGNING_IDENTITY="$DEVELOPER_ID"
 if [[ "$SIGNING_MODE" == "ad-hoc" ]]; then OCR_SIGNING_IDENTITY="-"; fi
 python3 "$REPO_ROOT/tools/ocr/bundle.py" \
-    --destination "$CONTENTS/Helpers/HippocampusOCR" \
+    --destination "$RESOURCES/HippocampusOCR" \
     --identity "$OCR_SIGNING_IDENTITY" \
     || fatal "Offline OCR worker is missing, stale, or could not be signed. See tools/ocr/README.md."
 
