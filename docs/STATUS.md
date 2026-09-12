@@ -2,7 +2,7 @@
 
 _Updated on 2026-09-11; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `c911bbd`
+Audited code baseline: `3e71c11`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -22,9 +22,23 @@ The helper suite passes 824 tests and Python worker/build checks pass 11 tests.
 Independent review's low-confidence privacy and frozen-runtime integrity
 findings are addressed. Shipping requires model/runtime hash verification and
 nested signing. Cold startup has a bounded 30-second deadline; capture shutdown
-kills the child promptly. Signed candidate verification and installation remain
-pending at this source checkpoint. The installed owner app remains `fe90a3d`;
-existing stored OCR has not been rewritten and no private database was modified.
+kills the child promptly. The signed `f4f7bf1` app passes deep/strict signature verification, a disposable-home
+20-second launch check, Apple notarization, stapler validation and Gatekeeper.
+Its embedded worker recovered all 10 synthetic chat lines without timeout:
+20.2 seconds before notarization and 24.9 seconds during final assessment.
+These are measured startup observations, not a speed guarantee.
+
+The assembly fixture suite passes 16 tests after `3e71c11`. The earlier complete
+helper run passed 824 tests, but subsequent real Vision completeness tests fail
+under load locally and on hosted CI. Those pre-existing assertions remain intact;
+this checkpoint does not claim all hosted checks are green. The new PaddleOCR
+adapter tests passed both locally and in that hosted run.
+
+Installation awaits a clean owner quit: the UI-control tool could not access the
+installed app's menu. The installed owner app remains `fe90a3d`; existing stored
+OCR has not been rewritten and no private database was modified. Candidate and
+Apple receipts are in `/Users/amy/hippo-work/releases/2026-09-11-ocr-quality/`.
+Notary submission: `5a8f11f8-eda4-45b9-be86-84cf1a984f18` (Accepted).
 
 ## September 9 Installer Repair
 
@@ -1422,3 +1436,6 @@ protected GitHub environment secret names are:
 
 No secret value belongs in source, Markdown, shell history, app child-process
 arguments, or client MCP configuration.
+
+Final warm embedded-worker run: 10/10 exact chat lines in 4.587 seconds, no timeout.
+The staged copy also passes deep/strict signing and stapler validation.

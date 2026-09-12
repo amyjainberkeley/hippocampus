@@ -9,7 +9,10 @@
 - [x] Add worker protocol regressions: valid cropped BMP, malformed/oversized input, no network, empty image, exact synthetic chat text. Run against missing implementation, then implement worker using explicit local model paths.
 - [x] Add Swift adapter regressions: ROI cropping and image-coordinate mapping, invalid responses, process timeout/reaping. Implement PaddleOCRRunner on the existing bounded execution lane and wire production selection.
 - [x] Preserve Retina capture resolution up to 3840; update sizing regressions and measure synthetic small text at native and old scaled resolution.
-- [ ] Pin build dependencies/model hashes; freeze worker, bundle and sign its runtime during app assembly; verify frozen-worker inference.
-- [ ] Run helper/privacy tests and relevant release tests, inspect diff, record measured results and limitations in STATUS/audit notes, publish verified source checkpoint and candidate build.
+- [x] Pin build dependencies/model hashes; freeze worker, bundle and sign its runtime during app assembly; verify frozen-worker inference.
+- [x] Run helper/privacy tests and relevant release tests, inspect diff, record measured results and limitations in STATUS/audit notes, publish verified source checkpoint and candidate build.
 
 The attached user screenshot stays outside the repository. Synthetic expected strings must be fixed before inference, and measurements must report errors rather than only successful examples. Installation and public release remain separate from source publication and candidate qualification.
+
+Candidate qualification complete; installation awaits a clean owner quit.
+Hosted real Vision failures remain explicitly recorded in STATUS.
