@@ -98,3 +98,29 @@ with sampling showing dyld code-signature validation. Subsequent runs took
 8.7–10.9 seconds during concurrent release compilation. These measurements do
 not qualify first-run performance: the final notarized embedded runtime must
 still be tested against the 30-second capture deadline before installation.
+
+## Signed candidate qualification
+
+Candidate `f4f7bf1` passed deep/strict signatures, the disposable-home launch
+check, notarization (submission `5a8f11f8-eda4-45b9-be86-84cf1a984f18`), stapler
+validation and Gatekeeper. Actual Swift-to-embedded-worker inference recovered
+10/10 synthetic chat lines in 20.2 seconds before notarization and 24.9 seconds
+while final signature assessment ran, both below the unchanged 30-second bound.
+A separate executable-layout probe confirmed `Bundle.main` resolves to the
+outer app for a nested `Contents/MacOS/MCICaptureHelper` executable.
+
+The synthetic app assembly suite now supplies an OCR worker fixture and asserts
+missing workers stop assembly: 16 tests pass. Hosted CI exposed pre-existing
+real Vision completeness assumptions at a one-second deadline; local reruns
+under load also failed. A trial larger functional-test budget did not resolve
+all failures and was reverted. No assertions were removed and the production
+Vision deadline was not changed. New Paddle adapter tests pass in that hosted
+run. Full hosted green status is not claimed.
+
+The notarized app is ready for a controlled installation after clean Quit.
+CUA selection by name, bundle ID and exact installed path could not access the
+menu-bar app. The owner was asked to use Quit Hippocampus. No database backup,
+replacement, migration or historical OCR rewrite has occurred at this point.
+
+Final warm embedded-worker run: 10/10 exact chat lines in 4.587 seconds, no timeout.
+The staged copy also passes deep/strict signing and stapler validation.
