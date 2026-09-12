@@ -24,8 +24,11 @@ use std::time::Instant;
 
 use mci_brief::author::BriefAuthor;
 use mci_brief::author::StubBriefAuthor;
+use mci_brief::extractive_author::ExtractiveBriefAuthor;
 use mci_brief::llama_author::LlamaBriefAuthor;
-use mci_brief::llama_backend::{LlamaBackend, StubLlamaBackend};
+use mci_brief::llama_backend::LlamaBackend;
+#[cfg(not(feature = "coreml"))]
+use mci_brief::llama_backend::StubLlamaBackend;
 
 use mci_brief_eval::{
     bundled_fixtures_dir, list_fixture_names, score_brief, EvalReport, FixtureDay, GoldBrief,
@@ -42,7 +45,8 @@ OPTIONS:
     --all                          Run every fixture under <dir>/days/ (default)
     --fixture NAME                 Run a single fixture by stem (e.g. day_light)
     --fixtures-dir PATH            Override the bundled fixtures directory
-    --backend stub|scripted|coreml Pick the BriefAuthor backend (default: scripted)
+    --backend stub|scripted|extractive|coreml
+                                   Pick the BriefAuthor backend (default: scripted)
     --model-path PATH              .mlmodelc path (required for --backend coreml)
     --tokenizer-dir PATH           Tokenizer dir (required for --backend coreml)
     --require-real-model           Fail when the brief contains the stub signature
@@ -60,6 +64,8 @@ enum BackendKind {
     /// `LlamaBriefAuthor + ScriptedLlamaBackend` — replays
     /// `fixtures/scripted/<name>.md`. CI default.
     Scripted,
+    /// The zero-download author used by the shipping agent.
+    Extractive,
     /// `LlamaBriefAuthor + Qwen3CoreMLBackend` — real model. Only
     /// available when built with `--features coreml`. CEO mode.
     CoreML,
@@ -131,10 +137,11 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                 backend = match v.as_str() {
                     "stub" => BackendKind::Stub,
                     "scripted" => BackendKind::Scripted,
+                    "extractive" => BackendKind::Extractive,
                     "coreml" => BackendKind::CoreML,
                     other => {
                         return ParseOutcome::Error(format!(
-                            "--backend: unknown value {other} (expected stub|scripted|coreml)"
+                            "--backend: unknown value {other} (expected stub|scripted|extractive|coreml)"
                         ));
                     }
                 };
@@ -223,6 +230,7 @@ fn main() -> ExitCode {
     let backend_label = match args.backend {
         BackendKind::Stub => "stub (StubBriefAuthor)",
         BackendKind::Scripted => "scripted (LlamaBriefAuthor + ScriptedLlamaBackend)",
+        BackendKind::Extractive => "extractive (ExtractiveBriefAuthor)",
         BackendKind::CoreML => "coreml (LlamaBriefAuthor + Qwen3CoreMLBackend)",
     };
 
@@ -324,6 +332,7 @@ fn build_author(
             let backend: Arc<dyn LlamaBackend> = Arc::new(ScriptedLlamaBackend::new(response));
             Ok(Box::new(LlamaBriefAuthor::new(backend)))
         }
+        BackendKind::Extractive => Ok(Box::new(ExtractiveBriefAuthor)),
         BackendKind::CoreML => build_coreml_author(args),
     }
 }
@@ -351,4 +360,22 @@ fn build_coreml_author(_args: &Args) -> Result<Box<dyn BriefAuthor>, String> {
     // referenced through the runtime BackendKind selector.
     let _ = StubLlamaBackend::default();
     Err("--backend coreml was not enabled at build time. Rebuild with `--features coreml` (macOS only).".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parser_accepts_the_shipping_extractive_backend() {
+        let argv = vec![
+            "brief-eval".to_owned(),
+            "--backend".to_owned(),
+            "extractive".to_owned(),
+        ];
+        let ParseOutcome::Run(parsed) = parse_args(&argv) else {
+            panic!("extractive backend must parse");
+        };
+        assert!(matches!(parsed.backend, BackendKind::Extractive));
+    }
 }

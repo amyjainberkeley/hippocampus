@@ -34,35 +34,43 @@ compatibility (retained from PR #143). Do not remove until coremltools
 upstream lands the new_ones converter.
 
 Usage:
-    # 1. Convert + INT8 quantize + verify (no fixtures)
+    # 1. Convert the shipping FP16 model + verify (no fixtures)
     python scripts/convert_embedder.py \\
-        --output models/ArcticEmbedS_INT8.mlpackage \\
+        --output models/ArcticEmbedS_FP16.mlpackage \\
         --verify
 
     # 2. Convert + write the Python reference fixture for the Rust
     #    quality regression test (50 sentences × 384-d Float32, saved
     #    next to the Rust crate as a .npy file)
     python scripts/convert_embedder.py \\
-        --output models/ArcticEmbedS_INT8.mlpackage \\
+        --output models/ArcticEmbedS_FP16.mlpackage \\
         --verify --fixtures
 
     # 3. --tokenizer is a no-op when resources/tokenizer.json already
     #    exists (Wave 17 commits it). Pass the flag for explicit
     #    documentation that the conversion expects the bundled file.
     python scripts/convert_embedder.py \\
-        --output models/ArcticEmbedS_INT8.mlpackage \\
+        --output models/ArcticEmbedS_FP16.mlpackage \\
         --tokenizer
 
 Per BUNDLING.md §2 (Wave-17 corrected) and ADR-0011 erratum (2026-05-22).
 """
 
 import argparse
+import json
 import logging
 import shutil
 import sys
+import types
 from pathlib import Path
 
+from coreml_model_contract import validate_arctic_model
+
 MODEL_REPO = "Snowflake/snowflake-arctic-embed-s"
+MODEL_REVISION = "e596f507467533e48a2e17c007f0e1dacc837b33"
+MODEL_ID = "arctic-embed-s-fp16"
+MINIMUM_SYSTEM_VERSION = "14.0"
+ATTENTION_MASK_FLOOR = -10000.0
 OUTPUT_DIM = 384
 MAX_SEQ_LEN = 128
 
@@ -78,9 +86,36 @@ FIXTURES_REFERENCE = FIXTURES_DIR / "arctic_embed_reference.npy"
 log = logging.getLogger("convert_embedder")
 
 
+def write_model_contract(
+    compiled_path: Path,
+    *,
+    precision: str,
+    minimum_system_version: str,
+    specification_version: int,
+) -> None:
+    """Write the app-owned compatibility and provenance record."""
+    contract = {
+        "attentionImplementation": "eager",
+        "attentionMaskFloor": ATTENTION_MASK_FLOOR,
+        "embeddingDimension": OUTPUT_DIM,
+        "maxSequenceLength": MAX_SEQ_LEN,
+        "minimumSystemVersion": minimum_system_version,
+        "modelID": MODEL_ID,
+        "precision": precision,
+        "schemaVersion": 1,
+        "sourceRepo": MODEL_REPO,
+        "sourceRevision": MODEL_REVISION,
+        "specificationVersion": specification_version,
+    }
+    (compiled_path / "hippocampus-model.json").write_text(
+        json.dumps(contract, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 # 50 diverse English sentences for the Rust quality-regression fixture.
 # Covers short / long / code-ish / Unicode-edge / empty-ish corners so a
-# numeric drift between Python FP32 reference and Core ML INT8 output
+# numeric drift between Python FP32 reference and the shipping Core ML output
 # shows up as cosine-sim < 0.999 on at least one row.
 FIXTURE_SENTENCES = [
     "Hello, world.",
@@ -155,7 +190,7 @@ def _ensure_tokenizer_resource(quiet: bool = False) -> None:
         "Fix:\n"
         "  mkdir -p adapters/macos/mci-embed-coreml/resources\n"
         f"  curl -L -o {TOKENIZER_BUNDLED_PATH} \\\n"
-        f"    https://huggingface.co/{MODEL_REPO}/resolve/main/tokenizer.json\n",
+        f"    https://huggingface.co/{MODEL_REPO}/resolve/{MODEL_REVISION}/tokenizer.json\n",
         file=sys.stderr,
     )
     sys.exit(2)
@@ -184,7 +219,7 @@ def _write_fixtures(quiet: bool) -> None:
     FIXTURES_SENTENCES.write_text("\n".join(FIXTURE_SENTENCES) + "\n", encoding="utf-8")
 
     log.info("Loading sentence-transformers %s for FP32 reference...", MODEL_REPO)
-    st_model = SentenceTransformer(MODEL_REPO)
+    st_model = SentenceTransformer(MODEL_REPO, revision=MODEL_REVISION)
     # IMPORTANT: cap max_seq_length at MAX_SEQ_LEN (128) so the Python
     # reference uses the same truncation policy as the Rust runtime.
     # Without this, long inputs (e.g. Lorem Ipsum, full paragraphs)
@@ -216,7 +251,6 @@ def convert(
     quiet: bool = False,
     fixtures: bool = False,
     write_tokenizer: bool = False,
-    quantize_int8: bool = False,
 ) -> None:
     if quiet:
         logging.basicConfig(level=logging.WARNING)
@@ -261,9 +295,38 @@ def convert(
     log.info("Patched torch.Tensor.new_ones for coremltools compatibility.")
 
     log.info("Loading %s...", MODEL_REPO)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO)
-    model = AutoModel.from_pretrained(MODEL_REPO)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO, revision=MODEL_REVISION)
+    # Force unfused eager attention. The default PyTorch SDPA trace lowers to
+    # the iOS 18 / macOS 15 MIL dialect even though this BERT graph can run on
+    # macOS 14 when attention is expanded into primitive operations.
+    model = AutoModel.from_pretrained(
+        MODEL_REPO,
+        revision=MODEL_REVISION,
+        attn_implementation="eager",
+    )
     model.eval()
+
+    def _finite_extended_attention_mask(
+        self, attention_mask, input_shape, device=None, dtype=None
+    ):
+        # Hugging Face normally multiplies the inverted mask by the dtype's
+        # minimum value. Core ML narrows that value to FP16 -inf, making valid
+        # tokens evaluate as 0 * -inf = NaN on its CPU path. A finite floor is
+        # numerically equivalent for softmax and remains valid on every unit.
+        del input_shape, device
+        if attention_mask.dim() == 3:
+            extended = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            extended = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(f"unsupported attention mask rank: {attention_mask.dim()}")
+        target_dtype = dtype if dtype is not None else self.dtype
+        extended = extended.to(dtype=target_dtype)
+        return (1.0 - extended) * ATTENTION_MASK_FLOOR
+
+    model.get_extended_attention_mask = types.MethodType(
+        _finite_extended_attention_mask, model
+    )
 
     sample_text = "Represent this sentence for searching relevant passages: hello world"
     inputs = tokenizer(
@@ -338,10 +401,10 @@ def convert(
         ],
         outputs=[ct.TensorType(name="embedding", dtype=np.float32)],
         compute_units=ct.ComputeUnit.CPU_AND_NE,
-        minimum_deployment_target=ct.target.macOS15,
+        minimum_deployment_target=ct.target.macOS14,
     )
 
-    # Quantization gating per ADR-0011 §1 + 2026-05-22 erratum:
+    # Precision decision per ADR-0011 §1 + 2026-05-22 erratum:
     # - INT8: original plan, smallest size (~33 MB), but quality
     #   regression test (tests/quality.rs) showed 43/50 sentences
     #   drift > 1e-3 vs Python FP32 reference (range 0.99-0.9989
@@ -351,17 +414,9 @@ def convert(
     # - FP32: would be ~133 MB, partial ANE fallback to GPU.
     #   Not shipped.
     #
-    # Default: FP16 (Wave 17 ratified path after INT8 quality test
-    # failed). Override with --int8 only to re-run the regression.
-    if quantize_int8:
-        log.info("Applying INT8 quantization (--int8 flag)...")
-        op_config = ct.optimize.coreml.OpLinearQuantizerConfig(
-            mode="linear_symmetric", dtype="int8"
-        )
-        config = ct.optimize.coreml.OptimizationConfig(global_config=op_config)
-        mlmodel = ct.optimize.coreml.linear_quantize_weights(mlmodel, config=config)
-    else:
-        log.info("Keeping FP16 weights (default per ADR-0011 erratum 2026-05-22).")
+    # The rejected INT8 experiment is intentionally absent from this shipping
+    # converter: every artifact it emits must satisfy the FP16 release identity.
+    log.info("Keeping FP16 weights (required by the shipping model contract).")
 
     log.info("Saving to %s...", output_path)
     mlmodel.save(output_path)
@@ -401,6 +456,16 @@ def convert(
         if compiled_path.exists():
             shutil.rmtree(compiled_path)
         shutil.copytree(compiled_src, compiled_path)
+        write_model_contract(
+            compiled_path,
+            precision="float16",
+            minimum_system_version=MINIMUM_SYSTEM_VERSION,
+            specification_version=mlmodel.get_spec().specificationVersion,
+        )
+        validate_arctic_model(
+            compiled_path,
+            app_minimum_system_version=MINIMUM_SYSTEM_VERSION,
+        )
         del loaded_for_compile
         compiled_size = sum(
             f.stat().st_size for f in compiled_path.rglob("*") if f.is_file()
@@ -466,7 +531,7 @@ def convert(
         assert emb.shape[-1] == OUTPUT_DIM, f"Expected {OUTPUT_DIM}-d, got {emb.shape}"
         mag = float(np.linalg.norm(emb))
         log.info("  Embedding magnitude: %.6f (expected ~1.0 from in-graph L2-norm)", mag)
-        # In-graph L2-normalize: |v| must be 1.0 to within INT8 quant noise.
+        # In-graph L2-normalize: |v| must be 1.0 within conversion noise.
         assert abs(mag - 1.0) < 1e-3, (
             f"L2-norm in graph appears broken: |emb| = {mag} (expected 1.0). "
             "If you see this, the Python -> MIL conversion of F.normalize "
@@ -486,7 +551,7 @@ def main():
     parser.add_argument(
         "--output",
         required=True,
-        help="Output .mlpackage path (e.g. models/ArcticEmbedS_INT8.mlpackage)",
+        help="Output .mlpackage path (e.g. models/ArcticEmbedS_FP16.mlpackage)",
     )
     parser.add_argument(
         "--verify",
@@ -518,15 +583,6 @@ def main():
             "Errors out with a curl command if missing."
         ),
     )
-    parser.add_argument(
-        "--int8",
-        action="store_true",
-        help=(
-            "Apply INT8 weight quantization. Default is FP16 per ADR-0011 "
-            "erratum 2026-05-22 (INT8 cosine-sim regression test failed "
-            "43/50 sentences). Pass --int8 only to re-run the regression."
-        ),
-    )
     args = parser.parse_args()
     convert(
         args.output,
@@ -534,7 +590,6 @@ def main():
         quiet=args.quiet,
         fixtures=args.fixtures,
         write_tokenizer=args.tokenizer,
-        quantize_int8=args.int8,
     )
 
 

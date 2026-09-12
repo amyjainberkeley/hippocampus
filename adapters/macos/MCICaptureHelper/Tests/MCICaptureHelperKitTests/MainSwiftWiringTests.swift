@@ -126,6 +126,41 @@ final class MainSwiftWiringTests: XCTestCase {
         return try String(contentsOf: mainSwiftURL, encoding: .utf8)
     }
 
+    func testProductionFocusBindingIsIndependentOfDisplayOrder() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "Sources/MCICaptureHelperKit/Capture/SCStreamCaptureSession.swift"
+        ), encoding: .utf8)
+        XCTAssertEqual(source.components(separatedBy: "try await SCContentFilterFactory.makeFocusedWindowFilter(").count - 1, 3,
+                       "Startup, focus rebind, and permission recovery must bind the actual window, on any display")
+        XCTAssertFalse(source.contains("try await SCContentFilterFactory.makeMultiWindowFilter("),
+                       "A first-display include list can return blank pixels for a window on another display")
+    }
+
+    func testAllThreeStreamConstructionPathsUseTheirSelectedFiltersCanvas() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "Sources/MCICaptureHelperKit/Capture/SCStreamCaptureSession.swift"
+        ), encoding: .utf8)
+        let call = "let configuration = try SCStreamConfigFactory.makeConfiguration(policy: policy, filter: "
+        XCTAssertEqual(source.components(separatedBy: call).count - 1, 3,
+                       "Startup, focus rebind, and permission recovery must size the selected filter")
+        let paths = [
+            ("public func start() async throws {", "public func stop() async throws {", "filter"),
+            ("public func rebindFocusedWindow(", "internal func claimFirstSampleLogSlot()", "newFilter"),
+            ("private func bringUpSCStreamOnly(lifecycleEpoch:", "internal func activateTCCMonitoring()", "filter"),
+        ]
+        for (start, end, filter) in paths {
+            let startRange = try XCTUnwrap(source.range(of: start))
+            let endRange = try XCTUnwrap(source.range(of: end, range: startRange.upperBound..<source.endIndex))
+            let body = source[startRange.upperBound..<endRange.lowerBound]
+            XCTAssertEqual(body.components(separatedBy: call + filter + ")").count - 1, 1, start)
+            XCTAssertFalse(body.contains("let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)"), start)
+        }
+    }
+
     /// The wiring PR's mandatory grep-in-place assertion — pins the
     /// construction-graph shape at `main.swift`. Redesign memo §2.3 +
     /// §5.1 + [[project-v2p1-unit-tests-passed-but-never-wired]] make
@@ -152,7 +187,7 @@ final class MainSwiftWiringTests: XCTestCase {
         // Positive assertion 2: `main.swift` constructs a `FocusTracker`
         // and passes the store to it. Redesign memo §2.3 wiring shape.
         XCTAssertTrue(
-            src.contains("FocusTracker(store: focusedWindowStore)"),
+            src.contains("FocusTracker(\n        store: focusedWindowStore,"),
             "main.swift MUST construct a FocusTracker(store: focusedWindowStore)."
         )
 
@@ -186,6 +221,42 @@ final class MainSwiftWiringTests: XCTestCase {
             src.contains("desktopIndependentWindow:"),
             "main.swift MUST NOT use SCContentFilter(desktopIndependentWindow:) — FORK 3 = B rejects single-window form."
         )
+    }
+
+    func test_main_swift_has_one_capture_authority_and_publishes_readiness_after_stream_start() throws {
+        let src = try Self.readMainSwift()
+
+        XCTAssertFalse(src.contains("HIPPOCAMPUS_ENABLE_V2P1"))
+        XCTAssertFalse(src.contains("MciV2P1Gate"))
+        guard let startRange = src.range(of: "try await captureSession.start()"),
+              let publishRange = src.range(of: "try readiness?.publish()")
+        else {
+            return XCTFail("main.swift must start capture and publish readiness")
+        }
+        XCTAssertLessThan(startRange.lowerBound, publishRange.lowerBound)
+        XCTAssertTrue(src.contains("exit(78)"), "Keychain startup failure must exit nonzero")
+        XCTAssertTrue(src.contains("exit(79)"), "SCStream startup failure must exit nonzero")
+    }
+
+    func test_main_swift_wires_tcc_monitor_into_capture_session() throws {
+        let src = try Self.readMainSwift()
+
+        XCTAssertTrue(
+            src.contains("let tccStatusMonitor = TCCStatusMonitor()"),
+            "main.swift MUST construct the live TCC monitor."
+        )
+        XCTAssertTrue(
+            src.contains("tccStatusMonitor: tccStatusMonitor"),
+            "main.swift MUST pass the TCC monitor into SCStreamCaptureSession."
+        )
+    }
+
+    func test_main_uses_no_op_encoder_without_an_undrained_hevc_queue() throws {
+        let src = try Self.readMainSwift()
+
+        XCTAssertTrue(src.contains("NoOpFrameEncoder()"))
+        XCTAssertFalse(src.contains("InMemoryEncodedSampleQueue()"))
+        XCTAssertFalse(src.contains("VideoToolboxHEVCEncoder("))
     }
 
     /// Grep-in-place assertion on `SCStreamPipeline.swift` — the
@@ -224,15 +295,21 @@ final class MainSwiftWiringTests: XCTestCase {
         )
     }
 
-    /// Scope-fence guard — the wiring PR MUST NOT flip `killOcrEmit`.
-    /// M4 stays RE-ENGAGED (`killOcrEmit = true`) until Phase 7 PR 14
-    /// lands after Amy's live-Mac smoke passes (redesign memo §4 +
-    /// scaffold PR §5 audit row 7). This mirrors the scaffold PR's
-    /// scope-fence test.
-    func test_wiring_pr_does_not_flip_killOcrEmit() {
-        XCTAssertTrue(
+    /// Standalone Phase 7 PR 14 guard: the production default lifts only
+    /// after the signed live-Mac privacy/resource qualification passes.
+    func test_production_default_has_lifted_killOcrEmit() {
+        XCTAssertFalse(
             CascadeTwiceOCREmitter.killOcrEmit,
-            "V2-P1 third-lift wiring PR MUST NOT flip killOcrEmit — that's Phase 7 PR 14."
+            "The qualified production capture path must emit privacy-cleared OCR."
+        )
+    }
+
+    func test_production_startup_does_not_mutate_the_source_controlled_ocr_gate() throws {
+        let src = try Self.readMainSwift()
+
+        XCTAssertFalse(
+            src.contains("CascadeTwiceOCREmitter.activateM4Lift"),
+            "Production startup must not mutate the source-controlled emergency OCR switch."
         )
     }
 

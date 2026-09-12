@@ -12,17 +12,17 @@ struct HowItWorksSlide: View {
                     pillar(
                         icon: "camera.fill",
                         title: "Capture",
-                        detail: "Screen, focused window, active tab — captured continuously in the background."
+                        detail: "After you opt in, screen, focused-window, and active-tab context are sampled in the background."
                     )
                     pillar(
                         icon: "brain",
                         title: "Remember",
-                        detail: "Frames are OCR'd in memory and discarded. Only text and metadata are stored."
+                        detail: "Raw frames are discarded. OCR text, metadata, and selected encrypted visual keyframes stay local."
                     )
                     pillar(
                         icon: "magnifyingglass",
                         title: "Recall",
-                        detail: "Search what you've seen in natural language. Find anything, instantly."
+                        detail: "Search by words or meaning, then inspect the source event behind each result."
                     )
                 }
 
@@ -30,7 +30,7 @@ struct HowItWorksSlide: View {
                     IconTextRow(icon: "cpu", title: OnboardingCopy.howItWorksFootprint)
                     IconTextRow(
                         icon: "sparkles",
-                        title: "Daily briefs (coming soon — on-device LLM, no cloud)."
+                        title: "Daily briefs are local and source-cited. An optional model can add richer wording."
                     )
                 }
                 .frame(maxWidth: 460)

@@ -12,7 +12,7 @@ struct SlideContainer<Content: View>: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 24)
                 content
-                    .frame(maxWidth: OnboardingTheme.contentMaxWidth)
+                    .frame(maxWidth: OnboardingDesign.Width.hero)
                 Spacer(minLength: 24)
             }
             .frame(maxWidth: .infinity)

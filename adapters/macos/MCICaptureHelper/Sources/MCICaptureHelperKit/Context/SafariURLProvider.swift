@@ -87,35 +87,55 @@ internal protocol AppleScriptRunner: Sendable {
 /// AppleScript continues on the dispatch queue and its result is
 /// dropped — the caller has already returned `.timeout`.
 internal struct RealAppleScriptRunner: AppleScriptRunner {
-    private static let queue = DispatchQueue(
-        label: "mci.context.applescript.runner",
-        qos: .utility
-    )
+    private static let executor = BoundedAppleScriptExecutor { source in
+        if let script = NSAppleScript(source: source) {
+            var errInfo: NSDictionary?
+            let desc = script.executeAndReturnError(&errInfo)
+            if errInfo != nil {
+                return .scriptError
+            } else if let s = desc.stringValue, !s.isEmpty {
+                return .success(s)
+            } else {
+                return .scriptError
+            }
+        } else {
+            return .scriptError
+        }
+    }
 
     init() {}
 
     func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
+        Self.executor.run(source, timeoutMs: timeoutMs)
+    }
+}
+
+internal final class BoundedAppleScriptExecutor: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "mci.context.applescript.runner", qos: .utility)
+    private let slot = DispatchSemaphore(value: 1)
+    private let execute: @Sendable (String) -> AppleScriptOutcome
+
+    init(execute: @escaping @Sendable (String) -> AppleScriptOutcome) {
+        self.execute = execute
+    }
+
+    func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
+        guard timeoutMs > 0 else { return .timeout }
+        let deadline = DispatchTime.now() + .milliseconds(timeoutMs)
+        // A permission dialog can outlive the caller. Keep its OS request as
+        // the only pending job, and include contention in each caller's budget.
+        guard slot.wait(timeout: deadline) == .success else { return .timeout }
         let sem = DispatchSemaphore(value: 0)
         let box = OutcomeBox()
-        Self.queue.async {
-            let outcome: AppleScriptOutcome
-            if let script = NSAppleScript(source: source) {
-                var errInfo: NSDictionary?
-                let desc = script.executeAndReturnError(&errInfo)
-                if errInfo != nil {
-                    outcome = .scriptError
-                } else if let s = desc.stringValue, !s.isEmpty {
-                    outcome = .success(s)
-                } else {
-                    outcome = .scriptError
-                }
-            } else {
-                outcome = .scriptError
+        queue.async { [execute, slot] in
+            defer { slot.signal(); sem.signal() }
+            guard DispatchTime.now() < deadline else {
+                box.set(.timeout)
+                return
             }
-            box.set(outcome)
-            sem.signal()
+            box.set(execute(source))
         }
-        let wait = sem.wait(timeout: .now() + .milliseconds(timeoutMs))
+        let wait = sem.wait(timeout: deadline)
         if wait == .timedOut { return .timeout }
         return box.value ?? .scriptError
     }

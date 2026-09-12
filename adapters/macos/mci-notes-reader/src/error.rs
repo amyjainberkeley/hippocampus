@@ -10,7 +10,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum NotesReaderError {
     /// macOS Automation TCC (per-target: Notes) has not been granted to
-    /// the calling process, so every AppleScript `tell application
+    /// the calling process, so every `AppleScript` `tell application
     /// "Notes"` returns permission-denied. Wire-up-only variant.
     #[error(
         "Notes access denied: macOS Automation permission for Notes not granted. \

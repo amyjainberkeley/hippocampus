@@ -46,7 +46,7 @@ final class FormattersTests: XCTestCase {
         )
         XCTAssertEqual(
             Formatters.contextLine(h),
-            "com.apple.Safari — Apple — Privacy"
+            "Safari — Apple — Privacy"
         )
     }
 
@@ -61,7 +61,7 @@ final class FormattersTests: XCTestCase {
         )
         XCTAssertEqual(
             Formatters.contextLine(h),
-            "com.apple.Safari — https://example.org/"
+            "Safari — https://example.org/"
         )
     }
 
@@ -73,7 +73,7 @@ final class FormattersTests: XCTestCase {
             ocrTextSnippet: "x",
             source: "lexical", score: nil
         )
-        XCTAssertEqual(Formatters.contextLine(h), "com.microsoft.VSCode")
+        XCTAssertEqual(Formatters.contextLine(h), "VS Code")
     }
 
     func testContextLineFallsBackToNoApp() {
@@ -83,12 +83,38 @@ final class FormattersTests: XCTestCase {
             ocrTextSnippet: "x",
             source: "lexical", score: nil
         )
-        XCTAssertEqual(Formatters.contextLine(h), "(no app)")
+        XCTAssertEqual(Formatters.contextLine(h), "Unknown app")
+    }
+
+    func testAppDisplayNameMapsKnownBundleIds() {
+        XCTAssertEqual(Formatters.appDisplayName("com.apple.Safari"), "Safari")
+        XCTAssertEqual(Formatters.appDisplayName("com.microsoft.VSCode"), "VS Code")
+        XCTAssertEqual(Formatters.appDisplayName("com.tinyspeck.slackmacgap"), "Slack")
+        XCTAssertEqual(Formatters.appDisplayName("com.github.GitHubClient"), "GitHub")
+    }
+
+    func testAppDisplayNameMapsSyntheticFixturesLikeTheirRealApps() {
+        XCTAssertEqual(Formatters.appDisplayName("com.mci.demo.seed.github"), "GitHub")
+        XCTAssertEqual(Formatters.appDisplayName("com.mci.demo.seed.vscode"), "VS Code")
+        XCTAssertEqual(Formatters.appDisplayName("com.mci.demo.seed.notion"), "Notion")
+    }
+
+    func testAppDisplayNameHumanizesUnknownBundleId() {
+        XCTAssertEqual(Formatters.appDisplayName("com.example.my-app"), "My App")
+        XCTAssertEqual(Formatters.appDisplayName("com.example.focus_writer"), "Focus Writer")
+    }
+
+    func testAppDisplayNameUsesUnknownAppForMissingValue() {
+        XCTAssertEqual(Formatters.appDisplayName(nil), "Unknown app")
+        XCTAssertEqual(Formatters.appDisplayName(""), "Unknown app")
+        XCTAssertEqual(Formatters.appDisplayName("..."), "Unknown app")
     }
 
     func testSourceTagMapping() {
         XCTAssertEqual(Formatters.sourceTag("lexical"), "lex")
         XCTAssertEqual(Formatters.sourceTag("hybrid"), "hyb")
+        XCTAssertEqual(Formatters.sourceTag("hybrid-related"), "related")
+        XCTAssertEqual(Formatters.sourceTag("hybrid-conflict"), "conflict")
         XCTAssertEqual(Formatters.sourceTag("timeline"), "time")
         XCTAssertEqual(Formatters.sourceTag("custom"), "custom")
     }
@@ -101,6 +127,11 @@ final class FormattersTests: XCTestCase {
 
     func testMatchReasonMapsHybridToPlainEnglish() {
         XCTAssertEqual(Formatters.matchReason("hybrid"), "Matched: meaning")
+    }
+
+    func testMatchReasonKeepsUnverifiedHybridResultsHonest() {
+        XCTAssertEqual(Formatters.matchReason("hybrid-related"), "Related by meaning")
+        XCTAssertEqual(Formatters.matchReason("hybrid-conflict"), "Conflicting evidence")
     }
 
     func testMatchReasonTimelineIsNil() {

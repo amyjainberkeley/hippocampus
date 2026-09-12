@@ -34,13 +34,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_brain::graph::{Entity, EntityIdentity};
 use mci_brain::{
-    BrainStats, BrainStore, EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId,
-    EventRecord, HybridRetriever, IdentityId, RetrievalQuery, Retriever, SqlCipherBrainStore,
-    StoreError,
+    explicit_evidence_signal, has_explicit_current_supersession_context, BrainStats, BrainStore,
+    EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId, EventRecord, EvidenceCandidate,
+    ExplicitEvidenceSignal, HybridRetriever, IdentityId, NothingMatchedReason, RetrievalMatch,
+    RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, StoreError,
 };
 use mci_core::crypto::DbKey;
 
-use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit};
+use crate::context_packet::{
+    compile_context_packet, ContextBudget, ContextEvidence, ContextFocusRetrieval, ContextPacket,
+    ContextSources, EvidencePriority,
+};
+use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 
 // ---------------------------------------------------------------------------
 // DynEmbedder — Sized wrapper for Arc<dyn Embedder>
@@ -295,17 +300,54 @@ impl LiveBrainReader {
     }
 
     /// FTS5-only recall (Embedder=None fallback).
-    fn recall_fts5_only(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError> {
+    fn recall_fts5_only(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<McpRecallOutcome, BrainReaderError> {
+        if limit == 0 {
+            return Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::ZeroLimit,
+            });
+        }
         let sanitized = sanitize_fts5_query(query);
         if sanitized.is_empty() {
-            return Ok(Vec::new());
+            return Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::NoCandidates,
+            });
         }
-        let raw = self
-            .store
-            .fts5_search(&sanitized, limit)
-            .map_err(|e| BrainReaderError::Backend(format!("fts5_search: {e}")))?;
+        let Ok(mut raw) = self.store.fts5_search(&sanitized, limit) else {
+            return Ok(McpRecallOutcome::Degraded {
+                degradation: mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                related_context: Vec::new(),
+            });
+        };
+        if raw.is_empty() {
+            let relaxed = relaxed_fts5_terms(query);
+            if !relaxed.is_empty() {
+                let alternatives = relaxed
+                    .iter()
+                    .map(|text| mci_brain::fts_sanitizer::LexicalAlternative::Keywords(text))
+                    .collect::<Vec<_>>();
+                let Ok(relaxed_hits) = self.store.fts5_search_alternatives(&alternatives, limit)
+                else {
+                    return Ok(McpRecallOutcome::Degraded {
+                        degradation:
+                            mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                        related_context: Vec::new(),
+                    });
+                };
+                raw = relaxed_hits;
+            }
+        }
+        if raw.is_empty() {
+            return Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::NoCandidates,
+            });
+        }
 
         let mut out: Vec<McpHit> = Vec::with_capacity(raw.len());
+        let mut evidence_candidates = Vec::with_capacity(raw.len());
         for (event_id, score) in raw {
             let Some(event) = self
                 .store
@@ -314,6 +356,7 @@ impl LiveBrainReader {
             else {
                 continue;
             };
+            evidence_candidates.push((event_id, event.text.clone()));
             let (entities, linked_event_ids) = self.enrich_hit(event_id);
             out.push(McpHit {
                 record: EventRecord {
@@ -329,7 +372,25 @@ impl LiveBrainReader {
                 linked_event_ids,
             });
         }
-        Ok(out)
+        let evidence = evidence_candidates
+            .iter()
+            .map(|(event_id, text)| EvidenceCandidate {
+                stable_id: event_id.0,
+                text,
+                raw_semantic_cosine: 0.0,
+            })
+            .collect::<Vec<_>>();
+        if explicit_evidence_signal(query, &evidence) == ExplicitEvidenceSignal::RelationUnsupported
+            && !has_explicit_current_supersession_context(query, &evidence)
+        {
+            return Ok(McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::EvidenceFloor,
+            });
+        }
+        Ok(McpRecallOutcome::Degraded {
+            degradation: mci_brain::RetrievalDegradation::EmbeddingsUnavailable,
+            related_context: out,
+        })
     }
 
     /// Hybrid recall via `HybridRetriever` (ADR-0010 min-max CC fusion).
@@ -342,7 +403,7 @@ impl LiveBrainReader {
         query: &str,
         limit: usize,
         embedder: &Arc<dyn Embedder>,
-    ) -> Result<Vec<McpHit>, BrainReaderError> {
+    ) -> Result<McpRecallOutcome, BrainReaderError> {
         #[allow(clippy::cast_possible_truncation)]
         let now_us = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -363,12 +424,36 @@ impl LiveBrainReader {
             app_filter: None,
         };
 
-        let hits = retriever
-            .retrieve(&rq)
+        let outcome = retriever
+            .retrieve_outcome(&rq)
             .map_err(|e| BrainReaderError::Backend(format!("hybrid retrieve: {e}")))?;
+        match outcome {
+            RetrievalOutcome::Matched { matches } => Ok(McpRecallOutcome::Matched {
+                hits: self.materialize_matches(matches)?,
+            }),
+            RetrievalOutcome::Contradicted { matches } => Ok(McpRecallOutcome::Contradicted {
+                evidence: self.materialize_matches(matches)?,
+            }),
+            RetrievalOutcome::NothingMatched { reason } => {
+                Ok(McpRecallOutcome::NothingMatched { reason })
+            }
+            RetrievalOutcome::Degraded {
+                degradation,
+                fallback_matches,
+            } => Ok(McpRecallOutcome::Degraded {
+                degradation,
+                related_context: self.materialize_matches(fallback_matches)?,
+            }),
+        }
+    }
 
-        let mut out: Vec<McpHit> = Vec::with_capacity(hits.len());
-        for hit in hits {
+    fn materialize_matches(
+        &self,
+        matches: Vec<RetrievalMatch>,
+    ) -> Result<Vec<McpHit>, BrainReaderError> {
+        let mut out = Vec::with_capacity(matches.len());
+        for value in matches {
+            let hit = value.hit;
             let Some(event) = self
                 .store
                 .get_event(hit.event_id)
@@ -393,10 +478,30 @@ impl LiveBrainReader {
         }
         Ok(out)
     }
+
+    fn context_evidence_from_hit(
+        &self,
+        hit: &McpHit,
+    ) -> Result<Option<ContextEvidence>, BrainReaderError> {
+        let Some(event) = self
+            .store
+            .get_event(hit.record.event_id)
+            .map_err(|error| BrainReaderError::Backend(format!("get context event: {error}")))?
+        else {
+            return Ok(None);
+        };
+        let mut evidence =
+            ContextEvidence::from_event(&event, EvidencePriority::Focused, Some(hit.score));
+        evidence.source_kind = self.event_source(event.id).as_str().into();
+        Ok(Some(evidence))
+    }
 }
 
 impl BrainReader for LiveBrainReader {
-    fn recall(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError> {
+    fn event_source(&self, id: EventId) -> mci_brain::EventSource {
+        self.store.event_source(id).unwrap_or_default()
+    }
+    fn recall(&self, query: &str, limit: usize) -> Result<McpRecallOutcome, BrainReaderError> {
         if query.trim().is_empty() {
             return Err(BrainReaderError::InvalidInput("empty query".into()));
         }
@@ -437,6 +542,110 @@ impl BrainReader for LiveBrainReader {
             .events_by_app_bundle_id(app_bundle_id, limit)
             .map_err(|e| BrainReaderError::Backend(format!("events_by_app: {e}")))
     }
+
+    fn context(
+        &self,
+        focus: Option<&str>,
+        budget: ContextBudget,
+    ) -> Result<ContextPacket, BrainReaderError> {
+        let now_us = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros(),
+        )
+        .unwrap_or(u64::MAX);
+        let claim_limit = budget.max_evidence.saturating_mul(4).clamp(1, 128);
+        let claims = self
+            .store
+            .memory_claims_as_of(now_us, now_us, claim_limit)
+            .map_err(|error| BrainReaderError::Backend(format!("read current claims: {error}")))?;
+        let mut evidence = Vec::new();
+        let mut focus_retrieval = None;
+
+        for claim in &claims {
+            for reference in &claim.evidence {
+                if let Some(event) = self.store.get_event(reference.event_id).map_err(|error| {
+                    BrainReaderError::Backend(format!("get claim evidence: {error}"))
+                })? {
+                    let mut candidate =
+                        ContextEvidence::from_event(&event, EvidencePriority::Claim, None);
+                    candidate.source_kind = self.event_source(event.id).as_str().into();
+                    evidence.push(candidate);
+                }
+            }
+        }
+
+        let candidate_limit = budget.max_evidence.saturating_mul(2).clamp(1, 100);
+        if let Some(focus) = focus.map(str::trim).filter(|value| !value.is_empty()) {
+            let recall_candidates = match self.recall(focus, candidate_limit)? {
+                McpRecallOutcome::Matched { hits } => {
+                    focus_retrieval = Some(ContextFocusRetrieval::matched());
+                    hits
+                }
+                McpRecallOutcome::Contradicted { evidence } => {
+                    focus_retrieval = Some(ContextFocusRetrieval::contradicted());
+                    evidence
+                }
+                McpRecallOutcome::Degraded {
+                    degradation,
+                    related_context,
+                } => {
+                    focus_retrieval = Some(ContextFocusRetrieval::degraded(degradation));
+                    related_context
+                }
+                McpRecallOutcome::NothingMatched { reason } => {
+                    focus_retrieval = Some(ContextFocusRetrieval::nothing_matched(reason));
+                    Vec::new()
+                }
+            };
+            for hit in &recall_candidates {
+                if let Some(candidate) = self.context_evidence_from_hit(hit)? {
+                    evidence.push(candidate);
+                }
+            }
+        } else {
+            let recent_limit = candidate_limit.min(64);
+            let recent = self.store.recent_events(recent_limit).map_err(|error| {
+                BrainReaderError::Backend(format!("read recent events: {error}"))
+            })?;
+            evidence.extend(recent.iter().map(|event| {
+                let mut candidate =
+                    ContextEvidence::from_event(event, EvidencePriority::Recent, None);
+                candidate.source_kind = self.event_source(event.id).as_str().into();
+                candidate
+            }));
+        }
+
+        let mut packet =
+            compile_context_packet(focus, now_us, budget, ContextSources { claims, evidence });
+        packet.focus_retrieval = focus_retrieval;
+        Ok(packet)
+    }
+}
+
+fn relaxed_fts5_terms(query: &str) -> Vec<String> {
+    const STOPWORDS: &[&str] = &[
+        "a", "about", "an", "and", "are", "as", "at", "be", "before", "did", "do", "does", "for",
+        "from", "how", "i", "in", "is", "it", "made", "of", "on", "only", "or", "should", "source",
+        "that", "the", "this", "to", "was", "we", "what", "when", "where", "which", "who", "why",
+        "with",
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    query
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .filter_map(|token| {
+            let normalized = token.to_lowercase();
+            if normalized.len() < 2
+                || STOPWORDS.contains(&normalized.as_str())
+                || !seen.insert(normalized)
+            {
+                return None;
+            }
+            Some(token.to_owned())
+        })
+        .take(12)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -502,6 +711,85 @@ mod tests {
                 || err_msg.contains("read-only"),
             "error should indicate read-only rejection, got: {err_msg}"
         );
+    }
+
+    #[test]
+    fn lexical_fallback_relaxes_a_natural_language_query_into_related_context() {
+        let (_dir, path, key) = make_test_db();
+        let writer = SqlCipherBrainStore::new(&path, &key).unwrap();
+        let event_id = writer
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 1_000_000,
+                app_bundle_id: Some("com.apple.Terminal".into()),
+                window_title: Some("Agent memory decision".into()),
+                url: Some("file:///docs/agent-context.md".into()),
+                text: "The mci_context handoff compiles a bounded cited packet for the current focus instead of dumping history.".into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: None,
+                tab_id: None,
+                embedding: None,
+            })
+            .unwrap();
+        drop(writer);
+        let reader = LiveBrainReader::open_with_embedder(&path, &key, None).unwrap();
+
+        let McpRecallOutcome::Degraded {
+            degradation,
+            related_context,
+        } = reader
+            .recall(
+                "How do we keep an AI handoff from swallowing the whole activity history?",
+                5,
+            )
+            .unwrap()
+        else {
+            panic!("lexical fallback must remain explicitly degraded");
+        };
+
+        assert_eq!(
+            degradation,
+            mci_brain::RetrievalDegradation::EmbeddingsUnavailable
+        );
+        assert!(related_context
+            .iter()
+            .any(|hit| hit.record.event_id == event_id));
+    }
+
+    #[test]
+    fn lexical_fallback_abstains_when_an_explicit_answer_relation_is_missing() {
+        let (_dir, path, key) = make_test_db();
+        let writer = SqlCipherBrainStore::new(&path, &key).unwrap();
+        writer
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 1_000_000,
+                app_bundle_id: Some("com.github.GitHubClient".into()),
+                window_title: Some("PR 531".into()),
+                url: Some("github://pull/531".into()),
+                text: "PR 531 describes bounded context packets but does not name an approver."
+                    .into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: None,
+                tab_id: None,
+                embedding: None,
+            })
+            .unwrap();
+        drop(writer);
+        let reader = LiveBrainReader::open_with_embedder(&path, &key, None).unwrap();
+
+        assert!(matches!(
+            reader.recall("Who approved PR 531?", 5).unwrap(),
+            McpRecallOutcome::NothingMatched {
+                reason: NothingMatchedReason::EvidenceFloor
+            }
+        ));
     }
 
     #[test]
@@ -574,5 +862,13 @@ mod tests {
     #[test]
     fn sanitize_asterisk_quoted() {
         assert_eq!(sanitize_fts5_query("test*"), "\"test*\"");
+    }
+
+    #[test]
+    fn relaxed_query_splits_hyphenated_prose_and_drops_source_boilerplate() {
+        assert_eq!(
+            relaxed_fts5_terms("Which source describes the local-only storage promise?"),
+            ["describes", "local", "storage", "promise"]
+        );
     }
 }

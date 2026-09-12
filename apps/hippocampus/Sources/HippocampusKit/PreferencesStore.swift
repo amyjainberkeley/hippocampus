@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: TBD-private
 //
-// PreferencesStore — the UserDefaults-backed model behind the
+// PreferencesStore — the persisted model behind the
 // comprehensive Preferences window (Mac-native surface, ⌘,).
 //
 // Split from the SwiftUI window (which lives in the `Hippocampus`
@@ -10,16 +10,12 @@
 // properties here.
 //
 // Design principles:
-//   - **Non-sensitive only**: preferences are cosmetic + workflow
-//     knobs (launch-at-login, menu-bar-visibility, default recall
-//     tab, retention window, Ollama endpoint). They live in
-//     `UserDefaults.standard`, not in the SQLCipher brain. Anything
-//     that touches capture policy or crypto stays where it is
-//     (denylist / allowlist / key store).
-//   - **Default = current behavior**: every preference defaults to
-//     the value the app already ships with today. Flipping a
-//     preference is a deliberate opt-in / opt-out; a first-run user
-//     who never opens Preferences sees zero behavior change.
+//   - **One retention authority**: cosmetic and workflow preferences
+//     live in UserDefaults, while retention is written atomically to
+//     the same `retention.json` the agent reads.
+//   - **Preserve choices**: fresh retention defaults to 90 days;
+//     explicit existing selections are preserved, with review before
+//     finite legacy selections authorize deletion.
 //   - **Testable in isolation**: the store accepts an injected
 //     `UserDefaults` so `PreferencesStoreTests` can use an ephemeral
 //     suite and never touch the process-wide standard defaults.
@@ -27,8 +23,8 @@
 //     so a future migration can grep the namespace and future
 //     `UserDefaults` cleanups are safe.
 //
-// This file is deliberately small (≤ ~250 LOC) and dependency-free
-// beyond Foundation + Combine — no AppKit, no SwiftUI — so the
+// This file is dependency-free beyond Foundation + Combine — no
+// AppKit, no SwiftUI — so the
 // HippocampusKitTests target can `@testable import HippocampusKit`
 // and exercise every path headlessly.
 
@@ -56,19 +52,22 @@ public enum PreferredRecallTab: String, CaseIterable, Sendable, Codable {
     }
 }
 
-/// How long the brain keeps captured events before the retention
-/// sweeper prunes them. `.forever` is the current default — the sweeper
-/// is a no-op unless the user explicitly narrows the window.
+/// Retention uses the agent's canonical policy names. New installations
+/// default to 90 days; existing explicit choices remain selected.
 public enum RetentionPolicy: String, CaseIterable, Sendable, Codable {
-    case days30
-    case days90
     case forever
+    case ninetyDays
+    case thirtyDays
+    case sevenDays
+    case custom
 
     public var displayLabel: String {
         switch self {
-        case .days30: return "30 days"
-        case .days90: return "90 days"
         case .forever: return "Forever"
+        case .ninetyDays: return "90 days"
+        case .thirtyDays: return "30 days"
+        case .sevenDays: return "7 days"
+        case .custom: return "Custom"
         }
     }
 
@@ -77,17 +76,20 @@ public enum RetentionPolicy: String, CaseIterable, Sendable, Codable {
     /// re-parse the enum.
     public var maxAgeSeconds: TimeInterval? {
         switch self {
-        case .days30: return 30 * 24 * 3600
-        case .days90: return 90 * 24 * 3600
         case .forever: return nil
+        case .ninetyDays: return 90 * 24 * 3600
+        case .thirtyDays: return 30 * 24 * 3600
+        case .sevenDays: return 7 * 24 * 3600
+        case .custom: return nil
         }
     }
 }
 
 // MARK: - Store
 
-/// UserDefaults-backed preferences store. Every property is
-/// `@Published` so SwiftUI Toggles / Pickers bind directly.
+/// Preferences store. Cosmetic properties bind directly through
+/// UserDefaults; retention changes use `setRetentionPolicy` so the
+/// worker-compatible file is committed before the UI changes.
 ///
 /// A single instance is created by the app at launch and passed into
 /// the Preferences window; tests construct their own with an ephemeral
@@ -113,40 +115,15 @@ public final class PreferencesStore: ObservableObject {
         didSet { defaults.set(defaultRecallTab.rawValue, forKey: Keys.defaultRecallTab) }
     }
 
-    // MARK: Capture
-
-    /// Deep-hook plugin toggles. Each plugin is a named boolean; the
-    /// values default to whatever the plugin ships with (`Messages`
-    /// and `Mail` are on by default; future `Calendar`, `Notes`,
-    /// `Reminders` default off until they ship).
-    ///
-    /// Stored as a small `[String: Bool]` dict under a single key so
-    /// adding a new plugin doesn't require a new key + migration.
-    @Published public var deepHookPlugins: [String: Bool] {
-        didSet {
-            if let data = try? JSONEncoder().encode(deepHookPlugins) {
-                defaults.set(data, forKey: Keys.deepHookPlugins)
-            }
-        }
-    }
-
     // MARK: Privacy
 
-    /// Retention window applied by the brain-pruner. Defaults to
-    /// `.forever` to match current behavior — the pruner is idle
-    /// unless the user opts in.
-    @Published public var retentionPolicy: RetentionPolicy {
-        didSet { defaults.set(retentionPolicy.rawValue, forKey: Keys.retentionPolicy) }
-    }
+    /// Finite legacy selections require review before the agent deletes data.
+    @Published public private(set) var retentionPolicy: RetentionPolicy
+    @Published public private(set) var retentionCustomDays: Int?
+    @Published public private(set) var retentionWriteError: String?
+    @Published public private(set) var retentionNeedsReview: Bool = false
 
     // MARK: Advanced
-
-    /// Optional Ollama endpoint for BYOK local-LLM users who want to
-    /// route brief-authoring through their own local model instead of
-    /// bundled Qwen3. Empty string = disabled (default).
-    @Published public var ollamaEndpoint: String {
-        didSet { defaults.set(ollamaEndpoint, forKey: Keys.ollamaEndpoint) }
-    }
 
     /// Custom SQLCipher database path. Empty string = default
     /// (`~/Library/Application Support/Hippocampus/mci.sqlite`).
@@ -159,9 +136,43 @@ public final class PreferencesStore: ObservableObject {
     // MARK: - Storage
 
     private let defaults: UserDefaults
+    private let retentionURL: URL
+    private let now: () -> Date
 
-    public init(defaults: UserDefaults = .standard) {
+    private struct PersistedRetention: Codable {
+        var schema_version: Int?
+        let mode: String
+        let days: Int?
+        let updated_at: String?
+
+        enum CodingKeys: String, CodingKey {
+            case schema_version
+            case mode
+            case days
+            case updated_at
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(schema_version, forKey: .schema_version)
+            try container.encode(mode, forKey: .mode)
+            if let days {
+                try container.encode(days, forKey: .days)
+            } else {
+                try container.encodeNil(forKey: .days)
+            }
+            try container.encode(updated_at, forKey: .updated_at)
+        }
+    }
+
+    public init(
+        defaults: UserDefaults = .standard,
+        retentionURL: URL = PreferencesStore.defaultRetentionURL,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.defaults = defaults
+        self.retentionURL = retentionURL
+        self.now = now
 
         // Read + coerce every property from the injected UserDefaults.
         // First-launch users see the default value; existing users see
@@ -173,40 +184,155 @@ public final class PreferencesStore: ObservableObject {
         let rawTab = defaults.string(forKey: Keys.defaultRecallTab) ?? PreferredRecallTab.search.rawValue
         self.defaultRecallTab = PreferredRecallTab(rawValue: rawTab) ?? .search
 
-        if let data = defaults.data(forKey: Keys.deepHookPlugins),
-           let decoded = try? JSONDecoder().decode([String: Bool].self, from: data) {
-            self.deepHookPlugins = decoded
-        } else {
-            self.deepHookPlugins = PreferencesStore.defaultDeepHookPlugins
-        }
+        self.retentionPolicy = .forever
+        self.retentionCustomDays = nil
+        self.retentionWriteError = nil
 
-        let rawRetention = defaults.string(forKey: Keys.retentionPolicy) ?? RetentionPolicy.forever.rawValue
-        self.retentionPolicy = RetentionPolicy(rawValue: rawRetention) ?? .forever
-
-        self.ollamaEndpoint = defaults.string(forKey: Keys.ollamaEndpoint) ?? ""
         self.customDatabasePath = defaults.string(forKey: Keys.customDatabasePath) ?? ""
+
+        if FileManager.default.fileExists(atPath: retentionURL.path) {
+            do {
+                let loaded = try Self.loadRetention(from: retentionURL)
+                self.retentionPolicy = loaded.policy
+                self.retentionCustomDays = loaded.days
+                self.retentionNeedsReview = loaded.needsReview
+            } catch {
+                self.retentionWriteError = "Retention policy could not be read; keeping events forever."
+            }
+        } else if let migrated = Self.legacyRetention(
+            defaults.string(forKey: Keys.retentionPolicy)
+        ) {
+            self.retentionPolicy = migrated.policy
+            self.retentionCustomDays = migrated.days
+            self.retentionNeedsReview = migrated.policy != .forever
+            // Migrate the selection without silently authorizing finite deletion.
+            do {
+                try writeRetention(policy: migrated.policy, days: migrated.days, schemaVersion: nil)
+                defaults.removeObject(forKey: Keys.retentionPolicy)
+            } catch {
+                self.retentionWriteError = "Retention policy was not migrated: \(error.localizedDescription)"
+            }
+        } else {
+            self.retentionPolicy = .ninetyDays
+        }
     }
 
-    // MARK: - Known plugin catalog
+    public static var defaultRetentionURL: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MCI")
+            .appendingPathComponent("retention.json")
+    }
 
-    /// The set of deep-hook plugins the app knows about. Shipping
-    /// plugins default to enabled; future ones default off so a new
-    /// row appearing in the list is a deliberate opt-in. Extending
-    /// this dict is a single-line change; no migration required
-    /// because the store rehydrates any missing key on next read.
-    public static let defaultDeepHookPlugins: [String: Bool] = [
-        "Messages": true,
-        "Mail": true,
-        "Calendar": false,
-        "Notes": false,
-        "Reminders": false,
-    ]
+    /// Atomically commits the worker's canonical retention payload.
+    /// Published state changes only after the durable replacement succeeds.
+    @discardableResult
+    public func setRetentionPolicy(
+        _ policy: RetentionPolicy,
+        customDays: Int? = nil
+    ) -> Bool {
+        let normalizedDays: Int?
+        switch policy {
+        case .custom:
+            guard let customDays, (1...365).contains(customDays) else {
+                retentionWriteError = "Custom retention must be between 1 and 365 days."
+                return false
+            }
+            normalizedDays = customDays
+        case .forever, .ninetyDays, .thirtyDays, .sevenDays:
+            normalizedDays = nil
+        }
 
-    /// Stable display ordering for UI. Alphabetical + shipping-first
-    /// keeps the list scannable regardless of dict iteration order.
-    public static let deepHookPluginOrder: [String] = [
-        "Messages", "Mail", "Calendar", "Notes", "Reminders",
-    ]
+        do {
+            try writeRetention(policy: policy, days: normalizedDays)
+            retentionPolicy = policy
+            retentionCustomDays = normalizedDays
+            retentionWriteError = nil
+            retentionNeedsReview = false
+            defaults.removeObject(forKey: Keys.retentionPolicy)
+            return true
+        } catch {
+            retentionWriteError = "Retention policy was not saved: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private static func loadRetention(
+        from url: URL
+    ) throws -> (policy: RetentionPolicy, days: Int?, needsReview: Bool) {
+        let persisted = try JSONDecoder().decode(
+            PersistedRetention.self,
+            from: Data(contentsOf: url)
+        )
+        guard let policy = RetentionPolicy(rawValue: persisted.mode) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        if policy == .custom {
+            guard let days = persisted.days, (1...365).contains(days) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            return (policy, days, persisted.schema_version != 2)
+        }
+        return (policy, nil, policy != .forever && persisted.schema_version != 2)
+    }
+
+    private static func legacyRetention(
+        _ rawValue: String?
+    ) -> (policy: RetentionPolicy, days: Int?)? {
+        switch rawValue {
+        case "days30": return (.thirtyDays, nil)
+        case "days90": return (.custom, 90)
+        case "forever": return (.forever, nil)
+        case "sevenDays": return (.sevenDays, nil)
+        case "thirtyDays": return (.thirtyDays, nil)
+        case "ninetyDays": return (.ninetyDays, nil)
+        default: return nil
+        }
+    }
+
+    private func writeRetention(policy: RetentionPolicy, days: Int?, schemaVersion: Int? = 2) throws {
+        let directory = retentionURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let payload = PersistedRetention(
+            schema_version: schemaVersion,
+            mode: policy.rawValue,
+            days: days,
+            updated_at: formatter.string(from: now())
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(payload)
+        let temporaryURL = directory.appendingPathComponent(
+            ".retention.json.\(UUID().uuidString).tmp"
+        )
+
+        do {
+            try data.write(to: temporaryURL, options: .withoutOverwriting)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: temporaryURL.path
+            )
+            if FileManager.default.fileExists(atPath: retentionURL.path) {
+                _ = try FileManager.default.replaceItemAt(
+                    retentionURL,
+                    withItemAt: temporaryURL,
+                    backupItemName: nil,
+                    options: .usingNewMetadataOnly
+                )
+            } else {
+                try FileManager.default.moveItem(at: temporaryURL, to: retentionURL)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
 
     // MARK: - Keys
 
@@ -216,9 +342,7 @@ public final class PreferencesStore: ObservableObject {
     enum Keys {
         static let showMenuBarIcon = "ai.hippocampus.prefs.showMenuBarIcon"
         static let defaultRecallTab = "ai.hippocampus.prefs.defaultRecallTab"
-        static let deepHookPlugins = "ai.hippocampus.prefs.deepHookPlugins"
         static let retentionPolicy = "ai.hippocampus.prefs.retentionPolicy"
-        static let ollamaEndpoint = "ai.hippocampus.prefs.ollamaEndpoint"
         static let customDatabasePath = "ai.hippocampus.prefs.customDatabasePath"
     }
 }

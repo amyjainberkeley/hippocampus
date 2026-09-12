@@ -5,26 +5,21 @@ import HippocampusKit
 
 /// SwiftUI panel for the read-only "Inspect Key Wrap" surface.
 ///
-/// Renders a `KeyWrapAuditReport` and lets the user (a) re-verify the
-/// wrap by re-running the inspector and (b) jump to Finder or
-/// Keychain Access for an OS-level second opinion. Content-free —
+/// Renders a `KeyWrapAuditReport` and lets the user (a) check
+/// readability again and (b) jump to Keychain Access
+/// for an OS-level second opinion. Content-free —
 /// the panel never displays key bytes, store contents, or any brain
 /// data. (DOGFOOD_V1 #28.)
 struct KeyWrapAuditView: View {
-    @State private var report: KeyWrapAuditReport
-    @State private var lastVerified: Date
+    @StateObject private var model: KeyWrapAuditViewModel
 
-    let reverify: () -> KeyWrapAuditReport
     let onClose: () -> Void
 
     init(
-        initialReport: KeyWrapAuditReport,
-        reverify: @escaping () -> KeyWrapAuditReport,
+        store: KeychainKeyStore,
         onClose: @escaping () -> Void
     ) {
-        self._report = State(initialValue: initialReport)
-        self._lastVerified = State(initialValue: initialReport.generatedAt)
-        self.reverify = reverify
+        self._model = StateObject(wrappedValue: KeyWrapAuditViewModel(store: store))
         self.onClose = onClose
     }
 
@@ -33,14 +28,19 @@ struct KeyWrapAuditView: View {
             header
             Divider()
 
-            if report.severity == .devOnly {
-                devOnlyBanner
-            }
-
-            metadataGrid
-
-            if !report.notes.isEmpty {
-                notesSection
+            switch model.state {
+            case .loading:
+                loadingState
+            case .failed(let message):
+                errorState(message)
+            case .loaded(let report):
+                if report.severity == .devOnly {
+                    devOnlyBanner
+                }
+                metadataGrid(report)
+                if !report.notes.isEmpty {
+                    notesSection(report)
+                }
             }
 
             Divider()
@@ -48,6 +48,7 @@ struct KeyWrapAuditView: View {
         }
         .padding(20)
         .frame(width: 520)
+        .task { await model.refresh() }
     }
 
     // MARK: - Sections
@@ -64,7 +65,7 @@ struct KeyWrapAuditView: View {
                 severityBadge
             }
 
-            Text("Content-free — this panel only shows how your brain key is sealed. It never shows the key bytes, your brain contents, or anything captured from your screen.")
+            Text("Content-free - this panel checks whether Hippocampus can read the brain key. Access-control inspection is reported separately and never inferred from a successful read.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -100,13 +101,35 @@ struct KeyWrapAuditView: View {
         .background(Color.red, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private var metadataGrid: some View {
+    private var loadingState: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Checking Keychain readability...")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
+    }
+
+    private func errorState(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Audit failed", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .font(.headline)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+    }
+
+    private func metadataGrid(_ report: KeyWrapAuditReport) -> some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 8) {
             row("Implementation", report.implementationName)
-            row("Sealed on this Mac", report.sealed ? "Yes" : "No")
-            row("Access control", report.aclDescription)
+            row("Key readability", report.keyReadable ? "Readable" : "Unavailable")
+            row("Access control", report.accessControlDescription)
             row("Identifier", report.identifier, monospaced: true)
-            row("Last verified", verifiedTimestamp)
+            row("Last read attempt", verifiedTimestamp(report.generatedAt))
         }
     }
 
@@ -123,7 +146,7 @@ struct KeyWrapAuditView: View {
         }
     }
 
-    private var notesSection: some View {
+    private func notesSection(_ report: KeyWrapAuditReport) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Notes")
                 .font(.caption.bold())
@@ -144,13 +167,17 @@ struct KeyWrapAuditView: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Button(action: runReverify) {
-                Label("Re-verify wrap", systemImage: "arrow.clockwise")
+            Button {
+                Task { await model.refresh() }
+            } label: {
+                Label("Check readability again", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
             .accessibilityIdentifier("KeyWrapAuditReverifyButton")
+            .disabled(model.state == .loading)
 
-            if let revealLabel = revealButtonLabel {
+            if let report = loadedReport,
+               let revealLabel = revealButtonLabel(report) {
                 Button(action: runReveal) {
                     Label(revealLabel, systemImage: revealIcon)
                 }
@@ -168,15 +195,9 @@ struct KeyWrapAuditView: View {
 
     // MARK: - Actions
 
-    private func runReverify() {
-        report = reverify()
-        lastVerified = report.generatedAt
-    }
-
     private func runReveal() {
+        guard let report = loadedReport else { return }
         switch report.reveal {
-        case .showInFinder(let url):
-            NSWorkspace.shared.activateFileViewerSelecting([url])
         case .showInKeychainAccess:
             let keychain = URL(fileURLWithPath: "/Applications/Utilities/Keychain Access.app")
             NSWorkspace.shared.open(keychain)
@@ -188,49 +209,61 @@ struct KeyWrapAuditView: View {
     // MARK: - Computed
 
     private var severityIcon: String {
-        switch report.severity {
-        case .production: "lock.shield.fill"
-        case .interim: "lock.fill"
-        case .devOnly: "exclamationmark.octagon.fill"
+        switch model.state {
+        case .loading: "arrow.clockwise"
+        case .failed: "exclamationmark.triangle.fill"
+        case .loaded(let report):
+            switch report.severity {
+            case .production: "key.fill"
+            case .devOnly: "exclamationmark.octagon.fill"
+            }
         }
     }
 
     private var severityColor: Color {
-        switch report.severity {
-        case .production: .green
-        case .interim: .blue
-        case .devOnly: .red
+        switch model.state {
+        case .loading: .secondary
+        case .failed: .red
+        case .loaded(let report):
+            switch report.severity {
+            case .production: .blue
+            case .devOnly: .red
+            }
         }
     }
 
     private var severityLabel: String {
-        switch report.severity {
-        case .production: "Production"
-        case .interim: "Interim"
-        case .devOnly: "DEV ONLY"
+        switch model.state {
+        case .loading: "Checking"
+        case .failed: "Error"
+        case .loaded(let report):
+            switch report.severity {
+            case .production: "File Keychain"
+            case .devOnly: "DEV ONLY"
+            }
         }
     }
 
-    private var revealButtonLabel: String? {
+    private func revealButtonLabel(_ report: KeyWrapAuditReport) -> String? {
         switch report.reveal {
-        case .showInFinder: "Show in Finder"
         case .showInKeychainAccess: "Show me in Keychain Access"
         case .none: nil
         }
     }
 
     private var revealIcon: String {
-        switch report.reveal {
-        case .showInFinder: "folder"
-        case .showInKeychainAccess: "key.viewfinder"
-        case .none: "questionmark"
-        }
+        "key.viewfinder"
     }
 
-    private var verifiedTimestamp: String {
+    private func verifiedTimestamp(_ date: Date) -> String {
         let fmt = DateFormatter()
         fmt.dateStyle = .medium
         fmt.timeStyle = .medium
-        return fmt.string(from: lastVerified)
+        return fmt.string(from: date)
+    }
+
+    private var loadedReport: KeyWrapAuditReport? {
+        guard case .loaded(let report) = model.state else { return nil }
+        return report
     }
 }

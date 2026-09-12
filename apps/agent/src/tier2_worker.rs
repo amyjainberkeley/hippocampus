@@ -5,28 +5,25 @@
 //! a single tokio task that polls the brain store for events
 //! pending Tier 2 extraction, runs them through a
 //! [`Tier2Extractor`], writes results + a sentinel "processed"
-//! marker, and yields between cycles.
+//! marker, and sleeps when the queue is empty.
 //!
 //! # Why idle-batch (not synchronous on the brain ingest hot path)
 //!
-//! Qwen3-1.7B inference is ~100-500ms per call (ADR-0028 §6
-//! steady state). Running it inline in
-//! [`crate::brain_ingest::BrainPump::ingest_ocr_event`] would blow
-//! the G2 per-event burst SLO (≤25% CPU brief sub-second). The
-//! idle-batch pattern decouples Tier 2 from the hot path:
+//! Qwen inference is blocking work with no enforced time or memory
+//! budget. The idle-batch pattern decouples Tier 2 from the hot path:
 //!
 //! - V2-P4 Tier 1 regex extractor runs **synchronously** on the
 //!   hot path. It's microseconds-per-event; the cost is amortized.
 //! - V2-P5 Tier 2 Qwen NER runs **asynchronously** in this worker.
-//!   Bounded steady-state via the idle interval; single-flight
-//!   protects the ~500 MB working set.
+//!   Single-flight limits concurrency within this worker, not memory
+//!   use or sustained inference while a backlog exists.
 //!
-//! # Disabled-idle mode (Qwen model not downloaded)
+//! # Disabled-idle mode (default)
 //!
-//! Qwen3-1.7B is an **opt-in download** (`brief_worker::
-//! QWEN3_MODEL_BASENAME` + the `ModelDownloadManager` UI). When the
-//! model is not present on disk, this worker enters disabled-idle
-//! mode — same pattern as
+//! Production requires `MCI_QWEN_NER_ENABLED=1` before model discovery
+//! or loading. Downloading a model alone does not enable this worker.
+//! Without the exact opt-in or an installed model, it enters
+//! disabled-idle mode — same pattern as
 //! [`crate::brief_worker::run_disabled_idle`]. The worker logs one
 //! line and idles on the shutdown channel; no busy-loop, no
 //! repeated failure logs.
@@ -59,6 +56,12 @@ use mci_brain::{
     mark_event_tier2_processed, persist_tier2_matches, SqlCipherBrainStore, Tier2Extractor,
 };
 use tokio::sync::watch;
+
+/// Optional background Qwen NER is enabled only by the exact value `1`.
+#[must_use]
+pub fn qwen_ner_enabled(value: Option<&str>) -> bool {
+    value == Some("1")
+}
 
 /// Stats reported when the worker exits.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -96,13 +99,12 @@ pub enum Tier2WorkerError {
 /// Reads up to `batch_size` events pending Tier 2 extraction per
 /// cycle (via [`SqlCipherBrainStore::events_pending_tier2`]), runs
 /// each through `extractor`, persists Tier 2 matches +
-/// the sentinel "processed" marker, then sleeps `idle_interval`
-/// before the next cycle. Exits cleanly when `shutdown` flips to
-/// `true`.
+/// the sentinel "processed" marker. Sleeps `idle_interval` only when
+/// the queue is empty. Shutdown is checked between events; an active
+/// blocking inference cannot be cancelled here.
 ///
 /// Single-flight by design: one Qwen call at a time, one store
-/// write at a time. Keeps the ~500 MB Qwen working set predictable
-/// and the SLO budget bounded.
+/// write at a time. This does not enforce a memory or wall-time budget.
 ///
 /// The worker marks every event "processed" (via the sentinel
 /// mention) **even when**:
@@ -152,8 +154,7 @@ pub async fn run_tier2_worker(
                 return Ok(stats);
             }
 
-            // Extract on a blocking worker (Qwen is CPU+ANE-bound;
-            // never block the tokio runtime).
+            // Native inference is blocking work; keep it off the runtime.
             let ex_for_call = extractor.clone();
             let text = event.text.clone();
             let extract_result = tokio::task::spawn_blocking(move || ex_for_call.extract(&text))
@@ -202,8 +203,8 @@ pub async fn run_tier2_worker(
 
 /// Disabled-idle mode: log once, then sleep on the shutdown channel.
 ///
-/// Used when the Qwen3 `.mlmodelc` is not present on disk (opt-in
-/// download not yet completed). The task exits cleanly on shutdown;
+/// Used when optional Qwen NER is not enabled or its model is absent.
+/// The task exits cleanly on shutdown;
 /// no work happens between launch and exit beyond the single log
 /// line. Mirrors [`crate::brief_worker::run_disabled_idle`].
 pub async fn run_disabled_idle(
@@ -221,6 +222,67 @@ pub async fn run_disabled_idle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qwen_ner_requires_exact_opt_in() {
+        assert!(!qwen_ner_enabled(None));
+        for value in [
+            "", "0", "false", "off", "true", "on", "yes", "2", "01", " 1", "1 ", "1\n",
+        ] {
+            assert!(!qwen_ner_enabled(Some(value)), "enabled for {value:?}");
+        }
+        assert!(qwen_ner_enabled(Some("1")));
+    }
+
+    #[test]
+    fn production_ner_gate_precedes_model_preflight() {
+        // Guard the macOS construction site without loading a real model.
+        let source = include_str!("bin/mci_agent.rs");
+        let spawn = source
+            .split_once("fn spawn_tier2_worker(")
+            .expect("production worker")
+            .1
+            .split_once("\n}\n")
+            .expect("worker end")
+            .0;
+        let gate = spawn
+            .find("if !qwen_ner_enabled(")
+            .expect("explicit opt-in gate");
+        let model_dir = spawn
+            .find("brief_worker::default_model_dir()")
+            .expect("model directory");
+        let preflight = spawn
+            .find("brief_worker::qwen3_model_present(")
+            .expect("model preflight");
+        let load = spawn.find("Qwen3CoreMLBackend::open(").expect("model load");
+        assert!(gate < model_dir && model_dir < preflight && preflight < load);
+        let disabled = &spawn[gate..model_dir];
+        assert!(disabled.contains("std::env::var(\"MCI_QWEN_NER_ENABLED\").ok().as_deref()"));
+        assert!(disabled.contains("run_disabled_idle("));
+        assert!(disabled.contains("return;"));
+    }
+
+    #[test]
+    fn scheduled_brief_is_extractive_but_explicit_cli_keeps_model_selection() {
+        let source = include_str!("bin/mci_agent.rs");
+        let scheduled = source
+            .split_once("fn spawn_brief_worker(")
+            .expect("scheduled worker")
+            .1
+            .split_once("\n}\n")
+            .expect("worker end")
+            .0;
+        assert!(scheduled.contains("let factory = brief_worker::extractive_author_factory();"));
+        assert!(!scheduled.contains("preferred_brief_author_factory("));
+        assert!(!scheduled.contains("default_model_dir("));
+        assert!(!scheduled.contains("qwen3_author_factory("));
+        // The only preferred-factory caller must remain the explicit CLI.
+        let before_factories = source
+            .split_once("fn qwen3_author_factory(")
+            .expect("factory")
+            .0;
+        assert!(before_factories.contains("preferred_brief_author_factory(&model_dir)"));
+    }
 
     #[test]
     fn stats_default_zero() {

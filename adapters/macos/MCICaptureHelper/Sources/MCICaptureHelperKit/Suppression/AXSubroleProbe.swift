@@ -155,9 +155,9 @@ public enum AXBackstopOutcome: Sendable, Equatable {
 }
 
 /// Structured snapshot of one `focusedHasSecureSubrole()` call, used by
-/// the `--probe-debug` diagnostic sink. Plain-data + `Sendable` so it
-/// can cross task boundaries; the helper just stringifies it onto
-/// stderr.
+/// the `--probe-debug` diagnostic sink. Raw values stay in memory so the
+/// classifier can make its decision; the diagnostic renderer below emits only
+/// presence and enum outcomes.
 ///
 /// Never serialized to the wire. Never reaches the Rust core. Never
 /// touches the encoded frame path. Diagnostic-only.
@@ -213,6 +213,41 @@ public struct AXProbeObservation: Sendable, Equatable {
     }
 }
 
+/// Content-free formatter for live AX probe diagnostics. Attribute values may
+/// contain document names, customer identifiers, or secrets and must never be
+/// written to stderr, even in a development qualification run.
+public enum AXProbeDiagnostic {
+    public static func render(_ observation: AXProbeObservation) -> String {
+        func presence(_ value: String?) -> String {
+            value == nil ? "absent" : "present"
+        }
+        func outcome(_ value: AXBackstopOutcome) -> String {
+            switch value {
+            case .positive: return "pos"
+            case .negative: return "neg"
+            case .errored: return "err"
+            }
+        }
+        let classification: String
+        switch observation.classification {
+        case .some(true): classification = "true"
+        case .some(false): classification = "false"
+        case .none: classification = "nil"
+        }
+        let focus = observation.focusResult == .success ? "success" : "error"
+        return "mci-capture-helper: probe(ax-subrole) "
+            + "focus=\(focus) "
+            + "role=\(presence(observation.role)) "
+            + "subrole=\(presence(observation.subrole)) "
+            + "id=\(presence(observation.identifier)) "
+            + "title=\(presence(observation.title)) "
+            + "descendant=\(outcome(observation.descendantSecure)) "
+            + "value-hidden=\(outcome(observation.valueAttributeHidden)) "
+            + "id-regex=\(outcome(observation.identifierRegexMatch)) "
+            + "result=\(classification)\n"
+    }
+}
+
 /// Concrete `AXSecureSubroleProbe` backed by the macOS Accessibility API.
 ///
 /// `Sendable` because it holds no mutable state beyond an optional
@@ -228,20 +263,41 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
     public typealias DebugSink = @Sendable (AXProbeObservation) -> Void
 
     private let debugLog: DebugSink?
+    private let healthLog: (@Sendable (AXProbeHealthSnapshot) -> Void)?
+    typealias FocusReader = @Sendable () -> (AXError, CFTypeRef?)
+    private let readFocus: FocusReader
 
-    public init(debugLog: DebugSink? = nil) {
+    public init(
+        debugLog: DebugSink? = nil,
+        healthLog: (@Sendable (AXProbeHealthSnapshot) -> Void)? = nil
+    ) {
         self.debugLog = debugLog
+        self.healthLog = healthLog
+        self.readFocus = Self.readSystemFocus
     }
 
-    public func focusedHasSecureSubrole() -> Bool? {
-        let systemWide = AXUIElementCreateSystemWide()
+    init(
+        healthLog: @escaping @Sendable (AXProbeHealthSnapshot) -> Void,
+        readFocus: @escaping FocusReader
+    ) {
+        self.debugLog = nil
+        self.healthLog = healthLog
+        self.readFocus = readFocus
+    }
 
+    private static func readSystemFocus() -> (AXError, CFTypeRef?) {
+        let systemWide = AXUIElementCreateSystemWide()
         var focusedRef: CFTypeRef?
         let focusResult = AXUIElementCopyAttributeValue(
             systemWide,
             kAXFocusedUIElementAttribute as CFString,
             &focusedRef
         )
+        return (focusResult, focusedRef)
+    }
+
+    public func focusedHasSecureSubrole() -> Bool? {
+        let (focusResult, focusedRef) = readFocus()
 
         // Resolve the focused AXUIElement once (defensively type-checked
         // for the same reason as the prior impl: hostile shims could
@@ -326,6 +382,23 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
             valueAttributeHidden: valueHidden,
             identifierRegexMatch: regexMatch
         )
+
+        // Reuse the reads above. Production health logs never fetch labels or
+        // values and distinguish skipped checks from observed negative results.
+        if let healthLog {
+            let evaluatedValue = priorClassification == false && focusedElement != nil
+            let evaluatedIdentifier = evaluatedValue && valueHidden != .positive
+            let evaluatedDescendants = evaluatedIdentifier && regexMatch != .positive
+            healthLog(AXProbeHealthSnapshot(
+                focusResult: focusResult.rawValue,
+                focusedElementMatched: focusedElement != nil,
+                subroleResult: focusedElement == nil ? nil : subroleResult.rawValue,
+                valueHidden: evaluatedValue ? valueHidden : nil,
+                identifierMatch: evaluatedIdentifier ? regexMatch : nil,
+                descendantSecure: evaluatedDescendants ? descendantSecure : nil,
+                classification: classification
+            ))
+        }
 
         // STEADY-STATE FAST PATH. When no sink is wired (default
         // production build), skip the role / identifier / title reads
@@ -609,42 +682,60 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
     /// descendant chain (`kAXFocusedUIElementAttribute`). Depth ≤ 3
     /// and total visited nodes ≤ 32; aborts on first match.
     static func descendantSecureSubroleSignal(
-        of root: AXUIElement
+        of root: AXUIElement,
+        readString: (AXUIElement, CFString) -> (AXError, String?) = readStringObservation,
+        readChildren: (AXUIElement, CFString) -> ArrayReadResult = { readElementArrayAttribute($0, $1) },
+        readFocusedChild: (AXUIElement, CFString) throws -> AXUIElement? = { try readElementAttribute($0, $1) }
     ) -> AXBackstopOutcome {
         var budget = backstopMaxNodes
         var anyTraversalError = false
-        var madeProgress = false
 
         func recurse(_ node: AXUIElement, depth: Int) -> Bool {
-            if budget <= 0 { return false }
-            if depth >= backstopMaxDepth { return false }
-
             // Children of `node` — both the focused-descendant link
             // (priority — the user's actual input target) and the
             // structural child array.
             var queued: [AXUIElement] = []
-            if let focusedChild = readElementAttribute(
-                node, kAXFocusedUIElementAttribute as CFString)
-            {
-                queued.append(focusedChild)
+            do {
+                if let focusedChild = try readFocusedChild(
+                    node, kAXFocusedUIElementAttribute as CFString)
+                {
+                    queued.append(focusedChild)
+                }
+            } catch {
+                anyTraversalError = true
             }
-            switch readElementArrayAttribute(node, kAXChildrenAttribute as CFString) {
+            switch readChildren(node, kAXChildrenAttribute as CFString) {
             case .success(let arr):
                 queued.append(contentsOf: arr)
+            case .partial(let arr):
+                queued.append(contentsOf: arr)
+                anyTraversalError = true
             case .empty:
                 break
             case .errored:
                 anyTraversalError = true
             }
 
+            // The boundary node is already visited. Check its links to distinguish
+            // a known leaf from uninspected work without visiting beyond the bound.
+            if !queued.isEmpty && (budget <= 0 || depth >= backstopMaxDepth) {
+                anyTraversalError = true
+                return false
+            }
             for child in queued {
-                if budget <= 0 { return false }
+                if budget <= 0 {
+                    anyTraversalError = true
+                    return false
+                }
                 budget -= 1
-                madeProgress = true
-                if let subrole = readStringAttribute(child, kAXSubroleAttribute as CFString),
-                    subrole == (kAXSecureTextFieldSubrole as String)
-                {
-                    return true
+                let (subroleStatus, subroleValue) = readString(child, kAXSubroleAttribute as CFString)
+                switch priorClassify(
+                    focusResult: .success, focusedRefMatched: true,
+                    subroleResult: subroleStatus, subroleValue: subroleValue
+                ) {
+                case .some(true): return true
+                case .some(false): break
+                case .none: anyTraversalError = true
                 }
                 if recurse(child, depth: depth + 1) { return true }
             }
@@ -652,7 +743,7 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
         }
 
         if recurse(root, depth: 0) { return .positive }
-        if anyTraversalError && !madeProgress { return .errored }
+        if anyTraversalError { return .errored }
         return .negative
     }
 
@@ -721,73 +812,89 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
     /// container role, also checks descendants up to depth 3 (budget
     /// shared with signal 1's bound, conservatively).
     static func identifierRegexSignal(
-        of element: AXUIElement
+        of element: AXUIElement,
+        readString: (AXUIElement, CFString) -> (AXError, String?) = readStringObservation,
+        readChildren: (AXUIElement, CFString) -> ArrayReadResult = { readElementArrayAttribute($0, $1) },
+        readFocusedChild: (AXUIElement, CFString) throws -> AXUIElement? = { try readElementAttribute($0, $1) }
     ) -> AXBackstopOutcome {
         var anyError = false
-        var madeProgress = false
 
-        func checkOne(_ el: AXUIElement) -> Bool? {
-            // Return `true` on positive, `false` on negative-after-read,
-            // `nil` if every attribute read errored (so the caller can
-            // mark `anyError`).
-            var sawAny = false
+        func checkOne(_ el: AXUIElement) -> AXBackstopOutcome {
+            var outcome = AXBackstopOutcome.negative
             for attr in [
                 kAXIdentifierAttribute, kAXTitleAttribute,
                 kAXPlaceholderValueAttribute,
             ] as [String] {
-                if let s = readStringAttribute(el, attr as CFString) {
-                    sawAny = true
-                    if passwordIdentifierMatches(s) { return true }
+                switch identifierAttributesOutcome([readString(el, attr as CFString)]) {
+                case .positive: return .positive
+                case .negative: break
+                case .errored: outcome = .errored
                 }
             }
-            return sawAny ? false : nil
+            return outcome
         }
 
         // Check the focused element itself first.
         switch checkOne(element) {
-        case .some(true): return .positive
-        case .some(false): madeProgress = true
-        case .none: anyError = true
+        case .positive: return .positive
+        case .negative: break
+        case .errored: anyError = true
         }
 
         // If the focused element is a container, walk its descendants
         // up to depth 3. Bounded budget shared conceptually with
         // signal 1 — but the brief specifies the regex backstop also
         // bounds at depth 3, so we cap independently here.
-        let role = readStringAttribute(element, kAXRoleAttribute as CFString)
-        guard let role, containerRoles.contains(role) else {
-            return anyError && !madeProgress ? .errored : .negative
+        let (roleStatus, roleValue) = readString(element, kAXRoleAttribute as CFString)
+        guard roleStatus == .success, let role = roleValue, !role.isEmpty else {
+            return .errored
+        }
+        guard containerRoles.contains(role) else {
+            return anyError ? .errored : .negative
         }
 
         var budget = backstopMaxNodes
         var found = false
 
         func recurse(_ node: AXUIElement, depth: Int) {
-            if found || budget <= 0 { return }
-            if depth >= backstopMaxDepth { return }
+            if found { return }
 
             var queued: [AXUIElement] = []
-            if let focusedChild = readElementAttribute(
-                node, kAXFocusedUIElementAttribute as CFString)
-            {
-                queued.append(focusedChild)
+            do {
+                if let focusedChild = try readFocusedChild(
+                    node, kAXFocusedUIElementAttribute as CFString)
+                {
+                    queued.append(focusedChild)
+                }
+            } catch {
+                anyError = true
             }
-            switch readElementArrayAttribute(node, kAXChildrenAttribute as CFString) {
+            switch readChildren(node, kAXChildrenAttribute as CFString) {
             case .success(let arr):
                 queued.append(contentsOf: arr)
+            case .partial(let arr):
+                queued.append(contentsOf: arr)
+                anyError = true
             case .empty:
                 break
             case .errored:
                 anyError = true
             }
+            if !queued.isEmpty && (budget <= 0 || depth >= backstopMaxDepth) {
+                anyError = true
+                return
+            }
             for child in queued {
-                if found || budget <= 0 { return }
+                if found { return }
+                if budget <= 0 {
+                    anyError = true
+                    return
+                }
                 budget -= 1
-                madeProgress = true
                 switch checkOne(child) {
-                case .some(true): found = true; return
-                case .some(false): break
-                case .none: anyError = true
+                case .positive: found = true; return
+                case .negative: break
+                case .errored: anyError = true
                 }
                 recurse(child, depth: depth + 1)
             }
@@ -795,24 +902,76 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
 
         recurse(element, depth: 0)
         if found { return .positive }
-        if anyError && !madeProgress { return .errored }
+        if anyError { return .errored }
         return .negative
+    }
+
+    /// Optional metadata can be absent without an AX failure. Absence means
+    /// no keyword evidence, not a non-secure field; the other probes still run.
+    static func identifierAttributesOutcome(_ reads: [(AXError, String?)]) -> AXBackstopOutcome {
+        var anyError = reads.isEmpty
+        for (status, value) in reads {
+            switch status {
+            case .success:
+                guard let value else {
+                    anyError = true
+                    continue
+                }
+                if passwordIdentifierMatches(value) { return .positive }
+            case .noValue, .attributeUnsupported:
+                break
+            default:
+                anyError = true
+            }
+        }
+        return anyError ? .errored : .negative
+    }
+
+    private static func readStringObservation(
+        _ element: AXUIElement, _ attribute: CFString
+    ) -> (AXError, String?) {
+        var ref: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(element, attribute, &ref)
+        return (status, ref as? String)
     }
 
     // MARK: - AX read helpers used by the backstops
 
-    /// Read a single AXUIElement attribute (e.g.
-    /// `kAXFocusedUIElementAttribute`). Returns the element on
-    /// success, `nil` on any non-success or type mismatch.
-    private static func readElementAttribute(
+    typealias AttributeReader = (AXUIElement, CFString) -> (AXError, CFTypeRef?)
+
+    enum ElementReadError: Error, Equatable {
+        case ax(AXError)
+        case malformedValue
+    }
+
+    private static func readAttributeObservation(
         _ element: AXUIElement, _ attribute: CFString
-    ) -> AXUIElement? {
+    ) -> (AXError, CFTypeRef?) {
         var ref: CFTypeRef?
-        let r = AXUIElementCopyAttributeValue(element, attribute, &ref)
-        guard r == .success, let ref else { return nil }
-        guard CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        // swiftlint:disable:next force_cast
-        return (ref as! AXUIElement)
+        let status = AXUIElementCopyAttributeValue(element, attribute, &ref)
+        return (status, ref)
+    }
+
+    /// Read a single AXUIElement attribute (e.g.
+    /// `kAXFocusedUIElementAttribute`). Only documented absence returns nil;
+    /// failed reads and malformed successful payloads throw instead.
+    static func readElementAttribute(
+        _ element: AXUIElement, _ attribute: CFString,
+        readAttribute: AttributeReader = readAttributeObservation
+    ) throws -> AXUIElement? {
+        let (r, ref) = readAttribute(element, attribute)
+        switch r {
+        case .success:
+            guard let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else {
+                throw ElementReadError.malformedValue
+            }
+            // swiftlint:disable:next force_cast
+            return (ref as! AXUIElement)
+        case .noValue, .attributeUnsupported:
+            return nil
+        default:
+            throw ElementReadError.ax(r)
+        }
     }
 
     /// Result of an AX array attribute read (e.g.
@@ -820,38 +979,49 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
     enum ArrayReadResult {
         /// Read returned `.success` with a non-empty array.
         case success([AXUIElement])
+        /// Bounded valid children from an array with malformed or uninspected entries.
+        case partial([AXUIElement])
         /// Read returned `.success` empty array, `.noValue`, or
         /// `.attributeUnsupported` — the node legitimately has no
         /// children.
         case empty
-        /// Read returned a catastrophic AX error.
+        /// Failed or malformed read with no usable children.
         case errored
     }
 
-    private static func readElementArrayAttribute(
-        _ element: AXUIElement, _ attribute: CFString
+    static func readElementArrayAttribute(
+        _ element: AXUIElement, _ attribute: CFString,
+        readAttribute: AttributeReader = readAttributeObservation
     ) -> ArrayReadResult {
-        var ref: CFTypeRef?
-        let r = AXUIElementCopyAttributeValue(element, attribute, &ref)
+        let (r, ref) = readAttribute(element, attribute)
         switch r {
         case .success:
-            guard let ref else { return .empty }
-            guard CFGetTypeID(ref) == CFArrayGetTypeID() else { return .empty }
+            guard let ref else { return .errored }
+            guard CFGetTypeID(ref) == CFArrayGetTypeID() else { return .errored }
             // swiftlint:disable:next force_cast
             let arr = ref as! CFArray
             let count = CFArrayGetCount(arr)
             if count == 0 { return .empty }
+            let inspectedCount = min(count, backstopMaxNodes)
+            var incomplete = count > inspectedCount
             var out: [AXUIElement] = []
-            out.reserveCapacity(count)
-            for i in 0..<count {
+            out.reserveCapacity(inspectedCount)
+            for i in 0..<inspectedCount {
                 let p = CFArrayGetValueAtIndex(arr, i)
-                guard let p else { continue }
+                guard let p else {
+                    incomplete = true
+                    continue
+                }
                 let item = Unmanaged<CFTypeRef>.fromOpaque(p).takeUnretainedValue()
-                guard CFGetTypeID(item) == AXUIElementGetTypeID() else { continue }
+                guard CFGetTypeID(item) == AXUIElementGetTypeID() else {
+                    incomplete = true
+                    continue
+                }
                 // swiftlint:disable:next force_cast
                 out.append(item as! AXUIElement)
             }
-            return out.isEmpty ? .empty : .success(out)
+            if incomplete { return out.isEmpty ? .errored : .partial(out) }
+            return .success(out)
         case .noValue, .attributeUnsupported:
             return .empty
         default:

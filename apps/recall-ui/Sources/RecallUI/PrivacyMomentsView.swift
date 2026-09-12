@@ -72,9 +72,10 @@ struct PrivacyMomentCard: View {
             Grid(alignment: .leading, horizontalSpacing: MCI.Spacing.s, verticalSpacing: MCI.Spacing.xs) {
                 GridRow {
                     Text("App:").foregroundStyle(Color.brandFgMuted)
-                    Text(moment.appBundleId ?? "(unknown)")
-                        .font(.system(.body, design: .monospaced))
+                    Text(Formatters.appDisplayName(moment.appBundleId))
+                        .font(.system(.body, design: .default))
                         .foregroundStyle(Color.brandFgSecondary)
+                        .help(moment.appBundleId ?? "No bundle identifier")
                 }
                 GridRow {
                     Text("Time:").foregroundStyle(Color.brandFgMuted)

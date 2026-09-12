@@ -48,5 +48,25 @@ let package = Package(
                 .copy("Fixtures"),
             ]
         ),
+        .executableTarget(
+            name: "RetentionPersistenceBehavior",
+            dependencies: ["OnboardingKit"],
+            path: "Tests/Fixtures/RetentionPersistenceBehavior"
+        ),
+        .executableTarget(
+            name: "OnboardingRouteBehavior",
+            dependencies: ["OnboardingKit"],
+            path: "Tests/Fixtures/OnboardingRouteBehavior"
+        ),
+        .executableTarget(
+            name: "AppAccessBehavior",
+            dependencies: ["OnboardingKit"],
+            path: "Tests/Fixtures/AppAccessBehavior"
+        ),
+        .executableTarget(
+            name: "AIToolConnectorBehavior",
+            dependencies: ["OnboardingKit"],
+            path: "Tests/Fixtures/AIToolConnectorBehavior"
+        ),
     ]
 )

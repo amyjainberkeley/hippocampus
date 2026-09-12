@@ -125,12 +125,10 @@ fn new_creates_encrypted_db_and_runs_migration() {
             |r| r.get(0),
         )
         .expect("brain_schema_version stamp");
-    // V2-P3 migration 0004 stamps brain_schema_version = '4'; V2-P6
-    // migration 0005 (entity_identities) bumps it to '5'. The
-    // intermediate '2' was never published (briefs uses a separate
-    // briefs_schema_version key) — the brain main-schema version
-    // jumped 1 → 3 at V2-P2, 3 → 4 at V2-P3, 4 → 5 at V2-P6.
-    assert_eq!(v, "5");
+    // V2-P3 migration 0004 adds the graph, V2-P6 migration 0005 adds
+    // entity identities, and Task 5 migration 0006 adds governed memory.
+    // Briefs retain their separate version key.
+    assert_eq!(v, "10");
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +330,23 @@ fn fts5_search_returns_bm25_ranked_hits() {
 }
 
 #[test]
+fn fts5_equal_score_cutoff_uses_event_id_tie_break() {
+    let (_dir, path) = tmp("fts_tie.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let first = store
+        .put_event(&blank_event(1, "identical marker"))
+        .unwrap();
+    let second = store
+        .put_event(&blank_event(1, "identical marker"))
+        .unwrap();
+
+    let hits = store.fts5_search("identical marker", 1).unwrap();
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].0, first.min(second));
+}
+
+#[test]
 fn fts5_indexes_summary_window_title_and_url_columns() {
     let (_dir, path) = tmp("brain.sqlite");
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
@@ -478,6 +493,458 @@ fn fts5_search_whitespace_only_query_returns_empty_not_error() {
     );
 }
 
+#[test]
+fn pasted_code_search_preserves_rank_limits_filters_and_deletion() {
+    use mci_brain::stubs::FixedDimEmbedder;
+    use mci_brain::{HybridRetriever, RetrievalDegradation, RetrievalOutcome, RetrievalQuery};
+    use std::sync::Arc;
+
+    let (_dir, path) = tmp("pasted_code_search.sqlite");
+    let store = Arc::new(SqlCipherBrainStore::new(&path, &test_key()).expect("open"));
+    let mut ids = Vec::new();
+    for (ts, app) in [
+        (100, "test.editor"),
+        (100, "test.editor"),
+        (100, "test.other"),
+        (99, "test.editor"),
+        (201, "test.editor"),
+        (100, "test.editor"),
+    ] {
+        let mut event = blank_event(ts, "src/cache.rs NOT failed");
+        event.app_bundle_id = Some(app.into());
+        ids.push(store.put_event(&event).expect("insert synthetic text"));
+    }
+    assert_eq!(store.delete_event(ids[5]).expect("delete event"), 1);
+    let mut suppressed = blank_event(100, "src/cache.rs NOT failed");
+    suppressed.cascade_reason = 7;
+    assert!(matches!(
+        store.put_event(&suppressed),
+        Err(StoreError::InvalidInput(_))
+    ));
+
+    let raw = "\"src/cache.rs NOT failed\"";
+    // No stored vectors: only the real lexical arm can supply these hits.
+    let retriever = HybridRetriever::new(store.clone(), Arc::new(FixedDimEmbedder::default()), 200)
+        .with_pools(8, 1);
+    for limit in [1, 10] {
+        let query = RetrievalQuery {
+            text: raw.into(),
+            limit,
+            time_filter: Some(TimeRange {
+                from_us: 100,
+                to_us: 200,
+            }),
+            app_filter: Some("test.editor".into()),
+        };
+        let outcome = retriever.retrieve_outcome(&query).expect("retrieve");
+        let RetrievalOutcome::Degraded {
+            degradation,
+            fallback_matches,
+        } = outcome
+        else {
+            panic!("expected ranked context without a production verifier, got {outcome:?}");
+        };
+        assert_eq!(
+            degradation,
+            RetrievalDegradation::EvidenceVerifierUnavailable
+        );
+        assert_eq!(
+            fallback_matches
+                .iter()
+                .map(|value| value.hit.event_id)
+                .collect::<Vec<_>>(),
+            ids[..limit.min(2)],
+            "only live events inside the app/time filters may surface"
+        );
+        assert!(fallback_matches
+            .windows(2)
+            .all(|pair| { pair[0].hit.score_combined >= pair[1].hit.score_combined }));
+    }
+
+    let lexical = store.fts5_search(raw, 2).expect("literal FTS query");
+    assert_eq!(
+        lexical.iter().map(|hit| hit.0).collect::<Vec<_>>(),
+        ids[..2],
+        "the literal code must retain its bounded BM25 tie order"
+    );
+    assert!(lexical[0].1 >= lexical[1].1);
+    assert!(store.fts5_search(raw, 0).expect("zero limit").is_empty());
+    assert_eq!(store.fts5_search(raw, 10).unwrap().len(), 5);
+}
+
+#[test]
+fn fts5_sql_looking_text_matches_literally_without_mutating_events() {
+    let (_dir, path) = tmp("sql_looking_search.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let raw = "src/cache.rs\" OR 1=1; DROP TABLE events; --";
+    let target = store.put_event(&blank_event(100, raw)).unwrap();
+    let unrelated = store.put_event(&blank_event(100, "src/cache.rs")).unwrap();
+
+    let hits = store.fts5_search(raw, 10).expect("bound literal query");
+    assert_eq!(
+        hits.iter().map(|hit| hit.0).collect::<Vec<_>>(),
+        [target],
+        "SQL-looking text must neither broaden the query nor execute as SQL"
+    );
+    assert_eq!(store.get_event(target).unwrap().unwrap().text, raw);
+    assert_eq!(
+        store.get_event(unrelated).unwrap().unwrap().text,
+        "src/cache.rs"
+    );
+}
+
+#[test]
+fn lexical_alternatives_preserve_phrases_literals_limits_and_deletion() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::{Keywords, Phrase};
+    let (_dir, path) = tmp("lexical_alternatives.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let first = store.put_event(&blank_event(100, "release notes")).unwrap();
+    let second = store.put_event(&blank_event(101, "Morgan Vale")).unwrap();
+    let literal = store
+        .put_event(&blank_event(102, "label OR secret"))
+        .unwrap();
+    let unrelated = store
+        .put_event(&blank_event(103, "Morgan and Vale secret"))
+        .unwrap();
+    let alternatives = [
+        Keywords("release notes"),
+        Phrase("Morgan Vale"),
+        Phrase("label OR secret"),
+    ];
+    let hits = store.fts5_search_alternatives(&alternatives, 10).unwrap();
+    let ids = hits
+        .iter()
+        .map(|hit| hit.0)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(ids, [first, second, literal].into_iter().collect());
+    assert!(!ids.contains(&unrelated));
+    assert!(hits.windows(2).all(|pair| pair[0].1 >= pair[1].1));
+    assert_eq!(
+        store.fts5_search_alternatives(&alternatives, 1).unwrap(),
+        hits[..1]
+    );
+    assert!(store
+        .fts5_search_alternatives(&alternatives, 0)
+        .unwrap()
+        .is_empty());
+    store.delete_event(second).unwrap();
+    assert_eq!(
+        store
+            .fts5_search_alternatives(&alternatives, 10)
+            .unwrap()
+            .len(),
+        2
+    );
+    let hostile = [Phrase("\" OR secret"), Keywords("label NOT secret")];
+    // The tokenizer ignores punctuation, so the literal phrase "OR secret"
+    // may match, but the input cannot become an OR branch matching "secret".
+    assert_eq!(
+        store
+            .fts5_search_alternatives(&hostile, 10)
+            .unwrap()
+            .iter()
+            .map(|hit| hit.0)
+            .collect::<Vec<_>>(),
+        [literal]
+    );
+    assert!(store.get_event(unrelated).unwrap().is_some());
+}
+
+#[test]
+fn lexical_alternatives_reject_excess_work_and_accept_empty_input() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+    let (_dir, path) = tmp("lexical_alternatives_limits.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    assert!(store.fts5_search_alternatives(&[], 10).unwrap().is_empty());
+    assert!(store
+        .fts5_search_alternatives(&[Keywords(" \t")], 10)
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        store.fts5_search_alternatives(&vec![Keywords("x"); 1025], 10),
+        Err(StoreError::InvalidInput(_))
+    ));
+    let excessive = "x".repeat(128 * 1024 + 1);
+    assert!(matches!(
+        store.fts5_search_alternatives(&[Keywords(&excessive)], 10),
+        Err(StoreError::InvalidInput(_))
+    ));
+}
+
+#[test]
+fn fts5_filtered_preserves_optional_bounds_literal_apps_and_scores() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+
+    let (_dir, path) = tmp("filtered_lexical.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let literal_app = "test.allowed' OR 1=1 --";
+    let max_ts = i64::MAX as u64;
+    let ids: Vec<_> = [
+        (99, Some("test.allowed")),
+        (100, Some("test.allowed")),
+        (200, Some("test.allowed")),
+        (201, Some("test.allowed.other")),
+        (150, None),
+        (150, Some("")),
+        (150, Some(literal_app)),
+        (max_ts, Some("test.allowed")),
+    ]
+    .into_iter()
+    .map(|(ts, app)| {
+        let mut event = blank_event(ts, "ranked marker");
+        event.app_bundle_id = app.map(str::to_owned);
+        store.put_event(&event).unwrap()
+    })
+    .collect();
+    let range = |from_us, to_us| Some(TimeRange { from_us, to_us });
+    let baseline = store.fts5_search("ranked marker", 20).unwrap();
+    let cases = [
+        (None, None, vec![ids[0], ids[1]]),
+        (None, Some("test.allowed"), vec![ids[0], ids[1]]),
+        (range(100, u64::MAX), None, vec![ids[1], ids[2]]),
+        (range(0, 100), None, vec![ids[0], ids[1]]),
+        (range(100, 200), Some("test.allowed"), vec![ids[1], ids[2]]),
+        (range(200, 200), Some("test.allowed"), vec![ids[2]]),
+        (range(200, 199), None, vec![]),
+        (None, Some(""), vec![ids[5]]),
+        (None, Some(literal_app), vec![ids[6]]),
+        (range(max_ts, u64::MAX), None, vec![ids[7]]),
+        (range(max_ts + 1, u64::MAX), None, vec![]),
+    ];
+    for (time_filter, app_filter, expected) in cases {
+        for hits in [
+            store.fts5_search_filtered("ranked marker", 2, time_filter, app_filter),
+            store.fts5_search_alternatives_filtered(
+                &[Keywords("ranked marker")],
+                2,
+                time_filter,
+                app_filter,
+            ),
+        ] {
+            let hits = hits.unwrap();
+            assert_eq!(
+                hits.iter().map(|hit| hit.0).collect::<Vec<_>>(),
+                expected,
+                "time={time_filter:?}, app={app_filter:?}"
+            );
+            assert!(
+                hits.iter().all(|hit| baseline.contains(hit)),
+                "Filtering must preserve the original BM25 scores"
+            );
+        }
+    }
+    assert!(store
+        .fts5_search_filtered("ranked marker", 0, None, None)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .fts5_search_alternatives_filtered(
+            &[Keywords("ranked marker")],
+            0,
+            range(100, 200),
+            Some("test.allowed"),
+        )
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn fts5_filtered_ranks_eligible_hits_before_applying_limit() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Phrase;
+
+    let (_dir, path) = tmp("filtered_lexical_rank.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let mut weak = blank_event(
+        100,
+        "ranked marker followed by many unrelated descriptive words",
+    );
+    weak.app_bundle_id = Some("test.allowed".into());
+    let weak_id = store.put_event(&weak).unwrap();
+    let mut strong = blank_event(200, "ranked marker");
+    strong.app_bundle_id = Some("test.allowed".into());
+    let strong_id = store.put_event(&strong).unwrap();
+    let time = Some(TimeRange {
+        from_us: 100,
+        to_us: 200,
+    });
+    for hits in [
+        store.fts5_search_filtered("ranked marker", 1, time, Some("test.allowed")),
+        store.fts5_search_alternatives_filtered(
+            &[Phrase("ranked marker")],
+            1,
+            time,
+            Some("test.allowed"),
+        ),
+    ] {
+        assert_eq!(
+            hits.unwrap().iter().map(|hit| hit.0).collect::<Vec<_>>(),
+            [strong_id]
+        );
+    }
+    assert_ne!(weak_id, strong_id);
+}
+
+#[test]
+fn filtered_metadata_search_preserves_bm25_and_handles_extreme_bounds() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+
+    let (_dir, path) = tmp("filtered_metadata.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let apps = vec!["test.a".into(), "test.b".into()];
+    let mut event = blank_event(i64::MAX as u64, "ranked marker");
+    event.app_bundle_id = Some("test.a".into());
+    event.url = Some("https://example.test".into());
+    let id = store.put_event(&event).unwrap();
+    let baseline = store.fts5_search("ranked marker", 1).unwrap();
+    let at_max = Some(TimeRange {
+        from_us: i64::MAX as u64,
+        to_us: u64::MAX,
+    });
+    for time in [None, at_max] {
+        assert_eq!(
+            store
+                .fts5_search_with_filters("ranked marker", 1, time, None, &apps, true)
+                .unwrap(),
+            baseline
+        );
+        assert_eq!(
+            store
+                .fts5_search_alternatives_with_filters(
+                    &[Keywords("ranked marker")],
+                    1,
+                    time,
+                    None,
+                    &apps,
+                    true,
+                )
+                .unwrap(),
+            baseline
+        );
+        assert_eq!(
+            store
+                .browse_event_ids_filtered(1, time, None, &apps, true)
+                .unwrap(),
+            [id]
+        );
+    }
+    let above_max = Some(TimeRange {
+        from_us: i64::MAX as u64 + 1,
+        to_us: u64::MAX,
+    });
+    for (limit, time) in [(0, None), (1, above_max)] {
+        assert!(store
+            .fts5_search_with_filters("ranked marker", limit, time, None, &apps, true)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .fts5_search_alternatives_with_filters(
+                &[Keywords("ranked marker")],
+                limit,
+                time,
+                None,
+                &apps,
+                true,
+            )
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .browse_event_ids_filtered(limit, time, None, &apps, true)
+            .unwrap()
+            .is_empty());
+    }
+}
+
+#[test]
+fn filtered_metadata_search_rejects_invalid_apps_even_with_zero_limit() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+
+    let (_dir, path) = tmp("filtered_metadata_invalid.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    for apps in [
+        vec![String::new()],
+        vec!["test.a".into(); 33],
+        vec!["x".repeat(256)],
+        vec!["\u{e9}".repeat(128)],
+        vec!["mcp:a\0b".into()],
+        vec!["mcp:a\nb".into()],
+        vec!["mcp:a\u{7f}b".into()],
+        vec!["mcp:a\u{85}b".into()],
+    ] {
+        assert!(matches!(
+            store.fts5_search_with_filters("marker", 0, None, None, &apps, false),
+            Err(StoreError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            store.fts5_search_alternatives_with_filters(
+                &[Keywords("marker")],
+                0,
+                None,
+                None,
+                &apps,
+                false,
+            ),
+            Err(StoreError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            store.browse_event_ids_filtered(0, None, None, &apps, false),
+            Err(StoreError::InvalidInput(_))
+        ));
+    }
+    assert!(SqlCipherBrainStore::validate_search_app_filters(&["x".repeat(255)]).is_ok());
+}
+
+#[test]
+fn filtered_metadata_source_ids_preserve_exact_utf8_identity() {
+    use mci_brain::fts_sanitizer::LexicalAlternative::Keywords;
+
+    let (_dir, path) = tmp("filtered_source_ids.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).unwrap();
+    let sources = [
+        "mcp:slack-personal".to_owned(),
+        "mcp:\u{65e5}\u{672c}_notes".to_owned(),
+        "mcp:caf\u{e9}".to_owned(),
+        "mcp:cafe\u{301}".to_owned(),
+        "mcp:O'Brien".to_owned(),
+        "mcp:x') OR 1=1 --".to_owned(),
+        "mcp:x'); DROP TABLE events; --".to_owned(),
+        format!("{}x", "\u{e9}".repeat(127)),
+    ];
+    let ids: Vec<_> = sources
+        .iter()
+        .map(|source| {
+            let mut event = blank_event(100, "needle");
+            event.app_bundle_id = Some(source.clone());
+            store.put_event(&event).unwrap()
+        })
+        .collect();
+    for (source, id) in sources.iter().zip(&ids) {
+        let filters = std::slice::from_ref(source);
+        assert_eq!(
+            store
+                .browse_event_ids_filtered(50, None, None, filters, false)
+                .unwrap(),
+            [*id]
+        );
+        for hits in [
+            store.fts5_search_with_filters("needle", 50, None, None, filters, false),
+            store.fts5_search_alternatives_with_filters(
+                &[Keywords("needle")],
+                50,
+                None,
+                None,
+                filters,
+                false,
+            ),
+        ] {
+            assert_eq!(
+                hits.unwrap().iter().map(|hit| hit.0).collect::<Vec<_>>(),
+                [*id]
+            );
+        }
+    }
+    assert_eq!(store.recent_events(50).unwrap().len(), ids.len());
+}
+
 // ---------------------------------------------------------------------------
 // 8. vec_search — cosine ranking holds; zero-limit empty
 // ---------------------------------------------------------------------------
@@ -512,6 +979,42 @@ fn vec_search_returns_cosine_ranked_hits() {
     assert!((hits[0].1 - 0.914).abs() < 1e-3);
     assert!((hits[1].1 - 0.406).abs() < 1e-3);
     assert!(hits[2].1.abs() < 1e-6);
+}
+
+#[test]
+fn vector_equal_score_cutoff_uses_event_id_tie_break() {
+    let (_dir, path) = tmp("vec_tie.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let mut first_event = blank_event(1, "first");
+    first_event.embedding = Some(axis_unit_vec(0));
+    let mut second_event = blank_event(2, "second");
+    second_event.embedding = Some(axis_unit_vec(0));
+    let first = store.put_event(&first_event).unwrap();
+    let second = store.put_event(&second_event).unwrap();
+
+    let hits = store.vec_search(&axis_unit_vec(0), 1).unwrap();
+
+    assert_eq!(hits, vec![(first.min(second), 1.0)]);
+}
+
+#[test]
+fn filtered_vector_equal_score_cutoff_uses_event_id_tie_break() {
+    let (_dir, path) = tmp("vec_filtered_tie.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let mut first_event = blank_event(1, "first");
+    first_event.app_bundle_id = Some("com.test.tie".into());
+    first_event.embedding = Some(axis_unit_vec(0));
+    let mut second_event = blank_event(2, "second");
+    second_event.app_bundle_id = Some("com.test.tie".into());
+    second_event.embedding = Some(axis_unit_vec(0));
+    let first = store.put_event(&first_event).unwrap();
+    let second = store.put_event(&second_event).unwrap();
+
+    let hits = store
+        .vec_search_filtered(&axis_unit_vec(0), 1, None, Some("com.test.tie"))
+        .unwrap();
+
+    assert_eq!(hits, vec![(first.min(second), 1.0)]);
 }
 
 #[test]
@@ -589,7 +1092,7 @@ fn vec_search_filtered_time_range_matches_manual_subset() {
             let e = store.get_event(*id).unwrap().unwrap();
             e.ts_us >= 150 && e.ts_us <= 350
         })
-        .cloned()
+        .copied()
         .collect();
     assert_eq!(
         filtered, full_in_range,
@@ -850,6 +1353,55 @@ fn events_since_truncates_long_text_to_snippet_cap() {
     let out = store.events_since(0, 10).expect("events_since");
     assert_eq!(out.len(), 1);
     assert!(out[0].text_snippet.len() <= EventRecord::SNIPPET_MAX_CHARS);
+}
+
+#[test]
+fn sampled_events_between_spans_the_whole_window_and_keeps_boundaries() {
+    let (_dir, path) = tmp("sampled_events_between.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in [10_u64, 20, 30, 40, 50, 60, 70] {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+
+    let out = store
+        .sampled_events_between(20, 70, 3)
+        .expect("sampled_events_between");
+    let ts_seq: Vec<u64> = out.iter().map(|record| record.ts_us).collect();
+
+    assert_eq!(ts_seq, vec![20, 40, 60]);
+}
+
+#[test]
+fn sampled_events_between_with_one_slot_keeps_the_newest_event() {
+    let (_dir, path) = tmp("sampled_events_between_one.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    for ts in [10_u64, 20, 30] {
+        store
+            .put_event(&blank_event(ts, &format!("e@{ts}")))
+            .expect("put");
+    }
+
+    let out = store
+        .sampled_events_between(0, 40, 1)
+        .expect("sampled_events_between");
+
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].ts_us, 30);
+}
+
+#[test]
+fn sampled_events_between_zero_limit_returns_empty() {
+    let (_dir, path) = tmp("sampled_events_between_zero.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    store.put_event(&blank_event(10, "anything")).expect("put");
+
+    let out = store
+        .sampled_events_between(0, 20, 0)
+        .expect("sampled_events_between");
+
+    assert!(out.is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1167,8 +1719,8 @@ fn observed_apps_zero_limit_returns_empty() {
 
 /// Two events with the same `url` but distinct `tab_id` values must
 /// round-trip as DISTINCT rows. Pins the V2-P2 fix shape end-to-end
-/// on the brain side: per-tab attribution survives put_event +
-/// get_event without collapsing on the URL key.
+/// on the brain side: per-tab attribution survives `put_event` +
+/// `get_event` without collapsing on the URL key.
 #[test]
 fn put_then_get_round_trips_distinct_tab_ids_under_shared_url() {
     let (_dir, path) = tmp("tab_id_distinct.sqlite");
@@ -1194,7 +1746,7 @@ fn put_then_get_round_trips_distinct_tab_ids_under_shared_url() {
     assert_eq!(got_b.url, Some(url));
 }
 
-/// Inserting an event with `tab_id = None` (OCREvent path; no tab
+/// Inserting an event with `tab_id = None` (`OCREvent` path; no tab
 /// signal) round-trips as NULL on disk and `None` in the read model.
 #[test]
 fn put_event_with_null_tab_id_round_trips_as_none() {
@@ -1270,6 +1822,90 @@ fn delete_event_removes_the_row_and_cascades_vectors() {
 }
 
 #[test]
+fn delete_event_removes_its_unreferenced_encrypted_keyframe_blob() {
+    let (_dir, path) = tmp("delete_event_blob.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let digest = "a".repeat(64);
+    let unrelated_digest = "b".repeat(64);
+    let blob_path = blob_dir.join(format!("{digest}.bin"));
+    let unrelated_path = blob_dir.join(format!("{unrelated_digest}.bin"));
+    std::fs::write(&blob_path, b"encrypted-keyframe").expect("write keyframe");
+    std::fs::write(&unrelated_path, b"unrelated").expect("write unrelated blob");
+
+    let mut event = blank_event(100, "delete me with my keyframe");
+    event.keyframe_blob = Some(digest);
+    let id = store.put_event(&event).expect("put event");
+
+    assert_eq!(store.delete_event(id).expect("delete event"), 1);
+    assert!(!blob_path.exists(), "deleted event blob must be unlinked");
+    assert!(
+        unrelated_path.exists(),
+        "targeted deletion must not sweep unrelated files"
+    );
+}
+
+#[test]
+fn delete_event_reports_post_commit_blob_cleanup_failure_without_lying_about_deletion() {
+    let (_dir, path) = tmp("delete_event_blob_cleanup_failure.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let digest = "e".repeat(64);
+    let invalid_blob_path = blob_dir.join(format!("{digest}.bin"));
+    std::fs::create_dir(&invalid_blob_path).expect("create non-file blob candidate");
+
+    let mut event = blank_event(100, "delete despite cleanup failure");
+    event.keyframe_blob = Some(digest);
+    let id = store.put_event(&event).expect("put event");
+
+    let outcome = store
+        .delete_event_with_outcome(id)
+        .expect("delete transaction committed");
+    assert_eq!(outcome.events_deleted, 1);
+    assert!(outcome.vacuum_ok());
+    assert!(!outcome.blob_cleanup_ok());
+    assert!(
+        store.get_event(id).expect("read after delete").is_none(),
+        "a post-commit cleanup warning must not conceal the committed deletion"
+    );
+    assert!(
+        invalid_blob_path.is_dir(),
+        "non-regular evidence artifacts remain fail-closed for manual inspection"
+    );
+}
+
+#[test]
+fn delete_event_keeps_a_keyframe_blob_until_its_last_reference_is_deleted() {
+    let (_dir, path) = tmp("delete_shared_blob.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+    let digest = "7".repeat(64);
+    let blob_path = blob_dir.join(format!("{digest}.bin"));
+    std::fs::write(&blob_path, b"shared encrypted keyframe").expect("write blob");
+
+    let mut first = blank_event(100, "first reference");
+    first.keyframe_blob = Some(digest.clone());
+    let first_id = store.put_event(&first).expect("put first");
+    let mut second = blank_event(200, "second reference");
+    second.keyframe_blob = Some(digest);
+    let second_id = store.put_event(&second).expect("put second");
+
+    assert_eq!(store.delete_event(first_id).expect("delete first"), 1);
+    assert!(
+        blob_path.exists(),
+        "shared blob must remain while referenced"
+    );
+    assert_eq!(store.delete_event(second_id).expect("delete second"), 1);
+    assert!(!blob_path.exists(), "last-reference deletion removes blob");
+}
+
+#[test]
 fn delete_event_returns_zero_for_missing_id() {
     let (_dir, path) = tmp("delete_missing.sqlite");
     let key = test_key();
@@ -1305,6 +1941,37 @@ fn delete_events_in_range_removes_only_events_in_window() {
 }
 
 #[test]
+fn delete_events_in_range_removes_only_unreferenced_in_window_blobs() {
+    let (_dir, path) = tmp("delete_range_blobs.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let deleted_digest = "c".repeat(64);
+    let kept_digest = "d".repeat(64);
+    let deleted_path = blob_dir.join(format!("{deleted_digest}.bin"));
+    let kept_path = blob_dir.join(format!("{kept_digest}.bin"));
+    std::fs::write(&deleted_path, b"delete").expect("write deleted blob");
+    std::fs::write(&kept_path, b"keep").expect("write kept blob");
+
+    let mut inside = blank_event(200, "inside");
+    inside.keyframe_blob = Some(deleted_digest);
+    store.put_event(&inside).expect("put inside");
+    let mut outside = blank_event(400, "outside");
+    outside.keyframe_blob = Some(kept_digest);
+    store.put_event(&outside).expect("put outside");
+
+    assert_eq!(
+        store
+            .delete_events_in_range(150, 300)
+            .expect("delete range"),
+        1
+    );
+    assert!(!deleted_path.exists(), "in-window blob must be removed");
+    assert!(kept_path.exists(), "out-of-window blob must remain");
+}
+
+#[test]
 fn delete_events_in_range_rejects_inverted_window() {
     let (_dir, path) = tmp("delete_range_bad.sqlite");
     let key = test_key();
@@ -1334,12 +2001,141 @@ fn wipe_all_clears_events_and_leaves_meta_schema_intact() {
 }
 
 #[test]
+fn wipe_all_removes_every_referenced_encrypted_keyframe_blob() {
+    let (_dir, path) = tmp("wipe_blobs.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let first_digest = "e".repeat(64);
+    let second_digest = "f".repeat(64);
+    let first_path = blob_dir.join(format!("{first_digest}.bin"));
+    let second_path = blob_dir.join(format!("{second_digest}.bin"));
+    std::fs::write(&first_path, b"first").expect("write first blob");
+    std::fs::write(&second_path, b"second").expect("write second blob");
+
+    let mut first = blank_event(100, "first");
+    first.keyframe_blob = Some(first_digest);
+    store.put_event(&first).expect("put first");
+    let mut second = blank_event(200, "second");
+    second.keyframe_blob = Some(second_digest);
+    store.put_event(&second).expect("put second");
+
+    assert_eq!(store.wipe_all().expect("wipe all"), 2);
+    assert!(!first_path.exists(), "first wiped blob must be removed");
+    assert!(!second_path.exists(), "second wiped blob must be removed");
+}
+
+#[test]
 fn wipe_all_on_empty_store_returns_zero() {
     let (_dir, path) = tmp("wipe_empty.sqlite");
     let key = test_key();
     let store = SqlCipherBrainStore::new(&path, &key).expect("open");
     let n = store.wipe_all().expect("wipe_all");
     assert_eq!(n, 0);
+}
+
+#[test]
+fn reconcile_keyframe_blobs_removes_only_managed_orphans() {
+    let (_dir, path) = tmp("reconcile_blobs.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+    let referenced_digest = "3".repeat(64);
+    let orphan_digest = "4".repeat(64);
+    let referenced_path = blob_dir.join(format!("{referenced_digest}.bin"));
+    let orphan_path = blob_dir.join(format!("{orphan_digest}.bin"));
+    let unknown_path = blob_dir.join("do-not-touch.txt");
+    let stale_temp_path = blob_dir.join(format!(
+        ".{}.00000000-0000-4000-8000-000000000000.tmp",
+        "5".repeat(64)
+    ));
+    std::fs::write(&referenced_path, b"referenced").expect("write referenced blob");
+    std::fs::write(&orphan_path, b"orphan").expect("write orphan blob");
+    std::fs::write(&unknown_path, b"unknown").expect("write unknown file");
+    std::fs::write(&stale_temp_path, b"partial").expect("write stale temp");
+
+    let mut event = blank_event(100, "referenced");
+    event.keyframe_blob = Some(referenced_digest);
+    store.put_event(&event).expect("put referenced event");
+
+    let stats = store
+        .reconcile_keyframe_blobs(std::time::Duration::ZERO)
+        .expect("reconcile blobs");
+
+    assert_eq!(stats.orphaned_blobs_deleted, 1);
+    assert_eq!(stats.stale_temporary_files_deleted, 1);
+    assert!(referenced_path.exists(), "referenced blob must remain");
+    assert!(!orphan_path.exists(), "managed orphan must be removed");
+    assert!(
+        !stale_temp_path.exists(),
+        "stale managed temp must be removed"
+    );
+    assert!(unknown_path.exists(), "unknown files must never be removed");
+}
+
+#[test]
+fn reconcile_keyframe_blobs_retains_recent_orphans_inside_the_grace_period() {
+    let (_dir, path) = tmp("reconcile_recent_blob.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+    let orphan = blob_dir.join(format!("{}.bin", "8".repeat(64)));
+    std::fs::write(&orphan, b"possibly in flight").expect("write recent orphan");
+
+    let stats = store
+        .reconcile_keyframe_blobs(std::time::Duration::from_secs(3_600))
+        .expect("reconcile blobs");
+
+    assert_eq!(stats.recent_orphans_retained, 1);
+    assert!(
+        orphan.exists(),
+        "recent orphan must survive the grace period"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn reconcile_keyframe_blobs_never_follows_a_managed_name_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let (_dir, path) = tmp("reconcile_symlink_blob.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blob dir");
+    let external = path.parent().expect("brain parent").join("external.bin");
+    std::fs::write(&external, b"external").expect("write external target");
+    let link = blob_dir.join(format!("{}.bin", "9".repeat(64)));
+    symlink(&external, &link).expect("create symlink");
+
+    let stats = store
+        .reconcile_keyframe_blobs(std::time::Duration::ZERO)
+        .expect("reconcile blobs");
+
+    assert_eq!(stats.orphaned_blobs_deleted, 0);
+    assert!(
+        link.symlink_metadata().is_ok(),
+        "symlink must remain untouched"
+    );
+    assert_eq!(std::fs::read(&external).expect("read target"), b"external");
+}
+
+#[test]
+fn reconcile_keyframe_blobs_counts_missing_live_references_without_creating_files() {
+    let (_dir, path) = tmp("reconcile_missing_blob.sqlite");
+    let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
+    let mut event = blank_event(100, "missing keyframe evidence");
+    event.keyframe_blob = Some("a".repeat(64));
+    store.put_event(&event).expect("put event");
+
+    let stats = store
+        .reconcile_keyframe_blobs(std::time::Duration::ZERO)
+        .expect("reconcile blobs");
+
+    assert_eq!(stats.referenced_blobs_missing, 1);
+    assert_eq!(stats.orphaned_blobs_deleted, 0);
+    assert!(!path.parent().expect("brain parent").join("blobs").exists());
 }
 
 // ---------------------------------------------------------------------------
@@ -1354,7 +2150,10 @@ fn wipe_all_on_empty_store_returns_zero() {
 #[test]
 fn retriever_prefilter_matches_full_knn_on_scored_topk() {
     use mci_brain::stubs::FixedDimEmbedder;
-    use mci_brain::{Embedder, HybridRetriever, RetrievalQuery, Retriever};
+    use mci_brain::{
+        Embedder, EvidenceSufficiencyPolicy, HybridRetriever, RetrievalQuery, Retriever,
+        EVIDENCE_SUFFICIENCY_POLICY,
+    };
     use std::sync::Arc;
 
     let (_dir, path) = tmp("prefilter_topk.sqlite");
@@ -1370,14 +2169,20 @@ fn retriever_prefilter_matches_full_knn_on_scored_topk() {
         "test",
     ];
     for i in 0..20_u64 {
-        let text = format!("{} {}", words[(i as usize) % words.len()], "sample");
+        let index = usize::try_from(i).expect("fixture index fits usize");
+        let text = format!("{} {}", words[index % words.len()], "sample");
         let mut ev = blank_event(1_000_000 * (i + 1), &text);
-        ev.app_bundle_id = Some(apps[(i as usize) % 2].to_string());
+        ev.app_bundle_id = Some(apps[index % 2].to_string());
         ev.embedding = Some(embedder.embed_one(&text).unwrap());
         store.put_event(&ev).expect("put");
     }
 
-    let retriever = HybridRetriever::new(store.clone(), embedder.clone(), 30 * 1_000_000);
+    let retriever = HybridRetriever::new(store.clone(), embedder.clone(), 30 * 1_000_000)
+        .with_evidence_policy(EvidenceSufficiencyPolicy {
+            validation_qualified: true,
+            threshold: 0.0,
+            ..EVIDENCE_SUFFICIENCY_POLICY
+        });
 
     // Both queries carry the same app_filter — the retriever code path
     // that runs `vec_search_filtered` (with pre-filter) is the one under

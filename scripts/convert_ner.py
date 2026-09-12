@@ -7,8 +7,8 @@ This is the CEO-ratified V2-P5+ NER path (2026-06-03): GLiNER was dropped
 docs/research/2026-06-03-ner-backbone-convertibility-scan.md). MCI's 5
 kinds are FIXED, so zero-shot is unnecessary; a standard supervised NER
 covers Person/Org/Location and the shipped V2-P4 Tier-1 regex covers
-Date/Time. The default model `dslim/distilbert-NER` is proven-convertible
-on this stack (100% of ops, 100% argmax fidelity FP16-vs-FP32).
+Date/Time. The release model is `dslim/bert-base-NER`; its exact upstream
+revision is pinned below so reconstruction cannot drift with a mutable branch.
 
 Same shape as scripts/convert_embedder.py and scripts/convert_brief_model.py
 (load -> new_ones patch -> jit.trace -> ct.convert), specialized for a
@@ -19,7 +19,7 @@ Rust BIO decoder (P2') consumes.
 
 The per-token logits head does NOT ANE-compile on this stack (the §7.1
 spike: ANECCompile fails in FP16 AND INT8, while the production pooled
-ArcticEmbedS_INT8 compiles clean on the same Mac — so it's the per-token
+ArcticEmbedS_FP16 compiles clean on the same Mac — so it's the per-token
 head, not the environment). Ratification #4 was relaxed accordingly:
 **GPU/CPU residency, footprint-gated in Phase 5.** So the default
 `--compute-units cpu_and_gpu` avoids the ANE gamble; the runtime app sets
@@ -33,7 +33,7 @@ can bake off quality vs footprint. `--variants both` (default) writes both.
 
 # Usage
 
-    # default: dslim/distilbert-NER, FP16 + INT8, GPU/CPU, compile + verify
+    # default: dslim/bert-base-NER, FP16 + INT8, GPU/CPU, compile + verify
     .venv-ml/bin/python scripts/convert_ner.py --verify --compile
 
     # one precision / a different model / a flexible max len
@@ -53,7 +53,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_MODEL = "dslim/distilbert-NER"
+DEFAULT_MODEL = "dslim/bert-base-NER"
+DEFAULT_REVISION = "d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc"
 DEFAULT_OUT_DIR = "models"
 # DistilBERT/BERT support 512; 256 is plenty for an OCR/text-chunk event and
 # keeps the model lighter. The seq dim is flexible (RangeDim) up to this.
@@ -132,6 +133,7 @@ def _compile_mlmodelc(mlpackage_path: Path) -> Path | None:
 
 def convert(
     model_repo: str,
+    revision: str,
     out_dir: str,
     variants: list[str],
     compute_units: str,
@@ -151,9 +153,13 @@ def convert(
 
     _patch_new_ones(torch)
 
-    log.info("Loading %s ...", model_repo)
-    tokenizer = AutoTokenizer.from_pretrained(model_repo)
-    model = AutoModelForTokenClassification.from_pretrained(model_repo, torch_dtype=torch.float32)
+    log.info("Loading %s at %s ...", model_repo, revision)
+    tokenizer = AutoTokenizer.from_pretrained(model_repo, revision=revision)
+    model = AutoModelForTokenClassification.from_pretrained(
+        model_repo,
+        revision=revision,
+        torch_dtype=torch.float32,
+    )
     model.eval()
     id2label = {int(k): v for k, v in model.config.id2label.items()}
     log.info("labels (%d): %s", len(id2label), list(id2label.values()))
@@ -261,6 +267,11 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", default=DEFAULT_MODEL,
                     help=f"HF token-classification model (default {DEFAULT_MODEL})")
+    ap.add_argument(
+        "--revision",
+        default=DEFAULT_REVISION,
+        help=f"immutable Hugging Face commit (default {DEFAULT_REVISION})",
+    )
     ap.add_argument("--output-dir", default=DEFAULT_OUT_DIR,
                     help="dir for the .mlpackage/.mlmodelc + sidecars (default models/)")
     ap.add_argument("--variants", choices=["both", "fp16", "int8"], default="both",
@@ -279,7 +290,7 @@ def main() -> int:
         return _env_check()
 
     variants = ["fp16", "int8"] if args.variants == "both" else [args.variants]
-    convert(args.model, args.output_dir, variants, args.compute_units,
+    convert(args.model, args.revision, args.output_dir, variants, args.compute_units,
             args.max_len, args.verify, args.compile)
     return 0
 

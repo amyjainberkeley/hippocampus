@@ -12,8 +12,10 @@
     <string>Hippocampus</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>HippocampusAppGroupIdentifier</key>
+	<string>group.ai.hippocampus</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -29,7 +31,7 @@
     <key>NSAccessibilityUsageDescription</key>
     <string>Hippocampus uses Accessibility to detect password fields and secure input, so it can automatically stop capturing when you type sensitive information.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Hippocampus reads the URL of your active browser tab so your brain knows what page you were looking at. No page content is sent anywhere.</string>
+    <string>Hippocampus reads your active browser tab's URL and checks whether the window is normal or private so it can exclude private windows from capture and save allowed browsing context to your local memory. Your memory stays on this Mac unless you choose to share it.</string>
     <key>NSCalendarsUsageDescription</key>
     <string>Hippocampus reads your current calendar event so each captured moment is tagged with "what meeting was happening right now." Only events whose time window covers right now are read; no past events, no event bodies, no attendee lists leave your Mac.</string>
     <key>NSContactsUsageDescription</key>
@@ -47,27 +49,18 @@
             </array>
         </dict>
     </array>
-    <!-- Sparkle 2.x auto-update configuration.
-         Feed URL is co-hosted with the DMG on the Vercel landing surface
-         until the `hippocampus.ai` custom domain is provisioned (OWNER_TASKS #3);
-         at that point the URL flips to https://appcast.hippocampus.ai/appcast.xml
-         per docs/appcast-hosting.md, and Sparkle picks it up on the next reship.
-         SUPublicEDKey is a placeholder Ed25519 public key — Amy runs
-         scripts/sparkle-keygen.sh (OWNER_TASKS #4) to mint the real keypair,
-         which replaces this string. The placeholder means unsigned builds
-         will fetch the feed but reject any <item> until the real key is
-         wired — deliberate; keeps the pipeline testable end-to-end without
-         shipping trust before the key is in 1Password. -->
+    <!-- Sparkle 2.x auto-update configuration. The feed is published from the
+         protected github-pages environment only after its draft release has
+         been inspected. The release workflow proves that the private signing
+         key matches SUPublicEDKey before it creates the draft. -->
     <key>SUFeedURL</key>
-    <string>https://hippocampus-swart.vercel.app/appcast.xml</string>
+    <string>https://amyjainberkeley.github.io/hippocampus/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>XRC6iJSDpOpPuA78CqB0vC6Lw1YUyZalLIXgyBCfG00=</string>
+    <string>JyMJvusOjdVeoHr5YsyTBywtaNtj5qtWGDH1Kxyi1ng=</string>
     <key>SUEnableSystemProfiling</key>
     <false/>
-    <key>SUEnableInstallerLauncher</key>
-    <true/>
     <key>SUEnableAutomaticChecks</key>
-    <true/>
+    <false/>
     <key>SUAutomaticallyUpdate</key>
     <false/>
     <key>SUScheduledCheckInterval</key>

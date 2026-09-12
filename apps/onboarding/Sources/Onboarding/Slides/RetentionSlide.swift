@@ -14,12 +14,28 @@ struct RetentionSlide: View {
                         .multilineTextAlignment(.center)
                 }
 
-                OnboardingDesign.TypeRamp.body("Choose how long Hippocampus keeps your memories. Deleted data is crypto-shredded — the encryption key for that segment is destroyed.")
+                OnboardingDesign.TypeRamp.body("Choose how long Hippocampus keeps your memories. Deleted memories are removed as database rows and local storage is compacted.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: OnboardingDesign.Width.prose)
 
                 retentionPicker
+
+                if retentionVM.needsReview {
+                    Label("Needs review: confirm your earlier retention choice to resume automatic deletion. Capture continues while you review.", systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: OnboardingDesign.Width.prose)
+                }
+
+                if let saveError = retentionVM.saveError {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(OnboardingDesign.Palette.excluded)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: OnboardingDesign.Width.prose)
+                }
 
                 blockedAppsPreview
             }
@@ -32,6 +48,7 @@ struct RetentionSlide: View {
             HStack(spacing: OnboardingDesign.Space.md) {
                 retentionCard(.sevenDays)
                 retentionCard(.thirtyDays)
+                retentionCard(.ninetyDays)
                 retentionCard(.forever)
             }
 
@@ -73,7 +90,7 @@ struct RetentionSlide: View {
             VStack(spacing: OnboardingDesign.Space.sm - 2) {
                 Text(policy.displayName)
                     .font(.system(size: 15, weight: .semibold))
-                if policy == .forever {
+                if policy == .ninetyDays {
                     Text("Default")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)

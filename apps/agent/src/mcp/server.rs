@@ -7,9 +7,9 @@
 //!
 //! # Read-only invariant (structural)
 //!
-//! [`Server::dispatch`] reaches the `BrainReader` only via five named
+//! [`Server::dispatch`] reaches the `BrainReader` only via six named
 //! arms — `Recall` / `EventsSince` / `Stats` / `Episodes` /
-//! `EventsByApp`. There is **no fall-through** branch that touches the
+//! `EventsByApp` / `Context`. There is **no fall-through** branch that touches the
 //! brain; an unknown tool name returns `METHOD_NOT_FOUND` synchronously.
 //! The `BrainReader` trait itself has no mutating methods (per
 //! `brain_reader.rs`).
@@ -22,7 +22,11 @@ use std::sync::{
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
-use crate::mcp::brain_reader::{BrainReader, BrainReaderError};
+use crate::context_packet::{
+    ContextBudget, DEFAULT_CONTEXT_EVIDENCE, DEFAULT_CONTEXT_TOKENS, MAX_CONTEXT_EVIDENCE,
+    MAX_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS,
+};
+use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
 use crate::mcp::jsonrpc::{
     JsonRpcId, JsonRpcRequest, JsonRpcResponse, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
     PARSE_ERROR, SERVER_ERROR_GENERIC,
@@ -36,8 +40,7 @@ const MAX_EPISODES_LIMIT: usize = 100;
 /// Default `limit` for `mci_events_by_app` when the client omits it.
 const DEFAULT_EVENTS_BY_APP_LIMIT: usize = 50;
 /// Hard cap for `mci_events_by_app`'s `limit` parameter.
-const MAX_EVENTS_BY_APP_LIMIT: usize = 500;
-
+const MAX_EVENTS_BY_APP_LIMIT: usize = 1000;
 /// MCP protocol version this server advertises in `initialize`.
 ///
 /// The MCP spec uses calendar-versioned protocol revisions; Claude Code
@@ -75,6 +78,8 @@ pub struct ServerCounters {
     pub episodes_count: AtomicU64,
     /// `mci_events_by_app` invocations.
     pub events_by_app_count: AtomicU64,
+    /// `mci_context` invocations.
+    pub context_count: AtomicU64,
     /// Frames that did not parse as JSON-RPC 2.0.
     pub parse_error_count: AtomicU64,
     /// Frames that named an unknown method or unknown tool.
@@ -84,13 +89,14 @@ pub struct ServerCounters {
 impl ServerCounters {
     /// Snapshot the counters atomically-as-of-now.
     #[must_use]
-    pub fn snapshot(&self) -> (u64, u64, u64, u64, u64, u64, u64) {
+    pub fn snapshot(&self) -> (u64, u64, u64, u64, u64, u64, u64, u64) {
         (
             self.recall_count.load(Ordering::SeqCst),
             self.events_since_count.load(Ordering::SeqCst),
             self.stats_count.load(Ordering::SeqCst),
             self.episodes_count.load(Ordering::SeqCst),
             self.events_by_app_count.load(Ordering::SeqCst),
+            self.context_count.load(Ordering::SeqCst),
             self.parse_error_count.load(Ordering::SeqCst),
             self.unknown_method_count.load(Ordering::SeqCst),
         )
@@ -190,12 +196,13 @@ impl Server {
                     "name": "hippocampus",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
-                "instructions": "Hippocampus is your screen memory. It continuously captures \
-                    what you see on your Mac and stores it in a private, encrypted, local-only \
-                    brain. You can search it with mci_recall, browse recent activity with \
+                "instructions": "Hippocampus is your local work memory. It records permitted \
+                    context after you opt in and stores it in a private, encrypted brain on \
+                    this Mac. You can search it with mci_recall, browse recent activity with \
                     mci_events_since, check capture status with mci_stats, see work sessions \
-                    with mci_episodes, or filter by app with mci_events_by_app. All data stays \
-                    on this Mac — nothing is sent to any server.",
+                    with mci_episodes, filter by app with mci_events_by_app, or request a \
+                    bounded cited handoff with mci_context. Hippocampus keeps no cloud copy; \
+                    content returned through MCP is handled by the AI client you chose.",
             }),
         )
     }
@@ -236,7 +243,7 @@ impl Server {
             return JsonRpcResponse::err(id, METHOD_NOT_FOUND, format!("unknown tool: {name}"));
         };
 
-        // STRUCTURAL READ-ONLY POINT — five named branches, no fall-through.
+        // STRUCTURAL READ-ONLY POINT — six named branches, no fall-through.
         match tool {
             ToolName::Recall => {
                 self.counters.recall_count.fetch_add(1, Ordering::SeqCst);
@@ -261,6 +268,10 @@ impl Server {
                     .events_by_app_count
                     .fetch_add(1, Ordering::SeqCst);
                 self.handle_events_by_app(id, args)
+            }
+            ToolName::Context => {
+                self.counters.context_count.fetch_add(1, Ordering::SeqCst);
+                self.handle_context(id, args)
             }
         }
     }
@@ -287,37 +298,8 @@ impl Server {
             .clamp(1, MAX_RECALL_LIMIT);
 
         match self.reader.recall(&parsed.query, limit) {
-            Ok(hits) => {
-                let hits_json: Vec<serde_json::Value> = hits
-                    .iter()
-                    .map(|h| {
-                        serde_json::json!({
-                            "event_id": h.record.event_id.0,
-                            "ts_us": h.record.ts_us,
-                            "app_bundle_id": h.record.app_bundle_id,
-                            "window_title": h.record.window_title,
-                            "url": h.record.url,
-                            "text_snippet": h.record.text_snippet,
-                            "score": h.score,
-                            "entities": h.entities,
-                            "linked_event_ids": h.linked_event_ids,
-                        })
-                    })
-                    .collect();
-                JsonRpcResponse::ok(
-                    id,
-                    serde_json::json!({
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": serde_json::to_string(&hits_json)
-                                    .unwrap_or_else(|_| "[]".to_owned()),
-                            }
-                        ],
-                        "hits": hits_json,
-                        "isError": false,
-                    }),
-                )
+            Ok(outcome) => {
+                JsonRpcResponse::ok(id, recall_wire_result(outcome, self.reader.as_ref()))
             }
             Err(e) => brain_err_to_response(id, &e),
         }
@@ -357,6 +339,7 @@ impl Server {
                             "window_title": r.window_title,
                             "url": r.url,
                             "text_snippet": r.text_snippet,
+                            "source_kind": self.reader.event_source(r.event_id).as_str(),
                         })
                     })
                     .collect();
@@ -501,6 +484,7 @@ impl Server {
                             "window_title": r.window_title,
                             "url": r.url,
                             "text_snippet": r.text_snippet,
+                            "source_kind": self.reader.event_source(r.event_id).as_str(),
                         })
                     })
                     .collect();
@@ -522,6 +506,134 @@ impl Server {
             Err(e) => brain_err_to_response(id, &e),
         }
     }
+
+    fn handle_context(&self, id: JsonRpcId, args: serde_json::Value) -> JsonRpcResponse {
+        #[derive(Deserialize)]
+        struct ContextArgs {
+            #[serde(default)]
+            focus: Option<String>,
+            #[serde(default)]
+            project: Option<String>,
+            #[serde(default)]
+            max_tokens: Option<usize>,
+            #[serde(default)]
+            max_evidence: Option<usize>,
+        }
+        let parsed = match serde_json::from_value::<ContextArgs>(args) {
+            Ok(value) => value,
+            Err(error) => {
+                return JsonRpcResponse::err(
+                    id,
+                    INVALID_PARAMS,
+                    format!("mci_context args: {error}"),
+                )
+            }
+        };
+        let focus_value = parsed.focus.or(parsed.project);
+        let focus = focus_value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let budget = ContextBudget::new(
+            parsed
+                .max_tokens
+                .unwrap_or(DEFAULT_CONTEXT_TOKENS)
+                .clamp(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS),
+            parsed
+                .max_evidence
+                .unwrap_or(DEFAULT_CONTEXT_EVIDENCE)
+                .clamp(1, MAX_CONTEXT_EVIDENCE),
+        );
+
+        match self.reader.context(focus, budget) {
+            Ok(packet) => {
+                let text = serde_json::to_string(&packet).unwrap_or_else(|_| {
+                    "{\"outcome\":\"nothing_available\",\"serialization_error\":true}".to_owned()
+                });
+                JsonRpcResponse::ok(
+                    id,
+                    serde_json::json!({
+                        "content": [{"type": "text", "text": text}],
+                        "packet": packet,
+                        "isError": false,
+                    }),
+                )
+            }
+            Err(error) => brain_err_to_response(id, &error),
+        }
+    }
+}
+
+fn hit_json(hit: &McpHit, reader: &dyn BrainReader) -> serde_json::Value {
+    serde_json::json!({
+        "event_id": hit.record.event_id.0,
+        "ts_us": hit.record.ts_us,
+        "app_bundle_id": hit.record.app_bundle_id,
+        "window_title": hit.record.window_title,
+        "url": hit.record.url,
+        "text_snippet": hit.record.text_snippet,
+        "source_kind": reader.event_source(hit.record.event_id).as_str(),
+        "score": hit.score,
+        "entities": hit.entities,
+        "linked_event_ids": hit.linked_event_ids,
+    })
+}
+
+fn recall_wire_result(outcome: McpRecallOutcome, reader: &dyn BrainReader) -> serde_json::Value {
+    let payload = match outcome {
+        McpRecallOutcome::Matched { hits } => serde_json::json!({
+            "outcome": "matched",
+            "hits": hits.iter().map(|hit| hit_json(hit, reader)).collect::<Vec<_>>(),
+            "related_context": [],
+            "contradicting_context": [],
+        }),
+        McpRecallOutcome::Contradicted { evidence } => serde_json::json!({
+            "outcome": "contradicted",
+            "hits": [],
+            "related_context": [],
+            "contradicting_context": evidence.iter().map(|hit| hit_json(hit, reader)).collect::<Vec<_>>(),
+        }),
+        McpRecallOutcome::NothingMatched { reason } => serde_json::json!({
+            "outcome": "nothing_matched",
+            "reason": match reason {
+                mci_brain::NothingMatchedReason::NoCandidates => "no_candidates",
+                mci_brain::NothingMatchedReason::EvidenceFloor => "evidence_floor",
+                mci_brain::NothingMatchedReason::ZeroLimit => "zero_limit",
+            },
+            "hits": [],
+            "related_context": [],
+            "contradicting_context": [],
+        }),
+        McpRecallOutcome::Degraded {
+            degradation,
+            related_context,
+        } => serde_json::json!({
+            "outcome": "degraded",
+            "degradation": match degradation {
+                mci_brain::RetrievalDegradation::EmbeddingsUnavailable => "embeddings_unavailable",
+                mci_brain::RetrievalDegradation::LexicalUnavailable => "lexical_unavailable",
+                mci_brain::RetrievalDegradation::LexicalAndEmbeddingsUnavailable => "lexical_and_embeddings_unavailable",
+                mci_brain::RetrievalDegradation::EvidenceSufficiencyUnqualified => "evidence_sufficiency_unqualified",
+                mci_brain::RetrievalDegradation::EvidenceVerifierUnavailable => "evidence_verifier_unavailable",
+            },
+            "hits": [],
+            "related_context": related_context.iter().map(|hit| hit_json(hit, reader)).collect::<Vec<_>>(),
+            "contradicting_context": [],
+        }),
+    };
+    let text = serde_json::to_string(&payload).unwrap_or_else(|_| {
+        "{\"outcome\":\"degraded\",\"degradation\":\"serialization_failed\"}".to_owned()
+    });
+    let mut result = payload;
+    let object = result
+        .as_object_mut()
+        .expect("recall wire payload is always an object");
+    object.insert(
+        "content".into(),
+        serde_json::json!([{"type": "text", "text": text}]),
+    );
+    object.insert("isError".into(), serde_json::Value::Bool(false));
+    result
 }
 
 fn brain_err_to_response(id: JsonRpcId, e: &BrainReaderError) -> JsonRpcResponse {

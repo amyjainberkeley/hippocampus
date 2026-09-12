@@ -10,11 +10,8 @@
 // Signals (all read-only OS probes):
 //   - Screen Recording — `CGPreflightScreenCaptureAccess()`
 //   - Accessibility    — `AXIsProcessTrusted()`
-//   - Full Disk Access — indirect: try to read `~/Library/Safari/
-//                        Bookmarks.plist` (a well-known FDA-protected
-//                        location). A successful open ⇒ granted; a
-//                        POSIX EPERM ⇒ denied; missing-file / other
-//                        errors ⇒ unknown (safer than a false-denied).
+//   - Full Disk Access — available to explicit deep-hook callers, but
+//                        not monitored as a global capture requirement.
 //   - Automation       — STUBBED for follow-up per mission constraint
 //                        (per-target `AEDeterminePermissionToAutomateTarget`
 //                        is high-implementation-cost + Apple-Events
@@ -181,10 +178,10 @@ public final class TCCStatusMonitor: @unchecked Sendable {
 
     private let probe: TCCProbe
     private let pollIntervalNs: UInt64
-    /// The surfaces the monitor polls. Automation is included so a
-    /// future PR flipping `DefaultTCCProbe.probeAutomation()` from
-    /// `.unknown` to a real verdict starts firing transitions with no
-    /// wiring change. Callers can shrink the set for tests.
+    /// The surfaces the monitor polls. Production defaults to the two
+    /// permissions required to apply the screen-capture privacy policy.
+    /// Optional deep-hook permissions are scoped to those hooks and must not
+    /// globally pause screen capture.
     private let surfaces: [TCCSurface]
 
     private let lock = NSLock()
@@ -204,7 +201,7 @@ public final class TCCStatusMonitor: @unchecked Sendable {
     public init(
         probe: TCCProbe = DefaultTCCProbe(),
         pollIntervalNs: UInt64 = 2_000_000_000, // 0.5 Hz per mission constraint
-        surfaces: [TCCSurface] = TCCSurface.allCases,
+        surfaces: [TCCSurface] = [.screenRecording, .accessibility],
         observer: (any Observer)? = nil
     ) {
         self.probe = probe
@@ -236,6 +233,17 @@ public final class TCCStatusMonitor: @unchecked Sendable {
         return published
     }
 
+    /// Put a surface back behind the denied-to-granted debounce after an
+    /// observer could not act on a published grant. Without this reset, the
+    /// monitor would keep seeing `granted == granted` and never notify the
+    /// observer to retry its failed resume.
+    public func requireFreshGrantForRetry(surface: TCCSurface) {
+        lock.lock(); defer { lock.unlock() }
+        guard surfaces.contains(surface) else { return }
+        published[surface] = .denied
+        grantRepeats[surface] = 0
+    }
+
     /// Start the poll loop. Idempotent. Callers should invoke
     /// `seedInitialSnapshot()` first (this method does NOT seed —
     /// otherwise the first tick would fire a spurious transition for
@@ -256,11 +264,24 @@ public final class TCCStatusMonitor: @unchecked Sendable {
 
     /// Stop the poll loop. Idempotent.
     public func stop() {
+        let t = takePollTask()
+        t?.cancel()
+    }
+
+    /// Cancel the poll loop and wait for any in-flight observer callback. This
+    /// is the shutdown boundary used by the capture owner.
+    public func stopAndDrain() async {
+        let t = takePollTask()
+        t?.cancel()
+        await t?.value
+    }
+
+    private func takePollTask() -> Task<Void, Never>? {
         lock.lock()
         let t = pollTask
         pollTask = nil
         lock.unlock()
-        t?.cancel()
+        return t
     }
 
     /// One poll cycle across all surfaces. `internal` so tests can

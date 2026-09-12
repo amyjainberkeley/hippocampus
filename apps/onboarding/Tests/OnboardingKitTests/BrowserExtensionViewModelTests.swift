@@ -16,6 +16,7 @@ final class BrowserExtensionViewModelTests: XCTestCase {
     private final class FakeLauncher: BrowserLauncher, @unchecked Sendable {
         var openCalls: [(String, String)] = []
         var revealCalls: [URL] = []
+        var safariSettingsCalls = 0
         var returnSuccess = true
 
         func openInBrowser(browserName: String, url: String) -> Bool {
@@ -26,11 +27,27 @@ final class BrowserExtensionViewModelTests: XCTestCase {
         func revealInFinder(_ url: URL) {
             revealCalls.append(url)
         }
+
+        func openSafariSettings() {
+            safariSettingsCalls += 1
+        }
     }
 
     private struct FakeLocator: ChromiumExtensionLocator {
         let url: URL?
         func bundledChromiumExtensionURL() -> URL? { url }
+    }
+
+    func testViewModelHasNoDirectBrowserSideEffectsOutsideLauncher() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "Sources/OnboardingKit/BrowserExtensionViewModel.swift"), encoding: .utf8)
+        let viewModel = source.components(separatedBy: "// MARK: - Chromium extension locator")[0]
+        XCTAssertFalse(viewModel.contains("NSWorkspace.shared"),
+                       "All browser launches must pass through the injected launcher")
+        XCTAssertFalse(viewModel.contains("ChildProcessEnvironment.makeProcess"),
+                       "A fake launcher must prevent real child processes")
     }
 
     func testRowsPopulatedFromDetector() {
@@ -120,6 +137,7 @@ final class BrowserExtensionViewModelTests: XCTestCase {
         XCTAssertEqual(vm.rows[0].installInstructions?.unpackedDirPath, dir.path)
         XCTAssertTrue(vm.rows[0].installInstructions?.didOpenBrowser ?? false)
         XCTAssertEqual(vm.rows[0].installInstructions?.browserName, "Chrome")
+        XCTAssertEqual(launcher.safariSettingsCalls, 0)
     }
 
     func testInstallChromiumSurfacesFailureWhenOpenFails() {
@@ -149,7 +167,7 @@ final class BrowserExtensionViewModelTests: XCTestCase {
         XCTAssertEqual(vm.rows[0].installInstructions?.browserName, "Arc")
     }
 
-    func testInstallSafariDoesNotSpawnChromium() {
+    func testInstallSafariUsesInjectedLauncherWithoutChromiumSideEffects() {
         let launcher = FakeLauncher()
         let vm = BrowserExtensionViewModel(
             detector: StubBrowserDetector(browsers: [safari]),
@@ -157,6 +175,9 @@ final class BrowserExtensionViewModelTests: XCTestCase {
             browserLauncher: launcher
         )
         vm.installAction(for: safari)
+        XCTAssertEqual(launcher.safariSettingsCalls, 1)
         XCTAssertTrue(launcher.openCalls.isEmpty, "Safari install must not invoke chromium launcher")
+        XCTAssertTrue(launcher.revealCalls.isEmpty)
+        XCTAssertNil(vm.rows[0].installInstructions)
     }
 }

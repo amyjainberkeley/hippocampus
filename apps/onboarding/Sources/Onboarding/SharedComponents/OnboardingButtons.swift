@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Hippocampus onboarding button ladder — filled pill (primary),
+/// The Hippocampus onboarding button ladder — filled control (primary),
 /// ghost (secondary), text-only (tertiary). One filled CTA per screen,
 /// everything else steps down the ladder (Stripe "pill / ghost / text"
 /// convention from the peer study). Press feedback is a calm scale +
@@ -20,7 +20,11 @@ struct PrimaryCTAStyle: ButtonStyle {
                 .padding(.horizontal, OnboardingDesign.Space.xl)
                 .padding(.vertical, OnboardingDesign.Space.md)
                 .background(
-                    Capsule().fill(OnboardingDesign.Palette.accent)
+                    RoundedRectangle(
+                        cornerRadius: OnboardingDesign.Radius.control,
+                        style: .continuous
+                    )
+                    .fill(OnboardingDesign.Palette.accent)
                 )
                 .opacity(pressed ? 0.85 : 1)
         }
@@ -40,10 +44,18 @@ struct SecondaryCTAStyle: ButtonStyle {
                 .padding(.horizontal, OnboardingDesign.Space.xl)
                 .padding(.vertical, OnboardingDesign.Space.md)
                 .background(
-                    Capsule().fill(OnboardingDesign.Palette.cardFill)
+                    RoundedRectangle(
+                        cornerRadius: OnboardingDesign.Radius.control,
+                        style: .continuous
+                    )
+                    .fill(OnboardingDesign.Palette.cardFill)
                 )
                 .overlay(
-                    Capsule().stroke(hairline.color, lineWidth: hairline.width)
+                    RoundedRectangle(
+                        cornerRadius: OnboardingDesign.Radius.control,
+                        style: .continuous
+                    )
+                    .stroke(hairline.color, lineWidth: hairline.width)
                 )
                 .opacity(pressed ? 0.7 : 1)
         }
@@ -95,7 +107,12 @@ private struct CTABody<Style: View>: View {
     var body: some View {
         style(configuration.label, configuration.isPressed, hairline)
             .frame(maxWidth: fullWidth ? .infinity : nil)
-            .contentShape(Capsule())
+            .contentShape(
+                RoundedRectangle(
+                    cornerRadius: OnboardingDesign.Radius.control,
+                    style: .continuous
+                )
+            )
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
             .animation(
                 OnboardingDesign.Motion.resolve(.easeOut(duration: 0.12),

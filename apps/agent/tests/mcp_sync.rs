@@ -76,7 +76,7 @@ fn read_all(store: &SqlCipherBrainStore) -> Vec<mci_brain::Event> {
     for i in 1u64..500 {
         match store.get_event(EventId(i)) {
             Ok(Some(ev)) => out.push(ev),
-            Ok(None) => continue,
+            Ok(None) => {}
             Err(_) => break,
         }
     }
@@ -92,6 +92,13 @@ async fn run_cli(home: &Path, db_path: &Path) -> (i32, String) {
         .arg("--db-path")
         .arg(db_path)
         .env("HOME", home)
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.mcp-sync.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", KEY_HEX)
         .env_remove("MCI_DB_PATH")
         .env_remove("MCI_CRASH_REPORT_URL")
@@ -208,7 +215,7 @@ async fn a_second_sync_writes_nothing() {
     );
     assert_eq!(
         second.resources_materialized, 0,
-        "nothing is re-read, so nothing is re-materialized"
+        "an unchanged body is re-read for change detection but not re-materialized"
     );
     assert_eq!(
         second.resources_discovered, 2,
@@ -263,6 +270,57 @@ async fn a_new_resource_after_a_sync_is_picked_up() {
 
     let bodies: Vec<String> = read_all(&store).into_iter().map(|e| e.text).collect();
     assert!(bodies.iter().any(|b| b.contains("brand new body")));
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn changed_content_at_the_same_uri_appends_a_new_revision() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home.path().join("brain.sqlite"));
+
+    let server = StubMcpServer::start().await;
+    server
+        .set_resources(vec![StubResource::new(
+            "svc://roadmap",
+            "roadmap",
+            "Launch target is Friday.",
+        )])
+        .await;
+    let cfg = write_config(home.path(), &one_server_toml("svc", server.port()), 0o600);
+
+    let SyncOutcome::Ran(first) = run_mcp_sync(&cfg, Arc::clone(&store)).await.expect("first")
+    else {
+        panic!("first run should sync");
+    };
+    assert_eq!(first.events_written, 1);
+
+    server
+        .set_resources(vec![StubResource::new(
+            "svc://roadmap",
+            "roadmap",
+            "Launch target moved to Monday.",
+        )])
+        .await;
+
+    let SyncOutcome::Ran(second) = run_mcp_sync(&cfg, Arc::clone(&store))
+        .await
+        .expect("second")
+    else {
+        panic!("second run should sync");
+    };
+    assert_eq!(
+        second.events_written, 1,
+        "a stable resource identity must not hide a changed revision"
+    );
+
+    let bodies: Vec<String> = read_all(&store)
+        .into_iter()
+        .map(|event| event.text)
+        .collect();
+    assert_eq!(bodies.len(), 2);
+    assert!(bodies.iter().any(|body| body.contains("Friday")));
+    assert!(bodies.iter().any(|body| body.contains("Monday")));
 
     server.shutdown().await;
 }

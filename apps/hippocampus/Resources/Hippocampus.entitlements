@@ -8,6 +8,8 @@
 	<false/>
 	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
 	<false/>
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.ai.hippocampus</string>

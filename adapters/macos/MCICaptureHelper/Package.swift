@@ -5,8 +5,8 @@
 // Phase 1 cycle 1 (Director-Recording, CSO sign-off). Per ADR-0002 (stack
 // split) + ADR-0007 (separate signed Swift helper process). The Swift helper
 // owns the SCStream lifecycle, runs the ADR-0013 sensitive-surface
-// suppression cascade BEFORE any frame/metadata crosses IPC, and ships the
-// HEVC keyframe encode via VideoToolbox.
+// suppression cascade before any frame/metadata crosses IPC, and retains
+// only post-OCR, condensed, authenticated evidence.
 //
 // macOS 14+ deployment target — ScreenCaptureKit needs 12.3+, but the
 // suppression cascade prefers the modern SCContentFilter exclusion APIs
@@ -20,6 +20,9 @@ let package = Package(
         .executable(name: "mci-capture-helper", targets: ["MCICaptureHelper"]),
         .library(name: "MCICaptureHelperKit", targets: ["MCICaptureHelperKit"]),
     ],
+    dependencies: [
+        .package(path: "../MCIKeyframeCodec"),
+    ],
     targets: [
         .executableTarget(
             name: "MCICaptureHelper",
@@ -31,6 +34,9 @@ let package = Package(
         ),
         .target(
             name: "MCICaptureHelperKit",
+            dependencies: [
+                .product(name: "MCIKeyframeCodec", package: "MCIKeyframeCodec"),
+            ],
             path: "Sources/MCICaptureHelperKit",
             resources: [
                 // ADR-0013 §3 + ADR-0015 §5 + ADR-0017 §3.1 — CSO-ratified
@@ -43,12 +49,43 @@ let package = Package(
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Security"),
             ]
         ),
         .testTarget(
             name: "MCICaptureHelperKitTests",
-            dependencies: ["MCICaptureHelperKit"],
+            dependencies: [
+                "MCICaptureHelperKit",
+                .product(name: "MCIKeyframeCodec", package: "MCIKeyframeCodec"),
+            ],
             path: "Tests/MCICaptureHelperKitTests"
+        ),
+        .executableTarget(
+            name: "OCRQualityProbe",
+            dependencies: ["MCICaptureHelperKit"],
+            path: "Tests/Fixtures/OCRQualityProbe"
+        ),
+        .executableTarget(
+            name: "Task4CaptureBehavior",
+            dependencies: ["MCICaptureHelperKit"],
+            path: "Tests/Fixtures/Task4CaptureBehavior"
+        ),
+        .executableTarget(
+            name: "Task4R1Behavior",
+            dependencies: ["MCICaptureHelperKit"],
+            path: "Tests/Fixtures/Task4R1Behavior"
+        ),
+        .executableTarget(
+            name: "CaptureSourcePolicyBehavior",
+            dependencies: ["MCICaptureHelperKit"],
+            path: "Tests/Fixtures/CaptureSourcePolicyBehavior"
+        ),
+        .executableTarget(
+            name: "HelperReadinessBehavior",
+            dependencies: ["MCICaptureHelperKit"],
+            path: "Tests/Fixtures/HelperReadinessBehavior"
         ),
     ]
 )

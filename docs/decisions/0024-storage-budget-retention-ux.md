@@ -1,5 +1,16 @@
 # ADR-0024 — Storage Budget + Retention UX
 
+> **Implementation clarification, September 7, 2026:** The decision below is
+> historical design intent, not a description of the shipped product. There is
+> no enforced 25 GB budget, budget notification, growth modal, budget-driven
+> pruning, or fleet-managed cap. Current retention is age-based. The JPEG
+> encoder replaced the assumed HEIC path; SQLCipher encryption does not compress
+> text. The growth estimates below were not measured on today's implementation.
+> Explicit, bounded storage accounting now covers the database, WAL, SHM and
+> managed blobs, not a scan on every write. See [current status](../STATUS.md)
+> and the [cost and storage audit](../guide/cost-and-storage.md) before making
+> product or capacity claims. No automatic deletion is authorized by this note.
+
 - Status: Accepted (2026-05-21; ratifies the storage budget decision from the CEO EOD discussion).
 - Owners: **Director-Brain** (storage accounting + purge logic) + **Director-Recording** (onboarding UX + menu bar warning)
 - Reviewers: CTO (sequencing); CEO (ratification)
@@ -116,10 +127,12 @@ Workspace admins can set a fleet-wide default cap via workspace policy:
 
 When events are purged:
 
-1. The purger collects all `blob_path` values from the events being deleted.
-2. Blob files are `unlink`ed from the blob directory.
+1. The purger collects all canonical `events.keyframe_blob` SHA-256 digests from the events being deleted.
+2. After the database transaction commits, unreferenced `blobs/<digest>.bin` files are `unlink`ed from the managed blob directory.
 3. If a blob is referenced by multiple events (unlikely but possible with dedupe), it is only deleted when the last referencing event is purged.
 4. The blob directory is not `VACUUM`ed (it's a filesystem directory, not SQLite) — `unlink` reclaims space immediately.
+5. Every retention cycle also reconciles canonical orphan blobs and stale writer temp files older than one hour, including when retention is `forever`. The grace period avoids racing a durable blob publication that has not reached its event insert yet.
+6. Reconciliation never follows symlinks and never removes unknown filenames or non-regular entries. Missing referenced blobs and per-entry cleanup errors are surfaced only as content-free health counters.
 
 ## Consequences
 

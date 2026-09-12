@@ -92,7 +92,10 @@ struct GlobalRecallPopupView: View {
                         row(hit: hit, isSelected: idx == viewModel.selectedIndex)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                if let action = viewModel.invokeAction(preferExternal: false) {
+                                if let action = viewModel.invokeAction(
+                                    at: idx,
+                                    preferExternal: false
+                                ) {
                                     onInvoke(action)
                                 }
                             }

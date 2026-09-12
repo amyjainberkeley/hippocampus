@@ -24,12 +24,12 @@
 //! so `coremltools` cannot convert a graph whose input is a `String` and
 //! whose first hidden layer is a tokenizer. CRS Arxiv/OSS scout
 //! (2026-05-22) verified this and the CEO ratified the pivot the same
-//! day. Industry-standard pattern (Apple ml-stable-diffusion, WhisperKit,
-//! HuggingFace's own exporters): tokenize on the host, pass token-IDs
+//! day. Industry-standard pattern (Apple ml-stable-diffusion, `WhisperKit`,
+//! `HuggingFace`'s own exporters): tokenize on the host, pass token-IDs
 //! into the graph.
 //!
 //! The Rust-side tokenizer lives in [`tokenizer`] and uses the
-//! HuggingFace `tokenizers` crate against the bundled
+//! `HuggingFace` `tokenizers` crate against the bundled
 //! `Snowflake/snowflake-arctic-embed-s` `tokenizer.json` (embedded in
 //! this crate's binary via `include_bytes!`). CLS-pool + L2-norm move
 //! INTO the Core ML graph so the embedding the Rust side receives is
@@ -47,7 +47,7 @@
 //!
 //! # Model bundling
 //!
-//! The `ArcticEmbedS_INT8.mlpackage` (~33 MB) is **not** checked into
+//! The `ArcticEmbedS_FP16.mlpackage` (~66 MB) is **not** checked into
 //! the repo. The Phase-5 signed-app build pipeline runs
 //! `scripts/convert_embedder.py` at release time to produce the
 //! `.mlpackage` (and pre-compile it to `.mlmodelc` via
@@ -141,32 +141,26 @@ pub const MAX_SEQ_LEN: usize = 128;
 /// to stderr and **falls back to CPU** — predictions still succeed (the
 /// live store's vectors are genuine unit vectors), but the failover wastes
 /// an ANE/GPU compile attempt and spews an alarming-but-benign error.
-/// Pinning the load to [`ComputeUnits::CpuOnly`] avoids the ANE/GPU path
-/// entirely, so the error never appears and the idle-batch worker stays a
-/// low-footprint CPU citizen. The companion fix in
-/// `scripts/convert_embedder.py` pins the input/output shapes so the graph
-/// is statically `[1, 384]` and re-eligible for GPU/ANE — but per the
-/// [Core ML compute-units `.all` is a latency trap] lesson, the optimal
-/// unit is model-dependent and chosen by measurement, not by default. For
-/// this idle-batch (non-hot-path) embedder the measured numbers make
-/// CPU-only the right pin: it tolerates both the current flexible artifact
-/// and the future fixed-shape one (reship-ordering-robust) at a latency
-/// (~3–29 ms) that is irrelevant on a 5-second idle loop.
+/// Pinning the old graph to [`ComputeUnits::CpuOnly`] avoided that failure. The
+/// current macOS 14 eager-attention graph also replaces the FP16 `-inf`
+/// attention sentinel with finite `-10000`, so both CPU-only and
+/// [`ComputeUnits::CpuAndNeuralEngine`] produce finite vectors that pass the
+/// 50-sentence reference gate. CPU+Neural Engine is the production policy
+/// because it was faster in the same dual-mode development measurement. This
+/// policy permits those units; it does not prove physical ANE residency.
 ///
-/// [Core ML compute-units `.all` is a latency trap]: there is no ANE
-/// residency for this BERT graph; the real choice is GPU vs CPU.
+/// [Core ML compute-units `.all` is a latency trap]: allowing every compute
+/// unit added a costly failed scheduling path on the previous graph. Keep the
+/// shipping policy explicit and remeasure it whenever the graph changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComputeUnits {
-    /// CPU only (`MLComputeUnitsCPUOnly`). The production pin — see the
-    /// type-level docs.
+    /// CPU only (`MLComputeUnitsCPUOnly`). Covered by the release quality gate.
     CpuOnly,
-    /// CPU + GPU, no ANE (`MLComputeUnitsCPUAndGPU`). Fastest measured
-    /// clean unit on the fixed-shape graph (~1.9 ms); available for future
-    /// tuning if the embedder ever moves to a hot path.
+    /// CPU + GPU, no ANE (`MLComputeUnitsCPUAndGPU`). Available for explicit
+    /// diagnostics; not part of the shipping quality gate.
     CpuAndGpu,
-    /// CPU + ANE, no GPU (`MLComputeUnitsCPUAndNeuralEngine`). The BERT
-    /// graph fails ANE compile and falls back, emitting its own benign
-    /// E5RT message — kept for completeness/measurement parity.
+    /// CPU + ANE, no GPU (`MLComputeUnitsCPUAndNeuralEngine`). Production
+    /// policy for the fixed-shape macOS 14 eager-attention graph.
     CpuAndNeuralEngine,
     /// Core ML schedules across ANE/GPU/CPU (`MLComputeUnitsAll`). The
     /// pre-fix default that produced the data-dependent-shape failover.
@@ -185,9 +179,8 @@ impl ComputeUnits {
 }
 
 /// The compute-unit policy the production loaders ([`CoreMLBackend::open`],
-/// [`try_load_coreml_backend`], [`load_backend_or_fallback`]) pin. CPU-only
-/// per the measured idle-batch rationale on [`ComputeUnits`].
-pub const DEFAULT_COMPUTE_UNITS: ComputeUnits = ComputeUnits::CpuOnly;
+/// [`try_load_coreml_backend`], [`load_backend_or_fallback`]) pin.
+pub const DEFAULT_COMPUTE_UNITS: ComputeUnits = ComputeUnits::CpuAndNeuralEngine;
 
 /// Core ML / ANE backend for `snowflake-arctic-embed-s`.
 ///
@@ -454,7 +447,9 @@ impl EmbedderBackend for CoreMLBackend {
 #[allow(deprecated)]
 fn build_int32_multiarray_1xn(values: &[i32]) -> Result<Retained<MLMultiArray>, EmbedError> {
     let dim0 = NSNumber::new_i64(1);
-    let dim1 = NSNumber::new_i64(values.len() as i64);
+    let value_count = i64::try_from(values.len())
+        .map_err(|_| EmbedError::Backend("input tensor length exceeds Core ML limits".into()))?;
+    let dim1 = NSNumber::new_i64(value_count);
     let shape = NSArray::from_slice(&[&*dim0, &*dim1]);
 
     // SAFETY: `initWithShape:dataType:error:` allocates a fresh
@@ -671,12 +666,8 @@ mod tests {
     }
 
     #[test]
-    fn default_compute_units_is_cpu_only() {
-        // Production pin: idle-batch is non-hot-path; CPU-only tolerates
-        // both the flexible and fixed-shape artifacts and never triggers
-        // the ANE/GPU E5RT failover. If this ever changes, re-measure per
-        // the ComputeUnits doc rationale.
-        assert_eq!(DEFAULT_COMPUTE_UNITS, ComputeUnits::CpuOnly);
+    fn default_compute_units_matches_shipping_graph() {
+        assert_eq!(DEFAULT_COMPUTE_UNITS, ComputeUnits::CpuAndNeuralEngine);
     }
 
     #[test]

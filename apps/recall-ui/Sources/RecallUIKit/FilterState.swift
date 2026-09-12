@@ -10,10 +10,9 @@
 //     yesterday, last7Days, custom(from, to)}.
 //   - `hasUrl: Bool` — single toggle preserved from v1.
 //
-// The state encodes itself into `SearchOptions.timeFromUs / timeToUs /
-// appFilter` for FFI consumption. When more than one app is selected
-// the reader can only filter on one at the wire level — the SearchView-
-// Model post-filters the remainder client-side.
+// SearchViewModel sends all constraints through SearchOptions for SQL filtering.
+// Calendar windows have an exclusive upper bound, converted to the inclusive
+// FFI endpoint only when composing SearchOptions.
 
 import Foundation
 
@@ -109,6 +108,9 @@ public enum FilterPill: String, CaseIterable, Sendable, Equatable, Hashable, Ide
 /// The recall-UI search filter model. Equatable so the SearchView's
 /// `.onChange` only re-fires when something actually changes.
 public struct FilterState: Equatable, Sendable, Codable {
+    /// Matches the FFI's bounded source-ID list. Restored selections are never truncated.
+    public static let maximumSelectedApps = 32
+
     /// App bundle ids the user has narrowed to. Empty ⇒ no app filter.
     public var appBundleIds: Set<String> = []
     /// Time-window preset. `.none` ⇒ no time filter.
@@ -135,11 +137,34 @@ public struct FilterState: Equatable, Sendable, Codable {
         !appBundleIds.isEmpty || dateRange.isActive || hasUrl
     }
 
+    public var hasReachedAppSelectionLimit: Bool {
+        appBundleIds.count >= Self.maximumSelectedApps
+    }
+
+    /// Oversized saved selections stay visible until the user explicitly repairs them.
+    public var appSelectionValidationMessage: String? {
+        let excess = appBundleIds.count - Self.maximumSelectedApps
+        guard excess > 0 else { return nil }
+        return "\(appBundleIds.count) apps selected; maximum \(Self.maximumSelectedApps). Deselect \(excess) to search."
+    }
+
+    public var appSelectionHelp: String {
+        if let message = appSelectionValidationMessage { return message }
+        if hasReachedAppSelectionLimit {
+            return "Up to \(Self.maximumSelectedApps) apps can be selected. Deselect an app to select another."
+        }
+        return "Select up to \(Self.maximumSelectedApps) apps."
+    }
+
+    public func canToggleApp(_ bundleId: String) -> Bool {
+        appBundleIds.contains(bundleId) || !hasReachedAppSelectionLimit
+    }
+
     /// Toggle one app bundle id in the set.
     public mutating func toggleApp(_ bundleId: String) {
         if appBundleIds.contains(bundleId) {
             appBundleIds.remove(bundleId)
-        } else {
+        } else if canToggleApp(bundleId) {
             appBundleIds.insert(bundleId)
         }
     }
@@ -154,7 +179,7 @@ public struct FilterState: Equatable, Sendable, Codable {
         dateRange = preset
     }
 
-    /// Resolve `dateRange` to a `[fromUs, toUs?]` time window. Returns
+    /// Resolve `dateRange` to a half-open `[fromUs, toUs)` time window. Returns
     /// `nil` when no time filter applies. `toUs` is `nil` for open-ended
     /// windows ("today" runs from start-of-day to now-ish; the FFI
     /// treats `toUs == nil` as "no upper bound").
@@ -195,17 +220,12 @@ public struct FilterState: Equatable, Sendable, Codable {
         timeWindowUs(now: now).fromUs
     }
 
-    /// The single `app_bundle_id` the FFI can filter on, if any. When
-    /// the user selected exactly one app, pass it through to the wire
-    /// for an index hit. With two or more, leave `nil` and rely on
-    /// client-side post-filter in the view model.
+    /// Legacy single-app projection. SearchOptions.appFilters carries the full set.
     public var appFilter: String? {
         appBundleIds.count == 1 ? appBundleIds.first : nil
     }
 
-    /// `true` when the FFI's single `app_filter` cannot fully express
-    /// `appBundleIds` (i.e. ≥ 2 apps selected) and the view model must
-    /// post-filter results in Swift.
+    /// Compatibility projection for readers that only understand `app_filter`.
     public var requiresClientSideAppFilter: Bool {
         appBundleIds.count >= 2
     }

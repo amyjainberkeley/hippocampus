@@ -60,18 +60,20 @@ Snowflake Arctic Embed S
     Apache-2.0
     https://huggingface.co/Snowflake/snowflake-arctic-embed-s
 
-    Redistributed here as a Core ML derivative
-    (`ArcticEmbedS_INT8.mlmodelc`), converted with coremltools. Used
-    for the semantic half of hybrid recall.
+    Redistributed here as the FP16 Core ML derivative
+    `ArcticEmbedS_FP16.mlmodelc`. Used for the semantic half of hybrid
+    recall.
 
 dslim/bert-base-NER
     Copyright (c) David S. Lim
     MIT
     https://huggingface.co/dslim/bert-base-NER
 
-    Redistributed as `bert_base_NER_INT8.mlmodelc`. Fine-tuned on
-    CoNLL-2003, whose underlying Reuters corpus imposes no condition
-    that transfers to the released weights.
+    Redistributed as `bert_base_NER_INT8.mlmodelc`. The upstream model is
+    published under MIT and was fine-tuned on CoNLL-2003 Reuters material.
+    Public redistribution remains gated on an explicit legal review of the
+    dataset terms; this notice does not infer derivative rights from the
+    model-card license alone.
 
 Qwen3-1.7B
     Copyright (c) Alibaba Cloud
@@ -99,8 +101,66 @@ Sparkle 2.9.2
     network requests" rather than making a claim about the whole app.
     Sparkle is not present in the CLI distribution at all.
 
+TOMLKit 0.6.0
+    Copyright (c) 2024 Jeff Lebrun
+    MIT
+    https://github.com/LebJe/TOMLKit
+
+    Parses and validates the complete runtime configuration before a
+    capture preference can be read or changed.
+
+MIT License
+
+Copyright (c) 2024 Jeff Lebrun
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+toml++ 3.4.0
+    Copyright (c) Mark Gillard
+    MIT
+    https://github.com/marzer/tomlplusplus
+
+    Bundled by TOMLKit and used as its conforming TOML 1.0 parser.
+
+MIT License
+
+Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 --------------------------------------------------------------------
 
-Full license texts for every dependency can be regenerated with:
+Rust dependency license reports can be regenerated with:
 
     cargo install cargo-about && cargo about generate about.hbs
+
+The reviewed TOMLKit and toml++ license sources are committed under
+`third_party/licenses/` and verified against their exact package pins before
+app assembly. This notice includes their complete required MIT terms.

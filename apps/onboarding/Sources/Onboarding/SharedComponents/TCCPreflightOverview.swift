@@ -42,7 +42,7 @@ struct TCCPreflightOverview: View {
             rationale: "Sees what's on your screen so we can search it later. All processing stays on your Mac.",
             pill: Pill.from(screenRecordingStatus))
         row(icon: "accessibility",
-            name: "Accessibility · Recommended",
+            name: "Accessibility · Required",
             rationale: "Detects password fields so we know NOT to capture them.",
             pill: Pill.from(accessibilityStatus))
         row(icon: "applescript",

@@ -4,6 +4,21 @@ import XCTest
 
 final class SafariInboxReaderTests: XCTestCase {
 
+    func testCaptureGenerationMustMatchCurrentTopology() {
+        XCTAssertTrue(SafariInboxReader.matchesCaptureGeneration(
+            payload: ["capture_generation": "generation-2"],
+            expected: "generation-2"
+        ))
+        XCTAssertFalse(SafariInboxReader.matchesCaptureGeneration(
+            payload: ["capture_generation": "generation-1"],
+            expected: "generation-2"
+        ))
+        XCTAssertFalse(SafariInboxReader.matchesCaptureGeneration(
+            payload: [:],
+            expected: "generation-2"
+        ))
+    }
+
     // MARK: - URL Denylist
 
     func testDeniedURLsBlocked() {
@@ -84,9 +99,9 @@ final class SafariInboxReaderTests: XCTestCase {
 
     // MARK: - Wire encoding
 
-    func testWireEncodingCrossSideFixture() {
+    func testWireEncodingCrossSideFixture() throws {
         // Must match core/src/ipc/wire.rs page_content_event_cross_side_fixture
-        let data = SafariInboxReader.encodePageContentEvent(
+        let data = try XCTUnwrap(SafariInboxReader.encodePageContentEvent(
             seq: 7,
             tsUs: 0x0102_0304_0506_0708,
             url: "U",
@@ -94,7 +109,7 @@ final class SafariInboxReaderTests: XCTestCase {
             fullText: "Hi",
             sourceBrowser: "chrome",
             tabId: 99
-        )
+        ))
 
         // Frame total = 16 (header) + 29 (fixed payload) + 10 (variable) = 55
         XCTAssertEqual(data.count, 55)
@@ -158,8 +173,8 @@ final class SafariInboxReaderTests: XCTestCase {
         XCTAssertEqual(Array(bytes[49..<55]), Array("chrome".utf8))
     }
 
-    func testWireEncodingMinimal() {
-        let data = SafariInboxReader.encodePageContentEvent(
+    func testWireEncodingMinimal() throws {
+        let data = try XCTUnwrap(SafariInboxReader.encodePageContentEvent(
             seq: 0,
             tsUs: 0,
             url: "",
@@ -167,13 +182,120 @@ final class SafariInboxReaderTests: XCTestCase {
             fullText: "",
             sourceBrowser: "",
             tabId: 0
-        )
+        ))
         // 16 (header) + 29 (fixed payload) + 0 (variable) = 45
         XCTAssertEqual(data.count, 45)
 
         let bytes = Array(data)
         XCTAssertEqual(bytes[0], 0x4D)
         XCTAssertEqual(bytes[1], 0x06)
+    }
+
+    func testWireEncodingAcceptsLargestRepresentableURL() throws {
+        let url = String(repeating: "u", count: Int(UInt16.max))
+
+        let data = try XCTUnwrap(SafariInboxReader.encodePageContentEvent(
+            seq: 0,
+            tsUs: 0,
+            url: url,
+            title: "",
+            fullText: "",
+            sourceBrowser: "safari",
+            tabId: 0
+        ))
+
+        XCTAssertEqual(data.count, 16 + 29 + url.utf8.count + "safari".utf8.count)
+    }
+
+    func testWireEncodingRejectsURLPastUInt16Limit() {
+        let url = String(repeating: "u", count: Int(UInt16.max) + 1)
+
+        XCTAssertNil(SafariInboxReader.encodePageContentEvent(
+            seq: 0,
+            tsUs: 0,
+            url: url,
+            title: "",
+            fullText: "",
+            sourceBrowser: "safari",
+            tabId: 0
+        ))
+    }
+
+    func testWireEncodingRejectsTitlePastUInt16Limit() {
+        let title = String(repeating: "t", count: Int(UInt16.max) + 1)
+
+        XCTAssertNil(SafariInboxReader.encodePageContentEvent(
+            seq: 0,
+            tsUs: 0,
+            url: "https://example.com",
+            title: title,
+            fullText: "",
+            sourceBrowser: "safari",
+            tabId: 0
+        ))
+    }
+
+    func testWireEncodingRejectsBrowserPastUInt8Limit() {
+        let browser = String(repeating: "b", count: Int(UInt8.max) + 1)
+
+        XCTAssertNil(SafariInboxReader.encodePageContentEvent(
+            seq: 0,
+            tsUs: 0,
+            url: "https://example.com",
+            title: "Example",
+            fullText: "",
+            sourceBrowser: browser,
+            tabId: 0
+        ))
+    }
+
+    @MainActor
+    func testOversizedInboxEntryIsDiscardedWithoutBlockingLaterValidEntry() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let oversizedURL = directory.appendingPathComponent("001-oversized.json")
+        let validURL = directory.appendingPathComponent("002-valid.json")
+        try writePayload(
+            to: oversizedURL,
+            url: "https://example.com",
+            title: String(repeating: "t", count: Int(UInt16.max) + 1),
+            text: "oversized title",
+            generation: "generation-2"
+        )
+        try writePayload(
+            to: validURL,
+            url: "https://example.com/project",
+            title: "Project",
+            text: "A valid record follows the poison entry.",
+            generation: "generation-2"
+        )
+
+        let reader = SafariInboxReader(expectedGenerationID: "generation-2")
+        var forwardedFrames: [Data] = []
+        let writer: (Data) -> Bool = { frame in
+            forwardedFrames.append(frame)
+            return true
+        }
+
+        reader.processPayloadFile(oversizedURL, writeFrame: writer)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oversizedURL.path))
+        XCTAssertEqual(reader.failedParse, 1)
+        XCTAssertEqual(reader.forwarded, 0)
+        XCTAssertTrue(forwardedFrames.isEmpty)
+
+        reader.processPayloadFile(validURL, writeFrame: writer)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: validURL.path))
+        XCTAssertEqual(reader.failedParse, 1)
+        XCTAssertEqual(reader.forwarded, 1)
+        XCTAssertEqual(forwardedFrames.count, 1)
     }
 
     // MARK: - SO_NOSIGPIPE (cycle 8.23 main-GUI-death regression pin)
@@ -336,5 +458,25 @@ final class SafariInboxReaderTests: XCTestCase {
             sawEPIPE || totalWritten > 0,
             "neither EPIPE nor any successful write — unexpected"
         )
+    }
+
+    private func writePayload(
+        to fileURL: URL,
+        url: String,
+        title: String,
+        text: String,
+        generation: String
+    ) throws {
+        let payload: [String: Any] = [
+            "url": url,
+            "title": title,
+            "text": text,
+            "ts_us": UInt64(1),
+            "tab_id": UInt32(7),
+            "source_browser": "safari",
+            "capture_generation": generation,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try data.write(to: fileURL, options: .atomic)
     }
 }

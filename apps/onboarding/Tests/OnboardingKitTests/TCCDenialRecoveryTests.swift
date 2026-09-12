@@ -6,7 +6,7 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
     private func makeVM(
         srStatus: TCCStatus = .notRequested,
-        axStatus: TCCStatus = .notRequested
+        axStatus: TCCStatus = .granted
     ) -> (OnboardingFlowViewModel, StubTCCPermission, StubTCCPermission) {
         let sr = StubTCCPermission(kind: .screenRecording, status: srStatus)
         let ax = StubTCCPermission(kind: .accessibility, status: axStatus)
@@ -89,15 +89,18 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
         XCTAssertTrue(vm.canAdvance)
         vm.advance()
+        XCTAssertEqual(vm.currentStep, .primaryHotkey)
+        vm.markHotkeyPracticed()
+        vm.advance()
         XCTAssertEqual(vm.currentStep, .allowlist)
     }
 
-    // MARK: - Accessibility denial (separate row, non-blocking)
+    // MARK: - Accessibility denial (capture-critical)
 
-    func testAccessibilityDeniedDoesNotBlockAdvance() {
+    func testAccessibilityDeniedBlocksAdvance() {
         let (vm, _, _) = makeVM(srStatus: .granted, axStatus: .denied)
         vm.goTo(.permissions)
-        XCTAssertTrue(vm.canAdvance)
+        XCTAssertFalse(vm.canAdvance)
     }
 
     func testAccessibilityResetAndRetry() async {
@@ -140,7 +143,8 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
     func testCanAdvanceOnOtherSlides() {
         let (vm, _, _) = makeVM(srStatus: .denied)
-        for step in OnboardingStep.allCases where step != .permissions && step != .done {
+        for step in OnboardingStep.allCases
+            where step != .permissions && step != .primaryHotkey && step != .done {
             vm.goTo(step)
             XCTAssertTrue(vm.canAdvance, "Should be able to advance from \(step)")
         }

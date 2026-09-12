@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Generate EULA.rtf and sla.r from docs/legal/terms-of-service.md.
+"""Generate or verify EULA.rtf from the canonical license terms.
 
 Single source of truth: the markdown file. This script produces:
   - EULA.rtf   — Rich Text for distribution / reference
-  - sla.r      — Rez resource source for DMG SLA popup attachment
 
 Regenerate:
     python3 assets/installer/generate-eula.py
 
+Verify without writing:
+    python3 assets/installer/generate-eula.py --check
+
 Requires: Python 3.8+ (stdlib only).
 """
 
+import argparse
 import os
 import re
 import sys
@@ -19,12 +22,30 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 TOS_PATH = os.path.join(REPO_ROOT, "docs", "legal", "terms-of-service.md")
 EULA_PATH = os.path.join(SCRIPT_DIR, "EULA.rtf")
-SLA_PATH = os.path.join(SCRIPT_DIR, "sla.r")
+
+PROHIBITED_GUARANTEES = (
+    (r"crypto[\s-]*shred", "unimplemented range-key deletion"),
+    (r"zero[\s-]*knowledge", "unimplemented server/sync guarantee"),
+    (r"secure\s+enclave", "unimplemented hardware-backed key custody"),
+    (r"neural\s+engine", "unverified compute-unit guarantee"),
+    (r"sqlite[\s-]*vec", "unshipped vector extension"),
+    (r"no\s+third\s+party\s+can\s+decrypt", "absolute decryption guarantee"),
+)
 
 
 def read_terms():
-    with open(TOS_PATH) as f:
+    with open(TOS_PATH, encoding="utf-8") as f:
         return f.read()
+
+
+def validate_terms(text):
+    failures = []
+    for pattern, description in PROHIBITED_GUARANTEES:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            failures.append(description)
+    if failures:
+        joined = ", ".join(failures)
+        raise ValueError(f"prohibited unshipped guarantee in legal source: {joined}")
 
 
 def strip_comments(text):
@@ -94,6 +115,7 @@ def md_to_rtf(md_text):
         body.append(f'{inline_to_rtf(s)}\\par ')
 
     joined = '\n'.join(body)
+    joined = re.sub(r"[ \t]+$", "", joined, flags=re.MULTILINE)
     return (
         '{\\rtf1\\ansi\\ansicpg1252\n'
         '{\\fonttbl\\f0\\fswiss\\fcharset0 Helvetica;'
@@ -103,109 +125,66 @@ def md_to_rtf(md_text):
         '\\paperw11900\\paperh16840'
         '\\margl1440\\margr1440\n'
         '\\pard\\tx720\\pardirnatural\\partightenfactor0\n'
-        '{\\cf2\\f1\\b\\fs18 LAWYER: Auto-generated from '
+        '{\\cf2\\f1\\b\\fs18 NOTICE: Auto-generated from '
         'docs/legal/terms-of-service.md. '
-        'Verify effective date, jurisdiction, and dispute resolution '
-        'before distribution. See <!-- LAWYER --> comments in source '
-        'for specific review items.}\n'
+        'Product behavior was reconciled with docs/STATUS.md; '
+        'legal owner approval remains a release gate.}\n'
         '\\f0\\b0\\fs24\\par\\par\n'
         f'{joined}\n'
         '}'
     )
 
 
-def md_to_plain(md_text):
-    text = strip_comments(md_text)
-    lines = []
-    for line in text.split('\n'):
-        line = re.sub(r'^#{1,6}\s+', '', line)
-        line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
-        line = re.sub(r'\*(.+?)\*', r'\1', line)
-        line = re.sub(r'\[(.+?)\]\((.+?)\)', r'\1 (\2)', line)
-        line = re.sub(r'`(.+?)`', r'\1', line)
-        if re.match(r'^---+$', line.strip()):
-            line = ''
-        lines.append(line)
-    result = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines))
-    return result.strip()
-
-
-def rez_string_escape(text):
-    return text.replace('\\', '\\\\').replace('"', '\\"')
-
-
-def generate_sla_r(md_text):
-    plain = md_to_plain(md_text)
-    text_lines = []
-    for line in plain.split('\n'):
-        escaped = rez_string_escape(line)
-        text_lines.append(f'    "{escaped}\\n"')
-    text_data = '\n'.join(text_lines)
-
-    return f'''/* DMG Software License Agreement resources.
- * Auto-generated from docs/legal/terms-of-service.md.
- * Regenerate: python3 assets/installer/generate-eula.py
- *
- * Attach to DMG:
- *   hdiutil unflatten Hippocampus.dmg
- *   Rez -append assets/installer/sla.r -o Hippocampus.dmg
- *   hdiutil flatten Hippocampus.dmg
- */
-
-data 'LPic' (5000) {{
-    $"0000"  /* default language */
-    $"0001"  /* count */
-    $"0000"  /* English */
-    $"0000"  /* resource ID offset */
-    $"0000"  /* reserved */
-}};
-
-resource 'STR#' (5000, "English buttons") {{
-    {{
-        "English",
-        "Agree",
-        "Disagree",
-        "Print",
-        "Save\\311",
-        "If you agree with the terms of this license, click "
-        "\\"Agree\\" to install the software. "
-        "If you do not agree, click \\"Disagree\\"."
-    }}
-}};
-
-data 'TEXT' (5000, "English") {{
-{text_data}
-}};
-
-data 'styl' (5000, "English") {{
-    $"0001"           /* 1 style run */
-    $"00000000"       /* start offset */
-    $"000C"           /* height */
-    $"000A"           /* ascent */
-    $"0000"           /* font ID (system) */
-    $"0000"           /* face (plain) */
-    $"000A"           /* size 10 */
-    $"0000 0000 0000" /* color (black) */
-}};
-'''
+def check_artifact(path, expected):
+    if not os.path.isfile(path):
+        print(f"ERROR: generated legal artifact is missing: {path}", file=sys.stderr)
+        return False
+    with open(path, encoding="utf-8") as artifact:
+        actual = artifact.read()
+    if actual != expected:
+        print(
+            f"ERROR: generated legal artifact differs from source: {path}",
+            file=sys.stderr,
+        )
+        print(
+            "Regenerate with: python3 assets/installer/generate-eula.py",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify generated artifacts without modifying them",
+    )
+    args = parser.parse_args()
+
     if not os.path.isfile(TOS_PATH):
         print(f"ERROR: {TOS_PATH} not found", file=sys.stderr)
         sys.exit(1)
 
     md_text = read_terms()
+    try:
+        validate_terms(md_text)
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(1)
 
     rtf = md_to_rtf(md_text)
-    with open(EULA_PATH, 'w') as f:
+
+    if args.check:
+        if not check_artifact(EULA_PATH, rtf):
+            sys.exit(1)
+        print("Legal artifact matches the canonical source and product-truth policy.")
+        return
+
+    with open(EULA_PATH, "w", encoding="utf-8", newline="") as f:
         f.write(rtf)
     print(f"  EULA.rtf  ({len(rtf):,} bytes)")
-
-    sla = generate_sla_r(md_text)
-    with open(SLA_PATH, 'w') as f:
-        f.write(sla)
-    print(f"  sla.r     ({len(sla):,} bytes)")
 
 
 if __name__ == "__main__":

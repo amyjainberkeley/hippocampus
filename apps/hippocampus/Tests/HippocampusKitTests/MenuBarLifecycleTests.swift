@@ -42,6 +42,15 @@ final class MenuBarLifecycleTests: XCTestCase {
             ? candidate.path : nil
     }
 
+    private var terminationCoordinatorSourcePath: String? {
+        let candidate = repoRoot
+            .appendingPathComponent(
+                "apps/hippocampus/Sources/HippocampusKit/ApplicationTerminationCoordinator.swift"
+            )
+        return FileManager.default.fileExists(atPath: candidate.path)
+            ? candidate.path : nil
+    }
+
     private var infoPlistPath: String? {
         let candidate = repoRoot
             .appendingPathComponent(
@@ -52,6 +61,26 @@ final class MenuBarLifecycleTests: XCTestCase {
     }
 
     // MARK: - applicationShouldTerminateAfterLastWindowClosed
+
+    func test_AppDelegate_defers_termination_until_verified_shutdown_replies() throws {
+        guard let path = appDelegateSourcePath else {
+            throw XCTSkip("HippocampusApp.swift not found at expected repo location")
+        }
+        let content = try String(contentsOfFile: path, encoding: .utf8)
+        guard let coordinatorPath = terminationCoordinatorSourcePath else {
+            throw XCTSkip("ApplicationTerminationCoordinator.swift not found")
+        }
+        let coordinator = try String(contentsOfFile: coordinatorPath, encoding: .utf8)
+
+        XCTAssertTrue(content.contains("func applicationShouldTerminate("))
+        XCTAssertTrue(content.contains("return .terminateLater"))
+        XCTAssertTrue(content.contains("await self.terminationCoordinator.terminate("))
+        XCTAssertTrue(coordinator.contains("try await supervisor.shutdownAndWait("))
+        XCTAssertTrue(coordinator.contains("guard supervisor.state == .stopped"))
+        XCTAssertTrue(coordinator.contains("try restartLauncher.scheduleRestart()"))
+        XCTAssertTrue(coordinator.contains("reply(true)"))
+        XCTAssertFalse(content.contains("applicationWillTerminate(_ notification: Notification) {\n        supervisor.stop()"))
+    }
 
     /// `AppDelegate` MUST declare the override.
     ///

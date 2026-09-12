@@ -11,6 +11,8 @@
 import Foundation
 
 public enum RecallTab: Int, Hashable, Sendable {
+    public static let defaultTab: RecallTab = .now
+    case now = 0
     case search = 1
     case timeline = 2
     case episodes = 3
@@ -30,14 +32,6 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// chronological list); the two coexist during Phase D scaffold and
     /// may collapse into one tab in Phase D full impl (cycle 8.55+).
     case timelineStrip = 8
-    /// Cycle 8.52 — Chat surface stub (⌘9). UI-only preview of the future
-    /// V2-P12 chat-with-your-memory experience per ADR-0035 (Proposed).
-    /// No ML runtime is loaded here; the tab renders placeholder responses
-    /// framed as "coming in v1.5" so the CEO can review the intended
-    /// shape before ratifying ADR-0035. See
-    /// `docs/decisions/0035-v2-p12-chat-surface-anylanguagemodel.md`.
-    case chat = 9
-
     /// Map a deep-link `?tab=…` query value (case-insensitive) to a
     /// `RecallTab`. Returns `nil` for unknown values so callers can
     /// ignore junk without crashing.
@@ -45,15 +39,15 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// Pinned by `BriefDeepLinkRoutingTests`.
     public static func from(deepLinkValue: String) -> RecallTab? {
         switch deepLinkValue.lowercased() {
+        case "today", "now", "daily": return .now
         case "search":   return .search
-        case "timeline": return .timeline
-        case "episodes": return .episodes
+        case "timeline", "history": return .timeline
+        case "episodes", "sessions": return .episodes
         case "privacy":  return .privacy
-        case "brief":    return .brief
+        case "brief", "briefs": return .brief
         case "settings": return .settings
         case "dashboard", "privacy-dashboard": return .privacyDashboard
         case "timeline-strip", "strip": return .timelineStrip
-        case "chat":     return .chat
         default:         return nil
         }
     }
@@ -62,4 +56,101 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// its initial tab. Hippocampus.app sets this when it handles a
     /// `hippocampus://recall?tab=…` URL.
     public static let initialTabEnvVar = "MCI_INITIAL_TAB"
+
+    public var workspaceTab: RecallTab {
+        switch self {
+        case .brief: return .now
+        case .timelineStrip: return .timeline
+        case .privacyDashboard: return .privacy
+        default: return self
+        }
+    }
+}
+
+/// One launch/deep-link request for the Recall process. Keeping the parsing in
+/// RecallUIKit makes the cross-process environment contract testable without
+/// constructing a SwiftUI scene.
+public struct RecallLaunchRequest: Equatable, Sendable {
+    public static let focusEventEnvVar = "MCI_INITIAL_FOCUS_EVENT_ID"
+    public static let openPopupEnvVar = "MCI_OPEN_GLOBAL_POPUP"
+    public static let distributedCommandName = Notification.Name(
+        "ai.hippocampus.recall.command.v1"
+    )
+    public static let localCommandName = Notification.Name(
+        "ai.hippocampus.recall.command.received.v1"
+    )
+
+    public let tab: RecallTab?
+    public let focusEventId: UInt64?
+    public let openPopup: Bool
+
+    /// Running workspaces change only for an explicit destination or focused event.
+    public var navigationTab: RecallTab? {
+        focusEventId == nil ? tab : .search
+    }
+
+    public var initialTab: RecallTab {
+        if focusEventId != nil { return .search }
+        return tab ?? (openPopup ? .search : RecallTab.defaultTab)
+    }
+
+    public init(tab: RecallTab?, focusEventId: UInt64?, openPopup: Bool) {
+        self.tab = tab
+        self.focusEventId = focusEventId.flatMap { $0 == 0 ? nil : $0 }
+        self.openPopup = openPopup
+    }
+
+    public init(environment: [String: String]) {
+        let tab = environment[RecallTab.initialTabEnvVar].flatMap(RecallTab.from)
+        let focus = environment[Self.focusEventEnvVar]
+            .flatMap(UInt64.init)
+            .flatMap { $0 == 0 ? nil : $0 }
+        self.init(
+            tab: tab,
+            focusEventId: focus,
+            openPopup: environment[Self.openPopupEnvVar] == "1"
+        )
+    }
+
+    public init?(url: URL) {
+        guard url.scheme == "hippocampus", url.host == "recall" else { return nil }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let tab = items.first(where: { $0.name == "tab" })?.value.flatMap(RecallTab.from)
+        let focus = items.first(where: { $0.name == "focus" })?.value
+            .flatMap(UInt64.init)
+            .flatMap { $0 == 0 ? nil : $0 }
+        self.init(
+            tab: tab,
+            focusEventId: focus,
+            openPopup: items.contains { $0.name == "popup" && $0.value == "1" }
+        )
+    }
+
+    public init?(userInfo: [AnyHashable: Any]?) {
+        guard let userInfo else { return nil }
+        let tab = (userInfo["tab"] as? String).flatMap {
+            RecallTab.from(deepLinkValue: $0)
+        }
+        let focusNumber = userInfo["focus_event_id"] as? NSNumber
+        let numericFocus = focusNumber.map(\.uint64Value)
+        let focusString = userInfo["focus_event_id"] as? String
+        let stringFocus = focusString.flatMap(UInt64.init)
+        let parsedFocus = numericFocus ?? stringFocus
+        let focus = parsedFocus.flatMap { $0 == 0 ? nil : $0 }
+        let openPopup = (userInfo["open_popup"] as? Bool) == true
+            || (userInfo["open_popup"] as? NSNumber)?.boolValue == true
+        self.init(tab: tab, focusEventId: focus, openPopup: openPopup)
+    }
+}
+
+/// Identifies a focused-event navigation, including repeated requests for the
+/// same event. SwiftUI uses the sequence as a task identity.
+public struct RecallFocusRequest: Equatable, Hashable, Sendable {
+    public let eventId: UInt64
+    public let sequence: UInt64
+
+    public init(eventId: UInt64, sequence: UInt64) {
+        self.eventId = eventId
+        self.sequence = sequence
+    }
 }

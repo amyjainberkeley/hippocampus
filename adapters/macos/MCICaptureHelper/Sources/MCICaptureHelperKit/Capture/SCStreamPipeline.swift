@@ -53,12 +53,69 @@ public enum SCStreamConfigFactory {
         let cfg = SCStreamConfiguration()
         cfg.showsCursor = policy.showsCursor // MUST be false (SLO).
         cfg.queueDepth = policy.queueDepth
-        // 5 fps default → minimumFrameInterval = 1/5 s. CMTime with a
+        // 2 fps default -> minimumFrameInterval = 1/2 s. CMTime with a
         // 1000-tick timescale keeps the ms policy exact.
         cfg.minimumFrameInterval = CMTime(
             value: CMTimeValue(policy.minimumFrameIntervalMs),
             timescale: 1000
         )
+        return cfg
+    }
+
+    /// SCStream.h (macOS 14+): contentRect is in points; pointPixelScale
+    /// converts it to pixels. Only independent-window filters use this sizing.
+    public static func makeConfiguration(
+        policy: StreamPolicy = .default,
+        filter: SCContentFilter
+    ) throws -> SCStreamConfiguration {
+        guard filter.style == .window else {
+            return makeConfiguration(policy: policy)
+        }
+        return try makeFocusedWindowConfiguration(
+            policy: policy,
+            contentRect: filter.contentRect,
+            pointPixelScale: filter.pointPixelScale
+        )
+    }
+
+    /// Value-only sizing, shared by startup, focus rebind, and TCC recovery.
+    /// A same-window resize stays aspect-fit in this bounded canvas until the
+    /// next bind. Changed aspect ratios may letterbox; no focus generation or
+    /// source crop is changed to track geometry.
+    internal static func makeFocusedWindowConfiguration(
+        policy: StreamPolicy = .default,
+        contentRect: CGRect,
+        pointPixelScale: Float
+    ) throws -> SCStreamConfiguration {
+        let width = contentRect.size.width
+        let height = contentRect.size.height
+        guard !contentRect.isNull, !contentRect.isInfinite,
+              contentRect.origin.x.isFinite, contentRect.origin.y.isFinite,
+              width.isFinite, height.isFinite, width > 0, height > 0,
+              pointPixelScale.isFinite, pointPixelScale > 0
+        else {
+            throw SCStreamPipelineError.invalidFocusedWindowGeometry
+        }
+
+        // Bound the multiplier before multiplying or converting to Int, even
+        // for enormous finite geometry. Keep native resolution below the cap.
+        // Preserve Retina glyph detail for OCR; bound worst-case buffer allocation.
+        let maximumLongEdge: CGFloat = 3840
+        let scale = min(CGFloat(pointPixelScale), maximumLongEdge / max(width, height))
+        let pixelWidth = width * scale
+        let pixelHeight = height * scale
+        guard pixelWidth.isFinite, pixelHeight.isFinite,
+              pixelWidth >= 1, pixelHeight >= 1
+        else {
+            // Do not stretch a subpixel short edge to manufacture valid geometry.
+            throw SCStreamPipelineError.invalidFocusedWindowGeometry
+        }
+
+        let cfg = makeConfiguration(policy: policy)
+        cfg.width = Int(min(maximumLongEdge, pixelWidth.rounded()))
+        cfg.height = Int(min(maximumLongEdge, pixelHeight.rounded()))
+        cfg.scalesToFit = true
+        cfg.preservesAspectRatio = true
         return cfg
     }
 }
@@ -408,6 +465,8 @@ public enum SCContentFilterFactory {
 public enum SCStreamPipelineError: Error, Equatable {
     /// `SCShareableContent` reported no display.
     case noDisplay
+    /// The focused window cannot be represented by a bounded pixel canvas.
+    case invalidFocusedWindowGeometry
     /// An encode was attempted without a prior `.allow` decision —
     /// an internal invariant breach. Should be impossible by
     /// construction; asserted so a refactor can't regress the gate.
@@ -470,8 +529,9 @@ public final class SurfaceLease: @unchecked Sendable {
     }
 }
 
-/// The encode seam. Production impl = VideoToolbox HEVC keyframe
-/// encode (`VideoToolboxHEVCEncoder.swift`). Tests inject a spy.
+/// The post-pixel-privacy dispatch seam. Production uses the no-op
+/// implementation because visual retention now occurs after OCR privacy.
+/// Tests may inject a spy or the legacy HEVC implementation in isolation.
 ///
 /// The `input: EncoderInput?` argument carries the retained pixel
 /// buffer for one frame. `nil` means "OS-free / headless test path"
@@ -493,14 +553,8 @@ public protocol FrameEncoder: Sendable {
     ) async throws
 }
 
-/// Default-OFF placeholder. Retained because `main.swift` may wire it
-/// when the operator omits `--capture`, and headless tests use it as a
-/// zero-cost stand-in for the production encoder. Replacing it with
-/// `VideoToolboxHEVCEncoder` is itself NOT a default flip — flipping
-/// the §4 default-ON capture gate requires the §7 corpus + CSO
-/// sign-off (`CaptureLaunchOptions.swift`). DOGFOOD #3 wires the real
-/// encoder ONLY inside the `--capture` dev branch in `main.swift`.
-public struct DeferredVideoToolboxEncoder: FrameEncoder {
+/// Production no-op. Post-OCR condensed JPEG is the only retained visual.
+public struct NoOpFrameEncoder: FrameEncoder {
     public init() {}
     public func encodeAllowedFrame(
         input _: EncoderInput?,
@@ -513,6 +567,9 @@ public struct DeferredVideoToolboxEncoder: FrameEncoder {
         // gate without pulling in VideoToolbox.
     }
 }
+
+@available(*, deprecated, renamed: "NoOpFrameEncoder")
+public typealias DeferredVideoToolboxEncoder = NoOpFrameEncoder
 
 /// Mutable wall-clock state for the cascade floor.
 ///
@@ -631,6 +688,31 @@ public struct SCStreamPipeline: Sendable {
     /// call. Not on the wire; not load-bearing for production.
     public var cascadeFloor: CascadeFloorState { floorState }
 
+    func emitActivityInterval(_ interval: MeasuredActivityInterval,
+                              admitted: @escaping @Sendable () -> Bool) async throws {
+        let seq = await sequence.allocate()
+        guard !Task.isCancelled, admitted() else { return }
+        guard let sink = sink as? any AdmissionControlledFrameSink else {
+            throw CaptureRuntimeFailure.activityDeliveryFailed
+        }
+        _ = try await sink.writeIfCurrent(encodeActivityInterval(seq: seq, interval: interval), admitted: admitted)
+    }
+
+    /// Freeze the pixel-time privacy gate before a raw surface is retained or
+    /// queued. The returned value is the only gate consulted by the live
+    /// asynchronous path for that frame.
+    public func snapshotPixelPrivacy(
+        context: WorkflowContext,
+        hasBlackedRegion: Bool? = nil,
+        capturedWindow: FocusedWindow? = nil
+    ) -> PixelPrivacySnapshot {
+        cascade.snapshotPixelPrivacy(
+            context: context,
+            hasBlackedRegion: hasBlackedRegion,
+            capturedWindow: capturedWindow
+        )
+    }
+
     /// What `process(...)` did with one candidate — returned so the
     /// OS-free test can assert the ordering invariant.
     public enum Outcome: Sendable, Equatable {
@@ -670,7 +752,8 @@ public struct SCStreamPipeline: Sendable {
         context: WorkflowContext,
         nowUs: UInt64,
         lease: SurfaceLease,
-        encoderInput: EncoderInput? = nil
+        encoderInput: EncoderInput? = nil,
+        privacySnapshot: PixelPrivacySnapshot? = nil
     ) async throws -> Outcome {
         // Exactly-once release on EVERY path, including a throwing
         // `sink.write` / `encoder.encodeAllowedFrame`. Must be the
@@ -719,7 +802,7 @@ public struct SCStreamPipeline: Sendable {
         }
 
         // Stage 2: ADR-0013 cascade — UNCONDITIONALLY before encode.
-        let decision = cascade.decide(context: context)
+        let decision = privacySnapshot?.decision ?? cascade.decide(context: context)
         // Stamp the wall-clock on EVERY cascade evaluation, regardless
         // of `.allow` / `.suppress` and regardless of filter-passed /
         // floor-forced. Failing to stamp on `.suppress` would let the
@@ -766,8 +849,8 @@ public struct SCStreamPipeline: Sendable {
             // ONLY reachable after `.allow`. This is the single encode
             // call site in the helper. The top-level `defer` releases
             // the surface on every path including the encoder catch arm.
-            // DOGFOOD #3: `encoderInput` carries the live frame's
-            // retained `CVPixelBuffer`. A `nil` input keeps the
+            // `encoderInput` carries the live frame's retained
+            // `CVPixelBuffer`. A `nil` input keeps the
             // headless / OS-free test path unchanged (the encoder is
             // expected to no-op on nil); the live `SCStreamCapture`
             // callback always supplies a non-nil input.
@@ -775,12 +858,9 @@ public struct SCStreamPipeline: Sendable {
             // ADR-0016 §4.2 — OCR emission is gated on cascade-twice
             // on pixels (and §6 on text), NOT on encode-success. The
             // cascade decision above is the structural gate that
-            // protects user content; the encoder's role is to produce
-            // an HEVC blob for the recall timeline (post-§7-corpus /
-            // post-key-plumbing). A VideoToolbox failure on this `.allow`
-            // frame must not silently mute the OCR brain — that was
-            // the ocr-emit-silence regression closed by docs/research/
-            // ocr-emit-silence-2026-05-28.md. Treat encoder errors as
+            // protects user content. The production encoder is no-op;
+            // preserving this error arm keeps injected encoder failures
+            // from silently muting OCR. Treat encoder errors as
             // content-free observables: increment the
             // `framesEncoderFailed` counter (surfaced on the wire by
             // the 0x06 → 0x07 HelperHealth bump) and still return

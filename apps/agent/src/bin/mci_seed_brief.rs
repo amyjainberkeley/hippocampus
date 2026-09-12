@@ -1,7 +1,7 @@
 //! `mci-seed-brief` — DEMO / SMOKE-TEST ONLY synthetic-brief inserter.
 //!
 //! Writes one row into the `briefs` table so the Recall UI's Brief tab
-//! has something to render before the Qwen3 brief-author pipeline lands.
+//! has something to render with truthful extractive-author provenance.
 //! ADR-0028 + `docs/design/brief-viewer-spec.md` §"manual smoke" — this
 //! binary is the test fixture the spec's smoke trace calls.
 //!
@@ -25,6 +25,7 @@
 //! # Usage
 //!
 //! ```bash
+//! export MCI_DEVELOPMENT_FILE_KEY=1
 //! export MCI_DB_KEY_HEX=<64-hex>
 //! cargo run --release --bin mci-seed-brief -- \
 //!   --date 2026-05-22 \
@@ -64,12 +65,15 @@ fn default_db_path() -> PathBuf {
     home.join("Library/Application Support/MCI/mci.sqlite")
 }
 
+// This parser intentionally stays dependency-free and keeps the complete CLI
+// grammar in one place so the demo binary remains easy to audit.
+#[allow(clippy::too_many_lines)]
 fn parse_args(argv: &[String]) -> ParseOutcome {
     let mut db_path: Option<PathBuf> = None;
     let mut date_local: Option<String> = None;
     let mut title: Option<String> = None;
     let mut body: Option<String> = None;
-    let mut model_id: String = "qwen3-1.7b-fp16".into();
+    let mut model_id: String = "hippocampus-extractive".into();
     let mut model_version: String = "demo".into();
     let mut source_event_count: u32 = 0;
     let mut force = false;
@@ -116,14 +120,14 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                 if i >= argv.len() {
                     return ParseOutcome::Error("--model-id requires STRING".into());
                 }
-                model_id = argv[i].clone();
+                model_id.clone_from(&argv[i]);
             }
             "--model-version" => {
                 i += 1;
                 if i >= argv.len() {
                     return ParseOutcome::Error("--model-version requires STRING".into());
                 }
-                model_version = argv[i].clone();
+                model_version.clone_from(&argv[i]);
             }
             "--source-events" => {
                 i += 1;
@@ -150,21 +154,18 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
         .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
         .unwrap_or_else(default_db_path);
 
-    let date_local = match date_local {
-        Some(d) => d,
-        None => {
-            return ParseOutcome::Error(
-                "--date YYYY-MM-DD is required (the brief's local date)".into(),
-            )
-        }
+    let Some(date_local) = date_local else {
+        return ParseOutcome::Error(
+            "--date YYYY-MM-DD is required (the brief's local date)".into(),
+        );
     };
     let title = title.unwrap_or_else(|| format!("Demo brief for {date_local}"));
     let body = body.unwrap_or_else(|| {
         format!(
             "## Highlights\n\nSynthetic demo brief for {date_local}.\n\n\
              ## Deep work\n\nThis brief was inserted via `mci-seed-brief` \
-             so the Recall UI Brief tab has something to render before the \
-             Qwen3 author pipeline lands.\n"
+             so the Recall UI Brief tab can be verified without an optional \
+             model download.\n"
         )
     });
 
@@ -214,7 +215,7 @@ fn print_usage() {
         \x20 --date YYYY-MM-DD          REQUIRED. Local date the brief is for.\n\
         \x20 --title STRING             Header title (default: \"Demo brief for <date>\").\n\
         \x20 --body STRING              Markdown body (default: a synthetic stub).\n\
-        \x20 --model-id STRING          Model id for the header (default: qwen3-1.7b-fp16).\n\
+        \x20 --model-id STRING          Author id for the header (default: hippocampus-extractive).\n\
         \x20 --model-version STRING     Model version string (default: \"demo\").\n\
         \x20 --source-events N          Source-event count for the footer (default: 0).\n\
         \x20 --db-path PATH             default $MCI_DB_PATH or\n\
@@ -222,7 +223,8 @@ fn print_usage() {
         \x20 --force                    overwrite an existing brief for this date\n\
         \n\
         Required env:\n\
-        \x20 MCI_DB_KEY_HEX             64-hex (32-byte) SQLCipher key — same value\n\
+        \x20 MCI_DEVELOPMENT_FILE_KEY   Must be exactly 1.\n\
+        \x20 MCI_DB_KEY_HEX             Development-only 64-hex SQLCipher key — same value\n\
         \x20                            you pass to mci-agent / the recall UI.\n"
     );
 }
@@ -236,8 +238,8 @@ fn now_us() -> u64 {
 fn main() -> ExitCode {
     mci_agent::panic_hook::install();
 
-    let argv: Vec<String> = std::env::args().collect();
-    let args = match parse_args(&argv) {
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = match parse_args(&raw_args) {
         ParseOutcome::Help => {
             print_usage();
             return ExitCode::SUCCESS;
@@ -252,6 +254,14 @@ fn main() -> ExitCode {
         }
         ParseOutcome::Run(a) => a,
     };
+
+    if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
+        eprintln!(
+            "mci-seed-brief: this development-only tool requires \
+             MCI_DEVELOPMENT_FILE_KEY=1."
+        );
+        return ExitCode::from(9);
+    }
 
     let Ok(key_hex) = std::env::var("MCI_DB_KEY_HEX") else {
         eprintln!(
@@ -329,5 +339,27 @@ fn main() -> ExitCode {
             eprintln!("mci-seed-brief: put_brief failed: {e}");
             ExitCode::from(16)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_args, ParseOutcome};
+
+    #[test]
+    fn synthetic_brief_defaults_to_extractive_provenance() {
+        let argv = vec![
+            "mci-seed-brief".to_owned(),
+            "--date".to_owned(),
+            "2026-09-02".to_owned(),
+        ];
+        let ParseOutcome::Run(parsed_args) = parse_args(&argv) else {
+            panic!("minimal seed arguments should parse");
+        };
+
+        assert_eq!(parsed_args.model_id, "hippocampus-extractive");
+        assert!(!parsed_args
+            .body
+            .contains("before the Qwen3 author pipeline lands"));
     }
 }

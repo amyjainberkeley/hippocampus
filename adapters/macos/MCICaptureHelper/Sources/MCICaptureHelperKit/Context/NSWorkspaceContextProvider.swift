@@ -50,8 +50,7 @@ public protocol FrontmostAppSource: Sendable {
     func currentBundleId() -> String?
 }
 
-/// Default production `FrontmostAppSource` over
-/// `NSWorkspace.shared.frontmostApplication`.
+/// Compatibility name for the fresh AX-backed production focus source.
 ///
 /// AppKit import is guarded by `#if canImport(AppKit)` so the target
 /// still compiles in headless / Linux CI contexts; the
@@ -61,11 +60,7 @@ public struct NSWorkspaceFrontmostAppSource: FrontmostAppSource {
     public init() {}
 
     public func currentBundleId() -> String? {
-        #if canImport(AppKit)
-        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        #else
-        return nil
-        #endif
+        AXFocusedApplicationSource().currentBundleId()
     }
 }
 
@@ -102,6 +97,12 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     /// title for the polled bundle id and includes it in the
     /// snapshot.
     private let windowTitleProvider: WindowTitleProvider?
+
+    /// Focus identity sampled around the title read. When supplied, the
+    /// resulting context is stamped only if the same focus generation remained
+    /// current for the entire observation.
+    private let focusedWindowStore: FocusedWindowStore?
+    private let focusedWindowReader: (any FocusedWindowReader)?
 
     /// Optional current-calendar-event source (Phase 6 PR 5 — SH
     /// Fork D1). `nil` preserves the prior shape (every tick writes
@@ -159,6 +160,8 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         snapshotStore: WorkflowContextSnapshot = WorkflowContextSnapshot(),
         source: FrontmostAppSource = NSWorkspaceFrontmostAppSource(),
         windowTitleProvider: WindowTitleProvider? = nil,
+        focusedWindowStore: FocusedWindowStore? = nil,
+        focusedWindowReader: (any FocusedWindowReader)? = nil,
         calendarSource: CalendarEventSource? = nil,
         nowPlayingSource: NowPlayingTrackSource? = nil,
         contactsSource: ContactsAttributionSource? = nil,
@@ -171,6 +174,8 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         self.snapshotStore = snapshotStore
         self.source = source
         self.windowTitleProvider = windowTitleProvider
+        self.focusedWindowStore = focusedWindowStore
+        self.focusedWindowReader = focusedWindowReader
         self.calendarSource = calendarSource
         self.nowPlayingSource = nowPlayingSource
         self.contactsSource = contactsSource
@@ -212,6 +217,8 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
         let source = self.source
         let store = self.snapshotStore
         let titleProvider = self.windowTitleProvider
+        let focusedWindowStore = self.focusedWindowStore
+        let focusedWindowReader = self.focusedWindowReader
         let calendar = self.calendarSource
         let nowPlaying = self.nowPlayingSource
         let contacts = self.contactsSource
@@ -220,6 +227,8 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
             Self.tick(
                 source: source,
                 titleProvider: titleProvider,
+                focusedWindowStore: focusedWindowStore,
+                focusedWindowReader: focusedWindowReader,
                 calendarSource: calendar,
                 nowPlayingSource: nowPlaying,
                 contactsSource: contacts,
@@ -256,11 +265,14 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
     private static func tick(
         source: FrontmostAppSource,
         titleProvider: WindowTitleProvider?,
+        focusedWindowStore: FocusedWindowStore?,
+        focusedWindowReader: (any FocusedWindowReader)?,
         calendarSource: CalendarEventSource?,
         nowPlayingSource: NowPlayingTrackSource?,
         contactsSource: ContactsAttributionSource?,
         store: WorkflowContextSnapshot
     ) {
+        let identityBefore = focusedWindowReader?.readFocusedWindowIdentity()
         let ctx = buildContext(
             source: source,
             titleProvider: titleProvider,
@@ -268,14 +280,22 @@ public final class NSWorkspaceContextProvider: ContextProvider, @unchecked Senda
             nowPlayingSource: nowPlayingSource,
             contactsSource: contactsSource
         )
-        // The actor-isolated `store(_:)` is `async`; schedule onto a
-        // detached task. Ordering across ticks is preserved by the
-        // serial timer queue (tick N+1 cannot enqueue before tick N
-        // has handed off to the actor — `Task` enqueue order from a
-        // serial queue is deterministic).
-        Task.detached(priority: .utility) {
-            await store.store(ctx)
+        let identityAfter = focusedWindowReader?.readFocusedWindowIdentity()
+        let storedFocus = focusedWindowStore?.currentSync()
+        let focusGeneration: UInt64?
+        if let before = identityBefore,
+           let after = identityAfter,
+           before.bundleId == after.bundleId,
+           before.windowId == after.windowId,
+           storedFocus?.focused?.bundleId == after.bundleId,
+           storedFocus?.focused?.windowId == after.windowId,
+           after.bundleId == ctx.appBundleId
+        {
+            focusGeneration = storedFocus?.generation
+        } else {
+            focusGeneration = nil
         }
+        store.storeSync(ctx, focusGeneration: focusGeneration)
     }
 
     /// Pure builder — read each sub-provider and assemble a

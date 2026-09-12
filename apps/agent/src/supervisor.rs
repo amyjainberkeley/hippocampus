@@ -61,6 +61,9 @@ pub struct HelperSpawnConfig {
     /// becomes an inherited fd; for the iter-6 scaffold it's a file
     /// path the helper's `--output` CLI flag honors.
     pub output_path: PathBuf,
+
+    /// Explicit persisted capture setting supplied by the app supervisor.
+    pub capture_enabled: bool,
 }
 
 impl HelperSpawnConfig {
@@ -88,26 +91,8 @@ impl HelperSpawnConfig {
     /// Render the CLI args this config produces. Matches the flags the
     /// Swift helper's `main.swift` parses today.
     ///
-    /// Delegates to [`Self::cli_args_for_gate`] with the process-cached
-    /// [`crate::v2p1_gate::State::current`]. Callers that need to
-    /// exercise a specific gate state (tests) should use the explicit
-    /// form directly.
     #[must_use]
     pub fn cli_args(&self) -> Vec<String> {
-        self.cli_args_for_gate(crate::v2p1_gate::State::current())
-    }
-
-    /// Same as [`Self::cli_args`] but takes an explicit gate state.
-    /// Extracted so tests can pin both `Enabled` and `Disabled`
-    /// branches without process-level env mutation.
-    ///
-    /// When `gate == Enabled` the returned argv includes `--capture` at
-    /// the tail — this is the ADR-0031 §Status M4-LIFT activation
-    /// signal to the Swift helper. When `Disabled`, `--capture` is
-    /// omitted and the helper's live-capture path stays dev-only per
-    /// `CaptureLaunchOptions.parse` semantics (ADR-0013 Amendment 1 §4).
-    #[must_use]
-    pub fn cli_args_for_gate(&self, gate: crate::v2p1_gate::State) -> Vec<String> {
         let mut args = vec![
             "--output".to_string(),
             self.output_path.display().to_string(),
@@ -116,7 +101,7 @@ impl HelperSpawnConfig {
             "--heartbeat-seconds".to_string(),
             self.heartbeat_seconds.to_string(),
         ];
-        if gate.passes_capture_argv() {
+        if self.capture_enabled {
             args.push("--capture".to_string());
         }
         args
@@ -188,6 +173,7 @@ mod tests {
             denylist_path: PathBuf::from("/dev/null"),
             heartbeat_seconds: 30,
             output_path: PathBuf::from("/tmp/x"),
+            capture_enabled: false,
         };
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, SupervisorError::HelperNotFound(_)));
@@ -202,6 +188,7 @@ mod tests {
             denylist_path: PathBuf::from("/dev/null"),
             heartbeat_seconds: 30,
             output_path: PathBuf::from("/tmp/x"),
+            capture_enabled: false,
         };
         cfg.validate().expect("sh is executable");
     }
@@ -220,20 +207,22 @@ mod tests {
             denylist_path: PathBuf::from("/dev/null"),
             heartbeat_seconds: 30,
             output_path: PathBuf::from("/tmp/x"),
+            capture_enabled: false,
         };
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, SupervisorError::HelperNotFound(_)));
     }
 
     #[test]
-    fn cli_args_shape_gate_disabled_omits_capture() {
+    fn cli_args_omits_capture_when_explicit_setting_is_off() {
         let cfg = HelperSpawnConfig {
             binary_path: PathBuf::from("/bin/sh"),
             denylist_path: PathBuf::from("/tmp/denylist.toml"),
             heartbeat_seconds: 30,
             output_path: PathBuf::from("/tmp/out.bin"),
+            capture_enabled: false,
         };
-        let args = cfg.cli_args_for_gate(crate::v2p1_gate::State::Disabled);
+        let args = cfg.cli_args();
         assert_eq!(
             args,
             vec![
@@ -250,14 +239,15 @@ mod tests {
     }
 
     #[test]
-    fn cli_args_shape_gate_enabled_appends_capture() {
+    fn cli_args_appends_capture_when_explicit_setting_is_on() {
         let cfg = HelperSpawnConfig {
             binary_path: PathBuf::from("/bin/sh"),
             denylist_path: PathBuf::from("/tmp/denylist.toml"),
             heartbeat_seconds: 30,
             output_path: PathBuf::from("/tmp/out.bin"),
+            capture_enabled: true,
         };
-        let args = cfg.cli_args_for_gate(crate::v2p1_gate::State::Enabled);
+        let args = cfg.cli_args();
         assert_eq!(
             args,
             vec![

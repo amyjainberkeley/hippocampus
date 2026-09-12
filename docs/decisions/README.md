@@ -19,10 +19,10 @@ decision has a numbered file here. Sequential, immutable once merged
 increasing. Numbers are allocated on merge, not on draft — check
 `ls docs/decisions/ | tail -1` before you claim the next number.
 
-## Contents (as of cycle 8.44)
+## Contents (as of 2026-09-02)
 
-35 ratified ADRs from ADR-0001 (privacy posture: local-first + E2E)
-through ADR-0035 (v2 P12 chat surface on AnyLanguageModel). Load-
+39 numbered ADRs from ADR-0001 (privacy posture: local-first + E2E)
+through ADR-0039 (zero-download evidence-cited briefs). Load-
 bearing ones agents cite most often:
 
 - `0001-privacy-posture-local-first-e2e.md` — the privacy thesis.
@@ -37,6 +37,8 @@ bearing ones agents cite most often:
 - `0019-company-workspace-server-tier-2-store.md` — sync server
   model.
 - `0034-fleet-authored-pr-merge-policy.md` — Track A / Track B.
+- `0038-source-attributed-evidence-verifier.md` — trusted recall boundary.
+- `0039-zero-download-evidence-briefs.md` — default brief and release model boundary.
 
 ## Related
 

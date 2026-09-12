@@ -6,20 +6,19 @@ import os
 import AppKit
 #endif
 
-@main
 struct HippocampusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var loginItemVM = LoginItemViewModel(service: SMLoginItemService())
-    @StateObject private var preferencesStore = PreferencesStore()
-    private let updater = SparkleUpdaterService()
 
     var body: some Scene {
         MenuBarExtra {
             StatusMenuView(
                 supervisor: appDelegate.supervisor,
-                loginItemVM: loginItemVM,
-                updater: updater,
-                preferencesStore: preferencesStore
+                modelProvisioner: appDelegate.modelProvisioner,
+                loginItemVM: appDelegate.loginItemVM,
+                updater: appDelegate.updater,
+                preferencesStore: appDelegate.preferencesStore,
+                onRequestQuit: { appDelegate.requestQuit() },
+                onRequestRestart: { appDelegate.requestRestart() }
             )
             .task {
                 // Supervisor lifecycle (start / defer-until-onboarded)
@@ -29,115 +28,35 @@ struct HippocampusApp: App {
                 // "onboarding doesn't open unless I touch the icon").
                 // Here we only do menu-open-time chores: Sparkle updater
                 // start + the LoginItem one-time prompt mark.
-                updater.startUpdater()
+                appDelegate.updater.startUpdater()
                 // One-shot delayed background poll of the Sparkle appcast.
                 // The 10 s delay lets `ProcessSupervisor.start()` finish
                 // spinning up MCICaptureHelper + mci-agent before the
                 // updater does any network I/O + XML parse work. Gated on
                 // the user's opt-in inside `checkForUpdatesInBackground()`
                 // — no network call happens if auto-check is OFF.
-                updater.scheduleBackgroundCheck(after: 10.0)
-                if loginItemVM.shouldPrompt {
-                    loginItemVM.markPrompted()
+                appDelegate.updater.scheduleBackgroundCheck(after: 10.0)
+                if appDelegate.loginItemVM.shouldPrompt {
+                    appDelegate.loginItemVM.markPrompted()
                 }
-                configurePreferencesController()
             }
         } label: {
             MenuBarIcon(supervisor: appDelegate.supervisor)
         }
 
-        // Separate Window scene for the Daily Briefs model download.
-        // Previously this was a `.sheet(isPresented:)` attached to the
-        // menu view, but SwiftUI dismisses a MenuBarExtra menu on item
-        // tap BEFORE the sheet can present — the user saw "nothing
-        // happens" when clicking "Daily Briefs: Off — Download Model…"
-        // (CEO dogfood 2026-05-26). A real `Window` scene survives the
-        // menu close. `openWindow(id: "model-download")` from
-        // StatusMenuView triggers it.
-        Window("Download AI Model", id: "model-download") {
-            ModelDownloadView(
-                onDismiss: {
-                    closeModelDownloadWindow()
-                },
-                onComplete: {
-                    closeModelDownloadWindow()
-                }
-            )
-        }
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
     }
 
-    private func closeModelDownloadWindow() {
-        for window in NSApp.windows where window.identifier?.rawValue == "model-download" {
-            window.close()
-        }
-    }
-
-    /// Wire the process-wide `PreferencesWindowController.shared` with
-    /// the dependencies it needs. Idempotent; safe on every menu open.
-    /// The controller only builds the NSPanel on first `show()` — this
-    /// merely stashes the store / VM / updater references + the
-    /// callbacks the About/Privacy/Advanced sections need to defer
-    /// back to the supervisor + recall-UI.
-    @MainActor
-    private func configurePreferencesController() {
-        #if canImport(AppKit)
-        let supervisor = appDelegate.supervisor
-        PreferencesWindowController.shared.configure(
-            store: preferencesStore,
-            loginItemVM: loginItemVM,
-            updater: updater,
-            dbPath: supervisor.dbPath.path,
-            onOpenRecallTab: { tab in
-                Task { @MainActor in
-                    supervisor.openRecallUI(initialTab: tab)
-                }
-            },
-            onOpenDenylistEditor: {
-                // Deep-link into the onboarding executable's denylist
-                // editor. `hippocampus://onboarding` re-opens the flow;
-                // a future PR will add a dedicated `?slide=denylist`
-                // route. For now the button lands the user on
-                // onboarding, from which they can navigate.
-                Task { @MainActor in
-                    _ = supervisor.openOnboarding()
-                }
-            },
-            onOpenAllowlistEditor: {
-                Task { @MainActor in
-                    _ = supervisor.openOnboarding()
-                }
-            },
-            onExportDebugBundle: {
-                // Open the logs folder as a debug-bundle proxy — a
-                // future PR will produce a proper .zip artefact.
-                let logDir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Logs/MCI")
-                NSWorkspace.shared.open(logDir)
-            }
-        )
-        #endif
-    }
 }
 
 /// Menu-bar icon rendered as a status light.
 ///
-/// Cycle 8.45 Raycast/Cotypist peer study pattern #3 (P0) + cycle 8.44
-/// product-readiness audit polish gap #1. Four visually distinct
-/// states — idle / recording / paused / error — driven by
-/// `ProcessSupervisor.state` (existing @Published surface, no new XPC
-/// bridge). See `HippocampusKit/MenuBarStatus.swift` for the state
-/// derivation + pulse animation.
+/// Shares the receipt-backed status used in the menu and Preferences.
 struct MenuBarIcon: View {
     @ObservedObject var supervisor: ProcessSupervisor
 
     var body: some View {
         MenuBarStatusLabel(
-            status: MenuBarStatus.derive(
-                from: supervisor.state,
-                tccRevokedSurface: supervisor.tccRevokedSurface
-            )
+            status: supervisor.menuBarStatus
         )
     }
 }
@@ -153,15 +72,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// straight to that older shape — the previous code parked the
     /// launch logic in `StatusMenuView.task`.
     let supervisor: ProcessSupervisor
+    let modelProvisioner = BriefModelProvisioner()
+    let loginItemVM = LoginItemViewModel(service: SMLoginItemService())
+    let preferencesStore = PreferencesStore()
+    let updater = SparkleUpdaterService()
+    private var preferencesControllerConfigured = false
+    private let initialPreferencesRequest = PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))
 
     private let firstLaunchLogger = Logger(
         subsystem: "ai.hippocampus", category: "first-launch"
     )
     private let sentinelLogger = Logger(
         subsystem: "ai.hippocampus", category: "sentinel-watch"
-    )
-    private let quarantineLogger = Logger(
-        subsystem: "ai.hippocampus", category: "quarantine"
     )
     private var sentinelWatcher: DispatchSourceFileSystemObject?
     private var sentinelWatcherFd: Int32 = -1
@@ -178,6 +100,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// tailing across those transitions).
     private let tccNotifier = TCCRevokedNotifier()
     private var tccStderrTail: TCCHelperStderrTail?
+    private let terminationRequests = ApplicationTerminationRequestGate()
+    private var terminationTask: Task<Void, Never>?
+    private var didCleanUpLifecycle = false
+    private lazy var terminationCoordinator = ApplicationTerminationCoordinator(
+        supervisor: supervisor,
+        restartLauncher: DelayedApplicationRestartLauncher(
+            bundlePath: Bundle.main.bundlePath
+        ),
+        cleanup: { [weak self] in self?.cleanUpLifecycle() },
+        onFailure: { [weak self] error in self?.presentShutdownFailure(error) }
+    )
 
     override init() {
         // `ProcessSupervisor.init` is `@MainActor`; this class is too
@@ -186,17 +119,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the main thread during the SwiftUI App init.
         self.supervisor = ProcessSupervisor(
             locator: BundleBinaryLocator(),
-            keyStore: FileKeyStore()
+            keyStore: KeychainKeyStore.defaultDatabaseKey
         )
         super.init()
+    }
+
+    /// Share launch-owned dependencies with every preferences entry point.
+    /// A cold-launch URL can arrive before applicationDidFinishLaunching.
+    private func configurePreferencesController() {
+        guard !preferencesControllerConfigured else { return }
+        let supervisor = self.supervisor
+        PreferencesWindowController.shared.configure(
+            store: preferencesStore,
+            loginItemVM: loginItemVM,
+            updater: updater,
+            captureApplier: supervisor,
+            supervisor: supervisor,
+            dbPath: supervisor.dbPath.path,
+            onOpenRecallTab: { tab in
+                Task { @MainActor in
+                    supervisor.openRecallUI(initialTab: tab)
+                }
+            },
+            onOpenDenylistEditor: {
+                Task { @MainActor in
+                    _ = supervisor.openOnboarding(initialStep: "trust")
+                }
+            },
+            onOpenAllowlistEditor: {
+                Task { @MainActor in
+                    _ = supervisor.openOnboarding(initialStep: "allowlist")
+                }
+            },
+            onExportDebugBundle: {
+                // Open the logs folder as a debug-bundle proxy.
+                let logDir = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Logs/MCI")
+                NSWorkspace.shared.open(logDir)
+            }
+        )
+        preferencesControllerConfigured = true
     }
 
     /// Called by AppKit immediately after the app finishes launching —
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
+                     NSWorkspace.sessionDidBecomeActiveNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(
+                self, selector: #selector(workspaceBecameAvailable(_:)), name: name, object: nil
+            )
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceWillPowerOff(_:)),
+            name: NSWorkspace.willPowerOffNotification,
+            object: nil
+        )
+
         // Hard fail-fast for Intel / Rosetta hosts. Hippocampus's local-AI
-        // path (Core ML brief-author + embeddings + Neural Engine) is
+        // path (Core ML brief-author + CPU-pinned embeddings) is
         // Apple Silicon-only; on Intel it silently degrades or crashes.
         // Cycle 8.44 product-readiness audit polish gap. See
         // `MciBootGuards.hostIsAppleSilicon()` for the host-CPU check
@@ -204,12 +187,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // process). No env override — Intel is unsupported, period.
         guard MciBootGuards.hostIsAppleSilicon() else {
             Self.presentUnsupportedArchitectureAlert()
-            NSApp.terminate(nil)
+            requestQuit()
             return
         }
 
-        // FIRST thing on launch, before any pipe / socket / Process /
-        // xattr work: mask SIGPIPE.
+        // Mask SIGPIPE before any pipe, socket, or child-process work.
         //
         // CEO-reported (cycle 8.23, 2026-05-29): even after PR #254 shipped
         // the `applicationShouldTerminateAfterLastWindowClosed = false`
@@ -250,73 +232,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // hardening; it does NOT touch capture / OCR cascade /
         // redaction / sensitive-app denylist / wire framing / known-
         // safe-apps / entitlements / notarization / Gatekeeper /
-        // QuarantineUnlocker / mci.sqlite / blob store. Mirror of PR
+        // mci.sqlite / blob store. Mirror of PR
         // #252 + PR #254's no-CSO-sign-off-required pattern. Standard
         // library convention: Rust's `std` masks `SIGPIPE` by default
         // for the same reason.
         signal(SIGPIPE, SIG_IGN)
 
-        // FIRST thing on launch: strip `com.apple.quarantine` from the
-        // running .app bundle.
-        //
-        // CEO-reported (cycles 8.19 and 8.21): after granting a TCC
-        // permission during onboarding, the main GUI process vanishes
-        // (menu-bar icon disappears) while MCICaptureHelper + mci-agent
-        // stay alive (re-parented to launchd). Live triage confirmed
-        // `com.apple.quarantine` was still set on the .app, and the
-        // verified fix was:
-        //
-        //     xattr -dr com.apple.quarantine /Applications/Hippocampus.app
-        //
-        // Notarization + stapling do NOT clear the quarantine attr —
-        // it is attached by the downloading browser regardless of
-        // signing. While the attr is set, LaunchServices keeps a
-        // per-bundle decision record that a single Gatekeeper-adjacent
-        // Cancel or a TCC denial can flip to "reject", silently
-        // refusing subsequent launches. See QuarantineUnlocker for the
-        // full mechanism + §5 protected-set audit.
-        //
-        // We do this BEFORE `installBrowserHostManifests` and
-        // `startSupervisorOrDeferUntilOnboarded` so the strip is
-        // committed before any TCC-triggering call sites run.
-        let unlocker = QuarantineUnlocker()
-        let outcome = unlocker.runIfNeeded()
-        quarantineLogger.info(
-            "first-launch quarantine outcome: \(String(describing: outcome), privacy: .public)"
-        )
-
-        // Seed the bundled Qwen3-1.7B brief-author model from
-        // Contents/Resources/Models/qwen3-1.7b-fp16/ into
-        // ~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/ so the
-        // Rust runtime (`apps/agent/src/brief_worker.rs::default_model_dir`)
-        // finds the model at the same path it did before cycle 8.42's
-        // bundle-into-DMG fix. Idempotent — no-op if the user already has a
-        // copy at the destination (either from a prior seed OR from the
-        // pre-bundling HF-download path).
-        //
-        // Cycle 8.42, EnviousWispr peer-study §5 fix — see
-        // docs/research/2026-07-13-enviouswispr-peer-study.md. Prior to this
-        // change, first-run onboarding downloaded the model from HuggingFace
-        // with no fallback; a HF CDN throttle or 5xx (as EnviousWispr
-        // experienced 2026-07-05, killing multiple installs for ~45 min each)
-        // hung MCI's first-run at the "Prepare your brain" slide. Bundling
-        // the model into the DMG closes that outage class; the download
-        // path in `RealModelDownloader` is preserved as a fallback for any
-        // future "lite edition" DMG variant that ships without the model.
-        //
-        // We run this BEFORE `startSupervisorOrDeferUntilOnboarded()` so the
-        // supervisor's `mci-agent` spawn (which calls `qwen3_model_present`
-        // during brief-worker init) sees the seeded model on the very first
-        // launch — no restart, no reopen-menu required.
-        let seedOutcome = BriefModelPresence.seedBundledQwen3IfNeeded()
-        firstLaunchLogger.info(
-            "first-launch Qwen3 seed outcome: \(String(describing: seedOutcome), privacy: .public)"
-        )
+        configurePreferencesController()
+        installPreferencesReceiver()
+        if let request = initialPreferencesRequest {
+            PreferencesWindowController.shared.show(section: request.section)
+        }
 
         Task { @MainActor in
+            let hotkeyResult = GlobalHotkeyManager.shared.registerDefault { [weak self] in
+                self?.supervisor.openRecallUI(openPopup: true)
+            }
+            if case .osError(let status) = hotkeyResult {
+                self.firstLaunchLogger.error(
+                    "global Recall hotkey registration failed: \(status)"
+                )
+            }
             self.installBrowserHostManifests()
             self.startSupervisorOrDeferUntilOnboarded()
             self.armTCCStderrTail()
+            // Custom builds may include the optional Qwen model. Seed it on a
+            // utility task without delaying the default extractive brief path.
+            self.modelProvisioner.startIfNeeded()
+        }
+    }
+
+    private func installPreferencesReceiver() {
+        guard let executable = Bundle.main.executableURL else { return }
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(receivePreferencesRequest(_:)),
+            name: PreferencesOpenRequest.notificationName,
+            object: executable.resolvingSymlinksInPath().path, suspensionBehavior: .deliverImmediately)
+    }
+
+    @objc private func receivePreferencesRequest(_ notification: Notification) {
+        guard let executable = Bundle.main.executableURL,
+              let request = PreferencesOpenRequest(notification: notification, executableURL: executable)
+        else { return }
+        configurePreferencesController()
+        PreferencesWindowController.shared.show(section: request.section)
+        request.acknowledge(from: executable)
+    }
+
+    @objc private func workspaceBecameAvailable(_ notification: Notification) {
+        Task { @MainActor [weak self] in
+            await self?.supervisor.recoverAfterWorkspaceWake()
         }
     }
 
@@ -370,9 +335,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "Hippocampus requires Apple Silicon"
         alert.informativeText = """
-            This Mac appears to use an Intel processor. Hippocampus uses \
-            the Apple Silicon Neural Engine for local AI (Core ML). \
-            Intel Macs are not supported.
+            This Mac appears to use an Intel processor. Hippocampus's \
+            bundled local models and native components currently support \
+            Apple Silicon only. Intel Macs are not supported.
 
             Learn more at https://hippocampus-swart.vercel.app
             """
@@ -381,11 +346,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    func requestQuit() {
+        requestTermination(.quit)
+    }
+
+    func requestRestart() {
+        requestTermination(.restart)
+    }
+
+    private func requestTermination(_ intent: ApplicationTerminationIntent) {
+        terminationRequests.request(intent)
+        NSApp.terminate(nil)
+    }
+
+    @objc
+    private func workspaceWillPowerOff(_ notification: Notification) {
+        terminationRequests.request(.quit)
+    }
+
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        if terminationCoordinator.hasVerifiedShutdown { return .terminateNow }
+        if terminationTask != nil { return .terminateLater }
+        // Apple scopes the current event to its synchronous handler.
+        terminationRequests.requestQuitIfAppleEvent(
+            NSAppleEventManager.shared().currentAppleEvent
+        )
+        guard let intent = terminationRequests.takeRequestedIntent() else {
+            return .terminateCancel
+        }
+
+        terminationTask = Task { @MainActor [weak self] in
+            guard let self else {
+                sender.reply(toApplicationShouldTerminate: false)
+                return
+            }
+            let didTerminate = await self.terminationCoordinator.terminate(
+                intent: intent,
+                reply: { sender.reply(toApplicationShouldTerminate: $0) }
+            )
+            if !didTerminate {
+                self.terminationTask = nil
+            }
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        cleanUpLifecycle()
+    }
+
+    private func cleanUpLifecycle() {
+        guard !didCleanUpLifecycle else { return }
+        didCleanUpLifecycle = true
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
         cancelSentinelWatcher()
         tccStderrTail?.stop()
         tccStderrTail = nil
-        supervisor.stop()
+        GlobalHotkeyManager.shared.unregister()
+        supervisor.closeRecallUI()
+    }
+
+    private func presentShutdownFailure(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Hippocampus could not quit safely"
+        alert.informativeText = "A capture process is still running. Hippocampus will stay open so you can try again.\n\n\(error.localizedDescription)"
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     /// Defensive override against AppKit's default "terminate after
@@ -414,20 +444,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Hippocampus main process has multiple window-creating
     /// surfaces:
     ///
-    ///   - The `Window("Download AI Model", id: "model-download")`
-    ///     SwiftUI Scene declared in `HippocampusApp.body`, opened by
-    ///     `openWindow(id:)` from the "Daily Briefs: Off — Download
-    ///     Model…" menu item and closed by
-    ///     `closeModelDownloadWindow()`.
     ///   - `NSAlert.runModal()` panels in `StatusMenuView`: About
     ///     (`openAboutWindow`), Reset TCC confirmation, error
     ///     alerts via `showAlert`, `KeyWrapAuditView` sheet.
     ///   - Any future SwiftUI window or sheet attached to the menu.
     ///
     /// Returning `false` here makes the app's lifecycle explicit:
-    /// the app only quits via the "Quit Hippocampus" menu item
-    /// (`supervisor.stop()` + `NSApp.terminate(nil)`) or
-    /// `applicationWillTerminate` from the OS. The menu-bar status
+    /// the app only quits through AppKit's terminate-later lifecycle,
+    /// which awaits verified helper + agent shutdown before replying.
+    /// The menu-bar status
     /// item is the entire product surface on the user's machine —
     /// losing the main process means losing the product, even though
     /// the helper + agent keep recording.
@@ -446,13 +471,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for url in urls {
             guard let route = HippocampusURLRoute.parse(url) else { continue }
             switch route {
-            case .openRecall(let tab):
+            case .openRecall(let tab, let focusEventId, let openPopup):
                 // Per Brief Viewer spec: `hippocampus://recall?tab=brief`
                 // deep-links the Brief tab. Unknown tab values fall
                 // through to the recall-ui's default tab.
                 Task { @MainActor in
-                    supervisor.openRecallUI(initialTab: tab)
+                    supervisor.openRecallUI(
+                        initialTab: tab,
+                        focusEventId: focusEventId,
+                        openPopup: openPopup
+                    )
                 }
+            case .openPreferences(let section):
+                configurePreferencesController()
+                PreferencesWindowController.shared.show(section: section)
             case .showOnboarding:
                 // Cycle 8.48 — the cycle 8.46 Action Panel "Show
                 // Onboarding" command now works end-to-end. Re-opens
@@ -489,18 +521,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///     sentinel, the watch fires and the supervisor starts —
     ///     no relaunch required.
     ///
-    /// Once the sentinel exists, this method is a plain
-    /// `supervisor.start()`.
+    /// Once the sentinel exists, start the supervisor and present Recall
+    /// once the verified topology is ready.
     @MainActor
     private func startSupervisorOrDeferUntilOnboarded() {
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
+            if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
 
         guard supervisor.hasOnboarding else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
+            if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
@@ -549,12 +583,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if OnboardingSentinel.isComplete {
                     self.sentinelLogger.info(
-                        "sentinel-watch: sentinel appeared → starting supervisor"
+                        "sentinel-watch: sentinel appeared → enabling first-run capture"
                     )
                     self.cancelSentinelWatcher()
-                    Task { @MainActor in
-                        self.supervisor.start()
-                    }
+                    self.startCaptureAfterOnboarding()
                 }
             }
             source.setCancelHandler { [weak self] in
@@ -582,10 +614,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if Task.isCancelled { return }
                 if OnboardingSentinel.isComplete {
                     self?.sentinelLogger.info(
-                        "sentinel-watch: poll caught sentinel → starting supervisor"
+                        "sentinel-watch: poll caught sentinel → enabling first-run capture"
                     )
                     self?.cancelSentinelWatcher()
-                    self?.supervisor.start()
+                    self?.startCaptureAfterOnboarding()
                     return
                 }
             }
@@ -598,5 +630,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentinelWatcher = nil
         sentinelPollTask?.cancel()
         sentinelPollTask = nil
+    }
+
+    /// Completing the first-run flow is the user's explicit capture opt-in.
+    /// Persist and launch that state as one verified supervisor transition so
+    /// the Done screen cannot lead to an inert capture-disabled process tree.
+    @MainActor
+    private func startCaptureAfterOnboarding() {
+        supervisor.openRecallWhenReady(initialLaunch: true)
+        if supervisor.captureEnabled {
+            supervisor.start()
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.supervisor.applyCaptureEnabled(true)
+                self.firstLaunchLogger.info(
+                    "first-launch: onboarding consent persisted; capture topology ready"
+                )
+            } catch {
+                self.firstLaunchLogger.error(
+                    "first-launch: could not enable capture after onboarding: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !OnboardingSentinel.isComplete && supervisor.hasOnboarding {
+            _ = supervisor.openOnboarding()
+            return false
+        }
+        supervisor.openRecallWhenReady()
+        if !supervisor.state.isActive && supervisor.state != .starting {
+            supervisor.start()
+        }
+        return false
     }
 }

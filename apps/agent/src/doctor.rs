@@ -4,23 +4,26 @@
 //!
 //! An install of Hippocampus captured 52,457 frames over 27 hours and wrote
 //! zero events. Nothing in the product said why. Finding the answer took
-//! reading 5.8 MB of helper logs, cross-referencing a Swift kill-switch, and
-//! knowing that `v2p1_gate=disabled` on one log line meant every OCR emit was
-//! a no-op.
+//! reading 5.8 MB of helper logs and cross-referencing capture startup state.
 //!
 //! Three independent things were wrong at once, and each failed silently:
-//! the V2-P1 gate was off, Screen Recording TCC had been declined, and the
-//! helper had no DB key. A user who hits any of them sees the same thing: an
+//! capture was off, Screen Recording TCC had been declined, and the helper had
+//! no DB key. A user who hits any of them sees the same thing: an
 //! app that looks like it is running and a memory that stays empty.
 //!
 //! `doctor` reads the same evidence and says it in one screen. It is
 //! deliberately read-only and dependency-free: it opens the brain read-only,
-//! reads env vars, and greps logs it already owns.
+//! and greps logs it already owns.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use crate::capture_status::CaptureStatus;
+use crate::wall_clock::parse_unix_ms;
 use mci_brain::{BrainStats, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
+
+const RECEIPT_FRESHNESS_MS: u64 = 120_000;
 
 /// How a single check came out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,109 +85,36 @@ fn tail_of(path: &Path, max_bytes: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&data[start..]).into_owned())
 }
 
-/// The env var name, as it appears verbatim inside a helper that reads it.
-const HELPER_GATE_SYMBOL: &[u8] = b"HIPPOCAMPUS_ENABLE_V2P1";
-
-/// Path to the installed helper binary.
-fn installed_helper_path() -> PathBuf {
-    PathBuf::from("/Applications/Hippocampus.app/Contents/MacOS/MCICaptureHelper")
-}
-
-/// Does a built helper actually contain the gate?
-///
-/// The env-var gate landed 2026-07-13. A helper built before that has no code
-/// path that reads it, so telling someone to set the variable is worse than
-/// saying nothing: they set it, nothing changes, and they conclude the product
-/// is broken rather than stale. Scanning the binary for the symbol is crude
-/// but exact, and it is the difference between "flip this switch" and "you
-/// need a newer build".
-///
-/// `None` when there is no installed helper, which must not be reported as
-/// stale: a machine that never had one should not be told to rebuild.
-fn helper_supports_gate(path: &Path) -> Option<bool> {
-    let data = std::fs::read(path).ok()?;
-    Some(
-        data.windows(HELPER_GATE_SYMBOL.len())
-            .any(|w| w == HELPER_GATE_SYMBOL),
-    )
-}
-
-/// Is the V2-P1 capture gate on, and can the installed helper even read it?
-///
-/// Two separate questions with very different answers. The helper inherits its
-/// environment from whoever launches it (`ProcessSupervisor` leaves
-/// `helper.environment` nil, which in Foundation means inherit), so setting the
-/// variable does reach it, but only if that binary was built after the gate
-/// existed.
-fn check_gate() -> Check {
-    let installed = installed_helper_path();
-    if helper_supports_gate(&installed) == Some(false) {
-        return Check::new(
-            "capture gate",
-            Status::Fail,
-            format!(
-                "the installed helper has no gate symbol, so it cannot emit at all ({})",
-                installed.display()
-            ),
-            "This build predates the env-var gate (added 2026-07-13), so no setting \
-             will make it capture. Build a current one:\n      \
-             swift build -c release --package-path adapters/macos/MCICaptureHelper\n    \
-             then run that binary with HIPPOCAMPUS_ENABLE_V2P1=1.",
-        );
-    }
-
-    let on = std::env::var("HIPPOCAMPUS_ENABLE_V2P1").as_deref() == Ok("1");
-    if on {
-        Check::new(
-            "capture gate",
-            Status::Pass,
-            "HIPPOCAMPUS_ENABLE_V2P1=1, OCR emit is armed",
-            "",
-        )
-    } else {
-        Check::new(
-            "capture gate",
-            Status::Fail,
-            "HIPPOCAMPUS_ENABLE_V2P1 is not 1, so killOcrEmit stays true",
-            "Frames get captured and cascaded, then every OCR emit is dropped. \
-             Launch with the gate on so the helper inherits it:\n      \
-             HIPPOCAMPUS_ENABLE_V2P1=1 /Applications/Hippocampus.app/Contents/MacOS/Hippocampus",
-        )
-    }
-}
-
-/// Did ScreenCaptureKit report a TCC refusal in the helper log?
+/// Historical logs cannot establish current Screen Recording permission.
 fn check_screen_recording(log: Option<&str>) -> Check {
     let Some(text) = log else {
         return Check::new(
             "screen recording",
             Status::Warn,
-            "no helper log yet, so capture has not been attempted",
+            "no fresh capture receipt; current Screen Recording status is unknown",
             "Launch the app once, then re-run doctor.",
         );
     };
     if text.contains("user declined TCC") || text.contains("declined TCC") {
         return Check::new(
             "screen recording",
-            Status::Fail,
-            "the helper log shows ScreenCaptureKit was declined",
-            "macOS remembers a refusal and will not ask again. Grant it by hand:\n      \
-             System Settings > Privacy & Security > Screen & System Audio Recording\n      \
-             enable Hippocampus, then quit and relaunch the app.",
+            Status::Warn,
+            "historical helper log contains a ScreenCaptureKit refusal; current permission is unknown",
+            "Launch Hippocampus and re-run doctor for a fresh capture receipt.",
         );
     }
     if text.contains("first sample received") {
         return Check::new(
             "screen recording",
-            Status::Pass,
-            "the helper has received frames from ScreenCaptureKit",
-            "",
+            Status::Warn,
+            "historical helper log records frames; current capture status is unknown",
+            "Launch Hippocampus and re-run doctor for a fresh capture receipt.",
         );
     }
     Check::new(
         "screen recording",
         Status::Warn,
-        "no frames and no refusal in the log",
+        "no fresh capture receipt; current Screen Recording status is unknown",
         "Launch the app and use it for a minute, then re-run doctor.",
     )
 }
@@ -192,20 +122,80 @@ fn check_screen_recording(log: Option<&str>) -> Check {
 /// Can the helper write keyframe blobs?
 fn check_helper_key(log: Option<&str>) -> Check {
     match log {
-        Some(t) if t.contains("MCI_DB_KEY_HEX not set or invalid") => Check::new(
+        Some(t) if t.contains("database key unavailable from Keychain") => Check::new(
             "helper db key",
             Status::Warn,
-            "the helper ran without MCI_DB_KEY_HEX",
-            "Text still lands; keyframe images do not. Set MCI_DB_KEY_HEX in the \
-             environment the app is launched from if you want thumbnails.",
+            "historical helper log contains a Keychain error; current key access is unknown",
+            "Launch Hippocampus and re-run doctor for current capture status.",
         ),
         _ => Check::new(
             "helper db key",
-            Status::Pass,
-            "no key complaint in the log",
+            Status::Warn,
+            "current helper key access is unknown without a fresh capture receipt",
             "",
         ),
     }
+}
+
+fn fresh_capture_checks(receipt: &CaptureStatus, now_ms: u64) -> Option<Vec<Check>> {
+    let updated = parse_unix_ms(&receipt.updated_at)?;
+    if receipt.schema_version != 1 || updated > now_ms || now_ms - updated > RECEIPT_FRESHNESS_MS {
+        return None;
+    }
+    let recent_frame = receipt
+        .last_stored_frame_at
+        .as_deref()
+        .and_then(parse_unix_ms)
+        .is_some_and(|ts| ts <= updated && now_ms.saturating_sub(ts) <= RECEIPT_FRESHNESS_MS);
+    let runtime = if let Some(reason) = &receipt.blocked_reason {
+        Check::new(
+            "capture runtime",
+            if reason == "capture_disabled" {
+                Status::Warn
+            } else {
+                Status::Fail
+            },
+            format!("fresh agent receipt reports {reason}"),
+            "Review capture status in Hippocampus.",
+        )
+    } else if let Some(reason) = &receipt.suppression_reason {
+        Check::new(
+            "capture runtime",
+            Status::Warn,
+            format!("fresh helper receipt reports suppression: {reason}"),
+            "",
+        )
+    } else if recent_frame && receipt.stored_frame_count > 0 {
+        Check::new(
+            "capture runtime",
+            Status::Pass,
+            "a screen frame was committed within the last two minutes",
+            "",
+        )
+    } else {
+        Check::new(
+            "capture runtime",
+            Status::Warn,
+            "agent receipt is fresh, but no recent saved screen frame is confirmed",
+            "Use an allowed app and check capture status in Hippocampus.",
+        )
+    };
+    Some(vec![
+        runtime,
+        Check::new(
+            "capture storage",
+            if receipt.stored_frame_count > 0 {
+                Status::Pass
+            } else {
+                Status::Warn
+            },
+            format!(
+                "{} retained screen events; {} retained screenshot references",
+                receipt.stored_frame_count, receipt.stored_screenshot_count
+            ),
+            "",
+        ),
+    ])
 }
 
 /// Is there an embedder model, and therefore semantic recall?
@@ -214,9 +204,9 @@ fn check_embedder() -> Check {
     let candidates = [
         std::env::var_os("MCI_ARCTIC_MODEL_PATH").map(PathBuf::from),
         Some(PathBuf::from(
-            "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc",
+            "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc",
         )),
-        Some(home.join("Library/Application Support/MCI/Models/ArcticEmbedS_INT8.mlmodelc")),
+        Some(home.join("Library/Application Support/MCI/Models/ArcticEmbedS_FP16.mlmodelc")),
     ];
     for c in candidates.into_iter().flatten() {
         if c.exists() {
@@ -244,7 +234,7 @@ fn check_events(stats: &BrainStats) -> Check {
             "events",
             Status::Fail,
             "0 events",
-            "Nothing has been captured. The checks above say why.",
+            "No events are retained. Review the current capture checks.",
         );
     }
     Check::new(
@@ -292,17 +282,31 @@ pub fn diagnose(db_path: &Path, key: &DbKey) -> Result<Vec<Check>, String> {
         .map_err(|e| format!("open brain at {}: {e}", db_path.display()))?;
     let stats = store.stats().map_err(|e| format!("read stats: {e}"))?;
 
-    let log = tail_of(&helper_log_path(), 256 * 1024);
-    let log_ref = log.as_deref();
-
-    Ok(vec![
-        check_events(&stats),
-        check_gate(),
-        check_screen_recording(log_ref),
-        check_helper_key(log_ref),
-        check_embedder(),
-        check_enriched(&stats),
-    ])
+    let now_ms = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
+    let receipt = std::fs::read(db_path.with_file_name("capture-status.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<CaptureStatus>(&bytes).ok());
+    let mut checks = vec![check_events(&stats)];
+    checks.extend(
+        receipt
+            .as_ref()
+            .and_then(|value| fresh_capture_checks(value, now_ms))
+            .unwrap_or_else(|| {
+                let log = tail_of(&helper_log_path(), 256 * 1024);
+                vec![
+                    check_screen_recording(log.as_deref()),
+                    check_helper_key(log.as_deref()),
+                ]
+            }),
+    );
+    checks.extend([check_embedder(), check_enriched(&stats)]);
+    Ok(checks)
 }
 
 /// Render the checks as the report the CLI prints.
@@ -310,12 +314,7 @@ pub fn diagnose(db_path: &Path, key: &DbKey) -> Result<Vec<Check>, String> {
 pub fn render(checks: &[Check]) -> String {
     let mut out = String::new();
     for c in checks {
-        out.push_str(&format!(
-            "  [{}] {:<18} {}\n",
-            c.status.marker(),
-            c.name,
-            c.detail
-        ));
+        let _ = writeln!(out, "  [{}] {:<18} {}", c.status.marker(), c.name, c.detail);
     }
 
     let blockers: Vec<&Check> = checks.iter().filter(|c| c.status == Status::Fail).collect();
@@ -324,21 +323,30 @@ pub fn render(checks: &[Check]) -> String {
         .filter(|c| c.status == Status::Warn && !c.fix.is_empty())
         .collect();
 
-    if blockers.is_empty() && advisories.is_empty() {
+    if checks.is_empty() {
+        out.push_str("\n  No checks were run.\n");
+        return out;
+    }
+
+    if checks.iter().all(|c| c.status == Status::Pass) {
         out.push_str("\n  Nothing to fix.\n");
         return out;
+    }
+
+    if blockers.is_empty() {
+        out.push_str("\n  Review warnings above.\n");
     }
 
     if !blockers.is_empty() {
         out.push_str("\nBlocking:\n");
         for c in blockers {
-            out.push_str(&format!("\n  {}\n    {}\n", c.name, c.fix));
+            let _ = write!(out, "\n  {}\n    {}\n", c.name, c.fix);
         }
     }
     if !advisories.is_empty() {
         out.push_str("\nWorth doing:\n");
         for c in advisories {
-            out.push_str(&format!("\n  {}\n    {}\n", c.name, c.fix));
+            let _ = write!(out, "\n  {}\n    {}\n", c.name, c.fix);
         }
     }
     out
@@ -378,51 +386,62 @@ mod tests {
     }
 
     #[test]
-    fn declined_tcc_is_detected_and_explains_itself() {
+    fn historical_tcc_refusal_is_not_a_current_blocker() {
         let log = "mci-capture-helper: live capture start failed: Code=-3801 \
                    \"The user declined TCC\"";
         let c = check_screen_recording(Some(log));
-        assert_eq!(c.status, Status::Fail);
-        assert!(
-            c.fix.contains("Screen & System Audio Recording"),
-            "should name the exact settings pane"
-        );
+        assert_eq!(c.status, Status::Warn);
+        assert!(c.detail.contains("current permission is unknown"));
     }
 
     #[test]
-    fn frames_received_passes() {
+    fn historical_frames_do_not_prove_current_capture() {
         let c = check_screen_recording(Some("SCStream callback alive: first sample received."));
-        assert_eq!(c.status, Status::Pass);
+        assert_eq!(c.status, Status::Warn);
     }
 
     #[test]
-    fn missing_helper_key_is_a_warning_not_a_blocker() {
-        // Text still lands without it; only keyframe images are lost. Calling
-        // this fatal would send people chasing the wrong thing.
+    fn historical_missing_key_is_not_a_current_blocker() {
         let c = check_helper_key(Some(
-            "mci-capture-helper: MCI_DB_KEY_HEX not set or invalid",
+            "mci-capture-helper: database key unavailable from Keychain",
         ));
         assert_eq!(c.status, Status::Warn);
     }
 
     #[test]
-    fn a_helper_too_old_for_the_gate_is_detected() {
-        let dir = std::env::temp_dir().join("mci-doctor-gate-test");
-        std::fs::create_dir_all(&dir).expect("tmpdir");
+    fn receipt_freshness_and_frame_time_are_independent() {
+        let now = parse_unix_ms("2026-09-05T12:00:30.000Z").unwrap();
+        let mut receipt = CaptureStatus {
+            schema_version: 1,
+            updated_at: "2026-09-05T12:00:00.000Z".into(),
+            last_stored_frame_at: Some("2026-09-05T11:59:59.000Z".into()),
+            stored_frame_count: 4,
+            stored_screenshot_count: 2,
+            suppression_reason: None,
+            blocked_reason: None,
+        };
+        assert_eq!(
+            fresh_capture_checks(&receipt, now).unwrap()[0].status,
+            Status::Pass
+        );
+        receipt.last_stored_frame_at = Some("2026-09-01T11:59:59.000Z".into());
+        assert_eq!(
+            fresh_capture_checks(&receipt, now).unwrap()[0].status,
+            Status::Warn
+        );
+        assert!(fresh_capture_checks(&receipt, now + RECEIPT_FRESHNESS_MS).is_none());
+        assert!(fresh_capture_checks(&receipt, now - 60_000).is_none());
+        receipt.schema_version = 2;
+        assert!(fresh_capture_checks(&receipt, now).is_none());
+    }
 
-        let stale = dir.join("stale-helper");
-        std::fs::write(&stale, b"a binary built before the gate existed").expect("write");
-        assert_eq!(helper_supports_gate(&stale), Some(false));
-
-        let current = dir.join("current-helper");
-        std::fs::write(&current, b"...reads HIPPOCAMPUS_ENABLE_V2P1 at boot...").expect("write");
-        assert_eq!(helper_supports_gate(&current), Some(true));
-
-        // Absent is unknown, not stale. A machine that never installed the
-        // app must not be told to rebuild something it never had.
-        assert_eq!(helper_supports_gate(&dir.join("nope")), None);
-
-        let _ = std::fs::remove_dir_all(&dir);
+    #[test]
+    fn receipt_timestamp_parser_rejects_invalid_dates() {
+        assert!(parse_unix_ms("2026-02-30T12:00:00.000Z").is_none());
+        assert!(parse_unix_ms("2026-09-05T25:00:00.000Z").is_none());
+        assert!(parse_unix_ms("2026-09-05T12:00:00.000X").is_none());
+        assert_eq!(parse_unix_ms("1970-01-01T00:00:00.000Z"), Some(0));
+        assert!(parse_unix_ms("2024-02-29T12:00:00.123Z").is_some());
     }
 
     #[test]
@@ -436,11 +455,54 @@ mod tests {
         assert!(out.contains("Blocking:"));
         assert!(out.contains("Worth doing:"));
         assert!(out.contains("do this"));
+        assert!(out.contains("maybe this"));
+        assert!(!out.contains("Nothing to fix."));
+        assert!(!out.contains("Review warnings above."));
     }
 
     #[test]
     fn render_says_so_when_everything_is_fine() {
         let out = render(&[Check::new("a", Status::Pass, "fine", "")]);
         assert!(out.contains("Nothing to fix."));
+    }
+
+    #[test]
+    fn render_reviews_warnings_without_remediation() {
+        let warning = Check::new(
+            "capture runtime",
+            Status::Warn,
+            "suppressed: denylist-source",
+            "",
+        );
+        for checks in [
+            vec![warning.clone()],
+            vec![Check::new("a", Status::Pass, "fine", ""), warning],
+        ] {
+            let out = render(&checks);
+            assert!(!out.contains("Nothing to fix."));
+            assert!(out.contains("Review warnings above."));
+            assert!(out.contains("[warn]"));
+            assert!(out.contains("denylist-source"));
+            assert!(!out.contains("Blocking:"));
+            assert!(!out.contains("Worth doing:"));
+        }
+    }
+
+    #[test]
+    fn render_reviews_warnings_with_remediation() {
+        let out = render(&[Check::new("a", Status::Warn, "meh", "maybe this")]);
+        assert!(out.contains("Review warnings above."));
+        assert!(out.contains("Worth doing:"));
+        assert!(out.contains("maybe this"));
+        assert!(!out.contains("Nothing to fix."));
+        assert!(!out.contains("Blocking:"));
+    }
+
+    #[test]
+    fn render_does_not_claim_clean_when_no_checks_ran() {
+        let out = render(&[]);
+        assert!(!out.contains("Nothing to fix."));
+        assert!(out.contains("No checks were run."));
+        assert!(!out.contains("Review warnings above."));
     }
 }

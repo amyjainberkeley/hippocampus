@@ -6,11 +6,11 @@
 //!
 //! **SCAFFOLD ONLY.** Publishes the type shape and public API signatures
 //! the Phase D Tier2 entity-extraction pipeline (FORK 8 = A) will consume
-//! for Reminders.app. Does NOT read EventKit today.
+//! for Reminders.app. Does NOT read `EventKit` today.
 //!
 //! ## TCC requirement (documented; not yet exercised)
 //!
-//! Reminders shares EventKit with Calendar but requires a **separate**
+//! Reminders shares `EventKit` with Calendar but requires a **separate**
 //! Automation TCC per-target grant (Reminders is distinct from Calendars
 //! since macOS 13). The wire-up PR (cycle 8.60+) must add:
 //!
@@ -24,7 +24,7 @@
 //!
 //! ## What this crate does NOT do
 //!
-//! - Does not read EventKit. Does not write the brain.
+//! - Does not read `EventKit`. Does not write the brain.
 //! - Does not implement a cascade-equivalent (deferred to the wire-up PR).
 //!
 //! ## ADR pointers

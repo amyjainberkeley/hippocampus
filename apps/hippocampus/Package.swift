@@ -13,6 +13,21 @@
 // macOS 14+ matches the rest of the MCI app set.
 import PackageDescription
 
+let standaloneFixtureSources = [
+    "AIToolConnectorBehavior.swift",
+    "BriefModelPresenceBehavior.swift",
+    "CaptureConsentBehavior.swift",
+    "ChildProcessEnvironmentBehavior.swift",
+    "KeyCustodyCommandRunnerBehavior.swift",
+    "KeyStoreResponsiveness.swift",
+    "KeyWrapAuditResponsiveness.swift",
+    "RuntimeConfigBehavior.swift",
+    "RetentionPreferencesBehavior.swift",
+    "SupervisorLifecycleBehavior.swift",
+    "SupervisorProcessShutdownBehavior.swift",
+    "SupervisorTransitionGateBehavior.swift",
+]
+
 let package = Package(
     name: "Hippocampus",
     platforms: [.macOS(.v14)],
@@ -22,6 +37,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+        .package(url: "https://github.com/LebJe/TOMLKit.git", exact: "0.6.0"),
     ],
     targets: [
         .executableTarget(
@@ -36,6 +52,7 @@ let package = Package(
             name: "HippocampusKit",
             dependencies: [
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "TOMLKit", package: "TOMLKit"),
             ],
             path: "Sources/HippocampusKit",
             resources: [
@@ -43,15 +60,70 @@ let package = Package(
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Security"),
             ]
         ),
         .testTarget(
             name: "HippocampusKitTests",
-            dependencies: ["HippocampusKit"],
+            dependencies: [
+                "HippocampusKit",
+                .product(name: "TOMLKit", package: "TOMLKit"),
+            ],
             path: "Tests/HippocampusKitTests",
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
             ]
+        ),
+        .executableTarget(
+            name: "BriefModelPresenceBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "BriefModelPresenceBehavior.swift" },
+            sources: ["BriefModelPresenceBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "RuntimeConfigBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "RuntimeConfigBehavior.swift" },
+            sources: ["RuntimeConfigBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "CaptureConsentBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "CaptureConsentBehavior.swift" },
+            sources: ["CaptureConsentBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "SupervisorLifecycleBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "SupervisorLifecycleBehavior.swift" },
+            sources: ["SupervisorLifecycleBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "RetentionPreferencesBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "RetentionPreferencesBehavior.swift" },
+            sources: ["RetentionPreferencesBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "ChildProcessEnvironmentBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "ChildProcessEnvironmentBehavior.swift" },
+            sources: ["ChildProcessEnvironmentBehavior.swift"]
+        ),
+        .executableTarget(
+            name: "AIToolConnectorBehavior",
+            dependencies: ["HippocampusKit"],
+            path: "Tests/Fixtures",
+            exclude: standaloneFixtureSources.filter { $0 != "AIToolConnectorBehavior.swift" },
+            sources: ["AIToolConnectorBehavior.swift"]
         ),
     ]
 )

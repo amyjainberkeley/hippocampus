@@ -5,15 +5,14 @@
 //! brain filled any other way the worker never ran, and no command existed
 //! that produced a brief at all.
 //!
-//! Two halves, because no CoreML model exists on a dev machine or in CI:
+//! Two halves, because no `CoreML` model exists on a dev machine or in CI:
 //!
 //! - The generation half drives `brief_worker::generate_brief_once` — the
 //!   exact function the `brief` CLI arm calls — with the `StubBriefAuthor`
 //!   and `StubLlamaBackend` from `mci_brief`, so the pipeline runs without
 //!   a model.
-//! - The refusal half spawns the real binary, because "what does the
-//!   command do on a machine with no model" is a question about argument
-//!   parsing and exit codes, not about generation.
+//! - The executable half spawns the real binary and proves that a machine
+//!   without Qwen still receives an evidence-cited extractive brief.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -25,6 +24,7 @@ use mci_agent::brief_worker::{
 };
 use mci_brain::{BrainStore, Event, EventId, EventRecord, SqlCipherBrainStore};
 use mci_brief::author::{AuthorError, BriefAuthor, StubBriefAuthor};
+use mci_brief::extractive_author::ExtractiveBriefAuthor;
 use mci_brief::llama_author::LlamaBriefAuthor;
 use mci_brief::llama_backend::StubLlamaBackend;
 use mci_brief::model::{Brief, BriefId, BriefState};
@@ -60,8 +60,8 @@ fn store_with(events: Vec<Event>) -> (TempDir, SqlCipherBrainStore) {
     let path = dir.path().join("brain.sqlite");
     let key = DbKey::generate().expect("csprng");
     let store = SqlCipherBrainStore::new(&path, &key).expect("open store");
-    for e in &events {
-        store.put_event(e).expect("put_event");
+    for event in events {
+        store.put_event(&event).expect("put_event");
     }
     (dir, store)
 }
@@ -99,6 +99,10 @@ fn workday_events() -> Vec<Event> {
 /// The stub author, wrapped the way the CLI wraps the real one.
 fn stub_factory() -> AuthorFactory {
     Arc::new(|| Ok(Box::new(StubBriefAuthor) as Box<dyn BriefAuthor>))
+}
+
+fn extractive_factory() -> AuthorFactory {
+    Arc::new(|| Ok(Box::new(ExtractiveBriefAuthor) as Box<dyn BriefAuthor>))
 }
 
 /// The real `LlamaBriefAuthor` over a canned backend. Exercises prompt
@@ -157,6 +161,117 @@ fn cli_path_writes_a_draft_brief_for_a_brain_capture_never_touched() {
     assert_eq!(row.source_event_count, 3);
     assert!(row.body.contains("pricing page"), "body: {}", row.body);
     assert_eq!(store.brief_count().expect("brief_count"), 1);
+}
+
+#[test]
+fn persisted_brief_records_the_author_that_actually_wrote_it() {
+    let (_dir, store) = store_with(workday_events());
+
+    generate_brief_once(
+        &store,
+        &extractive_factory(),
+        "Daily brief",
+        &whole_day(),
+        1,
+    )
+    .expect("generate");
+
+    let row = store.brief_for_date(DAY).unwrap().unwrap();
+    assert_eq!(row.model_id, "hippocampus-extractive");
+    assert_eq!(row.model_version, "2");
+}
+
+#[test]
+fn extractive_chrome_only_day_is_skipped_without_persisting_a_brief() {
+    let (_dir, store) = store_with(vec![event(
+        DAY_START_US + MIN,
+        "com.apple.finder",
+        "",
+        "Finder\nFile Edit View Go Window Help\nRecents\nDownloads\n2 items, 40 GB available",
+    )]);
+    let outcome = generate_brief_once(
+        &store,
+        &extractive_factory(),
+        "Daily brief",
+        &whole_day(),
+        1,
+    )
+    .unwrap();
+    assert!(matches!(outcome, BriefOutcome::SkippedEmpty), "{outcome:?}");
+    assert_eq!(store.brief_count().unwrap(), 0);
+    assert_eq!(store.events_since(0, 16).unwrap().len(), 1);
+}
+
+#[test]
+fn extractive_mixed_ocr_persists_useful_lines_with_exact_source_ids() {
+    let (_dir, store) = store_with(vec![
+        event(
+            DAY_START_US + MIN,
+            "com.apple.Notes",
+            "",
+            "Merged PR #412 after CI passed.\nWaiting for Maya's review.",
+        ),
+        event(
+            DAY_START_US + 2 * MIN,
+            "com.apple.Notes",
+            "",
+            "File Edit View Window Help\nMerged PR #412 after CI passed.\nDrafting release notes.",
+        ),
+        event(
+            DAY_START_US + 3 * MIN,
+            "com.apple.finder",
+            "",
+            "Finder\nFile Edit View Go Window Help\nDownloads",
+        ),
+    ]);
+    let records = store.events_since(0, 16).unwrap();
+    let merged_id = records
+        .iter()
+        .find(|r| r.text_snippet.contains("Drafting release"))
+        .unwrap()
+        .event_id
+        .0;
+    let waiting_id = records
+        .iter()
+        .find(|r| r.text_snippet.contains("Waiting for Maya"))
+        .unwrap()
+        .event_id
+        .0;
+    let outcome = generate_brief_once(
+        &store,
+        &extractive_factory(),
+        "Daily brief",
+        &whole_day(),
+        1,
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            outcome,
+            BriefOutcome::Stored {
+                citation_violations: 0,
+                ..
+            }
+        ),
+        "{outcome:?}"
+    );
+    let row = store.brief_for_date(DAY).unwrap().unwrap();
+    assert_eq!(
+        row.body.matches("Merged PR #412").count(),
+        1,
+        "{}",
+        row.body
+    );
+    assert!(row.body.contains(&format!(
+        "Merged PR #412 after CI passed. [event:{merged_id}]"
+    )));
+    assert!(row
+        .body
+        .contains(&format!("Waiting for Maya's review. [event:{waiting_id}]")));
+    assert!(!row.body.contains("File Edit"));
+    assert!(!row.body.contains("Downloads"));
+    assert_eq!(row.source_event_count, 3);
+    assert_eq!(store.events_since(0, 16).unwrap(), records);
 }
 
 #[test]
@@ -330,6 +445,51 @@ fn a_dated_window_reads_that_day_and_no_other() {
 }
 
 #[test]
+fn a_busy_day_samples_through_the_newest_work_instead_of_truncating_the_morning() {
+    let mut events = (0..brief_worker::MAX_EVENTS_PER_BRIEF)
+        .map(|index| {
+            event(
+                DAY_START_US + 8 * 60 * MIN + u64::try_from(index).unwrap() * 1_000_000,
+                "com.microsoft.VSCode",
+                "https://github.com/example/hippocampus",
+                &format!("Routine editor state {index}"),
+            )
+        })
+        .collect::<Vec<_>>();
+    events.push(event(
+        DAY_START_US + 20 * 60 * MIN,
+        "com.tinyspeck.slackmacgap",
+        "https://example.com/launch",
+        "Blocked on the final notarization credential",
+    ));
+    let (_dir, store) = store_with(events);
+
+    let outcome = generate_brief_once(
+        &store,
+        &extractive_factory(),
+        "Daily brief",
+        &whole_day(),
+        1,
+    )
+    .expect("generate");
+
+    let BriefOutcome::Stored { event_count, .. } = outcome else {
+        panic!("expected stored brief");
+    };
+    assert_eq!(
+        usize::try_from(event_count).unwrap(),
+        brief_worker::MAX_EVENTS_PER_BRIEF
+    );
+    let row = store.brief_for_date(DAY).unwrap().unwrap();
+    assert!(
+        row.body
+            .contains("Blocked on the final notarization credential"),
+        "the newest work vanished from the daily brief: {}",
+        row.body
+    );
+}
+
+#[test]
 fn an_empty_window_writes_nothing_and_says_so() {
     let (_dir, store) = store_with(workday_events());
     let empty_day = BriefWindow::for_local_date("2026-05-21", 0).expect("valid date");
@@ -426,45 +586,87 @@ fn agent_bin() -> PathBuf {
 }
 
 #[test]
-fn no_model_exits_non_zero_and_explains_itself() {
+fn help_describes_the_zero_download_brief_path() {
+    let out = Command::new(agent_bin())
+        .arg("--help")
+        .output()
+        .expect("spawn mci-agent --help");
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("evidence-cited extractive"),
+        "help must name the always-available local author: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Needs the Qwen3 model"),
+        "help must not claim that an optional model is required: {stdout}"
+    );
+}
+
+#[test]
+fn no_model_still_writes_an_evidence_cited_local_brief() {
     let tmp = TempDir::new().expect("tempdir");
     let model_dir = tmp.path().join("Models");
     std::fs::create_dir_all(&model_dir).expect("mkdir");
     assert_eq!(
         brief_worker::brief_gate(&model_dir, false),
-        BriefGate::ModelMissing,
-        "fixture must genuinely have no model"
+        BriefGate::Open,
+        "the extractive author must keep the brief path open"
     );
+
+    let db_path = tmp.path().join("brain.sqlite");
+    let key = DbKey::from_bytes([0xaa; 32]);
+    let store = SqlCipherBrainStore::new(&db_path, &key).expect("open store");
+    store
+        .put_event(&event(
+            DAY_START_US + 12 * 60 * MIN,
+            "com.microsoft.VSCode",
+            "https://github.com/example/hippocampus",
+            "Fixed the capture permission status path",
+        ))
+        .expect("seed event");
+    drop(store);
 
     let out = Command::new(agent_bin())
         .arg("brief")
         .arg("--db-path")
-        .arg(tmp.path().join("brain.sqlite"))
+        .arg(&db_path)
+        .arg("--date")
+        .arg(DAY)
         .arg("--model-dir")
         .arg(&model_dir)
         .env("HOME", tmp.path())
-        .env("MCI_DB_KEY_HEX", "a".repeat(64))
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.brief.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
+        .env("MCI_DB_KEY_HEX", "aa".repeat(32))
         .env_remove("MCI_BRIEFS_DISABLED")
         .output()
         .expect("spawn mci-agent");
 
     assert!(
-        !out.status.success(),
-        "a command that writes no brief must not exit 0"
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("Qwen3-1.7B-FP16.mlmodelc"),
-        "must name the file it looked for: {stderr}"
+        stderr.contains("hippocampus-extractive"),
+        "must name the author used: {stderr}"
     );
-    assert!(
-        stderr.contains("convert_brief_model.py"),
-        "must say how to get one: {stderr}"
-    );
-    assert!(
-        !tmp.path().join("brain.sqlite").exists(),
-        "refusing early must not create a brain as a side effect"
-    );
+
+    let reopened = SqlCipherBrainStore::new(&db_path, &key).expect("reopen store");
+    let row = reopened.brief_for_date(DAY).unwrap().unwrap();
+    assert_eq!(row.model_id, "hippocampus-extractive");
+    assert!(row
+        .body
+        .contains("Fixed the capture permission status path"));
+    assert!(row.body.contains("[event:"));
 }
 
 #[test]
@@ -478,6 +680,13 @@ fn the_disable_switch_exits_non_zero_and_names_itself() {
         .arg("--model-dir")
         .arg(tmp.path())
         .env("HOME", tmp.path())
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.brief.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", "a".repeat(64))
         .env("MCI_BRIEFS_DISABLED", "1")
         .output()
@@ -504,6 +713,13 @@ fn a_date_that_is_not_a_date_is_rejected_before_anything_else() {
         .arg("--model-dir")
         .arg(tmp.path())
         .env("HOME", tmp.path())
+        .env("MCI_DEVELOPMENT_FILE_KEY", "1")
+        .env(
+            "MCI_DB_KEYCHAIN_SERVICE",
+            "ai.hippocampus.tests.brief.missing",
+        )
+        .env("MCI_DB_KEYCHAIN_ACCOUNT", "never-created")
+        .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", "a".repeat(64))
         .output()
         .expect("spawn mci-agent");

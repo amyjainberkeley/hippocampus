@@ -1,0 +1,423 @@
+name: Release contract and artifact fixtures
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'core/brain/**'
+      - 'core/src/ipc/**'
+      - 'adapters/macos/mci-brain-ffi/**'
+      - 'adapters/macos/MCICaptureHelper/**'
+      - 'apps/agent/src/brain_ingest.rs'
+      - 'apps/agent/src/runner.rs'
+      - '.github/workflows/release*.yml'
+      - '.github/workflows/publish-release.yml'
+      - 'apps/hippocampus/Resources/Info.plist'
+      - 'apps/hippocampus/Resources/Hippocampus.entitlements'
+      - 'apps/hippocampus/Resources/build-app.sh'
+      - 'apps/hippocampus/Sources/HippocampusKit/AppGroupIdentity.swift'
+      - 'apps/hippocampus/Package.swift'
+      - 'apps/hippocampus/Package.resolved'
+      - 'NOTICE'
+      - 'third_party/licenses/TOMLKit-0.6.0-LICENSE.txt'
+      - 'third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt'
+      - 'third_party/licenses/toml-license-manifest.json'
+      - 'scripts/build-installer.sh'
+      - 'scripts/lib/app-group-contract.sh'
+      - 'scripts/test-app-group-contract.sh'
+      - 'scripts/*release*'
+      - 'scripts/*sparkle*'
+      - 'scripts/test-toml-license-contract.sh'
+      - 'scripts/verify-toml-license-contract.py'
+      - 'scripts/test-task-2-product-truth.sh'
+      - 'scripts/test-retention-policy-contract.sh'
+      - 'scripts/test_retention_policy_runner.py'
+      - 'scripts/swift-package.sh'
+      - 'scripts/e2e-clean-home.sh'
+      - 'scripts/test-e2e-clean-home-contract.sh'
+      - 'scripts/test_e2e_clean_home.py'
+      - 'scripts/verify-app-launches.sh'
+      - 'scripts/verify-parent-lifetime.sh'
+      - 'scripts/verify-models.sh'
+      - 'scripts/test-verify-app-launches.sh'
+      - 'scripts/test-development-app-contract.sh'
+      - 'scripts/test-development-file-key-contract.sh'
+      - 'scripts/test-no-quarantine-bypass.sh'
+      - 'scripts/test-capture-overlap-corpus.sh'
+      - 'scripts/run-live-capture-overlap.sh'
+      - 'scripts/test-live-capture-overlap-contract.sh'
+      - 'scripts/product-source-digest.py'
+      - 'scripts/build-provenance.py'
+      - 'scripts/test-product-source-provenance.sh'
+      - 'scripts/live-capture/**'
+      - 'tools/capture-overlap-corpus/**'
+      - 'tools/ocr/**'
+      - 'scripts/demo.sh'
+      - 'scripts/test-demo-contract.sh'
+      - 'scripts/test-keyframe-demo-fixture.sh'
+      - 'scripts/test-onboarding-product-truth.sh'
+      - 'scripts/test-screenshot-assets.sh'
+      - 'scripts/stage-recall-ffi.sh'
+      - 'assets/screenshots/**'
+      - 'adapters/macos/MCIKeyframeCodec/**'
+      - 'apps/onboarding/Package.swift'
+      - 'apps/onboarding/Sources/Onboarding/Slides/**'
+      - 'apps/recall-ui/Package.swift'
+      - 'apps/recall-ui/Sources/RecallUI/**'
+      - 'apps/recall-ui/Sources/RecallUIKit/**'
+      - 'apps/recall-ui/Tests/**'
+      - 'apps/onboarding/Sources/OnboardingKit/RetentionStore.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift'
+      - 'apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift'
+      - 'apps/onboarding/Sources/Onboarding/OnboardingApp.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/OnboardingFlowViewModel.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift'
+      - 'apps/onboarding/Tests/Fixtures/RetentionPersistenceBehavior/main.swift'
+      - 'apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift'
+      - 'apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift'
+      - 'apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift'
+      - 'apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/KeyCustodyCommandRunner.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/DevelopmentFileKeyMode.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/KeyStore.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SupervisorProcessRuntime.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift'
+      - 'apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/CaptureConsentBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/ChildProcessEnvironmentBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/KeyStoreTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift'
+      - 'extensions/safari/appex/SafariWebExtensionHandler.swift'
+      - 'extensions/safari/appex/Info.plist'
+      - 'extensions/safari/appex/HippocampusSafariExtension.entitlements'
+      - 'extensions/safari/content.js'
+      - 'extensions/safari/background.js'
+      - 'extensions/safari/manifest.json'
+      - 'extensions/safari/__tests__/content.test.cjs'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
+      - 'apps/agent/src/retention_worker.rs'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift'
+      - 'adapters/macos/MCICaptureHelper/Package.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/HelperReadinessReceipt.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/Fixtures/HelperReadinessBehavior/main.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Security/KeychainDatabaseKeyResolver.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/KeychainDatabaseKeyResolverTests.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/BrowserPixelCapturePolicy.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/Fixtures/CaptureSourcePolicyBehavior/main.swift'
+      - 'apps/agent/src/bin/mci_agent.rs'
+      - 'apps/agent/src/bin/mci_e2e_fixture.rs'
+      - 'apps/agent/Cargo.toml'
+      - 'apps/agent/tests/retention_preferences_contract.rs'
+      - 'assets/installer/EULA.rtf'
+      - 'assets/installer/sla.r'
+      - 'assets/installer/generate-eula.py'
+      - 'docs/legal/**'
+      - 'apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift'
+      - 'apps/agent/src/bin/mci_seed_brain.rs'
+      - 'apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/ApplicationTerminationCoordinator.swift'
+      - 'docs/assets/data-flow-diagram.svg'
+      - 'scripts/check.sh'
+      - 'CHANGELOG.md'
+      - 'docs/STATUS.md'
+      - 'docs/appcast-hosting.md'
+      - 'docs/release/**'
+      - 'rust-toolchain.toml'
+      - 'release-models.json'
+  pull_request:
+    paths:
+      - 'core/brain/**'
+      - 'core/src/ipc/**'
+      - 'adapters/macos/mci-brain-ffi/**'
+      - 'adapters/macos/MCICaptureHelper/**'
+      - 'apps/agent/src/brain_ingest.rs'
+      - 'apps/agent/src/runner.rs'
+      - '.github/workflows/release*.yml'
+      - '.github/workflows/publish-release.yml'
+      - 'apps/hippocampus/Resources/Info.plist'
+      - 'apps/hippocampus/Resources/Hippocampus.entitlements'
+      - 'apps/hippocampus/Resources/build-app.sh'
+      - 'apps/hippocampus/Sources/HippocampusKit/AppGroupIdentity.swift'
+      - 'apps/hippocampus/Package.swift'
+      - 'apps/hippocampus/Package.resolved'
+      - 'NOTICE'
+      - 'third_party/licenses/TOMLKit-0.6.0-LICENSE.txt'
+      - 'third_party/licenses/tomlplusplus-3.4.0-LICENSE.txt'
+      - 'third_party/licenses/toml-license-manifest.json'
+      - 'scripts/build-installer.sh'
+      - 'scripts/lib/app-group-contract.sh'
+      - 'scripts/test-app-group-contract.sh'
+      - 'scripts/*release*'
+      - 'scripts/*sparkle*'
+      - 'scripts/test-toml-license-contract.sh'
+      - 'scripts/verify-toml-license-contract.py'
+      - 'scripts/test-task-2-product-truth.sh'
+      - 'scripts/test-retention-policy-contract.sh'
+      - 'scripts/test_retention_policy_runner.py'
+      - 'scripts/swift-package.sh'
+      - 'scripts/e2e-clean-home.sh'
+      - 'scripts/test-e2e-clean-home-contract.sh'
+      - 'scripts/test_e2e_clean_home.py'
+      - 'scripts/verify-app-launches.sh'
+      - 'scripts/verify-parent-lifetime.sh'
+      - 'scripts/verify-models.sh'
+      - 'scripts/test-verify-app-launches.sh'
+      - 'scripts/test-development-app-contract.sh'
+      - 'scripts/test-development-file-key-contract.sh'
+      - 'scripts/test-no-quarantine-bypass.sh'
+      - 'scripts/test-capture-overlap-corpus.sh'
+      - 'scripts/run-live-capture-overlap.sh'
+      - 'scripts/test-live-capture-overlap-contract.sh'
+      - 'scripts/product-source-digest.py'
+      - 'scripts/build-provenance.py'
+      - 'scripts/test-product-source-provenance.sh'
+      - 'scripts/live-capture/**'
+      - 'tools/capture-overlap-corpus/**'
+      - 'tools/ocr/**'
+      - 'scripts/demo.sh'
+      - 'scripts/test-demo-contract.sh'
+      - 'scripts/test-keyframe-demo-fixture.sh'
+      - 'scripts/test-onboarding-product-truth.sh'
+      - 'scripts/test-screenshot-assets.sh'
+      - 'scripts/stage-recall-ffi.sh'
+      - 'assets/screenshots/**'
+      - 'adapters/macos/MCIKeyframeCodec/**'
+      - 'apps/onboarding/Package.swift'
+      - 'apps/onboarding/Sources/Onboarding/Slides/**'
+      - 'apps/recall-ui/Package.swift'
+      - 'apps/recall-ui/Sources/RecallUI/**'
+      - 'apps/recall-ui/Sources/RecallUIKit/**'
+      - 'apps/recall-ui/Tests/**'
+      - 'apps/onboarding/Sources/OnboardingKit/RetentionStore.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift'
+      - 'apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift'
+      - 'apps/onboarding/Sources/Onboarding/OnboardingApp.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/OnboardingFlowViewModel.swift'
+      - 'apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift'
+      - 'apps/onboarding/Tests/Fixtures/RetentionPersistenceBehavior/main.swift'
+      - 'apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift'
+      - 'apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift'
+      - 'apps/onboarding/Tests/OnboardingKitTests/OnboardingFlowViewModelTests.swift'
+      - 'apps/onboarding/Tests/Fixtures/OnboardingRouteBehavior/main.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/ProcessSupervisor.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/KeyCustodyCommandRunner.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/DevelopmentFileKeyMode.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/KeyStore.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/CaptureConsentAuthority.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SafariInboxReader.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SupervisorTransitionGate.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/SupervisorProcessRuntime.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/RuntimeConfig.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/PreferencesStore.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift'
+      - 'apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift'
+      - 'apps/hippocampus/Tests/Fixtures/SupervisorLifecycleBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/CaptureConsentBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/ChildProcessEnvironmentBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/RuntimeConfigBehavior.swift'
+      - 'apps/hippocampus/Tests/Fixtures/RetentionPreferencesBehavior.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/ProcessSupervisorTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/KeyStoreTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/CaptureConsentAuthorityTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/SafariInboxReaderTests.swift'
+      - 'extensions/safari/appex/SafariWebExtensionHandler.swift'
+      - 'extensions/safari/appex/Info.plist'
+      - 'extensions/safari/appex/HippocampusSafariExtension.entitlements'
+      - 'extensions/safari/content.js'
+      - 'extensions/safari/background.js'
+      - 'extensions/safari/manifest.json'
+      - 'extensions/safari/__tests__/content.test.cjs'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/RuntimeConfigTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/PreferencesStoreTests.swift'
+      - 'apps/hippocampus/Tests/HippocampusKitTests/MenuBarQuickActionsTests.swift'
+      - 'apps/agent/src/retention_worker.rs'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift'
+      - 'adapters/macos/MCICaptureHelper/Package.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/HelperReadinessReceipt.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/Fixtures/HelperReadinessBehavior/main.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Security/KeychainDatabaseKeyResolver.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/MCICaptureHelperKitTests/KeychainDatabaseKeyResolverTests.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/BrowserPixelCapturePolicy.swift'
+      - 'adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift'
+      - 'adapters/macos/MCICaptureHelper/Tests/Fixtures/CaptureSourcePolicyBehavior/main.swift'
+      - 'apps/agent/src/bin/mci_agent.rs'
+      - 'apps/agent/src/bin/mci_e2e_fixture.rs'
+      - 'apps/agent/Cargo.toml'
+      - 'apps/agent/tests/retention_preferences_contract.rs'
+      - 'assets/installer/EULA.rtf'
+      - 'assets/installer/sla.r'
+      - 'assets/installer/generate-eula.py'
+      - 'docs/legal/**'
+      - 'apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift'
+      - 'apps/agent/src/bin/mci_seed_brain.rs'
+      - 'apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift'
+      - 'apps/hippocampus/Sources/HippocampusKit/ApplicationTerminationCoordinator.swift'
+      - 'docs/assets/data-flow-diagram.svg'
+      - 'scripts/check.sh'
+      - 'CHANGELOG.md'
+      - 'docs/STATUS.md'
+      - 'docs/appcast-hosting.md'
+      - 'docs/release/**'
+      - 'rust-toolchain.toml'
+      - 'release-models.json'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Install contract dependencies
+        run: |
+          brew install ripgrep
+          rg --version
+      - name: Record contract toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+      - name: Screen proof fixture contracts
+        id: screen-proof-contract
+        run: bash scripts/live-capture/test-screen-proof.sh
+      - run: scripts/test-release-contract.sh
+      - run: python3 -B scripts/test_release_safety.py
+      - run: scripts/test-app-group-contract.sh
+      - run: scripts/test-toml-license-contract.sh
+      - run: scripts/test-task-2-product-truth.sh
+      - run: python3 -B scripts/test_retention_policy_runner.py
+      - name: Retention policy contract
+        id: retention-contract
+        run: |
+          time -p env -i HOME="$HOME" \
+            PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:$HOME/.cargo/bin" \
+            DEVELOPER_DIR="$(xcode-select -p)" \
+            scripts/test-retention-policy-contract.sh
+      - name: Diagnose retention failure
+        if: failure() && steps.retention-contract.outcome == 'failure'
+        timeout-minutes: 2
+        run: |
+          env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin python3 -B - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+
+          products = {
+              "RetentionPersistenceBehavior": "apps/onboarding",
+              "RetentionPreferencesBehavior": "apps/hippocampus",
+          }
+          for product, package in products.items():
+              binary = Path(package) / ".build/debug" / product
+              if not binary.is_file():
+                  print(f"{product}: no built executable", flush=True)
+                  continue
+              for command in (["codesign", "--verify", "--strict", "--verbose=2", str(binary)],
+                              ["otool", "-L", str(binary)]):
+                  result = subprocess.run(command, timeout=20)
+                  print(f"{product}: {command[0]} exit={result.returncode}", flush=True)
+
+          reports = Path.home() / "Library/Logs/DiagnosticReports"
+          found = False
+          for product in (*products, "swift-run"):
+              for report in sorted(reports.glob(product + "*.ips"))[-3:]:
+                  found = True
+                  try:
+                      text = report.read_text().lstrip()
+                      payload, end = json.JSONDecoder().raw_decode(text)
+                      if text[end:].strip():
+                          payload = json.loads(text[end:])
+                      summary = {"report": report.name}
+                      for field, keys in (
+                          ("exception", ("type", "signal")),
+                          ("termination", ("namespace", "code", "indicator")),
+                      ):
+                          value = payload.get(field, {})
+                          summary[field] = {key: value[key] for key in keys if key in value}
+                      print(json.dumps(summary), flush=True)
+                  except (OSError, ValueError, AttributeError, TypeError) as error:
+                      print(f"{report.name}: unable to parse ({type(error).__name__})", flush=True)
+          if not found:
+              print("No matching crash report; termination reason remains unknown", flush=True)
+          PY
+      - run: scripts/test-e2e-clean-home-contract.sh
+      - run: scripts/e2e-clean-home.sh
+      - run: scripts/test-development-app-contract.sh
+      - run: scripts/test-development-file-key-contract.sh
+      - run: scripts/test-no-quarantine-bypass.sh
+      - run: scripts/test-verify-app-launches.sh
+      - run: scripts/test-demo-contract.sh
+      - run: scripts/test-keyframe-demo-fixture.sh
+      - run: scripts/test-onboarding-product-truth.sh
+      - run: scripts/test-screenshot-assets.sh
+      - run: node --test extensions/safari/__tests__/content.test.cjs
+      - run: scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior
+      - run: scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior
+      - run: scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior
+      - run: scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper HelperReadinessBehavior
+      - run: scripts/test-capture-overlap-corpus.sh
+      - run: scripts/test-live-capture-overlap-contract.sh
+      - run: scripts/test-product-source-provenance.sh
+      - run: scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior
+      - name: Select OCR build Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Build and verify offline OCR worker
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ocr-python"
+          env -i HOME="$HOME" PATH="$PATH" "$RUNNER_TEMP/ocr-python/bin/python" -m pip --isolated install \
+            --disable-pip-version-check --index-url https://pypi.org/simple \
+            --require-hashes --no-deps -r tools/ocr/requirements.txt
+          env -i HOME="$HOME" PATH="$PATH" "$RUNNER_TEMP/ocr-python/bin/python" tools/ocr/prepare.py
+          env -i HOME="$HOME" PATH="$PATH" "$RUNNER_TEMP/ocr-python/bin/python" -m unittest discover -s tools/ocr -v
+          env -i HOME="$HOME" PATH="$PATH" "$RUNNER_TEMP/ocr-python/bin/python" tools/ocr/benchmark.py \
+            --worker tools/ocr/dist/hippocampus-ocr/hippocampus-ocr
+
+      - name: Build app assembly prerequisites
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          scripts/swift-package.sh build --jobs 2 --configuration debug --package-path apps/hippocampus --product Hippocampus
+          scripts/swift-package.sh build --jobs 2 --configuration debug --package-path adapters/macos/MCICaptureHelper --product mci-capture-helper
+          scripts/swift-package.sh build --jobs 2 --configuration debug --package-path apps/recall-ui --product recall-ui
+          scripts/swift-package.sh build --jobs 2 --configuration debug --package-path apps/onboarding --product onboarding
+          cargo build --locked --jobs 2 -p mci-agent --bins -p hippocampus-native-host
+      - run: apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
+      - run: scripts/test-release-identity.sh
+      - run: scripts/test-prepare-release-models.sh
+      - run: scripts/test-release-model-manifest.sh
+      - run: scripts/test-sparkle-keygen.sh
+      - run: scripts/test-sparkle-keypair.sh
+
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.25.x'
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7

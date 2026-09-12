@@ -15,29 +15,30 @@
 //   (re-checked PER FRAME in `isBlockedURL` — a blocked iframe URL
 //   bails before the message ever leaves the content script)
 // - Incognito exclusion is defense-in-depth at FOUR layers:
-//     1. manifest "incognito": "split" (sibling-context isolation)
-//     2. content.js `chrome.extension.inIncognitoContext` early-return (this file)
-//     3. background.js `sender.tab.incognito` early-return
-//     4. native-host `incognito: true` early-return (Rust side)
+//     1. manifest "incognito": "not_allowed" (cannot be enabled there)
+//     2. content.js requires explicit `inIncognitoContext === false`
+//     3. background.js requires explicit `sender.tab.incognito === false`
+//     4. native-host requires the field and drops `incognito: true`
 //   Any one layer should be sufficient. All four ship together so a JS
-//   regression cannot reach the brain. The incognito check fires
-//   independently in every iframe — `chrome.extension.inIncognitoContext`
-//   is true in every frame of a split-incognito tab. Per docs/DESIGN.md,
-//   incognito exclusion is a launch-blocker — it ships WITH capture.
+//   regression cannot reach the brain. Per docs/DESIGN.md, incognito
+//   exclusion is a launch-blocker — it ships WITH capture.
 // - Text capped at 200,000 characters PER FRAME — a runaway iframe DOM
 //   cannot blow the tab's budget.
 // - No local cache — strictly forward-and-forget
 
 "use strict";
 
-// CSO invariant #1: never observe an incognito tab from the content
-// script, even if the user has flipped "Allow in Incognito" on. Manifest
-// is `incognito: "split"`, which runs us in a separate context where
-// this flag is true — bail before extracting or sending.
-function isIncognitoContext() {
+// Only an explicit ordinary-context signal permits extraction. Treating
+// an unavailable API or malformed value as ordinary would expose page
+// text before a later layer could reject it.
+function isPersistableContext() {
   return typeof chrome !== "undefined" &&
     chrome.extension &&
-    chrome.extension.inIncognitoContext === true;
+    chrome.extension.inIncognitoContext === false;
+}
+
+function isIncognitoContext() {
+  return !isPersistableContext();
 }
 
 const MAX_TEXT_LENGTH = 200000;
@@ -76,7 +77,7 @@ function isTopFrame() {
 }
 
 function extractPageContent() {
-  if (isIncognitoContext()) return null;
+  if (!isPersistableContext()) return null;
   if (isBlockedURL(window.location.href)) return null;
 
   const text = (document.body && document.body.innerText) || "";
@@ -98,8 +99,23 @@ function extractPageContent() {
   };
 }
 
-function sendContent() {
-  if (isIncognitoContext()) return;
+async function requestCaptureAuthorization() {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "capture_authorization",
+    });
+    return response && response.authorized === true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+async function sendContent() {
+  if (!isPersistableContext()) return;
+  if (!(await requestCaptureAuthorization())) return;
+  // Re-check the browser-owned privacy classification after crossing the
+  // asynchronous native boundary and before touching the DOM.
+  if (!isPersistableContext()) return;
   const content = extractPageContent();
   if (!content) return;
   if (!content.text && !content.title) return;
@@ -154,8 +170,11 @@ debouncedSend();
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     extractPageContent,
+    requestCaptureAuthorization,
+    sendContent,
     isBlockedURL,
     isIncognitoContext,
+    isPersistableContext,
     isTopFrame,
     MAX_TEXT_LENGTH,
   };

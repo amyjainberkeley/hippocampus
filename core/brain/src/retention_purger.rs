@@ -17,6 +17,7 @@
 //!   for the retention policy. The purger reads; never writes.
 //! - CSO sign-off required on any change per ADR-0017 §7.4.
 
+use crate::sqlcipher_brain_store::delete_projected_memory_for_events;
 use crate::{SqlCipherBrainStore, StoreError};
 use rusqlite::params;
 
@@ -42,6 +43,8 @@ pub struct PurgeStats {
     /// the same retention cutoff as events per
     /// `docs/design/brief-viewer-spec.md` §"Storage + retention".
     pub briefs_deleted: u64,
+    /// Number of unreferenced encrypted keyframe files removed.
+    pub blobs_deleted: u64,
 }
 
 /// 1 hour in microseconds — events younger than this are never purged.
@@ -93,6 +96,34 @@ pub fn purge_once(
         )
         .map_err(|e| StoreError::Backend(format!("count event_vectors for purge: {e}")))?;
 
+    let blob_digests = {
+        let mut statement = tx
+            .prepare(
+                "SELECT keyframe_blob FROM events
+                 WHERE ts_us < ?1 AND keyframe_blob IS NOT NULL
+                 ORDER BY keyframe_blob",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare purge keyframe blobs: {e}")))?;
+        let rows = statement
+            .query_map(params![cutoff_i64], |row| row.get::<_, String>(0))
+            .map_err(|e| StoreError::Backend(format!("query purge keyframe blobs: {e}")))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| StoreError::Backend(format!("read purge keyframe blobs: {e}")))?
+    };
+
+    let event_ids = {
+        let mut statement = tx
+            .prepare("SELECT id FROM events WHERE ts_us < ?1 ORDER BY id")
+            .map_err(|e| StoreError::Backend(format!("prepare purge event ids: {e}")))?;
+        let rows = statement
+            .query_map(params![cutoff_i64], |row| row.get::<_, i64>(0))
+            .map_err(|e| StoreError::Backend(format!("query purge event ids: {e}")))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| StoreError::Backend(format!("read purge event ids: {e}")))?
+    };
+    delete_projected_memory_for_events(&tx, &event_ids)?;
+    crate::activity::delete_activity_in_range(&tx, 0, cutoff_i64)?;
+
     // DELETE events. ON DELETE CASCADE auto-removes event_vectors + chunks.
     // FTS5 trigger (events_ad) auto-removes from events_fts.
     let events_deleted = tx
@@ -128,19 +159,26 @@ pub fn purge_once(
         .conn()
         .execute_batch("VACUUM")
         .map_err(|e| StoreError::Backend(format!("VACUUM after purge: {e}")))?;
+    drop(guard);
+    let blobs_deleted = store.remove_unreferenced_keyframe_candidates(&blob_digests)?;
 
     Ok(PurgeStats {
         events_deleted: events_deleted as u64,
         vectors_deleted: u64::try_from(vectors_count).unwrap_or(0),
         episodes_deleted: episodes_deleted as u64,
         briefs_deleted: briefs_deleted as u64,
+        blobs_deleted,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BrainStore, Event, EventId};
+    use crate::episode_segmenter::EpisodeWriter;
+    use crate::{
+        project_event, BrainStore, ClaimStatus, Event, EventId, EvidenceRef, MemoryClaim,
+        MemoryDelta,
+    };
     use mci_core::crypto::DbKey;
 
     fn temp_store() -> (SqlCipherBrainStore, tempfile::TempDir) {
@@ -177,6 +215,7 @@ mod tests {
         assert_eq!(stats.vectors_deleted, 0);
         assert_eq!(stats.episodes_deleted, 0);
         assert_eq!(stats.briefs_deleted, 0);
+        assert_eq!(stats.blobs_deleted, 0);
     }
 
     #[test]
@@ -186,9 +225,9 @@ mod tests {
         let now = 60 * day_us;
 
         // Insert 100 events spanning 60 days (one per day).
-        for i in 0..100 {
+        for i in 0_u64..100 {
             // Events at day 0, day 0.6, day 1.2, ... day 59.4
-            let ts = (i as u64) * (60 * day_us / 100);
+            let ts = i * (60 * day_us / 100);
             store
                 .put_event(&make_event(ts, &format!("event {i}")))
                 .unwrap();
@@ -206,14 +245,167 @@ mod tests {
     }
 
     #[test]
+    fn purge_removes_expired_keyframe_blobs_and_keeps_live_blobs() {
+        let (store, dir) = temp_store();
+        let day_us = 86_400_000_000_u64;
+        let now = 100 * day_us;
+        let blob_dir = dir.path().join("blobs");
+        std::fs::create_dir(&blob_dir).expect("create blob dir");
+
+        let expired_digest = "1".repeat(64);
+        let live_digest = "2".repeat(64);
+        let expired_path = blob_dir.join(format!("{expired_digest}.bin"));
+        let live_path = blob_dir.join(format!("{live_digest}.bin"));
+        std::fs::write(&expired_path, b"expired").expect("write expired blob");
+        std::fs::write(&live_path, b"live").expect("write live blob");
+
+        let mut expired = make_event(now - 40 * day_us, "expired");
+        expired.keyframe_blob = Some(expired_digest);
+        store.put_event(&expired).expect("put expired event");
+        let mut live = make_event(now - day_us, "live");
+        live.keyframe_blob = Some(live_digest);
+        store.put_event(&live).expect("put live event");
+
+        let stats = purge_once(&store, &RetentionConfig::Days(30), now).expect("purge");
+
+        assert_eq!(stats.events_deleted, 1);
+        assert_eq!(stats.blobs_deleted, 1);
+        assert!(!expired_path.exists(), "expired blob must be removed");
+        assert!(live_path.exists(), "retained blob must remain");
+    }
+
+    #[test]
+    fn purge_removes_memory_projected_from_expired_events() {
+        let (store, _dir) = temp_store();
+        let day_us = 86_400_000_000_u64;
+        let now = 100 * day_us;
+        let source = store
+            .put_event(&make_event(now - 40 * day_us, "expired source"))
+            .unwrap();
+        let claim = MemoryClaim::new(
+            source,
+            "retention fixture",
+            "status",
+            "expired",
+            "local/test",
+            Some("model".into()),
+            0.5,
+            now - 39 * day_us,
+            now - 40 * day_us,
+            None,
+            "projector-v1",
+            ClaimStatus::Proposed,
+            None,
+            Vec::new(),
+        );
+        project_event(
+            &store,
+            &MemoryDelta::new(
+                source,
+                now - 39 * day_us,
+                "projector-v1",
+                vec![claim.clone()],
+                Vec::new(),
+            ),
+        )
+        .unwrap();
+
+        let stats = purge_once(&store, &RetentionConfig::Days(30), now).unwrap();
+
+        assert_eq!(stats.events_deleted, 1);
+        assert!(store.memory_claim_history(&claim.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn purge_of_secondary_evidence_preserves_independent_same_source_delta() {
+        let (store, _dir) = temp_store();
+        let day_us = 86_400_000_000_u64;
+        let now = 100 * day_us;
+        let expired = store
+            .put_event(&make_event(now - 40 * day_us, "expired support"))
+            .unwrap();
+        let source = store
+            .put_event(&make_event(now - day_us, "current source"))
+            .unwrap();
+        let source_event = store.get_event(source).unwrap().unwrap();
+        let expired_event = store.get_event(expired).unwrap().unwrap();
+        let source_evidence = EvidenceRef::from_event(source, &source_event, "structured_app");
+        let expired_evidence = EvidenceRef::from_event(expired, &expired_event, "structured_app");
+        let source_scope = source_evidence.source_scope.clone();
+        let affected = MemoryClaim::new(
+            source,
+            "retention fixture",
+            "status",
+            "affected",
+            &source_scope,
+            Some("source".into()),
+            0.9,
+            now - 1_000,
+            now - day_us,
+            None,
+            "projector-v1",
+            ClaimStatus::Active,
+            None,
+            vec![source_evidence.clone(), expired_evidence],
+        );
+        project_event(
+            &store,
+            &MemoryDelta::new(
+                source,
+                now - 1_000,
+                "projector-v1",
+                vec![affected.clone()],
+                Vec::new(),
+            ),
+        )
+        .unwrap();
+        let independent = MemoryClaim::new(
+            source,
+            "retention fixture",
+            "status",
+            "independent",
+            &source_scope,
+            Some("source".into()),
+            0.9,
+            now - 500,
+            now - day_us,
+            None,
+            "projector-v1",
+            ClaimStatus::Active,
+            None,
+            vec![source_evidence],
+        );
+        project_event(
+            &store,
+            &MemoryDelta::new(
+                source,
+                now - 500,
+                "projector-v1",
+                vec![independent.clone()],
+                Vec::new(),
+            ),
+        )
+        .unwrap();
+
+        let stats = purge_once(&store, &RetentionConfig::Days(30), now).unwrap();
+
+        assert_eq!(stats.events_deleted, 1);
+        assert!(store.memory_claim_history(&affected.id).unwrap().is_empty());
+        assert_eq!(
+            store.memory_claim_history(&independent.id).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
     fn purge_30_days_leaves_recent() {
         let (store, _dir) = temp_store();
         let day_us: u64 = 86_400_000_000;
         let now = 60 * day_us;
 
         // Insert 60 events, one per day.
-        for i in 0..60 {
-            let ts = (i as u64) * day_us;
+        for i in 0_u64..60 {
+            let ts = i * day_us;
             store
                 .put_event(&make_event(ts, &format!("day {i}")))
                 .unwrap();
@@ -230,8 +422,8 @@ mod tests {
         let (store, _dir) = temp_store();
         let day_us: u64 = 86_400_000_000;
 
-        for i in 0..100 {
-            let ts = (i as u64) * day_us;
+        for i in 0_u64..100 {
+            let ts = i * day_us;
             store
                 .put_event(&make_event(ts, &format!("event {i}")))
                 .unwrap();
@@ -298,7 +490,6 @@ mod tests {
             .put_event(&make_event(2_000_000, "old ep event 2"))
             .unwrap();
 
-        use crate::episode_segmenter::EpisodeWriter;
         let ep_id = store
             .create_episode(1_000_000, 2_000_000, Some("com.test.app"))
             .unwrap();

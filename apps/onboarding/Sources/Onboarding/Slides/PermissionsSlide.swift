@@ -1,21 +1,8 @@
 import SwiftUI
 import OnboardingKit
 
-/// Cotypist peer-study P0 pattern #2 — deferred-permission choreography.
-///
-/// The slide preserves the PR #44 pre-flight overview at the top ("here's
-/// the four TCC / FDA surfaces you'll be asked for") and then walks the
-/// user through the sequence ONE surface at a time. Each sub-step renders:
-///   1. A permission-specific title + plain-English "why" copy.
-///   2. A prominent "Grant" button → fires the TCC probe.
-///   3. A "Skip for now" button (always available — accessibility requirement).
-///   4. An inline denial-recovery banner if the user denied, with a
-///      "Continue" button that advances the sequence without blocking.
-///
-/// After every surface has an outcome the slide shows a compact summary
-/// and the standard `OnboardingFlowView` "Next" affordance advances to
-/// `.primaryHotkey`. `canAdvance` on the flow VM still gates on Screen
-/// Recording being `.granted` (the only hard-required surface).
+/// Ask for each permission in context. Required denials keep recovery controls
+/// visible; only optional Automation and Full Disk Access can be deferred.
 struct PermissionsSlide: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @State private var isResetting = false
@@ -39,14 +26,13 @@ struct PermissionsSlide: View {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 OnboardingTheme.title("macOS requires your permission")
 
-                // The Cotypist "neither stored nor sent" moment — turn the
-                // scariest ask (Screen Recording) into a reassurance. The
-                // claim is exact: frames are OCR'd in memory and discarded;
-                // only the extracted text is persisted, encrypted, locally.
+                // Describe the exact storage boundary before asking for the
+                // broadest permission: raw frames are transient, while a
+                // selected post-privacy subset may become encrypted evidence.
                 ReassuranceBanner(
                     systemImage: "eye.slash.fill",
-                    message: "Screen frames are OCR'd in memory and instantly discarded — the picture is never saved or sent anywhere. Only the extracted text stays, encrypted, on this Mac.",
-                    highlight: "never saved or sent anywhere"
+                    message: "Raw screen frames are OCR'd in memory and discarded. Extracted text and selected encrypted visual keyframes stay on this Mac under your retention setting.",
+                    highlight: "selected encrypted visual keyframes"
                 )
 
                 // The Raycast "Ask anything" assurance strip — three short
@@ -60,7 +46,7 @@ struct PermissionsSlide: View {
                     AssuranceItem(
                         icon: "icloud.slash",
                         title: "No collection",
-                        detail: "Nothing is uploaded. Hippocampus makes zero network calls with your captured content."
+                        detail: "Hippocampus does not upload captured memory. Connected AI tools may send requested context under their provider terms."
                     ),
                     AssuranceItem(
                         icon: "lock.fill",
@@ -137,10 +123,9 @@ struct PermissionsSlide: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // Grant / skip row. Both buttons are always present — the
-            // Skip affordance is an accessibility requirement (SetApp /
-            // Alfred conflicts, corporate-managed Macs where TCC is
-            // MDM-locked, etc. must never dead-end the user).
+            // Screen Recording and Accessibility jointly enforce the screen
+            // privacy boundary, so neither can be skipped. Automation and
+            // Full Disk Access remain optional and may be deferred.
             if currentStatus != .granted && outcome != .denied {
                 HStack(spacing: 12) {
                     Button {
@@ -150,10 +135,12 @@ struct PermissionsSlide: View {
                     }
                     .onboardingPrimary()
 
-                    Button("Skip for now") {
-                        flowVM.recordPermissionOutcome(surface, .skipped)
+                    if surface == .automation || surface == .fullDiskAccess {
+                        Button("Skip for now") {
+                            flowVM.recordPermissionOutcome(surface, .skipped)
+                        }
+                        .onboardingSecondary()
                     }
-                    .onboardingSecondary()
                 }
             }
 
@@ -204,11 +191,10 @@ struct PermissionsSlide: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 10) {
-                if surface == .screenRecording {
-                    // Screen Recording is hard-required. Offer the
-                    // Reset & Retry affordance (PR #44) rather than
-                    // "Continue" — a "Continue" past denied SR would
-                    // drop the user into a non-functional app.
+                if surface == .screenRecording || surface == .accessibility {
+                    // Both screen permissions are hard-required. A Continue
+                    // path would complete onboarding into a capture pipeline
+                    // that correctly refuses to retain anything.
                     Button {
                         Task { await performResetAndRetry(surface: surface) }
                     } label: {
@@ -224,9 +210,8 @@ struct PermissionsSlide: View {
                     .onboardingPrimary()
                     .disabled(isResetting)
                 } else {
-                    // AX / Automation / FDA are soft-fail — inline
-                    // "Continue" advances the sequence, matching the
-                    // Cotypist pattern.
+                    // Automation / FDA are soft-fail and can be revisited in
+                    // context when the corresponding integration is enabled.
                     Button("Continue") {
                         flowVM.recordPermissionOutcome(surface, .denied)
                     }
@@ -239,7 +224,8 @@ struct PermissionsSlide: View {
                 .onboardingSecondary()
             }
 
-            if showResetFailedFallback && surface == .screenRecording {
+            if showResetFailedFallback
+                && (surface == .screenRecording || surface == .accessibility) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Still denied after reset.")
                         .font(.system(size: 12, weight: .medium))
@@ -248,7 +234,7 @@ struct PermissionsSlide: View {
                     // only "MCICaptureHelper" bundle-name leak; users
                     // still get the concrete fix path (Settings pane +
                     // relaunch) without the internal bundle jargon.
-                    Text("Open System Settings → Privacy & Security → Screen Recording. Remove any duplicate Hippocampus entries whose path is not in /Applications, then quit Hippocampus and reopen it.")
+                    Text("Open System Settings → Privacy & Security → \(copy.shortName). Enable Hippocampus, then return here to continue setup.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -370,7 +356,7 @@ struct PermissionsSlide: View {
     private func labelFor(outcome: PermissionOutcome) -> String {
         switch outcome {
         case .granted: "Granted"
-        case .denied: "Denied · will retry later"
+        case .denied: "Denied"
         case .skipped: "Skipped"
         case .pending: "Pending"
         case .notApplicable: "N/A"
@@ -398,7 +384,7 @@ private struct PermissionCopy {
                 shortName: "Screen Recording",
                 icon: "rectangle.inset.filled.and.person.filled",
                 requirementBadge: "Required",
-                why: "Lets Hippocampus see what's on your screen so we can OCR it in memory and index the text. Frames are discarded — only the extracted text is stored, and everything stays on your Mac.",
+                why: "Lets Hippocampus OCR what is on your screen. Raw frames are discarded; extracted text and selected encrypted keyframes are retained locally according to your settings.",
                 denialRecovery: "Screen Recording is required for Hippocampus to work. macOS won't re-prompt automatically — use Reset & Retry to clear the old TCC entry and try again."
             )
         case .accessibility:
@@ -406,9 +392,9 @@ private struct PermissionCopy {
                 title: "Accessibility",
                 shortName: "Accessibility",
                 icon: "accessibility",
-                requirementBadge: "Recommended",
-                why: "Lets Hippocampus detect password fields so it knows NOT to capture them. Also improves recall accuracy on native macOS apps. Recommended but not required — you can still use Hippocampus without it.",
-                denialRecovery: "That's OK — Hippocampus still works, but it won't be able to detect password fields automatically. You can grant Accessibility later from Settings if you change your mind."
+                requirementBadge: "Required",
+                why: "Lets Hippocampus identify the focused window and detect password fields before capture. It is required for the screen privacy boundary.",
+                denialRecovery: "Accessibility is required before screen capture can run safely. Use Reset & Retry, or grant it later from Privacy & Security settings."
             )
         case .automation:
             return PermissionCopy(

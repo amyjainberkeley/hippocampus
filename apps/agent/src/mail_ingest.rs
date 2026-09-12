@@ -5,7 +5,7 @@
 //!
 //! - **V2-P8a** (PR #243) shipped `mci-mail-reader` — the READ-ONLY
 //!   library that splits emlx files, opens `Envelope Index`
-//!   WAL-aware, and streams new-emlx events via FSEvents.
+//!   WAL-aware, and streams new-emlx events via `FSEvents`.
 //! - **V2-P8b** (this PR) consumes that watcher inside `mci-agent`,
 //!   applies the §3(c)(ii) parsed-header cascade-equivalent
 //!   ([`mci_brain::redaction::parsed_mail_header`]), and persists
@@ -16,7 +16,7 @@
 //! pre-checked by [`cascade_equivalent`] BEFORE any body byte is
 //! materialized into the brain. There is no delete-after-write path.
 //!
-//! # MailEvent shape (per the dispatch)
+//! # `MailEvent` shape (per the dispatch)
 //!
 //! For an `Allow` outcome the persisted [`mci_brain::Event`] has:
 //!
@@ -25,7 +25,7 @@
 //! - `url = None` (Mail has no tabs and no per-mail URL)
 //! - `tab_id = None`
 //! - `text = ADR-0010 §1.3 context header + body` (text/plain or
-//!    text/html)
+//!   text/html)
 //!
 //! For a `HeaderOnly` outcome (drop-body-persist-content-free):
 //!
@@ -34,10 +34,10 @@
 //! - `url = None`
 //! - `tab_id = None`
 //! - `text = "[REDACTED:MAIL_HEADER_MATCH] from=<sender_domain>"` —
-//!    the sender eTLD+1 is the categorical match key that fired the
-//!    cascade (chase.com, paypal.com, …); it is itself a CSO-curated
-//!    public marketing domain, not user-identifying content. Subject
-//!    is dropped; body is dropped.
+//!   the sender eTLD+1 is the categorical match key that fired the
+//!   cascade (chase.com, paypal.com, …); it is itself a CSO-curated
+//!   public marketing domain, not user-identifying content. Subject
+//!   is dropped; body is dropped.
 //!
 //! For a `Refuse` outcome (fail-safe): NO row reaches `put_event`;
 //! [`MailIngestCounters::refused`] is bumped.
@@ -46,7 +46,7 @@
 //!
 //! Nothing in this module crosses the helper IPC seam. The pump is
 //! an in-process tokio task; it consumes the `mci-mail-reader`
-//! FSEvents stream directly. No new wire variant is added (per
+//! `FSEvents` stream directly. No new wire variant is added (per
 //! V2-P2 "no bump" pattern); the cascade outcome enum
 //! [`mci_brain::redaction::parsed_mail_header::MailRedactionReason`]
 //! is local to the brain crate, not the wire-protected
@@ -265,7 +265,9 @@ impl MailIngestPump {
             tab_id: None,
             embedding,
         };
-        let id = self.store.put_event(&event)?;
+        let id = self
+            .store
+            .put_event_with_source(&event, mci_brain::EventSource::StructuredApp)?;
         self.counter.allowed.fetch_add(1, Ordering::Relaxed);
         Ok(MailIngestOutcome::Stored { id, embedded })
     }
@@ -302,7 +304,9 @@ impl MailIngestPump {
             tab_id: None,
             embedding: None,
         };
-        let id = self.store.put_event(&event)?;
+        let id = self
+            .store
+            .put_event_with_source(&event, mci_brain::EventSource::StructuredApp)?;
         self.counter.header_only.fetch_add(1, Ordering::Relaxed);
         Ok(MailIngestOutcome::HeaderOnlyStored {
             id,
@@ -323,13 +327,13 @@ impl MailIngestPump {
 ///
 /// Domain extraction:
 /// - `from_domain` / `reply_to_domain` / `sender_domain` use the
-///    bare-address `domain` portion (everything after the last `@`).
-///    Lowercased so the cascade's domain-table lookup hits the
-///    pre-lowercased entries without extra normalization.
+///   bare-address `domain` portion (everything after the last `@`).
+///   Lowercased so the cascade's domain-table lookup hits the
+///   pre-lowercased entries without extra normalization.
 /// - `list_id_domain` is RFC 2919 — typical value
-///    `<list-name.example.com>` or `Plain Text <list-name.example.com>`.
-///    The bracketed host (if present) is the eTLD+1; otherwise the
-///    bare value is used as-is.
+///   `<list-name.example.com>` or `Plain Text <list-name.example.com>`.
+///   The bracketed host (if present) is the eTLD+1; otherwise the
+///   bare value is used as-is.
 #[must_use]
 pub fn to_parsed_headers(parsed: &ParsedMessage) -> ParsedMailHeaders {
     let from_domain = first_address_domain(&parsed.from);
@@ -396,11 +400,10 @@ fn file_mtime_us(path: &Path) -> u64 {
         .ok()
         .and_then(|md| md.modified().ok())
         .and_then(|mt| mt.duration_since(UNIX_EPOCH).ok())
-        .map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
-/// Run the FSEvents watcher for one [`MailAccount`] until the
+/// Run the `FSEvents` watcher for one [`MailAccount`] until the
 /// watcher closes.
 ///
 /// Each new emlx event is fed to [`MailIngestPump::ingest_path`].

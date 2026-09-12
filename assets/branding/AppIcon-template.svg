@@ -1,10 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" role="img" aria-label="Hippocampus menu-bar template variant A">
-  <!-- Variant A template — left-facing outline head with anatomical sulci hints. Stroke-only so macOS tints only actual marks. -->
-  <g fill="none" stroke="#000" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M 12.03 3.01 C 15.47 3.01, 18.91 6.23, 18.91 9.88 C 18.91 12.89, 18.26 14.83, 17.62 15.68 C 16.76 15.90, 15.90 15.90, 15.04 15.68 C 14.18 16.54, 12.46 17.62, 10.74 18.26 C 9.88 18.48, 9.02 18.48, 8.16 18.04 C 7.73 17.83, 7.52 17.40, 7.52 16.76 C 7.52 15.90, 7.30 15.47, 6.87 15.25 C 6.66 15.04, 6.44 14.61, 6.55 14.18 C 6.66 13.75, 6.87 13.53, 7.19 13.42 C 7.30 13.32, 7.30 12.89, 7.19 12.67 C 6.55 12.46, 5.80 12.35, 5.05 12.03 C 4.29 11.71, 4.19 11.28, 5.05 10.96 C 6.01 10.78, 6.55 10.74, 6.87 10.52 L 6.98 9.45 C 6.87 8.16, 7.30 6.87, 8.59 5.15 C 9.45 4.08, 10.74 3.11, 12.03 3.01 Z"/>
-    <path d="M 9.5 7.5 C 11.0 7.0, 13.0 7.2, 14.5 8.0"/>
-    <path d="M 9.0 9.5 C 10.8 9.0, 13.5 9.2, 15.0 10.0"/>
-    <path d="M 9.0 11.5 C 10.8 11.0, 13.5 11.2, 15.0 12.0"/>
-    <path d="M 9.5 13.5 C 11.0 13.0, 13.0 13.2, 14.5 13.8"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hippocampus brain mark template">
+  <defs>
+    <mask id="folds">
+      <circle cx="32" cy="32" r="46" fill="#FFF"/>
+      <g fill="none" stroke="#000" stroke-width="3.5" stroke-linecap="round">
+        <path d="M12 17C18 17 21 21 21 26M12 38C18 38 22 34 22 30"/>
+        <path d="M52 17C46 17 43 21 43 26M52 38C46 38 42 34 42 30"/>
+      </g>
+    </mask>
+  </defs>
+  <g transform="translate(0 2.5)" mask="url(#folds)" fill="#000">
+    <path d="M30 14C30 9 27 6 22 6C16 6 12 10 12 16C7 18 5 22 5 27C5 32 8 36 12 38C11 46 16 53 23 53C27 53 30 50 30 46Z"/>
+    <path d="M34 14C34 9 37 6 42 6C48 6 52 10 52 16C57 18 59 22 59 27C59 32 56 36 52 38C53 46 48 53 41 53C37 53 34 50 34 46Z"/>
   </g>
 </svg>

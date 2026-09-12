@@ -4,18 +4,18 @@ set -euo pipefail
 # scripts/demo.sh — Reproducible E2E pitch demo for Hippocampus / MCI.
 #
 # Subcommands:
-#   clean      Kill processes, wipe demo brain, archive logs.
+#   clean      Stop demo processes and wipe only the disposable demo root.
 #   seed       Generate ephemeral key + seed 20 synthetic events.
 #   boot       Build Hippocampus.app, embed Sparkle, codesign, launch.
 #   query      Run canned mci-brain queries against the seeded brain.
 #   mcp-demo   JSON-RPC mci_recall against running mcp-serve.
 #   screenshot  Capture window screenshots (interactive screencapture -w).
 #   screenshot --auto  Non-interactive: render CLI + attempt GUI captures.
-#   teardown   Kill processes, optionally archive/delete demo brain.
+#   teardown   Stop demo processes and delete the disposable demo root.
 #   full       Run all subcommands in sequence.
 #
 # CSO posture:
-#   - Ephemeral key lives in /tmp/mci-demo-key.hex (mode 0600).
+#   - Every artifact lives below MCI_DEMO_ROOT (mode 0700 directory).
 #   - Never writes to shell history (key generated inline, not exported).
 #   - teardown deletes the demo brain (or moves to /tmp).
 #   - Seed events are synthetic (com.mci.demo.seed.*), no real user content.
@@ -23,16 +23,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-MCI_DIR="$HOME/Library/Application Support/MCI"
+DEMO_ROOT="${MCI_DEMO_ROOT:-${TMPDIR:-/tmp}/hippocampus-demo-${UID}}"
+DEMO_HOME="$DEMO_ROOT/home"
+MCI_DIR="$DEMO_HOME/Library/Application Support/MCI"
 DB_PATH="$MCI_DIR/mci.sqlite"
-LOG_DIR="$HOME/Library/Logs/MCI"
-KEY_FILE="/tmp/mci-demo-key.hex"
+LOG_DIR="$DEMO_HOME/Library/Logs/MCI"
+KEY_FILE="$MCI_DIR/dev.key"
+PID_DIR="$DEMO_ROOT/pids"
+DEMO_KEYCHAIN_SERVICE="ai.hippocampus.demo.$UID"
+DEMO_KEYCHAIN_ACCOUNT="database-key"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
 APP_DIST="$REPO_ROOT/apps/hippocampus/dist"
 APP_PATH="$APP_DIST/Hippocampus.app"
+DEMO_ARCTIC_MODEL="$REPO_ROOT/models/ArcticEmbedS_FP16.mlmodelc"
 
 # macOS Tahoe (26.x) toolchain note (PR #95):
-# swift build may warn about deployment target vs SDK version.
+# SwiftPM may warn about deployment target vs SDK version.
 # Cosmetic only — build completes. cargo build works as-is.
 
 # ---------------------------------------------------------------------------
@@ -51,9 +57,75 @@ require_cmd() {
     fi
 }
 
+ensure_demo_dirs() {
+    mkdir -p "$MCI_DIR" "$LOG_DIR" "$PID_DIR"
+    chmod 0700 "$DEMO_ROOT" "$DEMO_HOME" "$MCI_DIR" "$LOG_DIR" "$PID_DIR"
+}
+
+stop_demo_processes() {
+    [[ -d "$PID_DIR" ]] || return 0
+    local pid_file pid command
+    for pid_file in "$PID_DIR"/*.pid; do
+        [[ -f "$pid_file" ]] || continue
+        pid=$(tr -dc '0-9' < "$pid_file")
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            command=$(ps -p "$pid" -o command= 2>/dev/null || true)
+            case "$command" in
+                *"$APP_PATH/Contents/MacOS/Hippocampus"* | *"$APP_PATH/Contents/MacOS/recall-ui"*) ;;
+                *)
+                    dim "  Ignoring stale PID $pid; it is not a demo process."
+                    rm -f "$pid_file"
+                    continue
+                    ;;
+            esac
+            kill "$pid" 2>/dev/null || true
+            for _ in 1 2 3 4 5; do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 0.2
+            done
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+        rm -f "$pid_file"
+    done
+}
+
+normalize_screenshot() {
+    local input="$1" output="$2" width height scaled_width scaled_height temp
+    width=$(sips -g pixelWidth "$input" | awk '/pixelWidth:/ {print $2}')
+    height=$(sips -g pixelHeight "$input" | awk '/pixelHeight:/ {print $2}')
+    [[ -n "$width" && -n "$height" && "$width" -gt 0 && "$height" -gt 0 ]] || return 1
+    temp=$(mktemp "${TMPDIR:-/tmp}/hippocampus-shot.XXXXXX.png")
+    if (( width * 10 >= height * 16 )); then
+        scaled_width=1280
+        scaled_height=$((1280 * height / width))
+    else
+        scaled_height=800
+        scaled_width=$((800 * width / height))
+    fi
+    sips -s format png -z "$scaled_height" "$scaled_width" "$input" --out "$temp" >/dev/null
+    sips -s format png -p 800 1280 --padColor F6F8FB "$temp" --out "$output" >/dev/null
+    python3 "$REPO_ROOT/scripts/sanitize-png-metadata.py" "$output"
+    rm -f "$temp"
+}
+
+window_id_for_pid() {
+    MCI_WINDOW_PID="$1" xcrun swift -e 'import CoreGraphics
+import Foundation
+let wanted = Int(ProcessInfo.processInfo.environment["MCI_WINDOW_PID"] ?? "") ?? -1
+let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+for window in windows where (window[kCGWindowOwnerPID as String] as? Int) == wanted {
+    let layer = window[kCGWindowLayer as String] as? Int ?? -1
+    let number = window[kCGWindowNumber as String] as? Int ?? 0
+    if layer == 0 && number > 0 { print(number); break }
+}' 2>/dev/null
+}
+
 load_key() {
     if [[ -f "$KEY_FILE" ]]; then
-        MCI_DB_KEY_HEX=$(cat "$KEY_FILE")
+        export MCI_DEVELOPMENT_FILE_KEY=1
+        export MCI_DB_KEYCHAIN_SERVICE="$DEMO_KEYCHAIN_SERVICE"
+        export MCI_DB_KEYCHAIN_ACCOUNT="$DEMO_KEYCHAIN_ACCOUNT"
+        MCI_DB_KEY_HEX=$(tr -d '\r\n' < "$KEY_FILE")
         export MCI_DB_KEY_HEX
     else
         red "ERROR: key file not found at $KEY_FILE"
@@ -82,6 +154,8 @@ Commands:
 Options:
   -h, --help   Show this help.
 
+All demo state is stored below $DEMO_ROOT.
+Override with MCI_DEMO_ROOT=/absolute/path when needed.
 Demo key is stored at $KEY_FILE (mode 0600, ephemeral).
 Brain is at $DB_PATH.
 EOF
@@ -94,31 +168,13 @@ EOF
 do_clean() {
     bold "=== demo clean ==="
 
-    echo "Killing Hippocampus / mci-agent / mci-capture-helper processes..."
-    pkill -f "Hippocampus" 2>/dev/null || true
-    pkill -f "mci-agent" 2>/dev/null || true
-    pkill -f "mci-capture-helper" 2>/dev/null || true
-    sleep 1
-
-    if [[ -f "$DB_PATH" ]]; then
-        echo "Removing demo brain: $DB_PATH"
-        rm -f "$DB_PATH" "${DB_PATH}-wal" "${DB_PATH}-shm"
+    echo "Stopping only processes recorded below $PID_DIR..."
+    stop_demo_processes
+    if [[ -d "$DEMO_ROOT" ]]; then
+        echo "Removing disposable demo root: $DEMO_ROOT"
+        rm -rf "$DEMO_ROOT"
     else
-        dim "  (no brain file found)"
-    fi
-
-    if [[ -d "$LOG_DIR" ]] && ls "$LOG_DIR"/*.log &>/dev/null 2>&1; then
-        ARCHIVE="/tmp/mci-logs-$(date +%Y%m%d-%H%M%S).tar.gz"
-        echo "Archiving logs to $ARCHIVE"
-        tar czf "$ARCHIVE" -C "$HOME/Library/Logs" MCI/ 2>/dev/null || true
-        rm -rf "$LOG_DIR"
-    else
-        dim "  (no logs to archive)"
-    fi
-
-    if [[ -f "$KEY_FILE" ]]; then
-        echo "Removing old key file: $KEY_FILE"
-        rm -f "$KEY_FILE"
+        dim "  (no disposable demo state found)"
     fi
 
     green "clean done."
@@ -132,22 +188,93 @@ do_seed() {
     bold "=== demo seed ==="
     require_cmd openssl
     require_cmd cargo
+    local expect_semantic=0
+    local enrich_output embedded_count
 
+    ensure_demo_dirs
     echo "Generating ephemeral SQLCipher key..."
     openssl rand -hex 32 > "$KEY_FILE"
     chmod 0600 "$KEY_FILE"
     dim "  key: $KEY_FILE (mode 0600)"
 
     export MCI_DB_KEY_HEX
-    MCI_DB_KEY_HEX=$(cat "$KEY_FILE")
+    export MCI_DEVELOPMENT_FILE_KEY=1
+    MCI_DB_KEY_HEX=$(tr -d '\r\n' < "$KEY_FILE")
+    if [[ -n "${MCI_ARCTIC_MODEL_PATH:-}" ]]; then
+        if [[ ! -d "$MCI_ARCTIC_MODEL_PATH" ]]; then
+            red "ERROR: MCI_ARCTIC_MODEL_PATH is not a compiled model directory"
+            return 1
+        fi
+        expect_semantic=1
+    elif [[ -d "$DEMO_ARCTIC_MODEL" ]]; then
+        export MCI_ARCTIC_MODEL_PATH="$DEMO_ARCTIC_MODEL"
+        expect_semantic=1
+    else
+        dim "DEGRADED: Arctic model unavailable; demo recall will be lexical-only."
+    fi
 
-    mkdir -p "$MCI_DIR"
+    echo "Building the synthetic memory and brief seeders..."
+    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release \
+        --bin mci-agent --bin mci-seed-brain --bin mci-seed-brief 2>&1 | tail -3
 
-    echo "Building mci-seed-brain..."
-    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release --bin mci-seed-brain 2>&1 | tail -3
+    echo "Sealing three fixture images with the production keyframe codec..."
+    local blob_dir="$MCI_DIR/blobs"
+    local digest seed_args
+    local -a digests=()
+    mkdir -p "$blob_dir"
+    while IFS= read -r digest; do
+        [[ "$digest" =~ ^[0-9a-f]{64}$ ]] && digests+=("$digest")
+    done < <(
+        "$REPO_ROOT/scripts/swift-package.sh" run -c release \
+            --package-path "$REPO_ROOT/adapters/macos/MCIKeyframeCodec" \
+            KeyframeFixtureBuilder \
+            --blob-root "$blob_dir" \
+            "$REPO_ROOT/assets/screenshots/hero-onboarding-welcome.png" \
+            "$REPO_ROOT/assets/screenshots/hero-onboarding-trust-panel.png" \
+            "$REPO_ROOT/assets/screenshots/hero-cli.png"
+    )
+    [[ ${#digests[@]} -eq 3 ]] || {
+        red "ERROR: production keyframe fixture did not return three digests"
+        return 1
+    }
 
     echo "Seeding 20 synthetic events..."
-    "$REPO_ROOT/target/release/mci-seed-brain" --db-path "$DB_PATH"
+    seed_args=(--db-path "$DB_PATH")
+    for digest in "${digests[@]}"; do
+        seed_args+=(--keyframe-digest "$digest")
+    done
+    "$REPO_ROOT/target/release/mci-seed-brain" "${seed_args[@]}"
+
+    echo "Running the production understanding pipeline..."
+    if ! enrich_output=$("$REPO_ROOT/target/release/mci-agent" enrich --db-path "$DB_PATH" 2>&1); then
+        printf '%s\n' "$enrich_output" >&2
+        red "ERROR: production understanding pipeline failed"
+        return 1
+    fi
+    printf '%s\n' "$enrich_output"
+    embedded_count=$(sed -nE \
+        's/^mci-agent enrich: done\..*, ([0-9]+) embedded,.*/\1/p' \
+        <<< "$enrich_output" | tail -n 1)
+    if [[ ! "$embedded_count" =~ ^[0-9]+$ ]]; then
+        red "ERROR: understanding pipeline did not report an embedding count"
+        return 1
+    fi
+    if (( expect_semantic == 1 )); then
+        if (( embedded_count != 20 )); then
+            red "ERROR: semantic demo expected 20 embeddings but produced $embedded_count"
+            return 1
+        fi
+        green "Semantic enrichment verified: 20/20 events embedded."
+    fi
+
+    echo "Seeding a synthetic daily brief..."
+    "$REPO_ROOT/target/release/mci-seed-brief" \
+        --date "$(date +%F)" \
+        --title "Today in your work" \
+        --body "Hippocampus captured the launch-lifecycle fix, retrieval benchmark, agent context handoff, and local-memory architecture. The remaining release gates are a validation-qualified evidence verifier, a real capture soak, and Developer ID notarization." \
+        --model-id "hippocampus-extractive" \
+        --source-events 20 \
+        --db-path "$DB_PATH"
 
     echo ""
     ls -lh "$DB_PATH"
@@ -160,58 +287,33 @@ do_seed() {
 
 do_boot() {
     bold "=== demo boot ==="
-    require_cmd swift
-    require_cmd cargo
-    require_cmd codesign
-    require_cmd install_name_tool
+    ensure_demo_dirs
+    stop_demo_processes
+    echo "Assembling the development app through the canonical build graph..."
+    "$BUILD_APP" --debug --development-ad-hoc --development-lite
 
-    echo "Building Swift + Rust binaries (release)..."
-    (cd "$REPO_ROOT/apps/hippocampus" && swift build -c release 2>&1 | tail -3)
-    (cd "$REPO_ROOT/adapters/macos/MCICaptureHelper" && swift build -c release 2>&1 | tail -3)
-    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --workspace --release 2>&1 | tail -3
+    echo "Launching the packaged app with a disposable home through LaunchServices..."
+    open -n -g \
+        --stdout "$LOG_DIR/hippocampus.stdout.log" \
+        --stderr "$LOG_DIR/hippocampus.stderr.log" \
+        --env "HOME=$DEMO_HOME" \
+        --env "CFFIXED_USER_HOME=$DEMO_HOME" \
+        --env "MCI_EPHEMERAL_UI_STATE=1" \
+        "$APP_PATH"
 
-    echo "Assembling Hippocampus.app via build-app.sh..."
-    "$BUILD_APP"
-
-    FRAMEWORKS="$APP_PATH/Contents/Frameworks"
-
-    if [[ -d "$FRAMEWORKS/Sparkle.framework" ]]; then
-        green "  Sparkle.framework already embedded by build-app.sh"
-    else
-        echo "Sparkle.framework not found in app bundle — checking SwiftPM artifacts..."
-        SPARKLE_SRC=""
-        for candidate in \
-            "$REPO_ROOT/apps/hippocampus/.build/release/Sparkle.framework" \
-            "$REPO_ROOT/apps/hippocampus/.build/artifacts/sparkle/Sparkle/Sparkle.framework" \
-            "$REPO_ROOT/apps/hippocampus/.build/artifacts/Sparkle/Sparkle.framework"; do
-            if [[ -d "$candidate" ]]; then
-                SPARKLE_SRC="$candidate"
-                break
-            fi
-        done
-        if [[ -n "$SPARKLE_SRC" ]]; then
-            mkdir -p "$FRAMEWORKS"
-            cp -R "$SPARKLE_SRC" "$FRAMEWORKS/"
-            green "  Embedded Sparkle.framework from $SPARKLE_SRC"
-        else
-            dim "  WARNING: Sparkle.framework not found anywhere. Auto-update won't work."
-        fi
+    local app_pid=""
+    for _ in {1..50}; do
+        app_pid="$(pgrep -f "^$APP_PATH/Contents/MacOS/Hippocampus$" | tail -n 1 || true)"
+        [[ -n "$app_pid" ]] && break
+        sleep 0.1
+    done
+    if [[ -z "$app_pid" ]] || ! kill -0 "$app_pid" 2>/dev/null; then
+        red "ERROR: packaged Hippocampus.app did not remain alive after launch"
+        return 1
     fi
+    echo "$app_pid" > "$PID_DIR/hippocampus.pid"
 
-    echo "Adding @executable_path/../Frameworks rpath..."
-    install_name_tool -add_rpath @executable_path/../Frameworks \
-        "$APP_PATH/Contents/MacOS/Hippocampus" 2>/dev/null || true
-
-    echo "Re-codesigning app bundle..."
-    codesign --force --deep --sign - "$APP_PATH"
-    codesign --verify --deep --strict "$APP_PATH" && green "  Signature valid."
-
-    echo ""
-    echo "Launching Hippocampus.app..."
-    load_key
-    open "$APP_PATH"
-
-    green "boot done. Hippocampus.app running."
+    green "boot done. Packaged Hippocampus.app is running against $DEMO_HOME."
 }
 
 # ---------------------------------------------------------------------------
@@ -239,16 +341,16 @@ do_query() {
     "$BRAIN" recent --limit 5
     echo ""
 
-    bold "--- search: snowflake ---"
-    "$BRAIN" search snowflake --limit 3
+    bold "--- search: retrieval benchmark ---"
+    "$BRAIN" search "retrieval benchmark" --limit 3
     echo ""
 
-    bold "--- search: Cure53 ---"
-    "$BRAIN" search Cure53 --limit 3
+    bold "--- search: agent context handoff ---"
+    "$BRAIN" search "agent context handoff" --limit 3
     echo ""
 
-    bold "--- search: zero-knowledge ---"
-    "$BRAIN" search zero-knowledge --limit 3
+    bold "--- search: launch lifecycle ---"
+    "$BRAIN" search "launch lifecycle" --limit 3
     echo ""
 
     bold "--- show event 1 ---"
@@ -274,15 +376,17 @@ do_mcp_demo() {
 
     export MCI_DB_PATH="$DB_PATH"
 
-    echo "Sending JSON-RPC initialize + tools/list + mci_recall to mcp-serve..."
+    echo "Sending JSON-RPC initialize + tools/list + recall + cited context to mcp-serve..."
     echo ""
 
     INIT_REQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"0.1"}}}'
     LIST_REQ='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-    RECALL_REQ='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mci_recall","arguments":{"query":"snowflake arctic embed","limit":3}}}'
-    STATS_REQ='{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mci_stats","arguments":{}}}'
+    RECALL_REQ='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mci_recall","arguments":{"query":"agent context handoff","limit":3}}}'
+    CONTEXT_REQ='{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mci_context","arguments":{"focus":"agent context handoff","max_tokens":600,"max_evidence":5}}}'
+    STATS_REQ='{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"mci_stats","arguments":{}}}'
+    EPISODES_REQ='{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"mci_episodes","arguments":{"limit":5}}}'
 
-    RESPONSES=$(printf '%s\n%s\n%s\n%s\n' "$INIT_REQ" "$LIST_REQ" "$RECALL_REQ" "$STATS_REQ" | \
+    RESPONSES=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$INIT_REQ" "$LIST_REQ" "$RECALL_REQ" "$CONTEXT_REQ" "$STATS_REQ" "$EPISODES_REQ" | \
         "$AGENT" mcp-serve 2>/dev/null || true)
 
     if [[ -z "$RESPONSES" ]]; then
@@ -298,12 +402,20 @@ do_mcp_demo() {
     echo "$RESPONSES" | sed -n '2p' | python3 -m json.tool 2>/dev/null || echo "$RESPONSES" | sed -n '2p'
     echo ""
 
-    bold "--- mci_recall(snowflake arctic embed) ---"
+    bold "--- mci_recall(agent context handoff) ---"
     echo "$RESPONSES" | sed -n '3p' | python3 -m json.tool 2>/dev/null || echo "$RESPONSES" | sed -n '3p'
     echo ""
 
-    bold "--- mci_stats ---"
+    bold "--- mci_context(agent context handoff) ---"
     echo "$RESPONSES" | sed -n '4p' | python3 -m json.tool 2>/dev/null || echo "$RESPONSES" | sed -n '4p'
+    echo ""
+
+    bold "--- mci_stats ---"
+    echo "$RESPONSES" | sed -n '5p' | python3 -m json.tool 2>/dev/null || echo "$RESPONSES" | sed -n '5p'
+    echo ""
+
+    bold "--- mci_episodes ---"
+    echo "$RESPONSES" | sed -n '6p' | python3 -m json.tool 2>/dev/null || echo "$RESPONSES" | sed -n '6p'
     echo ""
 
     green "mcp-demo done."
@@ -328,12 +440,12 @@ do_screenshot() {
     echo "Click on each window when prompted by the crosshair cursor."
     echo ""
 
-    bold "Screenshot 1/4: Hippocampus menu-bar (click the menu-bar icon area)"
-    SHOT1="$SHOT_DIR/hippocampus-menu-$TIMESTAMP.png"
+    bold "Screenshot 1/4: Onboarding welcome (click the onboarding window)"
+    SHOT1="$SHOT_DIR/onboarding-welcome-$TIMESTAMP.png"
     screencapture -w "$SHOT1"
     if [[ -f "$SHOT1" ]]; then
-        sips -z 800 1280 "$SHOT1" --out "$REPO_ROOT/assets/screenshots/hero-hippocampus-menu.png" >/dev/null
-        green "  Saved: assets/screenshots/hero-hippocampus-menu.png"
+        normalize_screenshot "$SHOT1" "$REPO_ROOT/assets/screenshots/hero-onboarding-welcome.png"
+        green "  Saved: assets/screenshots/hero-onboarding-welcome.png"
     else
         dim "  (cancelled)"
     fi
@@ -342,7 +454,7 @@ do_screenshot() {
     SHOT2="$SHOT_DIR/recall-ui-$TIMESTAMP.png"
     screencapture -w "$SHOT2"
     if [[ -f "$SHOT2" ]]; then
-        sips -z 800 1280 "$SHOT2" --out "$REPO_ROOT/assets/screenshots/hero-recall-ui.png" >/dev/null
+        normalize_screenshot "$SHOT2" "$REPO_ROOT/assets/screenshots/hero-recall-ui.png"
         green "  Saved: assets/screenshots/hero-recall-ui.png"
     else
         dim "  (cancelled)"
@@ -352,7 +464,7 @@ do_screenshot() {
     SHOT3="$SHOT_DIR/trust-panel-$TIMESTAMP.png"
     screencapture -w "$SHOT3"
     if [[ -f "$SHOT3" ]]; then
-        sips -z 800 1280 "$SHOT3" --out "$REPO_ROOT/assets/screenshots/hero-onboarding-trust-panel.png" >/dev/null
+        normalize_screenshot "$SHOT3" "$REPO_ROOT/assets/screenshots/hero-onboarding-trust-panel.png"
         green "  Saved: assets/screenshots/hero-onboarding-trust-panel.png"
     else
         dim "  (cancelled)"
@@ -362,7 +474,7 @@ do_screenshot() {
     SHOT4="$SHOT_DIR/cli-$TIMESTAMP.png"
     screencapture -w "$SHOT4"
     if [[ -f "$SHOT4" ]]; then
-        sips -z 800 1280 "$SHOT4" --out "$REPO_ROOT/assets/screenshots/hero-cli.png" >/dev/null
+        normalize_screenshot "$SHOT4" "$REPO_ROOT/assets/screenshots/hero-cli.png"
         green "  Saved: assets/screenshots/hero-cli.png"
     else
         dim "  (cancelled)"
@@ -371,6 +483,7 @@ do_screenshot() {
     echo ""
     echo "Final screenshots:"
     ls -lh "$REPO_ROOT/assets/screenshots/"*.png 2>/dev/null || true
+    "$REPO_ROOT/scripts/test-screenshot-assets.sh"
     green "screenshot done."
 }
 
@@ -382,9 +495,13 @@ do_screenshot_auto() {
     bold "=== demo screenshot --auto ==="
     require_cmd python3
     require_cmd sips
+    require_cmd xcrun
     load_key
+    ensure_demo_dirs
 
     export MCI_DB_PATH="$DB_PATH"
+    export MCI_DB_KEY_FILE="$KEY_FILE"
+    export MCI_BRAIN_BIN="$REPO_ROOT/target/release/mci-brain"
     SCREENSHOTS="$REPO_ROOT/assets/screenshots"
 
     bold "--- 1/4: hero-cli.png (programmatic render) ---"
@@ -396,60 +513,50 @@ do_screenshot_auto() {
     fi
 
     bold "--- 2/4: hero-recall-ui.png (screencapture -l) ---"
-    RECALL_UI="$REPO_ROOT/apps/recall-ui/.build/release/recall-ui"
+    RECALL_UI="$APP_PATH/Contents/MacOS/recall-ui"
     if [[ ! -f "$RECALL_UI" ]]; then
-        dim "  RecallUI not built. Skipping."
-        dim "  Build: cd apps/recall-ui && swift build -c release"
+        dim "  Packaged Recall UI not built. Run: ./scripts/demo.sh boot"
     else
-        "$RECALL_UI" &
+        HOME="$DEMO_HOME" \
+            CFFIXED_USER_HOME="$DEMO_HOME" \
+            MCI_DEVELOPMENT_FILE_KEY=1 \
+            MCI_DB_KEY_HEX="$MCI_DB_KEY_HEX" \
+            MCI_DB_PATH="$DB_PATH" \
+            MCI_EPHEMERAL_UI_STATE=1 \
+            MCI_INITIAL_TAB=now \
+            "$RECALL_UI" \
+            >"$LOG_DIR/recall.stdout.log" \
+            2>"$LOG_DIR/recall.stderr.log" &
         RECALL_PID=$!
-        sleep 2
+        echo "$RECALL_PID" > "$PID_DIR/recall.pid"
 
-        WID=$(osascript -e 'tell application "System Events" to get id of first window of process "recall-ui"' 2>/dev/null || echo "")
+        WID=""
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            WID=$(window_id_for_pid "$RECALL_PID" || true)
+            [[ -n "$WID" ]] && break
+            sleep 0.5
+        done
         if [[ -n "$WID" ]]; then
-            screencapture -l "$WID" -o /tmp/recall-ui-auto.png 2>/dev/null
-            if [[ -f /tmp/recall-ui-auto.png ]]; then
-                sips -z 800 1280 /tmp/recall-ui-auto.png --out "$SCREENSHOTS/hero-recall-ui.png" >/dev/null
+            RAW_RECALL_SHOT=$(mktemp "${TMPDIR:-/tmp}/recall-ui-auto.XXXXXX.png")
+            if screencapture -l "$WID" -o "$RAW_RECALL_SHOT" 2>/dev/null && [[ -s "$RAW_RECALL_SHOT" ]]; then
+                normalize_screenshot "$RAW_RECALL_SHOT" "$SCREENSHOTS/hero-recall-ui.png"
                 green "  hero-recall-ui.png captured"
             else
                 dim "  screencapture failed (TCC Screen Recording permission needed)"
             fi
+            rm -f "$RAW_RECALL_SHOT"
         else
-            dim "  Could not get window ID (TCC Accessibility permission needed)"
+            dim "  Could not find the Recall window for process $RECALL_PID"
         fi
         kill "$RECALL_PID" 2>/dev/null || true
+        rm -f "$PID_DIR/recall.pid"
     fi
 
-    bold "--- 3/4: hero-hippocampus-menu.png (requires interactive) ---"
-    dim "  Menu-bar dropdowns require interactive click."
-    dim "  Use: screencapture -w assets/screenshots/hero-hippocampus-menu.png"
-    dim "  Or run: demo.sh screenshot (interactive mode)"
+    bold "--- 3/4: hero-onboarding-welcome.png ---"
+    dim "  Preserving the reviewed Welcome capture. Navigation is intentionally interactive."
 
-    bold "--- 4/4: hero-onboarding-trust-panel.png (screencapture -l) ---"
-    ONBOARDING="$REPO_ROOT/apps/onboarding/.build/release/onboarding"
-    if [[ ! -f "$ONBOARDING" ]]; then
-        dim "  Onboarding not built. Skipping."
-        dim "  Build: cd apps/onboarding && swift build -c release"
-    else
-        "$ONBOARDING" &
-        ONBOARD_PID=$!
-        sleep 2
-
-        WID=$(osascript -e 'tell application "System Events" to get id of first window of process "onboarding"' 2>/dev/null || echo "")
-        if [[ -n "$WID" ]]; then
-            screencapture -l "$WID" -o /tmp/onboarding-auto.png 2>/dev/null
-            if [[ -f /tmp/onboarding-auto.png ]]; then
-                sips -z 800 1280 /tmp/onboarding-auto.png --out "$SCREENSHOTS/hero-onboarding-trust-panel.png" >/dev/null
-                green "  hero-onboarding-trust-panel.png captured"
-                dim "  NOTE: may need manual navigation to 'What MCI Ignores' panel first"
-            else
-                dim "  screencapture failed (TCC Screen Recording permission needed)"
-            fi
-        else
-            dim "  Could not get window ID (TCC Accessibility permission needed)"
-        fi
-        kill "$ONBOARD_PID" 2>/dev/null || true
-    fi
+    bold "--- 4/4: hero-onboarding-trust-panel.png ---"
+    dim "  Preserving the reviewed Trust-panel capture. Navigation is intentionally interactive."
 
     echo ""
     bold "Final state:"
@@ -457,7 +564,9 @@ do_screenshot_auto() {
 
     echo ""
     bold "Privacy check:"
+    python3 "$REPO_ROOT/scripts/sanitize-png-metadata.py" "$SCREENSHOTS"/*.png
     file "$SCREENSHOTS"/*.png 2>/dev/null
+    "$REPO_ROOT/scripts/test-screenshot-assets.sh"
     echo ""
     dim "Visually inspect each PNG before committing — confirm no real user content."
     green "screenshot --auto done."
@@ -470,25 +579,11 @@ do_screenshot_auto() {
 do_teardown() {
     bold "=== demo teardown ==="
 
-    echo "Killing Hippocampus / mci-agent / mci-capture-helper processes..."
-    pkill -f "Hippocampus" 2>/dev/null || true
-    pkill -f "mci-agent" 2>/dev/null || true
-    pkill -f "mci-capture-helper" 2>/dev/null || true
-    sleep 1
-
-    if [[ -f "$DB_PATH" ]]; then
-        ARCHIVE="/tmp/mci-demo-brain-$(date +%Y%m%d-%H%M%S).sqlite"
-        echo "Archiving demo brain to $ARCHIVE"
-        cp "$DB_PATH" "$ARCHIVE"
-        rm -f "$DB_PATH" "${DB_PATH}-wal" "${DB_PATH}-shm"
-        green "  Brain archived to $ARCHIVE and removed from $MCI_DIR"
-    else
-        dim "  (no brain file to clean up)"
-    fi
-
-    if [[ -f "$KEY_FILE" ]]; then
-        echo "Removing ephemeral key: $KEY_FILE"
-        rm -f "$KEY_FILE"
+    echo "Stopping only processes recorded below $PID_DIR..."
+    stop_demo_processes
+    if [[ -d "$DEMO_ROOT" ]]; then
+        echo "Deleting disposable demo state: $DEMO_ROOT"
+        rm -rf "$DEMO_ROOT"
     fi
 
     green "teardown done."
@@ -517,7 +612,7 @@ do_full() {
     echo ""
     do_mcp_demo
     echo ""
-    do_screenshot
+    do_screenshot_auto
     echo ""
     do_teardown
 

@@ -2,8 +2,8 @@
 // UI per `docs/design/brief-viewer-spec.md`.
 //
 // The scene is a thin renderer over BriefViewModel.scene; the VM owns
-// all state-machine logic. The five spec states map to the
-// `BriefScene` enum the VM publishes.
+// all state-machine logic. The viewer states map to the `BriefScene`
+// enum the VM publishes.
 
 import AppKit
 import RecallUIKit
@@ -11,12 +11,7 @@ import SwiftUI
 
 struct BriefView: View {
     @StateObject var viewModel: BriefViewModel
-    /// Callback fired when the empty-state "Enable on-device brief
-    /// model" button is tapped. The Recall UI does NOT own the model
-    /// download UI (that lives in Hippocampus.app per PR #134) — this
-    /// is the deep-link out. App wires it to launch Hippocampus.app
-    /// with a URL the menu-bar surfaces.
-    var onRequestModelDownload: () -> Void = {}
+    let reader: BrainReader
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -35,32 +30,23 @@ struct BriefView: View {
         .task {
             await viewModel.reload()
         }
-        // While the model is missing (user is actively downloading from
-        // the menu-bar Daily Briefs flow), re-poll every 3 s so the
-        // scene transitions out of `.modelMissing` the moment the
-        // download finishes — without requiring the user to switch tabs
-        // or relaunch the Recall window (CEO dogfood 2026-05-26).
-        .task(id: viewModel.scene == .modelMissing) {
-            guard viewModel.scene == .modelMissing else { return }
-            while !Task.isCancelled, viewModel.scene == .modelMissing {
-                try? await Task.sleep(for: .seconds(3))
-                guard !Task.isCancelled, viewModel.scene == .modelMissing else { return }
-                await viewModel.reload()
-            }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
+            _ in
+            Task { await viewModel.reload(forceDate: viewModel.selectedDate) }
         }
     }
 
     @ViewBuilder
     private var sceneBody: some View {
         switch viewModel.scene {
-        case .modelMissing:
-            modelMissingView
-        case .awaitingFirstFullDay(let hoursSoFar):
-            awaitingFirstFullDayView(hoursSoFar: hoursSoFar)
+        case .captureCoverageUnknown:
+            captureCoverageUnknownView
+        case .awaitingFirstFullDay:
+            captureCoverageUnknownView
         case .loading:
             ShimmerLoadingView(isLoading: true)
         case .brief(let brief):
-            BriefBodyView(brief: brief) {
+            BriefBodyView(brief: brief, reader: reader) {
                 Task { await viewModel.reload(forceDate: brief.dateLocal) }
             }
         case .missingForDate(let dateLocal):
@@ -70,43 +56,11 @@ struct BriefView: View {
         }
     }
 
-    private var modelMissingView: some View {
-        VStack(spacing: 16) {
-            ContentUnavailableView(
-                "Daily briefs aren't enabled yet",
-                systemImage: "doc.text",
-                description: Text(
-                    "Daily briefs are written by an on-device AI model (Qwen3-1.7B, ≈ 2.5 GB). One-time download, runs entirely on your Mac — nothing leaves your device."
-                )
-            )
-            .foregroundStyle(Color.brandFgSecondary)
-
-            // The download flow lives in Hippocampus.app's menu bar:
-            // clicking "Daily Briefs: Off — Download Model…" opens
-            // ModelDownloadView, fetches the tarball from HuggingFace,
-            // SHA-verifies, and unpacks under
-            // `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/`.
-            // brief_worker picks it up on its next 06:00 cycle or the
-            // first-launch fast path. Once enabled, BriefViewModel
-            // re-evaluates scene and this view is replaced.
-            Text("Click the Hippocampus icon in your menu bar → \"Daily Briefs: Off — Download Model…\" to enable.")
-                .font(.caption)
-                .foregroundStyle(Color.brandFgMuted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-        }
-        .padding(24)
-    }
-
-    private func awaitingFirstFullDayView(hoursSoFar: Double?) -> some View {
-        let hoursLabel: String = {
-            guard let h = hoursSoFar, h > 0 else { return "Capture hasn't started yet." }
-            return String(format: "Captured %.1f hours so far.", h)
-        }()
-        return ContentUnavailableView(
-            "First brief generates after your first full day",
-            systemImage: "clock.badge",
-            description: Text(hoursLabel)
+    private var captureCoverageUnknownView: some View {
+        ContentUnavailableView(
+            "No saved brief yet",
+            systemImage: "doc.text",
+            description: Text("Today's draft will appear after useful memories have been saved.")
         )
         .foregroundStyle(Color.brandFgSecondary)
         .padding(24)
@@ -117,9 +71,7 @@ struct BriefView: View {
             ContentUnavailableView(
                 "No brief for \(dateLocal)",
                 systemImage: "doc.text.magnifyingglass",
-                description: Text(
-                    "Either capture was off this day or brief generation was skipped."
-                )
+                description: Text("No saved brief was found for this date.")
             )
             .foregroundStyle(Color.brandFgSecondary)
 
@@ -161,6 +113,7 @@ struct BriefView: View {
 
 struct DateSelectorBar: View {
     @ObservedObject var viewModel: BriefViewModel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         HStack(spacing: 12) {
@@ -198,6 +151,10 @@ struct DateSelectorBar: View {
             .accessibilityLabel("Next brief")
             .accessibilityHint("Show the brief for the following day")
         }
+        .padding(.vertical, MCI.Spacing.xs)
+        .padding(.horizontal, MCI.Spacing.s)
+        .background(reduceTransparency ? Color.brandBgSecondary : Color.brandBgElevated.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous))
     }
 
     /// "Friday, May 22, 2026"
@@ -220,21 +177,22 @@ struct DateSelectorBar: View {
 
 struct BriefBodyView: View {
     let brief: Brief
-    var onRegenerate: () -> Void = {}
+    let reader: BrainReader
+    let onRefresh: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 BriefHeaderView(brief: brief)
 
-                Text(brief.body)
+                BriefEvidenceView(brief: brief, reader: reader)
                     .font(.system(.body, design: .default))
                     .textSelection(.enabled)
                     .foregroundStyle(Color.brandFgPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
 
-                BriefFooterActions(brief: brief, onRegenerate: onRegenerate)
+                BriefFooterActions(brief: brief, onRefresh: onRefresh)
                     .padding(.top, 8)
             }
             .padding(.horizontal, 16)
@@ -253,6 +211,9 @@ struct BriefHeaderView: View {
             Text(brief.title)
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(Color.brandFgPrimary)
+            if brief.modelId == "hippocampus-extractive" {
+                Label("Draft", systemImage: "pencil").font(.caption).foregroundStyle(.secondary)
+            }
             HStack(spacing: 6) {
                 Text("Generated \(Formatters.relativeTime(usSinceEpoch: brief.generatedTsUs))")
                     .help(Formatters.tsString(usSinceEpoch: brief.generatedTsUs))
@@ -276,19 +237,24 @@ struct BriefHeaderView: View {
 
 struct BriefFooterActions: View {
     let brief: Brief
-    var onRegenerate: () -> Void = {}
+    let onRefresh: () -> Void
+    @State private var exportError: String?
 
     var body: some View {
         HStack(spacing: 8) {
             Button {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(brief.body, forType: .string)
+                if NSPasteboard.general.setString(VisualMemoryExport.markdown(brief: brief), forType: .string) {
+                    ToastNotifier.shared.notify("Summary copied")
+                } else {
+                    exportError = "The clipboard is unavailable. Try again."
+                }
             } label: {
-                Label("Copy", systemImage: "doc.on.doc")
+                Label("Copy summary", systemImage: "doc.on.doc")
             }
             .buttonStyle(.bordered)
             .keyboardShortcut("c", modifiers: [.command, .shift])
-            .help("Copy brief body to clipboard")
+            .help("Copy the draft with its date, provenance, and source links")
 
             Button {
                 exportMarkdown(brief)
@@ -302,17 +268,18 @@ struct BriefFooterActions: View {
             Spacer()
 
             Button {
-                onRegenerate()
+                onRefresh()
             } label: {
-                Label("Regenerate", systemImage: "arrow.clockwise")
+                Label("Refresh", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
             .foregroundStyle(Color.brandMintDim)
-            .help(
-                "Re-fetch the latest brief for this date. The brief author runs on a schedule; this does not trigger a new generation."
-            )
+            .help("Refresh the saved brief for this date")
         }
         .font(.callout)
+        .alert("Summary export failed", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(exportError ?? "") }
     }
 
     private func exportMarkdown(_ brief: Brief) {
@@ -321,9 +288,11 @@ struct BriefFooterActions: View {
         panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .text]
         panel.title = "Export Brief"
         if panel.runModal() == .OK, let url = panel.url {
-            let header = "# \(brief.title)\n\n_\(brief.modelId), generated \(Formatters.tsString(usSinceEpoch: brief.generatedTsUs))_\n\n"
-            let data = (header + brief.body).data(using: .utf8) ?? Data()
-            try? data.write(to: url)
+            do {
+                try VisualMemoryExport.markdown(brief: brief).write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                exportError = "The summary could not be saved. Choose a writable location and try again."
+            }
         }
     }
 }

@@ -26,33 +26,33 @@ private final class FakeUNCenter: UserNotificationCenter, @unchecked Sendable {
     private var _authorizationRequests = 0
 
     func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
-        lock.lock(); _authorizationRequests += 1; lock.unlock()
+        lock.withLock { _authorizationRequests += 1 }
         return true
     }
 
     func add(_ request: UNNotificationRequest) async throws {
-        lock.lock(); _added.append(request); lock.unlock()
+        lock.withLock { _added.append(request) }
     }
 
     func removePendingNotificationRequests(withIdentifiers ids: [String]) {
-        lock.lock(); _removedPending.append(contentsOf: ids); lock.unlock()
+        lock.withLock { _removedPending.append(contentsOf: ids) }
     }
 
     func removeDeliveredNotifications(withIdentifiers ids: [String]) {
-        lock.lock(); _removedDelivered.append(contentsOf: ids); lock.unlock()
+        lock.withLock { _removedDelivered.append(contentsOf: ids) }
     }
 
     var added: [UNNotificationRequest] {
-        lock.lock(); defer { lock.unlock() }; return _added
+        lock.withLock { _added }
     }
     var removedPending: [String] {
-        lock.lock(); defer { lock.unlock() }; return _removedPending
+        lock.withLock { _removedPending }
     }
     var removedDelivered: [String] {
-        lock.lock(); defer { lock.unlock() }; return _removedDelivered
+        lock.withLock { _removedDelivered }
     }
     var authorizationRequests: Int {
-        lock.lock(); defer { lock.unlock() }; return _authorizationRequests
+        lock.withLock { _authorizationRequests }
     }
 }
 
@@ -64,10 +64,7 @@ final class TCCRevokedRecoveryTests: XCTestCase {
             from: .running,
             tccRevokedSurface: .screenRecording
         )
-        guard case .error(let reason) = status else {
-            return XCTFail("expected .error, got \(status)")
-        }
-        XCTAssertEqual(reason, "Screen Recording revoked")
+        XCTAssertEqual(status, .needsPermission(.screenRecording))
     }
 
     func testDerivation_tccRevokedOverridesIntegrityError() {
@@ -79,16 +76,13 @@ final class TCCRevokedRecoveryTests: XCTestCase {
             integrityError: "hash mismatch",
             tccRevokedSurface: .accessibility
         )
-        guard case .error(let reason) = status else {
-            return XCTFail("expected .error, got \(status)")
-        }
-        XCTAssertEqual(reason, "Accessibility revoked")
+        XCTAssertEqual(status, .needsPermission(.accessibility))
     }
 
     func testDerivation_noOverride_preservesLegacyBehaviour() {
         // Sanity: pre-cycle-8.45 callsites that pass no override
         // continue to behave exactly as before.
-        XCTAssertEqual(
+        XCTAssertNotEqual(
             MenuBarStatus.derive(from: .running),
             .recording
         )

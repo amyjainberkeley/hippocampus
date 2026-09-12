@@ -55,19 +55,19 @@ private final class FakeUNCenter: UserNotificationCenter, @unchecked Sendable {
 
     func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool { true }
     func add(_ request: UNNotificationRequest) async throws {
-        lock.lock(); _added.append(request); lock.unlock()
+        lock.withLock { _added.append(request) }
     }
     func removePendingNotificationRequests(withIdentifiers ids: [String]) {
-        lock.lock(); _removedPending.append(contentsOf: ids); lock.unlock()
+        lock.withLock { _removedPending.append(contentsOf: ids) }
     }
     func removeDeliveredNotifications(withIdentifiers ids: [String]) {
-        lock.lock(); _removedDelivered.append(contentsOf: ids); lock.unlock()
+        lock.withLock { _removedDelivered.append(contentsOf: ids) }
     }
     var added: [UNNotificationRequest] {
-        lock.lock(); defer { lock.unlock() }; return _added
+        lock.withLock { _added }
     }
     var removedPending: [String] {
-        lock.lock(); defer { lock.unlock() }; return _removedPending
+        lock.withLock { _removedPending }
     }
 }
 
@@ -219,16 +219,13 @@ final class TCCHelperStderrTailIntegrationTests: XCTestCase {
         // Supervisor mirror set.
         XCTAssertEqual(supervisor.tccRevokedSurface, .screenRecording)
 
-        // MenuBarStatus.derive picks up the mirror and forces .error
+        // MenuBarStatus.derive picks up the mirror and requests permission
         // — even when the supervisor state itself is .running.
         let status = MenuBarStatus.derive(
             from: .running,
             tccRevokedSurface: supervisor.tccRevokedSurface
         )
-        guard case .error(let reason) = status else {
-            return XCTFail("expected .error, got \(status)")
-        }
-        XCTAssertEqual(reason, "Screen Recording revoked")
+        XCTAssertEqual(status, .needsPermission(.screenRecording))
     }
 
     /// (3) The matching `tcc_restored=<surface>` clears both the
@@ -256,15 +253,11 @@ final class TCCHelperStderrTailIntegrationTests: XCTestCase {
             "restore must clear pending notification"
         )
 
-        // With the mirror cleared, MenuBarStatus falls back to the
-        // underlying supervisor state — .running → .recording.
-        XCTAssertEqual(
-            MenuBarStatus.derive(
+        // Restored permission alone cannot establish that any memory was saved.
+        guard case .stale = MenuBarStatus.derive(
                 from: .running,
                 tccRevokedSurface: supervisor.tccRevokedSurface
-            ),
-            .recording
-        )
+            ) else { return XCTFail("restoring permission must not invent a saved frame") }
     }
 
     /// A restored breadcrumb for a DIFFERENT surface than the one

@@ -50,10 +50,15 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
     /// - Throws: `BrainReaderError.openFailed` with the FFI's last-error
     ///   diagnostic on any failure (missing file, wrong key, malformed
     ///   key hex, etc.).
-    public init(path: String, keyHex: String) throws {
+    public init(path: String, keyHex: String, modelPath: String? = nil) throws {
         let h: OpaquePointer? = path.withCString { pPath in
             keyHex.withCString { pKey in
-                mci_brain_ffi_open(pPath, pKey)
+                if let modelPath {
+                    return modelPath.withCString { pModel in
+                        mci_brain_ffi_open_with_model(pPath, pKey, pModel)
+                    }
+                }
+                return mci_brain_ffi_open(pPath, pKey)
             }
         }
         guard let h else {
@@ -83,14 +88,7 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
         }
-        let payload = QueryPayload(
-            text: opts.text,
-            limit: opts.limit,
-            timeFromUs: opts.timeFromUs,
-            timeToUs: opts.timeToUs,
-            appFilter: opts.appFilter,
-            userAliases: opts.userAliases
-        )
+        let payload = QueryPayload(options: opts)
         let queryJsonData = try JSONEncoder().encode(payload)
         guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
             throw BrainReaderError.decodeFailed("FFIBrainReader: non-UTF8 query payload")
@@ -128,6 +126,17 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         }
         defer { mci_brain_ffi_string_free(rawJson) }
         return try Self.decodePrivacyMoments(rawJson)
+    }
+
+    public func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let rawJson = mci_brain_activity_intervals(h, startUs, endUs, limit) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        return try JSONDecoder().decode(ActivityPage.self, from: Data(String(cString: rawJson).utf8))
     }
 
     public func listObservedApps(
@@ -179,6 +188,39 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         return try Self.decodeHits(rawJson)
     }
 
+    public func eventText(eventId: UInt64) async throws -> EventText? {
+        try Task.checkCancellation()
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let raw = mci_brain_ffi_event_text(h, eventId) else {
+            throw BrainReaderError.queryFailed("Stored text unavailable")
+        }
+        defer { mci_brain_ffi_string_free(raw) }
+        try Task.checkCancellation()
+        let count = strnlen(raw, EventText.maxJSONBytes + 1)
+        guard count <= EventText.maxJSONBytes else {
+            throw BrainReaderError.decodeFailed("Invalid bounded event text response")
+        }
+        return try Self.decodeEventText(Data(bytes: raw, count: count), eventId: eventId)
+    }
+
+    static func decodeEventText(_ data: Data, eventId: UInt64) throws -> EventText? {
+        do {
+            guard data.count <= EventText.maxJSONBytes else {
+                throw BrainReaderError.decodeFailed("Invalid bounded event text response")
+            }
+            let value = try JSONDecoder().decode(EventText?.self, from: data)
+            guard value == nil || value?.eventId == eventId else {
+                throw BrainReaderError.decodeFailed("Invalid bounded event text response")
+            }
+            return value
+        } catch {
+            // Decoder diagnostics must never echo stored content to callers or logs.
+            throw BrainReaderError.decodeFailed("Invalid bounded event text response")
+        }
+    }
+
     public func listEpisodes(limit: Int) async throws -> [Episode] {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
@@ -219,6 +261,35 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
     }
 
     public func summaryStats() async throws -> SummaryStats {
+        try await Task.detached(priority: .utility) {
+            try self.readSummaryStats()
+        }.value
+    }
+
+    public func storageUsage() async throws -> StorageUsage? {
+        // Explicit directory enumeration must never execute on the UI actor.
+        try await Task.detached(priority: .utility) {
+            try self.readStorageUsage()
+        }.value
+    }
+
+    private func readStorageUsage() throws -> StorageUsage {
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        guard let rawJson = mci_brain_ffi_storage_usage(h) else {
+            throw BrainReaderError.queryFailed(Self.consumeLastError())
+        }
+        defer { mci_brain_ffi_string_free(rawJson) }
+        let data = Data(String(cString: rawJson).utf8)
+        do {
+            return try JSONDecoder().decode(StorageUsage.self, from: data)
+        } catch {
+            throw BrainReaderError.decodeFailed("FFIBrainReader.storageUsage: invalid aggregate")
+        }
+    }
+
+    private func readSummaryStats() throws -> SummaryStats {
         guard let h = handle else {
             throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
         }
@@ -232,12 +303,7 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         }
         do {
             let wire = try JSONDecoder().decode(SummaryStatsWire.self, from: data)
-            return SummaryStats(
-                totalEvents: wire.total_events,
-                oldestTsUs: wire.oldest_ts_us,
-                newestTsUs: wire.newest_ts_us,
-                diskBytes: wire.disk_bytes
-            )
+            return wire.value
         } catch {
             throw BrainReaderError.decodeFailed("FFIBrainReader.summaryStats: \(error)")
         }
@@ -411,7 +477,7 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
 // stays camelCase.
 // ---------------------------------------------------------------------------
 
-private struct HitWire: Decodable {
+struct HitWire: Decodable {
     let event_id: UInt64
     let ts_us: UInt64
     let app_bundle_id: String?
@@ -438,6 +504,7 @@ private struct HitWire: Decodable {
     /// `hit_json_wire_uses_snake_case_keys_for_new_fields` in
     /// `adapters/macos/mci-brain-ffi/tests/hit_entities_wire.rs`.
     let thumbnail_path: String?
+    let source_kind: String?
 
     func toHit() -> Hit {
         Hit(
@@ -451,7 +518,8 @@ private struct HitWire: Decodable {
             score: score,
             entities: entities ?? [],
             linkedEventIds: linked_event_ids ?? [],
-            thumbnailPath: thumbnail_path
+            thumbnailPath: thumbnail_path,
+            sourceKind: source_kind
         )
     }
 }
@@ -495,23 +563,44 @@ private struct BriefWire: Decodable {
     }
 }
 
-private struct QueryPayload: Encodable {
+struct QueryPayload: Encodable {
     let text: String
+    let mode: SearchMode
+    let browse: Bool
     let limit: Int
     let timeFromUs: UInt64?
     let timeToUs: UInt64?
     let appFilter: String?
+    let appFilters: [String]
+    let hasUrl: Bool
     /// Cycle 8.42 — user-defined alias map. `nil` (default) is encoded as
     /// missing key so the FFI's `#[serde(default)]` yields an empty map,
     /// preserving pre-8.42 behavior.
     let userAliases: [String: [String]]?
 
+    init(options: SearchOptions) {
+        text = options.text
+        mode = options.mode
+        browse = options.browse
+        limit = options.limit
+        timeFromUs = options.timeFromUs
+        timeToUs = options.timeToUs
+        appFilter = options.appFilter
+        appFilters = options.appFilters
+        hasUrl = options.hasUrl
+        userAliases = options.userAliases
+    }
+
     enum CodingKeys: String, CodingKey {
         case text
+        case mode
+        case browse
         case limit
         case timeFromUs = "time_from_us"
         case timeToUs = "time_to_us"
         case appFilter = "app_filter"
+        case appFilters = "app_filters"
+        case hasUrl = "has_url"
         case userAliases = "user_aliases"
     }
 }
@@ -579,12 +668,13 @@ private struct TimelineQueryPayload: Encodable {
 
 /// **V2-P13.** Decoder side of `mci_brain_ffi_timeline_events`.
 /// Snake-case wire; converts to the public `TimelineEvent` on decode.
-private struct TimelineEventWire: Decodable {
+struct TimelineEventWire: Decodable {
     let event_id: UInt64
     let ts_us: UInt64
     let app_bundle_id: String?
     let snippet: String
     let thumbnail_path: String?
+    let source_kind: String?
 
     func toTimelineEvent() -> TimelineEvent {
         TimelineEvent(
@@ -592,16 +682,25 @@ private struct TimelineEventWire: Decodable {
             tsUs: ts_us,
             appBundleId: app_bundle_id,
             snippet: snippet,
-            thumbnailPath: thumbnail_path
+            thumbnailPath: thumbnail_path,
+            sourceKind: source_kind
         )
     }
 }
 
-private struct SummaryStatsWire: Decodable {
+struct SummaryStatsWire: Decodable {
     let total_events: UInt64
     let oldest_ts_us: UInt64?
     let newest_ts_us: UInt64?
     let disk_bytes: UInt64
+    let storage: StorageUsage?
+
+    var value: SummaryStats {
+        SummaryStats(
+            totalEvents: total_events, oldestTsUs: oldest_ts_us,
+            newestTsUs: newest_ts_us, diskBytes: disk_bytes, storage: storage
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -629,7 +728,7 @@ extension FFIBrainReader: PrivacyMutator {
             mci_brain_ffi_delete_event(h, q)
         }
         guard let rawJson else {
-            throw BrainReaderError.queryFailed(Self.consumeLastError())
+            throw Self.mutationError(Self.consumeLastError())
         }
         defer { mci_brain_ffi_string_free(rawJson) }
         return try Self.decodeDeleteResult(rawJson)
@@ -644,7 +743,7 @@ extension FFIBrainReader: PrivacyMutator {
         }
         guard let rawJson = mci_brain_ffi_delete_events_in_range(h, startTsUs, endTsUs)
         else {
-            throw BrainReaderError.queryFailed(Self.consumeLastError())
+            throw Self.mutationError(Self.consumeLastError())
         }
         defer { mci_brain_ffi_string_free(rawJson) }
         return try Self.decodeDeleteResult(rawJson)
@@ -678,7 +777,7 @@ extension FFIBrainReader: PrivacyMutator {
             mci_brain_ffi_wipe_brain(h, t)
         }
         guard let rawJson else {
-            throw BrainReaderError.queryFailed(Self.consumeLastError())
+            throw Self.mutationError(Self.consumeLastError())
         }
         defer { mci_brain_ffi_string_free(rawJson) }
         return try Self.decodeDeleteResult(rawJson)
@@ -693,13 +792,26 @@ extension FFIBrainReader: PrivacyMutator {
         }
         do {
             let wire = try JSONDecoder().decode(DeleteResultWire.self, from: data)
+            guard wire.committed else {
+                throw BrainReaderError.decodeFailed(
+                    "FFIBrainReader.delete: non-committed result payload"
+                )
+            }
             return DeleteResult(
+                committed: wire.committed,
                 eventsDeleted: wire.events_deleted,
-                vacuumOk: wire.vacuum_ok
+                vacuumOk: wire.vacuum_ok,
+                blobCleanupOk: wire.blob_cleanup_ok
             )
         } catch {
             throw BrainReaderError.decodeFailed("FFIBrainReader.delete: \(error)")
         }
+    }
+
+    private static func mutationError(_ message: String) -> BrainReaderError {
+        message.contains("MCI_MUTATION_BLOCKED")
+            ? .mutationBlocked
+            : .queryFailed(message)
     }
 }
 
@@ -708,6 +820,8 @@ private struct DeleteEventPayload: Encodable {
 }
 
 private struct DeleteResultWire: Decodable {
+    let committed: Bool
     let events_deleted: UInt64
     let vacuum_ok: Bool
+    let blob_cleanup_ok: Bool
 }

@@ -1,4 +1,4 @@
-//! Integration tests for the P3.9b FFI wiring against a real ephemeral
+//! Integration tests for the FFI wiring against a real ephemeral
 //! `SQLCipher` brain DB.
 //!
 //! # The CSO load-bearing test (`ffi_open_yields_a_strictly_read_only_brain`)
@@ -32,24 +32,45 @@
 //! in Swift + a two-step token flow for wipe). They are named in the
 //! `ffi_exports_no_mutating_surface_beyond_allowlist` allow-list below;
 //! adding a fifth mutation method without extending the allow-list is
-//! an AGENT_PROTOCOL §5 protected-set violation and the test fails.
+//! an `AGENT_PROTOCOL` §5 protected-set violation and the test fails.
 
 use std::ffi::{CStr, CString};
+use std::fs::OpenOptions;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
+use std::{fs, process};
 
 use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
 use mci_brain_ffi::{
     mci_brain_ffi_close, mci_brain_ffi_delete_event, mci_brain_ffi_delete_events_in_range,
     mci_brain_ffi_events_by_ids, mci_brain_ffi_last_error_message, mci_brain_ffi_list_episodes,
-    mci_brain_ffi_list_observed_apps, mci_brain_ffi_open, mci_brain_ffi_prepare_wipe,
-    mci_brain_ffi_recent_events, mci_brain_ffi_recent_privacy_moments, mci_brain_ffi_search,
-    mci_brain_ffi_string_free, mci_brain_ffi_wipe_brain, DeleteResultJson, HitJson,
-    PrivacyMomentJson,
+    mci_brain_ffi_list_observed_apps, mci_brain_ffi_open, mci_brain_ffi_open_with_model,
+    mci_brain_ffi_prepare_wipe, mci_brain_ffi_recent_events, mci_brain_ffi_recent_privacy_moments,
+    mci_brain_ffi_search, mci_brain_ffi_string_free, mci_brain_ffi_wipe_brain, DeleteResultJson,
+    HitJson, PrivacyMomentJson,
 };
 use mci_core::crypto::DbKey;
 use mci_core::store::open_readonly as mci_core_open_readonly;
 use rusqlite::params;
+use rustix::fs::{flock, FlockOperation};
 use tempfile::TempDir;
+
+fn hold_writer_lease(brain_path: &std::path::Path) -> std::fs::File {
+    let lease_path = brain_path
+        .parent()
+        .expect("brain parent")
+        .join(".writer.lock");
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(lease_path)
+        .expect("open writer lease");
+    flock(&file, FlockOperation::NonBlockingLockExclusive).expect("hold writer lease");
+    file
+}
 
 /// Hex-encode raw 32-byte test key bytes for the FFI's `key_hex` arg.
 /// Tests construct the `DbKey` via [`DbKey::from_bytes`] from the same
@@ -183,7 +204,7 @@ fn ffi_open_yields_a_strictly_read_only_brain() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. FFI search returns lexical hits (P3.9b: FTS5-only; hybrid is P3.3 swap)
+// 2. The compatibility open path returns lexical FTS5 hits.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -447,6 +468,7 @@ fn ffi_search_rejects_malformed_query_json() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[allow(clippy::many_single_char_names)]
 fn ffi_events_by_ids_resolves_seeded_ids_in_input_order() {
     let (_dir, path, raw_key) = make_test_db();
     let key = DbKey::from_bytes(raw_key);
@@ -548,6 +570,7 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     // read-only allow-list.
     let allowed_reads: &[&str] = &[
         "mci_brain_ffi_open",
+        "mci_brain_ffi_open_with_model",
         "mci_brain_ffi_close",
         "mci_brain_ffi_search",
         "mci_brain_ffi_recent_events",
@@ -563,11 +586,15 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
         // Resolves a Vec<u64> of linked event ids into HitJson rows via
         // BrainStore::get_event, no mutating call path.
         "mci_brain_ffi_events_by_ids",
+        // Bounded selected-event stored text through the existing read-only handle.
+        "mci_brain_ffi_event_text",
         // Cycle 8.46 — Privacy Dashboard summary card (read-only).
         // Returns content-free aggregate: event count, oldest/newest ts,
         // on-disk byte size. Uses `BrainStore::stats` + `fs::metadata` —
         // no row content is exposed.
         "mci_brain_ffi_summary_stats",
+        // Explicit metadata-only storage accounting; no mutation or content reads.
+        "mci_brain_ffi_storage_usage",
         // V2-P13 (Phase D scaffold) — Rewind-style timeline strip surface
         // (read-only). Returns downsampled TimelineEventJson rows for a
         // time range; uses the same read-only handle as _recent_events
@@ -592,6 +619,7 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     // symbols at runtime; this is a positive-list smoke check.)
     let _: &[*const ()] = &[
         mci_brain_ffi_open as *const (),
+        mci_brain_ffi_open_with_model as *const (),
         mci_brain_ffi_close as *const (),
         mci_brain_ffi_search as *const (),
         mci_brain_ffi_recent_events as *const (),
@@ -602,7 +630,9 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
         mci_brain_ffi::mci_brain_ffi_latest_brief as *const (),
         mci_brain_ffi::mci_brain_ffi_brief_dates as *const (),
         mci_brain_ffi_events_by_ids as *const (),
+        mci_brain_ffi::mci_brain_ffi_event_text as *const (),
         mci_brain_ffi::mci_brain_ffi_summary_stats as *const (),
+        mci_brain_ffi::mci_brain_ffi_storage_usage as *const (),
         // V2-P13 (Phase D scaffold) — timeline strip fetch surface.
         mci_brain_ffi::mci_brain_ffi_timeline_events as *const (),
         mci_brain_ffi_string_free as *const (),
@@ -615,9 +645,9 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     ];
     assert_eq!(
         allowed_reads.len(),
-        15,
-        "read-tier FFI surface size pinned at 15 \
-         (V2-P13 timeline scaffold added mci_brain_ffi_timeline_events)"
+        18,
+        "read-tier FFI surface size pinned at 18 \
+         (explicit storage accounting adds no mutation)"
     );
     assert_eq!(
         allowed_mutations.len(),
@@ -631,6 +661,7 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[allow(clippy::many_single_char_names)]
 fn ffi_delete_event_removes_the_row_and_leaves_others_intact() {
     let (_dir, path, raw_key) = make_test_db();
     let (a, b) = {
@@ -679,6 +710,163 @@ fn ffi_delete_event_removes_the_row_and_leaves_others_intact() {
     assert_eq!(hits[0].event_id, b.0);
 
     unsafe { mci_brain_ffi_close(h) };
+}
+
+#[test]
+fn ffi_delete_event_also_removes_the_events_encrypted_keyframe_blob() {
+    let (_dir, path, raw_key) = make_test_db();
+    let digest = "a".repeat(64);
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    std::fs::create_dir(&blob_dir).expect("create blobs");
+    let blob_path = blob_dir.join(format!("{digest}.bin"));
+    std::fs::write(&blob_path, b"encrypted keyframe").expect("write blob");
+
+    let id = {
+        let key = DbKey::from_bytes(raw_key);
+        let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+        writer
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 100,
+                app_bundle_id: Some("com.apple.Safari".into()),
+                window_title: Some("Delete me".into()),
+                url: None,
+                text: "event with keyframe".into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: Some(digest),
+                tab_id: None,
+                embedding: None,
+            })
+            .expect("put event")
+    };
+
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null(), "ffi open failed: {}", last_error_string());
+    let query = CString::new(format!(r#"{{"event_id":{}}}"#, id.0)).unwrap();
+    let raw = unsafe { mci_brain_ffi_delete_event(h, query.as_ptr()) };
+    assert!(!raw.is_null(), "ffi delete failed: {}", last_error_string());
+    unsafe { mci_brain_ffi_string_free(raw) };
+
+    assert!(
+        !blob_path.exists(),
+        "FFI deletion must unlink the keyframe blob"
+    );
+    unsafe { mci_brain_ffi_close(h) };
+}
+
+#[test]
+fn ffi_delete_event_returns_committed_outcome_when_blob_cleanup_warns() {
+    let (_dir, path, raw_key) = make_test_db();
+    let digest = "f".repeat(64);
+    let blob_dir = path.parent().expect("brain parent").join("blobs");
+    fs::create_dir(&blob_dir).expect("create blobs");
+    fs::create_dir(blob_dir.join(format!("{digest}.bin"))).expect("create non-file blob candidate");
+
+    let id = {
+        let key = DbKey::from_bytes(raw_key);
+        let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+        writer
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 100,
+                app_bundle_id: Some("com.apple.Safari".into()),
+                window_title: Some("Delete me".into()),
+                url: None,
+                text: "event with malformed keyframe candidate".into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: Some(digest),
+                tab_id: None,
+                embedding: None,
+            })
+            .expect("put event")
+    };
+
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null());
+    let query = CString::new(format!(r#"{{"event_id":{}}}"#, id.0)).unwrap();
+    let raw = unsafe { mci_brain_ffi_delete_event(h, query.as_ptr()) };
+    assert!(
+        !raw.is_null(),
+        "post-commit cleanup warnings must return a deletion result: {}",
+        last_error_string()
+    );
+    let payload = unsafe { CStr::from_ptr(raw) }.to_string_lossy();
+    let result: DeleteResultJson = serde_json::from_str(&payload).expect("delete result");
+    unsafe { mci_brain_ffi_string_free(raw) };
+    assert_eq!(result.events_deleted, 1);
+    assert!(result.vacuum_ok);
+    assert!(!result.blob_cleanup_ok);
+    unsafe { mci_brain_ffi_close(h) };
+}
+
+#[test]
+fn ffi_delete_event_fails_closed_while_agent_writer_lease_is_live() {
+    let (_dir, path, raw_key) = make_test_db();
+    let id = {
+        let key = DbKey::from_bytes(raw_key);
+        let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+        seed_event(&writer, 100, "app", "T", "", "must survive")
+    };
+    fs::write(
+        path.parent().unwrap().join(".running"),
+        process::id().to_string(),
+    )
+    .expect("write live sentinel");
+    let _writer_lease = hold_writer_lease(&path);
+
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null());
+    let query = CString::new(format!(r#"{{"event_id":{}}}"#, id.0)).unwrap();
+    let raw = unsafe { mci_brain_ffi_delete_event(h, query.as_ptr()) };
+    assert!(raw.is_null(), "live ingestion must block Recall mutation");
+    assert!(last_error_string().contains("MCI_MUTATION_BLOCKED"));
+    unsafe { mci_brain_ffi_close(h) };
+
+    let key = DbKey::from_bytes(raw_key);
+    let reader = SqlCipherBrainStore::open_readonly(&path, &key).expect("reader open");
+    assert!(reader.get_event(id).expect("read event").is_some());
+}
+
+#[test]
+fn ffi_delete_event_allows_recovery_when_only_a_malformed_crash_marker_remains() {
+    let (_dir, path, raw_key) = make_test_db();
+    let id = {
+        let key = DbKey::from_bytes(raw_key);
+        let writer = SqlCipherBrainStore::new(&path, &key).expect("writer open");
+        seed_event(&writer, 100, "app", "T", "", "must survive")
+    };
+    fs::write(path.parent().unwrap().join(".running"), "not-a-pid")
+        .expect("write malformed sentinel");
+
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let key_c = CString::new(key_hex_for(raw_key)).unwrap();
+    let h = unsafe { mci_brain_ffi_open(path_c.as_ptr(), key_c.as_ptr()) };
+    assert!(!h.is_null());
+    let query = CString::new(format!(r#"{{"event_id":{}}}"#, id.0)).unwrap();
+    let raw = unsafe { mci_brain_ffi_delete_event(h, query.as_ptr()) };
+    assert!(
+        !raw.is_null(),
+        "a stale crash marker must not impersonate a live writer: {}",
+        last_error_string()
+    );
+    unsafe { mci_brain_ffi_string_free(raw) };
+    unsafe { mci_brain_ffi_close(h) };
+
+    let key = DbKey::from_bytes(raw_key);
+    let reader = SqlCipherBrainStore::open_readonly(&path, &key).expect("reader open");
+    assert!(reader.get_event(id).expect("read event").is_none());
 }
 
 // ---------------------------------------------------------------------------

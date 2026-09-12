@@ -1,23 +1,7 @@
 // SPDX-License-Identifier: TBD-private
 //
-// BriefModelPresence — single source of truth for "is the Qwen3
-// brief-author model currently installed on disk?".
-//
-// Why this exists (CEO dogfood 2026-05-26): the prior implementation
-// used `UserDefaults.bool(forKey: "MCIBriefModelDownloaded")` to gate
-// the menu-bar Daily Briefs toggle, the onboarding skip path, and the
-// supervisor's brief-worker spawn. But UserDefaults survives across
-// installs (persisted under `~/Library/Preferences/ai.hippocampus.plist`
-// AND in `cfprefsd`'s in-memory cache), and the model directory does
-// not. After a partial reset (Time Machine restore, manual delete of
-// `~/Library/Application Support/MCI/Models/`, or a wipe that missed
-// `cfprefsd`), the bool flag kept saying "downloaded" while the
-// filesystem said "missing" — the user saw a UI that lied about state.
-//
-// Fix: ALL UI gating reads the filesystem directly. The UserDefaults
-// bool is kept as a one-way cache (still written by the manager on a
-// successful download) for legacy consumers, but never READ by the
-// gating logic.
+// Single source of truth for whether the optional Qwen3 brief author is
+// installed. Evidence-cited extractive briefs do not depend on this model.
 //
 // This file is the one approved sync filesystem check. Keep the path
 // computation in lock-step with:
@@ -52,19 +36,23 @@ public enum BriefModelPresence {
         modelID: String = qwen3ModelID,
         basename: String = qwen3Basename
     ) -> Bool {
-        let path = modelsDir
-            .appendingPathComponent(modelID)
-            .appendingPathComponent(basename)
-        return FileManager.default.fileExists(atPath: path.path)
+        let modelDirectory = modelsDir.appendingPathComponent(modelID)
+        let modelPath = modelDirectory.appendingPathComponent(basename)
+        let tokenizerPath = modelDirectory.appendingPathComponent("tokenizer.json")
+        var isModelDirectory: ObjCBool = false
+        return FileManager.default.fileExists(
+            atPath: modelPath.path,
+            isDirectory: &isModelDirectory
+        )
+            && isModelDirectory.boolValue
+            && FileManager.default.fileExists(atPath: tokenizerPath.path)
     }
 
-    /// URL of the Qwen3 model that ships INSIDE the .app bundle at
+    /// URL of an optional Qwen3 model included inside a custom .app bundle at
     /// `Contents/Resources/Models/qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc`.
     ///
-    /// Populated by `apps/hippocampus/Resources/build-app.sh` and gated by
-    /// `scripts/build-installer.sh` — a DMG that ships without the bundled
-    /// model trips a FATAL in the installer script before codesign +
-    /// notarize (see the "Completeness gate" comment blocks in both scripts).
+    /// Standard release builds omit it. `build-app.sh` validates the model and
+    /// tokenizer together when a custom build includes both source artifacts.
     ///
     /// Returns nil in test/CLI contexts where `Bundle.main` is the swift
     /// test-runner rather than Hippocampus.app.
@@ -78,22 +66,27 @@ public enum BriefModelPresence {
             .appendingPathComponent("Models")
             .appendingPathComponent(modelID)
             .appendingPathComponent(basename)
-        return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+        let tokenizer = candidate.deletingLastPathComponent()
+            .appendingPathComponent("tokenizer.json")
+        return FileManager.default.fileExists(atPath: candidate.path)
+            && FileManager.default.fileExists(atPath: tokenizer.path)
+            ? candidate
+            : nil
     }
 
     /// Outcome of `seedBundledQwen3IfNeeded()`. Reported for observability;
-    /// call sites treat all cases as non-fatal (a missing bundle model is
-    /// gated at build time, not runtime).
-    public enum SeedOutcome: Equatable {
+    /// call sites treat all cases as non-fatal because the extractive author
+    /// remains available.
+    public enum SeedOutcome: Equatable, Sendable {
         /// The Application Support copy was already present; no work done.
         case alreadyPresent
         /// The bundled model was hardlinked/copied into Application Support.
         case seeded
-        /// No bundled model exists inside the .app (e.g. a "lite edition"
-        /// DMG). Runtime falls back to `RealModelDownloader` (HuggingFace).
+        /// No optional model exists inside the .app. The default extractive
+        /// brief author remains active.
         case noBundle
-        /// FileManager error during seed; brief worker will run_disabled_idle
-        /// until the user retries via the download UI. Details in the string.
+        /// FileManager error during seed. Richer prose remains unavailable,
+        /// but evidence-cited briefs continue to work. Details in the string.
         case seedError(String)
     }
 
@@ -101,17 +94,9 @@ public enum BriefModelPresence {
     /// `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/` if that
     /// path does not yet exist.
     ///
-    /// Why this exists (cycle 8.42, EnviousWispr peer-study §5 fix): the
-    /// runtime brief worker resolves the model from `default_model_dir()` in
-    /// `apps/agent/src/brief_worker.rs`, which points at
-    /// `~/Library/Application Support/MCI/Models`. Bundling the model INTO
-    /// the .app removes the HuggingFace-throttling first-run outage class
-    /// entirely, but the Rust runtime cannot see files under
-    /// `Contents/Resources/Models/` without a bridging step. This seed runs
-    /// FIRST on `applicationDidFinishLaunching` (before the supervisor starts
-    /// `mci-agent`) and copies (or hardlinks) the bundled `.mlmodelc` into
-    /// the Application Support directory the runtime already resolves —
-    /// zero change to `apps/agent/src/` resolution logic.
+    /// Custom builds can put the optional model inside the app. The Rust worker
+    /// resolves models from Application Support, so first launch links or
+    /// copies the bundle artifact into that canonical directory.
     ///
     /// Idempotent: if the destination already exists (user completed a prior
     /// download OR a prior seed), no work is done. Users who ran an old
@@ -128,7 +113,8 @@ public enum BriefModelPresence {
     ) -> SeedOutcome {
         let destDir = modelsDir.appendingPathComponent(modelID)
         let destModel = destDir.appendingPathComponent(basename)
-        if fileManager.fileExists(atPath: destModel.path) {
+        let destTokenizer = destDir.appendingPathComponent("tokenizer.json")
+        if isQwen3Installed(modelsDir: modelsDir, modelID: modelID, basename: basename) {
             return .alreadyPresent
         }
         guard let bundledURL = bundledQwen3URL(
@@ -136,6 +122,8 @@ public enum BriefModelPresence {
         ) else {
             return .noBundle
         }
+        let bundledTokenizer = bundledURL.deletingLastPathComponent()
+            .appendingPathComponent("tokenizer.json")
         do {
             try fileManager.createDirectory(
                 at: destDir, withIntermediateDirectories: true
@@ -144,15 +132,20 @@ public enum BriefModelPresence {
             // Application Support both live on the boot volume in every
             // supported deployment. `linkItem` falls back to failing if the
             // volumes differ; on that failure we `copyItem` instead.
-            do {
-                try fileManager.linkItem(at: bundledURL, to: destModel)
-            } catch {
-                try fileManager.copyItem(at: bundledURL, to: destModel)
+            if !fileManager.fileExists(atPath: destModel.path) {
+                do {
+                    try fileManager.linkItem(at: bundledURL, to: destModel)
+                } catch {
+                    try fileManager.copyItem(at: bundledURL, to: destModel)
+                }
             }
-            // Set the legacy UserDefaults flag so pre-cycle-8.14 consumers
-            // that still read it see a consistent state. Real gating uses
-            // the filesystem via `isQwen3Installed()`.
-            UserDefaults.standard.set(true, forKey: "MCIBriefModelDownloaded")
+            if !fileManager.fileExists(atPath: destTokenizer.path) {
+                do {
+                    try fileManager.linkItem(at: bundledTokenizer, to: destTokenizer)
+                } catch {
+                    try fileManager.copyItem(at: bundledTokenizer, to: destTokenizer)
+                }
+            }
             return .seeded
         } catch {
             return .seedError(String(describing: error))

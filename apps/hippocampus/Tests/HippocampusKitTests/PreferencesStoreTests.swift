@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: TBD-private
 //
-// Tests for `PreferencesStore` — the UserDefaults-backed model behind
+// Tests for `PreferencesStore` — the persisted model behind
 // the comprehensive Preferences window (⌘,).
 //
 // The SwiftUI window itself lives in the `Hippocampus` executable
@@ -23,18 +23,22 @@ final class PreferencesStoreTests: XCTestCase {
     /// in tearDown to keep the disk cache clean between runs.
     private var suiteName: String!
     private var defaults: UserDefaults!
+    private var retentionURL: URL!
 
     override func setUp() async throws {
-        try await super.setUp()
         suiteName = "prefs-test-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
+        retentionURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("retention-prefs-\(UUID().uuidString)")
+            .appendingPathComponent("retention.json")
     }
 
     override func tearDown() async throws {
         defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
+        try? FileManager.default.removeItem(at: retentionURL.deletingLastPathComponent())
+        retentionURL = nil
         suiteName = nil
-        try await super.tearDown()
     }
 
     // MARK: - Defaults
@@ -43,25 +47,17 @@ final class PreferencesStoreTests: XCTestCase {
     /// ships with today. A first-run user who never opens Preferences
     /// sees zero behavior change — this test is the pin.
     func testDefaults_matchCurrentBehavior() {
-        let store = PreferencesStore(defaults: defaults)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
 
         XCTAssertTrue(store.showMenuBarIcon,
                       "menu-bar icon defaults ON (current behavior)")
         XCTAssertEqual(store.defaultRecallTab, .search,
                        "recall UI defaults to Search tab")
-        XCTAssertEqual(store.retentionPolicy, .forever,
-                       "retention defaults to forever (pruner idle)")
-        XCTAssertEqual(store.ollamaEndpoint, "",
-                       "Ollama endpoint defaults empty (bundled Qwen3)")
+        XCTAssertEqual(store.retentionPolicy, .ninetyDays,
+                       "fresh retention defaults to 90 days")
         XCTAssertEqual(store.customDatabasePath, "",
                        "DB path defaults empty (canonical location)")
 
-        // Shipping plugins on by default; future plugins off.
-        XCTAssertEqual(store.deepHookPlugins["Messages"], true)
-        XCTAssertEqual(store.deepHookPlugins["Mail"], true)
-        XCTAssertEqual(store.deepHookPlugins["Calendar"], false)
-        XCTAssertEqual(store.deepHookPlugins["Notes"], false)
-        XCTAssertEqual(store.deepHookPlugins["Reminders"], false)
     }
 
     // MARK: - Round-trip
@@ -72,24 +68,18 @@ final class PreferencesStoreTests: XCTestCase {
     /// property addition.
     func testRoundTrip_allPreferencesPersist() {
         do {
-            let store = PreferencesStore(defaults: defaults)
+            let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
             store.showMenuBarIcon = false
             store.defaultRecallTab = .brief
-            store.retentionPolicy = .days30
-            store.ollamaEndpoint = "http://localhost:11434"
+            XCTAssertTrue(store.setRetentionPolicy(.thirtyDays))
             store.customDatabasePath = "/tmp/custom.sqlite"
-            store.deepHookPlugins["Messages"] = false
-            store.deepHookPlugins["Calendar"] = true
         }
         // New instance, same defaults — should re-read the persisted values.
-        let reloaded = PreferencesStore(defaults: defaults)
+        let reloaded = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
         XCTAssertFalse(reloaded.showMenuBarIcon)
         XCTAssertEqual(reloaded.defaultRecallTab, .brief)
-        XCTAssertEqual(reloaded.retentionPolicy, .days30)
-        XCTAssertEqual(reloaded.ollamaEndpoint, "http://localhost:11434")
+        XCTAssertEqual(reloaded.retentionPolicy, .thirtyDays)
         XCTAssertEqual(reloaded.customDatabasePath, "/tmp/custom.sqlite")
-        XCTAssertEqual(reloaded.deepHookPlugins["Messages"], false)
-        XCTAssertEqual(reloaded.deepHookPlugins["Calendar"], true)
     }
 
     // MARK: - Defensive enum coercion
@@ -101,20 +91,9 @@ final class PreferencesStoreTests: XCTestCase {
         defaults.set("not-a-tab", forKey: PreferencesStore.Keys.defaultRecallTab)
         defaults.set("not-a-policy", forKey: PreferencesStore.Keys.retentionPolicy)
 
-        let store = PreferencesStore(defaults: defaults)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
         XCTAssertEqual(store.defaultRecallTab, .search)
-        XCTAssertEqual(store.retentionPolicy, .forever)
-    }
-
-    /// Corrupted deep-hook plugin blob must not crash — the store
-    /// falls back to the shipped `defaultDeepHookPlugins` catalog.
-    func testCorruptedDeepHookBlob_fallsBackToDefaults() {
-        defaults.set(Data([0xFF, 0x00, 0x42]),
-                     forKey: PreferencesStore.Keys.deepHookPlugins)
-
-        let store = PreferencesStore(defaults: defaults)
-        XCTAssertEqual(store.deepHookPlugins,
-                       PreferencesStore.defaultDeepHookPlugins)
+        XCTAssertEqual(store.retentionPolicy, .ninetyDays)
     }
 
     // MARK: - Enum display metadata
@@ -138,9 +117,71 @@ final class PreferencesStoreTests: XCTestCase {
     /// pruner; pin the arithmetic so a `days30 → days60` typo is
     /// caught before it hits the brain.
     func testRetentionPolicy_maxAgeSecondsMatches() {
-        XCTAssertEqual(RetentionPolicy.days30.maxAgeSeconds, 30 * 24 * 3600)
-        XCTAssertEqual(RetentionPolicy.days90.maxAgeSeconds, 90 * 24 * 3600)
+        XCTAssertEqual(RetentionPolicy.ninetyDays.maxAgeSeconds, 90 * 24 * 3600)
+        XCTAssertEqual(RetentionPolicy.thirtyDays.maxAgeSeconds, 30 * 24 * 3600)
+        XCTAssertEqual(RetentionPolicy.sevenDays.maxAgeSeconds, 7 * 24 * 3600)
         XCTAssertNil(RetentionPolicy.forever.maxAgeSeconds)
+        XCTAssertNil(RetentionPolicy.custom.maxAgeSeconds)
+    }
+
+    func testLegacyFiniteSelectionNeedsReviewWithoutChangingFile() throws {
+        try FileManager.default.createDirectory(at: retentionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = Data(#"{"mode":"sevenDays","days":null,"updated_at":"2026-09-01T00:00:00Z"}"#.utf8)
+        try original.write(to: retentionURL)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+        XCTAssertEqual(store.retentionPolicy, .sevenDays)
+        XCTAssertTrue(store.retentionNeedsReview)
+        XCTAssertEqual(try Data(contentsOf: retentionURL), original)
+        XCTAssertTrue(store.setRetentionPolicy(.ninetyDays))
+        XCTAssertFalse(store.retentionNeedsReview)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: retentionURL)) as? [String: Any])
+        XCTAssertEqual(json["schema_version"] as? Int, 2)
+        XCTAssertEqual(json["mode"] as? String, "ninetyDays")
+    }
+
+    func testLegacyForeverNeedsNoReview() throws {
+        try FileManager.default.createDirectory(at: retentionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"mode":"forever","days":null,"updated_at":"2026-09-01T00:00:00Z"}"#.utf8).write(to: retentionURL)
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+        XCTAssertEqual(store.retentionPolicy, .forever)
+        XCTAssertFalse(store.retentionNeedsReview)
+    }
+
+    func testRetentionPickerWritesWorkerCompatibleJsonAndReloadsIt() throws {
+        let fixedDate = Date(timeIntervalSince1970: 1_788_220_800)
+        let store = PreferencesStore(
+            defaults: defaults,
+            retentionURL: retentionURL,
+            now: { fixedDate }
+        )
+
+        XCTAssertTrue(store.setRetentionPolicy(.custom, customDays: 90))
+
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: retentionURL))
+        let json = try XCTUnwrap(object as? [String: Any])
+        XCTAssertEqual(json["mode"] as? String, "custom")
+        XCTAssertEqual(json["days"] as? Int, 90)
+        XCTAssertEqual(json["updated_at"] as? String, "2026-09-01T00:00:00Z")
+        XCTAssertNil(defaults.string(forKey: PreferencesStore.Keys.retentionPolicy))
+        let reloaded = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+        XCTAssertEqual(reloaded.retentionPolicy, .custom)
+        XCTAssertEqual(reloaded.retentionCustomDays, 90)
+    }
+
+    func testLegacyUserDefaultsRetentionMigratesOnceToCanonicalFile() throws {
+        defaults.set("days90", forKey: PreferencesStore.Keys.retentionPolicy)
+
+        let store = PreferencesStore(defaults: defaults, retentionURL: retentionURL)
+
+        XCTAssertEqual(store.retentionPolicy, .custom)
+        XCTAssertEqual(store.retentionCustomDays, 90)
+        XCTAssertNil(defaults.string(forKey: PreferencesStore.Keys.retentionPolicy))
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: retentionURL))
+        let json = try XCTUnwrap(object as? [String: Any])
+        XCTAssertEqual(json["mode"] as? String, "custom")
+        XCTAssertEqual(json["days"] as? Int, 90)
+        XCTAssertTrue(store.retentionNeedsReview)
+        XCTAssertNil(json["schema_version"], "Migration must not silently authorize deletion")
     }
 
     // MARK: - Namespacing
@@ -153,9 +194,7 @@ final class PreferencesStoreTests: XCTestCase {
         let allKeys = [
             PreferencesStore.Keys.showMenuBarIcon,
             PreferencesStore.Keys.defaultRecallTab,
-            PreferencesStore.Keys.deepHookPlugins,
             PreferencesStore.Keys.retentionPolicy,
-            PreferencesStore.Keys.ollamaEndpoint,
             PreferencesStore.Keys.customDatabasePath,
         ]
         for key in allKeys {
@@ -168,19 +207,4 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertEqual(Set(allKeys).count, allKeys.count)
     }
 
-    // MARK: - Plugin ordering
-
-    /// The order array must include every default plugin exactly once
-    /// so the UI never silently drops a row (e.g. when a new plugin is
-    /// added to `defaultDeepHookPlugins` but the developer forgets the
-    /// order array).
-    func testDeepHookPluginOrder_coversDefaults() {
-        let ordered = Set(PreferencesStore.deepHookPluginOrder)
-        let defaults = Set(PreferencesStore.defaultDeepHookPlugins.keys)
-        XCTAssertEqual(ordered, defaults,
-                       "deepHookPluginOrder must match defaultDeepHookPlugins keys")
-        XCTAssertEqual(PreferencesStore.deepHookPluginOrder.count,
-                       ordered.count,
-                       "no duplicates in deepHookPluginOrder")
-    }
 }

@@ -14,32 +14,42 @@ struct TrustSlide: View {
                         .multilineTextAlignment(.center)
                 }
 
-                pipelineView
-
                 VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
-                    IconTextRow(
-                        icon: "key.fill",
-                        title: "256-bit key sealed on this Mac."
-                    )
-                    Button("How is the key sealed?") {
-                        showKeyWrapAudit = true
-                    }
-                    .onboardingText(color: OnboardingDesign.Palette.accent)
-                    .padding(.leading, 34)
-                    .accessibilityIdentifier("TrustSlideInspectKeyWrap")
+                    pipelineView
 
-                    IconTextRow(
-                        icon: "shield.checkered",
-                        title: "Seven layers of protection filter what reaches your brain."
-                    )
-                    IconTextRow(
-                        icon: "network.slash",
-                        title: "Zero network — your data never leaves this Mac."
-                    )
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
+                        IconTextRow(
+                            icon: "key.fill",
+                            title: "256-bit key custody uses macOS Keychain."
+                        )
+                        Button("Inspect key custody") {
+                            showKeyWrapAudit = true
+                        }
+                        .onboardingText(color: OnboardingDesign.Palette.accent)
+                        .padding(.leading, 34)
+                        .accessibilityIdentifier("TrustSlideInspectKeyWrap")
+
+                        IconTextRow(
+                            icon: "shield.checkered",
+                            title: "Seven protection checks filter what reaches memory."
+                        )
+                        IconTextRow(
+                            icon: "network.slash",
+                            title: "No Hippocampus cloud copy. Captured memory stays on this Mac."
+                        )
+                        IconTextRow(
+                            icon: "arrow.up.right.square",
+                            title: OnboardingCopy.trustAIHandoff
+                        )
+                    }
+
+                    Divider()
+
+                    cascadePreview
                 }
                 .glassCard(padding: OnboardingDesign.Space.lg)
-
-                cascadePreview
             }
         }
         .sheet(isPresented: $showKeyWrapAudit) {
@@ -64,7 +74,7 @@ struct TrustSlide: View {
     }
 
     private func currentReport() -> KeyWrapAuditReport {
-        KeyWrapAuditor.inspectFile(at: DefaultKeyWrapLocation.devKeyURL())
+        KeyWrapAuditor.keychainReferenceReport()
     }
 
     private var pipelineView: some View {
@@ -75,7 +85,6 @@ struct TrustSlide: View {
             pipelineArrow
             pipelineStep(icon: "magnifyingglass", label: "Local\nSearch")
         }
-        .glassCard(padding: OnboardingDesign.Space.lg)
     }
 
     private func pipelineStep(icon: String, label: String) -> some View {
@@ -116,6 +125,5 @@ struct TrustSlide: View {
                 }
             }
         }
-        .glassCard(padding: OnboardingDesign.Space.md)
     }
 }

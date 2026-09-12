@@ -62,6 +62,10 @@ public protocol CalendarEventSource: Sendable {
     func eventNow(at now: Date) -> CalendarEventRef?
 }
 
+protocol CalendarAttributionStore: CalendarEventSource {
+    func requestAccess(completion: @escaping @Sendable (Bool) -> Void)
+}
+
 /// Authorization state of `EKEventStore` for the helper process.
 /// Exposed for observability; the only behaviour difference between
 /// denied / restricted / notDetermined is whether the
@@ -109,31 +113,38 @@ public final class CalendarAttribution: CalendarEventSource, @unchecked Sendable
     /// Set once per state-transition so we do not flood stderr.
     private var loggedDenialOnce: Bool = false
 
-    #if canImport(EventKit)
-    private let store: EKEventStore
-    #endif
+    private let storeLock = NSLock()
+    private let storeFactory: @Sendable () -> any CalendarAttributionStore
+    private var store: (any CalendarAttributionStore)?
 
     /// Initial state — `notDetermined`, no cached event.
-    public init(cacheTtl: TimeInterval = 30.0) {
+    public convenience init(cacheTtl: TimeInterval = 30.0) {
+        self.init(cacheTtl: cacheTtl, storeFactory: { SystemCalendarAttributionStore() })
+    }
+
+    init(cacheTtl: TimeInterval = 30.0, storeFactory: @escaping @Sendable () -> any CalendarAttributionStore) {
         self.cacheTtl = cacheTtl
+        self.storeFactory = storeFactory
         self.authState = .notDetermined
         self.cachedEvent = nil
         self.cachedAt = nil
-        #if canImport(EventKit)
-        self.store = EKEventStore()
-        #endif
     }
 
-    /// Kick off the TCC prompt + permission settle. Idempotent —
-    /// second call is a no-op. Until access resolves, `eventNow`
-    /// returns `nil`.
+    /// Explicitly request access, reusing the lazily-created store. Until
+    /// access resolves, `eventNow` returns `nil`.
     public func start() {
-        #if canImport(EventKit)
-        store.requestFullAccessToEvents { [weak self] granted, _ in
+        // OS store construction can initialize services even without requesting
+        // permission. Keep it off construction and unauthorized read paths.
+        let store = storeLock.withLock {
+            if let existing = self.store { return existing }
+            let created = storeFactory()
+            self.store = created
+            return created
+        }
+        store.requestAccess { [weak self] granted in
             guard let self else { return }
             self.recordAuth(granted: granted)
         }
-        #endif
     }
 
     /// Record the outcome of the auth callback. Idempotent; the
@@ -185,7 +196,8 @@ public final class CalendarAttribution: CalendarEventSource, @unchecked Sendable
         // Cache-miss: re-read from EventKit over the [now, now]
         // window. The predicate's start/end MUST be tight — we
         // explicitly do NOT read past events here.
-        let observed = readEventAt(now: now)
+        let backing = storeLock.withLock { store }
+        let observed = backing?.eventNow(at: now)
 
         stateLock.lock()
         cachedEvent = observed
@@ -194,12 +206,24 @@ public final class CalendarAttribution: CalendarEventSource, @unchecked Sendable
 
         return observed
     }
+}
+
+private final class SystemCalendarAttributionStore: CalendarAttributionStore, @unchecked Sendable {
+    #if canImport(EventKit)
+    private let store = EKEventStore()
+    #endif
+
+    func requestAccess(completion: @escaping @Sendable (Bool) -> Void) {
+        #if canImport(EventKit)
+        store.requestFullAccessToEvents { granted, _ in completion(granted) }
+        #endif
+    }
 
     /// Read EventKit for the calendar event whose window covers
     /// `now`. Returns the first match (deterministic ordering across
     /// overlapping events is out of scope for this PR — Phase 7
     /// deep-hook owns multi-event semantics).
-    private func readEventAt(now: Date) -> CalendarEventRef? {
+    func eventNow(at now: Date) -> CalendarEventRef? {
         #if canImport(EventKit)
         // Tight window: exact `[now, now]`. EventKit
         // `predicateForEvents(withStart:end:calendars:)` is

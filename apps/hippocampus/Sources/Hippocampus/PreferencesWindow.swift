@@ -11,8 +11,8 @@
 // Layout:
 //   - NSPanel host (borderless-titled, non-modal, floating) with
 //     `contentView` set to an `NSHostingView` wrapping the SwiftUI root.
-//   - NSToolbar with five selectable items (General / Capture / Privacy
-//     / Advanced / About). Toolbar switching is the same pattern
+//   - NSToolbar with six selectable items (General / Capture / Sources
+//     / Privacy / Advanced / About). Toolbar switching is the same pattern
 //     Xcode and Slack use; feels native.
 //   - Each section is a compact SwiftUI `Form` bound directly to the
 //     `PreferencesStore` (`@ObservedObject`, so toggling writes
@@ -31,10 +31,8 @@
 // PreferencesStyle below; a future refactor can bridge the two if
 // design-token drift becomes a problem.
 //
-// About every preference we render, defaults MUST match current
-// behavior — a first-run user who never opens Preferences sees zero
-// behavior change. Every write goes through the store's `@Published`
-// setters which persist to UserDefaults synchronously.
+// Retention writes atomically to the agent's canonical
+// `retention.json`; cosmetic settings remain in UserDefaults.
 
 import SwiftUI
 import HippocampusKit
@@ -61,24 +59,15 @@ enum PreferencesStyle {
     static let panelHeight: CGFloat = 460
 }
 
-// MARK: - Section enum
+// MARK: - Section presentation
 
-/// The five top-level tabs. The rawValue is the NSToolbar item
-/// identifier — matched in the AppKit shim below.
-enum PreferencesSection: String, CaseIterable, Identifiable {
-    case general = "General"
-    case capture = "Capture"
-    case privacy = "Privacy"
-    case advanced = "Advanced"
-    case about = "About"
-
-    var id: String { rawValue }
-
+extension PreferencesSection {
     /// SF-Symbol icon rendered in the toolbar item.
     var symbol: String {
         switch self {
         case .general: return "gearshape"
         case .capture: return "camera.viewfinder"
+        case .sources: return "point.3.connected.trianglepath.dotted"
         case .privacy: return "hand.raised"
         case .advanced: return "slider.horizontal.3"
         case .about: return "info.circle"
@@ -92,6 +81,8 @@ struct PreferencesRootView: View {
     @ObservedObject var store: PreferencesStore
     @Binding var section: PreferencesSection
     @ObservedObject var loginItemVM: LoginItemViewModel
+    @ObservedObject var captureController: CapturePreferenceController
+    @ObservedObject var supervisor: ProcessSupervisor
     let updater: SparkleUpdaterService
     let dbPath: String
     let onOpenRecallTab: (String) -> Void
@@ -108,6 +99,8 @@ struct PreferencesRootView: View {
             }
         }
         .frame(width: PreferencesStyle.panelWidth, height: PreferencesStyle.panelHeight)
+        .preferredColorScheme(.light)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder
@@ -115,6 +108,7 @@ struct PreferencesRootView: View {
         switch section {
         case .general: generalSection
         case .capture: captureSection
+        case .sources: SessionContextPreferencesView(supervisor: supervisor)
         case .privacy: privacySection
         case .advanced: advancedSection
         case .about: aboutSection
@@ -155,48 +149,52 @@ struct PreferencesRootView: View {
         VStack(alignment: .leading, spacing: PreferencesStyle.sectionSpacing) {
             sectionHeader("Capture")
 
+            CaptureHealthView(supervisor: supervisor, onReviewCapture: onOpenAllowlistEditor)
+
             HStack {
-                Text("V2-P1 recording engine")
-                Spacer()
-                Text(v2p1Status)
-                    .font(PreferencesStyle.captionFont)
-                    .foregroundStyle(.secondary)
+                Button { supervisor.refreshCaptureStatus() } label: {
+                    Label("Refresh Status", systemImage: "arrow.clockwise")
+                }
+                Button {
+                    NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser
+                        .appendingPathComponent("Library/Logs/MCI"))
+                } label: {
+                    Label("Open Capture Logs", systemImage: "doc.text.magnifyingglass")
+                }
             }
-            Text("Controlled by the HIPPOCAMPUS_ENABLE_V2P1 environment variable (PR #101).")
-                .font(PreferencesStyle.captionFont)
-                .foregroundStyle(.secondary)
 
             Divider()
 
-            Toggle("Screen recording enabled", isOn: Binding(
-                get: { !UserPauseController.shared.isPaused },
-                set: { on in UserPauseController.shared.setPaused(!on) }
+            Toggle("Capture screen activity", isOn: Binding(
+                get: { supervisor.captureEnabled },
+                set: { on in
+                    Task { @MainActor in
+                        await captureController.setCaptureEnabled(on)
+                    }
+                }
             ))
-            Text("Same as menu-bar Pause. When off, the helper is suspended (SIGSTOP).")
+            .disabled(captureController.isApplying)
+            LabeledContent("Capture area", value: "Focused window")
+                .help("Only the active, permitted window is eligible. Background windows and unopened tabs are not captured.")
+            Text(supervisor.captureEnabled
+                 ? "Screen capture is enabled."
+                 : "Screen capture is off.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
+            if let errorMessage = captureController.errorMessage {
+                Text(errorMessage)
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.red)
+            }
 
             Divider()
 
-            Text("Deep-hook plugins")
-                .font(.system(size: 13, weight: .semibold))
-            ForEach(PreferencesStore.deepHookPluginOrder, id: \.self) { name in
-                Toggle(name, isOn: pluginBinding(name))
+            Button {
+                onOpenAllowlistEditor()
+            } label: {
+                Label("Manage app access", systemImage: "checklist.checked")
             }
         }
-    }
-
-    private func pluginBinding(_ name: String) -> Binding<Bool> {
-        Binding(
-            get: { store.deepHookPlugins[name] ?? false },
-            set: { store.deepHookPlugins[name] = $0 }
-        )
-    }
-
-    private var v2p1Status: String {
-        (ProcessInfo.processInfo.environment["HIPPOCAMPUS_ENABLE_V2P1"] == "1")
-            ? "Enabled"
-            : "Disabled (default)"
     }
 
     // MARK: Privacy
@@ -210,15 +208,50 @@ struct PreferencesRootView: View {
 
             Divider()
 
-            Picker("Retention policy", selection: $store.retentionPolicy) {
+            Picker("Retention policy", selection: Binding(
+                get: { store.retentionPolicy },
+                set: { policy in
+                    _ = store.setRetentionPolicy(
+                        policy,
+                        customDays: policy == .custom
+                            ? (store.retentionCustomDays ?? 90)
+                            : nil
+                    )
+                }
+            )) {
                 ForEach(RetentionPolicy.allCases, id: \.self) { policy in
                     Text(policy.displayLabel).tag(policy)
                 }
             }
             .pickerStyle(.menu)
-            Text("Older events are pruned automatically. Default: forever (no pruning).")
+            if store.retentionPolicy == .custom {
+                Stepper(
+                    "Keep events for \(store.retentionCustomDays ?? 90) days",
+                    value: Binding(
+                        get: { store.retentionCustomDays ?? 90 },
+                        set: { days in
+                            _ = store.setRetentionPolicy(.custom, customDays: days)
+                        }
+                    ),
+                    in: 1...365
+                )
+            }
+            Text("Default: 90 days. Older memories are deleted automatically after the selected period.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
+            if store.retentionNeedsReview {
+                Label("Needs review: your earlier retention choice has not been confirmed. Automatic deletion is on hold; capture continues.", systemImage: "exclamationmark.triangle")
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.orange)
+                Button("Confirm Retention Choice") {
+                    _ = store.setRetentionPolicy(store.retentionPolicy, customDays: store.retentionCustomDays)
+                }
+            }
+            if let retentionWriteError = store.retentionWriteError {
+                Text(retentionWriteError)
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.red)
+            }
 
             Divider()
 
@@ -243,15 +276,6 @@ struct PreferencesRootView: View {
             ))
 
             Divider()
-
-            VStack(alignment: .leading, spacing: PreferencesStyle.controlSpacing) {
-                Text("Ollama endpoint (optional)")
-                TextField("http://localhost:11434", text: $store.ollamaEndpoint)
-                    .textFieldStyle(.roundedBorder)
-                Text("BYOK local-LLM endpoint for brief authoring. Empty = use bundled Qwen3.")
-                    .font(PreferencesStyle.captionFont)
-                    .foregroundStyle(.secondary)
-            }
 
             VStack(alignment: .leading, spacing: PreferencesStyle.controlSpacing) {
                 Text("Custom database path (optional)")
@@ -303,6 +327,15 @@ struct PreferencesRootView: View {
 
             Divider()
 
+            if let noticeURL = Bundle.main.url(forResource: "NOTICE", withExtension: "txt") {
+                Button("Third-party licenses") {
+                    #if canImport(AppKit)
+                    NSWorkspace.shared.open(noticeURL)
+                    #endif
+                }
+                .buttonStyle(.link)
+            }
+
             ForEach(Self.aboutLinks, id: \.label) { link in
                 Button(link.label) {
                     if let u = URL(string: link.url) {
@@ -322,7 +355,6 @@ struct PreferencesRootView: View {
     private static let aboutLinks: [(label: String, url: String)] = [
         ("Privacy policy", "https://hippocampus-swart.vercel.app/privacy"),
         ("Terms of service", "https://hippocampus-swart.vercel.app/terms"),
-        ("Third-party licenses", "https://hippocampus-swart.vercel.app/licenses"),
         ("Report an issue on GitHub", "https://github.com/amyjainberkeley/hippocampus/issues"),
         ("Send feedback (email)",
          "mailto:hippocampus@amyjainberkeley.com?subject=Hippocampus%20feedback"),
@@ -359,6 +391,8 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     private var store: PreferencesStore?
     private var loginItemVM: LoginItemViewModel?
     private var updater: SparkleUpdaterService?
+    private var captureController: CapturePreferenceController?
+    private var supervisor: ProcessSupervisor?
     private var dbPath: String = "~/Library/Application Support/Hippocampus/mci.sqlite"
     private var onOpenRecallTab: (String) -> Void = { _ in }
     private var onOpenDenylistEditor: () -> Void = {}
@@ -372,6 +406,8 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         store: PreferencesStore,
         loginItemVM: LoginItemViewModel,
         updater: SparkleUpdaterService,
+        captureApplier: any CaptureSettingApplying,
+        supervisor: ProcessSupervisor,
         dbPath: String,
         onOpenRecallTab: @escaping (String) -> Void,
         onOpenDenylistEditor: @escaping () -> Void,
@@ -381,6 +417,8 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         self.store = store
         self.loginItemVM = loginItemVM
         self.updater = updater
+        self.captureController = CapturePreferenceController(applier: captureApplier)
+        self.supervisor = supervisor
         self.dbPath = dbPath
         self.onOpenRecallTab = onOpenRecallTab
         self.onOpenDenylistEditor = onOpenDenylistEditor
@@ -389,8 +427,9 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     }
 
     /// Open (or focus) the preferences window.
-    func show() {
-        guard let store, let loginItemVM, let updater else {
+    func show(section requestedSection: PreferencesSection? = nil) {
+        if let requestedSection { setSection(requestedSection) }
+        guard let store, let loginItemVM, let updater, let captureController else {
             // Not configured yet — silently no-op. The app's first ⌘,
             // arrives after `configure` from AppDelegate, so this only
             // fires in test / uninitialized contexts.
@@ -418,6 +457,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
+        panel.appearance = NSAppearance(named: .aqua)
         panel.center()
 
         let toolbar = NSToolbar(identifier: "ai.hippocampus.preferences.toolbar")
@@ -433,6 +473,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         rebuildContent(
             store: store,
             loginItemVM: loginItemVM,
+            captureController: captureController,
             updater: updater,
             panel: panel
         )
@@ -445,10 +486,12 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     /// Programmatically switch section — used by the toolbar action.
     private func setSection(_ new: PreferencesSection) {
         section = new
-        guard let store, let loginItemVM, let updater, let panel else { return }
+        panel?.toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(new.rawValue)
+        guard let store, let loginItemVM, let updater, let captureController, let panel else { return }
         rebuildContent(
             store: store,
             loginItemVM: loginItemVM,
+            captureController: captureController,
             updater: updater,
             panel: panel
         )
@@ -457,9 +500,11 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     private func rebuildContent(
         store: PreferencesStore,
         loginItemVM: LoginItemViewModel,
+        captureController: CapturePreferenceController,
         updater: SparkleUpdaterService,
         panel: NSPanel
     ) {
+        guard let supervisor else { return }
         let sectionBinding = Binding<PreferencesSection>(
             get: { [weak self] in self?.section ?? .general },
             set: { [weak self] new in self?.setSection(new) }
@@ -468,6 +513,8 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
             store: store,
             section: sectionBinding,
             loginItemVM: loginItemVM,
+            captureController: captureController,
+            supervisor: supervisor,
             updater: updater,
             dbPath: dbPath,
             onOpenRecallTab: onOpenRecallTab,

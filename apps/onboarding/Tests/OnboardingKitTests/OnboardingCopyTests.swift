@@ -84,4 +84,12 @@ final class OnboardingCopyTests: XCTestCase {
             "DoneSlide must point the user at the menu-bar entrypoint."
         )
     }
+
+    func testAIHandoffCopyNamesUserRequestAndProviderBoundary() {
+        for copy in [OnboardingCopy.welcomeAIHandoff, OnboardingCopy.trustAIHandoff] {
+            XCTAssertTrue(copy.lowercased().contains("request"))
+            XCTAssertTrue(copy.lowercased().contains("provider"))
+            XCTAssertFalse(copy.lowercased().contains("never leaves your mac"))
+        }
+    }
 }

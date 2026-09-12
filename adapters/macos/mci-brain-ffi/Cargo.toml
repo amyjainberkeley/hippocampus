@@ -5,14 +5,14 @@ edition.workspace      = true
 rust-version.workspace = true
 publish.workspace      = true
 license.workspace      = true
-description            = "MCI macOS adapter: C-ABI FFI shim that exposes a READ-ONLY view of the Phase-3 brain (events / search / privacy moments) to the Swift recall-ui app. Read-only by construction — see crate-level docs + ADR-0016 §4. P3.9a skeleton: signatures + stub bodies; P3.9b wires the real HybridRetriever + readonly SqlCipher open."
+description            = "MCI macOS adapter: C-ABI FFI shim exposing read-only timeline and lexical or Core ML-backed hybrid recall, plus explicitly gated privacy deletion, to the Swift Recall app."
 
 [lints]
 workspace = true
 
 [lib]
-# staticlib so the Swift recall-ui app can link us via a binaryTarget /
-# system-library product (P3.9b wires the Swift Package linker line).
+# staticlib so the Swift recall-ui app can link us via a system-library
+# product.
 # rlib is also produced so workspace cargo tests still link this crate.
 crate-type = ["staticlib", "rlib"]
 
@@ -29,6 +29,12 @@ serde_json = "1"
 # Cycle 8.47 — `getrandom` for the wipe-confirmation token (32 random
 # bytes hex-encoded). Already on the workspace lockfile via mci-core.
 getrandom  = "0.3.4"
+# Uses the same safe `flock(LOCK_EX | LOCK_NB)` writer lease as mci-agent.
+# The process feature supplies the current uid for private-file validation.
+rustix = { version = "1.1.4", default-features = false, features = ["fs", "process", "std"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mci-embed-coreml = { path = "../mci-embed-coreml" }
 
 [dev-dependencies]
 # Stub feature on mci-brain gives us NoopChunker / FixedDimEmbedder /

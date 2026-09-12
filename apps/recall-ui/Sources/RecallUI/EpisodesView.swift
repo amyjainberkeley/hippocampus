@@ -11,15 +11,16 @@ import SwiftUI
 /// duration, and the event count for that segment.
 struct EpisodesView: View {
     @StateObject var viewModel: EpisodesViewModel
+    var reader: BrainReader? = nil
 
     var body: some View {
         Group {
             if let err = viewModel.errorMessage {
-                errorView(err)
+                EvidenceStateViewport { errorView(err) }
             } else if viewModel.isLoading && viewModel.episodes.isEmpty {
-                ShimmerLoadingView(isLoading: true)
+                EvidenceStateViewport { ShimmerLoadingView(isLoading: true) }
             } else if viewModel.episodes.isEmpty {
-                emptyView
+                EvidenceStateViewport { emptyView }
             } else {
                 contentView
             }
@@ -27,6 +28,10 @@ struct EpisodesView: View {
         .background(Color.brandBgPrimary)
         .task {
             await viewModel.reload()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
+            _ in
+            Task { await viewModel.reload() }
         }
     }
 
@@ -57,10 +62,24 @@ struct EpisodesView: View {
     }
 
     private var contentView: some View {
+        AdaptiveEvidencePanes(
+            showsDetail: viewModel.selectedEpisode != nil && reader != nil,
+            backLabel: "Back to sessions",
+            onDismissDetail: { viewModel.selectedEpisodeId = nil }
+        ) {
+            episodeList
+        } detail: {
+            if let episode = viewModel.selectedEpisode, let reader {
+                EpisodeEvidencePanel(episode: episode, reader: reader)
+                    .id(episode.id)
+            }
+        }
+    }
+
+    private var episodeList: some View {
         List(viewModel.episodes, selection: $viewModel.selectedEpisodeId) { episode in
             EpisodeCard(episode: episode)
                 .tag(episode.id)
-                .listRowSeparator(.hidden)
                 .listRowBackground(
                     viewModel.selectedEpisodeId == episode.id
                         ? Color.brandMintSubtle : Color.clear
@@ -75,6 +94,7 @@ struct EpisodesView: View {
 
 private struct EpisodeCard: View {
     let episode: Episode
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -84,6 +104,8 @@ private struct EpisodeCard: View {
                 Text(displayApp)
                     .font(.system(.body, design: .default).weight(.semibold))
                     .foregroundStyle(Color.brandFgPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer(minLength: 8)
                 Text("\(episode.eventCount) event\(episode.eventCount == 1 ? "" : "s")")
                     .font(.system(.caption2, design: .monospaced))
@@ -101,21 +123,18 @@ private struct EpisodeCard: View {
                     .foregroundStyle(Color.brandMint)
                     .help(Formatters.tsString(usSinceEpoch: episode.tsStartUs))
                 Text("·").foregroundStyle(Color.brandFgMuted)
-                Text(durationLabel)
+                Text("\(durationLabel) event span")
                     .font(.system(.caption, design: .default))
                     .foregroundStyle(Color.brandFgSecondary)
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.brandCardBg)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.brandCardBorder, lineWidth: 0.5)
-        )
-        .padding(.vertical, 4)
+        .padding(.vertical, MCI.Spacing.s)
+        .padding(.horizontal, MCI.Spacing.xs)
+        .background(isHovered ? Color.brandBgElevated.opacity(0.7) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.s, style: .continuous))
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .animation(MCI.Motion.snap, value: isHovered)
     }
 
     private var displayApp: String {
@@ -141,5 +160,80 @@ private struct EpisodeCard: View {
         let h = Int(seconds / 3600)
         let m = Int((seconds.truncatingRemainder(dividingBy: 3600)) / 60)
         return m == 0 ? "\(h)h" : "\(h)h \(m)m"
+    }
+}
+
+private struct EpisodeEvidencePanel: View {
+    let episode: Episode
+    let reader: BrainReader
+    @State private var screenshots: [TimelineEvent] = []
+    @State private var isLoading = true
+    @State private var failed = false
+    @State private var selection: ScreenshotSelection?
+    @State private var loadGeneration = UUID()
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(Formatters.appDisplayName(episode.appBundleId)).font(.headline)
+                Text(Formatters.tsString(usSinceEpoch: episode.tsStartUs)).font(.caption)
+                Text("Episode spans include unmeasured idle time and may include non-screen records.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if isLoading {
+                    ProgressView("Reading episode")
+                } else if failed {
+                    Text("Episode evidence is unavailable. Try refreshing memory.")
+                        .foregroundStyle(Color.brandError)
+                } else if screenshots.isEmpty {
+                    ContentUnavailableView("No saved evidence", systemImage: "doc.text",
+                                           description: Text("This session has no available samples."))
+                } else {
+                    ForEach(screenshots) { event in
+                        Button {
+                            selection = ScreenshotSelection(eventIDs: screenshots.map(\.id), initialID: event.id, expectedEvents: screenshots)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                if event.hasScreenshot {
+                                    GeometryReader { geometry in
+                                        EvidenceThumbnail(url: event.thumbnailURL, size: geometry.size, maxPixelSize: 640)
+                                    }
+                                    .aspectRatio(16 / 10, contentMode: .fit)
+                                }
+                                Text(verbatim: Formatters.stripContextHeader(event.snippet))
+                                    .font(.callout).lineLimit(4)
+                                Text(Date(timeIntervalSince1970: Double(event.tsUs) / 1_000_000), format: .dateTime.hour().minute().second())
+                                Text(MemorySourceKind.label(event.sourceKind)).foregroundStyle(.secondary)
+                            }
+                            .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open saved session evidence")
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .task(id: episode) { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) { _ in
+            Task { await load() }
+        }
+        .sheet(item: $selection) { selection in ScreenshotViewer(selection: selection, reader: reader) }
+    }
+
+    private func load() async {
+        let request = UUID()
+        loadGeneration = request
+        isLoading = screenshots.isEmpty
+        failed = false
+        do {
+            let events = try await reader.timelineEvents(startTsUs: episode.tsStartUs, endTsUs: episode.tsEndUs, resolution: .minute)
+            guard !Task.isCancelled, request == loadGeneration else { return }
+            screenshots = episode.evidence(from: events)
+        } catch {
+            guard !Task.isCancelled, request == loadGeneration else { return }
+            screenshots = []
+            failed = true
+        }
+        isLoading = false
     }
 }

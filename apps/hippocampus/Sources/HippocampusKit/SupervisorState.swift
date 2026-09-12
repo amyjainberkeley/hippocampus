@@ -20,7 +20,7 @@ public enum SupervisorState: Sendable, Equatable {
         switch self {
         case .idle: return "○ Off"
         case .starting: return "○ Starting…"
-        case .running: return "● Recording"
+        case .running: return "Process running"
         case .paused: return "❚❚ Paused"
         case .crashed(let reason): return "⚠ Error: \(reason)"
         case .stopped: return "○ Off"
@@ -29,7 +29,7 @@ public enum SupervisorState: Sendable, Equatable {
 
     public var iconColor: String {
         switch self {
-        case .running: return "green"
+        case .running: return "secondary"
         case .paused: return "yellow"
         case .crashed: return "red"
         default: return "secondary"

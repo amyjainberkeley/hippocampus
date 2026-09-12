@@ -115,6 +115,18 @@ public enum MessageType: UInt16, Sendable {
     case ocrEvent = 0x0040
     /// Phase 7 — browser extension full page content event.
     case pageContentEvent = 0x0050
+    /// Additive v9 message; paired helper/agent release required.
+    case activityInterval = 0x0060
+}
+
+public func encodeActivityInterval(seq: UInt64, interval: MeasuredActivityInterval) -> Data {
+    var payload = Data()
+    payload.appendUInt64LE(interval.startUs)
+    payload.appendUInt64LE(interval.endUs)
+    payload.append(interval.state.rawValue)
+    payload.appendString(interval.state == .unknown ? "" : (interval.appBundleId ?? ""))
+    payload.appendString(interval.captureGeneration)
+    return assembleFrame(msgType: .activityInterval, seq: seq, payload: payload)
 }
 
 /// A privacy tombstone — the only message the helper emits in this cycle.

@@ -250,8 +250,8 @@ final class BuildWorkflowContextFocusedAttributionTests: XCTestCase {
         )
         // ADR-0031 V2-P1: focused-window bundle id wins.
         XCTAssertEqual(ctx.appBundleId, "com.apple.Terminal")
-        // Title comes from the snapshot path (unchanged).
-        XCTAssertEqual(ctx.windowTitle, "old title")
+        // Metadata from a different app observation is not generation-safe.
+        XCTAssertNil(ctx.windowTitle)
     }
 
     func test_no_focused_snapshot_falls_back_to_snapshot_bundle_id() async {

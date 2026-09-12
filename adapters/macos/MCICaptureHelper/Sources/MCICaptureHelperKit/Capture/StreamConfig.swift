@@ -36,9 +36,10 @@ public struct StreamPolicy: Sendable, Equatable {
     public let queueDepth: Int
 
     /// Target minimum interval between frame deliveries, in
-    /// milliseconds. 200 ms (5 fps) is the static-content default;
-    /// adaptive sampling (Phase-1 cycle 2+) drops this when the OS bit
-    /// + dirty-rect signal say content is changing.
+    /// milliseconds. 500 ms (2 fps) is the active-work ceiling from the
+    /// product footprint design. The filter chain still drops static and
+    /// near-duplicate frames before OCR; a future adaptive controller can
+    /// raise this interval further or pause the stream while idle.
     public let minimumFrameIntervalMs: Int
 
     /// Minimum interval between cascade evaluations, in milliseconds.
@@ -86,7 +87,7 @@ public struct StreamPolicy: Sendable, Equatable {
     public static let `default` = StreamPolicy(
         showsCursor: false,
         queueDepth: 3,
-        minimumFrameIntervalMs: 200,
+        minimumFrameIntervalMs: 500,
         cascadeFloorIntervalMs: 1000
     )
 

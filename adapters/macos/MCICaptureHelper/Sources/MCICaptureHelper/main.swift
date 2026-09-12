@@ -10,6 +10,7 @@
 // frames to stdout or a CLI-supplied output file.
 
 import Foundation
+import Darwin
 import MCICaptureHelperKit
 
 // ---------------------------------------------------------------------------
@@ -37,13 +38,27 @@ struct Args {
 
     /// `--probe-debug` — dev-only. STEP-2-FINDING-001 instrumentation.
     /// When set, every call to `AXSubroleProbe.focusedHasSecureSubrole()`
-    /// writes ONE stderr line: focused element's role + subrole +
-    /// identifier + title + the `Bool?` returned. Default OFF; the
+    /// writes ONE content-free stderr line containing attribute-presence bits,
+    /// backstop outcomes, and the `Bool?` returned. Default OFF; the
     /// steady-state (no-flag) cost of the flag is zero — the probe
     /// only reads role / identifier / title when a sink is wired.
     /// No wire-schema change. Pairs with `--capture` (which is what
     /// actually drives the cascade per-frame).
     var probeDebug: Bool
+
+    /// Monitor stdin as an inherited parent-lifetime lease. Used only by the
+    /// packaged supervisor; EOF means the owning UI no longer exists.
+    var parentLeaseStdin: Bool
+}
+
+struct CaptureRuntime {
+    let session: SCStreamCaptureSession
+    let contextSnapshot: WorkflowContextSnapshot
+    let urlProvider: any URLProvider
+    let contextProvider: NSWorkspaceContextProvider
+    let calendarAttribution: CalendarAttribution
+    let nowPlayingAttribution: NowPlayingAttribution
+    let contactsAttribution: ContactsAttribution
 }
 
 func defaultDenylistPath() -> String {
@@ -59,7 +74,8 @@ func parseArgs(_ argv: [String]) -> Args {
         denylistPath: defaultDenylistPath(),
         heartbeatSeconds: 30,
         oneShot: false,
-        probeDebug: false
+        probeDebug: false,
+        parentLeaseStdin: false
     )
     var i = 1
     while i < argv.count {
@@ -82,6 +98,8 @@ func parseArgs(_ argv: [String]) -> Args {
             // Dev-only STEP-2-FINDING-001 instrumentation. Logs every
             // AXSubroleProbe call to stderr. No wire-schema change.
             args.probeDebug = true
+        case "--parent-lease-stdin":
+            args.parentLeaseStdin = true
         case "--version":
             print("mci-capture-helper \(helperVersion)")
             exit(0)
@@ -106,18 +124,27 @@ func printUsage() {
 
     Usage: mci-capture-helper [OPTIONS]
 
-      --output <path>           Write IPC frames here. Default: stdout.
+      --output <path>           Write IPC to a pipe, or a regular file with --once.
+                                Default: stdout (regular redirection also needs --once).
       --denylist <path>         Read denylist TOML here. Default:
                                 ~/Library/Application Support/MCI/denylist.toml
       --heartbeat-seconds <n>   Emit HelperHealth every n seconds. Default 30.
+      --parent-lease-stdin      Exit and drain capture when stdin reaches EOF.
+      --readiness-file <path>   Write a generation-bound startup receipt.
+      --generation <token>      Expected supervisor process generation.
       --once                    Emit one frame and exit (CI smoke).
       --probe-debug             DEV-ONLY. Log every AXSubroleProbe call to
-                                stderr (role/subrole/identifier/title/Bool?).
+                                stderr (presence/outcome/Bool? only; never raw
+                                AX values).
                                 For STEP-2-FINDING-001 diagnosis only. No
                                 wire-schema change. Steady-state cost when
                                 OFF is zero. Pair with --capture.
       --version                 Print version and exit.
       -h, --help                Print this and exit.
+
+    Regular files are health fixtures only: --once with capture disabled.
+    Filesystem writes have no latency guarantee. The 1-second delivery deadline
+    applies only to bounded pipe/AF_UNIX IPC, including one-shot pipe output.
     """)
 }
 
@@ -129,42 +156,34 @@ let helperVersion = "0.0.2-phase1-cycle2-iter5"
 
 let args = parseArgs(CommandLine.arguments)
 
-// ADR-0013 Amendment 1 §4 — live capture is DEFAULT-OFF / dev-only.
+// ADR-0013 Amendment 1 §4 — live capture is DEFAULT-OFF.
 // `captureEnabled` is true ONLY if the non-default `--capture` flag was
 // explicitly passed. The default path never constructs an `SCStream`.
-let parsedCaptureOptions = CaptureLaunchOptions.parse(CommandLine.arguments)
-
-// ADR-0031 §Status M4 LIFT (env-var-gated interim, Phase 7 PR 14).
-// Read `HIPPOCAMPUS_ENABLE_V2P1` at boot; when set to exactly "1" the
-// gate overrides BOTH capture flags:
-//   • `captureOptions.captureEnabled` : false → true
-//   • `CascadeTwiceOCREmitter.killOcrEmit` : true → false
-// When the env var is unset or set to anything else, both flags stay at
-// their pre-M4-lift defaults — users on the shipped DMG see NO change.
-// The full lift (removing the gate) is a follow-up PR after Amy's live-
-// Mac §7-equivalent smoke test passes (redesign memo §3.2 H6′–H10′).
-//
-// One-way, read-once, cached at first access. See
-// `MCICaptureHelperKit/Capture/MciV2P1Gate.swift` header for the full
-// CSO sign-off block.
-let v2p1GateState = MciV2P1Gate.current
-FileHandle.standardError.write(
-    MciV2P1Gate.stderrBreadcrumb(v2p1GateState).data(using: .utf8) ?? Data()
+let captureOptions = CaptureLaunchOptions.parse(CommandLine.arguments)
+#if DEBUG
+let qualificationRequested = LiveOCRQualification.isRequested(CommandLine.arguments)
+let qualificationAuthorized = LiveOCRQualification.isAuthorized(
+    arguments: CommandLine.arguments,
+    environment: ProcessInfo.processInfo.environment
 )
-let captureOptions: CaptureLaunchOptions
-switch v2p1GateState {
-case .enabled:
-    // M4 lift active — override the argv-parsed default-OFF gate and
-    // flip the cascade-twice OCR emit kill-switch off. These two
-    // overrides constitute the FULL M4 lift; the SCContentFilter
-    // multi-window factory is already wired at construction time via
-    // PR #28 (V2-P1 third-lift wiring).
-    captureOptions = CaptureLaunchOptions(captureEnabled: true)
-    CascadeTwiceOCREmitter.activateM4Lift(enabled: true)
-case .disabled:
-    // Preserve pre-M4-lift behavior. `killOcrEmit` remains the module
-    // default (`true`); `captureEnabled` follows the argv parse.
-    captureOptions = parsedCaptureOptions
+if qualificationRequested && !qualificationAuthorized {
+    FileHandle.standardError.write(
+        "mci-capture-helper: incomplete live OCR qualification capability\n"
+            .data(using: .utf8) ?? Data()
+    )
+    exit(64)
+}
+#endif
+
+let readiness: HelperReadinessReceipt?
+do {
+    readiness = try HelperReadinessReceipt.parse(arguments: CommandLine.arguments)
+} catch {
+    FileHandle.standardError.write(
+        "mci-capture-helper: invalid readiness contract: \(error.localizedDescription)\n"
+            .data(using: .utf8) ?? Data()
+    )
+    exit(64)
 }
 
 // Output file handle.
@@ -186,6 +205,26 @@ if let path = args.outputPath {
     outputHandle = h
 } else {
     outputHandle = FileHandle.standardOutput
+}
+
+var outputInfo = stat()
+guard fstat(outputHandle.fileDescriptor, &outputInfo) == 0 else {
+    FileHandle.standardError.write(Data("mci-capture-helper: cannot inspect output descriptor\n".utf8))
+    exit(2)
+}
+let regularOutput = outputInfo.st_mode & S_IFMT == S_IFREG
+guard !regularOutput || (args.oneShot && !captureOptions.captureEnabled) else {
+    FileHandle.standardError.write(Data(
+        "mci-capture-helper: regular output requires --once with capture disabled; use a pipe or AF_UNIX stream for streaming output\n".utf8
+    ))
+    exit(64)
+}
+let oneShotHealthSink = regularOutput ? OneShotHealthSink() : nil
+let healthSink: any FrameSink
+if let oneShotHealthSink {
+    healthSink = oneShotHealthSink
+} else {
+    healthSink = FileHandleFrameSink(handle: outputHandle)
 }
 
 // Denylist load (missing-or-empty is OK — fail-safe still fires).
@@ -266,10 +305,11 @@ let blackedRegionProbe = PixelGridBlackedRegionProbe()
 // STEP-2-FINDING-001 diagnostic — `--probe-debug` only.
 // `axProbeDebugSink == nil` is the steady-state production path: the
 // probe makes the same two AX calls the prior implementation made; no
-// extra work. When the sink is wired (dev-only), each probe call also
-// reads role / identifier / title and emits ONE stderr line. Never
-// writes to the wire / disk / encoded frame path.
+// extra work. When the sink is wired (dev-only), each probe call emits
+// presence and classification signals only. Raw AX values never reach stderr,
+// the wire, disk, or the encoded-frame path.
 let axProbeDebugSink: AXSubroleProbe.DebugSink?
+let axProbeHealthReporter = AXProbeHealthReporter()
 if args.probeDebug {
     if !captureOptions.captureEnabled {
         FileHandle.standardError.write(
@@ -280,40 +320,9 @@ if args.probeDebug {
                 .data(using: .utf8) ?? Data())
     }
     axProbeDebugSink = { observation in
-        let role = observation.role ?? "nil"
-        let subrole = observation.subrole ?? "nil"
-        let identifier = observation.identifier ?? "nil"
-        let title = observation.title ?? "nil"
-        let result: String = {
-            switch observation.classification {
-            case .some(true): return "true"
-            case .some(false): return "false"
-            case .none: return "nil"
-            }
-        }()
-        // STEP-2-FINDING-001 §4 backstop signals — render one short
-        // token per signal so the next Step-2 re-run can attribute
-        // `reason=4` (or its absence) at signal granularity.
-        //   descendant=pos|neg|err
-        //   value-hidden=pos|neg|err
-        //   id-regex=pos|neg|err
-        func renderOutcome(_ o: AXBackstopOutcome) -> String {
-            switch o {
-            case .positive: return "pos"
-            case .negative: return "neg"
-            case .errored: return "err"
-            }
-        }
-        let line =
-            "mci-capture-helper: probe(ax-subrole) "
-            + "focus=\(observation.focusResult) "
-            + "role=\(role) subrole=\(subrole) "
-            + "id=\(identifier) title=\(title) "
-            + "descendant=\(renderOutcome(observation.descendantSecure)) "
-            + "value-hidden=\(renderOutcome(observation.valueAttributeHidden)) "
-            + "id-regex=\(renderOutcome(observation.identifierRegexMatch)) "
-            + "result=\(result)\n"
-        FileHandle.standardError.write(line.data(using: .utf8) ?? Data())
+        FileHandle.standardError.write(
+            AXProbeDiagnostic.render(observation).data(using: .utf8) ?? Data()
+        )
     }
 } else {
     axProbeDebugSink = nil
@@ -331,15 +340,27 @@ let cascadeEligibleBundles = allowlist.bundleIdSet
     .union(userAllowlist.captureEnabledBundleIds)
 let cascade = SuppressionCascade(
     secureEventInput: CarbonSecureEventInputProbe(),
-    axSecureSubrole: AXSubroleProbe(debugLog: axProbeDebugSink),
-    denylist: Denylist(entries: denylistEntries),
+    axSecureSubrole: AXSubroleProbe(
+        debugLog: axProbeDebugSink,
+        healthLog: { snapshot in
+            if let line = axProbeHealthReporter.line(
+                for: snapshot, at: ProcessInfo.processInfo.systemUptime
+            ) {
+                FileHandle.standardError.write(Data(line.utf8))
+            }
+        }
+    ),
+    denylist: SensitiveCaptureDenylist(entries: denylistEntries),
     blackedRegion: blackedRegionProbe,
-    knownSafeAppBundles: cascadeEligibleBundles
+    knownSafeAppBundles: cascadeEligibleBundles,
+    rawPixelExcludedAppBundles: BrowserPixelCapturePolicy.excludedBundleIds,
+    admissionPolicy: .ordinaryApplications,
+    browserWindowPrivacy: BrowserWindowPrivacyProbe()
 )
 
 let loop = HelperMainLoop(
     cascade: cascade,
-    sink: FileHandleFrameSink(handle: outputHandle),
+    sink: healthSink,
     heartbeatInterval: .seconds(args.heartbeatSeconds)
 )
 
@@ -366,7 +387,17 @@ if args.oneShot {
     // CI smoke: emit one frame, exit clean.
     do {
         try await loop.tickHealth()
-        try? outputHandle.close()
+        if let oneShotHealthSink {
+            let frame = try await oneShotHealthSink.takeFrame()
+            // This is explicit one-shot filesystem I/O, not bounded IPC.
+            // For stdout redirection, preserve the shell's offset/append policy.
+            if args.outputPath != nil {
+                try outputHandle.truncate(atOffset: 0)
+                try outputHandle.seek(toOffset: 0)
+            }
+            try outputHandle.write(contentsOf: frame)
+        }
+        try outputHandle.close()
         exit(0)
     } catch {
         FileHandle.standardError.write("mci-capture-helper: tick error: \(error)\n".data(using: .utf8)!)
@@ -374,7 +405,7 @@ if args.oneShot {
     }
 }
 
-// ADR-0013 Amendment 1 §4 — dev-only live-capture path. OFF unless
+// ADR-0013 Amendment 1 §4 — explicit live-capture path. OFF unless
 // `--capture` was explicitly passed. Even when ON this PR-1 path has
 // NO IOSurface retain and NO encoder, so it structurally cannot store
 // a frame; it exists so a human can drive the live SCStream wiring in
@@ -409,78 +440,28 @@ if args.oneShot {
 // below.
 let policy = StreamPolicy.default
 
-// ADR-0015 §6 P2.5 — context join. Construct the shared
-// `WorkflowContextSnapshot` actor (one per process); wire
-// `NSWorkspaceContextProvider` (1 Hz poll of `NSWorkspace.frontmost
-// Application.bundleIdentifier` + AX-backed focused-window-title via
-// the injected `AXWindowTitleProvider`); compose the per-browser URL
-// providers (Safari + Chromium-family + Firefox + Arc) behind the
-// `CompositeURLProvider` walk. The SCStream callback reads the
-// snapshot synchronously per-frame and invokes the URL provider
-// against the snapshot's frontmost bundle id (each per-browser
-// provider has its own 1 s cache TTL → ~1 AppleScript invocation/s
-// in the steady-state hot path).
-//
-// Lifetime: the provider's `start()` is called BEFORE the SCStream
-// kicks off, `stop()` is not currently triggered (the helper exits
-// on SIGINT/SIGPIPE and the timer is best-effort cancelled in
-// `deinit`). Idempotent on both ends. When `--capture` is off the
-// context providers are still constructed but the snapshot has no
-// reader — the polling cost is one NSWorkspace + one AX call per
-// second, far inside §4 budget by inspection.
-//
-// ADR-0015 §4 invariant 1 ("context-as-content") + invariant 2
-// ("cascade-before-storage"): the snapshot is the only path through
-// which `appBundleId` / `windowTitle` / `url` reach the cascade.
-// Nothing on this construction path writes those fields to disk,
-// IPC, or any sink ahead of a `.allow` cascade decision (the
-// `.suppress` path emits a `PrivacyTombstone` carrying ONLY
-// `appBundleId` + reason — see `SCStreamPipeline.swift:411-441`).
-let contextSnapshot = WorkflowContextSnapshot()
-let urlProvider: URLProvider = CompositeURLProvider()
-
-// Phase 6 PR 5 — SH Fork D1 attribution providers (EventKit +
-// Contacts + MPNowPlayingInfoCenter). These are PER-EVENT
-// attribution enrichers, NOT full deep-hook plugins:
-//   - CalendarAttribution → reads only events whose start <= now <=
-//     end via EKEventStore. NSCalendarsUsageDescription gates the
-//     TCC prompt.
-//   - NowPlayingAttribution → reads
-//     MPNowPlayingInfoCenter.default().nowPlayingInfo for title +
-//     artist. NSAppleMusicUsageDescription gates the system prompt.
-//   - ContactsAttribution → resolves a participant string to a
-//     CNContact.identifier (opaque). NSContactsUsageDescription
-//     gates the TCC prompt; minimal-key CNContactFetchRequest.
-//
-// All three return `nil` on TCC denial — the per-event capture path
-// degrades gracefully (no crash, no event drop, just the
-// corresponding attribution field stays nil). One stderr warn fires
-// per state-change per provider (V2-P10 pump-supervisor pattern).
-//
-// Construction-graph wiring (CSO sign-off row 8): the three
-// providers are constructed HERE at process top level — never inside
-// a Task closure, never inside an `if` branch that the cascade
-// hot-path would not enter. Top-level binding → process-lifetime
-// retention (SCSTREAM-LIVE-001 discipline).
-let calendarAttribution = CalendarAttribution()
-let nowPlayingAttribution = NowPlayingAttribution()
-let contactsAttribution = ContactsAttribution()
-
-let nsWorkspaceContextProvider = NSWorkspaceContextProvider(
-    snapshotStore: contextSnapshot,
-    source: NSWorkspaceFrontmostAppSource(),
-    windowTitleProvider: AXWindowTitleProvider(),
-    // Phase 6 PR 5 — SH Fork D1: per-tick consumption of the three
-    // attribution sources. Each tick reads the source at most once
-    // (provider-internal cache amortizes EventKit / CNContactStore /
-    // MPNowPlayingInfoCenter calls — see provider docs).
-    calendarSource: calendarAttribution,
-    nowPlayingSource: nowPlayingAttribution,
-    contactsSource: contactsAttribution
-)
-
-let captureSession: SCStreamCaptureSession?
+let captureRuntime: CaptureRuntime?
 if captureOptions.captureEnabled {
+    // Context and attribution are content-bearing capture resources. They are
+    // constructed only under the explicit argv authority and retained with
+    // the stream for exactly the same lifetime.
+    let contextSnapshot = WorkflowContextSnapshot()
+    let focusedWindowStore = FocusedWindowStore()
+    let focusedWindowReader = AXFocusedWindowReader()
+    let urlProvider: any URLProvider = CompositeURLProvider()
+    let calendarAttribution = CalendarAttribution()
+    let nowPlayingAttribution = NowPlayingAttribution()
+    let contactsAttribution = ContactsAttribution()
+    let nsWorkspaceContextProvider = NSWorkspaceContextProvider(
+        snapshotStore: contextSnapshot,
+        source: NSWorkspaceFrontmostAppSource(),
+        windowTitleProvider: AXWindowTitleProvider(),
+        focusedWindowStore: focusedWindowStore,
+        focusedWindowReader: focusedWindowReader,
+        calendarSource: calendarAttribution,
+        nowPlayingSource: nowPlayingAttribution,
+        contactsSource: contactsAttribution
+    )
     // Shared FrameSequence — monotonic seq numbers across tombstones
     // AND OCREvents on the same wire. Both SCStreamPipeline and
     // CascadeTwiceOCREmitter allocate from this single actor so the
@@ -494,42 +475,53 @@ if captureOptions.captureEnabled {
     // consumer loop is ready to drain submissions on the first
     // `.allow` frame. The emitter is the ONLY call site that emits
     // `OCREvent` in the helper (ADR-0016 §4.2 invariant).
-    let ocrEngine: OCREngine = VisionOCRRunner()
-    let ocrWorker = VisionOCRWorker(engine: ocrEngine)
+    let ocrEngine: OCREngine
+    let ocrTimeoutMs: Int
+    if let executable = PaddleOCRRunner.bundledExecutableURL {
+        ocrEngine = PaddleOCRRunner(executableURL: executable)
+        ocrTimeoutMs = PaddleOCRRunner.timeoutMs
+    } else {
+        // Unbundled development helpers retain the native engine. Release
+        // assembly requires the offline worker and its verified model weights.
+        ocrEngine = VisionOCRRunner()
+        ocrTimeoutMs = VisionOCRWorker.defaultTimeoutMs
+    }
+    let ocrWorker = VisionOCRWorker(engine: ocrEngine, timeoutMs: ocrTimeoutMs)
 
-    // P3.6.5: encrypted keyframe blob writer. Reads the DbKey from
-    // MCI_DB_KEY_HEX env var (set by the parent process or demo
-    // recipe). When absent, blobs are not written — OCREvents carry
-    // keyframeHash = [0; 32]. CSO invariant: the DbKey is the SAME
-    // key that opens the SQLCipher brain store (ADR-0008 §5 — no
-    // new key material, no new key custody surface).
-    let blobKeyMaterial: [UInt8]
-    let blobWriter: KeyframeBlobWriter?
-    if let dbKeyHex = ProcessInfo.processInfo.environment["MCI_DB_KEY_HEX"],
-       let keyBytes = hexStringToBytes(dbKeyHex),
-       keyBytes.count == 32
-    {
-        blobKeyMaterial = keyBytes
+    // Resolve the shared database key once, then keep screenshot policy,
+    // encryption, and durable publication behind one serialized coordinator.
+    let keyframeRetainer: KeyframeRetentionCoordinator
+    do {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
+        let keyBytes = try KeychainDatabaseKeyResolver().resolveBytes(
+            environment: ProcessInfo.processInfo.environment,
+            developmentKeyPath: appSupport
+                .appendingPathComponent("MCI")
+                .appendingPathComponent("dev.key")
+        )
         let blobDir = appSupport
             .appendingPathComponent("MCI")
             .appendingPathComponent("blobs")
-        try? FileManager.default.createDirectory(
+        try FileManager.default.createDirectory(
             at: blobDir, withIntermediateDirectories: true
         )
-        let writer = KeyframeBlobWriter(blobDir: blobDir)
-        await writer.start()
-        blobWriter = writer
-    } else {
-        blobKeyMaterial = []
-        blobWriter = nil
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: blobDir.path
+        )
+        keyframeRetainer = KeyframeRetentionCoordinator(
+            blobDirectory: blobDir,
+            keyMaterial: Data(keyBytes)
+        )
+    } catch {
         FileHandle.standardError.write(
-            ("mci-capture-helper: MCI_DB_KEY_HEX not set or invalid "
-             + "— keyframe blobs will not be written\n")
+            ("mci-capture-helper: database key unavailable; "
+             + "capture is disabled: \(error.localizedDescription)\n")
                 .data(using: .utf8) ?? Data()
         )
+        exit(78)
     }
 
     let ocrEmitter: any OCRPostAllowEmitter = CascadeTwiceOCREmitter(
@@ -538,8 +530,7 @@ if captureOptions.captureEnabled {
         sink: sharedSink,
         sequence: sharedSequence,
         counters: loop.counters,
-        blobWriter: blobWriter,
-        blobKeyMaterial: blobKeyMaterial
+        keyframeRetainer: keyframeRetainer
     )
     // Start OCR worker consumer loop BEFORE the SCStream session so
     // submissions from the first `.allow` frame drain immediately.
@@ -547,33 +538,10 @@ if captureOptions.captureEnabled {
     // binding (process-lifetime, SCSTREAM-LIVE-001 discipline).
     await ocrWorker.start()
 
-    // DOGFOOD #3 — `VideoToolboxHEVCEncoder` wired ONLY inside the
-    // `--capture` dev branch. The encoded `CMSampleBuffer`s flow into
-    // an in-memory `InMemoryEncodedSampleQueue` (NOT persisted to
-    // disk — that wiring is gated by ADR-0013 Amendment 1 §4 + the
-    // §7 corpus). The next PR (DOGFOOD #4) plugs the OCR worker into
-    // this same queue. Outside the `--capture` branch (the default
-    // build path) `DeferredVideoToolboxEncoder` is still the wiring
-    // and no `VTCompressionSession` is ever constructed.
-    //
-    // Amendment 1 §3 audit:
-    //   (a) cascade-before-encode — encoder is reached only from
-    //       `SCStreamPipeline.process(...)`'s `.allow` branch.
-    //   (b) fail-closed preserved — encoder additions widen no
-    //       `.allow` path.
-    //   (c) no stored/emitted suppressed event — `.suppress` returns
-    //       before the encode call site; the encoder is never reached.
-    //   (d) no IOSurface pool-stall — the pipeline's top-level
-    //       `defer { lease.release() }` releases the surface on every
-    //       exit including a throwing encoder; the encoder takes its
-    //       own bounded session-internal retain on the pixel buffer.
-    //
-    // Amendment 1 §4 — `CaptureLaunchOptions.captureEnabled` is the
-    // sole gate; this code path is unreachable until the operator
-    // passes `--capture` explicitly. Flipping the default-OFF gate is
-    // still NOT this PR.
-    let encodedSampleQueue = InMemoryEncodedSampleQueue()
-    let hevcEncoder = VideoToolboxHEVCEncoder(sink: encodedSampleQueue)
+    // The pre-OCR HEVC queue had no consumer and retained pixels before the
+    // OCR privacy gate. Post-OCR condensed encrypted JPEG is now the only
+    // visual persistence path, so the pipeline encoder is deliberately no-op.
+    let noOpEncoder = NoOpFrameEncoder()
 
     // STEP-2-FINDING-005 fix — pass `loop.counters` to the pipeline so
     // pipeline writes (`recordDelivered` / `recordSuppressed` /
@@ -588,39 +556,18 @@ if captureOptions.captureEnabled {
     // heartbeat. No new wire field; no `.allow` widening; strictly
     // more observability.
     //
-    // ADR-0031 V2-P1 third-lift wiring RE-INTRODUCED 2026-07-12 (Phase 7
-    // PR 13 — Director-Recording, this PR). The cycle 8.27 revert
-    // documented the -3815 antipattern (`SCContentFilter(display:
-    // exceptingWindows:[focusedWindow])` — an EXCLUDE filter used
-    // where an INCLUDE-ONLY filter was needed); the 2026-05-31 CEO
-    // ratification (FORK 3 = B) and the 2026-06-01 redesign memo
-    // (`docs/research/v2-p1-redesign-architecture-2026-06-01.md`)
-    // §1.1 bound the correct API form: `SCContentFilter(display:
-    // including:exceptingWindows:)` with a non-empty include list.
-    // Cycle 8.35 PR #20 landed the scaffold factory + selection
-    // helper (`SCContentFilterFactory.makeMultiWindowFilter(...)`);
-    // THIS PR wires that factory into the live capture path via
-    // `SCStreamCaptureSession`.
-    //
-    // Scope-fence discipline per ADR-0031 §Status "M4 lift is a
-    // SEPARATE standalone PR…no compounding under any circumstance":
-    // this PR wires the multi-window filter path but keeps the
-    // capture OFF at runtime — `killOcrEmit = true` remains, so the
-    // wire is INERT until Phase 7 PR 14 flips the switch after
-    // Amy's live-Mac smoke test passes.
-    //
-    // Co-view heuristic (redesign memo §6.1) is not yet CEO-ratified;
-    // the wiring uses the seed-only include-set (alt A) which
-    // delivers the API-correctness value of the third lift without
-    // depending on an unratified heuristic — the include-set has
-    // exactly one member (the focused window) and satisfies the
-    // FORK 3 = B non-empty invariant by construction.
-    let focusedWindowStore = FocusedWindowStore()
-    let focusTracker = FocusTracker(store: focusedWindowStore)
-    captureSession = SCStreamCaptureSession(
+    // ADR-0031 V2-P1 third-lift wiring uses the API-correct include-only
+    // `SCContentFilter` path. This block is reachable only under explicit
+    // supervisor argv; capture-off launches never construct these resources.
+    let focusTracker = FocusTracker(
+        store: focusedWindowStore,
+        reader: focusedWindowReader
+    )
+    let tccStatusMonitor = TCCStatusMonitor()
+    let captureSession = SCStreamCaptureSession(
         pipeline: SCStreamPipeline(
             cascade: cascade,
-            encoder: hevcEncoder,
+            encoder: noOpEncoder,
             counters: loop.counters,
             sequence: sharedSequence,
             sink: sharedSink,
@@ -628,9 +575,9 @@ if captureOptions.captureEnabled {
         ),
         denylist: Denylist(entries: denylistEntries),
         policy: policy,
-        // Shared §2 probe instance: the session calls `update(...)`
-        // in the SCStreamOutput callback; the cascade (constructed
-        // above with this same probe) reads `hasBlackedRegion()`.
+        // Shared §2 classifier configuration. The session updates and reads
+        // it synchronously, then freezes the result with secure-input and AX
+        // state before any raw pixel buffer is retained or queued.
         blackedRegionProbe: blackedRegionProbe,
         // ADR-0015 §6 P2.5 — shared snapshot + composite URL provider.
         // The SCStream callback reads `contextSnapshot.currentSync()`
@@ -646,21 +593,30 @@ if captureOptions.captureEnabled {
         // focus changes at 200 ms cadence; the race-consistency gate
         // covers residual buffer-delivery races.
         focusedWindowStore: focusedWindowStore,
-        focusTracker: focusTracker
+        focusTracker: focusTracker,
+        tccStatusMonitor: tccStatusMonitor,
+        measuresActivity: true
+    )
+    captureRuntime = CaptureRuntime(
+        session: captureSession,
+        contextSnapshot: contextSnapshot,
+        urlProvider: urlProvider,
+        contextProvider: nsWorkspaceContextProvider,
+        calendarAttribution: calendarAttribution,
+        nowPlayingAttribution: nowPlayingAttribution,
+        contactsAttribution: contactsAttribution
     )
 } else {
-    captureSession = nil
+    captureRuntime = nil
 }
 
-if let captureSession {
-    FileHandle.standardError.write("""
-    mci-capture-helper: --capture is a DEV-ONLY path \
-    (ADR-0013 Amendment 1 §4). Live SCStream capture is NOT enabled in \
-    default builds. The `--capture` dev path now runs the live cascade \
-    + the VideoToolbox HEVC encoder (DOGFOOD #3) and buffers encoded \
-    keyframes in memory ONLY — no frame is persisted to disk in this \
-    build. Starting live session…\n
-    """.data(using: .utf8) ?? Data())
+var captureDrainFailed = false
+if let captureRuntime {
+    let captureSession = captureRuntime.session
+    FileHandle.standardError.write(
+        "mci-capture-helper: starting explicit capture generation.\n"
+            .data(using: .utf8) ?? Data()
+    )
 
     // ADR-0015 §6 P2.5 — start the 1 Hz context poller BEFORE
     // SCStream so the snapshot has a chance to leave the all-nil
@@ -673,31 +629,47 @@ if let captureSession {
     // All three are idempotent + non-blocking; the auth callback
     // resolves asynchronously, until which point the providers
     // return `nil` (graceful absence). See CSO sign-off rows 1-2.
-    calendarAttribution.start()
-    nowPlayingAttribution.start()
-    contactsAttribution.start()
-    nsWorkspaceContextProvider.start()
+    captureRuntime.calendarAttribution.start()
+    captureRuntime.nowPlayingAttribution.start()
+    captureRuntime.contactsAttribution.start()
+    captureRuntime.contextProvider.start()
 
     // Synchronous `start()` inline — no `Task.detached`. The session
     // is retained by the top-level `captureSession` binding for the
     // process lifetime, so SCStream's weak delegate/output refs to
-    // `self` stay live. A throw is logged and swallowed; the
-    // heartbeat loop still runs so the helper stays observable.
+    // `self` stay live. A throw exits nonzero before readiness.
     do {
         try await captureSession.start()
     } catch {
         FileHandle.standardError.write(
-            "mci-capture-helper: live capture start failed (expected off a real screen): \(error)\n"
+            "mci-capture-helper: live capture start failed: \(error)\n"
                 .data(using: .utf8) ?? Data()
         )
+        exit(79)
     }
 }
 
-// Long-running mode. Cycle 3 adds SIGTERM/SIGINT handling +
-// real inbound IPC. For now Ctrl-C from a shell delivers SIGINT
-// which terminates the process; SIGPIPE on output close also kills.
 do {
-    try await loop.run()
+    try readiness?.publish()
+} catch {
+    FileHandle.standardError.write(
+        "mci-capture-helper: readiness publication failed: \(error.localizedDescription)\n"
+            .data(using: .utf8) ?? Data()
+    )
+    exit(80)
+}
+
+do {
+    if args.parentLeaseStdin {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await loop.run() }
+            group.addTask { try await ParentLifetimeLease.waitForEOF() }
+            _ = try await group.next()
+            group.cancelAll()
+        }
+    } else {
+        try await loop.run()
+    }
 } catch is CancellationError {
     // graceful shutdown
 } catch {
@@ -705,28 +677,25 @@ do {
     exit(5)
 }
 
+if let captureRuntime {
+    do {
+        try await captureRuntime.session.stop()
+    } catch {
+        captureDrainFailed = true
+        FileHandle.standardError.write(
+            "mci-capture-helper: capture drain failed during shutdown\n"
+                .data(using: .utf8)!
+        )
+    }
+    captureRuntime.contextProvider.stop()
+}
+if captureDrainFailed {
+    exit(82)
+}
+
 // Defensive: ensure the optimizer cannot lift `captureSession` out
 // of scope before `loop.run()` returns. The `if let` above already
 // holds it (the top-level binding has whole-file lifetime in a Swift
 // executable's main file), but read it here so the intent is explicit
 // in the source: this binding is load-bearing for SCSTREAM-LIVE-001.
-_ = captureSession
-// ADR-0015 §6 P2.5 — same load-bearing-binding discipline applies to
-// the context provider + snapshot + URL composite. The session's
-// callback reads the snapshot synchronously every frame, so the
-// snapshot actor MUST stay alive for the SCStream's lifetime; the
-// poller MUST stay alive to refresh it. Top-level bindings give us
-// process-lifetime retention by construction (SCSTREAM-LIVE-001
-// lesson, applied to Phase-2 state).
-_ = contextSnapshot
-_ = urlProvider
-_ = nsWorkspaceContextProvider
-// Phase 6 PR 5 — SH Fork D1 attribution providers MUST stay alive
-// for the SCStream's lifetime. Each holds internal cache state +
-// (for Calendar / Contacts) a TCC auth callback that may still
-// fire after `start()` returned. Top-level binding → process-
-// lifetime retention. CSO sign-off row 8 (construction-graph
-// wiring) cites these lines.
-_ = calendarAttribution
-_ = nowPlayingAttribution
-_ = contactsAttribution
+_ = captureRuntime

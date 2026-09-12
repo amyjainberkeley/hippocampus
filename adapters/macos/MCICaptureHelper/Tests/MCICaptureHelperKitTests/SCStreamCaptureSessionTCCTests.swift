@@ -18,6 +18,18 @@ import XCTest
 @testable import MCICaptureHelperKit
 
 private enum TCCFixtures {
+    private final class FixedProbe: TCCProbe, @unchecked Sendable {
+        private let statuses: [TCCSurface: TCCStatus]
+
+        init(statuses: [TCCSurface: TCCStatus]) {
+            self.statuses = statuses
+        }
+
+        func status(for surface: TCCSurface) -> TCCStatus {
+            statuses[surface] ?? .unknown
+        }
+    }
+
     private struct NoSEI: SecureEventInputProbe {
         func isSecureEventInputEnabled() -> Bool { false }
     }
@@ -43,7 +55,9 @@ private enum TCCFixtures {
         func write(_: Data) async throws {}
     }
 
-    static func makeSession() -> SCStreamCaptureSession {
+    static func makeSession(
+        initialTCCStatuses: [TCCSurface: TCCStatus]? = nil
+    ) -> SCStreamCaptureSession {
         let cascade = SuppressionCascade(
             secureEventInput: NoSEI(),
             axSecureSubrole: AXNonSecure(),
@@ -56,14 +70,35 @@ private enum TCCFixtures {
             encoder: NoopEncoder(),
             sink: NoopSink()
         )
+        let monitor = initialTCCStatuses.map {
+            TCCStatusMonitor(
+                probe: FixedProbe(statuses: $0),
+                pollIntervalNs: UInt64.max,
+                surfaces: Array($0.keys)
+            )
+        }
         return SCStreamCaptureSession(
             pipeline: pipeline,
-            denylist: Denylist(entries: [])
+            denylist: Denylist(entries: []),
+            tccStatusMonitor: monitor
         )
     }
 }
 
 final class SCStreamCaptureSessionTCCTests: XCTestCase {
+    func testInitialDeniedSnapshotPausesBeforeHealthyRuntime() async {
+        let session = TCCFixtures.makeSession(initialTCCStatuses: [
+            .screenRecording: .granted,
+            .accessibility: .denied,
+        ])
+
+        await session.activateTCCMonitoring()
+
+        XCTAssertTrue(session.isPausedForTCCForTest())
+        XCTAssertEqual(session.revokedSurfacesForTest(), [.accessibility])
+        try? await session.stop()
+    }
+
     // 1
     func testPauseForTCCSetsFlagAndRecordsSurface() async {
         let session = TCCFixtures.makeSession()
@@ -145,27 +180,11 @@ final class SCStreamCaptureSessionTCCTests: XCTestCase {
     }
 
     // 5
-    func testStopClearsBothPauseFlags() async throws {
+    func testStopClearsTCCPauseState() async throws {
         let session = TCCFixtures.makeSession()
         await session.pauseForTCC(surface: .screenRecording)
-        await session.pauseForScreenShare(actor: "us.zoom.xos")
         try await session.stop()
         XCTAssertFalse(session.isPausedForTCCForTest())
-        XCTAssertFalse(session.isPausedForScreenShareForTest())
         XCTAssertTrue(session.revokedSurfacesForTest().isEmpty)
-    }
-
-    // Independence from screen-share pause: a TCC revoke does NOT
-    // touch the screen-share flag and vice versa. The two reasons
-    // compose (bringUpSCStreamOnly is only reached when BOTH clear).
-    func testTCCAndScreenSharePauseFlagsAreIndependent() async {
-        let session = TCCFixtures.makeSession()
-        await session.pauseForTCC(surface: .screenRecording)
-        XCTAssertTrue(session.isPausedForTCCForTest())
-        XCTAssertFalse(session.isPausedForScreenShareForTest())
-
-        await session.pauseForScreenShare(actor: "us.zoom.xos")
-        XCTAssertTrue(session.isPausedForTCCForTest())
-        XCTAssertTrue(session.isPausedForScreenShareForTest())
     }
 }

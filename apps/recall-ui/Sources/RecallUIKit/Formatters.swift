@@ -9,6 +9,54 @@
 import Foundation
 
 public enum Formatters {
+    /// Render a stable, human-readable application name while keeping the
+    /// original bundle identifier on the underlying event for provenance.
+    public static func appDisplayName(_ bundleId: String?) -> String {
+        guard let bundleId = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !bundleId.isEmpty,
+              let component = bundleId.split(separator: ".").last,
+              !component.isEmpty
+        else {
+            return "Unknown app"
+        }
+
+        let exactNames = [
+            "com.apple.finder": "Finder",
+            "com.apple.safari": "Safari",
+            "com.apple.terminal": "Terminal",
+            "com.github.githubclient": "GitHub",
+            "com.microsoft.vscode": "VS Code",
+            "com.tinyspeck.slackmacgap": "Slack",
+        ]
+        if let name = exactNames[bundleId.lowercased()] {
+            return name
+        }
+
+        let componentNames = [
+            "chrome": "Chrome",
+            "github": "GitHub",
+            "linear": "Linear",
+            "notion": "Notion",
+            "safari": "Safari",
+            "slack": "Slack",
+            "terminal": "Terminal",
+            "vscode": "VS Code",
+            "xcode": "Xcode",
+        ]
+        if let name = componentNames[component.lowercased()] {
+            return name
+        }
+
+        let words = component
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+        guard !words.isEmpty else { return "Unknown app" }
+        return words.map { word in
+            word.prefix(1).uppercased() + word.dropFirst()
+        }.joined(separator: " ")
+    }
+
     /// Snippet truncation — keeps the recall-list cell from rendering
     /// megabytes of OCR text if a runaway event slipped past the FFI
     /// cap (the FFI itself caps at 280 chars; this is defense-in-depth).
@@ -33,10 +81,10 @@ public enum Formatters {
     }
 
     /// One-line label used in the recall list cell. Compact and content-
-    /// minimal — bundle id (or `(no app)`), then the title or URL when
+    /// minimal — human-readable app name, then the title or URL when
     /// present. Never includes the OCR text.
     public static func contextLine(_ hit: Hit) -> String {
-        let app = hit.appBundleId ?? "(no app)"
+        let app = appDisplayName(hit.appBundleId)
         if let t = hit.windowTitle, !t.isEmpty {
             return "\(app) — \(t)"
         }
@@ -44,6 +92,17 @@ public enum Formatters {
             return "\(app) — \(u)"
         }
         return app
+    }
+
+    /// Compact source-derived body shown under visual evidence previews.
+    /// Context headers and OCR whitespace churn are presentation-only noise;
+    /// the canonical stored event remains unchanged.
+    public static func evidenceSummary(_ hit: Hit, maxLen: Int = 120) -> String {
+        let body = stripContextHeader(hit.ocrTextSnippet)
+            .split(whereSeparator: \Character.isWhitespace)
+            .joined(separator: " ")
+        guard !body.isEmpty else { return "Visual evidence" }
+        return snippet(body, maxLen: maxLen)
     }
 
     /// Render the source tag the row was retrieved with into a short
@@ -57,6 +116,8 @@ public enum Formatters {
         switch s {
         case "lexical": return "lex"
         case "hybrid": return "hyb"
+        case "hybrid-related", "semantic-related": return "related"
+        case "hybrid-conflict": return "conflict"
         case "timeline": return "time"
         default: return s
         }
@@ -70,8 +131,9 @@ public enum Formatters {
     /// leak raw jargon into the UI).
     ///
     /// - `"lexical"` → `"Matched: text"` (BM25 / FTS5 keyword match)
-    /// - `"hybrid"`  → `"Matched: meaning"` (fused BM25 + embeddings +
-    ///   entity path — Phase-6 fusion)
+    /// - `"hybrid"` → `"Matched: meaning"` after evidence verification
+    /// - `"hybrid-related"` / `"semantic-related"` → unverified related context
+    /// - `"hybrid-conflict"` → evidence the verifier marked contradictory
     /// - `"timeline"` → `nil`
     /// - unknown → `nil`
     ///
@@ -81,6 +143,8 @@ public enum Formatters {
         switch s {
         case "lexical": return "Matched: text"
         case "hybrid": return "Matched: meaning"
+        case "hybrid-related", "semantic-related": return "Related by meaning"
+        case "hybrid-conflict": return "Conflicting evidence"
         case "timeline": return nil
         default: return nil
         }
