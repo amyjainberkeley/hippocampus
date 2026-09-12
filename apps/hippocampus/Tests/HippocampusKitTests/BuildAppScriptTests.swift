@@ -70,6 +70,7 @@ final class BuildAppScriptTests: XCTestCase {
     private func makeFixture(
         includeChangelog: Bool = true,
         includeManifest: Bool = true,
+        includeOCR: Bool = true,
         includeEmbedder: Bool = false,
         includeNER: Bool = false,
         includeQwen: Bool = false,
@@ -133,6 +134,23 @@ final class BuildAppScriptTests: XCTestCase {
             let verifier = repoRoot.appendingPathComponent("scripts/\(name)")
             try writeFile(verifier, contents: "#!/bin/bash\nexit 0\n")
             try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: verifier.path)
+        }
+        // Keep model/signature qualification in the real OCR bundle tests.
+        // This synthetic repository exercises assembly failure propagation.
+        if includeOCR {
+            try writeFile(repoRoot.appendingPathComponent("tools/ocr/bundle.py"), contents: """
+            import argparse
+            import pathlib
+            import shutil
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--destination', required=True)
+            parser.add_argument('--identity', required=True)
+            args = parser.parse_args()
+            destination = pathlib.Path(args.destination)
+            destination.mkdir(parents=True)
+            shutil.copyfile('/usr/bin/true', destination / 'hippocampus-ocr')
+            (destination / 'hippocampus-ocr').chmod(0o755)
+            """)
         }
         addTeardownBlock { try? FileManager.default.removeItem(at: repoRoot) }
 
@@ -570,6 +588,13 @@ final class BuildAppScriptTests: XCTestCase {
             result.output.contains("git restore apps/hippocampus/Sources/HippocampusKit/Resources/models.json"),
             "missing models.json must name the restore command, got: \(result.output)"
         )
+    }
+
+    func test_missing_ocr_worker_blocks_app_assembly() throws {
+        let fixture = try makeFixture(includeOCR: false, includeEmbedder: true)
+        let result = try runFixture(fixture)
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.output.contains("Offline OCR worker is missing"), result.output)
     }
 
     func test_missing_embedder_exits_with_convert_command() throws {
