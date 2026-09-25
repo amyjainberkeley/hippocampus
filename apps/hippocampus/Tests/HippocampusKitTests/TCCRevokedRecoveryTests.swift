@@ -26,20 +26,20 @@ private final class FakeUNCenter: UserNotificationCenter, @unchecked Sendable {
     private var _authorizationRequests = 0
 
     func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
-        lock.lock(); _authorizationRequests += 1; lock.unlock()
+        lock.withLock { _authorizationRequests += 1 }
         return true
     }
 
     func add(_ request: UNNotificationRequest) async throws {
-        lock.lock(); _added.append(request); lock.unlock()
+        lock.withLock { _added.append(request) }
     }
 
     func removePendingNotificationRequests(withIdentifiers ids: [String]) {
-        lock.lock(); _removedPending.append(contentsOf: ids); lock.unlock()
+        lock.withLock { _removedPending.append(contentsOf: ids) }
     }
 
     func removeDeliveredNotifications(withIdentifiers ids: [String]) {
-        lock.lock(); _removedDelivered.append(contentsOf: ids); lock.unlock()
+        lock.withLock { _removedDelivered.append(contentsOf: ids) }
     }
 
     var added: [UNNotificationRequest] {
