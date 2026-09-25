@@ -120,13 +120,10 @@ struct StatusMenuView: View {
                 openPreferencesWindow()
             }
 
-            // "Learn more" — public landing page. Cotypist parity: an
-            // always-visible link out to marketing / docs so a user
-            // who's never opened the app before still has a discovery
-            // path to features they haven't found yet. See brief §Steps
-            // "Learn more — opens landing page".
+            // "Learn more" — always-visible link out to the project page so a
+            // user who has never opened the app still has a discovery path.
             Button("Learn more") {
-                if let url = URL(string: "https://hippocampus-swart.vercel.app") {
+                if let url = URL(string: "https://github.com/amyjainberkeley/hippocampus") {
                     NSWorkspace.shared.open(url)
                 }
             }
@@ -443,10 +440,10 @@ struct StatusMenuView: View {
 
     private func sendFeedback() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
-        // TODO: swap to hippocampus.ai/feedback once domain (#21) lands
-        let subject = "Hippocampus feedback v\(version)"
+        // Feedback lands as a GitHub issue; the repo is the only support channel.
+        let title = "Feedback v\(version)"
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        guard let url = URL(string: "mailto:hippocampus@amyjainberkeley.com?subject=\(subject)") else { return }
+        guard let url = URL(string: "https://github.com/amyjainberkeley/hippocampus/issues/new?title=\(title)") else { return }
         NSWorkspace.shared.open(url)
     }
 

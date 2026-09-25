@@ -10,6 +10,13 @@
   <a href="#how-this-compares">Compared to mem0 and supermemory</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/amyjainberkeley/hippocampus/actions/workflows/cargo.yml"><img src="https://github.com/amyjainberkeley/hippocampus/actions/workflows/cargo.yml/badge.svg?branch=main" alt="Cargo: test, clippy, fmt"></a>
+  <a href="https://github.com/amyjainberkeley/hippocampus/actions/workflows/swift.yml"><img src="https://github.com/amyjainberkeley/hippocampus/actions/workflows/swift.yml/badge.svg?branch=main" alt="Swift: helper, recall UI, installer"></a>
+  <a href="https://github.com/amyjainberkeley/hippocampus/actions/workflows/cargo-audit.yml"><img src="https://github.com/amyjainberkeley/hippocampus/actions/workflows/cargo-audit.yml/badge.svg?branch=main" alt="RustSec audit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache 2.0"></a>
+</p>
+
 ---
 
 Hippocampus is a Mac app that remembers what was on your screen, so you can ask for it later in plain language.
@@ -344,9 +351,11 @@ Most projects bury this. It should be near the top, because it decides whether t
 | **Sync between machines** | **Skeleton.** The crypto is there. Proof that two devices converge is not. |
 | **Windows** | **Not started.** An empty crate with the right shape. |
 
-The test suite is 535 tests on the core (`cargo test -p mci-brain`). The build is not signed or notarized under my own Apple Developer ID yet, so a build you make yourself needs to be allowed through Gatekeeper by hand.
+The test suite is 545 tests on the core (`cargo test -p mci-brain`) and 1,581 across the workspace. The build is not signed or notarized under my own Apple Developer ID yet, so a build you make yourself needs to be allowed through Gatekeeper by hand.
 
 If you only take one thing from this table: **capture is off by default and unverified.** Everything you can try today is the recall half.
+
+**Where the full app is.** A menu-bar app with live capture, offline OCR and a Today / Search / History UI is being built on the `codex/hippocampus-v1` branch ([draft PR #25](https://github.com/amyjainberkeley/hippocampus/pull/25)). It runs on my own machine, but its CI is not green yet, so it is not on `main` and this README does not claim it. Its own status page is [docs/STATUS.md on that branch](https://github.com/amyjainberkeley/hippocampus/blob/codex/hippocampus-v1/docs/STATUS.md).
 
 ---
 
@@ -367,6 +376,8 @@ Hippocampus has no input step. The source is your screen, which means it reaches
 | Retrieval | Vector, plus a graph store | Embedded graph engine | Keyword + vector fused, inside SQLite |
 | Where memories live | Your DB or their cloud | Your machine or their cloud | One encrypted file, only your machine |
 | Maturity | Production, 62k stars | Production, 29k stars | Recall works; capture unproven |
+
+**The closer neighbours are the screen recorders.** [Rewind](https://www.rewind.ai) and [Limitless](https://www.limitless.ai) are commercial. [screenpipe](https://github.com/mediar-ai/screenpipe) is open source, cross-platform, and records audio as well as screen. Hippocampus is narrower on purpose: macOS only, screen only, one encrypted file, no cloud mode. The parts worth reading here are the capture filter chain and the MCP surface. If you want something you can install today with a track record, screenpipe is the honest recommendation.
 
 **On benchmarks, plainly: I have not run any.** mem0 publishes LoCoMo and LongMemEval numbers, supermemory publishes theirs. Those are conversational-memory benchmarks, and Hippocampus has no conversational input, so the numbers would not be comparable even if I ran them. I would rather say that than put a table of favorable numbers next to theirs. If you want a memory layer for an agent today, use one of theirs. Use this if you want your own machine to remember what you saw.
 
@@ -453,7 +464,7 @@ Found something wrong? [SECURITY.md](SECURITY.md) says what I most want to hear 
 | `scripts/try-it.sh` | The one-minute demo. |
 
 ```bash
-cargo test -p mci-brain      # the core: 535 tests
+cargo test -p mci-brain      # the core: 545 tests
 cargo test --workspace       # everything
 ```
 
